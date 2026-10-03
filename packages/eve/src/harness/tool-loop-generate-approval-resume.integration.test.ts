@@ -168,7 +168,11 @@ function createMemoryInstructionPreamble(
   ctx: ContextContainer,
   recalledMessages: readonly { readonly content: string; readonly id: string }[],
 ) {
-  const recall = vi.fn(async () => ({ messages: [...recalledMessages] }));
+  const recallMessages: ModelMessage[][] = [];
+  const recall = vi.fn(async (context: { readonly messages: readonly ModelMessage[] }) => {
+    recallMessages.push([...context.messages]);
+    return { messages: [...recalledMessages] };
+  });
   const instruction = vi.fn(() =>
     defineInstructions({
       content: "Current date and time: 2026-09-28T00:00:00.000Z (UTC).",
@@ -218,7 +222,7 @@ function createMemoryInstructionPreamble(
       resolvers: resolvers as never,
     });
   };
-  return { handleEvent, instruction, recall };
+  return { handleEvent, instruction, recall, recallMessages };
 }
 
 function createModel(): MockLanguageModelV4 {
@@ -1058,7 +1062,7 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
     async ({ decision, recalledMessages }) => {
       const ctx = createApprovalContext();
       const execute = vi.fn(async () => "/workspace");
-      const { handleEvent, instruction, recall } = createMemoryInstructionPreamble(
+      const { handleEvent, instruction, recall, recallMessages } = createMemoryInstructionPreamble(
         ctx,
         recalledMessages,
       );
@@ -1092,6 +1096,7 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
 
       expect(recall).toHaveBeenCalledOnce();
       expect(instruction).toHaveBeenCalledOnce();
+      expect(findPart(recallMessages[0] ?? [], "tool-approval-response")).toBeUndefined();
       if (decision === "approve") {
         expect(execute).toHaveBeenCalledExactlyOnceWith(
           toolCall.input,

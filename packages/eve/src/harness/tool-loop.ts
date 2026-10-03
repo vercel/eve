@@ -1003,6 +1003,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     let instructionMessages: UserModelMessage[] = [];
     let memoryCommit: ReturnType<typeof drainMemoryCommit> = undefined;
+    const historyLength = pending.session.history.length;
+    const preApprovalHistory = pending.messages.slice(0, historyLength);
+    const approvalTail = pending.messages.slice(historyLength);
     if (emit && (hasStepInput(effectiveStepInput) || hasStepInput(coordinated.stepInput))) {
       if (store !== undefined) {
         prepareDynamicInstructionPreamble(
@@ -1010,7 +1013,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           projectHistory(pending.session.history, pending.session.state),
         );
         prepareMemoryPreamble(store, {
-          history: pending.messages,
+          history: preApprovalHistory,
           input: [...ephemeralContextMessages, ...preparedTurnInput],
           projector: config.historyProjector,
           state: pending.session.state,
@@ -1057,7 +1060,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       stepInstrumentation?.setTurnId(emissionState.turnId);
     }
 
-    const historyLength = pending.session.history.length;
     const preambleMessages = [...(memoryCommit?.recalledMessages ?? []), ...instructionMessages];
     session = setHarnessEmissionState(
       {
@@ -1070,9 +1072,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // Preamble messages go before the pending transcript so an approval
     // response stays in the final tool message, where the AI SDK reads it.
     let messages: HarnessModelMessage[] = validateHarnessModelMessages([
-      ...pending.messages.slice(0, historyLength),
+      ...preApprovalHistory,
       ...preambleMessages,
-      ...pending.messages.slice(historyLength),
+      ...approvalTail,
     ]);
 
     // A resolved session-limit continuation prompt grants a fresh token
