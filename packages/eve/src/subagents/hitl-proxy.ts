@@ -48,7 +48,7 @@ export async function emitProxiedInputRequest(input: {
       turnId: input.hookPayload.event.turnId,
     }),
   );
-  await emitTurnWaiting(input.emit, input.session);
+  await input.emit(createTurnWaitingOnInputEvent(input.session));
   return toProxyInputRequestEntries(input.hookPayload);
 }
 
@@ -65,20 +65,19 @@ export async function emitProxiedAuthorizationEvent(input: {
 }): Promise<void> {
   await input.emit(input.hookPayload.event);
   if (input.hookPayload.event.type === "authorization.required") {
-    await emitTurnWaiting(input.emit, input.session);
+    await input.emit(createTurnWaitingOnInputEvent(input.session));
   }
 }
 
-async function emitTurnWaiting(emit: HarnessEmitFn, session: HarnessSessionBase): Promise<void> {
+/** The `turn.waiting` that parks the session's open turn while a person must act. */
+export function createTurnWaitingOnInputEvent(session: Pick<HarnessSessionBase, "state">) {
   const turn = getHarnessEmissionState(session.state);
-  await emit(
-    createTurnWaitingEvent({
-      on: "input",
-      sequence: turn.sequence,
-      turnId: turn.turnId,
-      usage: getSessionUsage(session),
-    }),
-  );
+  return createTurnWaitingEvent({
+    on: "input",
+    sequence: turn.sequence,
+    turnId: turn.turnId,
+    usage: getSessionUsage(session),
+  });
 }
 
 // ---------------------------------------------------------------------------

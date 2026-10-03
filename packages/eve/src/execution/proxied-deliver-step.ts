@@ -21,7 +21,7 @@ import {
   resolveRemoteAgentStreamHeaders,
   respondToRemoteAgentSession,
 } from "#execution/agent-sessions/remote.js";
-import { routeDeliverPayload } from "#subagents/hitl-proxy.js";
+import { createTurnWaitingOnInputEvent, routeDeliverPayload } from "#subagents/hitl-proxy.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import {
   sendWorkflowAskAnswers,
@@ -194,6 +194,16 @@ async function routeProxiedDeliver(
     // cannot route through stale entries.
     durableSession = retireProxyInputRequests(durableSession, [...child.resolutions.keys()]);
     retired = true;
+  }
+  // Answers that leave requests pending, and nothing for the turn itself, keep
+  // the open turn held, so it parks again as after a partial approval answer.
+  if (
+    resolvedEvents.length > 0 &&
+    parentPayloads.size === 0 &&
+    parentAction === undefined &&
+    getProxyInputRequests(durableSession.state).size > 0
+  ) {
+    resolvedEvents.push(createTurnWaitingOnInputEvent(durableSession));
   }
 
   const context = await relaySessionEvents(
