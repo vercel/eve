@@ -155,6 +155,8 @@ A server can answer a tool call with an MCP 2026-07-28 `input_required` result, 
 - **Approval:** one form elicitation with a single boolean field. When the user approves, eve retries the call with that field set to `true`.
 - **Sign-in:** URL elicitations with `http` or `https` URLs. eve shows the links in one prompt. The user opens them, approves once done, and eve retries the call.
 
+The prompt starts with eve's own line naming the tool and the connection, such as `Approve billing__refund?`. The server's message follows as quoted plain text on a single line, so it can't mention people, add links, or pass itself off as eve's text.
+
 The turn waits for the answer. Only that user's answer counts: an answer from anyone else is refused and the request stays open, and an answer that does not say who sent it cancels the call. When the user denies, eve sends nothing back and the call ends as denied. eve asks at most three times per call, and retries a round that carries only `requestState` at most three times.
 
 The retry sends the same arguments as the first round, with the user's answer and the server's `requestState`. eve keeps `requestState` and the resolved arguments in session state until the user answers. They never reach the model, telemetry, or action results.

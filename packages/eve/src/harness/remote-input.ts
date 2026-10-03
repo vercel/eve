@@ -148,11 +148,6 @@ function setPendingRemoteInputs(
   return entries.length === 0 ? rest : { ...rest, [PENDING_REMOTE_INPUTS_KEY]: [...entries] };
 }
 
-/** Whether an input request is a remote input (journaled by {@link parkRemoteInputs}). */
-export function isRemoteInputRequestId(requestId: string): boolean {
-  return requestId.startsWith(REQUEST_ID_PREFIX);
-}
-
 // ---------------------------------------------------------------------------
 // Park
 // ---------------------------------------------------------------------------

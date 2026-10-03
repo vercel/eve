@@ -21,6 +21,7 @@
 
 import { ContextContainer, contextStorage, type AlsContext } from "#context/container.js";
 import { isObject } from "#shared/guards.js";
+import { httpServerUrlSchema } from "#shared/network-address.js";
 
 /** JSON-RPC methods a server may answer with `input_required` (MCP 2026-07-28). */
 const MRTR_METHODS: ReadonlySet<string> = new Set(["prompts/get", "resources/read", "tools/call"]);
@@ -372,7 +373,8 @@ export type McpInputPlan =
   | {
       readonly approve: Readonly<Record<string, unknown>>;
       readonly kind: "approval";
-      readonly prompt: string;
+      /** The server's own text, untrusted; quote it before showing it to anyone. */
+      readonly message?: string;
     }
   | { readonly kind: "retry" }
   | {
@@ -408,11 +410,10 @@ export function planMcpInput(result: McpInputRequiredResult): McpInputPlan {
   if (property === undefined) {
     return { kind: "unsupported", reason: "it sent a form eve cannot render as an approval" };
   }
-  return {
-    approve: { [key]: { action: "accept", content: { [property]: true } } },
-    kind: "approval",
-    prompt: message ?? "Approve this request?",
-  };
+  const approve = { [key]: { action: "accept", content: { [property]: true } } };
+  return message === undefined
+    ? { approve, kind: "approval" }
+    : { approve, kind: "approval", message };
 }
 
 function singleBooleanProperty(schema: unknown): string | undefined {
@@ -430,10 +431,12 @@ function planSignIn(entries: readonly (readonly [string, McpInputRequest])[]): M
   const approve: Record<string, unknown> = Object.create(null);
   const links: McpSignInLink[] = [];
   for (const [key, request] of entries) {
-    const url = request.params?.["url"];
-    if (typeof url !== "string" || !/^https?:\/\//u.test(url)) {
+    const parsed = httpServerUrlSchema.safeParse(request.params?.["url"]);
+    if (!parsed.success) {
       return { kind: "unsupported", reason: "it sent a URL elicitation without an http(s) URL" };
     }
+    // Pass on the normalized href, never the server's raw string.
+    const url = new URL(parsed.data).href;
     const message = request.params?.["message"];
     links.push(typeof message === "string" ? { message, url } : { url });
     approve[key] = { action: "accept" };

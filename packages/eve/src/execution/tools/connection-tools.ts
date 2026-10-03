@@ -451,7 +451,10 @@ async function executeConnectionTool(
         resolvedArguments: raw.resolvedArguments,
       },
       connection: connection.connectionName,
-      prompt: plan.kind === "sign-in" ? signInPrompt(toolName, plan.links) : plan.prompt,
+      prompt:
+        plan.kind === "sign-in"
+          ? signInPrompt(toolName, connection.connectionName, plan.links)
+          : approvalPrompt(toolName, connection.connectionName, plan.message),
     });
   }
 
@@ -469,12 +472,54 @@ async function executeConnectionTool(
   return result.value;
 }
 
+/**
+ * eve's own question first, so the user can tell which tool and connection
+ * asks; the server's text follows, quoted.
+ */
+function approvalPrompt(
+  toolName: string,
+  connectionName: string,
+  message: string | undefined,
+): string {
+  const ask = `Approve ${toolName}?`;
+  return message === undefined ? ask : `${ask} ${connectionName} asks: ${quoteRemoteText(message)}`;
+}
+
 /** One prompt for every page the user must visit before the call can retry. */
-function signInPrompt(toolName: string, links: readonly McpSignInLink[]): string {
-  const lines = links.map((link) => `- ${link.message ?? "Sign in"}: ${link.url}`);
-  return [`${toolName} needs you to sign in first.`, ...lines, "Approve once you're done."].join(
-    "\n",
+function signInPrompt(
+  toolName: string,
+  connectionName: string,
+  links: readonly McpSignInLink[],
+): string {
+  const lines = links.map(
+    (link) =>
+      `- ${link.message === undefined ? "Sign in" : quoteRemoteText(link.message)}: ${link.url}`,
   );
+  return [
+    `${toolName} needs you to sign in for ${connectionName} first.`,
+    ...lines,
+    "Approve once you're done.",
+  ].join("\n");
+}
+
+const REMOTE_TEXT_MAX_LENGTH = 300;
+
+/**
+ * A remote server's text as one inert line: channels render prompts as
+ * markup (Slack as mrkdwn), so unquoted text could mention `@channel`, add
+ * links, or pose as another line of eve's own. Line breaks and control
+ * characters collapse to spaces, angle brackets (Slack's mention and link
+ * syntax) become lookalikes, and the result sits in a code span with
+ * backticks replaced, so no channel formats it.
+ */
+function quoteRemoteText(text: string): string {
+  const line = text
+    .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  const capped =
+    line.length > REMOTE_TEXT_MAX_LENGTH ? `${line.slice(0, REMOTE_TEXT_MAX_LENGTH - 1)}…` : line;
+  return `\`${capped.replace(/</gu, "‹").replace(/>/gu, "›").replace(/`/gu, "'")}\``;
 }
 
 /** Validates `input` against the tool's schema, returning it with schema defaults filled in. */

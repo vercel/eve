@@ -261,8 +261,10 @@ The MCP client that made the call answers its own approval. eve does not forward
 Set the signing secret in the environment of every instance:
 
 ```bash title=".env.local"
-EVE_MCP_REQUEST_STATE_SECRET=<at least 32 random bytes>
+EVE_MCP_REQUEST_STATE_SECRET=your_request_state_secret
 ```
+
+Generate a value with `openssl rand -base64 32`.
 
 Use the same value on every instance, so a retry can land on any of them. You can pass `requestStateSecret` to `mcpChannel()` instead; a value shorter than 32 bytes throws. Under `eve dev`, eve uses a random key for each process. Without a secret, tools that would ask for approval or a sign-in return an `internal` error that names `EVE_MCP_REQUEST_STATE_SECRET`, and other tools keep working.
 

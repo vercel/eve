@@ -27,6 +27,7 @@ import {
   type McpServerTool,
   type McpToolCallContext,
 } from "#internal/mcp/streamable-http-server.js";
+import { isObject } from "#shared/guards.js";
 import { isJsonObjectValue, type JsonValue } from "#shared/json.js";
 
 /** Input request key of an approval question. */
@@ -319,12 +320,8 @@ function readSignInAnswers(
  */
 function clientSupports(context: McpToolCallContext, mode: "form" | "url"): boolean {
   const declared = context.request.envelope?.[CLIENT_CAPABILITIES_KEY];
-  if (!isRecord(declared) || !isRecord(declared.elicitation)) return false;
+  if (!isObject(declared) || !isObject(declared.elicitation)) return false;
   const elicitation = declared.elicitation;
   if (mode === "url") return elicitation.url !== undefined;
   return elicitation.form !== undefined || elicitation.url === undefined;
-}
-
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

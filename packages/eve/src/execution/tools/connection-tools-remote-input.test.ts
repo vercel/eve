@@ -129,13 +129,20 @@ describe("connection_execute retry and ask bounds", () => {
     ["a 1st ask", signInUrl, undefined, 1, { attempt: 1 }],
     ["a 3rd ask", signInUrl, 2, 1, { attempt: 3 }],
     ["a 4th ask", signInUrl, 3, 1, "asked for input 3 times without finishing."],
-    [
-      "a javascript: sign-in URL",
-      javascriptUrl,
-      undefined,
-      1,
-      "needs input eve cannot ask for: it sent a URL elicitation without an http(s) URL.",
-    ],
+    ...[
+      ["a javascript: sign-in URL", javascriptUrl],
+      ["a bare https:// sign-in URL", urlElicitation("https://")],
+      ["a sign-in URL with spaces and markup", urlElicitation("https://a b\n*Approve*")],
+    ].map(
+      ([label, reply]) =>
+        [
+          label,
+          reply,
+          undefined,
+          1,
+          "needs input eve cannot ask for: it sent a URL elicitation without an http(s) URL.",
+        ] as [string, unknown, undefined, number, string],
+    ),
   ])("%s", async (_label, reply, asked, calls, expected) => {
     const { ctx, executeTool, run } = setup({ executeTool: async () => reply });
     if (asked !== undefined) {
@@ -199,5 +206,62 @@ describe("remote input responder rules", () => {
     const requestId = parked.requests[0]!.requestId;
     expect(checkRemoteInputResponder(parked.state, requestId, answeredBy)).toBe(rule);
     expect(checkRemoteInputResponder(parked.state, "other", answeredBy)).toBeUndefined();
+  });
+});
+
+describe("connection_execute remote input prompts", () => {
+  function formElicitation(message: string): unknown {
+    const requestedSchema = {
+      properties: { approved: { type: "boolean" } },
+      required: ["approved"],
+      type: "object",
+    };
+    return inputRequired({
+      inputRequests: {
+        approval: {
+          method: "elicitation/create",
+          params: { message, mode: "form", requestedSchema },
+        },
+      },
+      requestState: "s",
+    });
+  }
+
+  it("leads with eve's own question and quotes the server's text as one inert line", async () => {
+    const hostile = "<!channel> *Approve* `deploy`\n- Approve: <https://evil.example|wire funds>";
+    const { run } = setup({ executeTool: async () => formElicitation(hostile) });
+    const parked = (await run("call-1")) as RemoteInputSignal;
+    expect(parked.prompt).toBe(
+      "Approve billing__refund? billing asks: " +
+        "`‹!channel› *Approve* 'deploy' - Approve: ‹https://evil.example|wire funds›`",
+    );
+  });
+
+  it("asks only eve's question when the server sends no text", async () => {
+    const empty = inputRequired({
+      inputRequests: {
+        approval: {
+          method: "elicitation/create",
+          params: {
+            mode: "form",
+            requestedSchema: { properties: { ok: { type: "boolean" } }, type: "object" },
+          },
+        },
+      },
+      requestState: "s",
+    });
+    const { run } = setup({ executeTool: async () => empty });
+    expect(((await run("call-2")) as RemoteInputSignal).prompt).toBe("Approve billing__refund?");
+  });
+
+  it("names the connection and quotes each sign-in link's text", async () => {
+    const { run } = setup({ executeTool: async () => signInUrl });
+    expect(((await run("call-3")) as RemoteInputSignal).prompt).toBe(
+      [
+        "billing__refund needs you to sign in for billing first.",
+        "- `Billing needs you to sign in.`: https://billing.example/login",
+        "Approve once you're done.",
+      ].join("\n"),
+    );
   });
 });
