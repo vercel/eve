@@ -1,4 +1,4 @@
-import { asSchema } from "ai";
+import { context as otelContext, trace } from "#compiled/@opentelemetry/api/index.js";
 
 import { resolveApprovalPolicy, type ApprovalStatus } from "#approval/definition.js";
 import type { InvokeToolOptions, InvokeToolResult } from "#channel/invoke-tool.js";
@@ -19,8 +19,10 @@ import {
   AuthorizationHookKey,
   CallbackBaseUrlKey,
   isAuthorizationSignal,
+  modelFacingAuthorizationOutput,
 } from "#harness/authorization.js";
-import { normalizeToolJsonOutput, normalizeToolModelOutput } from "#harness/tool-model-output.js";
+import { checkToolCallInput, toolCallModelOutput } from "#harness/tool-call-io.js";
+import { normalizeToolJsonOutput } from "#harness/tool-model-output.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -29,10 +31,14 @@ import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { isObject } from "#shared/guards.js";
+import type { JsonObject } from "#shared/json.js";
 import type { SandboxAccess } from "#sandbox/state.js";
 import { createUlid } from "#shared/ulid.js";
-import { type InvokeToolTraceOrigin, withInvokeToolSpan } from "#tracing/invoke-tool-span.js";
+import {
+  type InvokeToolObserver,
+  type InvokeToolTraceOrigin,
+  withInvokeToolSpan,
+} from "#tracing/invoke-tool-span.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import type { ToolModelOutput } from "#tools/model-output.js";
 
@@ -48,6 +54,8 @@ export interface InvokeToolRuntime {
   /** The root node's compiled tools and source bindings, which decide invocability. */
   readonly manifest: InvokeToolManifest;
   readonly nodeId: string;
+  /** The agent's name, for trace policy and `gen_ai.agent.name`. */
+  readonly agentName: string;
   /** The channel the call arrived on, for trace policy and span attributes. */
   readonly origin?: InvokeToolTraceOrigin;
   readonly sandboxRegistry: RuntimeSandboxRegistry;
@@ -105,8 +113,17 @@ export async function invokeTool(
   const callId = `call_${createUlid()}`;
   const sessionId = `call_session_${createUlid()}`;
   return await withInvokeToolSpan(
-    { auth: options.auth, callId, input, origin: runtime.origin, sessionId, toolName: name },
-    () => runInvocation({ callId, definition, input, name, options, runtime, sessionId }),
+    {
+      agentName: runtime.agentName,
+      auth: options.auth,
+      callId,
+      input,
+      origin: runtime.origin,
+      sessionId,
+      toolName: name,
+    },
+    (observer) =>
+      runInvocation({ callId, definition, input, name, observer, options, runtime, sessionId }),
   );
 }
 
@@ -115,14 +132,17 @@ async function runInvocation(input: {
   readonly definition: HarnessToolDefinition;
   readonly input: unknown;
   readonly name: string;
+  readonly observer: InvokeToolObserver;
   readonly options: InvokeToolOptions;
   readonly runtime: InvokeToolRuntime;
   readonly sessionId: string;
 }): Promise<InvokeToolResult> {
-  const { callId, definition, name, options, runtime, sessionId } = input;
-  const validated = await validateToolInput(definition, input.input);
-  if (validated.kind === "threw")
+  const { callId, definition, name, observer, options, runtime, sessionId } = input;
+  const validated = await checkToolCallInput(definition, input.input, callId);
+  if (validated.kind === "threw") {
+    observer.failedWith(validated.error);
     return failedFromError(validated.error, name, "input validation failed");
+  }
   if (validated.kind === "invalid") return { message: validated.message, status: "invalid-input" };
 
   const sandbox = await callSandbox(runtime, sessionId);
@@ -137,7 +157,13 @@ async function runInvocation(input: {
 
   try {
     return await contextStorage.run(context, () =>
-      runCall({ callId, definition, input: validated.value, signal: options.signal }),
+      runCall({
+        callId,
+        definition,
+        input: validated.value,
+        observer,
+        signal: options.signal,
+      }),
     );
   } finally {
     await sandbox.release().catch((error: unknown) => {
@@ -206,10 +232,11 @@ function createCallContext(input: {
 async function runCall(input: {
   readonly callId: string;
   readonly definition: HarnessToolDefinition;
-  readonly input: unknown;
+  readonly input: JsonObject;
+  readonly observer: InvokeToolObserver;
   readonly signal: AbortSignal | undefined;
 }): Promise<InvokeToolResult> {
-  const { callId, definition } = input;
+  const { callId, definition, observer } = input;
   const signal = input.signal ?? new AbortController().signal;
 
   if (definition.approval !== undefined) {
@@ -220,10 +247,11 @@ async function runCall(input: {
         abortSignal: signal,
         approvedTools: new Set<string>(),
         callId,
-        toolInput: isObject(input.input) ? input.input : undefined,
+        toolInput: input.input,
         toolName: definition.name,
       });
     } catch (error) {
+      observer.failedWith(error);
       return failedFromError(error, definition.name, "approval policy failed");
     }
     const decision = decideApproval(status);
@@ -236,36 +264,51 @@ async function runCall(input: {
     messages: [],
     toolCallId: callId,
   };
+  // `execute` and output serialization are one step, as in a conversation's wrapped execute.
+  await observer.executing(input.input);
   let output: unknown;
+  let json: unknown;
+  let returned = false;
   try {
     output = await definition.execute!(input.input, executeOptions);
     if (isAsyncIterable(output)) output = await lastIterated(output);
+    returned = true;
+    if (!isAuthorizationSignal(output)) {
+      json = normalizeToolJsonOutput({
+        boundary: "execute",
+        output,
+        toolCallId: callId,
+        toolName: definition.name,
+      });
+    }
   } catch (error) {
+    await observer.executed({ error, type: "error" });
+    observer.failedWith(error);
+    if (returned) {
+      return failedFromError(error, definition.name, "tool output could not be serialized");
+    }
     if (isConnectionAuthorizationFailedError(error)) {
       return failed(toErrorMessage(error));
     }
     return failedFromError(error, definition.name, "tool execution failed");
   }
   if (isAuthorizationSignal(output)) {
+    await observer.executed({ output: modelFacingAuthorizationOutput(output), type: "result" });
     return {
       connections: output.challenges.map((challenge) => challenge.name),
       status: "authorization-required",
     };
   }
+  await observer.executed({ output: json, type: "result" });
 
   try {
-    const json = normalizeToolJsonOutput({
-      boundary: "execute",
-      output,
-      toolCallId: callId,
-      toolName: definition.name,
-    });
     return {
-      modelOutput: await toModelOutput(definition, json, callId),
+      modelOutput: (await toolCallModelOutput(definition, json, callId)) as ToolModelOutput,
       output: json,
       status: "completed",
     };
   } catch (error) {
+    observer.failedWith(error);
     return failedFromError(error, definition.name, "tool output could not be serialized");
   }
 }
@@ -283,53 +326,6 @@ function decideApproval(
     if (status.type === "denied") return { kind: "denied", reason: status.reason };
   }
   return { kind: "run" };
-}
-
-async function validateToolInput(
-  definition: HarnessToolDefinition,
-  input: unknown,
-): Promise<
-  | { readonly kind: "valid"; readonly value: unknown }
-  | { readonly kind: "invalid"; readonly message: string }
-  | { readonly kind: "threw"; readonly error: unknown }
-> {
-  let result: Awaited<ReturnType<NonNullable<ReturnType<typeof asSchema>["validate"]>>>;
-  try {
-    // Inside the try: normalizing a malformed schema throws just like a validator.
-    const schema = asSchema(definition.inputSchema);
-    if (schema.validate === undefined) return { kind: "valid", value: input };
-    result = await schema.validate(input);
-  } catch (error) {
-    // A validator that throws failed itself; its message is not a diagnostic of the input.
-    return { error, kind: "threw" };
-  }
-  // A structured failure describes the input, so it goes back verbatim.
-  return result.success
-    ? { kind: "valid", value: result.value }
-    : {
-        kind: "invalid",
-        message: `Invalid input for tool "${definition.name}": ${toErrorMessage(result.error)}`,
-      };
-}
-
-async function toModelOutput(
-  definition: HarnessToolDefinition,
-  output: unknown,
-  callId: string,
-): Promise<ToolModelOutput> {
-  if (definition.toModelOutput !== undefined) {
-    return normalizeToolModelOutput({
-      output: await definition.toModelOutput(output),
-      toolCallId: callId,
-      toolName: definition.name,
-    }) as ToolModelOutput;
-  }
-  if (typeof output === "string") return { type: "text", value: output };
-  return normalizeToolModelOutput({
-    output: { type: "json", value: output ?? null },
-    toolCallId: callId,
-    toolName: definition.name,
-  }) as ToolModelOutput;
 }
 
 async function lastIterated(iterable: AsyncIterable<unknown>): Promise<unknown> {
@@ -351,7 +347,10 @@ function failed(message: string): InvokeToolResult {
  * an unexpected error's text can carry paths, hosts, or secrets.
  */
 function failedFromError(error: unknown, toolName: string, what: string): InvokeToolResult {
-  const errorId = logError(log, `invokeTool ${what}`, error, { toolName });
+  // Off every span: the tool span records the failure itself, under its content decision.
+  const errorId = otelContext.with(trace.deleteSpan(otelContext.active()), () =>
+    logError(log, `invokeTool ${what}`, error, { toolName }),
+  );
   return {
     errorId,
     message: `Tool "${toolName}" failed: ${what}. The error is logged with id ${errorId}.`,

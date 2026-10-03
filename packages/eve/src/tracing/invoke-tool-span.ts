@@ -11,6 +11,11 @@ import type { InvokeToolResult } from "#channel/invoke-tool.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { buildConversationContext } from "#channel/conversation-context.js";
+import {
+  toolCallIdempotencyKey,
+  type InstrumentationAttemptScope,
+  type InstrumentationHooks,
+} from "#instrumentation/lifecycle.js";
 import { getInstrumentationRuntime } from "#instrumentation/runtime-global.js";
 import { resolveInstrumentationEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger, formatError } from "#internal/logging.js";
@@ -40,20 +45,18 @@ export interface InvokeToolTraceOrigin {
 }
 
 /**
- * Runs one direct tool call under an `execute_tool` span.
+ * Runs one direct tool call the way a conversation runs a model-issued one,
+ * minus the turn around it.
  *
- * A direct call has no turn, so the conversation path's lifecycle hooks never
- * see it; this is its whole instrumentation. The span records identity and
- * outcome, plus `gen_ai.tool.call.arguments` and `gen_ai.tool.call.result`
- * when the content decision allows them, which is the same decision the
- * conversation path's tool spans use: the OpenTelemetry declaration's content
- * setting, the trace policy, and the channel audience ceiling. Exception
- * text is never captured, on this span or on any span the call nests in or
- * under: error content is switched off for the whole call even when the
- * policy drops the span, so a failure logged inside the tool cannot land on
- * an already-active parent. That includes the trace policy itself: it runs
- * inside the protected context, and a policy that throws is logged as a
- * warning, which never touches a span.
+ * Instrumentation providers get the same `tool.call.started` and
+ * `tool.call.completed` events, and the `execute_tool` span carries the same
+ * attributes. Content follows the same decision: the OpenTelemetry
+ * declaration's content setting, the trace policy, and the channel audience
+ * ceiling. Arguments, the result, and error text are recorded only when that
+ * decision allows them; otherwise a failure is a generic error. Error content
+ * is switched off until the span exists, so a trace policy that throws, or a
+ * call whose span is dropped, never writes error text to a parent span. A
+ * throwing policy is logged as a warning, which never touches a span.
  *
  * The span is marked as a direct call so trace processors treat it as the
  * call's activation: it claims the trace when it starts and completes it
@@ -62,6 +65,8 @@ export interface InvokeToolTraceOrigin {
  */
 export async function withInvokeToolSpan(
   input: {
+    /** The agent's name, on the span whether or not the call has a channel origin. */
+    readonly agentName: string;
     readonly auth: SessionAuthContext;
     readonly callId: string;
     /** The caller's arguments, recorded only when the content decision allows inputs. */
@@ -70,21 +75,39 @@ export async function withInvokeToolSpan(
     readonly sessionId: string;
     readonly toolName: string;
   },
-  run: () => Promise<InvokeToolResult>,
+  run: (observer: InvokeToolObserver) => Promise<InvokeToolResult>,
 ): Promise<InvokeToolResult> {
   const base = withErrorContent(otelContext.active(), false);
   return await otelContext.with(base, () => traced(input, base, run));
 }
 
+/**
+ * What the call reports while it runs, so providers and the span see the
+ * same steps a model-issued call goes through.
+ */
+export interface InvokeToolObserver {
+  /** The tool's `execute` is about to run with its checked input. */
+  executing(input: unknown): Promise<void>;
+  /** `execute` settled with this output, or threw this error. */
+  executed(
+    outcome:
+      | { readonly type: "result"; readonly output: unknown }
+      | {
+          readonly type: "error";
+          readonly error: unknown;
+        },
+  ): Promise<void>;
+  /** The error behind a `failed` result, recorded on the span when outputs are. */
+  failedWith(error: unknown): void;
+}
+
 async function traced(
   input: Parameters<typeof withInvokeToolSpan>[0],
   base: Context,
-  run: () => Promise<InvokeToolResult>,
+  run: (observer: InvokeToolObserver) => Promise<InvokeToolResult>,
 ): Promise<InvokeToolResult> {
   const runtime = getInstrumentationRuntime();
-  const settings = runtime?.otelSettings;
-  // No declared OpenTelemetry: eve emits no agent spans anywhere, so none here either.
-  if (settings === undefined) return await run();
+  if (runtime === undefined) return await run(silentObserver);
 
   const conversation = buildConversationContext(
     {
@@ -94,15 +117,37 @@ async function traced(
     },
     resolveInstrumentationEnvironment(),
   );
+  const hooks =
+    runtime.hooks.forTrace?.({ agentName: input.agentName, ...conversation }) ?? runtime.hooks;
+  const scope: InstrumentationAttemptScope = {
+    attemptId: input.callId,
+    attemptIndex: 0,
+    channelAudience: conversation.audience,
+    functionId: input.agentName,
+    rootSessionId: input.sessionId,
+    sessionId: input.sessionId,
+    stepIndex: 0,
+    traceSessionId: input.sessionId,
+    // No turn exists; the call stands in for one, as its session context does.
+    turnId: input.callId,
+  };
+  const events = toolCallEvents(hooks, scope, input);
+
+  const settings = runtime.otelSettings;
+  // No declared OpenTelemetry: eve emits no agent spans anywhere, so none here either.
+  if (settings === undefined) return await run(events.observer(undefined));
+
   const decision = resolveTracePolicy(
     settings.tracePolicy,
-    { agentName: input.origin?.agentName ?? "", ...conversation },
+    { agentName: input.agentName, ...conversation },
     (error) =>
       log.warn("tracePolicy threw; dropping the tool call's trace", {
         error: formatError(error),
       }),
   );
-  if (decision.action === "drop") return await otelContext.with(suppressTracing(base), run);
+  if (decision.action === "drop") {
+    return await otelContext.with(suppressTracing(base), () => run(events.observer(undefined)));
+  }
   const content = applyLiveDeliveryAudienceCeiling(
     {
       action: "record",
@@ -119,6 +164,7 @@ async function traced(
   const spanName = `execute_tool ${input.toolName}`;
   const parent = withChannelAudience(base, conversation.audience);
   const attributes: Attributes = {
+    "gen_ai.agent.name": input.agentName,
     "gen_ai.operation.name": "execute_tool",
     "gen_ai.tool.call.id": input.callId,
     "gen_ai.tool.name": input.toolName,
@@ -132,7 +178,6 @@ async function traced(
     }),
   };
   if (input.origin !== undefined) {
-    attributes["gen_ai.agent.name"] = input.origin.agentName;
     attributes["eve.channel.kind"] = conversation.channel.kind;
     attributes["eve.channel.name"] = input.origin.channelName;
   }
@@ -143,37 +188,122 @@ async function traced(
   const span = trace
     .getTracer("eve.agent")
     .startSpan(spanName, { attributes, kind: SpanKind.INTERNAL }, parent);
+  // As on a conversation's tool span: error text inside the call follows the output decision.
   const active = markAgentTraceContext(
-    withAgentToolSpanContext(trace.setSpan(parent, span), {
+    withAgentToolSpanContext(withErrorContent(trace.setSpan(parent, span), recordOutputs), {
       recordInputs,
       recordOutputs,
-      // Status only, whatever the content decision: exception text stays out of the trace.
-      recordError: (_error, errorType) => recordAgentSpanError(span, undefined, errorType),
+      recordError: (error, errorType) =>
+        recordAgentSpanError(span, recordOutputs ? error : undefined, errorType),
       setAttributes: (attributes) => setDefined(span, attributes),
     }),
   );
 
+  let failure: { readonly error: unknown } | undefined;
+  const observer = events.observer({
+    failedWith: (error) => {
+      failure = { error };
+    },
+    span,
+  });
   try {
-    const result = await otelContext.with(active, run);
+    const result = await otelContext.with(active, () => run(observer));
     span.setAttribute("eve.tool.outcome", result.status);
     if (result.status === "completed" && recordOutputs) {
       const output = contentAttribute(result.output);
       if (output !== undefined) span.setAttribute("gen_ai.tool.call.result", output);
     }
-    if (result.status === "failed" || result.status === "invalid-input") {
+    if (result.status === "invalid-input") {
+      // A model-issued call with invalid input never runs, so it has no span to compare to.
       recordAgentSpanError(span, undefined, result.status);
+    } else if (result.status === "failed") {
+      // The conversation's rule: the error itself when outputs are recorded, else a generic one.
+      recordAgentSpanError(
+        span,
+        recordOutputs ? failure?.error : undefined,
+        failure === undefined ? result.status : undefined,
+      );
     }
     return result;
   } catch (error) {
-    // Status only: the thrown error's text stays out of the trace.
-    recordAgentSpanError(span, undefined, error instanceof Error ? error.name : undefined);
+    recordAgentSpanError(span, recordOutputs ? error : undefined);
     throw error;
   } finally {
     span.end();
-    await runtime?.forceFlush().catch((error: unknown) => {
+    await runtime.forceFlush().catch((error: unknown) => {
       log.warn("flushing a tool call's trace failed", { error: formatError(error) });
     });
   }
+}
+
+const silentObserver: InvokeToolObserver = {
+  executed: async () => {},
+  executing: async () => {},
+  failedWith: () => {},
+};
+
+/**
+ * The `tool.call.*` events a model-issued call publishes, in the same shapes
+ * (`instrumentation/ai-sdk-hook-bridge.ts`): started before `execute`, and
+ * completed with its result or error after. Content is projected the same way.
+ */
+function toolCallEvents(
+  hooks: InstrumentationHooks,
+  scope: InstrumentationAttemptScope,
+  input: { readonly callId: string; readonly toolName: string },
+) {
+  const capturesInputs = hooks.capturesInputs ?? hooks.capturesContent;
+  const capturesOutputs = hooks.capturesOutputs ?? hooks.capturesContent;
+  const idempotencyKey = toolCallIdempotencyKey(scope, input.callId, 0);
+  return {
+    observer(
+      spanState: { readonly failedWith: (error: unknown) => void; readonly span: Span } | undefined,
+    ): InvokeToolObserver {
+      let startedAt: number | undefined;
+      return {
+        async executing(toolInput) {
+          startedAt = performance.now();
+          await hooks.publish(
+            Object.freeze({
+              callId: input.callId,
+              idempotencyKey,
+              input: capturesInputs ? toolInput : undefined,
+              scope,
+              toolName: input.toolName,
+              type: "tool.call.started",
+            }),
+          );
+        },
+        async executed(outcome) {
+          if (startedAt !== undefined) {
+            spanState?.span.setAttribute(
+              "gen_ai.execute_tool.duration",
+              (performance.now() - startedAt) / 1000,
+            );
+          }
+          const output =
+            outcome.type === "result"
+              ? capturesOutputs
+                ? { output: outcome.output, type: "result" as const }
+                : { type: "result" as const }
+              : capturesOutputs
+                ? { error: outcome.error, type: "error" as const }
+                : { type: "error" as const };
+          await hooks.publish(
+            Object.freeze({
+              idempotencyKey,
+              output: Object.freeze(output),
+              scope,
+              type: "tool.call.completed",
+            }),
+          );
+        },
+        failedWith(error) {
+          spanState?.failedWith(error);
+        },
+      };
+    },
+  };
 }
 
 function setDefined(span: Span, attributes: Attributes): void {
