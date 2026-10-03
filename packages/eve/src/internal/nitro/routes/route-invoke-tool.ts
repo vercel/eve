@@ -16,12 +16,14 @@ import type { InvokeToolTraceOrigin } from "#tracing/invoke-tool-span.js";
  * the first call, so routes that never invoke a tool pay nothing.
  */
 export function createRouteInvokeTool(input: {
+  /** The agent's name, on every call's span and in its trace policy input. */
+  readonly agentName: string;
   readonly config: NitroArtifactsConfig;
   /** The channel this route belongs to; trace policy classifies calls by it. */
   readonly origin?: InvokeToolTraceOrigin;
   readonly requestUrl: string;
 }): InvokeToolFn {
-  let runtime: Promise<InvokeToolRuntime> | undefined;
+  let runtime: Promise<LoadedInvokeToolRuntime> | undefined;
   return async (name, toolInput, options) => {
     runtime ??= loadInvokeToolRuntime({
       callbackBaseUrl: resolveWorkflowCallbackBaseUrl(new URL(input.requestUrl).origin),
@@ -32,7 +34,7 @@ export function createRouteInvokeTool(input: {
     });
     const loaded = await runtime;
     return await invokeTool(
-      input.origin === undefined ? loaded : { ...loaded, origin: input.origin },
+      { ...loaded, agentName: input.agentName, origin: input.origin },
       name,
       toolInput,
       options,
@@ -40,11 +42,14 @@ export function createRouteInvokeTool(input: {
   };
 }
 
+/** The part of `InvokeToolRuntime` that comes from the compiled agent. */
+export type LoadedInvokeToolRuntime = Omit<InvokeToolRuntime, "agentName" | "origin">;
+
 /** Loads the root agent's static tools and sandbox. Dynamic resolvers are not run. */
 export async function loadInvokeToolRuntime(input: {
   readonly callbackBaseUrl: string;
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
-}): Promise<InvokeToolRuntime> {
+}): Promise<LoadedInvokeToolRuntime> {
   const { compiledArtifactsSource } = input;
   const [bundle, manifest] = await Promise.all([
     getCompiledRuntimeAgentBundle({ compiledArtifactsSource }),
