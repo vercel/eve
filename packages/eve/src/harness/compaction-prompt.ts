@@ -79,7 +79,7 @@ export function createCompactionPrompt(input: {
  * Re-renders the oldest entries with degraded (capped) conversational text
  * until the estimated prompt fits the budget. Mutates `entries` in place.
  * Savings are tracked per entry instead of re-estimating the whole prompt per
- * iteration; the char-length delta divided by 4 matches the
+ * iteration; the UTF-8 byte delta divided by 4 matches the
  * {@link estimateTokens} ruler closely enough for a soft budget.
  */
 function degradeOversizedTranscript(
@@ -113,7 +113,7 @@ function degradeOversizedTranscript(
       continue;
     }
 
-    excessTokens -= (entry.content.length - degraded.length) / 4;
+    excessTokens -= (Buffer.byteLength(entry.content) - Buffer.byteLength(degraded)) / 4;
     entries[index] = { content: degraded, role: entry.role };
   }
 }

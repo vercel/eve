@@ -14,10 +14,12 @@ const HEADER_BASE64_CHARS = 96 * 1024;
 const REMOTE_URL = /^https?:\/\//i;
 
 /**
- * Rough token estimate: serialized JSON length / 4, with file parts counted
- * at what providers bill for media instead of their base64 length. Good
- * enough for deciding whether compaction is needed; the real token count
- * comes back from the model each step via
+ * Rough token estimate: serialized JSON UTF-8 bytes / 4, with file parts
+ * counted at what providers bill for media instead of their base64 length.
+ * Bytes, not string length: a CJK character is one UTF-16 unit but about one
+ * token, and its three UTF-8 bytes track that cost far better. Good enough
+ * for deciding whether compaction is needed; the real token count comes back
+ * from the model each step via
  * `CompactionConfig.lastKnownInputTokens`.
  *
  * Accepts any JSON-serializable value so callers can apply the same heuristic
@@ -35,7 +37,7 @@ export function estimateTokens(value: unknown): number {
     };
     return { mediaType, type };
   });
-  return (serialized?.length ?? 0) / 4 + mediaTokens;
+  return Buffer.byteLength(serialized ?? "") / 4 + mediaTokens;
 }
 
 /**
