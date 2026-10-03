@@ -1,5 +1,4 @@
 export { createTraceRecorder } from "./core/scopes.js";
-export { createSpanWriter } from "./core/writer.js";
 export { snapshotReference } from "./core/snapshot.js";
 export { currentCapture, withCapture } from "./capture.js";
 export { currentAgentHandoff, withAgentHandoff, type AgentHandoff } from "./core/delegation.js";

@@ -1,9 +1,7 @@
-import { namingAttributes } from "./attributes.js";
 import type { Attributes, SpanType } from "./types.js";
 export const SPAN_NAMES = {
   action: "agent.action",
   approval: "agent.approval",
-  channelRequest: "agent.channel.request",
   step: "agent.step",
 } as const;
 export const USAGE_FIELDS = {
@@ -17,29 +15,9 @@ export const invocationName = (name?: string) =>
   name === undefined ? "invoke_agent" : `invoke_agent ${name}`;
 export const modelName = (name: string) => `chat ${name}`;
 export const toolName = (name: string) => `execute_tool ${name}`;
-export const mcpName = (method: string, name?: string) =>
-  method === "tools/call" ? `tools/call ${name ?? "unknown"}` : method;
 export interface ChannelMetadata {
   readonly kind?: string;
   readonly origin?: string;
-}
-export function requestAttributes(input: {
-  method: string;
-  route: string;
-  scheme?: string;
-  serverAddress?: string;
-  channelName?: string;
-  channelKind?: string;
-}): Attributes {
-  return {
-    ...namingAttributes(SPAN_NAMES.channelRequest),
-    "http.request.method": input.method,
-    "http.route": input.route,
-    "url.scheme": input.scheme,
-    "server.address": input.serverAddress,
-    "agent.channel.name": input.channelName,
-    "agent.channel.kind": input.channelKind,
-  };
 }
 export function mcpAttributes(input: {
   connectionName: string;
@@ -81,9 +59,6 @@ export const actionErrorAttributes = (code: string): Attributes => ({
 export const memoryCountAttributes = (count: number): Attributes => ({
   "gen_ai.memory.record.count": count,
 });
-export const requestStatusAttributes = (status: number): Attributes => ({
-  "http.response.status_code": status,
-});
 export const mcpSessionAttributes = (id: string): Attributes => ({ "mcp.session.id": id });
 export const rpcStatusAttributes = (code: number | string): Attributes => ({
   "rpc.response.status_code": code,
@@ -95,10 +70,3 @@ export function applyAttributes(
   for (const [key, value] of Object.entries(attributes))
     if (value !== undefined) span.setAttribute(key, value);
 }
-export const channelRequestMetadata = (input: {
-  channelName?: string;
-  channelKind?: string;
-}): Attributes => ({
-  "agent.channel.name": input.channelName,
-  "agent.channel.kind": input.channelKind,
-});
