@@ -1,5 +1,11 @@
 # eve
 
+## 0.71.1
+
+### Patch Changes
+
+- 6c2e941: Channel route handlers now receive `describe()`, which returns the agent's name, description, and the compiled tools a caller can run outside a turn, with their JSON schemas, without the inspection detail of `GET /eve/v1/info`.
+
 ## 0.71.0
 
 ### Minor Changes
