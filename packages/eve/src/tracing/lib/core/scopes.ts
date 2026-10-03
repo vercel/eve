@@ -12,14 +12,18 @@ import {
 } from "./span-kinds.js";
 import { mcpLifecycle } from "./mcp.js";
 import { intersectCapture } from "./activation.js";
-import { snapshotRecord, traceSnapshot, validSnapshot, checkpointSnapshot } from "./snapshot.js";
+import {
+  snapshotRecord,
+  traceSnapshot,
+  validSnapshot,
+  checkpointSnapshot,
+  boundedSerializer,
+} from "./snapshot.js";
 import type { Operation, OperationFacts } from "./types.js";
 import { withAgentHandoff } from "./delegation.js";
-import { boundedSerializer } from "./serializer.js";
 import { withoutDeclinedContent } from "./content-policy.js";
 import { runTraceContext } from "./context.js";
 import { randomBytes, randomUUID } from "node:crypto";
-const SERIALIZED_BYTES = 32768;
 const UNFINISHED_CHILDREN = 10000;
 
 import type { ScopeIdentity, ScopeData, ScopeRecord } from "./types.js";
@@ -70,7 +74,7 @@ export function createTraceRecorder(input: {
   const backend = input.output;
   input = {
     ...input,
-    serializer: boundedSerializer(input.serializer, SERIALIZED_BYTES, input.onError),
+    serializer: boundedSerializer(input.serializer, input.onError),
   };
   const engine = createSpanWriter({ backend, onError: input.onError });
   const serializer = input.serializer;

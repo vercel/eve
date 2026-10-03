@@ -8,6 +8,32 @@ import { withoutDeclinedContent } from "./content-policy.js";
 import type { ScopeTerminal } from "./types.js";
 import type { Attributes, TraceLink, Usage } from "./types.js";
 import type { TraceSnapshot } from "./types.js";
+export function boundedSerializer(
+  serializer: ContentSerializer,
+  onError?: import("./types.js").TraceErrorHandler,
+): ContentSerializer {
+  function invoke(method: keyof ContentSerializer, args: unknown[]): string | undefined {
+    try {
+      const value = Reflect.apply(serializer[method], serializer, args) as string | undefined;
+      return value === undefined || new TextEncoder().encode(value).length > SERIALIZED_BYTES
+        ? undefined
+        : value;
+    } catch (error) {
+      try {
+        onError?.(error, { phase: "serialize" });
+      } catch {}
+      return undefined;
+    }
+  }
+  return {
+    json: (value) => invoke("json", [value]),
+    text: (value) => invoke("text", [value]),
+    inputMessages: (value) => invoke("inputMessages", [value]),
+    instructions: (value) => invoke("instructions", [value]),
+    outputMessages: (value, reason) => invoke("outputMessages", [value, reason]),
+    toolResults: (value) => invoke("toolResults", [value]),
+  };
+}
 
 export function traceSnapshot(value: unknown): TraceSnapshot {
   return JSON.parse(JSON.stringify(value)) as TraceSnapshot;
