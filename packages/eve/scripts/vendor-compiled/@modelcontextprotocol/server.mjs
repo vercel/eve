@@ -16,6 +16,10 @@ export interface CallToolRequest {
 
 export interface McpRequestHandlerExtra {
   readonly mcpReq: {
+    /** The request's \`_meta\`, without the reserved \`io.modelcontextprotocol/*\` keys. */
+    readonly _meta?: Readonly<Record<string, unknown>>;
+    /** The reserved \`io.modelcontextprotocol/*\` keys the request carried. */
+    readonly envelope?: Readonly<Record<string, unknown>>;
     readonly signal: AbortSignal;
   };
 }

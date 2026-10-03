@@ -600,7 +600,18 @@ describe("mcpChannel tools", () => {
       ],
       ["note", completed("saved", "Saved."), { content: [{ text: "Saved.", type: "text" }] }],
       ["note", { message: "Bad id.", status: "invalid-input" }, { code: "invalid_input" }],
-      ["note", { reason: "Not today.", status: "denied" }, { code: "denied" }],
+      // The reason reaches the client verbatim, so an anonymous caller denied a
+      // tool session key learns why from `invokeTool`'s own message.
+      [
+        "note",
+        { reason: "Not today.", status: "denied" },
+        { code: "denied", message: "Not today." },
+      ],
+      [
+        "note",
+        { status: "denied" },
+        { code: "denied", message: expect.stringContaining("approval") },
+      ],
       ["note", { status: "approval-required" }, { code: "approval_required" }],
       [
         "note",
@@ -626,6 +637,76 @@ describe("mcpChannel tools", () => {
         auth: principal,
         signal: expect.any(AbortSignal),
       });
+    }
+  });
+
+  it("advertises tool sessions and honours a key only from clients that declare them", async () => {
+    const channel = mcpChannel({ auth: () => principal, tools: true });
+    const post = channel.routes[1]!;
+    if (post.transport === "websocket") throw new Error("expected HTTP route");
+    const invokeTool = vi.fn<InvokeToolFn>(async () => ({
+      modelOutput: { type: "text", value: "Saved." },
+      output: "saved",
+      status: "completed",
+    }));
+    const args = routeArgs(vi.fn(), {
+      describe: async () => ({ name: "compiled-agent", tools: [note] }),
+      invokeTool,
+    });
+    const modern = (method: string, params: object, capabilities: object) => {
+      const headers: Record<string, string> = {
+        "mcp-method": method,
+        "mcp-protocol-version": MCP_PROTOCOL_VERSION,
+      };
+      if (method === "tools/call") headers["mcp-name"] = "note";
+      return mcpRequest(
+        {
+          id: 1,
+          jsonrpc: "2.0",
+          method,
+          params: {
+            ...params,
+            _meta: {
+              ...(params as { _meta?: object })._meta,
+              "io.modelcontextprotocol/clientCapabilities": capabilities,
+              "io.modelcontextprotocol/clientInfo": { name: "test-client", version: "0.0.0" },
+              "io.modelcontextprotocol/protocolVersion": MCP_PROTOCOL_VERSION,
+            },
+          },
+        },
+        headers,
+      );
+    };
+
+    const discovered = (await jsonRpcResponse(
+      await post.handler(modern("server/discover", {}, {}), args),
+    )) as { result: { capabilities: Record<string, unknown> } };
+    expect(discovered.result.capabilities.extensions).toEqual({ "dev.eve/tool-sessions": {} });
+
+    const declared = { extensions: { "dev.eve/tool-sessions": {} } };
+    const call = { _meta: { "dev.eve/tool-session": "desk" }, arguments: {}, name: "note" };
+    const rows: Array<[string, Request, string | undefined]> = [
+      ["declaring client", modern("tools/call", call, declared), "desk"],
+      ["undeclaring client", modern("tools/call", call, {}), undefined],
+      [
+        "2025-era client",
+        mcpRequest({
+          id: 1,
+          jsonrpc: "2.0",
+          method: "tools/call",
+          params: {
+            ...call,
+            _meta: { ...call._meta, "io.modelcontextprotocol/clientCapabilities": declared },
+          },
+        }),
+        undefined,
+      ],
+    ];
+    for (const [client, request, key] of rows) {
+      invokeTool.mockClear();
+      await post.handler(request, args);
+      expect(invokeTool, client).toHaveBeenCalledOnce();
+      expect(invokeTool.mock.calls[0]![2].key, client).toBe(key);
     }
   });
 
