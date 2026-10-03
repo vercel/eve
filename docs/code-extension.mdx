@@ -11,7 +11,8 @@ description: "Mount eve's coding extension, eve-code, and see its latest benchma
 
 These results show baseline performance. Each harness uses its standard setup with high reasoning. The results do not show how a harness performs with other models, settings, or tasks.
 
-### How the benchmark works
+<details>
+<summary>How the benchmark works</summary>
 
 The benchmark uses eve-bench and the DeepSWE-lean dataset. DeepSWE-lean has 12 feature and bug-fix tasks from DeepSWE v1.1.
 
@@ -25,7 +26,10 @@ The benchmark uses eve-bench and the DeepSWE-lean dataset. DeepSWE-lean has 12 f
 
 The line on each correctness row shows the 95% interval. When the lines of two harnesses overlap, the benchmark does not show a difference between them.
 
-### How the results update
+</details>
+
+<details>
+<summary>How the results update</summary>
 
 1. A maintainer runs the `eve-code` workflow on `main` with the `deepswe-lean` dataset.
 2. The workflow runs eve-code, opencode, and pi. It saves each complete result in the eve-bench result store.
@@ -33,6 +37,8 @@ The line on each correctness row shows the 95% interval. When the lines of two h
 4. The next docs deployment shows the new results.
 
 The workflow does not publish incomplete runs, single-task runs, or pull request runs. Results can be older than `main`, because a maintainer starts each run. Select a harness name to open the GitHub Actions run for that result.
+
+</details>
 
 ## Mount the extension
 
