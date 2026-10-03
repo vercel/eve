@@ -43,7 +43,8 @@ export const EVE_STREAM_LEASE_ENDED_CONTROL = {
  *
  * `tool-calls` is the only non-terminal assistant step in the current
  * tool-loop harness. All other values indicate the assistant step ended the
- * current turn.
+ * current turn, except a step superseded by a steering message: it completes
+ * with `other` and the turn continues with the next step.
  */
 export type AssistantStepFinishReason =
   | "content-filter"
