@@ -187,10 +187,10 @@ test("mints a repository-scoped token only during execution and redacts output",
       return fakeSandbox(
         runs,
         (run) => {
-          const stdout = run.command.includes("realpath -e -- '/workspace/internal-agents'")
-            ? "/workspace/internal-agents\n"
+          const stdout = run.command.includes("realpath -e -z -- '/workspace/internal-agents'")
+            ? "/workspace/internal-agents\0"
             : run.command.includes("realpath -e")
-              ? "/workspace\n"
+              ? "/workspace\0"
               : run.command.includes("rev-parse --show-toplevel")
                 ? "/workspace/internal-agents\n"
                 : run.command.includes("remote get-url")
