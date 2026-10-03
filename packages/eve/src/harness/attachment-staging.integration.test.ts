@@ -733,6 +733,85 @@ describe("hydrateSandboxAttachments (integration)", () => {
     );
   });
 
+  it("degrades to a text reference when the staged bytes no longer match their address", async () => {
+    // Code in the sandbox overwrote the staged upload. The model must not
+    // receive the replacement as the attachment the person sent.
+    const logs = captureLogRecords();
+    const sandbox = mockSandbox({ id: "sbx_overwritten" });
+    const runtime = await createTestRuntime();
+
+    const stagedContent = (await runtime.runAsSession({ sandbox }, async () =>
+      stageAttachmentsToSandbox([
+        { data: smallImageBytes, filename: "logo.png", mediaType: "image/png", type: "file" },
+      ] as UserContent),
+    )) as UserContent;
+    const refPart = (stagedContent as FilePart[]).find((p) => p.type === "file") as FilePart;
+    const stagedPath = refPart.filename as string;
+    const messages = [{ content: stagedContent, role: "user" as const }];
+
+    for (const replacement of [
+      Buffer.alloc(smallImageBytes.byteLength, 0x50),
+      Buffer.alloc(smallImageBytes.byteLength * 2, 0x89),
+    ]) {
+      await sandbox.session.writeBinaryFile({ content: replacement, path: stagedPath });
+      const hydrated = await runtime.runAsSession({ sandbox }, async () =>
+        hydrateSandboxAttachments(messages),
+      );
+      expect(hydrated[0]?.content).toEqual([
+        {
+          text: `FileNotFound: Current snapshot may be newer and does not contain ${stagedPath}.`,
+          type: "text",
+        },
+      ]);
+    }
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "sandbox-ref attachment bytes changed since staging — degrading to text reference",
+      }),
+    );
+
+    // The original bytes back at the address hydrate again.
+    await sandbox.session.writeBinaryFile({ content: smallImageBytes, path: stagedPath });
+    const restored = await runtime.runAsSession({ sandbox }, async () =>
+      hydrateSandboxAttachments(messages),
+    );
+    const restoredContent = restored[0]?.content as Exclude<UserContent, string>;
+    const restoredPart = restoredContent.find((p) => (p as FilePart).type === "file") as FilePart;
+    expect((restoredPart.data as Buffer).equals(smallImageBytes)).toBe(true);
+  });
+
+  it("hydrates a ref whose path carries no content address as it reads", async () => {
+    const sandbox = mockSandbox({ id: "sbx_unaddressed" });
+    const runtime = await createTestRuntime();
+    await sandbox.session.writeBinaryFile({
+      content: smallImageBytes,
+      path: "/workspace/attachments/logo.png",
+    });
+    const messages = [
+      {
+        content: [
+          {
+            data: new URL(
+              `eve-sandbox:?path=%2Fworkspace%2Fattachments%2Flogo.png&size=${smallImageBytes.byteLength}&type=image%2Fpng`,
+            ),
+            filename: "/workspace/attachments/logo.png",
+            mediaType: "image/png",
+            type: "file",
+          },
+        ] as UserContent,
+        role: "user" as const,
+      },
+    ];
+
+    const hydrated = await runtime.runAsSession({ sandbox }, async () =>
+      hydrateSandboxAttachments(messages),
+    );
+    const hydratedContent = hydrated[0]?.content as Exclude<UserContent, string>;
+    const part = hydratedContent.find((p) => (p as FilePart).type === "file") as FilePart;
+    expect((part.data as Buffer).equals(smallImageBytes)).toBe(true);
+  });
+
   it("does not touch the sandbox when every ref is non-inlinable — text references carry all the info", async () => {
     // Regression guard: the non-inlinable path must render the text
     // reference entirely from ref metadata (path, mediaType, size)

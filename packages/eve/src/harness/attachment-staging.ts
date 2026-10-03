@@ -36,6 +36,7 @@ const log = createLogger("harness.attachment-staging");
 
 const UNSAFE_FILENAME_CHARS = /[^\w.-]+/g;
 const SHA_PREFIX_LENGTH = 16;
+const STAGED_ADDRESS = new RegExp(`^[0-9a-f]{${SHA_PREFIX_LENGTH}}$`);
 
 const DEFAULT_MEDIA_TYPE = "application/octet-stream";
 
@@ -357,8 +358,29 @@ async function readSandboxRefBytes(
       path: ref.path,
       size: ref.size,
     });
+    return null;
+  }
+  // Code in the sandbox can overwrite a staged file. Bytes that no longer
+  // match the address they were staged under are not the attachment.
+  const address = stagedAddress(ref);
+  if (address !== undefined && (bytes.byteLength !== ref.size || sha256Prefix(bytes) !== address)) {
+    log.warn("sandbox-ref attachment bytes changed since staging — degrading to text reference", {
+      mediaType: ref.mediaType,
+      path: ref.path,
+      size: ref.size,
+    });
+    return null;
   }
   return bytes;
+}
+
+/**
+ * The SHA-256 prefix a staged ref's path carries (`<root>/<sha>/<name>`), or
+ * `undefined` for a path without one.
+ */
+function stagedAddress(ref: SandboxRef): string | undefined {
+  const address = ref.path.split("/").at(-2);
+  return address !== undefined && STAGED_ADDRESS.test(address) ? address : undefined;
 }
 
 function renderMissingSandboxRef(ref: SandboxRef): TextPart {
@@ -549,7 +571,7 @@ function reconstitueFilePartUrls(
   return changed ? result : content;
 }
 
-function sha256Prefix(bytes: Buffer): string {
+function sha256Prefix(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex").slice(0, SHA_PREFIX_LENGTH);
 }
 
