@@ -91,6 +91,8 @@ export interface RoutedChildDelivery {
   readonly inputSource?: string;
   readonly childContinuationToken: string;
   readonly childSessionInbox?: SessionInboxAddress;
+  /** The person's message whose text answered this bucket's question. */
+  readonly message?: DeliverPayload["message"];
   readonly payload: { readonly inputResponses: readonly InputResponse[] };
   /** What forwarding this bucket resolves on the routing session. */
   readonly resolved: ProxiedInputResolutions;
@@ -158,6 +160,7 @@ export function routeDeliverPayload(input: {
     payload: input.payload,
     routable,
   });
+  const [textAnswer] = message.responses;
   const inputResponses = [...(input.payload.inputResponses ?? []), ...message.responses];
 
   const responsesByChild = new Map<string, ChildResponseBucket>();
@@ -248,6 +251,8 @@ export function routeDeliverPayload(input: {
           resolutions: resolveRetiredRequests({ entries, responses, retireRequestIds }),
         },
         ...(childSessionInbox !== undefined && { childSessionInbox }),
+        ...(textAnswer !== undefined &&
+          responses.includes(textAnswer) && { message: input.payload.message }),
         ...(workflowAsk !== undefined && { workflowAsk }),
         ...(remote !== undefined && { remote }),
         ...(routes[0]?.inputSource !== undefined && { inputSource: routes[0].inputSource }),
