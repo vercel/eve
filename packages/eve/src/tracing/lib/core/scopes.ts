@@ -522,7 +522,7 @@ export function createTraceRecorder(input: {
   }
   async function resume(
     snapshot: unknown,
-    options: { capture?: CaptureDecision; context?: ExecutionContext; deferred?: boolean } = {},
+    options: { capture?: CaptureDecision; context?: ExecutionContext } = {},
   ): Promise<Operation | undefined> {
     if (!validSnapshot(snapshot)) {
       try {
@@ -532,7 +532,7 @@ export function createTraceRecorder(input: {
     }
     return restore(
       { ...snapshot, capture: intersectCapture(snapshot.capture, options.capture) },
-      { deferred: options.deferred ?? true, executionContext: options.context },
+      { deferred: true, executionContext: options.context },
     );
   }
   async function memory<T>(
