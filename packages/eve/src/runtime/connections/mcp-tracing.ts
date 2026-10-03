@@ -1,5 +1,5 @@
 import { createMcpTraceFetch as traceFetch } from "#tracing/eve/mcp.js";
-import { eveMcpTracing } from "#tracing/eve/transports.js";
+import { createMcpTracing } from "#tracing/eve/mcp.js";
 import { replaceBaggageMember } from "#protocol/baggage.js";
 
 export function createMcpTraceFetch(input: Parameters<typeof traceFetch>[0]): typeof fetch {
@@ -20,7 +20,7 @@ export function withMcpToolsListSpan<T>(input: {
   protocolVersion?: string;
   execute: () => Promise<T>;
 }): Promise<T> {
-  return eveMcpTracing().list(input);
+  return createMcpTracing().list(input);
 }
 
 export function withMcpToolCallSpan<T>(input: {
@@ -30,5 +30,5 @@ export function withMcpToolCallSpan<T>(input: {
   arguments: unknown;
   execute: () => Promise<T>;
 }): Promise<T> {
-  return eveMcpTracing().call(input);
+  return createMcpTracing().call(input);
 }

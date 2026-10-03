@@ -8,7 +8,10 @@ import {
 
 import type { McpLifecycle, McpUpdate } from "#tracing/lib/index.js";
 import { activeTraceOperation } from "./otel.js";
-import type { createTransportLifecycle } from "#tracing/eve/transport-lifecycle.js";
+import { liveOtelBackend } from "./otel.js";
+import { eveOutputMapping } from "./profile.js";
+import { aiSdkContentSerializer } from "./serialization.js";
+import { mcpLifecycle, type CaptureDecision } from "#tracing/lib/index.js";
 import { truncateTelemetryText } from "./serialization.js";
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -103,7 +106,60 @@ function injectMcpTraceContext(
   };
 }
 
-export function createMcpTracing(lifecycle: ReturnType<typeof createTransportLifecycle>) {
+export function createMcpTracing() {
+  const backend = liveOtelBackend(trace.getTracer("eve.mcp"), eveOutputMapping());
+  function start(input: {
+    method: "tools/list" | "tools/call";
+    connectionName: string;
+    toolName?: string;
+    protocolVersion?: string;
+    executionContext: OtelContext;
+    capture: CaptureDecision;
+  }) {
+    const span = backend.start(
+      {
+        type: "mcp",
+        operationId: `${input.connectionName}:${input.method}`,
+        name:
+          input.method === "tools/call"
+            ? `tools/call ${input.toolName ?? "unknown"}`
+            : input.method,
+        kind: "CLIENT",
+        parent: trace.getSpan(input.executionContext)?.spanContext(),
+        attributes: {
+          "agent.connection.name": input.connectionName,
+          "mcp.method.name": input.method,
+          "network.protocol.name": "http",
+          "network.transport": "tcp",
+          "mcp.protocol.version": input.protocolVersion,
+          "gen_ai.operation.name": input.method === "tools/call" ? "execute_tool" : undefined,
+          "gen_ai.tool.name": input.toolName,
+        },
+      },
+      input.executionContext,
+    );
+    const semantic = mcpLifecycle({
+      serializer: aiSdkContentSerializer,
+      ...input.capture,
+      write(attributes) {
+        for (const [key, value] of Object.entries(attributes))
+          if (value !== undefined) span.setAttribute(key, value);
+      },
+      error: span.fail,
+    });
+    return {
+      ...semantic,
+      end: span.end,
+      run<T>(execute: () => T): T {
+        return backend.run(span.reference, input.capture, execute, input.executionContext, {
+          type: "mcp",
+          reference: span.reference,
+          capture: input.capture,
+          mcp: semantic,
+        });
+      },
+    };
+  }
   return {
     async list<T>(input: {
       readonly connectionName: string;
@@ -111,13 +167,12 @@ export function createMcpTracing(lifecycle: ReturnType<typeof createTransportLif
       readonly protocolVersion?: string;
     }): Promise<T> {
       const parent = otelContext.active();
-      const span = lifecycle.mcp({
+      const span = start({
         method: "tools/list",
         connectionName: input.connectionName,
         protocolVersion: input.protocolVersion,
-        parent: trace.getSpan(parent)?.spanContext(),
         executionContext: parent,
-        capture: lifecycle.active()?.capture ?? {
+        capture: activeTraceOperation()?.capture ?? {
           emit: true,
           recordInputs: false,
           recordOutputs: false,
@@ -148,18 +203,17 @@ export function createMcpTracing(lifecycle: ReturnType<typeof createTransportLif
       readonly toolName: string;
     }): Promise<T> {
       const parent = otelContext.active();
-      const existing = lifecycle.active();
+      const existing = activeTraceOperation();
       if (existing?.type === "tool" && existing.mcp !== undefined) {
         existing.mcp.update({ ...input, method: "tools/call" });
         return await runMcpToolCall(input, undefined);
       }
 
-      const span = lifecycle.mcp({
+      const span = start({
         method: "tools/call",
         connectionName: input.connectionName,
         toolName: truncateTelemetryText(input.toolName, 128),
         protocolVersion: input.protocolVersion,
-        parent: trace.getSpan(parent)?.spanContext(),
         executionContext: parent,
         capture: existing?.capture ?? { emit: true, recordInputs: false, recordOutputs: false },
       });

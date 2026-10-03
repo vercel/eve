@@ -1,8 +1,19 @@
-import { context, propagation, trace, type TextMapGetter } from "@opentelemetry/api";
+import {
+  context,
+  propagation,
+  trace,
+  SpanKind,
+  SpanStatusCode,
+  type TextMapGetter,
+} from "@opentelemetry/api";
 import { getInstrumentationRuntime } from "#instrumentation/runtime.js";
-import { eveTransportLifecycle } from "#tracing/eve/transports.js";
+import { withErrorContent } from "#tracing/eve/otel.js";
+import { markAgentTraceContext } from "#tracing/eve/agent-trace-context.js";
 
-export type ChannelRequestTrace = ReturnType<ReturnType<typeof eveTransportLifecycle>["request"]>;
+export interface ChannelRequestTrace {
+  readonly reference: import("@opentelemetry/api").SpanContext;
+  channel(input: { channelName?: string; channelKind?: string }): void;
+}
 const headersGetter: TextMapGetter<Headers> = {
   get: (headers, key) => headers.get(key) ?? undefined,
   keys: (headers) => [...headers.keys()],
@@ -22,20 +33,44 @@ export async function traceChannelRequest<T extends Response>(
   try {
     url = new URL(request.url);
   } catch {}
-  const operation = eveTransportLifecycle().request({
-    method: request.method,
-    route: separator === -1 ? routeKey : routeKey.slice(separator + 1),
-    scheme: url?.protocol.replace(/:$/, ""),
-    serverAddress: url?.hostname,
-    parent: trace.getSpan(parent)?.spanContext(),
-    executionContext: parent,
-  });
+  const span = trace.getTracer("eve.channel").startSpan(
+    "agent.channel.request",
+    {
+      kind: SpanKind.SERVER,
+      attributes: {
+        "operation.name": "agent.channel.request",
+        "resource.name": "agent.channel.request",
+        "http.request.method": request.method,
+        "http.route": separator === -1 ? routeKey : routeKey.slice(separator + 1),
+        "url.scheme": url?.protocol.replace(/:$/, ""),
+        "server.address": url?.hostname,
+      },
+    },
+    parent,
+  );
+  const operation: ChannelRequestTrace = {
+    reference: span.spanContext(),
+    channel(input) {
+      if (input.channelName !== undefined)
+        span.setAttribute("agent.channel.name", input.channelName);
+      if (input.channelName !== undefined) span.setAttribute("eve.channel.name", input.channelName);
+      if (input.channelKind !== undefined)
+        span.setAttribute("agent.channel.kind", input.channelKind);
+      if (input.channelKind !== undefined) span.setAttribute("eve.channel.kind", input.channelKind);
+    },
+  };
   try {
-    const response = await operation.run(() => handler(operation));
-    operation.completed(response.status);
+    const response = await context.with(
+      markAgentTraceContext(withErrorContent(trace.setSpan(parent, span), false)),
+      () => handler(operation),
+    );
+    span.setAttribute("http.response.status_code", response.status);
+    if (response.status >= 500) span.setStatus({ code: SpanStatusCode.ERROR });
     return response;
   } catch (error) {
-    operation.failed();
+    span.setStatus({ code: SpanStatusCode.ERROR });
     throw error;
+  } finally {
+    span.end();
   }
 }
