@@ -63,6 +63,8 @@ export type DurableStepResult = (
       readonly hold: "input";
       /** The open requests an answer can resolve. */
       readonly inputRequestIds: readonly string[];
+      /** The sign-in attempts whose callbacks, all of them, wake the turn. */
+      readonly authorizationAttemptIds: readonly string[];
     }
   | {
       readonly action: "park";

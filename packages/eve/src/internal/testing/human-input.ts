@@ -1,6 +1,7 @@
 import type { ModelMessage } from "ai";
 
 import type { SessionAuthContext } from "#channel/types.js";
+import type { AuthorizationChallenge } from "#harness/authorization.js";
 import {
   HumanInput,
   type HumanInputEvent,
@@ -16,13 +17,17 @@ import type { InputRequest, InputResponse } from "#shared/input.js";
 
 /** Where Alice's turn asked: its first model step. */
 export const AT: RequestAt = { sequence: 1, stepIndex: 0, turnId: "turn_1" };
+/** When answers arrive, unless a test moves the clock. */
+export const NOW = 1_000_000;
 
 function person(principalId: string): SessionAuthContext {
   return { attributes: {}, authenticator: "test", principalId, principalType: "user" };
 }
 
-/** Alice started the turn. */
+/** Alice started the turn; Bob and Carol are other people in the conversation. */
 export const ALICE = person("alice");
+export const BOB = person("bob");
+export const CAROL = person("carol");
 
 type Published<T extends UnstampedMessageStreamEvent["type"]> = Extract<
   UnstampedMessageStreamEvent,
@@ -157,7 +162,7 @@ export function answered(
   responses: readonly InputResponse[],
   responder: SessionAuthContext | null = ALICE,
 ): Intake {
-  return { responder, responses, type: "answered" };
+  return { now: NOW, responder, responses, type: "answered" };
 }
 
 /** `responder` picks `optionId` for request `requestId`. */
@@ -203,4 +208,57 @@ export function overBudget(at: RequestAt = AT): Interrupt {
 /** A turn held on the budget question. */
 export function heldOnBudget(): Turn {
   return Turn.idle().interrupt(overBudget());
+}
+
+/** A sign-in Alice must complete for `name` before her call can run. */
+export function challenge(
+  attemptId: string,
+  overrides: Partial<AuthorizationChallenge> = {},
+): AuthorizationChallenge {
+  return {
+    attemptId,
+    challenge: { url: `https://idp.example/authorize/${attemptId}` },
+    hookUrl: `https://agent.example/callback/${attemptId}`,
+    name: "weather",
+    principal: { id: "alice", issuer: "test", type: "user" },
+    principalId: "alice",
+    requester: ALICE,
+    resume: { nonce: attemptId },
+    ...overrides,
+  };
+}
+
+/**
+ * Alice's calls `callIds` need these sign-ins before they can run; `messages`
+ * is the step's response that asked.
+ */
+export function signInRequired(
+  challenges: readonly AuthorizationChallenge[],
+  callIds: readonly string[] = ["call-weather"],
+  messages: readonly ModelMessage[] = [],
+): Interrupt {
+  return {
+    at: AT,
+    callIds,
+    challenges,
+    messages,
+    requester: ALICE,
+    type: "authorization.required",
+  };
+}
+
+/** A turn held on Alice's sign-ins. */
+export function heldOnSignIns(...challenges: AuthorizationChallenge[]): Turn {
+  return Turn.idle().interrupt(signInRequired(challenges));
+}
+
+/** The identity provider calls back for sign-in attempt `attemptId`. */
+export function callback(attemptId: string, connectionName = "weather"): Intake {
+  return {
+    attemptId,
+    callback: { method: "GET", params: { code: "ok" } },
+    connectionName,
+    outcome: "authorized",
+    type: "authorization.completed",
+  };
 }

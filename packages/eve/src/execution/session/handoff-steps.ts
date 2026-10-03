@@ -30,7 +30,7 @@ export function isSessionStateIdleForHandoff(sessionState: DurableSessionState):
   // The batch is deleted when its calls settle. Its ordinary reader tolerates
   // a malformed value as absent; that must not authorize a handoff.
   if (state?.["eve.runtime.pendingCoordinationBatch"] !== undefined) return false;
-  if (HumanInput.read(state).openRequestIds().size > 0) return false;
+  if ("held" in HumanInput.read(state).next()) return false;
   return workflowToolRuns.length === 0;
 }
 

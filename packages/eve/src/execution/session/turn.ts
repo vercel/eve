@@ -186,13 +186,19 @@ export class SessionExecution {
       }
 
       if (result.action === "held" && result.hold === "input") {
+        // A sign-in needs no channel support: its callback reaches the session itself.
         if (
+          result.inputRequestIds.length > 0 &&
           this.input.capabilities?.requestInput !== true &&
           !hasDelegatedCallerContext(this.input.cursor.serializedContext)
         ) {
           throw new Error(NO_INPUT_CAPABILITY_ERROR_MESSAGE);
         }
-        const woke = await this.waitForHeldInput(turn, new Set(result.inputRequestIds));
+        const woke = await this.waitForHeldInput(
+          turn,
+          new Set(result.inputRequestIds),
+          new Set(result.authorizationAttemptIds),
+        );
         if (woke === "cancelled") return await this.finishCancelledTurn(turn);
         nextStepInput = { delivery: woke };
         continue;
@@ -313,14 +319,18 @@ export class SessionExecution {
 
   /**
    * The turn waits on a person. It wakes with the delivery its next step
-   * reads: an answer from any responder, or a delivery from the turn's own
-   * person, which steers it. Anyone else's message queues behind it.
+   * reads: the callbacks of every sign-in it waits on, an answer from any
+   * responder, or a delivery from the turn's own person, which steers it.
+   * Anyone else's message queues behind it.
    */
   private async waitForHeldInput(
     turn: ActiveTurn,
     requestIds: ReadonlySet<string>,
+    attemptIds: ReadonlySet<string>,
   ): Promise<DeliverHookPayload | "cancelled"> {
     while (true) {
+      const callbacks = turn.takeSignInCallbacks(attemptIds);
+      if (callbacks !== undefined) return callbacks;
       const answer = await turn.takeInputResponses(requestIds);
       if (answer !== undefined) return answer;
       const steering = await turn.takeSteering({ heldOnPerson: true });

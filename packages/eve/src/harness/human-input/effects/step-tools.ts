@@ -16,8 +16,8 @@ export interface StepEffects {
 }
 
 /**
- * The tools of the step at `at`, as its approvals saw them: an answer can
- * arrive steps or turns later, after the tools changed.
+ * The tools of the step at `at`, as its approvals and response policies saw
+ * them: an answer can arrive steps or turns later, after the tools changed.
  */
 export async function prepareStepTools(
   effects: StepEffects,

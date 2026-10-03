@@ -1,6 +1,12 @@
 import type { ModelMessage } from "ai";
 
 import type { SessionAuthContext } from "#channel/types.js";
+import { contextStorage } from "#context/container.js";
+import { AuthKey } from "#context/keys.js";
+import {
+  PendingAuthorizationResultKey,
+  ReceivedAuthorizationCallbacksKey,
+} from "#harness/authorization.js";
 import { setPendingCoordinationBatch } from "#harness/coordination.js";
 import { advanceStep, emitFailedStep, setHarnessEmissionState } from "#harness/emission.js";
 import type { HarnessEmissionState } from "#harness/emission-state.js";
@@ -17,6 +23,7 @@ import type {
 import { createTurnWaitingEvent } from "#protocol/message.js";
 
 import { runApprovedWork, type ApprovedRuntimeCalls } from "./approved-calls.js";
+import { checkResponder } from "./response-policy.js";
 import { prepareStepTools, type StepEffects } from "./step-tools.js";
 
 export type { StepEffects } from "./step-tools.js";
@@ -35,9 +42,9 @@ interface Applied {
 /**
  * Applies what human input reported to the tool loop's session. Each event
  * has one meaning here, so the tool loop decides nothing about a person's
- * input. Running approved calls needs `effects`, which only steps where an
- * answer can arrive pass. Returns the step's result when an event ended the
- * turn.
+ * input. Running approved calls and response policies needs `effects`, which
+ * only steps where an answer can arrive pass. Returns the step's result when
+ * an event ended the turn.
  */
 export async function applyHumanInput(input: {
   readonly effects?: StepEffects;
@@ -89,6 +96,26 @@ export async function applyHumanInput(input: {
       case "calls.dispatched":
         dispatched = event.messages;
         continue;
+      case "sign-in.completed": {
+        const ctx = contextStorage.getStore();
+        if (ctx === undefined) continue;
+        ctx.set(PendingAuthorizationResultKey, [
+          ...(ctx.get(PendingAuthorizationResultKey) ?? []),
+          event.result,
+        ]);
+        if (event.requester !== null) ctx.set(AuthKey, event.requester);
+        continue;
+      }
+      case "responder.check": {
+        if (effects === undefined) {
+          throw new Error("Response policies can run only where answers arrive.");
+        }
+        const tools = await prepareStepTools(effects, event.at, session);
+        const checked = await checkResponder(event, tools);
+        const ended = await applyNested(HumanInput.read(session.state).intake(checked));
+        if (ended !== undefined) return { ended, messageAnswered, session };
+        continue;
+      }
       case "calls.approved": {
         if (effects === undefined) {
           throw new Error("Approved calls can run only where answers arrive.");
@@ -112,6 +139,7 @@ export async function applyHumanInput(input: {
             results:
               work.results.length === 0 ? [] : [{ content: [...work.results], role: "tool" }],
             running: work.runtimeCalls?.tasks.map((task) => task.callId) ?? [],
+            stopped: work.signIns?.callIds ?? [],
             type: "calls.settled",
           }),
         );
@@ -124,6 +152,8 @@ export async function applyHumanInput(input: {
               at: event.at,
               callIds: work.signIns.callIds,
               challenges: work.signIns.challenges,
+              // The calls left the suspended step as it settled.
+              messages: [],
               requester: null,
               type: "authorization.required",
             }),
@@ -155,7 +185,6 @@ export async function applyHumanInput(input: {
           : { done: true as const, output: "" };
         return { ended: { next, session }, messageAnswered, session };
       }
-      case "responder.check":
       case "answer.forwarded":
         throw new Error(`Human input event "${event.type}" is not implemented.`);
     }
@@ -185,7 +214,12 @@ export async function applyStepArrivals(input: {
   let messageAnswered = false;
   let runtimeCalls: ApprovedRuntimeCalls | undefined;
   let dispatched: readonly ModelMessage[] | undefined;
-  const arrivals = HumanInput.read(session.state).arrivals({ sender: input.auth, stepInput });
+  const arrivals = HumanInput.read(session.state).arrivals({
+    callbacks: contextStorage.getStore()?.get(ReceivedAuthorizationCallbacksKey) ?? [],
+    now: Date.now(),
+    sender: input.auth,
+    stepInput,
+  });
   for (const intake of arrivals) {
     const applied = await applyHumanInput({
       effects,

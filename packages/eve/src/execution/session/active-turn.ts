@@ -22,7 +22,7 @@ export type RuntimeEvent =
   | { readonly kind: "steering" }
   /** A `task_wait` call's timeout passed. */
   | { readonly kind: "timeout"; readonly callId: string }
-  /** A delivery was admitted; it may answer a held turn's request. */
+  /** A delivery or sign-in callback was admitted; it may be what a held turn waits for. */
   | { readonly kind: "input" }
   | "cancelled";
 
@@ -196,6 +196,13 @@ export class ActiveTurn {
     return undefined;
   }
 
+  /** The sign-in callbacks for `attemptIds`, once every one of them has arrived. */
+  takeSignInCallbacks(attemptIds: ReadonlySet<string>): DeliverHookPayload | undefined {
+    if (attemptIds.size === 0) return undefined;
+    const payloads = this.input.queue.takeAuthorizations(attemptIds);
+    return payloads === undefined ? undefined : { kind: "deliver", payloads };
+  }
+
   /** Resolves with the id of the call whose timer won, or `undefined` once inbox input is ready. */
   private async waitForInboxOrTimer(
     timers: readonly Promise<string>[],
@@ -211,12 +218,14 @@ export class ActiveTurn {
     return payload.turnId === undefined || payload.turnId === this.expectedTurnId;
   }
 
-  /** Admits one payload; returns whether it was a delivery. */
+  /** Admits one payload; returns whether it was a delivery or sign-in callback. */
   private async admit(value: SessionInboxPayload): Promise<boolean> {
     const admitted = await admitSessionInboxPayload(value, this.input);
     switch (admitted.kind) {
       case "delivery":
         this.admitted.add(admitted.admission.sequence);
+        return true;
+      case "authorization-callback":
         return true;
       case "runtime-action-result":
         this.runtimeResults.push({

@@ -294,3 +294,20 @@ export const CallbackBaseUrlKey = new ContextKey<string>("eve.callbackBaseUrl");
 
 /** Hook token of a runtime that owns its callback instead of using the session hook. */
 export const AuthorizationHookKey = new ContextKey<string>("eve.authorizationHook");
+
+/** One sign-in callback, as the connection callback route delivers it. */
+export interface ReceivedAuthorizationCallback {
+  readonly attemptId: string;
+  /** Absent when the callback couldn't be read. */
+  readonly callback?: AuthorizationCallback;
+  readonly connectionName: string;
+}
+
+/**
+ * The sign-in callbacks the step's delivery carried, for the tool loop to
+ * report to human input. Set by the session step outside the channel's
+ * `deliver` hook, so a channel can't supply one; never serialized.
+ */
+export const ReceivedAuthorizationCallbacksKey = new ContextKey<
+  readonly ReceivedAuthorizationCallback[]
+>("eve.receivedAuthorizationCallbacks");

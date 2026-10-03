@@ -3,6 +3,7 @@ import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
 import { contextStorage } from "#context/container.js";
+import { requestAuthorization } from "#harness/authorization.js";
 import { getPendingCoordinationBatch } from "#harness/coordination.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
@@ -460,5 +461,131 @@ describe("tool approvals in the tool loop (real AI SDK)", () => {
       "tool:tool-result",
       "assistant:text",
     ]);
+  });
+});
+
+/** The sign-in `probe` asks for: Alice's access to the release service. */
+function signIn(attemptId: string) {
+  return requestAuthorization([
+    {
+      attemptId,
+      challenge: { url: `https://idp.example/authorize/${attemptId}` },
+      hookUrl: `https://agent.example/callback/${attemptId}`,
+      name: "release-service",
+    },
+  ]);
+}
+
+function probeCall(callId = "call-probe") {
+  return { input: "{}", toolCallId: callId, toolName: "probe" };
+}
+
+describe("a sign-in beside a tool approval in the tool loop (real AI SDK)", () => {
+  /** A tool whose call needs Alice to sign in before it can run. */
+  const probe: HarnessToolDefinition = {
+    description: "Check Alice's access.",
+    execute: async () => signIn("attempt-1"),
+    inputSchema: jsonSchema({ type: "object" }),
+    name: "probe",
+  };
+  /** One step checks Alice's access (a sign-in) and asks to deploy (an approval). */
+  const checkAndDeploy = () => toolCallsStreamResult([probeCall(), deployCall()]);
+
+  it("holds the turn on both without writing either waiting call to history", async () => {
+    const fixture = setup({
+      responses: [checkAndDeploy()],
+      tool: { approval: always() },
+      tools: [probe],
+    });
+
+    const held = await fixture.step(fixture.session, { message: "Check my access, then deploy." });
+
+    expect(held.held).toEqual({ kind: "input" });
+    const types = fixture.events.map((event) => event.type);
+    expect(types).toContain("input.requested");
+    expect(types).toContain("authorization.required");
+    expect(types.at(-1)).toBe("turn.waiting");
+    expect(partTypes(held.session.history)).toEqual(["user:text"]);
+    expect(unpairedCalls(held.session.history)).toEqual([]);
+  });
+
+  it("sends the provider a valid prompt when Alice steers past the hold", async () => {
+    const fixture = setup({
+      responses: [checkAndDeploy(), textStreamResult("Skipping the deploy.")],
+      tool: { approval: always() },
+      tools: [probe],
+    });
+    const held = await fixture.step(fixture.session, { message: "Check my access, then deploy." });
+
+    const steered = await fixture.step(held.session, { message: "Skip that; is the draft ready?" });
+
+    expect(fixture.execute).not.toHaveBeenCalled();
+    expect(unpairedCalls(fixture.model.doStreamCalls[1]!.prompt)).toEqual([]);
+    expect(unpairedCalls(steered.session.history)).toEqual([]);
+    // The step joins history without the probe, and with a not-run result for the deploy.
+    expect(partTypes(steered.session.history).slice(0, 3)).toEqual([
+      "user:text",
+      "assistant:tool-call",
+      "tool:tool-result",
+    ]);
+    expect(JSON.stringify(steered.session.history)).not.toContain("call-probe");
+  });
+
+  it("compacts the held session without leaving a waiting call behind, then resumes it", async () => {
+    const fixture = setup({
+      responses: [checkAndDeploy(), textStreamResult("Deployed the api.")],
+      tool: { approval: always() },
+      tools: [probe],
+    });
+    const held = await fixture.step(fixture.session, { message: "Check my access, then deploy." });
+    const [request] = requested(fixture.events);
+
+    const compacted = await fixture.compact(held.session);
+
+    expect(fixture.events.map((event) => event.type)).toContain("compaction.completed");
+    expect(unpairedCalls(compacted.session.history)).toEqual([]);
+
+    const approved = await fixture.step(compacted.session, {
+      inputResponses: [{ optionId: "approve", requestId: request!.requestId }],
+    });
+
+    // The deploy runs, and the turn still waits on the sign-in.
+    expect(fixture.execute).toHaveBeenCalledOnce();
+    expect(approved.held).toEqual({ kind: "input" });
+    expect(fixture.model.doStreamCalls).toHaveLength(1);
+    expect(unpairedCalls(approved.session.history)).toEqual([]);
+
+    const steered = await fixture.step(approved.session, { message: "Skip the access check." });
+
+    expect(unpairedCalls(fixture.model.doStreamCalls[1]!.prompt)).toEqual([]);
+    expect(unpairedCalls(steered.session.history)).toEqual([]);
+    expect(JSON.stringify(steered.session.history)).toContain("deployed");
+  });
+
+  it("keeps an approved call that asks for a sign-in out of history, and steers past it cleanly", async () => {
+    const fixture = setup({
+      responses: [toolCallStreamResult(deployCall()), textStreamResult("Skipping the deploy.")],
+      tool: { approval: always(), execute: async () => signIn("attempt-2") },
+    });
+    const held = await fixture.step(fixture.session, { message: "Deploy the api service." });
+    const [request] = requested(fixture.events);
+    const start = fixture.events.length;
+
+    const signingIn = await fixture.step(held.session, {
+      inputResponses: [{ optionId: "approve", requestId: request!.requestId }],
+    });
+
+    expect(signingIn.held).toEqual({ kind: "input" });
+    const types = fixture.events.slice(start).map((event) => event.type);
+    expect(types).toContain("authorization.required");
+    expect(types.at(-1)).toBe("turn.waiting");
+    expect(fixture.model.doStreamCalls).toHaveLength(1);
+    // The call that asked leaves the step; nothing of it is in history.
+    expect(partTypes(signingIn.session.history)).toEqual(["user:text"]);
+
+    const steered = await fixture.step(signingIn.session, { message: "Never mind." });
+
+    expect(unpairedCalls(fixture.model.doStreamCalls[1]!.prompt)).toEqual([]);
+    expect(unpairedCalls(steered.session.history)).toEqual([]);
   });
 });

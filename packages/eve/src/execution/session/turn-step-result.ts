@@ -35,8 +35,14 @@ export function resolveSessionStepResult(
     return { action: "held", hold: "tasks", ...values, taskIds: stepResult.held.taskIds };
   }
   if (stepResult.held?.kind === "input") {
-    const inputRequestIds = [...HumanInput.read(stepResult.session.state).openRequestIds()];
-    return { action: "held", hold: "input", inputRequestIds, ...values };
+    const humanInput = HumanInput.read(stepResult.session.state);
+    return {
+      action: "held",
+      authorizationAttemptIds: humanInput.awaitedSignIns(),
+      hold: "input",
+      inputRequestIds: [...humanInput.openRequestIds()],
+      ...values,
+    };
   }
   if (stepResult.next === null) {
     const { hasRunsToDispatch, pendingCoordinationCallIds, pendingTaskToolCalls } =

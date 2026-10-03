@@ -37,6 +37,8 @@ import { setChannelContext } from "#execution/channel-context.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { coalesceTurnInputs, validateHarnessModelMessages } from "#harness/messages.js";
 import type { HandleEventFn, HarnessSession, StepInput, StepResult } from "#harness/types.js";
+import type { DeliverPayload } from "#channel/types.js";
+import type { AuthorizationCallback } from "#shared/connection-types.js";
 import type {
   DurableStepResult,
   TurnStepInput,
@@ -48,7 +50,11 @@ import { openSessionEventPublisher } from "#execution/publish-session-events.js"
 import { createTurnEventHandler } from "#execution/session/turn-event-handler.js";
 import { derivePendingState } from "#execution/session/pending-turn-state.js";
 import { createSessionStartedEvent, createTurnStartedEvent } from "#protocol/message.js";
-import { CallbackBaseUrlKey } from "#harness/authorization.js";
+import {
+  CallbackBaseUrlKey,
+  ReceivedAuthorizationCallbacksKey,
+  type ReceivedAuthorizationCallback,
+} from "#harness/authorization.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { countRunUsage } from "#execution/agent-sessions/usage.js";
 import {
@@ -92,7 +98,16 @@ export async function turnStep(input: TurnStepInput): Promise<TurnStepResult> {
 
 async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> {
   const rawDelivery = input.input?.delivery;
-  const delivery = rawDelivery;
+  // Sign-in callbacks are for human input, not the channel's `deliver` hook.
+  const authorizationCallbacks = rawDelivery?.payloads.flatMap(readAuthorizationCallback) ?? [];
+  const otherPayloads =
+    rawDelivery?.payloads.filter((payload) => payload["authorizationCallback"] === undefined) ?? [];
+  const delivery =
+    authorizationCallbacks.length === 0 || rawDelivery === undefined
+      ? rawDelivery
+      : otherPayloads.length === 0
+        ? undefined
+        : { ...rawDelivery, payloads: otherPayloads };
   const runtimeResults = input.input?.runtimeResults;
 
   let durableSession = readDurableSession(input.sessionState);
@@ -417,6 +432,10 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
           const result = await runStep(ctx, session, async (enrichedSession) => {
             ctx.setVirtualContext(HandleEventKey, handleEvent);
             ctx.setVirtualContext(StaticModelReferenceKey, effectiveAgent.turnAgent.model ?? null);
+            // Only the step's first model call reports its callbacks.
+            if (firstCall && authorizationCallbacks.length > 0) {
+              ctx.setVirtualContext(ReceivedAuthorizationCallbacksKey, authorizationCallbacks);
+            }
             let schemaSession =
               firstCall && resolved?.outputSchema !== undefined
                 ? { ...enrichedSession, outputSchema: resolved.outputSchema }
@@ -468,4 +487,34 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
   } finally {
     publisher.writer.release();
   }
+}
+
+/** The sign-in callback a payload carries, as the connection callback route sends it. */
+function readAuthorizationCallback(payload: DeliverPayload): ReceivedAuthorizationCallback[] {
+  const value: unknown = payload["authorizationCallback"];
+  if (typeof value !== "object" || value === null) return [];
+  const attemptId: unknown = Reflect.get(value, "attemptId");
+  const connectionName: unknown = Reflect.get(value, "connectionName");
+  if (typeof attemptId !== "string" || typeof connectionName !== "string") return [];
+  const callback: unknown = Reflect.get(value, "callback");
+  return [
+    isAuthorizationCallback(callback)
+      ? { attemptId, callback, connectionName }
+      : { attemptId, connectionName },
+  ];
+}
+
+function isAuthorizationCallback(value: unknown): value is AuthorizationCallback {
+  if (typeof value !== "object" || value === null) return false;
+  const method: unknown = Reflect.get(value, "method");
+  const params: unknown = Reflect.get(value, "params");
+  const body: unknown = Reflect.get(value, "body");
+  return (
+    typeof method === "string" &&
+    typeof params === "object" &&
+    params !== null &&
+    !Array.isArray(params) &&
+    Object.values(params).every((param) => typeof param === "string") &&
+    (body === undefined || typeof body === "string")
+  );
 }

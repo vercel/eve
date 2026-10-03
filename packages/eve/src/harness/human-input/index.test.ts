@@ -2,14 +2,19 @@ import { describe, expect, it } from "vitest";
 
 import {
   AT,
+  BOB,
+  NOW,
   Turn,
   answer,
   approval,
   approvalsRequested,
+  callback,
   cancel,
+  challenge,
   heldOnApprovals,
   message,
   overBudget,
+  signInRequired,
 } from "#internal/testing/human-input.js";
 
 /** What a person or the runtime can do to a turn, by name. */
@@ -23,6 +28,23 @@ const ACTIONS: Readonly<Record<string, (turn: Turn) => Turn>> = {
   "the turn is cancelled": (turn) => turn.intake(cancel),
   "the session runs over budget": (turn) => turn.interrupt(overBudget()),
   "Alice continues past the budget": (turn) => turn.intake(answer("continue", "s:limit:input:12")),
+  "Alice's call needs a sign-in": (turn) => turn.interrupt(signInRequired([challenge("a1")])),
+  "the sign-in calls back": (turn) => turn.intake(callback("a1")),
+  "Alice's step asks for a guarded release": (turn) =>
+    turn.interrupt(
+      approvalsRequested([approval("release")], { responsePolicyRequestIds: ["release"] }),
+    ),
+  "Bob approves the release": (turn) => turn.intake(answer("approve", "release", BOB)),
+  "the release policy allows Bob": (turn) => {
+    const check = turn.reported("responder.check").at(-1);
+    if (check === undefined) return turn;
+    return turn.intake({
+      candidateId: check.candidateId,
+      ran: { kind: "returned", value: { status: "allowed" } },
+      type: "responder.checked",
+    });
+  },
+  "ten minutes pass": (turn) => turn.intake({ now: NOW + 10 * 60_000, type: "time" }),
 };
 
 /** Every sequence of up to `length` actions, by name. */
@@ -72,7 +94,8 @@ describe("HumanInput", () => {
       let turn = Turn.idle();
       for (const name of sequence) {
         turn = ACTIONS[name]!(turn).stored();
-        const open = turn.humanInput.openRequestIds().size > 0;
+        const open =
+          turn.humanInput.openRequestIds().size > 0 || turn.humanInput.awaitedSignIns().length > 0;
         if (open && "run" in turn.next()) ranWhileOpen.push(sequence.join(" → "));
       }
     }

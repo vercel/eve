@@ -613,11 +613,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       return { next: null, session: resolvedCoordination.session };
     }
     session = resolvedCoordination.session;
-    // Calls that ran beside open approvals join the suspended step, which
-    // joins history once the approvals' calls have results too.
+    // Calls that ran while the turn holds join the suspended step, which joins
+    // history once every call it made has a result.
     const settlesBesideApprovals =
       resolvedCoordination.outcome === "resolved" &&
-      HumanInput.read(session.state).openRequestIds().size > 0;
+      "held" in HumanInput.read(session.state).next();
     if (settlesBesideApprovals) {
       const settled = await applyHumanInput({
         emissionState,
@@ -2341,21 +2341,25 @@ async function handleStepResult(input: {
   }
   const signIns = findInlineAuthorizationSignals(result.toolResults);
   if (signIns !== undefined) {
+    // The calls that asked for a sign-in leave the step. With approvals open,
+    // the step is already suspended and stays out of history; otherwise it
+    // joins history without them.
     const applied = await applyHumanInput({
       emit,
       emissionState,
       hasDelegatedCaller: input.hasDelegatedCaller,
-      session: baseSession,
+      session: { ...baseSession, history: validateHarnessModelMessages(promptMessages) },
       transition: HumanInput.read(baseSession.state).interrupt({
         at: requestAt(emissionState),
         callIds: signIns.callIds,
         challenges: signIns.challenges,
+        messages: approvalRequests.length > 0 ? [] : responseMessages,
         requester: input.auth,
         type: "authorization.required",
       }),
     });
     if (applied.ended !== undefined) return applied.ended;
-    throw new Error("Holding a turn for a sign-in is not implemented.");
+    return await holdForInput({ emit, emissionState, session: applied.session });
   }
 
   const deferred = collectDeferredCalls({

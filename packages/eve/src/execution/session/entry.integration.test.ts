@@ -24,6 +24,8 @@ import { isEventId } from "#internal/testing/event-id.js";
 import type { Approval } from "#approval/definition.js";
 import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
+import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
+import { defineInteractiveAuthorization } from "#shared/connection-types.js";
 import { SessionTitleKey } from "#context/keys.js";
 import {
   buildSerializedContext,
@@ -670,6 +672,116 @@ describe("workflowEntry integration", () => {
     });
   }, 60_000);
 
+  it("holds the turn on an approval and resumes it when a responder the policy allows answers", async () => {
+    const executions: string[] = [];
+    const approval = { request: always(), response: async () => ({ status: "allowed" as const }) };
+    await withHeldApprovalRun(
+      {
+        agent: { name: "workflow-entry-held-approval" },
+        modules: [gatedTool("approve_change", executions, approval)],
+      },
+      async ({ commandInbox, stream }) => {
+        const asked = await withTimeout(stream.nextTurn(), "approval turn");
+        const request = filterEventsByType(asked, "input.requested")[0]?.data.requests[0];
+        expect(request?.kind).toBe("tool-approval");
+        expect(asked.at(-1)).toMatchObject({ data: { on: "input" }, type: "turn.waiting" });
+        expect(filterEventsByType(asked, "turn.completed")).toHaveLength(0);
+
+        await resumeHook(commandInbox, {
+          auth: BOB,
+          kind: "send",
+          payload: { inputResponses: [{ optionId: "approve", requestId: request!.requestId }] },
+        });
+        const answered = await withTimeout(stream.nextTurn(), "approved turn");
+        expect(filterEventsByType(answered, "turn.started")).toHaveLength(0);
+        expect(filterEventsByType(answered, "approval.settled")).toMatchObject([
+          { data: { outcome: "approved", requestId: request!.requestId } },
+        ]);
+        expect(filterEventsByType(answered, "turn.completed")).toHaveLength(1);
+        expect(answered.at(-1)?.type).toBe("session.waiting");
+        expect(executions).toEqual(["approve_change"]);
+      },
+    );
+  }, 60_000);
+
+  it("resumes a held approval after the responder signs in for its response policy", async () => {
+    const executions: string[] = [];
+    await withHeldApprovalRun(
+      {
+        agent: { name: "workflow-entry-held-policy-sign-in" },
+        modules: [gatedTool("approve_change", executions, reviewerSignInApproval())],
+      },
+      async ({ commandInbox, stream }) => {
+        const asked = await withTimeout(stream.nextTurn(), "approval turn");
+        const request = filterEventsByType(asked, "input.requested")[0]?.data.requests[0];
+
+        await resumeHook(commandInbox, {
+          auth: BOB,
+          kind: "send",
+          payload: { inputResponses: [{ optionId: "approve", requestId: request!.requestId }] },
+        });
+        const signIn = await withTimeout(stream.nextTurn(), "responder sign-in");
+        const required = filterEventsByType(signIn, "authorization.required")[0];
+        expect(required?.data.candidateId).toBeDefined();
+        expect(signIn.at(-1)).toMatchObject({ data: { on: "input" }, type: "turn.waiting" });
+
+        await resumeHook(commandInbox, reviewerCallback(required!));
+        const approved = await withTimeout(stream.nextTurn(), "approved turn");
+        expect(filterEventsByType(approved, "authorization.completed")).toMatchObject([
+          { data: { outcome: "authorized" } },
+        ]);
+        expect(filterEventsByType(approved, "approval.settled")).toMatchObject([
+          { data: { outcome: "approved", requestId: request!.requestId } },
+        ]);
+        expect(executions).toEqual(["approve_change"]);
+      },
+    );
+  }, 60_000);
+
+  it("withdraws the responder's sign-in when the requester steers past its approval", async () => {
+    const executions: string[] = [];
+    await withHeldApprovalRun(
+      {
+        agent: { name: "workflow-entry-steer-responder-sign-in" },
+        modules: [gatedTool("approve_change", executions, reviewerSignInApproval())],
+      },
+      async ({ commandInbox, stream }) => {
+        const asked = await withTimeout(stream.nextTurn(), "approval turn");
+        const request = filterEventsByType(asked, "input.requested")[0]?.data.requests[0];
+        await resumeHook(commandInbox, {
+          auth: BOB,
+          kind: "send",
+          payload: { inputResponses: [{ optionId: "approve", requestId: request!.requestId }] },
+        });
+        const signIn = await withTimeout(stream.nextTurn(), "responder sign-in");
+        const required = filterEventsByType(signIn, "authorization.required")[0]!;
+
+        // The requester moves on before the reviewer finishes signing in.
+        await resumeHook(commandInbox, {
+          kind: "send",
+          payload: { message: "Never mind, just say hello." },
+        });
+        const steered = await withTimeout(stream.nextTurn(), "steered turn");
+        expect(filterEventsByType(steered, "authorization.completed")).toMatchObject([
+          { data: { candidateId: required.data.candidateId, outcome: "declined" } },
+        ]);
+        expect(filterEventsByType(steered, "input.resolved")).toMatchObject([
+          { data: { resolutions: [{ outcome: "ignored", requestId: request!.requestId }] } },
+        ]);
+        expect(steered.at(-1)?.type).toBe("session.waiting");
+
+        // The reviewer's late sign-in settles nothing and runs nothing.
+        await resumeHook(commandInbox, reviewerCallback(required));
+        await resumeHook(commandInbox, { kind: "send", payload: { message: "Thanks." } });
+        const next = await withTimeout(stream.nextTurn(), "next turn");
+        expect(filterEventsByType(next, "authorization.completed")).toHaveLength(0);
+        expect(filterEventsByType(next, "approval.settled")).toHaveLength(0);
+        expect(filterEventsByType(next, "turn.started")).toHaveLength(1);
+        expect(executions).toEqual([]);
+      },
+    );
+  }, 60_000);
+
   it("re-holds a steered turn on a new approval and resets cleanly after it completes", async () => {
     const executions: string[] = [];
     await withHeldApprovalRun(
@@ -1152,6 +1264,7 @@ function hasSubagentResult(value: unknown, callId: string): boolean {
 }
 
 const ALICE = testUser("alice");
+const BOB = testUser("bob");
 
 function testUser(principalId: string) {
   return {
@@ -1178,6 +1291,57 @@ function gatedTool(name: string, executions: string[], approval: Approval = alwa
       }),
     }),
     logicalPath: `tools/${name}.ts`,
+  };
+}
+
+/** An approval whose responder must sign in to a reviewer service before it counts. */
+function reviewerSignInApproval(): Approval {
+  const tokens = new Map<string, string>();
+  const reviewerOAuth = defineInteractiveAuthorization<{ principalId: string }>({
+    displayName: "Reviewer OAuth",
+    async getToken({ principal }) {
+      const token = principal.type === "user" ? tokens.get(principal.id) : undefined;
+      if (token === undefined) throw new ConnectionAuthorizationRequiredError("reviewer-oauth");
+      return { providerSubject: principal.type === "user" ? principal.id : "", token };
+    },
+    async startAuthorization({ callbackUrl, principal }) {
+      const url = new URL(callbackUrl);
+      url.searchParams.set("code", "reviewer-code");
+      return {
+        challenge: { url: url.href },
+        resume: { principalId: principal.type === "user" ? principal.id : "" },
+      };
+    },
+    async completeAuthorization({ resume }) {
+      tokens.set(resume!.principalId, "reviewer-token");
+      return { providerSubject: resume!.principalId, token: "reviewer-token" };
+    },
+  });
+  return {
+    request: always(),
+    async response({ auth, response }) {
+      const credential = await auth.getToken(reviewerOAuth, { authKey: "reviewer-oauth" });
+      return credential.providerSubject === response.principal.principalId
+        ? { status: "allowed" }
+        : { status: "rejected", reason: "Reviewer identity mismatch." };
+    },
+  };
+}
+
+function reviewerCallback(required: {
+  readonly data: { readonly attemptId?: string; readonly name: string };
+}) {
+  return {
+    kind: "authorization-callback" as const,
+    payloads: [
+      {
+        authorizationCallback: {
+          attemptId: required.data.attemptId,
+          callback: { method: "GET" as const, params: { code: "reviewer-code" } },
+          connectionName: required.data.name,
+        },
+      },
+    ],
   };
 }
 

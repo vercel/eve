@@ -13,6 +13,7 @@ import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.
 /** One canonical admission result, after wire decoding but before turn policy. */
 type SessionAdmission =
   | { readonly admission: DeliveryAdmission; readonly kind: "delivery" }
+  | { readonly kind: "authorization-callback" }
   | { readonly kind: "cancel" }
   | { readonly kind: "consumed" }
   | { readonly kind: "runtime-action-result"; readonly payload: RuntimeActionResultHookPayload }
@@ -32,13 +33,12 @@ export async function admitSessionInboxPayload(
   if (value.kind === "runtime-action-result")
     return { kind: "runtime-action-result", payload: value };
   if (isWorkflowMessage(value)) return { kind: "workflow", message: value };
-  // No turn waits on a sign-in callback, and a child's questions reach the
-  // session only through the run that opened it.
-  if (
-    value.kind === "authorization-callback" ||
-    value.kind === "subagent-input-request" ||
-    value.kind === "subagent-authorization-event"
-  ) {
+  if (value.kind === "authorization-callback") {
+    input.queue.enqueueAuthorization(value.payloads);
+    return { kind: "authorization-callback" };
+  }
+  // A child's questions reach the session only through the run that opened it.
+  if (value.kind === "subagent-input-request" || value.kind === "subagent-authorization-event") {
     return { kind: "consumed" };
   }
 

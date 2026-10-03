@@ -42,6 +42,7 @@ export async function applyHumanInputEvents(
       case "message.answered":
       case "calls.approved":
       case "calls.dispatched":
+      case "sign-in.completed":
       case "responder.check":
       case "answer.forwarded":
       case "budget.granted":

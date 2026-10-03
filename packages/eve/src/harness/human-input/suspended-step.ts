@@ -97,3 +97,33 @@ export function withMessages(
   }
   return joined;
 }
+
+/**
+ * `messages` without these calls and their results, so the model calls them
+ * again once signed in. An assistant message the calls leave with only text
+ * goes too: it narrated calls that never happened.
+ */
+export function withoutCalls(
+  messages: readonly ModelMessage[],
+  callIds: ReadonlySet<string>,
+): ModelMessage[] {
+  return messages.flatMap((message): ModelMessage[] => {
+    if (message.role === "assistant" && Array.isArray(message.content)) {
+      const stopped = message.content.some(
+        (part) => part.type === "tool-call" && callIds.has(part.toolCallId),
+      );
+      const content = message.content.filter(
+        (part) => part.type !== "tool-call" || !callIds.has(part.toolCallId),
+      );
+      const hasOtherCall = content.some((part) => part.type === "tool-call");
+      return content.length === 0 || (stopped && !hasOtherCall) ? [] : [{ ...message, content }];
+    }
+    if (message.role === "tool") {
+      const content = message.content.filter(
+        (part) => part.type !== "tool-result" || !callIds.has(part.toolCallId),
+      );
+      return content.length === 0 ? [] : [{ ...message, content }];
+    }
+    return [message];
+  });
+}

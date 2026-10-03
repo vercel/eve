@@ -1,7 +1,7 @@
 import type { ModelMessage, UserContent } from "ai";
 
 import type { SessionAuthContext } from "#channel/types.js";
-import type { AuthorizationChallenge } from "#harness/authorization.js";
+import type { AuthorizationChallenge, AuthorizationResult } from "#harness/authorization.js";
 import {
   answerBudget,
   answerBudgetByText,
@@ -11,17 +11,36 @@ import {
 } from "#harness/human-input/budget.js";
 import type { SessionStateMap, StepInput } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { AuthorizationCallback } from "#shared/connection-types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 
 import {
   answerApprovals,
+  answerApprovalsByText,
   cancelApprovals,
   grantedApprovalKeys,
+  isPolicyGated,
   openApprovals,
-  receiveMessage,
   settleCalls,
+  steerPastApprovals,
   type OpenApproval,
 } from "./approvals.js";
+import {
+  checkedCandidate,
+  expireCandidates,
+  proposeCandidates,
+  signedInCandidate,
+  staleCandidates,
+  type ApprovalAudit,
+  type CandidateDecision,
+} from "./candidates.js";
+import {
+  awaitedSignIns,
+  closeSignIns,
+  completeSignIn,
+  requireSignIns,
+  type OpenSignIn,
+} from "./sign-ins.js";
 import { staleAnswersAsText } from "./stale-answers.js";
 import type { SuspendedStep } from "./suspended-step.js";
 import { arrivalsOf } from "./arrivals.js";
@@ -109,13 +128,25 @@ export class HumanInput {
     return grantedApprovalKeys(this.#state);
   }
 
+  /** The sign-in attempts whose callbacks the turn waits for. */
+  awaitedSignIns(): readonly string[] {
+    return awaitedSignIns(this.#state);
+  }
+
   #apply(reduced: Reduced): Transition {
     return { events: reduced.events, humanInput: new HumanInput(reduced.state) };
   }
 
-  /** The ids of every open request, for routing an answer to this session. */
+  /**
+   * The ids of every open request an answer can resolve, for routing an
+   * answer to this session. Sign-ins are closed by their callbacks instead.
+   */
   openRequestIds(): ReadonlySet<string> {
-    return new Set(Object.keys(this.#state.requests));
+    return new Set(
+      Object.entries(this.#state.requests).flatMap(([requestId, open]) =>
+        open.kind === "authorization" ? [] : [requestId],
+      ),
+    );
   }
 }
 
@@ -149,7 +180,14 @@ export type Interrupt =
   | {
       readonly type: "authorization.required";
       readonly at: RequestAt;
+      /** The calls that asked; the model calls them again once signed in. */
       readonly callIds: readonly string[];
+      /**
+       * The step's response. It joins history without the calls that asked,
+       * so history never holds a call that waits on a person. Empty when the
+       * step is held elsewhere, as for approved calls that asked.
+       */
+      readonly messages: readonly ModelMessage[];
       readonly challenges: readonly AuthorizationChallenge[];
       readonly requester: SessionAuthContext | null;
     }
@@ -173,6 +211,8 @@ export type Intake =
       readonly type: "answered";
       readonly responses: readonly InputResponse[];
       readonly responder: SessionAuthContext | null;
+      /** When the answers arrived, which starts a candidate's time to live. */
+      readonly now: number;
     }
   /** A message; from the person who started the turn, it steers it. */
   | {
@@ -181,26 +221,31 @@ export type Intake =
       readonly sender: SessionAuthContext | null;
     }
   | { readonly type: "cancelled" }
+  /** A sign-in's callback arrived; `failed` when it couldn't be read. */
   | {
       readonly type: "authorization.completed";
       readonly attemptId: string;
+      readonly callback?: AuthorizationCallback;
+      readonly connectionName: string;
       readonly outcome: "authorized" | "failed";
     }
   /** The runtime ran a response policy that `responder.check` asked for. */
   | {
       readonly type: "responder.checked";
       readonly candidateId: string;
-      readonly verdict: "allowed" | "rejected" | "failed" | "authorization-required";
+      readonly ran: PolicyRun;
     }
   /**
    * Calls of the suspended step settled: those `calls.approved` asked for, or
    * runtime calls that ran beside open approvals. `running` names the
-   * approved calls that still run as runtime work.
+   * approved calls that still run as runtime work; `stopped` names the calls
+   * that asked for a sign-in, which leave the step with their results.
    */
   | {
       readonly type: "calls.settled";
       readonly results: readonly ModelMessage[];
       readonly running?: readonly string[];
+      readonly stopped?: readonly string[];
     }
   | { readonly type: "time"; readonly now: number }
   /** A workflow run or child session ended; nobody can answer what it relayed. */
@@ -234,8 +279,28 @@ export type HumanInputEvent =
     }
   /** The message answered open requests, so the turn doesn't read it as input. */
   | { readonly type: "message.answered" }
-  /** Run a response policy for this answer; report `responder.checked`. */
-  | { readonly type: "responder.check"; readonly candidateId: string; readonly requestId: string }
+  /**
+   * Run the response policy of `request`'s tool, with the tools of the step
+   * that asked, for this responder's decision; report `responder.checked`.
+   */
+  | {
+      readonly type: "responder.check";
+      readonly at: RequestAt;
+      readonly candidateId: string;
+      readonly decision: CandidateDecision;
+      readonly request: InputRequest;
+      readonly requester: SessionAuthContext | null;
+      readonly responder: SessionAuthContext;
+    }
+  /**
+   * A sign-in completed: hand its callback to the tool call or policy that
+   * asked, and run as `requester` when one is given.
+   */
+  | {
+      readonly type: "sign-in.completed";
+      readonly result: AuthorizationResult & { readonly name: string };
+      readonly requester: SessionAuthContext | null;
+    }
   /** Deliver an answer to the child session or run that asked. */
   | {
       readonly type: "answer.forwarded";
@@ -257,6 +322,17 @@ export interface Transition {
 }
 
 export type Next = { readonly run: "model" } | { readonly held: "input" };
+
+/** What running a response policy did, before human input reads it as a verdict. */
+export type PolicyRun =
+  /** The tool no longer defines a response policy. */
+  | { readonly kind: "missing" }
+  | {
+      readonly kind: "returned";
+      readonly value: { readonly status: string; readonly reason?: string };
+    }
+  /** It threw or timed out; `challenges` when it threw for the responder to sign in. */
+  | { readonly kind: "threw"; readonly challenges?: readonly AuthorizationChallenge[] };
 
 /** Where a relayed request's answer goes. */
 export interface RelayRoute {
@@ -280,17 +356,13 @@ export interface HumanInputState {
   readonly grants: readonly string[];
   /** The model step whose calls wait, held out of history. */
   readonly suspended?: SuspendedStep;
+  /** Every response-policy candidate and settlement of the session. */
+  readonly audit?: ApprovalAudit;
 }
 
 type OpenRequest =
   | OpenApproval
-  | {
-      readonly kind: "authorization";
-      readonly at: RequestAt;
-      readonly callIds: readonly string[];
-      readonly challenge: AuthorizationChallenge;
-      readonly requester: SessionAuthContext | null;
-    }
+  | OpenSignIn
   | { readonly kind: "session-limit"; readonly at: RequestAt; readonly request: InputRequest }
   | {
       readonly kind: "relayed";
@@ -314,7 +386,8 @@ function isEmpty(state: HumanInputState): boolean {
     Object.keys(state.requests).length === 0 &&
     state.queued === undefined &&
     state.suspended === undefined &&
-    state.grants.length === 0
+    state.grants.length === 0 &&
+    state.audit === undefined
   );
 }
 
@@ -327,46 +400,73 @@ interface Reduced {
   readonly state: HumanInputState;
 }
 
+const STEERED_REASON = "Cancelled because a new message arrived.";
+const CANCELLED_REASON = "Cancelled.";
+
 function reduce(state: HumanInputState, input: Interrupt | Intake): Reduced {
   switch (input.type) {
     case "budget.exceeded":
       return askBudget(state, input);
     case "approvals.requested":
-      // Response policies decide who may answer; they come back in a later change.
-      if (input.responsePolicyRequestIds.length > 0) {
-        return unavailable(
-          state,
-          "This turn needs an approval whose tool defines an `approval.response` policy, which eve cannot ask for yet.",
-        );
-      }
       return openApprovals(state, input);
+    case "authorization.required":
+      return requireSignIns(state, input);
     case "answered": {
       const budget = answerBudget(state, input.responses);
-      const approvals = answerApprovals(budget.state, budget.unclaimed);
-      return { events: [...budget.events, ...approvals.events], state: approvals.state };
+      const gated = budget.unclaimed.filter((response) =>
+        isPolicyGated(budget.state, response.requestId),
+      );
+      const plain = budget.unclaimed.filter((response) => !gated.includes(response));
+      return then(
+        budget,
+        (next) => proposeCandidates(next, { ...input, responses: gated }),
+        (next) => answerApprovals(next, plain),
+      );
     }
-    // A typed reply answers the budget question when it names one of its
-    // options; otherwise it is for the approvals.
+    // A typed reply answers the budget question or approvals when it names one
+    // of their options; any other message steers the turn past everything it
+    // waits on.
     case "message":
-      return answerBudgetByText(state, input.text) ?? receiveMessage(state, input.text);
-    case "cancelled": {
-      const budget = withdrawBudget(state);
-      const approvals = cancelApprovals(budget.state);
-      return { events: [...budget.events, ...approvals.events], state: approvals.state };
-    }
+      return (
+        answerBudgetByText(state, input.text) ??
+        answerApprovalsByText(state, input.text) ??
+        steer(state)
+      );
+    case "cancelled":
+      // Candidates go first: their events report at their approval's coordinates.
+      return then(
+        staleCandidates(state, CANCELLED_REASON),
+        withdrawBudget,
+        cancelApprovals,
+        (next) => closeSignIns(next, { outcome: "declined", reason: CANCELLED_REASON }),
+      );
     case "calls.settled":
-      return settleCalls(state, input.results, input.running);
+      return settleCalls(state, input.results, input.running, input.stopped);
+    case "authorization.completed": {
+      const completed = completeSignIn(state, input);
+      if (completed === undefined) return { events: [], state };
+      const { candidateId } = completed.challenge;
+      if (candidateId === undefined) return completed;
+      return then(completed, (next) =>
+        signedInCandidate(next, { candidateId, outcome: input.outcome }),
+      );
+    }
+    case "responder.checked": {
+      const checked = checkedCandidate(state, input);
+      const { settled } = checked;
+      return settled === undefined
+        ? checked
+        : then(checked, (next) => answerApprovals(next, [settled]));
+    }
+    case "time":
+      return expireCandidates(state, input.now);
     // Human input is being rebuilt case by case. Until a case exists, a turn
     // that needs a person fails with a clear error instead of hanging.
-    case "authorization.required":
     case "relayed.requested":
       return unavailable(
         state,
         `This turn needs a person (${input.type}), which eve cannot ask for yet.`,
       );
-    case "authorization.completed":
-    case "responder.checked":
-    case "time":
     case "run.ended":
       return { events: [], state };
     default: {
@@ -374,6 +474,36 @@ function reduce(state: HumanInputState, input: Interrupt | Intake): Reduced {
       throw new TypeError(`Unhandled human input: ${JSON.stringify(unhandled)}`);
     }
   }
+}
+
+/**
+ * A message that answers nothing moves the turn on: its approvals resolve,
+ * their candidates go stale, and its sign-ins are declined. The model hears
+ * which of its sign-ins ended, so it asks again only if still needed.
+ */
+function steer(state: HumanInputState): Reduced {
+  const approvals = then(staleCandidates(state, STEERED_REASON), steerPastApprovals);
+  const signIns = closeSignIns(approvals.state, { outcome: "declined", reason: STEERED_REASON });
+  const events = [...approvals.events, ...signIns.events];
+  if (signIns.names.length > 0) {
+    events.push({
+      text: `Sign-in to ${signIns.names.join(", ")} was cancelled because the user sent a new message instead. Ask to sign in again only if the new message still needs it.`,
+      type: "note",
+    });
+  }
+  return { events, state: signIns.state };
+}
+
+/** Runs rules in order, each on the state the last one left, collecting their events. */
+function then(first: Reduced, ...rest: ((state: HumanInputState) => Reduced)[]): Reduced {
+  let state = first.state;
+  const events = [...first.events];
+  for (const rule of rest) {
+    const reduced = rule(state);
+    events.push(...reduced.events);
+    state = reduced.state;
+  }
+  return { events, state };
 }
 
 function unavailable(state: HumanInputState, message: string): Reduced {

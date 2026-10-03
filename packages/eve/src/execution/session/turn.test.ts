@@ -697,6 +697,7 @@ describe("SessionExecution checkpoints", () => {
         .mockImplementation(
           turnStepWork(async (input) => ({
             action: "held",
+            authorizationAttemptIds: [],
             hold: "input",
             inputRequestIds: ["request_1"],
             serializedContext: input.serializedContext,
