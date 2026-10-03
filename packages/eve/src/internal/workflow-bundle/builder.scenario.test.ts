@@ -140,6 +140,7 @@ describe("WorkflowBundleBuilder", () => {
     expect(builder.snapshot.workingDir).toBe(rootDir);
     expect(builder.snapshot.dirs).toEqual([
       resolvePackageSourceDirectoryPath("src/execution"),
+      resolvePackageSourceDirectoryPath("src/harness/human-input/effects"),
       resolvePackageSourceDirectoryPath("src/runtime/subagents"),
       resolvePackageSourceDirectoryPath("src/subagents"),
       resolvePackageSourceDirectoryPath("src/tools/provided"),

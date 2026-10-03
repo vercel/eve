@@ -1,13 +1,6 @@
 import type { DeliverHookPayload, TurnCaller } from "#channel/types.js";
-import { mapHeldInputResponsesStep } from "#execution/proxied-deliver-step.js";
-import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
-import {
-  isSteeringMessage,
-  type SteeringOptions,
-  type SteeringTurn,
-} from "#execution/session/input-queue.js";
-import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
+import { isSteeringMessage, type SteeringTurn } from "#execution/session/input-queue.js";
 import type { SessionExecutionInput } from "#execution/session/turn.js";
 import type { SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { decodeSessionInboxPayload } from "#execution/session-inbox/protocol.js";
@@ -24,15 +17,13 @@ export type RuntimeEvent =
   | { readonly kind: "steering" }
   /** A `task_wait` call's timeout passed. */
   | { readonly kind: "timeout"; readonly callId: string }
-  /** A delivery or sign-in callback was admitted; a held request may be answered. */
-  | { readonly kind: "input" }
   | "cancelled";
 
 /**
  * Admission policy, cancellation, and steering for one active turn.
  * Deliveries admitted while a model step runs stay in the shared queue until
- * the turn reaches a committed boundary; a runtime-action wait routes them
- * eagerly so a proxied child can receive the answer it is blocked on.
+ * the turn reaches a committed boundary; a runtime-action wait reads them as
+ * they arrive, so a message can steer it.
  *
  * The pump signals cancellation and eligible steering immediately. Cancellation
  * aborts the turn; steering only interrupts generation before assistant output
@@ -40,8 +31,8 @@ export type RuntimeEvent =
  */
 export class ActiveTurn {
   private readonly admitted = new Set<number>();
-  private readonly routedToChildren = new Set<number>();
-  private readonly mappedForHeldRequest = new Set<number>();
+  /** Admitted deliveries a runtime wait already checked for steering. */
+  private readonly inspected = new Set<number>();
   private readonly runtimeResults: RuntimeEvent[] = [];
   private readonly controller = new AbortController();
   private readonly expectedTurnId: string;
@@ -77,11 +68,7 @@ export class ActiveTurn {
     } catch {
       return;
     }
-    if (
-      delivery.kind === "deliver" &&
-      isSteeringMessage(delivery, this.identity) &&
-      !this.input.cursor.sessionState.hasProxyInputRequests
-    )
+    if (delivery.kind === "deliver" && isSteeringMessage(delivery, this.identity))
       this.steeringController.abort();
   };
 
@@ -114,22 +101,17 @@ export class ActiveTurn {
   }
 
   /**
-   * Steering admitted during this turn, routed to children first and coalesced.
+   * Steering admitted during this turn, coalesced.
    * The next step reads it as input, so its signal must not interrupt that
    * step; only deliveries still unread re-signal the next generation.
    */
-  async takeSteering(options?: SteeringOptions): Promise<DeliverHookPayload | undefined> {
+  async takeSteering(): Promise<DeliverHookPayload | undefined> {
     const steering: DeliverHookPayload[] = [];
     while (true) {
-      const selection = this.input.queue.takeSteering(this.admitted, this.identity, options);
+      const selection = this.input.queue.takeSteering(this.admitted, this.identity);
       if (selection === undefined) break;
       for (const sequence of selection.sequences) this.admitted.delete(sequence);
-      const routed = await routeSelectedDelivery(selection, this.input.cursor);
-      if (routed.kind === "cancel-turn") {
-        this.abort();
-        break;
-      }
-      if (routed.kind === "turn") steering.push(routed.delivery);
+      steering.push(selection.delivery);
     }
     this.resetSteering();
     if (steering.length === 0) return undefined;
@@ -157,12 +139,12 @@ export class ActiveTurn {
   /**
    * Next runtime result, workflow message, steering, or timeout, admitting
    * inbox traffic while waiting. Deliveries admitted before the wait began are
-   * routed first, so a message that arrived as the calls started still steers.
+   * checked first, so a message that arrived as the calls started still steers.
    * `timers` are durable sleeps raced against the inbox.
    */
   async nextRuntimeEvent(timers: readonly Promise<string>[]): Promise<RuntimeEvent> {
     while (true) {
-      const steered = await this.routeAdmittedToChildren();
+      const steered = this.checkAdmittedSteering();
       if (this.signal.aborted) return "cancelled";
       if (steered) return { kind: "steering" };
       const event = this.runtimeResults.shift();
@@ -172,40 +154,8 @@ export class ActiveTurn {
       const payload = await this.input.inbox.next();
       if (payload === undefined)
         throw new Error("Session inbox closed before runtime actions completed.");
-      if (await this.admit(payload)) return { kind: "input" };
+      await this.admit(payload);
     }
-  }
-
-  /**
-   * Takes one admitted delivery that answers a pending input request, from any
-   * responder: an approver need not be the turn's own person. Returns
-   * `undefined` when no admitted delivery answers one.
-   */
-  async takeInputResponses(
-    requestIds: ReadonlySet<string>,
-  ): Promise<DeliverHookPayload | undefined> {
-    for (const sequence of this.admitted) {
-      let delivery = this.input.queue.delivery(sequence);
-      if (delivery === undefined) continue;
-      const responses = delivery.payloads.flatMap((payload) => payload.inputResponses ?? []);
-      if (responses.length === 0) continue;
-      if (!responses.some((response) => requestIds.has(response.requestId))) {
-        // Some channels answer with ids only their `deliver` hook resolves,
-        // such as Telegram's compact button callbacks.
-        if (this.mappedForHeldRequest.has(sequence)) continue;
-        this.mappedForHeldRequest.add(sequence);
-        const target = delivery;
-        const mapped = await this.input.cursor.advance((state) =>
-          mapHeldInputResponsesStep({ delivery: target, requestIds: [...requestIds], ...state }),
-        );
-        if (mapped.delivery === undefined) continue;
-        delivery = mapped.delivery;
-      }
-      this.admitted.delete(sequence);
-      this.input.queue.replaceDelivery(sequence, undefined);
-      return delivery;
-    }
-    return undefined;
   }
 
   /** Resolves with the id of the call whose timer won, or `undefined` once inbox input is ready. */
@@ -223,60 +173,44 @@ export class ActiveTurn {
     return payload.turnId === undefined || payload.turnId === this.expectedTurnId;
   }
 
-  /** Admits one payload; returns whether it was a delivery or sign-in callback. */
-  private async admit(value: SessionInboxPayload): Promise<boolean> {
+  private async admit(value: SessionInboxPayload): Promise<void> {
     const admitted = await admitSessionInboxPayload(value, this.input);
     switch (admitted.kind) {
       case "delivery":
         this.admitted.add(admitted.admission.sequence);
-        return true;
+        return;
       case "runtime-action-result":
         this.runtimeResults.push({
           kind: "runtime-action-result",
           results: admitted.payload.results,
         });
-        return false;
+        return;
       case "workflow":
         this.runtimeResults.push({ kind: "workflow", message: admitted.message });
-        return false;
+        return;
       case "cancel":
         if (this.cancelsThisTurn(value)) this.abort();
-        return false;
+        return;
       case "consumed":
-        return value.kind === "authorization-callback";
+        return;
     }
   }
 
   /**
-   * During a runtime wait, descendant-bound answers cannot wait for the
-   * boundary. Returns whether a newly routed delivery still steers: it
-   * answered nothing, so its message is for the model.
+   * Returns whether a delivery admitted since the last check steers: its
+   * message is for the model.
    */
-  private async routeAdmittedToChildren(): Promise<boolean> {
+  private checkAdmittedSteering(): boolean {
     let steered = false;
     for (const sequence of this.admitted) {
-      if (this.routedToChildren.has(sequence)) continue;
+      if (this.inspected.has(sequence)) continue;
       const delivery = this.input.queue.delivery(sequence);
       if (delivery === undefined) {
         this.admitted.delete(sequence);
         continue;
       }
-      this.routedToChildren.add(sequence);
-      const routed = await this.input.cursor.advance((state) =>
-        routeDeliverToChildren({ delivery, ...state }),
-      );
-      if (routed.kind === "cancel-turn") {
-        this.input.queue.replaceDelivery(sequence, undefined);
-        this.admitted.delete(sequence);
-        this.abort();
-        return false;
-      }
-      this.input.queue.replaceDelivery(sequence, routed.remainder);
-      if (routed.remainder === undefined) {
-        this.admitted.delete(sequence);
-        continue;
-      }
-      if (isSteeringMessage(routed.remainder, this.identity)) steered = true;
+      this.inspected.add(sequence);
+      if (isSteeringMessage(delivery, this.identity)) steered = true;
     }
     return steered;
   }

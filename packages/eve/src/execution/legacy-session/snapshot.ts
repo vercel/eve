@@ -52,7 +52,6 @@ export function importConversation(session: LegacySession): {
       version: DURABLE_SESSION_VERSION,
       sessionId: session.sessionId,
       continuationToken: session.continuationToken,
-      hasProxyInputRequests: false,
       emissionState: getHarnessEmissionState(state),
       snapshot: { session: { ...durable, state } },
     },

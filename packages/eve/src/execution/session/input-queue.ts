@@ -1,4 +1,4 @@
-import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
+import type { DeliverHookPayload } from "#channel/types.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 import { ANONYMOUS_PRINCIPAL, principalOf } from "#execution/session/principal.js";
 
@@ -19,14 +19,7 @@ interface QueuedControl {
   readonly sequence: number;
 }
 
-interface QueuedAuthorization {
-  readonly attemptId: string;
-  readonly kind: "authorization";
-  readonly payload: DeliverPayload;
-  readonly sequence: number;
-}
-
-type QueuedSessionInput = QueuedDelivery | QueuedControl | QueuedAuthorization;
+type QueuedSessionInput = QueuedDelivery | QueuedControl;
 
 export interface TurnSelection {
   readonly delivery: DeliverHookPayload;
@@ -68,45 +61,6 @@ export class SessionInputQueue {
     this.entries.push({ control, kind: "control", sequence: this.nextSequence++ });
   }
 
-  /** Keeps one payload per authorization attempt; a repeated callback for the same attempt is dropped. */
-  enqueueAuthorization(payloads: readonly DeliverPayload[]): void {
-    for (const payload of payloads) {
-      const attemptId = authorizationAttemptId(payload);
-      if (attemptId === undefined) continue;
-      if (
-        this.entries.some(
-          (entry) => entry.kind === "authorization" && entry.attemptId === attemptId,
-        )
-      )
-        continue;
-      this.entries.push({
-        attemptId,
-        kind: "authorization",
-        payload,
-        sequence: this.nextSequence++,
-      });
-    }
-  }
-
-  /**
-   * Removes and returns the queued callbacks for `attemptIds` once every one
-   * has arrived, so a turn holding several sign-ins resumes when all are done.
-   */
-  takeAuthorizations(attemptIds: ReadonlySet<string>): DeliverPayload[] | undefined {
-    const taken = this.entries.filter(
-      (entry): entry is QueuedAuthorization =>
-        entry.kind === "authorization" && attemptIds.has(entry.attemptId),
-    );
-    if (
-      taken.length === 0 ||
-      new Set(taken.map((entry) => entry.attemptId)).size < attemptIds.size
-    ) {
-      return undefined;
-    }
-    this.retain((entry) => !taken.includes(entry as QueuedAuthorization));
-    return taken.map((entry) => entry.payload);
-  }
-
   delivery(sequence: number): DeliverHookPayload | undefined {
     const entry = this.entries.find(
       (candidate): candidate is QueuedDelivery =>
@@ -127,16 +81,12 @@ export class SessionInputQueue {
     this.entries[index] = { delivery, kind: "delivery", sequence };
   }
 
-  takeSteering(
-    admitted: ReadonlySet<number>,
-    turn: SteeringTurn,
-    options?: SteeringOptions,
-  ): TurnSelection | undefined {
+  takeSteering(admitted: ReadonlySet<number>, turn: SteeringTurn): TurnSelection | undefined {
     const steering = this.entries.filter(
       (entry): entry is QueuedDelivery =>
         entry.kind === "delivery" &&
         admitted.has(entry.sequence) &&
-        isSteeringDelivery(entry.delivery, turn, options),
+        isSteeringDelivery(entry.delivery, turn),
     );
     if (steering.length === 0) return undefined;
     this.retain((entry) => entry.kind !== "delivery" || !steering.includes(entry));
@@ -148,16 +98,12 @@ export class SessionInputQueue {
     };
   }
 
-  /**
-   * Takes the next turn or control. Sign-ins end with the turn that raised
-   * them, so a callback still queued between turns is stale and dropped.
-   */
+  /** Takes the next turn or control. */
   takeNext(options?: {
     /** Sequence of a delivery admitted while nothing else was pending. */
     readonly freshSequence?: number;
   }): SessionInputSelection | undefined {
-    this.retain((entry) => entry.kind !== "authorization");
-    const first = this.entries.shift() as QueuedDelivery | QueuedControl | undefined;
+    const first = this.entries.shift();
     if (first === undefined) return undefined;
     if (first.kind === "control") return { control: first.control, kind: "control" };
 
@@ -217,27 +163,14 @@ export interface SteeringTurn {
   readonly principal: string;
 }
 
-export interface SteeringOptions {
-  /**
-   * The turn waits on its own person for a sign-in or approval. Their message
-   * steers even with `turnPolicy: "queue"`: queued, it would wait for a turn
-   * that cannot end until they act.
-   */
-  readonly heldOnPerson?: boolean;
-}
-
 /**
  * Only the turn's own principal steers it; another principal's message waits
  * for the turn to end. A delivery without auth acts as the session's current
  * identity, which is the turn's.
  */
-export function isSteeringDelivery(
-  delivery: DeliverHookPayload,
-  turn: SteeringTurn,
-  options?: SteeringOptions,
-): boolean {
+export function isSteeringDelivery(delivery: DeliverHookPayload, turn: SteeringTurn): boolean {
   return (
-    (options?.heldOnPerson === true || (delivery.turnPolicy ?? "steer") === "steer") &&
+    (delivery.turnPolicy ?? "steer") === "steer" &&
     (delivery.caller === undefined || delivery.caller.callId === turn.callerCallId) &&
     (delivery.auth === undefined || principalOf(delivery.auth) === turn.principal)
   );
@@ -256,9 +189,4 @@ export function isSteeringMessage(delivery: DeliverHookPayload, turn: SteeringTu
 function combine(entries: readonly DeliveryAdmission[]): DeliverHookPayload {
   if (entries.length === 1) return entries[0]!.delivery;
   return coalesceDeliveries(entries.map(({ delivery }) => delivery));
-}
-
-function authorizationAttemptId(payload: DeliverPayload): string | undefined {
-  const callback = payload["authorizationCallback"] as { readonly attemptId?: unknown } | undefined;
-  return typeof callback?.attemptId === "string" ? callback.attemptId : undefined;
 }

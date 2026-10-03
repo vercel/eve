@@ -19,15 +19,6 @@ export interface ContractRule {
   run(conversation: ChannelConversation): Promise<void>;
 }
 
-const ASK =
-  'Use ask_question and set question to: "Which day works for the review?" with label "Saturday" and label "Sunday".';
-const PROMPT = "Which day works for the review?";
-
-async function askWhichDay(conversation: ChannelConversation) {
-  await conversation.say(ASK);
-  return await conversation.waitForQuestion(PROMPT);
-}
-
 const DEPLOY = `Use ${GATED_TOOL} to ship the release.`;
 // Channels word the two approval choices differently; the TUI asks Yes or No.
 const APPROVE_LABELS = ["Approve", "Yes"];
@@ -56,49 +47,7 @@ async function expectNotDeployed(conversation: ChannelConversation) {
   expect(conversation.gatedToolRuns).toBe(0);
 }
 
-function expectAnsweredSaturday(output: unknown) {
-  // The message carries the real output so a broken cell's symptom can match it.
-  expect(output, `ask_question returned ${JSON.stringify(output)}`).toEqual({
-    answer: "Saturday",
-    status: "answered",
-  });
-}
-
 export const hitlContract = [
-  {
-    rule: "a rendered question shows every option a person can choose",
-    source: "docs/tools/human-in-the-loop.md#questions",
-    requires: [],
-    async run(conversation) {
-      const options = await askWhichDay(conversation);
-      expect(
-        options.map((option) => option.label),
-        `the question showed ${JSON.stringify(options.map((option) => option.label))}`,
-      ).toEqual(["Saturday", "Sunday"]);
-    },
-  },
-  {
-    rule: "pressing a rendered option answers the pending question with that option",
-    source: "docs/tools/human-in-the-loop.md#answering-from-a-client-or-channel",
-    requires: ["buttons"],
-    async run(conversation) {
-      const options = await askWhichDay(conversation);
-      const saturday = options.find((option) => option.label === "Saturday");
-      expect(saturday, "a Saturday option to press").toBeDefined();
-      await conversation.press(saturday!);
-      expectAnsweredSaturday(await conversation.waitForToolResult("ask_question"));
-    },
-  },
-  {
-    rule: "a text reply matching an option answers the only pending question",
-    source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
-    requires: ["text-replies"],
-    async run(conversation) {
-      await askWhichDay(conversation);
-      await conversation.say("Saturday");
-      expectAnsweredSaturday(await conversation.waitForToolResult("ask_question"));
-    },
-  },
   {
     rule: "a tool approval shows a choice to approve and one to cancel",
     source: "docs/tools/human-in-the-loop.md#approvals",

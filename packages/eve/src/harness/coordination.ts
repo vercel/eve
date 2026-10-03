@@ -16,7 +16,6 @@ import {
 } from "#harness/workflow-tool-runs.js";
 import { validateHarnessModelMessages } from "#harness/messages.js";
 import { normalizeToolModelOutput } from "#harness/tool-model-output.js";
-import { extractHistoricalInputRequests } from "#harness/input-extraction.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { pendingTaskToolCalls } from "#execution/tasks/calls.js";
 import { startsTasks } from "#execution/tasks/tool-entry-point.js";
@@ -106,7 +105,6 @@ export function commitCancelledCoordinationBatch(session: HarnessSession): Harne
   const batch = getPendingCoordinationBatch(session.state);
   if (batch === undefined) return session;
   const cancelledCalls = [
-    ...approvedSiblingCalls(session.history, batch),
     ...batch.tasks.map((task) => ({ callId: task.callId, toolName: task.toolName })),
     ...pendingTaskToolCalls(batch.responseMessages).map((call) => ({
       callId: call.callId,
@@ -127,31 +125,6 @@ export function commitCancelledCoordinationBatch(session: HarnessSession): Harne
       : [{ content: cancelledResults, role: "tool" as const }]),
   ]);
   return clearPendingCoordinationBatch({ ...session, history });
-}
-
-/** Approved local calls parked with their workflow siblings, which have no result yet. */
-function approvedSiblingCalls(
-  history: readonly ModelMessage[],
-  batch: PendingCoordinationBatch,
-): { readonly callId: string; readonly toolName: string }[] {
-  const tail = batch.responseMessages.at(-1);
-  if (tail?.role !== "tool") return [];
-  const approvalIds = new Set(
-    tail.content.flatMap((part) =>
-      part.type === "tool-approval-response" && part.approved ? [part.approvalId] : [],
-    ),
-  );
-  const settled = new Set([
-    ...tail.content.flatMap((part) => (part.type === "tool-result" ? [part.toolCallId] : [])),
-    ...batch.tasks.map((task) => task.callId),
-  ]);
-  const requests = extractHistoricalInputRequests({
-    history: [...history, ...batch.responseMessages],
-    requestIds: approvalIds,
-  });
-  return [...requests.values()]
-    .map(({ action }) => ({ callId: action.callId, toolName: action.toolName }))
-    .filter(({ callId }) => !settled.has(callId));
 }
 
 /**
@@ -320,8 +293,8 @@ export async function resolvePendingCoordination(input: {
   const messages = [...nextSession.history, ...batch.responseMessages];
 
   if (toolResults.length > 0) {
-    // AI SDK reads approved calls and their results only from the tail tool
-    // message, so results join a trailing tool response instead of hiding it.
+    // Results join the step's trailing tool response, so the calls the step
+    // ran inline and the ones it deferred answer as one tool message.
     const tail = batch.responseMessages.at(-1);
     if (tail?.role === "tool") {
       messages[messages.length - 1] = { content: [...tail.content, ...toolResults], role: "tool" };

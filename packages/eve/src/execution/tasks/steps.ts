@@ -25,7 +25,6 @@ import { ignoreGoneTarget } from "#execution/tasks/workflow-target.js";
 import { countRunUsage } from "#execution/agent-sessions/usage.js";
 import {
   publishSessionEvents,
-  relaySessionEvents,
   type PublishedSessionEvents,
   type SessionStepState,
 } from "#execution/publish-session-events.js";
@@ -39,13 +38,11 @@ import type {
   WorkflowToolRunOutcomeMessage,
 } from "#execution/tools/workflow/messages.js";
 import { workflowToolRunFailureOutput } from "#execution/tools/workflow/owner-inbox.js";
-import { withdrawProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import {
   createTaskSettledEvent,
   type TaskCancelReason,
   type TaskSettledStreamEvent,
-  type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 
 /** The messages a task's run sends that change its record. */
@@ -75,7 +72,6 @@ async function applyTaskRunMessage(
   }
   let table = readTaskTable(session.state);
   const events: TaskSettledStreamEvent[] = [];
-  let withdrawn: readonly UnstampedMessageStreamEvent[] = [];
   switch (message.kind) {
     case "started": {
       const started = markTaskRunStarted(table, taskId, message.from.runId);
@@ -102,27 +98,18 @@ async function applyTaskRunMessage(
       const settled = settleRemainingTaskCalls(table, taskId, outcome);
       events.push(...taskSettledEvents(record, settled.settled, outcome));
       table = finishTaskRun(settled.table, taskId, message.from.runId);
-      // Nobody can answer what a finished run relayed, so channels must stop offering it.
-      ({ events: withdrawn, session } = withdrawProxyInputRequests(
-        session,
-        (_requestId, route) => route.runId === message.from.runId,
-      ));
       break;
     }
   }
-  const relayed = await relaySessionEvents(
+  return await publishSessionEvents(
     { ...input, sessionState: saveTable(input.sessionState, session, table) },
-    withdrawn,
+    events,
   );
-  return await publishSessionEvents({ ...input, ...relayed }, events);
 }
 
 /**
  * Cancels tasks: their calls settle as cancelled and their runs are told to
  * stop. A run ends itself within its cleanup deadline and reports cancelled.
- * A `task()` run's cancel settles every request it relayed, so the session
- * withdraws them in the same step and accepts no answer after it. A `serve()`
- * run withdraws its stretch's questions itself, and the session decides each one.
  */
 export async function cancelTasksStep(
   input: SessionStepState & TaskCancellationInput,
@@ -142,7 +129,6 @@ async function cancelTasks(
   const session = readDurableSession(input.sessionState);
   let table = readTaskTable(session.state);
   const events: TaskSettledStreamEvent[] = [];
-  const stoppedRunIds = new Set<string>();
   const outcome: TaskOutcome = { reason: input.reason, status: "cancelled" };
   for (const taskId of input.taskIds) {
     const record = findTask(table, taskId);
@@ -150,18 +136,12 @@ async function cancelTasks(
     table = cancelled.table;
     events.push(...taskSettledEvents(record, cancelled.settled, outcome));
     if (cancelled.send === undefined) continue;
-    if (record?.resumable === false) stoppedRunIds.add(cancelled.send.run.runId);
     await sendTaskRunCommands(cancelled.send);
   }
-  const withdrawn = withdrawProxyInputRequests(
-    session,
-    (_requestId, route) => route.runId !== undefined && stoppedRunIds.has(route.runId),
+  return await publishSessionEvents(
+    { ...input, sessionState: saveTable(input.sessionState, session, table) },
+    events,
   );
-  const relayed = await relaySessionEvents(
-    { ...input, sessionState: saveTable(input.sessionState, withdrawn.session, table) },
-    withdrawn.events,
-  );
-  return await publishSessionEvents({ ...input, ...relayed }, events);
 }
 
 /** The `task.settled` events for a task's settled calls; calls only settle on a known task. */

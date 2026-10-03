@@ -1,0 +1,278 @@
+import type { ModelMessage } from "ai";
+
+import type { SessionAuthContext } from "#channel/types.js";
+import type { AuthorizationChallenge } from "#harness/authorization.js";
+import type { SessionStateMap, StepInput } from "#harness/types.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
+
+import { arrivalsOf } from "./arrivals.js";
+
+export { approvalsRequested } from "./approvals.js";
+
+/**
+ * Everything a turn waits on from a person: tool approvals, sign-ins, the
+ * budget question, and requests relayed from child sessions and workflow runs.
+ *
+ * This is the only module that knows how human input works. The rest of eve
+ * reports what happened (`interrupt`, `intake`), applies the events that come
+ * back, and asks what to do next (`next`). It never reads or changes the state
+ * itself, which lives under one session key that only this module touches.
+ */
+export class HumanInput {
+  readonly #state: HumanInputState;
+
+  private constructor(state: HumanInputState) {
+    this.#state = state;
+  }
+
+  /** Reads the session's human input. */
+  static read(sessionState: SessionStateMap | undefined): HumanInput {
+    return new HumanInput(parseState(sessionState?.[STATE_KEY]));
+  }
+
+  /** Writes it back, removing the key when nothing is open. */
+  write(sessionState: SessionStateMap | undefined): SessionStateMap | undefined {
+    const next: Record<string, unknown> = { ...sessionState };
+    if (isEmpty(this.#state)) delete next[STATE_KEY];
+    else next[STATE_KEY] = this.#state;
+    return Object.keys(next).length > 0 ? next : undefined;
+  }
+
+  /** The turn needs a person: a model step's calls, the budget, or a child asked. */
+  interrupt(interrupt: Interrupt): Transition {
+    return this.#apply(reduce(this.#state, interrupt));
+  }
+
+  /** Something arrived for the turn: an answer, a message, a cancel, a callback. */
+  intake(intake: Intake): Transition {
+    return this.#apply(reduce(this.#state, intake));
+  }
+
+  /** What the turn does now: run its next model step, or wait. */
+  next(): Next {
+    return Object.keys(this.#state.requests).length === 0 ? { run: "model" } : { held: "input" };
+  }
+
+  /** What arrived for the turn's step, as the intakes to hand to `intake`, in order. */
+  arrivals(input: Omit<Parameters<typeof arrivalsOf>[0], "held">): readonly Intake[] {
+    return arrivalsOf({ ...input, held: "held" in this.next() });
+  }
+
+  #apply(reduced: Reduced): Transition {
+    return { events: reduced.events, humanInput: new HumanInput(reduced.state) };
+  }
+
+  /** The ids of every open request, for routing an answer to this session. */
+  openRequestIds(): ReadonlySet<string> {
+    return new Set(Object.keys(this.#state.requests));
+  }
+}
+
+/** The coordinates of the stream position a request was asked at. */
+export interface RequestAt {
+  readonly sequence: number;
+  readonly stepIndex: number;
+  readonly turnId: string;
+}
+
+/** What may be asked of the turn. */
+export type Interrupt =
+  /** A model step made calls whose approval policy asks a person. */
+  | {
+      readonly type: "approvals.requested";
+      readonly at: RequestAt;
+      readonly requests: readonly InputRequest[];
+      readonly requester: SessionAuthContext | null;
+      /** Requests whose tool decides who may answer (`approval.response`). */
+      readonly responsePolicyRequestIds: readonly string[];
+    }
+  /** A tool call needs a sign-in before it can run. */
+  | {
+      readonly type: "authorization.required";
+      readonly at: RequestAt;
+      readonly callIds: readonly string[];
+      readonly challenges: readonly AuthorizationChallenge[];
+      readonly requester: SessionAuthContext | null;
+    }
+  /** The budget ran out before a model call, and a person can grant more. */
+  | {
+      readonly type: "budget.exceeded";
+      readonly at: RequestAt;
+      readonly request: InputRequest;
+    }
+  /** A child session or workflow run asks a person, through this session. */
+  | {
+      readonly type: "relayed.requested";
+      readonly at: RequestAt;
+      readonly requests: readonly InputRequest[];
+      readonly route: RelayRoute;
+    };
+
+/** What may arrive for the turn. */
+export type Intake =
+  | {
+      readonly type: "answered";
+      readonly responses: readonly InputResponse[];
+      readonly responder: SessionAuthContext | null;
+    }
+  /** A message; from the person who started the turn, it steers it. */
+  | {
+      readonly type: "message";
+      readonly text: string;
+      readonly sender: SessionAuthContext | null;
+    }
+  | { readonly type: "cancelled" }
+  | {
+      readonly type: "authorization.completed";
+      readonly attemptId: string;
+      readonly outcome: "authorized" | "failed";
+    }
+  /** The runtime ran a response policy that `responder.check` asked for. */
+  | {
+      readonly type: "responder.checked";
+      readonly candidateId: string;
+      readonly verdict: "allowed" | "rejected" | "failed" | "authorization-required";
+    }
+  /** The runtime ran the calls `calls.approved` asked for. */
+  | { readonly type: "calls.settled"; readonly results: readonly ModelMessage[] }
+  | { readonly type: "time"; readonly now: number }
+  /** A workflow run or child session ended; nobody can answer what it relayed. */
+  | { readonly type: "run.ended"; readonly runId: string };
+
+/**
+ * What happened. Each has one meaning for the runtime, which applies it and
+ * decides nothing: publish an event, append to history, run work and report
+ * back through `intake`, or end the turn.
+ */
+export type HumanInputEvent =
+  | { readonly type: "publish"; readonly event: UnstampedMessageStreamEvent }
+  | { readonly type: "history.appended"; readonly message: ModelMessage }
+  /** Run these approved calls with the asking step's tools; report `calls.settled`. */
+  | { readonly type: "calls.approved"; readonly requests: readonly InputRequest[] }
+  /** Run a response policy for this answer; report `responder.checked`. */
+  | { readonly type: "responder.check"; readonly candidateId: string; readonly requestId: string }
+  /** Deliver an answer to the child session or run that asked. */
+  | {
+      readonly type: "answer.forwarded";
+      readonly route: RelayRoute;
+      readonly response: InputResponse;
+    }
+  /** Grant a fresh budget window: the person chose to continue. */
+  | { readonly type: "budget.granted" }
+  /** Tell the model something with the turn's next input. */
+  | { readonly type: "note"; readonly text: string }
+  | { readonly type: "turn.cancelled" }
+  | { readonly type: "turn.failed"; readonly code: string; readonly message: string };
+
+export interface Transition {
+  readonly humanInput: HumanInput;
+  readonly events: readonly HumanInputEvent[];
+}
+
+export type Next = { readonly run: "model" } | { readonly held: "input" };
+
+/** Where a relayed request's answer goes. */
+export interface RelayRoute {
+  readonly childContinuationToken: string;
+  readonly runId?: string;
+}
+
+// ---------------------------------------------------------------------------
+// State: one session key, read and written only here.
+// ---------------------------------------------------------------------------
+
+const STATE_KEY = "eve.harness.humanInput";
+
+interface HumanInputState {
+  /** Every open request, by `requestId`. */
+  readonly requests: Readonly<Record<string, OpenRequest>>;
+  /** Input that arrived before it could run: a partial answer, or a message behind one. */
+  readonly queued?: StepInput;
+  /** Approval keys a `once()` approval granted for the rest of the session. */
+  readonly grants: readonly string[];
+}
+
+type OpenRequest =
+  | {
+      readonly kind: "tool-approval";
+      readonly at: RequestAt;
+      readonly request: InputRequest;
+      readonly requester: SessionAuthContext | null;
+      readonly responsePolicy: boolean;
+    }
+  | {
+      readonly kind: "authorization";
+      readonly at: RequestAt;
+      readonly callIds: readonly string[];
+      readonly challenge: AuthorizationChallenge;
+      readonly requester: SessionAuthContext | null;
+    }
+  | { readonly kind: "session-limit"; readonly at: RequestAt; readonly request: InputRequest }
+  | {
+      readonly kind: "relayed";
+      readonly at: RequestAt;
+      readonly request: InputRequest;
+      readonly route: RelayRoute;
+    };
+
+const EMPTY: HumanInputState = { grants: [], requests: {} };
+
+function parseState(value: unknown): HumanInputState {
+  if (typeof value !== "object" || value === null) return EMPTY;
+  const requests: unknown = Reflect.get(value, "requests");
+  const grants: unknown = Reflect.get(value, "grants");
+  if (typeof requests !== "object" || requests === null || !Array.isArray(grants)) return EMPTY;
+  return value as HumanInputState;
+}
+
+function isEmpty(state: HumanInputState): boolean {
+  return (
+    Object.keys(state.requests).length === 0 &&
+    state.queued === undefined &&
+    state.grants.length === 0
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The rules: one reducer, (state, input) -> (state, events).
+// ---------------------------------------------------------------------------
+
+interface Reduced {
+  readonly events: readonly HumanInputEvent[];
+  readonly state: HumanInputState;
+}
+
+function reduce(state: HumanInputState, input: Interrupt | Intake): Reduced {
+  switch (input.type) {
+    // Human input is being rebuilt case by case. Until a case exists, a turn
+    // that needs a person fails with a clear error instead of hanging.
+    case "approvals.requested":
+    case "authorization.required":
+    case "budget.exceeded":
+    case "relayed.requested":
+      return {
+        events: [
+          {
+            code: "HUMAN_INPUT_UNAVAILABLE",
+            message: `This turn needs a person (${input.type}), which eve cannot ask for yet.`,
+            type: "turn.failed",
+          },
+        ],
+        state,
+      };
+    case "answered":
+    case "message":
+    case "cancelled":
+    case "authorization.completed":
+    case "responder.checked":
+    case "calls.settled":
+    case "time":
+    case "run.ended":
+      return { events: [], state };
+    default: {
+      const unhandled: never = input;
+      throw new TypeError(`Unhandled human input: ${JSON.stringify(unhandled)}`);
+    }
+  }
+}

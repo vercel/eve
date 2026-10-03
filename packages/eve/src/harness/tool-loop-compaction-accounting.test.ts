@@ -2,7 +2,6 @@ import { getRequestEnvelopeTokens } from "#harness/request-envelope.js";
 import { generateText, jsonSchema, type LanguageModel, ToolLoopAgent } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { appendPendingInputBatch } from "#harness/input-requests.js";
 import { validateHarnessModelMessages } from "#harness/messages.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession, StepFn, StepNext, ToolLoopHarnessConfig } from "#harness/types.js";
@@ -325,77 +324,6 @@ describe("tool-loop structured compaction accounting", () => {
       role: "user",
     });
     expect(second.session.history[1]).toEqual({
-      content: "summary",
-      role: "assistant",
-    });
-  });
-
-  it("counts synthesized pending-input tool responses when checking for compaction", async () => {
-    vi.mocked(generateText).mockResolvedValue({
-      text: "summary",
-    } as Awaited<ReturnType<typeof generateText>>);
-
-    setupMockAgentSequence([
-      {
-        finishReason: "stop",
-        response: {
-          messages: [{ content: "Resolved.", role: "assistant" }],
-        },
-        text: "Resolved.",
-        toolCalls: [],
-        toolResults: [],
-      },
-    ]);
-
-    const runStep = createToolLoopHarness(createTestConfig());
-    const session = appendPendingInputBatch({
-      requests: [
-        {
-          action: {
-            callId: "call-1",
-            input: { command: "pwd" },
-            kind: "tool-call",
-            toolName: "bash",
-          },
-          allowFreeform: false,
-          display: "confirmation",
-          kind: "tool-approval",
-          options: [
-            { id: "approve", label: "Yes" },
-            { id: "cancel", label: "No" },
-          ],
-          prompt: "Approve tool call: bash",
-          requestId: "approval-1",
-        },
-      ],
-      responseMessages: [],
-      session: createTestSession({
-        compaction: {
-          lastKnownInputTokens: 100,
-          lastKnownPromptMessageCount: 1,
-          recentWindowSize: 10,
-          threshold: 101,
-        },
-        history: [{ content: "Previous exact prompt", kind: "user", role: "user" }],
-      }),
-    });
-
-    const result = await runStep(session, {
-      inputResponses: [
-        {
-          optionId: "approve",
-          requestId: "approval-1",
-        },
-      ],
-    });
-
-    expect(vi.mocked(generateText)).toHaveBeenCalledTimes(1);
-    expect(result.session.history[0]).toEqual({
-      content: "Summary of our conversation so far:",
-      kind: "context.compaction",
-      role: "user",
-    });
-    expect(result.session.history[1]).toEqual({
       content: "summary",
       role: "assistant",
     });

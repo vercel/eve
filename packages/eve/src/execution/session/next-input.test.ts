@@ -1,23 +1,13 @@
-import { createTestSessionState } from "#internal/testing/session-state.js";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload, SessionAuthContext } from "#channel/types.js";
 import { nextTurnDelivery } from "#execution/session/next-input.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
-import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
-import { SessionStateCursor } from "#execution/session/state-cursor.js";
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   getWorkflowMetadata: () => ({ workflowRunId: "owner-1" }),
 }));
-vi.mock("../route-child-delivery.js", () => ({
-  routeDeliverToChildren: vi.fn(),
-}));
-
-beforeEach(() => {
-  vi.mocked(routeDeliverToChildren).mockReset();
-});
 
 interface ScriptedRead {
   readonly result: IteratorResult<SessionInboxPayload>;
@@ -77,8 +67,6 @@ function messageRead(message: string): ScriptedRead {
   };
 }
 
-const sessionState = createTestSessionState({ sessionId: "ses-parked-wait" });
-
 type WaitInput = {
   -readonly [K in keyof Parameters<typeof nextTurnDelivery>[0]]: Parameters<
     typeof nextTurnDelivery
@@ -86,26 +74,11 @@ type WaitInput = {
 };
 
 function waitInput(inbox: SessionInbox): WaitInput {
-  const cursor = createCursor(inbox);
   return {
     hasWorkingTasks: () => false,
     inbox: inbox,
-    cursor,
     queue: new SessionInputQueue(),
   };
-}
-
-function createCursor(
-  inbox: Pick<SessionInbox, "claimSessionHooks">,
-  state = sessionState,
-): SessionStateCursor {
-  return new SessionStateCursor({
-    history: [],
-    inbox: inbox,
-    sessionWritable: new WritableStream<Uint8Array>(),
-    serializedContext: {},
-    sessionState: state,
-  });
 }
 
 function queueOf(...deliveries: DeliverHookPayload[]): SessionInputQueue {
@@ -280,30 +253,6 @@ describe("nextTurnDelivery", () => {
 
     expect(next).toMatchObject({ kind: "closed" });
   });
-
-  it("carries retired proxy state through fully routed parked deliveries", async () => {
-    const retiredState = { ...sessionState, hasProxyInputRequests: false };
-    const inbox = createMockInbox([messageRead("child response"), messageRead("parent turn")]);
-    vi.mocked(routeDeliverToChildren)
-      .mockResolvedValueOnce({
-        kind: "continue",
-        remainder: undefined,
-        stateDelta: { sessionState: { kind: "value", value: retiredState } },
-      })
-      .mockResolvedValueOnce({
-        kind: "continue",
-        remainder: { kind: "deliver", payloads: [{ message: "parent turn" }] },
-        stateDelta: {},
-      });
-
-    const next = await nextTurnDelivery(waitInput(inbox));
-
-    expect(vi.mocked(routeDeliverToChildren).mock.calls[1]?.[0].sessionState).toBe(retiredState);
-    expect(next).toMatchObject({
-      delivery: { payloads: [{ message: "parent turn" }] },
-      kind: "turn",
-    });
-  });
 });
 
 function slackAuth(principalId: string): SessionAuthContext {
@@ -336,10 +285,5 @@ function authenticatedDelivery(message: string, auth: SessionAuthContext): Deliv
 
 function batchingInputFor(bufferedDeliveries: DeliverHookPayload[]) {
   const input = waitInput(createMockInbox([]));
-  vi.mocked(routeDeliverToChildren).mockImplementation(async ({ delivery }) => ({
-    kind: "continue",
-    remainder: delivery,
-    stateDelta: {},
-  }));
   return { ...input, queue: queueOf(...bufferedDeliveries) };
 }

@@ -52,9 +52,5 @@ function shouldRunAnotherModelCall(input: {
   }
 
   const pending = derivePendingState(input.result.session);
-  return (
-    !pending.hasPendingAuthorization &&
-    !pending.hasPendingInputBatch &&
-    (pending.pendingCoordinationCallIds?.length ?? 0) === 0
-  );
+  return (pending.pendingCoordinationCallIds?.length ?? 0) === 0;
 }

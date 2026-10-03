@@ -1,4 +1,3 @@
-import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
 import type {
   SessionControl,
   SessionInputQueue,
@@ -6,29 +5,23 @@ import type {
 } from "#execution/session/input-queue.js";
 import type { SessionInboxReader } from "#execution/session-inbox/inbox.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
-import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 
 export type NextTurnInstruction =
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage }
   | { readonly kind: SessionControl }
   | { readonly kind: "closed" }
-  | { readonly kind: "cancel-turn" }
   /** `session.cancel()` while no turn runs, but tasks are working. */
   | { readonly kind: "cancel-working-tasks" }
   | TurnSelection;
 
-/**
- * Waits for the next input the parked owner must act on. Fully routed
- * descendant deliveries leave nothing for the parent, so the wait continues.
- */
+/** Waits for the next input the parked owner must act on. */
 export async function nextTurnDelivery(input: {
   readonly inbox: SessionInboxReader;
-  readonly cursor: SessionStateCursor;
   readonly hasWorkingTasks: () => boolean;
   readonly queue: SessionInputQueue;
 }): Promise<NextTurnInstruction> {
-  const { inbox, cursor, queue } = input;
+  const { inbox, queue } = input;
   // A delivery admitted while the owner was fully idle (nothing queued, nothing
   // pumped) is the only kind that may move the session to another deployment.
   let freshSequence: number | undefined;
@@ -37,12 +30,7 @@ export async function nextTurnDelivery(input: {
       freshSequence: inbox.hasPending() ? undefined : freshSequence,
     });
     if (selected?.kind === "control") return { kind: selected.control };
-    if (selected?.kind === "turn") {
-      const routed = await routeSelectedDelivery(selected, cursor);
-      if (routed.kind === "cancel-turn") return routed;
-      if (routed.kind === "consumed") continue;
-      return routed;
-    }
+    if (selected?.kind === "turn") return selected;
 
     // A delivery may already be in the pump queue by the time the owner exits
     // its committed waiting step. It is still an idle arrival when no earlier

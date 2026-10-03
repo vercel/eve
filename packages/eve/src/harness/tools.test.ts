@@ -992,27 +992,6 @@ describe("buildToolSet", () => {
       await expect(resolveApproval(result, "bash", {})).resolves.toBe("user-approval");
     });
 
-    it("once() skips approval when tool already approved", async () => {
-      const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
-        [
-          "bash",
-          {
-            description: "Run a command.",
-            execute: async () => "ok",
-            inputSchema: jsonSchema({}),
-            name: "bash",
-            approval: once(),
-          },
-        ],
-      ]);
-
-      const result = buildToolSet({
-        approvedTools: new Set(["bash"]),
-        tools,
-      });
-      await expect(resolveApproval(result, "bash", {})).resolves.toBe("not-applicable");
-    });
-
     it("tool without approval defaults to false when another tool has an override", async () => {
       const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
         [
@@ -1220,44 +1199,6 @@ describe("buildToolSet", () => {
       await expect(resolveApproval(result, "refund", {}, humanResumedSession)).resolves.toBe(
         "user-approval",
       );
-    });
-
-    it("input-aware approval skips when compound key is in approvedTools", async () => {
-      const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
-        [
-          "vercel__list_projects",
-          {
-            description: "List projects in the team.",
-            execute: async () => "ok",
-            inputSchema: jsonSchema({}),
-            name: "vercel__list_projects",
-            approval: ({ approvedTools, toolName, toolInput }) => {
-              if (approvedTools.has(toolName)) return "not-applicable";
-              const team = (toolInput as { teamId?: string } | undefined)?.teamId;
-              if (team === undefined) return "user-approval";
-              return approvedTools.has(`${toolName}:${team}`) ? "not-applicable" : "user-approval";
-            },
-          },
-        ],
-      ]);
-
-      const withCompoundKey = buildToolSet({
-        approvedTools: new Set(["vercel__list_projects:team_abc"]),
-        tools,
-      });
-      await expect(
-        resolveApproval(withCompoundKey, "vercel__list_projects", {
-          teamId: "team_abc",
-          limit: 10,
-        }),
-      ).resolves.toBe("not-applicable");
-
-      await expect(
-        resolveApproval(withCompoundKey, "vercel__list_projects", {
-          teamId: "team_xyz",
-          limit: 10,
-        }),
-      ).resolves.toBe("user-approval");
     });
   });
 });

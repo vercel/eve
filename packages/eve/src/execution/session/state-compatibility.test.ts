@@ -38,7 +38,7 @@ describe("handoff state inspection", () => {
     expect(() =>
       isSessionStateIdleForHandoff(
         checkpoint({
-          "eve.runtime.pendingAuthorization": {},
+          "eve.runtime.pendingCoordinationBatch": {},
           "eve.workflowTool": {
             version: 4,
             runs: [{ ...run, address: { ...run.address, runId: null } }],
@@ -47,15 +47,10 @@ describe("handoff state inspection", () => {
       ),
     ).toThrow("Corrupt workflow tool run registry");
   });
-  it.each([
-    ["eve.runtime.pendingAuthorization", false],
-    ["eve.runtime.pendingInputBatch", {}],
-    ["eve.runtime.pendingInputBatches", [null]],
-    ["eve.runtime.pendingCoordinationBatch", {}],
-    ["eve.runtime.deferredStepInput", {}],
-    ["eve.harness.pendingWorkflowInterrupt", {}],
-    ["eve.runtime.proxyInputRequests", { malformed: null }],
-  ])("refuses nonempty or unreadable pending work in %s", (key, value) => {
-    expect(isSessionStateIdleForHandoff(checkpoint({ [key]: value }))).toBe(false);
-  });
+  it.each([["eve.runtime.pendingCoordinationBatch", {}]])(
+    "refuses nonempty or unreadable pending work in %s",
+    (key, value) => {
+      expect(isSessionStateIdleForHandoff(checkpoint({ [key]: value }))).toBe(false);
+    },
+  );
 });

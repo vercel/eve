@@ -7,6 +7,9 @@ import { describe, it } from "vitest";
 const SOURCE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 const DISALLOWED_ENTRYPOINT_PREFIXES = ["channel/", "harness/"];
+// Human input carries out its events here, durable steps and hook resumes
+// included, so its rules stay in harness/human-input/ beside the I/O they ask for.
+const WORKFLOW_FACING_PREFIXES = ["harness/human-input/effects/"];
 const WORKFLOW_PRIMITIVE_SPECIFIERS = new Set([
   "#compiled/@workflow/core/index.js",
   "#compiled/@workflow/core/runtime.js",
@@ -177,6 +180,7 @@ function findWorkflowReachabilityViolations(modules: Map<string, SourceModule>):
 
   for (const file of modules.keys()) {
     if (!DISALLOWED_ENTRYPOINT_PREFIXES.some((prefix) => file.startsWith(prefix))) continue;
+    if (WORKFLOW_FACING_PREFIXES.some((prefix) => file.startsWith(prefix))) continue;
 
     const path = findPathToWorkflowPrimitive({ file, modules, seen: new Set() });
     if (path !== undefined) {

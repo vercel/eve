@@ -1,13 +1,10 @@
 /**
- * Deterministic HITL continuation prompt for session usage limits.
- *
- * When a durable session reaches its configured token or token-cost budget, the harness
- * parks on a harness-authored input request instead of failing the session.
+ * The question a session asks when it reaches its token or token-cost budget.
  * The request is derived only from the session identity and violation, so
  * identical session state always produces an identical prompt — no model call
  * is involved.
  */
-import type { InputRequest, InputResponse } from "#shared/input.js";
+import type { InputRequest } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 import type { SessionUsageLimitViolation } from "#harness/turn-tag-state.js";
 
@@ -18,7 +15,7 @@ const SESSION_LIMIT_CONTINUATION_TOOL_NAME = "session_limit_continuation";
 const SESSION_LIMIT_CONTINUE_OPTION_ID = "continue";
 
 /** Option id that declines continuation and ends the session. */
-export const SESSION_LIMIT_STOP_OPTION_ID = "stop";
+const SESSION_LIMIT_STOP_OPTION_ID = "stop";
 
 /**
  * Builds the deterministic continuation prompt for one session usage-limit
@@ -113,58 +110,4 @@ function formatSessionLimitPrompt(violation: SessionUsageLimitViolation): string
 function formatUsd(costUsd: number): string {
   const value = costUsd < 0.000001 ? String(costUsd) : costUsd.toFixed(6);
   return `$${value.replace(/0+$/u, "").replace(/\.$/u, "")}`;
-}
-
-/**
- * Returns true when a request is a harness-authored session-limit
- * continuation prompt.
- */
-export function isSessionLimitContinuationRequest(request: InputRequest): boolean {
-  return request.kind === "session-limit";
-}
-
-/**
- * Matches request ids minted by {@link createSessionLimitContinuationRequest}.
- *
- * Continuation requests never enter model history (no matching tool call
- * exists), so the id shape is the only durable marker for recognizing a
- * stale continuation answer after its request left the pending batch.
- */
-export function isSessionLimitContinuationRequestId(requestId: string): boolean {
-  return (
-    /:limit:(?:input|output):\d+$/u.test(requestId) ||
-    /:limit:token-cost:\d+(?:\.\d+)?(?:e[+-]?\d+)?$/iu.test(requestId)
-  );
-}
-
-/**
- * Resolves the user's answer to a session-limit continuation prompt.
- *
- * Returns `{ granted: true }` for "continue", `{ granted: false }` for
- * "stop", and `undefined` when the batch carries no continuation request or
- * the user has not answered it — an unanswered prompt is re-raised on the
- * next step because the violation still holds.
- */
-export function resolveSessionLimitContinuation(input: {
-  readonly requests: readonly InputRequest[];
-  readonly responses: readonly InputResponse[];
-}): { readonly granted: boolean } | undefined {
-  const request = input.requests.find(isSessionLimitContinuationRequest);
-  if (request === undefined) {
-    return undefined;
-  }
-
-  const response = input.responses.find((entry) => entry.requestId === request.requestId);
-  if (response === undefined) {
-    return undefined;
-  }
-
-  if (response.optionId === SESSION_LIMIT_CONTINUE_OPTION_ID) {
-    return { granted: true };
-  }
-  if (response.optionId === SESSION_LIMIT_STOP_OPTION_ID) {
-    return { granted: false };
-  }
-
-  return undefined;
 }

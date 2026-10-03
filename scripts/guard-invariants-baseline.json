@@ -16,7 +16,7 @@
     "packages/eve/src/execution/node-step.test.ts": 4,
     "packages/eve/src/harness/prompt-cache.test.ts": 6,
     "packages/eve/src/harness/tool-loop-compaction-accounting.test.ts": 2,
-    "packages/eve/src/harness/tool-loop.test.ts": 16,
+    "packages/eve/src/harness/tool-loop.test.ts": 10,
     "packages/eve/src/internal/nitro/host/build-application.scenario.test.ts": 2,
     "packages/eve/src/internal/nitro/host/create-application-nitro.scenario.test.ts": 2,
     "packages/eve/src/internal/nitro/host/cron-handler-route.test.ts": 1,

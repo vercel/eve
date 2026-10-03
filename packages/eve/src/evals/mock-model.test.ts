@@ -69,16 +69,10 @@ describe("mockModel", () => {
   it("keeps framework scaffolding out of authored user messages", async () => {
     const requests: MockModelRequest[] = [];
     const tasks = "[Tasks]\n<tasks>\n</tasks>";
-    const notice = [
-      "[Pending approvals]",
-      "The following tool calls are awaiting approval and have not executed:",
-      '{"requestId":"approval-1","toolName":"gate"}',
-    ].join("\n");
     const result = await generateText({
       messages: [
-        { content: "Run the mixed approval flow.", role: "user" },
+        { content: "Run the task flow.", role: "user" },
         { content: tasks, role: "user" },
-        { content: notice, role: "user" },
       ],
       model: mockModel((request) => {
         requests.push(request);
@@ -86,16 +80,15 @@ describe("mockModel", () => {
       }),
     });
 
-    expect(result.text).toBe("Run the mixed approval flow.");
+    expect(result.text).toBe("Run the task flow.");
     expect(requests[0]).toMatchObject({
-      lastUserMessage: "Run the mixed approval flow.",
+      lastUserMessage: "Run the task flow.",
       messages: [
-        { role: "user", text: "Run the mixed approval flow." },
+        { role: "user", text: "Run the task flow." },
         { role: "user", text: tasks },
-        { role: "user", text: notice },
       ],
       userMessageCount: 1,
-      userMessages: ["Run the mixed approval flow."],
+      userMessages: ["Run the task flow."],
     });
   });
 

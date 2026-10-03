@@ -66,6 +66,8 @@ export class WorkflowBundleBuilder {
   constructor(options: WorkflowBundleBuilderOptions) {
     const dirs = [
       resolvePackageSourceDirectoryPath("src/execution"),
+      // Human input's durable steps live beside the rules that ask for them.
+      resolvePackageSourceDirectoryPath("src/harness/human-input/effects"),
       resolvePackageSourceDirectoryPath("src/runtime/subagents"),
       resolvePackageSourceDirectoryPath("src/subagents"),
       resolvePackageSourceDirectoryPath("src/tools/provided"),

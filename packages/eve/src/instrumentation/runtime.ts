@@ -25,10 +25,8 @@ import {
 import { createAiSdkHookBridge } from "#instrumentation/ai-sdk-hook-bridge.js";
 import {
   createInstrumentationHandleEvent,
-  publishInputResolutions,
   type CreateInstrumentationHandleEventInput,
 } from "#instrumentation/native-events.js";
-import type { ResolvedInputBatch } from "#harness/input-requests.js";
 import type { HandleEventFn } from "#harness/types.js";
 import {
   instrumentChannelDelivery,
@@ -104,10 +102,6 @@ export interface InstrumentationStepScope<TSession> {
   readonly preparePreamble: (
     input: Omit<PrepareTurnTraceContextInput, "instrumentation" | "principals" | "session">,
   ) => Promise<RuntimeTraceContext | undefined>;
-  readonly publishInputResolutions: (input: {
-    readonly batch: ResolvedInputBatch;
-    readonly sessionId: string;
-  }) => Promise<void>;
   readonly recordError: (error: unknown) => void;
   readonly resolveRuntimeContext: (
     input: Omit<
@@ -458,8 +452,6 @@ export function bindInstrumentationRuntime(
               };
             },
             preparePreamble: (preambleInput) => preparePreamble(preambleInput, sessionContext),
-            publishInputResolutions: (resolutionInput) =>
-              publishInputResolutions({ ...resolutionInput, hooks }),
             recordError: (error) => {
               if (turnSpan !== undefined) recordErrorOnSpan(turnSpan, error);
             },

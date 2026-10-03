@@ -3,18 +3,13 @@ import {
   emitAgentStartedStep,
   emitWorkflowToolRunReportStep,
 } from "#execution/tools/workflow/emit-workflow-tool-run-report-step.js";
+import { HumanInputFailure } from "#harness/human-input/effects/workflow.js";
 import type {
-  WorkflowToolAskRequest,
   WorkflowToolRunAgentStartedMessage,
   WorkflowToolRunMessage,
   WorkflowToolRunOutcomeMessage,
   WorkflowToolRunRequestMessage,
-  WorkflowToolRunWithdrawMessage,
 } from "#execution/tools/workflow/messages.js";
-import {
-  withdrawFinishedRunQuestionsStep,
-  withdrawWorkflowToolRunQuestionStep,
-} from "#execution/tools/workflow/withdraw-step.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import {
   workflowToolRunOutcomeToToolResult,
@@ -25,7 +20,6 @@ import {
   isInboxToolResultFromRecordedWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
-import type { WorkflowAskRoute } from "#harness/proxy-input-requests.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 
 interface HandlerInput<T> {
@@ -48,8 +42,8 @@ export async function handleWorkflowToolRunMessage(
     case "request":
       await handleWorkflowToolRunRequest({ ...input, message });
       return undefined;
+    // Nothing the session relays stays open, so there is nothing to withdraw.
     case "withdraw":
-      await handleWorkflowToolRunWithdraw({ ...input, message });
       return undefined;
     case "report":
       await input.cursor.advance((state) =>
@@ -84,8 +78,7 @@ export function batchAgentStarts(messages: readonly WorkflowToolRunMessage[]): B
 /**
  * Settles a workflow tool run outcome against the turn's recorded runs and
  * returns the runtime action result the turn should accept, or `undefined`
- * when the outcome does not bind to a run this turn owns. Requests the run
- * relayed are withdrawn first, since nobody can answer them anymore.
+ * when the outcome does not bind to a run this turn owns.
  */
 async function handleWorkflowToolRunOutcome(
   input: HandlerInput<WorkflowToolRunOutcomeMessage>,
@@ -97,11 +90,6 @@ async function handleWorkflowToolRunOutcome(
 
   const result = workflowToolRunOutcomeToToolResult(message);
   if (!isInboxToolResultFromRecordedWorkflowToolRun(state, result)) return undefined;
-
-  if (cursor.sessionState.hasProxyInputRequests) {
-    const { runId } = message.from;
-    await cursor.advance((current) => withdrawFinishedRunQuestionsStep({ ...current, runId }));
-  }
   return result;
 }
 
@@ -118,44 +106,15 @@ async function handleWorkflowToolRunRequest(
     });
     return;
   }
-  await cursor.advance((state) =>
+  const relayed = await cursor.advance((state) =>
     runProxySubagentEventStep({
-      ...(message.request.kind === "ask" && {
-        workflowAsk: createWorkflowAskRoute(message.request),
-      }),
       hookPayload: workflowToolRunRequestToInputRequestPayload(message),
       runId: message.from.runId,
       ...state,
     }),
   );
-}
-
-/**
- * A run asks to withdraw a `ctx.ask()` question. The session decides: it
- * withdraws the question unless it already accepted an answer or stopped
- * offering it, and tells the run either way.
- */
-async function handleWorkflowToolRunWithdraw(
-  input: HandlerInput<WorkflowToolRunWithdrawMessage>,
-): Promise<void> {
-  const { cursor, message } = input;
-  await cursor.advance((state) =>
-    withdrawWorkflowToolRunQuestionStep({
-      ...state,
-      control: message.control,
-      requestId: message.replyTo,
-      runId: message.from.runId,
-    }),
-  );
-}
-
-function createWorkflowAskRoute(ask: WorkflowToolAskRequest): WorkflowAskRoute {
-  const { allowFreeform, options } = ask.request;
-  return {
-    control: ask.control,
-    question: {
-      ...(allowFreeform !== undefined && { allowFreeform }),
-      ...(options !== undefined && { options: [...options] }),
-    },
-  };
+  if (relayed.ending?.kind === "failed") throw new HumanInputFailure(relayed.ending);
+  if (relayed.ending !== undefined) {
+    throw new Error("Cancelling a turn from a relayed request is not implemented.");
+  }
 }

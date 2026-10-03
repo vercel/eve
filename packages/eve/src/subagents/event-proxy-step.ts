@@ -3,6 +3,10 @@ import type {
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
 import {
+  applyHumanInputEvents,
+  type HumanInputEnding,
+} from "#harness/human-input/effects/index.js";
+import {
   publishFromSessionStep,
   restoreSessionStep,
   type PublishedSessionEvents,
@@ -11,30 +15,31 @@ import {
 } from "#execution/publish-session-events.js";
 import {
   withSessionStateDelta,
-  type SessionStateTransition,
+  type WithSessionStateDelta,
 } from "#execution/session/state-delta.js";
-import { emitProxiedAuthorizationEvent, emitProxiedInputRequest } from "#subagents/hitl-proxy.js";
-import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
-import type { WorkflowAskRoute } from "#harness/proxy-input-requests.js";
+import { getHarnessEmissionState } from "#harness/emission.js";
+import { HumanInput, type Transition } from "#harness/human-input/index.js";
+import { getSessionUsage } from "#harness/turn-tag-state.js";
+import { createTurnWaitingEvent } from "#protocol/message.js";
 
 type SubagentEventHookPayload =
   | SubagentAuthorizationEventHookPayload
   | SubagentInputRequestHookPayload;
 
+type ProxiedSubagentEvent = PublishedSessionEvents & { readonly ending?: HumanInputEnding };
+
 /** Proxies one child event through its parent channel across a durable step boundary. */
 export async function runProxySubagentEventStep(
   input: SessionStepState & {
-    readonly workflowAsk?: WorkflowAskRoute;
     readonly runId?: string;
     readonly hookPayload: SubagentEventHookPayload;
   },
-): Promise<SessionStateTransition> {
+): Promise<WithSessionStateDelta<ProxiedSubagentEvent>> {
   "use step";
 
   return await withSessionStateDelta(input, async (target) =>
     emitProxiedSubagentEvent({
       ...(await restoreSessionStep(target)),
-      workflowAsk: target.workflowAsk,
       runId: target.runId,
       hookPayload: target.hookPayload,
     }),
@@ -42,19 +47,20 @@ export async function runProxySubagentEventStep(
 }
 
 /**
- * Relays one child event through the parent session's channel. `runId` names
- * the workflow tool run that relayed an input request, so the session can
- * withdraw it when that run ends.
+ * Relays one child event through the parent session. A child's sign-in
+ * completes on its own callback, so its events only reach the channel; a
+ * child's question is human input. `runId` names the workflow tool run that
+ * relayed the question.
  */
 export async function emitProxiedSubagentEvent(
   input: RestoredSessionStep & {
-    readonly workflowAsk?: WorkflowAskRoute;
     readonly runId?: string;
     readonly hookPayload: SubagentEventHookPayload;
   },
-): Promise<PublishedSessionEvents> {
-  const { hookPayload, runId, workflowAsk } = input;
-  const { published } = await publishFromSessionStep(input, {
+): Promise<ProxiedSubagentEvent> {
+  const { hookPayload, runId } = input;
+  let transition: Transition | undefined;
+  const { published, result } = await publishFromSessionStep(input, {
     origin: "relayed",
     inputSource:
       hookPayload.kind === "subagent-input-request"
@@ -62,31 +68,39 @@ export async function emitProxiedSubagentEvent(
         : undefined,
     async publish(emit, session) {
       if (hookPayload.kind === "subagent-authorization-event") {
-        await emitProxiedAuthorizationEvent({ emit, hookPayload, session });
+        await emit(hookPayload.event);
+        if (hookPayload.event.type === "authorization.required") {
+          const turn = getHarnessEmissionState(session.state);
+          await emit(
+            createTurnWaitingEvent({
+              on: "input",
+              sequence: turn.sequence,
+              turnId: turn.turnId,
+              usage: getSessionUsage(session),
+            }),
+          );
+        }
         return undefined;
       }
-      return await emitProxiedInputRequest({ emit, hookPayload, session });
+      const { event } = hookPayload;
+      transition = HumanInput.read(session.state).interrupt({
+        at: { sequence: event.sequence, stepIndex: event.stepIndex, turnId: event.turnId },
+        requests: event.requests,
+        route: {
+          childContinuationToken: hookPayload.childContinuationToken,
+          ...(runId !== undefined && { runId }),
+        },
+        type: "relayed.requested",
+      });
+      return await applyHumanInputEvents(emit, transition.events);
     },
-    updateSession(session, entries) {
-      if (entries === undefined || hookPayload.kind !== "subagent-input-request") {
-        return { session };
-      }
+    updateSession(session, ending) {
+      if (transition === undefined) return { session };
       return {
-        session: upsertProxyInputRequests({
-          entries: entries.map(([requestId, route]) => [
-            requestId,
-            {
-              ...route,
-              ...(workflowAsk !== undefined && { workflowAsk }),
-              ...(runId !== undefined && { runId }),
-            },
-          ]),
-          forChildContinuationToken: hookPayload.childContinuationToken,
-          inputSource: hookPayload.inputSource,
-          session,
-        }),
+        result: ending,
+        session: { ...session, state: transition.humanInput.write(session.state) },
       };
     },
   });
-  return published;
+  return result === undefined ? published : { ...published, ending: result };
 }

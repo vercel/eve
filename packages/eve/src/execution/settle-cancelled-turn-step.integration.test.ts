@@ -3,12 +3,6 @@ import { describe, expect, it } from "vitest";
 import type { SessionStateMap } from "#harness/types.js";
 import { readDurableSession } from "#execution/durable-session-store.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
-import {
-  getProxyInputRequests,
-  upsertProxyInputRequestState,
-  type ProxyInputRequest,
-} from "#harness/proxy-input-requests.js";
-import { filterEventsByType } from "#internal/testing/events.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import {
   accumulateTurnUsage,
@@ -95,64 +89,4 @@ describe("settleCancelledTurnStep", () => {
       );
     },
   );
-
-  it("withdraws every request the session relays before it reports the turn cancelled", async () => {
-    const base = createTestSessionState({
-      emissionState: { sequence: 3, sessionStarted: true, stepIndex: 1, turnId: "turn_1" },
-      sessionId: "support-session",
-    });
-    // Alice's turn relays a question from Bob's deploy task and an approval
-    // from the reviewer subagent when she cancels it.
-    const state = relay(
-      relay(base.snapshot.session.state, "deploy-run-ask-1", {
-        kind: "question",
-        runId: "deploy-run",
-        workflowAsk: { control: "deploy-run-control", question: {} },
-      }),
-      "reviewer-approval-1",
-      { kind: "tool-approval" },
-    );
-
-    const result = await settleCancelledTurn({
-      history: [],
-      reportUsage: false,
-      serializedContext,
-      sessionState: { ...base, snapshot: { session: { ...base.snapshot.session, state } } },
-    });
-
-    expect(result.events.map((event) => event.type)).toEqual([
-      "input.resolved",
-      "input.resolved",
-      "turn.cancelled",
-      "session.waiting",
-    ]);
-    expect(
-      filterEventsByType(result.events, "input.resolved").map((event) => event.data.resolutions),
-    ).toEqual([
-      [{ kind: "question", outcome: "cancelled", requestId: "deploy-run-ask-1" }],
-      [{ kind: "tool-approval", outcome: "cancelled", requestId: "reviewer-approval-1" }],
-    ]);
-    expect(getProxyInputRequests(readDurableSession(result.sessionState).state).size).toBe(0);
-  });
 });
-
-function relay(
-  state: SessionStateMap | undefined,
-  requestId: string,
-  route: Pick<ProxyInputRequest, "kind" | "runId" | "workflowAsk">,
-): SessionStateMap | undefined {
-  return upsertProxyInputRequestState({
-    entries: [
-      [
-        requestId,
-        {
-          ...route,
-          childContinuationToken: requestId,
-          event: { sequence: 2, stepIndex: 0, turnId: "turn_1" },
-        },
-      ],
-    ],
-    forChildContinuationToken: requestId,
-    state,
-  });
-}

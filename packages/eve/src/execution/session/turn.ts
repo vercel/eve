@@ -1,6 +1,6 @@
 import { sleep } from "#compiled/@workflow/core/index.js";
 
-import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
+import type { TurnCaller } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
@@ -47,21 +47,7 @@ import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
-/** True when a delegating parent (local or remote) receives this session's input requests. */
-export function hasDelegatedCallerContext(serializedContext: Record<string, unknown>): boolean {
-  if (serializedContext["eve.sessionCallback"] !== undefined) return true;
-  const channel = serializedContext["eve.channel"];
-  return (
-    typeof channel === "object" && channel !== null && Reflect.get(channel, "kind") === "subagent"
-  );
-}
-
-const NO_INPUT_CAPABILITY_ERROR_MESSAGE =
-  "This session cannot request human input, so it cannot wait for a tool approval or question. " +
-  "Sessions started without `capabilities.requestInput`, such as schedules, must not use approval-gated tools.";
-
 export interface SessionExecutionInput {
-  readonly capabilities?: SessionCapabilities;
   readonly cursor: SessionStateCursor;
   readonly inbox: SessionInboxReader;
   readonly queue: SessionInputQueue;
@@ -185,20 +171,6 @@ export class SessionExecution {
         };
       }
 
-      if (result.action === "held" && result.hold === "request") {
-        if (
-          result.hasPendingInputBatch &&
-          this.input.capabilities?.requestInput !== true &&
-          !hasDelegatedCallerContext(this.input.cursor.serializedContext)
-        ) {
-          throw new Error(NO_INPUT_CAPABILITY_ERROR_MESSAGE);
-        }
-        const woke = await this.waitForHeldRequest(turn, result);
-        if (woke === "cancelled") return await this.finishCancelledTurn(turn);
-        nextStepInput = { delivery: woke };
-        continue;
-      }
-
       if (result.action === "held") {
         const woke = await this.waitForHeldTurn(turn);
         if (woke === "cancelled") return await this.finishCancelledTurn(turn);
@@ -304,39 +276,10 @@ export class SessionExecution {
         case "workflow":
           await this.handleWorkflowMessage(next.message);
           continue;
-        case "input":
         case "runtime-action-result":
         case "timeout":
           continue;
       }
-    }
-  }
-
-  /**
-   * The turn waits on a sign-in or tool approval it raised. It wakes with the
-   * delivery its next step reads: the sign-in callback, an approval answer
-   * from any responder, or a message from the turn's own person, which steers
-   * the turn and cancels the request. Anyone else's message queues behind it.
-   */
-  private async waitForHeldRequest(
-    turn: ActiveTurn,
-    held: {
-      readonly authorizationAttemptIds: readonly string[];
-      readonly inputRequestIds: readonly string[];
-    },
-  ): Promise<DeliverHookPayload | "cancelled"> {
-    const attemptIds = new Set(held.authorizationAttemptIds);
-    const requestIds = new Set(held.inputRequestIds);
-    while (true) {
-      const callbacks = this.input.queue.takeAuthorizations(attemptIds);
-      if (callbacks !== undefined) return { kind: "deliver", payloads: callbacks };
-      const answer = await turn.takeInputResponses(requestIds);
-      if (answer !== undefined) return answer;
-      const steering = await turn.takeSteering({ heldOnPerson: true });
-      if (steering !== undefined) return steering;
-      const next = await turn.nextRuntimeEvent([]);
-      if (next === "cancelled") return next;
-      if (next.kind === "workflow") await this.handleWorkflowMessage(next.message);
     }
   }
 
@@ -391,7 +334,6 @@ export class SessionExecution {
         }
         continue;
       }
-      if (next.kind === "input") continue;
       if (next.kind === "steering") {
         // Only the first steering message interrupts; later ones wait for the calls anyway.
         if (!interrupted) await this.interruptWaitedWorkflowCalls(input.pendingCallIds, results);

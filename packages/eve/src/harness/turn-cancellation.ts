@@ -8,17 +8,6 @@ export class TurnCancelledError extends Error {
   }
 }
 
-/**
- * A turn cancellation raised when the user declines a session-limit
- * continuation prompt. It keeps the canonical cancellation name, so execution
- * settles it through the standard turn-cancellation path.
- */
-export class SessionLimitDeclinedError extends TurnCancelledError {
-  constructor() {
-    super("The user declined a fresh session token budget.");
-  }
-}
-
 /** True when the error, or one of its causes, is a {@link TurnCancelledError}. */
 export function isTurnCancellation(error: unknown): boolean {
   let current: unknown = error;

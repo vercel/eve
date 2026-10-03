@@ -12,16 +12,10 @@ import {
   withSessionStateDelta,
   type WithSessionStateDelta,
 } from "#execution/session/state-delta.js";
-import { relayWithdrawnRequests } from "#execution/tools/workflow/withdraw-step.js";
 import { emitCancelledTurn } from "#harness/cancelled-turn-emission.js";
-import { declinedSignInEvents, withdrawHeldSignIns } from "#harness/held-requests.js";
-import {
-  cancelApprovalInputBatches,
-  getPendingApprovalRequests,
-} from "#harness/hitl/approval-input-requests.js";
-import { createInputResolvedEvent } from "#protocol/message.js";
+import { HumanInput, type Transition } from "#harness/human-input/index.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
-import { clearPendingSessionLimitPrompt } from "#harness/input-requests.js";
+import { applyHumanInputEvents } from "#harness/human-input/effects/index.js";
 import { getHarnessEmissionState, setHarnessEmissionState } from "#harness/emission.js";
 import { removeBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import {
@@ -30,8 +24,6 @@ import {
   takeSessionUsageDelta,
 } from "#harness/turn-tag-state.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-
-const CANCELLED_REASON = "Cancelled.";
 
 export interface CancelledTurnSettleResult {
   readonly serializedContext: Record<string, unknown>;
@@ -51,11 +43,10 @@ interface CancelledTurnSettleInput extends SessionHistoryStepState {
 }
 
 /**
- * Settles one cancelled turn: relays `input.resolved` for every request the
- * session proxies, emits `turn.cancelled` → `session.waiting`, drops pending
- * coordination state, and persists the between-turns session. Runs in the
- * owner, whose wake sources exclude the cancel hook, so a queued cancel wake
- * cannot re-dispatch it.
+ * Settles one cancelled turn: tells human input the turn was cancelled, emits
+ * `turn.cancelled` → `session.waiting`, drops pending coordination state, and
+ * persists the between-turns session. Runs in the owner, whose wake sources
+ * exclude the cancel hook, so a queued cancel wake cannot re-dispatch it.
  */
 export async function settleCancelledTurnStep(
   input: CancelledTurnSettleInput,
@@ -68,67 +59,33 @@ export async function settleCancelledTurnStep(
 export async function settleCancelledTurn(
   input: CancelledTurnSettleInput,
 ): Promise<CancelledTurnSettleResult> {
-  // The cancel stopped every descendant and task, so nobody can answer a request the session relays.
-  const relayed = await relayWithdrawnRequests(input, () => true);
   const step = {
-    ...(await restoreSessionStep({ ...relayed, sessionWritable: input.sessionWritable })),
+    ...(await restoreSessionStep(input)),
     history: input.history,
   };
   const durableState = step.durableSession.state;
-  // Every request the turn held ends with it: its sign-ins and its approvals.
-  const withdraw = { completedAt: Date.now(), reason: CANCELLED_REASON };
-  const withdrawal = withdrawHeldSignIns(durableState, withdraw);
-  const cancelledApprovals = getPendingApprovalRequests(durableState);
+  let transition: Transition | undefined;
   const { published, result: usage } = await publishFromSessionStep(step, {
     origin: "own",
     async publish(emit) {
+      transition = HumanInput.read(durableState).intake({ type: "cancelled" });
+      const ending = await applyHumanInputEvents(emit, transition.events);
+      // The turn already ends as cancelled; a failure here has no turn left to fail.
+      if (ending?.kind === "failed") throw new Error(ending.message);
       const emissionState = getHarnessEmissionState(durableState);
-      for (const event of declinedSignInEvents(
-        withdrawal.withdrawn,
-        CANCELLED_REASON,
-        emissionState,
-      )) {
-        await emit(event);
-      }
-      if (cancelledApprovals.length > 0) {
-        await emit(
-          createInputResolvedEvent({
-            resolutions: cancelledApprovals.map((request) => ({
-              kind: request.kind,
-              outcome: "cancelled",
-              requestId: request.requestId,
-            })),
-            sequence: emissionState.sequence,
-            stepIndex: emissionState.stepIndex,
-            turnId: emissionState.turnId,
-          }),
-        );
-      }
       return await emitCancelledTurn(emit, emissionState, getSessionUsage(step.durableSession));
     },
     updateSession(baseSession, emissionState) {
       const session = {
         ...baseSession,
-        state: withdrawHeldSignIns(baseSession.state, withdraw).state,
+        state: transition?.humanInput.write(baseSession.state) ?? baseSession.state,
       };
-      // `clearPendingSessionLimitPrompt`: cancellation settles with the step's
-      // input snapshot, which can resurrect an already-answered session-limit
-      // prompt (the decline that cancelled this turn consumed the answer in the
-      // discarded turn state). The pre-model gate re-raises the prompt while the
-      // violation holds, so the next delivery gets a fresh prompt instead of
-      // queueing forever behind a stale one.
       const owningTurnId =
         getPendingCoordinationBatch(session.state)?.event.turnId ??
         input.sessionState.emissionState.turnId;
       const cancelledSession = setHarnessEmissionState(
-        clearPendingSessionLimitPrompt(
-          // After the coordination batch, which owns an assistant response it
-          // shares with approvals raised beside its calls.
-          cancelApprovalInputBatches(
-            commitCancelledCoordinationBatch(
-              removeBlockingWorkflowToolRuns({ ...session, outputSchema: undefined }, owningTurnId),
-            ),
-          ),
+        commitCancelledCoordinationBatch(
+          removeBlockingWorkflowToolRuns({ ...session, outputSchema: undefined }, owningTurnId),
         ),
         emissionState,
       );

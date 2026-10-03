@@ -1,160 +1,60 @@
 /**
- * Session token and token-cost limit policy for the tool-loop harness.
- *
- * Two seams into the harness step:
- *
- * 1. {@link applySessionLimitContinuation} runs after pending-input
- *    resolution and acts on the user's answer to a continuation prompt —
- *    grant a fresh budget window, or cancel the in-flight turn tree.
- * 2. {@link enforceSessionUsageLimit} runs before each model call and, when
- *    the session is over budget, parks it on the deterministic continuation
- *    prompt (sessions that can request input) or fails it (nobody can answer
- *    the prompt).
+ * Session token and token-cost limit policy for the tool-loop harness. Before
+ * each model call, an over-budget session either fails the turn or, when a
+ * person could grant more budget, hands the question to human input.
  */
-import { createInputRequestedEvent } from "#protocol/message.js";
-import {
-  emitFailedStep,
-  emitTurnEpilogue,
-  setHarnessEmissionState,
-  type HarnessEmissionState,
-} from "#harness/emission.js";
-import { appendPendingInputBatch } from "#harness/input-requests.js";
-import type { HarnessModelMessage } from "#harness/messages.js";
+import { emitFailedStep, type HarnessEmissionState } from "#harness/emission.js";
 import { createSessionLimitContinuationRequest } from "#harness/session-limit-continuation.js";
-import { SessionLimitDeclinedError } from "#harness/turn-cancellation.js";
 import {
-  bumpSessionRuntimeUsageLimits,
   getSessionUsageLimitViolation,
   getSessionTokenUsage,
   getSessionUsage,
   type SessionUsageLimitViolation,
 } from "#harness/turn-tag-state.js";
 import type { HarnessSession, StepResult, ToolLoopHarnessConfig } from "#harness/types.js";
+import type { InputRequest } from "#shared/input.js";
 
 const SESSION_TOKEN_LIMIT_REACHED_CODE = "SESSION_TOKEN_LIMIT_REACHED";
 const SESSION_TOKEN_COST_LIMIT_REACHED_CODE = "SESSION_TOKEN_COST_LIMIT_REACHED";
 
-interface SessionLimitPolicyInput {
+export type SessionUsageLimitCheck =
+  | { readonly kind: "within" }
+  | { readonly kind: "failed"; readonly result: StepResult }
+  /** A person can grant a fresh budget window. */
+  | { readonly kind: "ask"; readonly request: InputRequest };
+
+/**
+ * Pre-model-call gate for the session token budget. Over budget, sessions
+ * that can request input ask a person; others fail with
+ * `SESSION_TOKEN_LIMIT_REACHED`.
+ */
+export async function enforceSessionUsageLimit(input: {
   readonly config: ToolLoopHarnessConfig;
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
   readonly emissionState: HarnessEmissionState;
   readonly session: HarnessSession;
-}
-
-/**
- * Acts on a resolved session-limit continuation answer.
- *
- * Granted: bumps the runtime token limits via
- * {@link bumpSessionRuntimeUsageLimits} and lets the step continue
- * transparently.
- * Declined: a user decision, not an error — the decline cancels the
- * in-flight turn tree through the standard cancellation path, settling as
- * `turn.cancelled` → `session.waiting` with no failure surfaced anywhere.
- * The harness only declares the intent by throwing
- * {@link SessionLimitDeclinedError}; the execution layer detects it at the
- * step boundary and cancels the root turn, whose cancelled arm cascades to
- * every descendant, so the delegating parent never receives an error result
- * it could retry against a fresh budget share.
- *
- * Returns `result: null` when the step should continue with `session`.
- */
-export async function applySessionLimitContinuation(
-  input: SessionLimitPolicyInput & {
-    readonly limitContinuation: { readonly granted: boolean } | undefined;
-  },
-): Promise<{ readonly result: StepResult | null; readonly session: HarnessSession }> {
-  if (input.limitContinuation === undefined) {
-    return { result: null, session: input.session };
-  }
-
-  if (input.limitContinuation.granted) {
-    return { result: null, session: bumpSessionRuntimeUsageLimits(input.session) };
-  }
-
-  throw new SessionLimitDeclinedError();
-}
-
-/**
- * Pre-model-call gate for the session token budget.
- *
- * Returns `null` when the session is within budget. Over budget, sessions
- * that can request input park on the deterministic continuation prompt;
- * others fail fast with `SESSION_TOKEN_LIMIT_REACHED`.
- */
-export async function enforceSessionUsageLimit(
-  input: SessionLimitPolicyInput & { readonly messages: readonly HarnessModelMessage[] },
-): Promise<StepResult | null> {
+}): Promise<SessionUsageLimitCheck> {
   const violation = getSessionUsageLimitViolation(input.session);
-  if (violation === null) {
-    return null;
-  }
+  if (violation === null) return { kind: "within" };
 
-  const { emit } = input;
   // A zero limit is an exhausted quota inherited by a delegated task.
   // Approving would bump the runtime limit by the configured limit -- zero --
   // so fail the child and let its parent reach the resumable limit gate.
   if (
     violationWindow(violation) > 0 &&
-    emit !== undefined &&
+    input.emit !== undefined &&
     input.config.capabilities?.requestInput === true
   ) {
-    return parkOnSessionUsageLimit({ ...input, emit, violation });
+    return {
+      kind: "ask",
+      request: createSessionLimitContinuationRequest({
+        sessionId: input.session.sessionId,
+        violation,
+      }),
+    };
   }
 
-  return failSessionUsageLimit({ ...input, violation });
-}
-
-/**
- * Parks the session on the deterministic HITL continuation prompt. No model
- * call happens: the request is harness-authored, and the parked history
- * carries the step's accumulated messages so the triggering user message
- * survives into the resumed turn.
- */
-async function parkOnSessionUsageLimit(input: {
-  readonly config: ToolLoopHarnessConfig;
-  readonly emit: NonNullable<ToolLoopHarnessConfig["handleEvent"]>;
-  readonly emissionState: HarnessEmissionState;
-  readonly messages: readonly HarnessModelMessage[];
-  readonly session: HarnessSession;
-  readonly violation: SessionUsageLimitViolation;
-}): Promise<StepResult> {
-  const request = createSessionLimitContinuationRequest({
-    sessionId: input.session.sessionId,
-    violation: input.violation,
-  });
-  let emissionState = input.emissionState;
-
-  const parkedSession = appendPendingInputBatch({
-    event: {
-      sequence: emissionState.sequence,
-      stepIndex: emissionState.stepIndex,
-      turnId: emissionState.turnId,
-    },
-    requests: [request],
-    responseMessages: [],
-    session: { ...input.session, history: [...input.messages] },
-  });
-
-  await input.emit(
-    createInputRequestedEvent({
-      requests: [request],
-      sequence: emissionState.sequence,
-      stepIndex: emissionState.stepIndex,
-      turnId: emissionState.turnId,
-    }),
-  );
-
-  emissionState = await emitTurnEpilogue(
-    input.emit,
-    emissionState,
-    parkedSession.history,
-    getSessionUsage(parkedSession),
-  );
-
-  return {
-    next: null,
-    session: setHarnessEmissionState(parkedSession, emissionState),
-  };
+  return { kind: "failed", result: await failSessionUsageLimit({ ...input, violation }) };
 }
 
 function violationWindow(violation: SessionUsageLimitViolation): number {

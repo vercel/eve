@@ -91,7 +91,7 @@ describe("generation steering with the real AI SDK", () => {
     }
   });
 
-  it.each(["input.requested", "turn.waiting", "step.failed"] as const)(
+  it.each(["step.failed"] as const)(
     "finishes committing %s when a correction arrives during publication",
     async (boundary) => {
       const logs = captureLogRecords();

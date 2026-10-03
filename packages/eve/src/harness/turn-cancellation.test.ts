@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   isTurnCancellation,
-  SessionLimitDeclinedError,
   throwIfTurnAborted,
   TurnCancelledError,
 } from "#harness/turn-cancellation.js";
@@ -48,15 +47,6 @@ describe("isTurnCancellation", () => {
     expect(isTurnCancellation(new Error("aborted"))).toBe(false);
     expect(isTurnCancellation(undefined)).toBe(false);
     expect(isTurnCancellation("TurnCancelledError")).toBe(false);
-  });
-});
-
-describe("SessionLimitDeclinedError", () => {
-  it("is a turn cancellation with the canonical name", () => {
-    const error = new SessionLimitDeclinedError();
-    // Keeps the canonical name so every existing cancellation check matches.
-    expect(error.name).toBe("TurnCancelledError");
-    expect(isTurnCancellation(error)).toBe(true);
   });
 });
 

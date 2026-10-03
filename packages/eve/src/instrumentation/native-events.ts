@@ -7,7 +7,6 @@ import type {
   InstrumentationAttemptScope,
   InstrumentationHooks,
   InstrumentationInputRequestedEvent,
-  InstrumentationInputResolvedEvent,
   InstrumentationParentLineage,
   InstrumentationPointEvent,
   InstrumentationTraceContext,
@@ -23,9 +22,7 @@ import {
   rememberInstrumentationActionScope,
   rememberInstrumentationInputScope,
   takeInstrumentationActionScopeForCall,
-  takeInstrumentationInputScope,
 } from "#instrumentation/state.js";
-import type { ResolvedInputBatch } from "#harness/input-requests.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
 import type { HandleEventFn } from "#harness/types.js";
 import {
@@ -152,41 +149,6 @@ async function publishInputStarts(
         scope,
         type: "input.requested",
       } satisfies InstrumentationInputRequestedEvent),
-    );
-  }
-}
-
-/** Publishes accepted input resolutions against their original request scope. */
-export async function publishInputResolutions(input: {
-  readonly batch: ResolvedInputBatch;
-  readonly hooks: InstrumentationHooks;
-  readonly sessionId: string;
-}): Promise<void> {
-  const capturesInputs = input.hooks.capturesInputs ?? input.hooks.capturesContent;
-  for (const resolved of input.batch.inputs) {
-    const idempotencyKey = inputIdempotencyKey(
-      input.sessionId,
-      input.batch.event.turnId,
-      resolved.request.requestId,
-    );
-    const scope = takeInstrumentationInputScope(idempotencyKey);
-    if (scope === undefined) continue;
-    await input.hooks.publish(
-      Object.freeze({
-        idempotencyKey,
-        kind: resolved.request.kind,
-        outcome: resolved.outcome,
-        requestId: resolved.request.requestId,
-        response:
-          !capturesInputs || resolved.response === undefined
-            ? undefined
-            : Object.freeze({
-                optionId: resolved.response.optionId,
-                text: resolved.response.text,
-              }),
-        scope,
-        type: "input.resolved",
-      } satisfies InstrumentationInputResolvedEvent),
     );
   }
 }

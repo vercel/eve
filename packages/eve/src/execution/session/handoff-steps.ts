@@ -1,3 +1,4 @@
+import { HumanInput } from "#harness/human-input/index.js";
 import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import {
   EntityConflictError,
@@ -17,7 +18,6 @@ import { getResolvedRuntimeAgentNode } from "#runtime/graph.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import { walkCauseChain } from "#shared/errors.js";
-import { isObject } from "#shared/guards.js";
 
 const log = createLogger("execution.handoff");
 
@@ -27,24 +27,10 @@ export function isSessionStateIdleForHandoff(sessionState: DurableSessionState):
   // Decoding the run registry rejects corrupt state before any busy-work shortcut.
   const workflowToolRuns = getBlockingWorkflowToolRuns(state);
 
-  // These registries are deleted when work settles. Their ordinary readers
-  // tolerate malformed values as absent; that must not authorize a handoff.
-  const pendingKeys = [
-    "eve.runtime.pendingAuthorization",
-    "eve.runtime.pendingInputBatch",
-    "eve.runtime.pendingCoordinationBatch",
-    "eve.runtime.deferredStepInput",
-    "eve.harness.pendingWorkflowInterrupt",
-  ];
-  if (pendingKeys.some((key) => state?.[key] !== undefined)) return false;
-  const batches = state?.["eve.runtime.pendingInputBatches"];
-  if (batches !== undefined && (!Array.isArray(batches) || batches.length > 0)) return false;
-  const proxyRequests = state?.["eve.runtime.proxyInputRequests"];
-  if (
-    proxyRequests !== undefined &&
-    (!isObject(proxyRequests) || Object.keys(proxyRequests).length > 0)
-  )
-    return false;
+  // The batch is deleted when its calls settle. Its ordinary reader tolerates
+  // a malformed value as absent; that must not authorize a handoff.
+  if (state?.["eve.runtime.pendingCoordinationBatch"] !== undefined) return false;
+  if (HumanInput.read(state).openRequestIds().size > 0) return false;
   return workflowToolRuns.length === 0;
 }
 
