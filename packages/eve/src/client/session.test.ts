@@ -939,7 +939,7 @@ describe("ClientSession", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it.each(["Load failed", "network error"])(
+  it.each(["network error"])(
     "does not retry an unrecognized TypeError while opening a stream: %s",
     async (message) => {
       const fetchMock = vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError(message));
