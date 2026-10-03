@@ -1,5 +1,15 @@
 # eve
 
+## 0.71.0
+
+### Minor Changes
+
+- 8582a36: The `bash` tool no longer blocks on slow commands: a command still running after 30 seconds keeps running in the sandbox and returns `status: "running"` with its process group `pid`, its output so far, and an `outputDirectory` whose `stdout`, `stderr`, and `exit` files the model reads with later commands. Cancelling a turn now stops a command that has not yet returned. `BashToolOutput` now carries `status`, and `exitCode` is present only on `completed` results, so authored wrappers that read the output should check `status` first.
+
+### Patch Changes
+
+- de6b7e1: Memory provider tools now survive a mid-turn restart when the turn's history holds non-JSON tool results, such as dates. eve no longer snapshots history into each tool's replay state; a replayed `tools()` call receives the same `messages` the current process resolved the turn's tools with.
+
 ## 0.70.3
 
 ### Patch Changes
