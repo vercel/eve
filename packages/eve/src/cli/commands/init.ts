@@ -63,10 +63,12 @@ import {
 import { cleanupFreshInitTarget, workspaceFailureNote } from "./init-recovery.js";
 import { hasInteractiveTerminal } from "./preconditions.js";
 import { resolveInitTarget } from "./init-target.js";
+import { runInitWebAuth, type InitWebAuthDeps } from "./init-web-auth.js";
 
 export type { InitCliLogger, InitCommandOptions } from "./init-agent-workspace.js";
 
 export interface InitCommandDependencies {
+  webAuth?: Partial<InitWebAuthDeps>;
   addAgentToProject: typeof addAgentToProject;
   detectInvokingPackageManager: typeof detectInvokingPackageManager;
   detectPackageManager: typeof detectPackageManager;
@@ -452,6 +454,20 @@ async function runInitSteps(input: {
     }
     initLog.debug("dependencies installed", { ms: installElapsedMs });
 
+    if (options.channelWebNextjs === true) {
+      progress.stop();
+      activeInitStep = "registry_channels";
+      trackStep?.(activeInitStep);
+      await runInitWebAuth({
+        appRoot: project.projectPath,
+        interactive: interactive && !agentLaunched && !options.nonInteractive,
+        options,
+        logger,
+        deps: dependencies.webAuth,
+      });
+      progress = startCliLiveRow(logger, progressOptions);
+    }
+
     if (project.kind === "created") {
       activeInitStep = "initialize_git";
       trackStep?.(activeInitStep);
@@ -492,6 +508,25 @@ export async function runInitCommand(
   trackStep?: (step: EveCliSetupStep) => void,
   trackTerminal?: InitTerminalTracker,
 ): Promise<void> {
+  if (
+    !options.channelWebNextjs &&
+    (options.webAuthentication !== undefined ||
+      options.project !== undefined ||
+      options.team !== undefined)
+  ) {
+    throw new Error(
+      "--web-authentication, --project, and --team require --channel-web-nextjs during eve init.",
+    );
+  }
+  if (
+    (options.project !== undefined || options.team !== undefined) &&
+    options.webAuthentication !== "vercel"
+  ) {
+    throw new Error("--project and --team require --web-authentication vercel during eve init.");
+  }
+  if (options.team !== undefined && options.project === undefined) {
+    throw new Error("--team requires --project during eve init.");
+  }
   const agentLaunched = await dependencies.isCodingAgentLaunch();
   const interactive = dependencies.hasInteractiveTerminal();
   const startDevelopment = interactive && !agentLaunched && !options.nonInteractive;

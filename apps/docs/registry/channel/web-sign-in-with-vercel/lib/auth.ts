@@ -45,6 +45,7 @@ export const auth = betterAuth({
     vercel: {
       clientId: requireEnvironmentVariable("VERCEL_APP_CLIENT_ID"),
       clientSecret: requireEnvironmentVariable("VERCEL_APP_CLIENT_SECRET"),
+      scope: ["openid", "email", "profile"],
     },
   },
 });

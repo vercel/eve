@@ -18,6 +18,70 @@ export default eveChannel({
 });
 ```
 
+## Web Chat with Sign in with Vercel
+
+Run `eve add channel/web`, or select **Web Chat** from the terminal UI's channel
+picker. Choose a hosting layout, then **Sign in with Vercel**. Setup uses a
+linked Vercel project and creates a Vercel App that only members of that
+project's team can sign in to.
+
+For a new app, run `eve init my-agent --channel-web-nextjs`. Initialization
+asks the same sign-in question, then lets you create or select a Vercel project
+if one is not linked. It installs the auth scaffold before initializing Git
+and opening the terminal UI. This option keeps the Next.js app at the project
+root; `eve add channel/web` installs its frontend under `apps/web`.
+
+For non-interactive initialization, select the provider and project explicitly:
+
+```bash
+eve init my-agent --channel-web-nextjs --web-authentication vercel \
+  --project my-agent --team my-team --non-interactive
+```
+
+Use `--web-authentication custom` to supply your own auth. Without an explicit
+provider, non-interactive and coding-agent initialization keeps the default
+channel policy and does not provision a Vercel App. Plain `eve init` does not
+add Web Chat or prompt for browser authentication.
+
+The generated Next.js app uses Better Auth sessions. The selected agent's HTTP
+channel verifies the same session, while retaining Vercel OIDC and local
+development access. In an agent workspace, setup configures only the selected
+agent. Other agents keep their own authentication policies.
+
+Setup registers `/api/auth/callback/vercel` as a project redirect URI, so Vercel
+validates callbacks against the project's deployment domains. The app uses the
+`authorization_code` grant, `client_secret_post` authentication, and the
+`openid`, `email`, and `profile` scopes. Setup writes `VERCEL_APP_CLIENT_ID`,
+`VERCEL_APP_CLIENT_SECRET`, and `BETTER_AUTH_SECRET` to production and preview;
+secret values are marked sensitive and are never printed or written to source.
+Deploy the project after setup. Local development continues without browser
+sign-in.
+
+For automation, supply the setup answers explicitly:
+
+```bash
+eve add channel/web --non-interactive \
+  --answer 'web-hosting="vercel"' \
+  --answer 'web-authentication="vercel"'
+```
+
+Use a linked project with permission to manage Vercel Apps and project
+environment variables. A team owner can complete setup if your role cannot
+create apps. If setup reports a missing prerequisite, complete it
+and resume with `eve add channel/web --skip-install`. Compatible existing apps
+and credentials are reused; conflicting app settings or credentials stop setup
+with an error. Authored channel or UI files are preserved unless you explicitly
+pass `--overwrite`.
+
+If sign-in setup fails or is cancelled during initialization, the generated
+app is preserved. Enter its directory, run `eve link` if needed, then resume
+with `eve add channel/web --skip-install`. The retry keeps the root Next.js
+layout; do not rerun `eve init` over the generated app.
+
+Choose **Configure authentication myself** (`web-authentication=custom`) to
+keep the current channel policy. The default placeholder rejects production
+browser requests until you configure your own authentication.
+
 ## Routes
 
 The default eve channel inspects the agent, creates sessions, accepts callbacks and task input, controls sessions, and streams events. Its public routes include:

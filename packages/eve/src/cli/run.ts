@@ -1,4 +1,5 @@
-import { Command, CommanderError } from "#compiled/commander/index.js";
+import { Command, CommanderError, Option } from "#compiled/commander/index.js";
+import type { WebAuthenticationChoice } from "#setup/integrations/web/auth-options.js";
 import { registerBuildCommand, type BuildHost } from "#cli/commands/build.js";
 import { resolveApplicationRoot } from "#internal/application/paths.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
@@ -172,6 +173,14 @@ export function createCliProgram(
     .command("init [target]")
     .description("Create a new eve agent, or add one to an existing project directory.")
     .option("--channel-web-nextjs", "Add the Web Chat application (Next.js)")
+    .addOption(
+      new Option("--web-authentication <provider>", "Web Chat authentication").choices([
+        "vercel",
+        "custom",
+      ]),
+    )
+    .option("--project <name-or-id>", "Vercel project for Web Chat sign-in")
+    .option("--team <slug-or-id>", "Vercel team for the Web Chat project")
     .option(
       "--agents <names>",
       "Create an agents/ workspace with comma-separated agent names",
@@ -191,6 +200,9 @@ export function createCliProgram(
         options: {
           agents?: string[];
           channelWebNextjs?: boolean;
+          webAuthentication?: WebAuthenticationChoice;
+          project?: string;
+          team?: string;
           model?: string;
           reasoning?: AgentReasoningDefinition;
           nonInteractive?: boolean;
@@ -209,6 +221,9 @@ export function createCliProgram(
           {
             agents: options.agents,
             channelWebNextjs: options.channelWebNextjs,
+            webAuthentication: options.webAuthentication,
+            project: options.project,
+            team: options.team,
             model: options.model,
             reasoning: options.reasoning,
             nonInteractive: options.nonInteractive,

@@ -353,6 +353,9 @@ describe("bare eve command", () => {
       {
         agents: undefined,
         channelWebNextjs: undefined,
+        webAuthentication: undefined,
+        project: undefined,
+        team: undefined,
         model: undefined,
         reasoning: undefined,
       },
@@ -445,6 +448,9 @@ describe("eve init compatibility flags", () => {
       {
         agents: undefined,
         channelWebNextjs: undefined,
+        webAuthentication: undefined,
+        project: undefined,
+        team: undefined,
         model: "openai/gpt-5.6-sol",
         reasoning: "high",
         nonInteractive: undefined,
@@ -468,6 +474,9 @@ describe("eve init compatibility flags", () => {
       {
         agents: undefined,
         channelWebNextjs: undefined,
+        webAuthentication: undefined,
+        project: undefined,
+        team: undefined,
         model: undefined,
         reasoning: undefined,
         nonInteractive: true,
@@ -484,6 +493,49 @@ describe("eve init compatibility flags", () => {
 
     await expect(runCli(["init", "my-agent", "--reasoning", "extreme"], logger)).rejects.toThrow();
 
+    expect(runInitCommand).not.toHaveBeenCalled();
+  });
+
+  it("accepts explicit Web Chat provisioning options and rejects unknown auth providers", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+    runInitCommand.mockClear();
+    await runCli(
+      [
+        "init",
+        "web-agent",
+        "--channel-web-nextjs",
+        "--web-authentication",
+        "vercel",
+        "--project",
+        "web-agent",
+        "--team",
+        "example",
+        "--non-interactive",
+      ],
+      logger,
+    );
+    expect(runInitCommand).toHaveBeenCalledWith(
+      logger,
+      resolve(process.cwd()),
+      "web-agent",
+      expect.objectContaining({
+        channelWebNextjs: true,
+        webAuthentication: "vercel",
+        project: "web-agent",
+        team: "example",
+        nonInteractive: true,
+      }),
+      undefined,
+      expect.any(Function),
+      expect.any(Function),
+    );
+    runInitCommand.mockClear();
+    await expect(
+      runCli(
+        ["init", "web-agent", "--channel-web-nextjs", "--web-authentication", "unknown"],
+        logger,
+      ),
+    ).rejects.toThrow();
     expect(runInitCommand).not.toHaveBeenCalled();
   });
 

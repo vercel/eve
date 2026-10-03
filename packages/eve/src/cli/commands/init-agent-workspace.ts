@@ -16,12 +16,16 @@ import { pathExists } from "#setup/path-exists.js";
 import { createPrompter } from "#setup/prompter.js";
 import { agentTemplateFiles } from "#setup/scaffold/create/project.js";
 import { writeTextFile } from "#setup/scaffold/files.js";
+import type { WebAuthenticationChoice } from "#setup/integrations/web/auth-options.js";
 
 import { InitTargetError } from "./init-telemetry.js";
 
 export interface InitCommandOptions {
   agents?: readonly string[];
   channelWebNextjs?: boolean;
+  webAuthentication?: WebAuthenticationChoice;
+  project?: string;
+  team?: string;
   model?: string;
   reasoning?: AgentReasoningDefinition;
   /** Do not start development after initialization. */

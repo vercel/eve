@@ -20,13 +20,18 @@ function deps(): WebSetupDeps {
       kind: "standalone",
     })),
     writeTextFile: vi.fn(async () => {}),
+    prepareWebAuthScaffold: vi.fn(async () => vi.fn(async () => {})),
+    provisionWebChatAuth: vi.fn(async () => {}),
+    installScaffoldDependencies: vi.fn(async () => {}),
   };
 }
 
 describe("Web setup", () => {
   it("presents the hosting topology with concise guidance", async () => {
     const effects = deps();
-    const fake = createFakePrompter({ single: () => "vercel" });
+    const fake = createFakePrompter({
+      single: (question) => (question.message.includes("sign in") ? "custom" : "vercel"),
+    });
     const select = vi.spyOn(fake.prompter, "select");
     const ctx = createSetupContexts({
       appRoot: "/project",
@@ -65,7 +70,9 @@ describe("Web setup", () => {
     const resolveVercelProject = vi.fn(async () => ({ orgId: "team", projectId: "project" }));
     const ctx = createSetupContexts({
       appRoot: "/project",
-      asker: withAnswers({ "web-hosting": "vercel" })(headlessAsker()),
+      asker: withAnswers({ "web-hosting": "vercel", "web-authentication": "custom" })(
+        headlessAsker(),
+      ),
       environment: integrationSetupEnvironment("cli-missing", { kind: "unresolved" }),
       prompter: createFakePrompter().prompter,
       resolveVercelProject,
@@ -85,7 +92,9 @@ describe("Web setup", () => {
     });
     const ctx = createSetupContexts({
       appRoot: "/project",
-      asker: withAnswers({ "web-hosting": "next" })(headlessAsker()),
+      asker: withAnswers({ "web-hosting": "next", "web-authentication": "custom" })(
+        headlessAsker(),
+      ),
       environment: integrationSetupEnvironment("cli-missing", { kind: "unresolved" }),
       prompter: createFakePrompter().prompter,
       resolveVercelProject,
@@ -257,5 +266,63 @@ describe("Web setup", () => {
       expect.anything(),
       expect.anything(),
     );
+  });
+  it("resolves a project for sign-in and provisions it before installing auth", async () => {
+    const effects = deps();
+    const writeAuth = vi.fn(async () => {});
+    vi.mocked(effects.prepareWebAuthScaffold).mockResolvedValue(writeAuth);
+    const resolveVercelProject = vi.fn(async () => ({ orgId: "team", projectId: "project" }));
+    const ctx = createSetupContexts({
+      appRoot: "/project",
+      asker: withAnswers({ "web-hosting": "vercel", "web-authentication": "vercel" })(
+        headlessAsker(),
+      ),
+      environment: integrationSetupEnvironment("cli-missing", { kind: "unresolved" }),
+      prompter: createFakePrompter().prompter,
+      resolveVercelProject,
+    });
+    const plan = await prepareWebSetup(ctx.prepare, effects);
+    expect(resolveVercelProject).toHaveBeenCalledWith("Web Chat sign-in");
+    await expect(applyWebSetup(plan, ctx.apply, effects)).resolves.toMatchObject({
+      deploymentRequired: true,
+    });
+    expect(effects.provisionWebChatAuth).toHaveBeenCalledWith(
+      { orgId: "team", projectId: "project" },
+      undefined,
+    );
+    expect(writeAuth).toHaveBeenCalledOnce();
+    expect(vi.mocked(effects.provisionWebChatAuth).mock.invocationCallOrder[0]).toBeLessThan(
+      writeAuth.mock.invocationCallOrder[0]!,
+    );
+    expect(effects.installScaffoldDependencies).toHaveBeenCalledWith(
+      expect.objectContaining({ projectPath: "/project" }),
+    );
+  });
+
+  it("keeps auth files unchanged when provisioning fails", async () => {
+    const effects = deps();
+    const writeAuth = vi.fn(async () => {});
+    vi.mocked(effects.prepareWebAuthScaffold).mockResolvedValue(writeAuth);
+    vi.mocked(effects.provisionWebChatAuth).mockRejectedValue(new Error("Cannot create app"));
+    const ctx = createSetupContexts({
+      appRoot: "/project",
+      asker: headlessAsker(),
+      environment: integrationSetupEnvironment("cli-missing", { kind: "unresolved" }),
+      prompter: createFakePrompter().prompter,
+      resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
+    });
+    await expect(
+      applyWebSetup(
+        {
+          hosting: "vercel",
+          packageManager: "pnpm",
+          authProject: { orgId: "team", projectId: "project" },
+        },
+        ctx.apply,
+        effects,
+      ),
+    ).rejects.toThrow("Cannot create app");
+    expect(writeAuth).not.toHaveBeenCalled();
+    expect(effects.installScaffoldDependencies).not.toHaveBeenCalled();
   });
 });

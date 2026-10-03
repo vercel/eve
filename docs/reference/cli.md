@@ -35,7 +35,7 @@ eve collects CLI telemetry by default to improve the command-line interface. Run
 ## `eve init`
 
 ```bash
-eve init [target] [--model <provider/model-id>] [--reasoning <effort>] [--channel-web-nextjs] [--non-interactive]
+eve init [target] [--model <provider/model-id>] [--reasoning <effort>] [--channel-web-nextjs] [--web-authentication <vercel|custom>] [--project <name-or-id>] [--team <slug-or-id>] [--non-interactive]
 ```
 
 Creates a new agent app or adds an agent to an existing app. Always installs dependencies. New directories also initialize Git.
@@ -52,12 +52,31 @@ Existing packages do not need a target-selection prompt: run `eve init` from the
 
 After scaffolding in an interactive human terminal, eve opens the TUI directly. Pass `-n` or `--non-interactive` to return after scaffolding instead. It still installs dependencies and follows the normal Git setup behavior. Noninteractive and coding-agent invocations return without starting an interactive session. Fresh projects use the parent workspace's package manager when there is one; otherwise they use the manager that launched `eve init`.
 
-| Flag                    | Type   | Default                                              | Description                                                                                                              |
-| ----------------------- | ------ | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `--model <model>`       | string | `openai/gpt-6-luna-fast`                             | Set the root agent's AI Gateway model ID.                                                                                |
-| `--reasoning <effort>`  | enum   | `high` without `--model`; otherwise provider default | Set reasoning to `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. `provider-default` leaves the field unauthored. |
-| `--channel-web-nextjs`  | flag   | off                                                  | Add the Web Chat app (Next.js). Not for existing projects — run `eve add channel/web` there instead.                     |
-| `-n, --non-interactive` | flag   | off                                                  | Scaffold and install dependencies without starting development.                                                          |
+| Flag                              | Type   | Default                                              | Description                                                                                                               |
+| --------------------------------- | ------ | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `--model <model>`                 | string | `openai/gpt-6-luna-fast`                             | Set the root agent's AI Gateway model ID.                                                                                 |
+| `--reasoning <effort>`            | enum   | `high` without `--model`; otherwise provider default | Set reasoning to `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. `provider-default` leaves the field unauthored.  |
+| `--channel-web-nextjs`            | flag   | off                                                  | Add the Web Chat app (Next.js). Not for existing projects — run `eve add channel/web` there instead.                      |
+| `--web-authentication <provider>` | enum   | prompt interactively; `custom` otherwise             | `vercel` provisions Sign in with Vercel; `custom` keeps the current channel auth. Requires `--channel-web-nextjs`.        |
+| `--project <name-or-id>`          | string | linked project or interactive picker                 | Link or create the Vercel project used for Web Chat sign-in. Requires `--channel-web-nextjs --web-authentication vercel`. |
+| `--team <slug-or-id>`             | string | Vercel CLI scope                                     | Team for `--project`. Requires `--project`.                                                                               |
+| `-n, --non-interactive`           | flag   | off                                                  | Scaffold and install dependencies without starting development.                                                           |
+
+With `--channel-web-nextjs`, interactive initialization asks how people should
+sign in. Choosing **Sign in with Vercel** creates or selects a Vercel project,
+provisions a team-only Vercel App, and installs browser session authentication.
+Production and preview credentials are configured remotely; local development
+continues without browser sign-in. Deploy after setup to enable production
+sign-in. See [Web Chat with Sign in with Vercel](../channels/eve#web-chat-with-sign-in-with-vercel).
+
+```bash
+eve init my-agent --channel-web-nextjs --web-authentication vercel \
+  --project my-agent --team my-team --non-interactive
+```
+
+If sign-in setup is interrupted, the generated app stays on disk. Enter its
+directory, link the project with `eve link` if needed, and run
+`eve add channel/web --skip-install` to finish setup.
 
 ## `eve extension`
 
