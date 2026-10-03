@@ -1,7 +1,7 @@
 import { createLogger } from "#internal/logging.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
-import type { SandboxProviderRuntime } from "#shared/sandbox-provider.js";
+import type { SandboxProviderHandle, SandboxProviderRuntime } from "#shared/sandbox-provider.js";
 
 const log = createLogger("tool-session.sandbox");
 
@@ -44,14 +44,27 @@ export interface ToolSessionSandboxSweeper {
   ): Promise<boolean>;
 }
 
-const supported = new WeakMap<object, ToolSessionSandboxSweeper | null>();
+/** What a binding that keeps tool-session sandboxes tells the calls that use them. */
+export interface ToolSessionSandboxSupport {
+  /**
+   * Frees what a call's handle holds in this process once the call ends,
+   * leaving the session's sandbox for later and overlapping calls. Absent
+   * when a handle holds nothing of its own, such as a client to a remote
+   * sandbox.
+   */
+  releaseHandle?(handle: SandboxProviderHandle): Promise<void>;
+  /** Lists and deletes the session sandboxes for the sweep; absent when there is nothing to sweep. */
+  readonly sweeper?: ToolSessionSandboxSweeper;
+}
+
+const supported = new WeakMap<object, ToolSessionSandboxSupport>();
 
 /** Marks a binding whose `start` reopens a session's sandbox by session id. */
 export function withToolSessionSandboxes<Implementation extends object>(
   implementation: Implementation,
-  sweeper?: ToolSessionSandboxSweeper,
+  support: ToolSessionSandboxSupport = {},
 ): Implementation {
-  supported.set(implementation, sweeper ?? null);
+  supported.set(implementation, support);
   return implementation;
 }
 
@@ -73,6 +86,16 @@ export function assertToolSessionSandboxSupport(registry: RuntimeSandboxRegistry
   if (provider !== undefined && !supported.has(provider.implementation)) {
     throw new ToolSessionSandboxUnsupportedError(provider.providerName);
   }
+}
+
+/** Frees what a keyed call's handle holds in this process; the sandbox itself stays. */
+export async function releaseToolSessionHandle(
+  registry: RuntimeSandboxRegistry,
+  handle: SandboxProviderHandle,
+): Promise<void> {
+  const provider = registeredProvider(registry);
+  if (provider === undefined) return;
+  await supported.get(provider.implementation)?.releaseHandle?.(handle);
 }
 
 function registeredProvider(registry: RuntimeSandboxRegistry): SandboxProviderRuntime | undefined {
@@ -126,8 +149,8 @@ export async function sweepToolSessionSandboxes(input: {
   if (provider === undefined) {
     return { deleted: [], failed: [], skipped: "The agent has no sandbox of its own." };
   }
-  const sweeper = supported.get(provider.implementation);
-  if (sweeper === undefined || sweeper === null) {
+  const sweeper = supported.get(provider.implementation)?.sweeper;
+  if (sweeper === undefined) {
     return {
       deleted: [],
       failed: [],

@@ -19,6 +19,7 @@ import { deriveToolSessionId, validateToolSessionKey } from "#execution/tool-ses
 import {
   assertToolSessionSandboxSupport,
   leaseToolSession,
+  releaseToolSessionHandle,
   ToolSessionSandboxUnsupportedError,
 } from "#execution/tool-session/sandbox.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -195,7 +196,7 @@ async function runInvocation(input: {
     );
   } finally {
     await sandbox.release().catch((error: unknown) => {
-      logError(log, "failed to delete a call's sandbox", error, { sessionId, toolName: name });
+      logError(log, "failed to release a call's sandbox", error, { sessionId, toolName: name });
     });
   }
 }
@@ -209,7 +210,9 @@ interface CallSandbox {
  * A keyed session's sandbox: found or created on the first `ctx.getSandbox()`
  * through the provider's `start`, which reopens it by session id, and kept
  * after the call. Concurrent first calls in this process share one start.
- * The call does not own the sandbox, so a failed start never deletes it.
+ * The call does not own the sandbox, so a failed start never deletes it, and
+ * release only lets go of this call's handle: an overlapping call keeps its
+ * own.
  */
 async function keyedSandbox(runtime: InvokeToolRuntime, sessionId: string): Promise<CallSandbox> {
   const release = leaseToolSession(sessionId);
@@ -233,7 +236,12 @@ async function keyedSandbox(runtime: InvokeToolRuntime, sessionId: string): Prom
       },
     },
     async release() {
-      release();
+      try {
+        const handle = await inner.detach();
+        if (handle !== undefined) await releaseToolSessionHandle(runtime.sandboxRegistry, handle);
+      } finally {
+        release();
+      }
     },
   };
 }

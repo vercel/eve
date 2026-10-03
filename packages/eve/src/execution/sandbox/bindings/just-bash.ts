@@ -68,7 +68,7 @@ export function createJustBashSandboxProvider(
 
   // `start` reopens the session's root by session id, so keyed tool sessions
   // can reuse it. The roots are local files, so there is nothing to sweep.
-  return withToolSessionSandboxes({
+  const implementation: ReturnType<typeof createJustBashSandboxProvider> = {
     async prepare(context) {
       const templateIdentity = createSandboxProviderIdentity({
         ...environmentIdentity,
@@ -147,6 +147,10 @@ export function createJustBashSandboxProvider(
         },
       };
     },
+  };
+  // Each handle runs its own interpreter in this process; stopping it keeps the root's files.
+  return withToolSessionSandboxes(implementation, {
+    releaseHandle: (handle) => handle.onSessionStop(),
   });
 }
 

@@ -42,6 +42,18 @@ interface EnsureSandboxAccessInput {
   readonly state: SandboxState | null;
 }
 
+/** The access `ensureSandboxAccess` builds, with what the opener may do beyond the sandbox API. */
+export interface EnsuredSandboxAccess extends SandboxAccess {
+  /**
+   * Lets go of the handle this access opened, if any, without stopping or
+   * deleting the sandbox, and returns it so the caller can free what it
+   * holds in this process. For a sandbox that outlives the access, such as a
+   * tool session's. Waits for an open still in flight, so a caller that
+   * finished early never leaves that handle behind.
+   */
+  detach(): Promise<SandboxProviderHandle | undefined>;
+}
+
 interface OpenedSandbox {
   readonly handle: SandboxProviderHandle;
   readonly providerName: string;
@@ -54,7 +66,9 @@ interface OpenedSandbox {
 // state instead.
 const pendingSandboxStarts = new Map<string, Promise<SandboxSessionState | null>>();
 
-export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Promise<SandboxAccess> {
+export async function ensureSandboxAccess(
+  input: EnsureSandboxAccessInput,
+): Promise<EnsuredSandboxAccess> {
   let persisted: SandboxSessionState | null = input.state?.session ?? null;
   let opened: OpenedSandbox | undefined;
   let opening: Promise<SandboxProviderHandle> | undefined;
@@ -66,6 +80,9 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
     return {
       async captureState() {
         return { session: persisted };
+      },
+      async detach() {
+        return undefined;
       },
       async get() {
         return null;
@@ -335,6 +352,21 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
       opening = undefined;
       persisted = null;
       requiring = undefined;
+    },
+    async detach() {
+      // A failed open left nothing to let go of.
+      if (requiring !== undefined) await requiring.catch(() => undefined);
+      const current = opened;
+      if (current === undefined) return undefined;
+      untrackActiveSandboxHandle({
+        handle: current.handle,
+        providerName: current.providerName,
+        sessionId: input.sessionId,
+      });
+      opened = undefined;
+      opening = undefined;
+      requiring = undefined;
+      return current.handle;
     },
     async get() {
       await requireHandle();

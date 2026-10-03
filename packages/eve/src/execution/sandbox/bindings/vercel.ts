@@ -250,10 +250,10 @@ export function createVercelSandbox(
     },
   };
   // `start` finds a session's sandbox by name, so keyed tool sessions can reuse it.
-  return withToolSessionSandboxes(
-    implementation,
-    createVercelToolSessionSweeper({ createOptions, loadSandboxModule }),
-  );
+  // A handle is only an SDK client, so a call that ends has nothing to free.
+  return withToolSessionSandboxes(implementation, {
+    sweeper: createVercelToolSessionSweeper({ createOptions, loadSandboxModule }),
+  });
 }
 
 interface VercelSandboxTemplateRecord {
