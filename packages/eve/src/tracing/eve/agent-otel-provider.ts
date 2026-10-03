@@ -31,15 +31,9 @@ import { resolveInstrumentationEnvironment } from "#internal/application/dev-env
 import type { ConversationEnvironment } from "#shared/conversation-context.js";
 import { eveOperationInput } from "#tracing/eve/operation-input.js";
 import { gatewayCostAttributes } from "#tracing/eve/gateway.js";
-import type {
-  Operation as AttemptOperation,
-  Operation as ModelOperation,
-  DurableTraceRuntime,
-} from "#tracing/lib/index.js";
+import type { Operation, DurableTraceRuntime } from "#tracing/lib/index.js";
 import { isUserMessageKind } from "#harness/messages.js";
 import { isObject } from "#shared/guards.js";
-
-type SpanState<T = AttemptOperation> = { readonly runtime: T; readonly context: Context };
 
 export interface AgentOtelInstrumentationInput {
   readonly tracing: DurableTraceRuntime;
@@ -75,11 +69,11 @@ export function createAgentOtelInstrumentation(
   const lifecycle = input.tracing;
   const attemptScopes = new Map<string, InstrumentationAttemptScope>();
   // A lost serverless worker retries the whole turn step from entry.
-  const steps = new WeakMap<InstrumentationAttemptScope, SpanState>();
-  const modelSpans = new WeakMap<
+  const steps = new WeakMap<
     InstrumentationAttemptScope,
-    Map<string, SpanState<ModelOperation>>
+    { runtime: Operation; context: Context }
   >();
+  const modelSpans = new WeakMap<InstrumentationAttemptScope, Map<string, Operation>>();
   const actions = createAgentActionInstrumentation({
     lifecycle,
     frameworkVersion: input.frameworkVersion,
@@ -224,23 +218,23 @@ export function createAgentOtelInstrumentation(
       },
       event.idempotencyKey,
     );
-    const state = {
-      runtime,
-      context: trace.setSpan(attempt.context, trace.wrapSpanContext(runtime.reference)),
-    };
-    getSpanStates(modelSpans, event.scope).set(event.idempotencyKey, state);
+    let models = modelSpans.get(event.scope);
+    if (models === undefined) modelSpans.set(event.scope, (models = new Map()));
+    models.set(event.idempotencyKey, runtime);
   };
 
   const onModelCallTerminal = async (
     event: InstrumentationModelCallTerminalEvent,
   ): Promise<void> => {
-    const state = takeSpanState(modelSpans, event.scope, event.idempotencyKey);
+    const models = modelSpans.get(event.scope);
+    const state = models?.get(event.idempotencyKey);
+    models?.delete(event.idempotencyKey);
     if (state === undefined) return;
     if (event.type === "model.call.failed") {
-      await state.runtime.fail(event.error);
+      await state.fail(event.error);
     } else {
       await sessionTracing.recordModelUsage(event.scope.sessionId, event.scope.turnId, event.usage);
-      await state.runtime.complete({
+      await state.complete({
         outcome: "completed",
         result: { ...event, content: recordOutputs ? event.content : undefined },
       });
@@ -301,7 +295,7 @@ export function createAgentOtelInstrumentation(
       const ceiling = { emit: true, ...(await capturePolicy.forOperation(operation.scope)) };
       const active =
         operation.type === "model.call"
-          ? modelSpans.get(scope)?.get(operation.idempotencyKey)?.runtime
+          ? modelSpans.get(scope)?.get(operation.idempotencyKey)
           : tools.operationFor(operation.scope.attemptId, operation.idempotencyKey);
       if (active !== undefined) return active.run(execute, ceiling);
       {
@@ -328,40 +322,15 @@ export function createAgentOtelInstrumentation(
 
   async function drainOpenSpans(event: InstrumentationStepAttemptTerminalEvent): Promise<void> {
     for (const state of modelSpans.get(event.scope)?.values() ?? []) {
-      if (event.type === "step.attempt.failed") await state.runtime.fail(event.error);
+      if (event.type === "step.attempt.failed") await state.fail(event.error);
       else
-        await state.runtime.complete({
+        await state.complete({
           outcome: "completed",
           result: { finishReason: "unknown", usage: {} },
         });
     }
     modelSpans.delete(event.scope);
   }
-}
-
-function getSpanStates<T>(
-  spans: WeakMap<InstrumentationAttemptScope, Map<string, T>>,
-  scope: InstrumentationAttemptScope,
-): Map<string, T> {
-  let scoped = spans.get(scope);
-  if (scoped === undefined) {
-    scoped = new Map();
-    spans.set(scope, scoped);
-  }
-  return scoped;
-}
-
-function takeSpanState<T>(
-  spans: WeakMap<InstrumentationAttemptScope, Map<string, T>>,
-  scope: InstrumentationAttemptScope,
-  id: string,
-): T | undefined {
-  const scoped = spans.get(scope);
-  const state = scoped?.get(id);
-  if (scoped === undefined) return undefined;
-  scoped.delete(id);
-  if (scoped.size === 0) spans.delete(scope);
-  return state;
 }
 
 function contextFromSpanContext(spanContext: SpanContext): Context {
