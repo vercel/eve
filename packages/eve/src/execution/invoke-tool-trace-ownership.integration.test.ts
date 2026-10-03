@@ -62,6 +62,7 @@ const tools = [
 ];
 
 const runtime: InvokeToolRuntime = {
+  agentName: "compiled-agent",
   callbackBaseUrl: "https://agent.example",
   compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
   manifest: {
