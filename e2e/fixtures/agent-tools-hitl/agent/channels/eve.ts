@@ -7,6 +7,8 @@ export default eveChannel({
     return {
       attributes: {
         fixture: "authorized-response",
+        // Lets a human-input eval change what the current caller's policies and tools see.
+        flag: request.headers.get("x-eve-fixture-flag") ?? "none",
         model: request.headers.get("x-eve-fixture-model") ?? "default",
       },
       authenticator: "e2e-fixture",
