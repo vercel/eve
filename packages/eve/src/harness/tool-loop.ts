@@ -179,6 +179,7 @@ import {
   createAuthorizationCompletedEvent,
   createAuthorizationRequiredEvent,
   createMessageCompletedEvent,
+  createStepCompletedEvent,
   createStepStartedEvent,
 } from "#protocol/message.js";
 import {
@@ -1262,7 +1263,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     };
     let currentMessages = createRequestMessages();
     let interruptedUsage: TokenUsageDelta | undefined;
-    const finishSteeredStep = (): StepResult => {
+    const finishSteeredStep = async (): Promise<StepResult> => {
       throwIfTurnAborted(config.abortSignal);
       ctx?.set(HistoryStateKey, currentMessages.historyState);
       if (interruptedUsage !== undefined) {
@@ -1275,6 +1276,17 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           }),
         );
       }
+      // The superseded step already published `step.started`. `emit` refuses
+      // events once generation is interrupted, so close the step directly.
+      await instrumentedEmit?.(
+        createStepCompletedEvent({
+          finishReason: "other",
+          sequence: emissionState.sequence,
+          stepIndex: emissionState.stepIndex,
+          turnId: emissionState.turnId,
+          usage: interruptedUsage,
+        }),
+      );
       return {
         steered: true,
         next: runStep,
