@@ -7,24 +7,32 @@ description: "Mount eve's coding extension, eve-code, and see its latest benchma
 
 ## Benchmark results
 
-eve-code is measured with eve-bench against other coding agent harnesses. Every harness runs the same tasks on the same model, and each trial runs in its own Vercel Sandbox. A trial counts as resolved only when the task's verifier passes against the files the agent left behind. A crash or timeout counts as a failure, not a gap.
-
-The 95% interval is a paired bootstrap over tasks. When two harnesses' intervals overlap, the benchmark does not separate them.
-
-### DeepSWE-lean
-
-Twelve pinned DeepSWE v1.1 feature and bug-fix tasks, graded by DeepSWE's own verifiers under a 20-minute agent budget. Measured on demand, so results can trail `main`.
-
 <EveCodeBenchmark dataset="deepswe-lean" />
 
-### How these results update
+These results show baseline performance. Each harness uses its default configuration. The results do not show how a harness performs with other models, prompts, or tasks.
+
+### How the benchmark works
+
+The benchmark uses eve-bench and the DeepSWE-lean dataset. DeepSWE-lean has 12 feature and bug-fix tasks from DeepSWE v1.1.
+
+- All harnesses use the same model and the same tasks.
+- Each harness does each task 3 times.
+- Each attempt runs in a new Vercel Sandbox.
+- Each attempt has a limit of 20 minutes.
+- The DeepSWE verifier examines the files that the agent leaves.
+- An attempt passes only when the verifier passes.
+- A crash or a timeout is a failure.
+
+The line on each correctness row shows the 95% interval. When the lines of two harnesses overlap, the benchmark does not show a difference between them.
+
+### How the results update
 
 1. A maintainer runs the `eve-code` workflow on `main` with the `deepswe-lean` dataset.
-2. The workflow benchmarks eve-code, opencode, and pi, and publishes each complete result to the eve-bench result store.
-3. The workflow converts the run's `report.json` into `apps/docs/lib/evals/eve-code-benchmark.json` and commits it to `main`. Incomplete runs, single-task runs, and pull request runs are never published.
-4. The next docs deployment renders the new snapshot.
+2. The workflow runs eve-code, opencode, and pi. It saves each complete result in the eve-bench result store.
+3. The workflow writes a summary of the result to `apps/docs/lib/evals/eve-code-benchmark.json`. Then it commits the file to `main`.
+4. The next docs deployment shows the new results.
 
-Each row's date links to the GitHub Actions run that produced it. Harnesses that did not run in that workflow show the date of their latest stored result.
+The workflow does not publish incomplete runs, single-task runs, or pull request runs. Results can be older than `main`, because a maintainer starts each run. Select a harness name to open the GitHub Actions run for that result.
 
 ## Mount the extension
 
