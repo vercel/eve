@@ -132,7 +132,7 @@ export interface ToolSessionSandboxSweepResult {
 /**
  * Deletes tool-session sandboxes unused for longer than `expiryMs`. A tool
  * session has no end to delete its sandbox at, so this bounds retention.
- * Production builds on Vercel Sandbox run it weekly as a Nitro task.
+ * Apps run it from a schedule through the public `sweepToolSessionSandboxes`.
  *
  * A sandbox that is running, used since the cutoff, or leased by a call in
  * this process is kept, checked again at the provider's final read. Another

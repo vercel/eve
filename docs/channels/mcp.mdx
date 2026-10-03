@@ -287,7 +287,19 @@ In a tool session:
 
 Tool sessions need a sandbox provider that finds the session's sandbox again: Vercel Sandbox or just-bash. On another provider, a call with a key fails with a `Sandbox provider "<name>" cannot keep a sandbox between invokeTool calls` error when the tool opens its sandbox. Tools that never open a sandbox still run. just-bash keeps its sandboxes on the local disk, so on Vercel Functions a just-bash tool session lasts only as long as the function instance.
 
-A tool session has no end, so a production build on Vercel Sandbox schedules a weekly cron task, `eve.tool-session-sandbox-sweep`, that deletes tool-session sandboxes unused for 30 days. A sandbox that is running, or that a call on the same instance is using, is kept. The task is registered in every production build whose agent uses Vercel Sandbox, including apps that never call `invokeTool` with a key or enable `mcpChannel({ tools: true })`; it lists only sandboxes eve named and tagged as tool sessions, and in an app with none it finds nothing to delete.
+A tool session has no end, so nothing deletes its sandbox on its own. On Vercel Sandbox, an app that uses tool sessions (through `tools: true` here or a custom route's `invokeTool` with a `key`) bounds that with a [schedule](../schedules) that runs `sweepToolSessionSandboxes` from `eve/sandbox`, which deletes the tool-session sandboxes unused for 30 days. A sandbox that is running, or that a call on the same instance is using, is kept. It deletes only sandboxes eve named and tagged as tool sessions. Without the schedule, idle tool-session sandboxes stay until you delete them yourself.
+
+```ts title="agent/schedules/tool-session-sweep.ts"
+import { sweepToolSessionSandboxes } from "eve/sandbox";
+import { defineSchedule } from "eve/schedules";
+
+export default defineSchedule({
+  cron: "17 4 * * 0",
+  run: sweepToolSessionSandboxes,
+});
+```
+
+just-bash keeps its sandboxes on the local disk and cannot list them, so there the sweep deletes nothing.
 
 ## Invocation ownership
 

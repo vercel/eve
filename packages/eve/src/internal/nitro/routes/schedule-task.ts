@@ -1,8 +1,10 @@
 import { expectScheduleRun, ScheduleDispatcher } from "#channel/schedule.js";
+import { ContextContainer } from "#context/container.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
 import { loadResolvedCompiledScheduleByTaskName } from "#runtime/schedules/resolve-schedule.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
+import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -42,6 +44,9 @@ export async function dispatchScheduleTaskFromArtifacts(
     runtime,
     channels: bundle.graph.root.channels,
   });
+  // The handler runs against the root agent, as framework helpers it calls expect.
+  const scope = new ContextContainer();
+  scope.setVirtualContext(BundleKey, bundle);
 
   const dispatchInput: {
     scheduleId: string;
@@ -55,7 +60,7 @@ export async function dispatchScheduleTaskFromArtifacts(
     dispatchInput.markdown = schedule.markdown;
   }
 
-  const result = await dispatcher.trigger(dispatchInput);
+  const result = await dispatcher.trigger(dispatchInput, scope);
 
   if (result.waitUntilTasks.length > 0) {
     await Promise.allSettled(result.waitUntilTasks);

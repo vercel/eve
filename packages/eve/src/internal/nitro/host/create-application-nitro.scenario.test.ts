@@ -48,7 +48,6 @@ vi.mock("nitro/builder", () => ({
 
 vi.mock("./schedule-task-routes.js", () => ({
   registerScheduleTaskHandlers,
-  registerToolSessionSandboxSweepTask: vi.fn(),
 }));
 
 vi.mock("./configure-nitro-routes.js", () => ({
