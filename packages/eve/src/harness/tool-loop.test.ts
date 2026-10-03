@@ -6514,6 +6514,87 @@ describe("createToolLoopHarness", () => {
     expect(result.session.history.at(-1)?.role).toBe("assistant");
   });
 
+  it.each([false, true])(
+    "keeps the approval response last when turn instructions run on approval resume (memory: %s)",
+    async (withMemory) => {
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "done", role: "assistant" }] },
+        text: "done",
+        toolCalls: [],
+        toolResults: [],
+      });
+      const ctx = new ContextContainer();
+      ctx.set(SandboxKey, mockSandbox().access);
+      ctx.set(SessionIdKey, "test-session");
+      ctx.set(SessionKey, {
+        sessionId: "test-session",
+        auth: { current: null, initiator: null },
+        turn: { id: "turn_0", sequence: 0 },
+      });
+      const memories = withMemory
+        ? [
+            {
+              ...defineMemory({
+                namespace: "test",
+                scope: "alice",
+                provider: { recall: { "turn.started": async () => ({ messages: [] }) } },
+              }),
+              logicalPath: "memory/profile.ts",
+              slot: "profile",
+              sourceId: "memory/profile.ts",
+              sourceKind: "module" as const,
+              visibility: "scope" as const,
+            },
+          ]
+        : [];
+      const resolver: ResolvedDynamicInstructionsResolver = {
+        eventNames: ["turn.started"],
+        events: {
+          "turn.started": () => defineInstructions({ content: "Current time.", role: "user" }),
+        },
+        logicalPath: "instructions/time.ts",
+        slug: "time",
+        sourceId: "instructions/time.ts",
+        sourceKind: "module",
+      };
+      const runStep = createToolLoopHarness(
+        createTestConfig(async (event, messages) => {
+          const lifecycleMessages = await dispatchMemoryLifecycleEvent({
+            appRoot: "/app",
+            ctx,
+            event,
+            memories,
+            messages,
+            nodeId: "__root__",
+          });
+          await dispatchDynamicInstructionEvent({
+            ctx,
+            event,
+            messages: lifecycleMessages ?? [],
+            resolvers: [resolver],
+          });
+        }),
+      );
+
+      await contextStorage.run(ctx, () =>
+        runStep(createPendingBashApprovalSession(), {
+          inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
+        }),
+      );
+
+      const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value;
+      const modelMessages = vi.mocked(agent!.stream).mock.calls[0]?.[0].messages ?? [];
+      expect(modelMessages).toContainEqual(
+        expect.objectContaining({ content: "Current time.", role: "user" }),
+      );
+      expect(modelMessages.at(-1)).toMatchObject({
+        content: [{ approvalId: "approval-1", approved: true, type: "tool-approval-response" }],
+        role: "tool",
+      });
+    },
+  );
+
   it("persists approved tool results when event handling is disabled", async () => {
     const resumedToolResultMessage = {
       content: [
