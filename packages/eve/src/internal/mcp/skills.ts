@@ -101,7 +101,9 @@ interface McpSkillEntry {
 export function createMcpSkillsFeature(source: McpSkillSource): McpServerFeature {
   return {
     capabilities: {
-      resources: {},
+      // eve never sends `notifications/resources/list_changed`; the SDK
+      // would advertise it for a bare `{}`.
+      resources: { listChanged: false },
       extensions: { [MCP_SKILLS_EXTENSION]: { directoryRead: true } },
     },
     register(server) {
