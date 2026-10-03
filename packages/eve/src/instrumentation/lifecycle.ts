@@ -474,6 +474,8 @@ export interface InstrumentationToolCallStartedEvent {
 
 export interface InstrumentationToolCallCompletedEvent {
   readonly type: "tool.call.completed";
+  /** How long the tool's `execute` ran, in milliseconds, when the publisher measured it. */
+  readonly durationMs?: number;
   readonly idempotencyKey: string;
   readonly output: InstrumentationToolOutput;
   readonly scope: InstrumentationAttemptScope;

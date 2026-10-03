@@ -2023,6 +2023,7 @@ describe("createAgentOtelInstrumentation", () => {
       type: "tool.call.started",
     });
     await runtime.hooks.publish({
+      durationMs: 1500,
       idempotencyKey: toolKey,
       output: { output: "sunny", type: "result" },
       scope,
@@ -2071,6 +2072,9 @@ describe("createAgentOtelInstrumentation", () => {
     const tool = byName(spans, "execute_tool weather")[0]!;
     const uncorrelatedTool = byName(spans, "execute_tool final_output")[0]!;
     expect(tool.parentSpanContext?.spanId).toBe(action.spanContext().spanId);
+    // Seconds, as `@ai-sdk/otel` records it; a publisher that measured nothing sets none.
+    expect(tool.attributes["gen_ai.execute_tool.duration"]).toBe(1.5);
+    expect(uncorrelatedTool.attributes["gen_ai.execute_tool.duration"]).toBeUndefined();
     expect(uncorrelatedTool.parentSpanContext?.spanId).toBe(
       byName(spans, "agent.step")[0]!.spanContext().spanId,
     );

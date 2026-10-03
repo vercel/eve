@@ -318,6 +318,7 @@ function toToolCallCompleted(
   source: TelemetryEvent<"onToolExecutionEnd">,
 ): InstrumentationToolCallCompletedEvent {
   return Object.freeze({
+    durationMs: source.toolExecutionMs,
     idempotencyKey,
     output: toToolOutput(source.toolOutput, state.capturesOutputs),
     scope: state.scope,
