@@ -308,6 +308,38 @@ describe("shouldCompact", () => {
   it("does not compact an empty history based on prompt overhead alone", () => {
     expect(shouldCompact([], { ...config, threshold: 0 })).toBe(false);
   });
+
+  // #4292: a 40,000-character Chinese tool result costs about 30k o200k and
+  // 40k cl100k tokens, but serialized length / 4 counted it as about 10k, so a
+  // measured 165k prompt reached the 200k window without compacting.
+  it("compacts when a large CJK tool result pushes a measured prompt over the threshold", () => {
+    const prompt: ModelMessage[] = [
+      { content: "Summarize the attached Chinese report.", role: "user" },
+    ];
+    const report: ModelMessage = {
+      content: [
+        {
+          output: {
+            type: "text",
+            value: "大型语言模型在长上下文任务中的表现取决于其对检索证据的整合能力。".repeat(1_250),
+          },
+          toolCallId: "call-1",
+          toolName: "read_document",
+          type: "tool-result",
+        },
+      ],
+      role: "tool",
+    };
+
+    expect(
+      shouldCompact([...prompt, report], {
+        lastKnownInputTokens: 165_000,
+        lastKnownPromptMessageCount: prompt.length,
+        recentWindowSize: 4,
+        threshold: 180_000,
+      }),
+    ).toBe(true);
+  });
 });
 
 describe("resolveCompactionModel", () => {
