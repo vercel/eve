@@ -427,6 +427,43 @@ describe("WorkflowAgentInvocationExecution", () => {
     ).resolves.toMatchObject({ status: "working" });
   });
 
+  it("preserves a background task authorization when the parent starts another turn", async () => {
+    runsGet.mockResolvedValue(run({ status: "running" }));
+    getReadable.mockReturnValue(
+      eventStream([
+        {
+          type: "turn.started",
+          data: { sequence: 0, turnId: "root_1" },
+          meta: { at: "2026-07-20T00:00:00.000Z", id: "event_root_1" },
+        } as HandleMessageStreamEvent,
+        {
+          type: "authorization.required",
+          data: {
+            description: "Sign in to GitHub",
+            name: "github",
+            sequence: 0,
+            stepIndex: 0,
+            turnId: "task_turn",
+          },
+          meta: { at: "2026-07-20T00:00:01.000Z", id: "event_task_auth" },
+        } as HandleMessageStreamEvent,
+        {
+          type: "turn.started",
+          data: { sequence: 1, turnId: "root_2" },
+          meta: { at: "2026-07-20T00:00:02.000Z", id: "event_root_2" },
+        } as HandleMessageStreamEvent,
+        ...turnSettledEvents("root_2"),
+      ]),
+    );
+
+    await expect(
+      execution().read({ auth, invocationId: "wrun_invocation" }),
+    ).resolves.toMatchObject({
+      authorizations: [{ description: "Sign in to GitHub", name: "github" }],
+      status: "authorization_required",
+    });
+  });
+
   it.each([
     {
       events: [inputRequestedEvent("event_1", ["question"])],
