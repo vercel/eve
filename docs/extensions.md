@@ -370,6 +370,7 @@ At build time, eve checks the extension's generated capability metadata. If the 
 ## What to read next
 
 - [Integrations](/integrations): browse ready-to-install extensions using the Extensions filter
+- [Code extension](/docs/code-extension): mount eve-code, the coding extension that ships in `eve`, and see its benchmark results
 - [Tools](/docs/tools): static tools, approval, and tool output
 - [Dynamic capabilities](/docs/guides/dynamic-capabilities): dynamic connections, tools, skills, and instructions
 - [Instructions](/docs/instructions): static and TypeScript instructions
