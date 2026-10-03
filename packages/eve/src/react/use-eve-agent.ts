@@ -163,6 +163,7 @@ export function useEveAgent<TData>(
   options: UseEveAgentOptions<TData> = {},
 ): UseEveAgentHelpers<TData> {
   const storeRef = useRef<EveAgentStore<TData> | undefined>(undefined);
+  const mountedRef = useRef(false);
   const resumeOnMountRef = useRef(options.resume ?? false);
   const [autoResumePending, setAutoResumePending] = useState(resumeOnMountRef.current);
   const [prewarmResetGeneration, setPrewarmResetGeneration] = useState(0);
@@ -210,10 +211,15 @@ export function useEveAgent<TData>(
   );
 
   useEffect(() => {
+    mountedRef.current = true;
     const timeout = setTimeout(() => attachEveAgentStore(store), 0);
     return () => {
+      mountedRef.current = false;
       clearTimeout(timeout);
-      detachEveAgentStore(store);
+      // Strict Mode and Fast Refresh replay this cleanup and setup in one synchronous commit.
+      queueMicrotask(() => {
+        if (!mountedRef.current) detachEveAgentStore(store);
+      });
     };
   }, [store]);
   useEffect(() => {
