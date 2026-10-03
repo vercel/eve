@@ -147,7 +147,6 @@ export interface Usage {
 }
 
 export type ActionKind = string;
-export type ActionOutcome = "abandoned" | "cancelled" | "completed" | "failed" | "rejected";
 
 export type ContentPart =
   | { readonly type: "text"; readonly text: string }
