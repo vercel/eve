@@ -27,8 +27,9 @@ function createFakeAccess(files: Record<string, string>): {
     async readFile() {
       return null;
     },
-    async readBinaryFile() {
-      return null;
+    async readBinaryFile({ path }: { path: string }) {
+      const content = files[path];
+      return content === undefined ? null : new TextEncoder().encode(content);
     },
     async readTextFile({ path }: { path: string }) {
       const content = files[path];

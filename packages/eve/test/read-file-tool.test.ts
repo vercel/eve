@@ -30,8 +30,9 @@ function createFakeAccess(files: Record<string, string | null>): SandboxAccess {
         async readFile() {
           return null;
         },
-        async readBinaryFile() {
-          return null;
+        async readBinaryFile({ path }: { path: string }) {
+          const content = files[path];
+          return content == null ? null : new TextEncoder().encode(content);
         },
         async readTextFile({ path }: { path: string }) {
           const content = files[path];
