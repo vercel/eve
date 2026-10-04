@@ -19,14 +19,6 @@ const DEFAULT_LIMIT = 2000;
 
 // Matches the inline cap for inbound image attachments.
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
-const IMAGE_MEDIA_TYPES: Readonly<Record<string, string>> = {
-  gif: "image/gif",
-  jpeg: "image/jpeg",
-  jpg: "image/jpeg",
-  png: "image/png",
-  webp: "image/webp",
-};
-
 // ---------------------------------------------------------------------------
 // Input / result shapes
 // ---------------------------------------------------------------------------
@@ -78,9 +70,15 @@ export async function executeReadFileOnSandbox(
   const resolvedPath = await resolveAbsoluteFilePath(sandbox, filePath);
   const normalizedPath = normalizeModelPath(resolvedPath);
 
-  const imageMediaType = IMAGE_MEDIA_TYPES[normalizedPath.split(".").pop()?.toLowerCase() ?? ""];
+  const bytes = await sandbox.readBinaryFile({ path: resolvedPath });
+  if (bytes === null) {
+    throw new Error(
+      `File not found: ${filePath}. Verify the path exists and is accessible in the sandbox.`,
+    );
+  }
+  const imageMediaType = detectImageMediaType(bytes);
   if (imageMediaType !== undefined) {
-    return await readImageFile(sandbox, resolvedPath, normalizedPath, imageMediaType);
+    return buildImageReadResult(bytes, normalizedPath, imageMediaType);
   }
 
   // ── Validate offset / limit ─────────────────────────────────────────
@@ -92,13 +90,7 @@ export async function executeReadFileOnSandbox(
   }
 
   // ── Read full file for fingerprinting ───────────────────────────────
-  const rawContent = await sandbox.readTextFile({ path: resolvedPath });
-
-  if (rawContent === null) {
-    throw new Error(
-      `File not found: ${filePath}. Verify the path exists and is accessible in the sandbox.`,
-    );
-  }
+  const rawContent = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
 
   // ── Reject non-text (NUL bytes) ─────────────────────────────────────
   if (rawContent.includes("\0")) {
@@ -202,18 +194,24 @@ export async function executeReadFileOnSandbox(
   };
 }
 
-async function readImageFile(
-  sandbox: SandboxSession,
-  resolvedPath: string,
-  path: string,
-  mediaType: string,
-): Promise<ReadFileResult> {
-  const bytes = await sandbox.readBinaryFile({ path: resolvedPath });
-  if (bytes === null) {
-    throw new Error(
-      `File not found: ${path}. Verify the path exists and is accessible in the sandbox.`,
-    );
+function detectImageMediaType(bytes: Uint8Array): string | undefined {
+  const startsWith = (signature: readonly number[]) =>
+    signature.every((value, index) => bytes[index] === value);
+  if (startsWith([137, 80, 78, 71, 13, 10, 26, 10])) return "image/png";
+  if (startsWith([255, 216, 255])) return "image/jpeg";
+  if (startsWith([71, 73, 70, 56, 55, 97]) || startsWith([71, 73, 70, 56, 57, 97])) {
+    return "image/gif";
   }
+  if (
+    startsWith([82, 73, 70, 70]) &&
+    [87, 69, 66, 80].every((value, index) => bytes[index + 8] === value)
+  ) {
+    return "image/webp";
+  }
+  return undefined;
+}
+
+function buildImageReadResult(bytes: Uint8Array, path: string, mediaType: string): ReadFileResult {
   if (bytes.byteLength > MAX_IMAGE_BYTES) {
     throw new Error(
       `Image "${path}" is ${bytes.byteLength} bytes; read_file shows images up to 3 MiB. ` +

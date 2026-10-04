@@ -81,7 +81,7 @@ export default disableTool();
 
 ### `read_file`
 
-`read_file` reads text files from the sandbox with line-numbered output, and shows PNG, JPEG, GIF, and WebP images up to 3 MiB to the model as images. It accepts absolute paths and paths beginning with `$HOME/`.
+`read_file` reads text files from the sandbox with line-numbered output, and shows PNG, JPEG, GIF, and WebP images up to 3 MiB to the model as images. Images are detected from their bytes, even without a filename extension. It accepts absolute paths and paths beginning with `$HOME/`.
 
 ```sh
 eve add tool/read_file
