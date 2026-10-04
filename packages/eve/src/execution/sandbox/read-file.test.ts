@@ -101,11 +101,11 @@ describe("read_file images", () => {
   });
 
   it.each([
-    [Buffer.from([255, 216, 255, 217]), "image/jpeg"],
-    [Buffer.from("GIF87a"), "image/gif"],
-    [Buffer.from("GIF89a"), "image/gif"],
-    [Buffer.from("RIFF\0\0\0\0WEBP"), "image/webp"],
-  ])("detects %s as %s without a filename suffix", async (bytes, mediaType) => {
+    ["JPEG", Buffer.from([255, 216, 255, 217]), "image/jpeg"],
+    ["GIF87a", Buffer.from("GIF87a\x01\0\x01\0", "latin1"), "image/gif"],
+    ["GIF89a", Buffer.from("GIF89a\x01\0\x01\0", "latin1"), "image/gif"],
+    ["WebP", Buffer.from("RIFF\0\0\0\0WEBP"), "image/webp"],
+  ])("detects %s without a filename suffix", async (_label, bytes, mediaType) => {
     const sandbox = mockSandbox();
     await sandbox.session.writeBinaryFile({ path: "/workspace/image", content: bytes });
     const output = await executeReadFileOnSandbox(sandbox.session, {
@@ -132,6 +132,20 @@ describe("read_file images", () => {
     });
   });
 
+  it.each([
+    ["an empty file", ""],
+    ["a truncated WebP header", "RIFF"],
+    ["text that starts with a GIF signature", "GIF89a is the most common GIF version.\n"],
+  ])("reads %s as text", async (_label, content) => {
+    const sandbox = mockSandbox();
+    await sandbox.session.writeTextFile({ path: "/workspace/file", content });
+    const output = await contextStorage.run(sandboxContext(sandbox), () =>
+      executeReadFileOnSandbox(sandbox.session, { filePath: "/workspace/file" }),
+    );
+    expect(output.image).toBeUndefined();
+    expect(output.totalLines).toBe(content === "" ? 0 : 1);
+  });
+
   it("rejects unsupported binary files instead of rendering them as images", async () => {
     const sandbox = mockSandbox();
     await sandbox.session.writeBinaryFile({
@@ -141,6 +155,23 @@ describe("read_file images", () => {
     await expect(
       executeReadFileOnSandbox(sandbox.session, { filePath: "/workspace/audio.png" }),
     ).rejects.toThrow("binary file");
+  });
+
+  it("withholds an image replaced between execute and toModelOutput", async () => {
+    const sandbox = mockSandbox();
+    const path = "/workspace/chart.png";
+    await sandbox.session.writeBinaryFile({ content: pngBytes(8, 8), path });
+    const output = await executeReadFileOnSandbox(sandbox.session, { filePath: path });
+
+    await sandbox.session.writeBinaryFile({ content: pngBytes(8, 8, 1024), path });
+    const modelOutput = await contextStorage.run(sandboxContext(sandbox), async () =>
+      readFile.toModelOutput?.(output),
+    );
+
+    expect(modelOutput).toEqual({
+      type: "text",
+      value: `${output.content} The image changed after it was read; read it again.`,
+    });
   });
 
   it.each(["photo.png", "photo"])("rejects oversized images named %s", async (filename) => {

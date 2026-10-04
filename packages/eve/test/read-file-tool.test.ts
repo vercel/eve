@@ -273,7 +273,7 @@ describe("executeReadFileOnSandbox", () => {
       runInContext({ "/workspace/binary.bin": "hello\0world" }, (sandbox) =>
         executeReadFileOnSandbox(sandbox, { filePath: "/workspace/binary.bin" }),
       ),
-    ).rejects.toThrow("contains NUL bytes");
+    ).rejects.toThrow("appears to be a binary file");
   });
 
   // ---------------------------------------------------------------------------

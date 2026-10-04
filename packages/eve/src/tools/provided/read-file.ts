@@ -119,6 +119,12 @@ export const readFile: ToolDefinition<ReadFileToolInput, ReadFileToolOutput> = d
             path: await resolveAbsoluteFilePath(sandbox, output.path),
           });
     if (bytes === null) return toolOutput.text(`${output.content} The image could not be loaded.`);
+    // A file replaced after `execute` would otherwise skip its size cap.
+    if (bytes.byteLength !== output.image.size) {
+      return toolOutput.text(
+        `${output.content} The image changed after it was read; read it again.`,
+      );
+    }
     return toolOutput.content([
       toolOutputPart.text(output.content),
       toolOutputPart.file(Buffer.from(bytes).toString("base64"), {

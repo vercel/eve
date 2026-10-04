@@ -6,7 +6,11 @@ import {
   setReadFileStamp,
 } from "#execution/tools/file-state.js";
 import { resolveAbsoluteFilePath } from "#execution/sandbox/require-sandbox.js";
-import { readMediaMetadata, type MediaMetadata } from "#internal/attachments/media-metadata.js";
+import {
+  detectImageMediaType,
+  readMediaMetadata,
+  type MediaMetadata,
+} from "#internal/attachments/media-metadata.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import { capLineLength, MAX_OUTPUT_BYTES } from "#execution/sandbox/truncate-output.js";
 
@@ -76,9 +80,20 @@ export async function executeReadFileOnSandbox(
       `File not found: ${filePath}. Verify the path exists and is accessible in the sandbox.`,
     );
   }
-  const imageMediaType = detectImageMediaType(bytes);
-  if (imageMediaType !== undefined) {
-    return buildImageReadResult(bytes, normalizedPath, imageMediaType);
+
+  // ── Classify as text, image, or unsupported binary ──────────────────
+  // Clean text stays text even behind an ASCII image signature such as
+  // `GIF89a`; real images always carry NUL or non-UTF-8 bytes.
+  const rawContent = decodeUtf8(bytes);
+  if (rawContent === undefined || rawContent.includes("\0")) {
+    const imageMediaType = detectImageMediaType(bytes);
+    if (imageMediaType !== undefined) {
+      return buildImageReadResult(bytes, normalizedPath, imageMediaType);
+    }
+    throw new Error(
+      `File "${filePath}" appears to be a binary file. ` +
+        "read_file only supports text files and PNG, JPEG, GIF, or WebP images.",
+    );
   }
 
   // ── Validate offset / limit ─────────────────────────────────────────
@@ -87,17 +102,6 @@ export async function executeReadFileOnSandbox(
 
   if (effectiveOffset < 1) {
     throw new Error(`offset must be >= 1. Received: ${effectiveOffset}.`);
-  }
-
-  // ── Read full file for fingerprinting ───────────────────────────────
-  const rawContent = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-
-  // ── Reject non-text (NUL bytes) ─────────────────────────────────────
-  if (rawContent.includes("\0")) {
-    throw new Error(
-      `File "${filePath}" contains NUL bytes and appears to be a binary file. ` +
-        "read_file only supports text files.",
-    );
   }
 
   // ── Split into lines ────────────────────────────────────────────────
@@ -194,21 +198,14 @@ export async function executeReadFileOnSandbox(
   };
 }
 
-function detectImageMediaType(bytes: Uint8Array): string | undefined {
-  const startsWith = (signature: readonly number[]) =>
-    signature.every((value, index) => bytes[index] === value);
-  if (startsWith([137, 80, 78, 71, 13, 10, 26, 10])) return "image/png";
-  if (startsWith([255, 216, 255])) return "image/jpeg";
-  if (startsWith([71, 73, 70, 56, 55, 97]) || startsWith([71, 73, 70, 56, 57, 97])) {
-    return "image/gif";
+// Decodes exactly like `readTextFile` so write_file's stale-write check
+// fingerprints the same text this read stamps.
+function decodeUtf8(bytes: Uint8Array): string | undefined {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return undefined;
   }
-  if (
-    startsWith([82, 73, 70, 70]) &&
-    [87, 69, 66, 80].every((value, index) => bytes[index + 8] === value)
-  ) {
-    return "image/webp";
-  }
-  return undefined;
 }
 
 function buildImageReadResult(bytes: Uint8Array, path: string, mediaType: string): ReadFileResult {

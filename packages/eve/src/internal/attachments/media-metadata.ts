@@ -55,13 +55,32 @@ export function estimateMediaTokens(metadata: MediaMetadata): number {
   return Math.ceil(metadata.size / 3);
 }
 
+/** Names the PNG, GIF, JPEG, or WebP format its leading bytes identify. */
+export function detectImageMediaType(bytes: Uint8Array): string | undefined {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const ascii = (start: number, end: number) => readAscii(bytes, start, end);
+
+  if (
+    bytes.byteLength >= 8 &&
+    view.getUint32(0) === 0x89504e47 &&
+    view.getUint32(4) === 0x0d0a1a0a
+  ) {
+    return "image/png";
+  }
+  if (bytes.byteLength >= 3 && view.getUint16(0) === 0xffd8 && bytes[2] === 0xff) {
+    return "image/jpeg";
+  }
+  if (ascii(0, 6) === "GIF87a" || ascii(0, 6) === "GIF89a") return "image/gif";
+  if (ascii(0, 4) === "RIFF" && ascii(8, 12) === "WEBP") return "image/webp";
+  return undefined;
+}
+
 /** Reads PNG, GIF, JPEG, or WebP dimensions from the leading bytes. */
 export function readImageDimensions(
   bytes: Uint8Array,
 ): { readonly width: number; readonly height: number } | undefined {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const ascii = (start: number, end: number) =>
-    String.fromCharCode(...bytes.subarray(start, Math.min(end, bytes.byteLength)));
+  const ascii = (start: number, end: number) => readAscii(bytes, start, end);
 
   if (bytes.byteLength >= 24 && view.getUint32(0) === 0x89504e47) {
     return dimensions(view.getUint32(16), view.getUint32(20));
@@ -115,6 +134,10 @@ function countPdfPages(bytes: Uint8Array): number | undefined {
   // estimate then falls back to the payload size.
   const pages = text.match(/\/Type\s*\/Page(?![A-Za-z])/g)?.length ?? 0;
   return pages > 0 ? pages : undefined;
+}
+
+function readAscii(bytes: Uint8Array, start: number, end: number): string {
+  return String.fromCharCode(...bytes.subarray(start, Math.min(end, bytes.byteLength)));
 }
 
 function readUint24(bytes: Uint8Array, offset: number): number {
