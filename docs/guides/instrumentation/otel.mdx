@@ -163,6 +163,9 @@ each turn. Remote requests carry the conversation ID in W3C Baggage.
 `trustedForwarders` controls whether the receiver accepts parent session data
 and the trace-content policy. See
 [Remote agents](../guides/remote-agents#preserving-trace-content).
+Gateway-routed model calls propagate the configured OpenTelemetry context at
+each provider request. Eve-owned baggage is removed before forwarding. Gateway
+controls whether its spans are sampled and which destinations receive them.
 
 ## Local traces
 

@@ -11,6 +11,7 @@ import {
 } from "#harness/compaction-prompt.js";
 import { createFrameworkUserMessage, isFrameworkUserMessage } from "#harness/messages.js";
 import { estimateTokens } from "#harness/token-estimate.js";
+import { resolveGatewayTraceContextHeaders } from "#internal/gateway.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { CompactionConfig, ToolLoopHarnessConfig } from "#harness/types.js";
 
@@ -249,7 +250,7 @@ export async function compactMessages(
 
     const result = await generateText({
       abortSignal,
-      headers,
+      headers: resolveGatewayTraceContextHeaders(model, headers),
       messages: [createFrameworkUserMessage("context.compaction", summaryPrompt.prompt)],
       model,
       providerOptions,

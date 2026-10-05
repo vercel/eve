@@ -11,6 +11,7 @@ import {
   type SystemModelMessage,
   type TelemetryOptions,
   ToolLoopAgent,
+  type ToolLoopAgentSettings,
   type ToolSet,
   type TypedToolCall,
   type TypedToolError,
@@ -19,7 +20,7 @@ import {
 import type { SessionAuthContext } from "#channel/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { readClientContext } from "#internal/client-context.js";
-import { resolveProviderHeaders } from "#internal/gateway.js";
+import { resolveGatewayTraceContextHeaders, resolveProviderHeaders } from "#internal/gateway.js";
 import { createErrorId, createLogger, formatError, logError } from "#internal/logging.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { contextStorage } from "#context/container.js";
@@ -362,6 +363,11 @@ function buildGatewayAttributionHeaders(
   if (referer) headers["http-referer"] = referer;
   return headers;
 }
+
+const prepareGatewayModelCall: NonNullable<ToolLoopAgentSettings["prepareCall"]> = (call) => {
+  const headers = resolveGatewayTraceContextHeaders(call.model, call.headers);
+  return headers === call.headers ? call : { ...call, headers };
+};
 
 async function resolveEffectiveRuntimeModel(input: {
   readonly config: ToolLoopHarnessConfig;
@@ -1607,6 +1613,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         },
         onStepEnd: hooks.onStepEnd,
         onStepStart: hooks.onStepStart,
+        prepareCall: prepareGatewayModelCall,
         prepareStep: hooks.prepareStep,
         reasoning: session.agent.modelReference?.reasoning ?? session.agent.reasoning,
         runtimeContext: telemetryRuntimeContext,
