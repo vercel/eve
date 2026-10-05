@@ -3,7 +3,9 @@ const SAFE_ABSOLUTE_PROTOCOLS = new Set(["http:", "https:", "mailto:", "tel:"]);
 interface MarkdownNode {
   type?: unknown;
   url?: unknown;
+  value?: unknown;
   children?: unknown;
+  data?: { hProperties?: Record<string, unknown> };
 }
 
 export const createResolveReadmeLinksPlugin =
@@ -13,13 +15,23 @@ export const createResolveReadmeLinksPlugin =
     resolveMarkdownLinks(tree, sourceRevisionHref);
   };
 
+export const createReadmeHeadingIdsPlugin =
+  () =>
+  () =>
+  (tree: unknown): void => {
+    addHeadingIds(tree);
+  };
+
 export const resolveReadmeHref = (
   href: string | undefined,
   sourceRevisionHref: string,
 ): string | undefined => {
   const sanitizedHref = sanitizeReadmeHref(href);
-  if (!sanitizedHref || sanitizedHref.startsWith("#") || isAbsoluteHref(sanitizedHref)) {
+  if (!sanitizedHref || isAbsoluteHref(sanitizedHref)) {
     return sanitizedHref;
+  }
+  if (sanitizedHref.startsWith("#")) {
+    return `#user-content-${sanitizedHref.slice(1)}`;
   }
 
   const bases = getGitHubBases(sourceRevisionHref);
@@ -84,6 +96,47 @@ const getGitHubBases = (
     repository: new URL(`/${owner}/${repo}/tree/${revision}`, url.origin).toString(),
   };
 };
+
+const addHeadingIds = (value: unknown): void => {
+  const usedSlugs = new Set<string>();
+  const visit = (nodeValue: unknown): void => {
+    if (!nodeValue || typeof nodeValue !== "object") return;
+
+    const node = nodeValue as MarkdownNode;
+    if (typeof node.type === "string" && /^heading$/.test(node.type)) {
+      const base = slugHeading(collectText(node));
+      let slug = base;
+      let suffix = 0;
+      while (usedSlugs.has(slug)) slug = `${base}-${++suffix}`;
+      usedSlugs.add(slug);
+      node.data = {
+        ...node.data,
+        hProperties: {
+          ...node.data?.hProperties,
+          id: slug,
+        },
+      };
+    }
+
+    if (Array.isArray(node.children)) {
+      for (const child of node.children) visit(child);
+    }
+  };
+  visit(value);
+};
+
+const collectText = (node: MarkdownNode): string => {
+  if (typeof node.value === "string") return node.value;
+  if (!Array.isArray(node.children)) return "";
+  return node.children.map((child) => collectText(child as MarkdownNode)).join("");
+};
+
+const slugHeading = (value: string): string =>
+  value
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}_-]/gu, " ")
+    .trim()
+    .replace(/ +/g, "-");
 
 const resolveMarkdownLinks = (value: unknown, sourceRevisionHref: string): void => {
   if (!value || typeof value !== "object") {
