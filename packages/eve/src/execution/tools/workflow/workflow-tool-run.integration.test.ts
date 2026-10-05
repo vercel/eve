@@ -304,6 +304,14 @@ describe("workflow tools", () => {
         ).toMatchObject([
           { data: { message: "Deploy" }, meta: { deliveryIds: ["delivery-answer"] } },
         ]);
+        expect(answered.slice(0, 2).map((event) => event.type)).toEqual([
+          "message.received",
+          "input.resolved",
+        ]);
+        // `send()` follows its delivery id to the turn boundary.
+        expect(answered.find((event) => event.type === "turn.completed")?.meta).toMatchObject({
+          deliveryIds: ["delivery-answer"],
+        });
       } finally {
         stream.dispose();
         await run.cancel();
