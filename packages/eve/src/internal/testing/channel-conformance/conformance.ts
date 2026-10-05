@@ -304,12 +304,6 @@ const hitlConformance = {
           "a re-raised budget prompt keeps its request id, and eve/client ignores ids it has seen",
           "pressing stop on budget prompt halts work, next message asks again",
         ),
-        "pressing options of two pending questions answers each with its own option": {
-          reason:
-            "a tool call's message part holds one input request, so a second ctx.ask on the same call replaces the first",
-          symptom:
-            /Timed out waiting for (one of the questions \["Which (day|time)|plan_review to return)/u,
-        },
       },
       unsupported: {
         "pressing an option of an answered question sends it to the agent as new input":
