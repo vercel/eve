@@ -2,17 +2,6 @@ import { createSource, type FumadocsCollection } from "@vercel/geistdocs/source"
 import { docs } from "@/.source/server";
 import { config } from "./config";
 
-const markdownComponentFallbacks: Record<string, string> = {
-  '<EveCodeBenchmark dataset="deepswe-lean" />':
-    "Benchmark results are interactive and are not included in Markdown. Lines are 95% intervals; overlapping lines are not a measured difference. Click a contender to open its run.",
-};
-
-const transformMarkdownComponents = (markdown: string): string =>
-  Object.entries(markdownComponentFallbacks).reduce(
-    (content, [component, fallback]) => content.replaceAll(component, fallback),
-    markdown,
-  );
-
 // If a page has a `url:` frontmatter field, use it as the routing slug so
 // a file like channels/README.md can render at /docs/channels without being
 // renamed on disk.
@@ -38,7 +27,6 @@ export const geistdocsSource = createSource({
   config,
   id: "docs",
   label: "Docs",
-  markdown: { transform: transformMarkdownComponents },
 });
 
 export const source = geistdocsSource.source;

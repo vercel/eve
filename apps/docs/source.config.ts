@@ -6,6 +6,7 @@ import {
 import { remarkMdxMermaid } from "fumadocs-core/mdx-plugins";
 import { defineConfig, defineDocs } from "fumadocs-mdx/config";
 import lastModified, { type LastModifiedPluginOptions } from "fumadocs-mdx/plugins/last-modified";
+import { remarkBenchmarkMarkdown } from "./lib/geistdocs/remark-benchmark-markdown";
 import { remarkComponentMarkdown } from "./lib/geistdocs/remark-component-markdown";
 
 // Some docs use non-standard fenced code labels like
@@ -58,7 +59,12 @@ const lastModifiedVersionControl: LastModifiedPluginOptions["versionControl"] =
 // git-backed last-modified lookup when the deployment checkout is shallow.
 export default defineConfig({
   mdxOptions: {
-    remarkPlugins: [remarkMdxMermaid, remarkNormalizeCodeLang, remarkComponentMarkdown],
+    remarkPlugins: [
+      remarkMdxMermaid,
+      remarkNormalizeCodeLang,
+      remarkComponentMarkdown,
+      remarkBenchmarkMarkdown,
+    ],
     rehypeCodeOptions: {
       themes: {
         light: geistShikiTheme,

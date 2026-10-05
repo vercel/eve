@@ -1,6 +1,7 @@
 import { cp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { renderBenchmarkMarkdown } from "../../../apps/docs/lib/evals/eve-code-format.ts";
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const monorepoRoot = fileURLToPath(new URL("../../..", import.meta.url));
@@ -29,27 +30,7 @@ if (page !== null) {
   await writeFile(
     benchmarkPage,
     page.replace(/<EveCodeBenchmark dataset="([^"]+)" \/>/gu, (_, dataset) =>
-      benchmarkTable(snapshot.datasets[dataset], dataset),
+      renderBenchmarkMarkdown(snapshot.datasets[dataset], dataset),
     ),
   );
-}
-
-function benchmarkTable(results, dataset) {
-  if (!results) return `No published ${dataset} results yet.`;
-  const pct = (value) => `${Math.round(value * 100)}%`;
-  const rows = [...results.harnesses]
-    .sort(
-      (a, b) => b.resolveRate.estimate - a.resolveRate.estimate || a.latencyP50Ms - b.latencyP50Ms,
-    )
-    .map(
-      (h) =>
-        `| \`${h.harness}\` | ${pct(h.resolveRate.estimate)} (${h.resolved}/${h.attempts}) | ${pct(h.resolveRate.low)}–${pct(h.resolveRate.high)} | ${(h.latencyP50Ms / 1000).toFixed(1)}s | ${(h.latencyP90Ms / 1000).toFixed(1)}s | ${h.measuredAt?.slice(0, 10) ?? "—"} |`,
-    );
-  return [
-    `${results.tasks} tasks × ${results.attempts} attempts on \`${results.model.id}\`. Snapshot updated ${results.generatedAt.slice(0, 10)}.`,
-    "",
-    "| Harness | Resolved | 95% interval | Median latency | p90 latency | Measured |",
-    "| --- | --- | --- | --- | --- | --- |",
-    ...rows,
-  ].join("\n");
 }
