@@ -84,9 +84,9 @@ Gating a side effect on approval is also how you make non-idempotent work safe a
 
 ### Authorizing approval responses
 
-By default, only the person whose turn requested a call can approve or cancel it. In a shared thread, another person's **Approve** or **Cancel** is refused, the request stays pending for the requester, and the other person sees a short message saying so. A call requested by an unauthenticated or anonymous caller has no identity to match, so anyone can respond to it.
+By default, only the person whose turn requested a call can approve or cancel it.
 
-Define an approval response policy to change who may settle a call, for example to let a designated approver respond for someone else. A tool with a `response` policy replaces the default entirely, so return `{ status: "allowed" }` to let any responder through:
+Define an approval response policy to change who may settle a call, for example, to specify a set of designated approvers who must approve a certain tool. A tool with a `response` policy replaces the default entirely, so return `{ status: "allowed" }` to let any responder through:
 
 ```ts title="agent/tools/refund_charge.ts"
 import { defineTool } from "eve/tools";
