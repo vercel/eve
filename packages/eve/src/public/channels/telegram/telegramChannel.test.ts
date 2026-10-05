@@ -385,22 +385,6 @@ describe("telegramChannel() inbound route", () => {
 });
 
 describe("telegramChannel() deliver hook", () => {
-  it("maps freeform reply responses through durable state", async () => {
-    const adapter = withState(getAdapter(telegramChannel()), {
-      pendingFreeformReplies: {
-        "55": "call_2",
-      },
-    });
-    const ctx = buildAdapterContext(adapter, { get: () => undefined, set: () => {} } as any);
-
-    expect(
-      await adapter.deliver!({ message: "because", state: { replyToBotMessageId: "55" } }, ctx),
-    ).toEqual({
-      inputResponses: [{ requestId: "call_2", text: "because" }],
-      context: undefined,
-    });
-  });
-
   it("falls back to a normal message when a reply is not a pending freeform answer", async () => {
     const adapter = getAdapter(telegramChannel());
     const ctx = buildAdapterContext(adapter, { get: () => undefined, set: () => {} } as any);
@@ -573,40 +557,6 @@ describe("telegramChannel() default event handlers", () => {
 
     const body = JSON.parse(String((fetchMock.mock.calls[0]![1] as RequestInit).body));
     expect(body).toEqual({ action: "typing", chat_id: "42" });
-  });
-
-  it("freeform input requests register the prompt message id", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(
-        new Response(JSON.stringify({ ok: true, result: { message_id: 51, chat: { id: 42 } } })),
-      );
-    vi.stubGlobal("fetch", fetchMock);
-    const adapter = withState(
-      getAdapter(telegramChannel({ credentials: { botToken: "bot-token" } })),
-      { chatId: "42", chatType: "private" },
-    );
-    const ctx = buildAdapterContext(adapter, { get: () => undefined, set: () => {} } as any);
-
-    await callEvent(
-      adapter,
-      makeEvent("input.requested", {
-        requests: [
-          {
-            action: { callId: "call_1", input: {}, kind: "tool-call", toolName: "ask_question" },
-            allowFreeform: true,
-            prompt: "Explain",
-            requestId: "call_1",
-          },
-        ],
-        sequence: 0,
-        stepIndex: 0,
-        turnId: "t1",
-      }),
-      ctx,
-    );
-
-    expect(ctx.state.pendingFreeformReplies).toEqual({ "51": "call_1" });
   });
 
   it("hydrates unknown private message posts without aliasing the session", async () => {

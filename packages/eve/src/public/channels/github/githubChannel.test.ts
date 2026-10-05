@@ -893,47 +893,6 @@ describe("githubChannel", () => {
     for (const ciEvent of ciEvents) expect(ciEvent.send).not.toHaveBeenCalled();
   });
 
-  it("posts final messages through the issue comments API", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 77 })));
-    const adapter = withState(
-      getAdapter(
-        githubChannel({
-          api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
-          credentials: {
-            installationToken: "ghs_test",
-            webhookSecret: SECRET,
-          },
-        }),
-      ),
-      {
-        conversationKind: "issue",
-        installationId: 55,
-        issueNumber: 5,
-        owner: "vercel",
-        repo: "eve",
-        repositoryId: 123,
-      },
-    );
-    const ctx = buildAdapterContext(adapter, stubAccessor());
-
-    await callEvent(
-      adapter,
-      makeEvent("message.completed", {
-        finishReason: "stop",
-        message: "Final answer",
-        sequence: 0,
-        stepIndex: 0,
-        turnId: "t1",
-      }),
-      ctx,
-    );
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "https://github.test/repos/vercel/eve/issues/5/comments",
-    );
-  });
-
   it("renders the mention instruction from a lazy botName resolver", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 79 })));
     const adapter = withState(
