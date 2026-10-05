@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { SessionAuthContext } from "#channel/types.js";
-import { attributeApprovalAnswers } from "#execution/session/approval-response-caller.js";
+import { attributeAnswers } from "#execution/session/answer-caller.js";
 import { appendPendingInputBatch } from "#harness/pending-input-batches.js";
 import type { InputRequest } from "#shared/input.js";
 
 const approval: InputRequest = {
   action: { callId: "call-1", input: {}, kind: "tool-call", toolName: "deploy" },
-  allowFreeform: false,
   display: "confirmation",
   kind: "tool-approval",
   options: [
@@ -16,6 +15,13 @@ const approval: InputRequest = {
   prompt: "Approve tool call: deploy",
   requestId: "approval-1",
 };
+const question: InputRequest = {
+  action: { callId: "call-2", input: {}, kind: "tool-call", toolName: "ask" },
+  kind: "question",
+  options: [{ id: "saturday", label: "Saturday" }],
+  prompt: "Which day?",
+  requestId: "question-1",
+};
 const bob: SessionAuthContext = {
   attributes: { team: "infra" },
   authenticator: "test",
@@ -23,7 +29,7 @@ const bob: SessionAuthContext = {
   principalType: "user",
 };
 const state = appendPendingInputBatch({
-  requests: [approval],
+  requests: [approval, question],
   responseMessages: [],
   session: {
     agent: { modelReference: { id: "test" }, system: "", tools: [] },
@@ -34,37 +40,42 @@ const state = appendPendingInputBatch({
   },
 }).state;
 const approve = { optionId: "approve", requestId: approval.requestId };
+const saturday = { optionId: "saturday", requestId: question.requestId };
 
-describe("attributeApprovalAnswers", () => {
-  it("carries the responder on an approval answer", () => {
+describe("attributeAnswers", () => {
+  it("carries the responder on approval answers and leaves other answers plain", () => {
     expect(
-      attributeApprovalAnswers({ responder: bob, state, stepInput: { inputResponses: [approve] } }),
-    ).toEqual({ attributedInputResponses: [{ auth: bob, response: approve }] });
+      attributeAnswers({
+        responder: bob,
+        state,
+        stepInput: { inputResponses: [approve, saturday] },
+      }),
+    ).toEqual({
+      attributedInputResponses: [{ auth: bob, response: approve }],
+      inputResponses: [saturday],
+    });
   });
 
-  it("attributes an unauthenticated answer to no one, never to the turn's caller", () => {
+  // Channels such as Discord deliver button presses with `auth: null`.
+  it("attributes an approval sent with null auth to no one, never to the turn's caller", () => {
     expect(
-      attributeApprovalAnswers({
-        responder: null,
-        state,
-        stepInput: { inputResponses: [approve] },
-      }),
+      attributeAnswers({ responder: null, state, stepInput: { inputResponses: [approve] } }),
     ).toEqual({ attributedInputResponses: [{ auth: null, response: approve }] });
   });
 
-  it("leaves a message or an answer to anything else to its sender", () => {
+  it("leaves a message or a stale answer to its sender", () => {
     expect(
-      attributeApprovalAnswers({
+      attributeAnswers({
         responder: bob,
         state,
         stepInput: { inputResponses: [approve], message: "Also do the other thing." },
       }),
     ).toBeUndefined();
     expect(
-      attributeApprovalAnswers({
+      attributeAnswers({
         responder: bob,
         state,
-        stepInput: { inputResponses: [{ optionId: "continue", requestId: "session-limit-1" }] },
+        stepInput: { inputResponses: [{ optionId: "approve", requestId: "answered-earlier" }] },
       }),
     ).toBeUndefined();
   });

@@ -1,3 +1,4 @@
+import type { SessionAuthContext } from "#channel/types.js";
 import type { ModelMessage } from "ai";
 
 import { createActionResultEvent } from "#protocol/message.js";
@@ -46,6 +47,8 @@ interface PendingCoordinationEventMetadata {
 
 /** Serializable pending coordination batch stored on `session.state`. */
 export interface PendingCoordinationBatch {
+  /** Who approved each call this batch runs for an approval, by call id. */
+  readonly approvers?: Readonly<Record<string, SessionAuthContext>>;
   /** Workflow tool runs pending coordination, including agent tools. */
   readonly tasks: readonly RuntimeWorkflowTaskRequest[];
   readonly event: PendingCoordinationEventMetadata;
@@ -158,6 +161,7 @@ function approvedSiblingCalls(
  * Stores one pending coordination batch on the session.
  */
 export function setPendingCoordinationBatch<T extends { readonly state?: SessionStateMap }>(input: {
+  readonly approvers?: PendingCoordinationBatch["approvers"];
   readonly tasks: readonly RuntimeWorkflowTaskRequest[];
   readonly event: PendingCoordinationEventMetadata;
   readonly responseMessages: readonly ModelMessage[];
@@ -166,6 +170,7 @@ export function setPendingCoordinationBatch<T extends { readonly state?: Session
   assertUniqueCoordinationCallIds(input.tasks);
   const state = { ...input.session.state };
   state[PENDING_COORDINATION_BATCH_KEY] = {
+    ...(input.approvers !== undefined && { approvers: input.approvers }),
     tasks: [...input.tasks],
     event: input.event,
     responseMessages: [...input.responseMessages],

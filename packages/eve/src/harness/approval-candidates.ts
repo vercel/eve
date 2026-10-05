@@ -40,8 +40,6 @@ export interface ApprovalSettlementAuditRecord {
   readonly actor: ApprovalResponderIdentity;
   /** The approver's full auth, which the approved call runs as. Absent for cancellations. */
   readonly approver?: SessionAuthContext;
-  /** The approved call, so the work that runs it can find its approver. */
-  readonly callId?: string;
   readonly outcome: "allowed" | "cancelled";
   readonly requestId: string;
   readonly settledAt: number;
@@ -260,7 +258,6 @@ export function expireApprovalCandidates(input: {
  * losing candidate becomes stale.
  */
 export function settleAllowedCandidate(input: {
-  readonly callId?: string;
   readonly candidateId: string;
   readonly settledAt: number;
   readonly state: SessionStateMap | undefined;
@@ -279,7 +276,6 @@ export function settleAllowedCandidate(input: {
     throw new Error(`Unknown approval candidate "${input.candidateId}".`);
   }
   return settleRequest({
-    callId: input.callId,
     candidateId: candidate.candidateId,
     outcome: candidate.decision === "cancel" ? "cancelled" : "allowed",
     requestId: candidate.requestId,
@@ -292,7 +288,6 @@ export function settleAllowedCandidate(input: {
 /** Atomically settles a direct authenticated approval response. */
 export function settleDirectApprovalResponse(input: {
   readonly actor: SessionAuthContext;
-  readonly callId?: string;
   readonly outcome: "allowed" | "cancelled";
   readonly requestId: string;
   readonly settledAt: number;
@@ -300,7 +295,6 @@ export function settleDirectApprovalResponse(input: {
 }): ApprovalStateTransition {
   const state = expireApprovalCandidates({ now: input.settledAt, state: input.state });
   return settleRequest({
-    callId: input.callId,
     outcome: input.outcome,
     requestId: input.requestId,
     responder: input.actor,
@@ -332,7 +326,6 @@ export function getApprovalAuditState(state: SessionStateMap | undefined): {
 }
 
 function settleRequest(input: {
-  readonly callId?: string;
   readonly candidateId?: string;
   readonly outcome: ApprovalSettlementAuditRecord["outcome"];
   readonly requestId: string;
@@ -348,7 +341,7 @@ function settleRequest(input: {
 
   const settlement: ApprovalSettlementAuditRecord = {
     actor: projectResponder(input.responder),
-    ...(input.outcome === "allowed" && { approver: input.responder, callId: input.callId }),
+    ...(input.outcome === "allowed" && { approver: input.responder }),
     candidateId: input.candidateId,
     outcome: input.outcome,
     requestId: input.requestId,
@@ -479,12 +472,10 @@ function writeApprovalState(
   return { ...state, [APPROVAL_STATE_KEY]: approvalState };
 }
 
-/** The full auth of whoever approved `callId`, when an allowed settlement recorded one. */
-export function approverOfCall(
+/** The full auth of whoever approved `requestId`, when it was allowed. */
+export function approverOfRequest(
   state: SessionStateMap | undefined,
-  callId: string,
+  requestId: string,
 ): SessionAuthContext | undefined {
-  return Object.values(readApprovalState(state).settlements).find(
-    (settlement) => settlement.callId === callId,
-  )?.approver;
+  return readApprovalState(state).settlements[requestId]?.approver;
 }

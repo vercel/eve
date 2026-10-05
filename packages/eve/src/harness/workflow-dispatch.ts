@@ -1,4 +1,6 @@
 import type { ModelMessage } from "ai";
+import type { SessionAuthContext } from "#channel/types.js";
+import { approverOfRequest } from "#harness/approval-candidates.js";
 import { commitCallEntry, isTaskTool } from "#execution/tasks/model-step.js";
 import {
   createCoordinationRequestFromToolCall,
@@ -43,7 +45,13 @@ export function dispatchApprovedWorkflowCalls(input: {
       tools: input.tools,
       turnId: batch.event.turnId,
     });
+    const approvers: Record<string, SessionAuthContext> = {};
+    for (const { request } of approved) {
+      const approver = approverOfRequest(input.session.state, request.requestId);
+      if (approver !== undefined) approvers[request.action.callId] = approver;
+    }
     return setPendingCoordinationBatch({
+      approvers,
       tasks: deferred.workflowRequests,
       event: batch.event,
       responseMessages: input.messages.slice(-1),

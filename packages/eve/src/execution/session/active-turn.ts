@@ -3,6 +3,7 @@ import { mapHeldInputResponsesStep } from "#execution/proxied-deliver-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import {
+  isSteeringDelivery,
   isSteeringMessage,
   type SteeringOptions,
   type SteeringTurn,
@@ -202,8 +203,13 @@ export class ActiveTurn {
         delivery = mapped.delivery;
       }
       this.admitted.delete(sequence);
-      this.input.queue.replaceDelivery(sequence, undefined);
-      return delivery;
+      // Someone else's answers settle the held request, but the rest of their
+      // delivery waits for the turn to end, as their messages do.
+      const split = isSteeringDelivery(delivery, this.identity, { heldOnPerson: true })
+        ? undefined
+        : splitAnswers(delivery);
+      this.input.queue.replaceDelivery(sequence, split?.rest);
+      return split?.answers ?? delivery;
     }
     return undefined;
   }
@@ -296,4 +302,21 @@ function asBoundaryMessage(event: RuntimeEvent): WorkflowToolRunMessage | undefi
   // may have no wait left to take the message, and publishing it needs none.
   if (event.message.kind === "agent-started") return event.message;
   return undefined;
+}
+
+function splitAnswers(delivery: DeliverHookPayload): {
+  readonly answers: DeliverHookPayload;
+  readonly rest: DeliverHookPayload | undefined;
+} {
+  const answers = delivery.payloads.flatMap((payload) =>
+    payload.inputResponses === undefined ? [] : [{ inputResponses: payload.inputResponses }],
+  );
+  const rest = delivery.payloads.flatMap((payload) => {
+    const { inputResponses: _answers, ...other } = payload;
+    return Object.keys(other).length === 0 ? [] : [other];
+  });
+  return {
+    answers: { ...delivery, payloads: answers },
+    rest: rest.length === 0 ? undefined : { ...delivery, payloads: rest },
+  };
 }

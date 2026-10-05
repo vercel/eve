@@ -147,7 +147,6 @@ export async function coordinateApprovalDelivery(input: {
       if (responder !== null && decision !== undefined) {
         const settled = settleDirectApprovalResponse({
           actor: responder,
-          callId: request.action.callId,
           outcome: decision === "approve" ? "allowed" : "cancelled",
           requestId: response.requestId,
           settledAt: now,
@@ -341,7 +340,6 @@ async function authorizeCandidate(input: {
     }
 
     const settled = settleAllowedCandidate({
-      callId: input.request.action.callId,
       candidateId: input.candidateId,
       settledAt: input.now,
       state: session.state,

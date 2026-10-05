@@ -50,7 +50,7 @@ import {
 } from "#harness/messages.js";
 import { consumeDeferredStepInput } from "#harness/pending-input-batches.js";
 import type { HandleEventFn, HarnessSession, StepInput, StepResult } from "#harness/types.js";
-import { attributeApprovalAnswers } from "#execution/session/approval-response-caller.js";
+import { attributeAnswers } from "#execution/session/answer-caller.js";
 import type {
   DurableStepResult,
   TurnStepInput,
@@ -165,6 +165,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
   }
 
   const previousAuth = ctx.get(AuthKey);
+  const hadInitiator = ctx.has(InitiatorAuthKey);
 
   // Apply deliver-time auth ferried via `resumeHook` (initial-turn
   // input has no auth; it was seeded by buildRunContext).
@@ -305,18 +306,24 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
       }
       resolved = results.length === 0 ? undefined : results.reduce(coalesceTurnInputs);
     }
-    const approvalAnswers =
+    // A delivery without auth acts as the session's current identity, so
+    // only a delivery that names its sender can be answered by someone else.
+    const answers =
       delivery?.auth === undefined
         ? undefined
-        : attributeApprovalAnswers({
+        : attributeAnswers({
             responder: delivery.auth,
             state: durableSession.state,
             stepInput: resolved,
           });
-    if (approvalAnswers !== undefined) {
-      resolved = approvalAnswers;
+    if (answers !== undefined) {
+      // The responder settles the request; the turn keeps its caller and
+      // initiator. Adapter state from the answer stays: channels record the
+      // responder and their prompt cards there, not the reply destination.
+      resolved = answers;
       if (previousAuth === undefined) ctx.delete(AuthKey);
       else ctx.set(AuthKey, previousAuth);
+      if (!hadInitiator) ctx.delete(InitiatorAuthKey);
     }
     const ignoredActiveDelivery =
       delivery !== undefined && resolved === undefined && !isHarnessBetweenTurns(initialSession);

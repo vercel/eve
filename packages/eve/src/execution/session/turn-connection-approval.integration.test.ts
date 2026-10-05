@@ -125,6 +125,7 @@ function setup(
             : "https://notes.example.com",
         instanceKey: variation === "destination" ? `turn-${sequence}` : undefined,
         description: "Save notes",
+        headers: { "X-Caller": (ctx) => ctx.session.auth.current?.principalId ?? "none" },
         spec: {
           openapi: "3.0.0",
           info: { title: "Notes", version: "1.0.0" },
@@ -649,6 +650,8 @@ describe("turn connection approval restoration", () => {
         getApprovalAuditState(readDurableSession(resumed.sessionState).state).settlements,
       ).toEqual([expect.objectContaining({ outcome: "allowed", requestId: request.requestId })]);
       expect(fixture.fetch).toHaveBeenCalledOnce();
+      // Bob approved Alice's call, so the approved request goes out as Bob.
+      expect(callerHeader(fixture.fetch.mock.calls[0])).toBe("bob");
       expect(getPendingInputBatches(readDurableSession(resumed.sessionState).state)).toEqual([]);
       expect(resumed.serializedContext).not.toHaveProperty("eve.pendingConnectionCalls");
       // The approval held its turn, so approving it resumes the same turn.
@@ -738,3 +741,9 @@ describe("turn connection approval restoration", () => {
     expect(fixture.fetch).toHaveBeenCalledOnce();
   });
 });
+
+function callerHeader(call: readonly unknown[] | undefined): string | null {
+  const [input, init] = (call ?? []) as [Request | string | URL, RequestInit | undefined];
+  const headers = new Headers(input instanceof Request ? input.headers : init?.headers);
+  return headers.get("x-caller");
+}
