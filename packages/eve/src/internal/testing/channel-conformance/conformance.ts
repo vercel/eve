@@ -115,22 +115,6 @@ interface ConformanceChannel {
   readonly unsupported?: Partial<Record<ContractRuleName, string>>;
 }
 
-const IMAGE_REACHES_AGENT = "an image a person sends reaches the agent with its bytes and type";
-const PDF_REACHES_AGENT = "a PDF a person sends reaches the agent with its bytes and type";
-const UNDOWNLOADABLE_FILE =
-  "a file that can't be downloaded reaches the agent as a note, not a link, and the next message still works";
-const EARLIER_FILE = "a file sent earlier in the conversation is still there on a later message";
-
-/** The agent sees none of the files a person sent. */
-function filesNotSeen(
-  reason: string,
-  ...rules: ContractRuleName[]
-): Partial<Record<ContractRuleName, BrokenCell>> {
-  return Object.fromEntries(
-    rules.map((rule) => [rule, { reason, symptom: /the agent saw \[\]/u }]),
-  );
-}
-
 const SIGN_IN_NOT_SHOWN = /Timed out waiting for the bot to show/u;
 
 /** The channel has no default `authorization.required` renderer, so a sign-in shows nothing. */
@@ -189,12 +173,6 @@ const DISCORD_BROKEN = {
     "a sign-in without a link shows its instructions",
     "completing a sign-in tells the person it succeeded",
   ),
-  ...filesNotSeen(
-    "eve reads only the slash command's message option, not its attachment options",
-    IMAGE_REACHES_AGENT,
-    PDF_REACHES_AGENT,
-    UNDOWNLOADABLE_FILE,
-  ),
 };
 
 const DISCORD_UNSUPPORTED = {
@@ -215,13 +193,6 @@ const SLACK_BROKEN = {
 
 const TEAMS_BROKEN = {
   ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, ["approvalText", "questionPress", "questionText"]),
-  ...filesNotSeen(
-    "Teams drops files unless files.enabled is set and their host is allowlisted",
-    IMAGE_REACHES_AGENT,
-    PDF_REACHES_AGENT,
-    UNDOWNLOADABLE_FILE,
-    EARLIER_FILE,
-  ),
 } satisfies Partial<Record<ContractRuleName, BrokenCell>>;
 
 /** The sign-in prompt, link included, goes to the whole thread. */

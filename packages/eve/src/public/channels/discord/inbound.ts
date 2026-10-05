@@ -64,12 +64,29 @@ export interface DiscordInteractionBase {
  */
 export interface DiscordCommandOption {
   readonly name: string;
+  /** Discord's option type integer, e.g. 3 for a string or 11 for an attachment. */
+  readonly type?: number;
   readonly value?: string | number | boolean;
   readonly options: readonly DiscordCommandOption[];
 }
 
+/** A file a person attached to a slash command through an attachment option. */
+export interface DiscordAttachment {
+  readonly id: string;
+  /** Signed Discord CDN URL the file downloads from. */
+  readonly url: string;
+  readonly filename: string;
+  readonly contentType?: string;
+  readonly size?: number;
+}
+
+/** Discord's option type for an attachment; its value is the attachment's id. */
+const ATTACHMENT_OPTION_TYPE = 11;
+
 /** Parsed Discord slash/application command interaction. */
 export interface DiscordCommandInteraction extends DiscordInteractionBase {
+  /** Files attached through the command's attachment options, in option order. */
+  readonly attachments: readonly DiscordAttachment[];
   readonly commandId?: string;
   readonly commandName: string;
   readonly options: readonly DiscordCommandOption[];
@@ -169,11 +186,13 @@ function parseCommandInteraction(raw: Record<string, unknown>): DiscordCommandIn
   const base = parseInteractionBase(raw);
   const data = isObject(raw.data) ? raw.data : null;
   if (!base || !data || !isNonEmptyString(data.name)) return null;
+  const options = parseOptions(data.options);
   return {
     ...base,
+    attachments: resolveAttachments(options, data.resolved),
     commandId: isNonEmptyString(data.id) ? data.id : undefined,
     commandName: data.name,
-    options: parseOptions(data.options),
+    options,
     type: DISCORD_INTERACTION_TYPE.APPLICATION_COMMAND,
   };
 }
@@ -282,11 +301,46 @@ function parseOptions(value: unknown): DiscordCommandOption[] {
     const option: DiscordCommandOption = {
       name: item.name,
       options: parseOptions(item.options),
+      type: typeof item.type === "number" ? item.type : undefined,
       value: parseOptionValue(item.value),
     };
     options.push(option);
   }
   return options;
+}
+
+/** The attachments the command's attachment options name, from the interaction's `resolved` data. */
+function resolveAttachments(
+  options: readonly DiscordCommandOption[],
+  resolved: unknown,
+): DiscordAttachment[] {
+  const byId =
+    isObject(resolved) && isObject(resolved.attachments) ? resolved.attachments : undefined;
+  if (byId === undefined) return [];
+  return attachmentOptionIds(options).flatMap((id) => {
+    const raw = byId[id];
+    if (!isObject(raw) || !isNonEmptyString(raw.url) || !isNonEmptyString(raw.filename)) {
+      return [];
+    }
+    return [
+      {
+        contentType: isNonEmptyString(raw.content_type) ? raw.content_type : undefined,
+        filename: raw.filename,
+        id,
+        size: typeof raw.size === "number" ? raw.size : undefined,
+        url: raw.url,
+      },
+    ];
+  });
+}
+
+function attachmentOptionIds(options: readonly DiscordCommandOption[]): string[] {
+  return options.flatMap((option) => [
+    ...(option.type === ATTACHMENT_OPTION_TYPE && typeof option.value === "string"
+      ? [option.value]
+      : []),
+    ...attachmentOptionIds(option.options),
+  ]);
 }
 
 function parseOptionValue(value: unknown): string | number | boolean | undefined {
@@ -331,6 +385,8 @@ function formatCommandOptions(options: readonly DiscordCommandOption[]): string 
 }
 
 function formatOption(option: DiscordCommandOption): string {
+  // An attachment option's value is an id; the file reaches the model as its own part.
+  if (option.type === ATTACHMENT_OPTION_TYPE) return "";
   if (option.value !== undefined) return `${option.name}:${String(option.value)}`;
   const nested = formatCommandOptions(option.options);
   return nested ? `${option.name} ${nested}` : option.name;

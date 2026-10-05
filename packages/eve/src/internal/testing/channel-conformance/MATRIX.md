@@ -85,10 +85,10 @@ pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conform
 
 | Rule | `tui` | `web chat` | `chat-sdk` | `chat-sdk-dm` | `chat-sdk-text` | `discord` | `discord-dm` | `linq` | `linq-dm` | `slack` | `slack-dm` | `teams` | `teams-dm` | `telegram` | `telegram-dm` | `github` | `linear` | `photon` | `twilio` |
 | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| an image a person sends reaches the agent with its bytes and type | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ✅ | ✅ | ✅ | ❌<sup>[21](#note-21)</sup> | ❌<sup>[21](#note-21)</sup> | ✅ | ✅ | ✅ | ✅ | ❌<sup>[22](#note-22)</sup> | ❌<sup>[22](#note-22)</sup> | ✅ | ✅ | —<sup>[20](#note-20)</sup> | ✅ | ✅ | ✅ |
-| a PDF a person sends reaches the agent with its bytes and type | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ✅ |  | ✅ | ❌<sup>[21](#note-21)</sup> |  | ✅ |  | ✅ |  | ❌<sup>[22](#note-22)</sup> |  | ✅ |  | —<sup>[20](#note-20)</sup> | ✅ | ✅ | ✅ |
-| a file that can't be downloaded reaches the agent as a note, not a link, and the next message still works | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ✅ |  | ✅ | ❌<sup>[21](#note-21)</sup> |  | ✅ |  | ✅ |  | ❌<sup>[22](#note-22)</sup> |  | ✅ |  | —<sup>[20](#note-20)</sup> | ✅ | ✅ | ✅ |
-| a file sent earlier in the conversation is still there on a later message | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ✅ |  | ✅ | —<sup>[23](#note-23)</sup> |  | ✅ |  | ✅ |  | ❌<sup>[22](#note-22)</sup> |  | ✅ |  | —<sup>[20](#note-20)</sup> | ✅ | ✅ | ✅ |
+| an image a person sends reaches the agent with its bytes and type | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[20](#note-20)</sup> | ✅ | ✅ | ✅ |
+| a PDF a person sends reaches the agent with its bytes and type | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ✅ |  | ✅ | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[20](#note-20)</sup> | ✅ | ✅ | ✅ |
+| a file that can't be downloaded reaches the agent as a note, not a link, and the next message still works | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ✅ |  | ✅ | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[20](#note-20)</sup> | ✅ | ✅ | ✅ |
+| a file sent earlier in the conversation is still there on a later message | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ✅ |  | ✅ | —<sup>[21](#note-21)</sup> |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[20](#note-20)</sup> | ✅ | ✅ | ✅ |
 
 ## Notes
 
@@ -112,6 +112,4 @@ pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conform
 18. <a id="note-18"></a>the platform has no second person who can act
 19. <a id="note-19"></a>the platform has no second person who can act or buttons a person can press
 20. <a id="note-20"></a>the platform has no files a person can send
-21. <a id="note-21"></a>eve reads only the slash command's message option, not its attachment options
-22. <a id="note-22"></a>Teams drops files unless files.enabled is set and their host is allowlisted
-23. <a id="note-23"></a>each slash command starts its own session, so no later message shares one with the file
+21. <a id="note-21"></a>each slash command starts its own session, so no later message shares one with the file

@@ -50,6 +50,10 @@ import { verifyDiscordInbound } from "#public/channels/discord/verifyInbound.js"
 import { readNonEmptyString } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
+import {
+  createDiscordFetchFile,
+  discordCommandContent,
+} from "#public/channels/discord/attachments.js";
 import type { InputOption, ValidatedInputResponse } from "#shared/input.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import { discordAudience, discordInstrumentationMetadata } from "./audience.js";
@@ -239,6 +243,7 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
     state: initialDiscordState(),
     metadata: discordInstrumentationMetadata,
     audience: ({ state }) => state.audience ?? "unknown",
+    fetchFile: createDiscordFetchFile(config.api?.fetch),
 
     context(state, session) {
       return rebuildDiscordContext(state, session, config);
@@ -612,7 +617,10 @@ async function dispatchCommand(input: {
   readonly from: ChannelFrom<DiscordChannelState>;
   readonly state: DiscordChannelState;
 }): Promise<void> {
-  const turnMessage = commandInteractionMessage(input.interaction);
+  const turnMessage = discordCommandContent(
+    commandInteractionMessage(input.interaction),
+    input.interaction.attachments,
+  );
   const contextBlock = formatDiscordContextBlock({
     applicationId: input.interaction.applicationId,
     channelId: input.interaction.channelId,
