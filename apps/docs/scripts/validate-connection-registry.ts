@@ -52,6 +52,7 @@ const CONNECT_SERVICES: Readonly<Record<string, string>> = {
   honeycomb: "mcp.honeycomb.io",
   context: "mcp.context.dev",
   natural: "mcp.natural.com",
+  upstash: "upstash-redis",
 };
 const CONNECT_CREATION_TYPES: Readonly<Record<string, string>> = {
   agentcard: "agentcard",
