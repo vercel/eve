@@ -140,6 +140,7 @@ async function emitAttempt(input: {
   readonly parentTraceContext?: InstrumentationTraceContext;
   readonly runInContext: InstrumentationContextRunner;
   readonly providerMetadata?: Readonly<Record<string, unknown>>;
+  readonly modelCallProviderMetadata?: Readonly<Record<string, unknown>>;
   readonly actionKind?: InstrumentationActionKind;
   readonly runtimeContext?: Readonly<Record<string, unknown>>;
   readonly sessionId: string;
@@ -219,6 +220,7 @@ async function emitAttempt(input: {
         finishReason: "tool-calls",
         modelId: "claude-response",
         performance: { responseTimeMs: 10 },
+        providerMetadata: input.modelCallProviderMetadata,
         responseId: "response-1",
         usage: {
           inputTokenDetails: { cacheReadTokens: 4, cacheWriteTokens: 2 },
@@ -485,6 +487,46 @@ describe("createAgentOtelInstrumentation", () => {
           "completed",
         ]);
       }
+      await runtime.provider.shutdown();
+    },
+  );
+
+  it.each(["input", "output"] as const)(
+    "redacts chat %s content for one destination while preserving Gateway identifiers",
+    async (direction) => {
+      const redacted = new InMemorySpanExporter();
+      const runtime = createRuntime(undefined, undefined, [
+        contentFilteringProcessor(new SimpleSpanProcessor(redacted), {
+          span: () => ({
+            redact: true,
+            inputs: direction === "input",
+            outputs: direction === "output",
+          }),
+        }),
+      ]);
+      await emitAttempt({
+        hooks: runtime.hooks,
+        modelCallProviderMetadata: {
+          gateway: { generationId: "gen_123", transcripts: { enabled: true } },
+        },
+        runInContext: runtime.runInContext,
+        sessionId: "session-1",
+        turnId: "turn-1",
+        turnSequence: 0,
+      });
+      await runtime.provider.forceFlush();
+
+      const model = byName(redacted.getFinishedSpans(), "chat claude-test")[0]!;
+      expect(model.attributes).toMatchObject({
+        "agent.trace.content.input": direction !== "input",
+        "agent.trace.content.output": direction !== "output",
+        "gen_ai.generation.id": "gen_123",
+        "vercel.ai_gateway.transcript.enabled": true,
+      });
+      expect(model.attributes).not.toHaveProperty(`gen_ai.${direction}.messages`);
+      const original = byName(runtime.exporter.getFinishedSpans(), "chat claude-test")[0]!;
+      expect(original.attributes[`agent.trace.content.${direction}`]).toBe(true);
+      expect(original.attributes).toHaveProperty(`gen_ai.${direction}.messages`);
       await runtime.provider.shutdown();
     },
   );
@@ -2738,11 +2780,14 @@ describe("createAgentOtelInstrumentation", () => {
     expect(model.attributes["ai.response.reasoning"]).toBe("thinking about weather");
     expect(model.attributes["ai.response.text"]).toBe("Checking the weather.");
     expect(model.attributes).toMatchObject({
+      "agent.trace.content.input": true,
+      "agent.trace.content.output": true,
       "gen_ai.agent.name": "weather",
       "gen_ai.input.messages":
         '[{"parts":[{"content":"real user text","type":"text"}],"role":"user"}]',
       "gen_ai.operation.name": "chat",
-      "gen_ai.output.messages": expect.stringContaining('"finish_reason":"tool_call"'),
+      "gen_ai.output.messages":
+        '[{"finish_reason":"tool_call","parts":[{"content":"thinking about weather","type":"reasoning"},{"content":"Checking the weather.","type":"text"},{"arguments":{"query":"weather today"},"id":"search-1","name":"web_search","type":"tool_call"},{"id":"search-1","response":{"results":["sunny"]},"type":"tool_call_response"}],"role":"assistant"}]',
       "gen_ai.response.finish_reasons": ["tool-calls"],
       "gen_ai.system_instructions":
         '[{"content":"You are a weather assistant (system prompt).","type":"text"}]',
@@ -2893,6 +2938,10 @@ describe("createAgentOtelInstrumentation", () => {
     await provider.forceFlush();
 
     const spans = exporter.getFinishedSpans();
+    expect(byName(spans, "chat claude-test")[0]!.attributes).toMatchObject({
+      "agent.trace.content.input": false,
+      "agent.trace.content.output": false,
+    });
     expect(JSON.stringify(spans.map((span) => span.attributes))).not.toContain("secret");
     expect(JSON.stringify(spans.map((span) => span.attributes))).not.toContain("temperature");
     expect(JSON.stringify(spans.map((span) => span.attributes))).not.toContain("private");
@@ -2952,6 +3001,107 @@ describe("createAgentOtelInstrumentation", () => {
     expect(agentToolSpanContext(active!)).toBeUndefined();
     withSpy.mockRestore();
   });
+
+  it.each([
+    {
+      name: "captured Gateway call",
+      metadata: { gateway: { generationId: "gen_123", transcripts: { enabled: true } } },
+      expectedAttributes: {
+        "gen_ai.generation.id": "gen_123",
+        "vercel.ai_gateway.transcript.enabled": true,
+      },
+      absentKeys: [],
+    },
+    {
+      name: "Gateway call without transcript metadata",
+      metadata: { gateway: { generationId: "gen_123" } },
+      expectedAttributes: { "gen_ai.generation.id": "gen_123" },
+      absentKeys: ["vercel.ai_gateway.transcript.enabled"],
+    },
+    {
+      name: "non-Gateway call",
+      metadata: { anthropic: { cacheCreationInputTokens: 0 } },
+      expectedAttributes: {},
+      absentKeys: ["gen_ai.generation.id", "vercel.ai_gateway.transcript.enabled"],
+    },
+  ])(
+    "reports chat identifiers and content flags for a $name",
+    async ({ metadata, expectedAttributes, absentKeys }) => {
+      const startedAttributes: Record<string, unknown>[] = [];
+      const runtime = createRuntime(undefined, undefined, [
+        {
+          onStart: (span) => {
+            if (span.name === "chat claude-test") startedAttributes.push({ ...span.attributes });
+          },
+          onEnd: () => {},
+          forceFlush: async () => {},
+          shutdown: async () => {},
+        },
+      ]);
+      await emitAttempt({
+        hooks: runtime.hooks,
+        modelCallProviderMetadata: metadata,
+        runInContext: runtime.runInContext,
+        sessionId: "session-1",
+        turnId: "turn-1",
+        turnSequence: 0,
+      });
+      await runtime.provider.forceFlush();
+
+      const model = byName(runtime.exporter.getFinishedSpans(), "chat claude-test")[0]!;
+      expect(startedAttributes).toEqual([
+        expect.objectContaining({ "agent.trace.content.input": true }),
+      ]);
+      expect(startedAttributes[0]).not.toHaveProperty("agent.trace.content.output");
+      expect(model.attributes).toMatchObject({
+        "agent.trace.content.input": true,
+        "agent.trace.content.output": true,
+        ...expectedAttributes,
+      });
+      for (const key of absentKeys) expect(model.attributes).not.toHaveProperty(key);
+      await runtime.provider.shutdown();
+    },
+  );
+
+  it.each([
+    { recordInputs: false, recordOutputs: true },
+    { recordInputs: true, recordOutputs: false },
+  ])(
+    "reports the effective chat content policy ($recordInputs, $recordOutputs)",
+    async (policy) => {
+      const runtime = createRuntime(new InMemoryAgentTraceStateStore(), () => ({
+        emit: true,
+        ...policy,
+      }));
+      await emitAttempt({
+        hooks: runtime.hooks,
+        modelCallProviderMetadata: {
+          gateway: { generationId: "gen_123", transcripts: { enabled: true } },
+        },
+        runInContext: runtime.runInContext,
+        sessionId: "session-1",
+        turnId: "turn-1",
+        turnSequence: 0,
+      });
+      await runtime.provider.forceFlush();
+
+      const model = byName(runtime.exporter.getFinishedSpans(), "chat claude-test")[0]!;
+      expect(model.attributes).toMatchObject({
+        "agent.trace.content.input": policy.recordInputs,
+        "agent.trace.content.output": policy.recordOutputs,
+        "gen_ai.generation.id": "gen_123",
+        "vercel.ai_gateway.transcript.enabled": true,
+      });
+      for (const [direction, recorded] of [
+        ["input", policy.recordInputs],
+        ["output", policy.recordOutputs],
+      ] as const) {
+        if (recorded) expect(model.attributes).toHaveProperty(`gen_ai.${direction}.messages`);
+        else expect(model.attributes).not.toHaveProperty(`gen_ai.${direction}.messages`);
+      }
+      await runtime.provider.shutdown();
+    },
+  );
 
   it("writes gateway cost attributes on the step span when the gateway reports them", async () => {
     const runtime = createRuntime();

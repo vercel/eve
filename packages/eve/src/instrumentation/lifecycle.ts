@@ -415,11 +415,7 @@ export type InstrumentationStepAttemptTerminalEvent =
   | InstrumentationStepAttemptCompletedEvent
   | InstrumentationStepAttemptFailedEvent;
 
-/**
- * Provider metadata for one completed attempt, as reported by the AI SDK
- * (`StepResult.providerMetadata`). Carries Vercel AI Gateway cost data when
- * the request went through the gateway; absent for other providers.
- */
+/** AI SDK step metadata, including Gateway cost data when available. */
 export interface InstrumentationStepAttemptMetadataEvent {
   readonly type: "step.attempt.metadata";
   readonly idempotencyKey: string;
@@ -442,6 +438,8 @@ export interface InstrumentationModelCallCompletedEvent {
   /** Content. Absent unless this provider's trace policy records this direction. */
   readonly content?: readonly InstrumentationContentPart[];
   readonly finishReason: string;
+  /** AI Gateway identifiers for this call; absent for non-Gateway models. */
+  readonly gateway?: Readonly<{ generationId?: string; transcriptsEnabled?: boolean }>;
   readonly idempotencyKey: string;
   readonly responseModelId?: string;
   readonly responseId?: string;

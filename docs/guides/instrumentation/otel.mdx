@@ -164,6 +164,19 @@ each turn. Remote requests carry the conversation ID in W3C Baggage.
 and the trace-content policy. See
 [Remote agents](../guides/remote-agents#preserving-trace-content).
 
+### Chat span attributes
+
+Each `chat <model>` span reports these attributes independently of its content attributes:
+
+| Attribute                              | Meaning                                                                                                             |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `gen_ai.generation.id`                 | The non-empty AI Gateway generation id returned for a completed call; also retained on `agent.step`.                |
+| `vercel.ai_gateway.transcript.enabled` | Set to boolean `true` only when AI Gateway returns `transcripts.enabled === true`; absent otherwise, never `false`. |
+| `agent.trace.content.input`            | Set at span start to whether eve recorded inputs for this call.                                                     |
+| `agent.trace.content.output`           | Set at span end for completed calls to whether eve recorded outputs for this call.                                  |
+
+Generation ids and the transcript flag are identifiers, not content, so content redaction preserves them. A destination's `exportPolicy` sets the content flag to `false` for each direction it redacts.
+
 ## Local traces
 
 `eve dev` records local traces by default. Omitting

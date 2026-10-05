@@ -1,4 +1,4 @@
-import { APICallError, generateText } from "ai";
+import { APICallError, createGateway, generateText, streamText } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
@@ -7,6 +7,7 @@ import {
   modelCallIdempotencyKey,
   type InstrumentationAttemptScope,
   type InstrumentationModelCallStartedEvent,
+  type InstrumentationModelCallCompletedEvent,
   type InstrumentationModelCallTerminalEvent,
 } from "#instrumentation/lifecycle.js";
 import { createAiSdkHookBridge } from "#instrumentation/ai-sdk-hook-bridge.js";
@@ -20,6 +21,59 @@ const scope: InstrumentationAttemptScope = {
 };
 
 describe("AI SDK model-call retry telemetry", () => {
+  it("publishes Gateway stream identifiers even when no provider captures content", async () => {
+    const completed: InstrumentationModelCallCompletedEvent[] = [];
+    const hooks = createUnboundInstrumentationHooks([
+      {
+        events: { "model.call.completed": (event) => void completed.push(event) },
+        name: "metadata",
+        tracePolicy: () => ({ emit: true, recordInputs: false, recordOutputs: false }),
+      },
+    ]).forTrace!({
+      agentName: "test-agent",
+      audience: "public",
+      channel: { kind: "http" },
+      environment: "production",
+      principalType: "anonymous",
+    });
+    const chunks = [
+      { type: "stream-start", warnings: [] },
+      { type: "text-start", id: "text-1" },
+      { type: "text-delta", id: "text-1", delta: "Sunny today." },
+      { type: "text-end", id: "text-1" },
+      {
+        type: "finish",
+        finishReason: { unified: "stop", raw: "stop" },
+        usage: {
+          inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+          outputTokens: { total: 2, text: 2, reasoning: 0 },
+        },
+        providerMetadata: {
+          gateway: { generationId: "gen_123", transcripts: { enabled: true } },
+        },
+      },
+    ];
+    const gateway = createGateway({
+      apiKey: "gateway-test",
+      fetch: async () =>
+        new Response(chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join(""), {
+          headers: { "content-type": "text/event-stream" },
+        }),
+    });
+    const result = streamText({
+      model: gateway.languageModel("openai/gpt-5.4-mini"),
+      prompt: "Help Alice check today's weather.",
+      telemetry: { integrations: [createAiSdkHookBridge(scope, hooks)], isEnabled: true },
+    });
+    await result.consumeStream();
+
+    expect(await result.text).toBe("Sunny today.");
+    expect(completed).toHaveLength(1);
+    expect(completed[0]!.gateway).toEqual({ generationId: "gen_123", transcriptsEnabled: true });
+    expect(completed[0]!.content).toBeUndefined();
+    expect(Object.isFrozen(completed[0]!.gateway)).toBe(true);
+  });
+
   it("restarts instrumentation when generateText retries without another call-start callback", async () => {
     const started: InstrumentationModelCallStartedEvent[] = [];
     const terminal: InstrumentationModelCallTerminalEvent[] = [];

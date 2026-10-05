@@ -169,6 +169,8 @@ operation key when upserting records across replays.
 
 An ordinary tool emits both `action.*` and `tool.call.*` events. Use `action.*` for eve's durable dispatch lifecycle, including tools, skills, subagents, and remote agents. Use `tool.call.*` only when you need the AI SDK's in-process tool execution boundary.
 
+For calls through AI Gateway, `model.call.completed` includes available Gateway identifiers in `gateway`, independently of the content policy.
+
 For local and remote subagents, `action.completed` and `action.failed` include the child turn's `usage` directly. Token counts are always present when the child reports usage; `usage.costUsd` is present only when the model provider reports a price. Without the action-level usage, consumers would have to correlate child model events through trace lineage and sum their provider metadata, which is harder to do reliably across retries and parked turns.
 
 Handlers from different files run concurrently and are failure-isolated. Do
