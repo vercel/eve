@@ -307,6 +307,11 @@ export function createDockerSandboxProvider(
         await touchDockerTemplateMarker(markerPath, imageReference);
       } finally {
         await cli.run(["rm", "-f", buildContainerName]).catch(() => {});
+        // The Dockerfile image only seeds this build; the committed
+        // template keeps its layers, and pruning the template frees them.
+        if (dockerfile !== undefined) {
+          await cli.run(["rmi", baseImage]).catch(() => {});
+        }
       }
 
       return { imageReference };
