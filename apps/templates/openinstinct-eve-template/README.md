@@ -1,6 +1,6 @@
-# Multi-tenant iMessage Assistant
+# iMessage Agent as a Service
 
-Build an iMessage assistant service for multiple customers with eve and Linq. This starter adapts the agent configuration and iMessage channel from [Merit Systems' OpenInstinct](https://github.com/Merit-Systems/OpenInstinct), an application that connects users to their own assistant context and accounts.
+Build a multi-tenant iMessage agent service with eve and Linq. This starter adapts the agent configuration and iMessage channel from [Merit Systems' OpenInstinct](https://github.com/Merit-Systems/OpenInstinct), an application that connects users to their own assistant context and accounts.
 
 The intended use case is one deployment serving multiple customers, rather than a separate deployment for each person's assistant. This starter provides the messaging foundation: it receives iMessage and SMS messages, derives sender identity from Linq, and replies through the same channel. Messages in the same Linq conversation continue the same eve session.
 

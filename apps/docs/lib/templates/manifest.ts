@@ -133,11 +133,11 @@ export const templateManifest: TemplateManifestEntry[] = [
   },
   {
     slug: "openinstinct-eve-template",
-    title: "Multi-tenant iMessage Assistant",
+    title: "iMessage Agent as a Service",
     setupPrompt:
-      "Set up the multi-tenant iMessage assistant starter in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/openinstinct-eve-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about the required Linq connector and model provider setup. Explain that this starter accepts messages from every sender who reaches the line and does not yet implement user enrollment or tenant-scoped resource access. Follow the README's multi-tenant guidance before connecting customer accounts or data. Do not describe OpenInstinct's web app, vault, or browser worker as included capabilities.",
+      "Set up the iMessage Agent as a Service template in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/openinstinct-eve-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about the required Linq connector and model provider setup. Explain that this starter accepts messages from every sender who reaches the line and does not yet implement user enrollment or tenant-scoped resource access. Follow the README's multi-tenant guidance before connecting customer accounts or data. Do not describe OpenInstinct's web app, vault, or browser worker as included capabilities.",
     description:
-      "A starter for building an iMessage assistant service for multiple customers with eve and Linq. Inspired by OpenInstinct; add user enrollment and tenant-scoped access in your application.",
+      "A starter for building a multi-tenant iMessage agent service with eve and Linq, adapted from OpenInstinct. Add user enrollment and tenant-scoped access in your application.",
     sourceHref: "https://github.com/vercel/eve/tree/main/apps/templates/openinstinct-eve-template",
     category: "Example",
     model: "anthropic/claude-sonnet-5",
