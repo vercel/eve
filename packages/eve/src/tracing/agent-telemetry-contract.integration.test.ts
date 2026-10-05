@@ -48,6 +48,12 @@ import { buildConversationItems } from "#cli/dev/tui/traces/trace-conversation.j
 import { contentFilteringProcessor } from "#tracing/content-span-processor.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
+import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
+import { resolveConnectionTools } from "#execution/tools/connection-tools.js";
+import { emitNestedToolActions } from "#harness/nested-actions.js";
+import { createInstrumentationHandleEvent } from "#instrumentation/native-events.js";
+import { createActionResultEvent, createActionsRequestedEvent } from "#protocol/message.js";
+import type { JsonValue } from "#shared/json.js";
 
 const traceContext = (agentName: string, audience: "public" | "private") => ({
   agentName,
@@ -126,6 +132,169 @@ function scopeFor(sessionId: string, audience: "public" | "private"): Instrument
 }
 
 describe("exported agent telemetry contract", () => {
+  it.each(["public", "private"] as const)(
+    "parents nested connector actions and preserves resolved arguments under the %s content policy",
+    async (audience) => {
+      const runtime = createRuntime();
+      const ctx = contextFor(audience);
+      const scope = scopeFor("parent", audience);
+      const hooks = runtime.hooks.forTrace!(traceContext("parent", audience));
+      const executeTool = vi.fn(async () => ({ structuredContent: { title: "Issue" } }));
+      ctx.set(ConnectionRegistryKey, {
+        dispose: async () => {},
+        getConnectionApproval: () => undefined,
+        getConnectionNames: () => ["linear"],
+        getConnections: () => [
+          {
+            connectionName: "linear",
+            protocol: "mcp",
+            url: "https://linear.example.com/mcp",
+            description: "Issues",
+            sourceId: "linear",
+            sourceKind: "module",
+            logicalPath: "connections/linear",
+          },
+        ],
+        getClient: () => ({
+          close: async () => {},
+          connect: async () => {},
+          executeTool,
+          getToolMetadata: async () => [
+            {
+              name: "get_issue",
+              description: "Read an issue",
+              inputSchema: {
+                type: "object",
+                properties: {
+                  id: { type: "string" },
+                  includeRelations: { type: "boolean", default: false },
+                },
+                required: ["id"],
+              },
+            },
+          ],
+        }),
+      });
+      const accepted = vi.fn(async () => {});
+      const handleEvent = createInstrumentationHandleEvent({
+        getAttemptScope: () => scope,
+        handleEvent: accepted,
+        hooks,
+        sessionId: "parent",
+      })!;
+      const input = { connection: "linear", tool: "get_issue", input: { id: "ISSUE-1" } };
+      const toolKey = toolCallIdempotencyKey(scope, "call-1", 0);
+      try {
+        await contextStorage.run(ctx, async () => {
+          await bindInstrumentationRuntime(runtime, ctx, {
+            agentName: "parent",
+            rootSessionId: "parent",
+            sessionId: "parent",
+          })!.preparePreamble({ sequence: 0, sessionStarted: false, turnId: "turn_0" });
+          await hooks.publish({
+            type: "step.attempt.started",
+            idempotencyKey: attemptIdempotencyKey(scope),
+            scope,
+            operation: { modelId: "test", operationId: "ai.streamText", provider: "test" },
+          });
+          await handleEvent(
+            createActionsRequestedEvent({
+              actions: [
+                { callId: "call-1", kind: "tool-call", toolName: "connection_execute", input },
+              ],
+              sequence: 0,
+              stepIndex: 0,
+              turnId: "turn_0",
+            }),
+          );
+          await hooks.publish({
+            type: "tool.call.started",
+            idempotencyKey: toolKey,
+            callId: "call-1",
+            input,
+            toolName: "connection_execute",
+            scope,
+          });
+          const output = await runtime.runInContext(
+            { idempotencyKey: toolKey, scope, type: "tool.call" },
+            () =>
+              resolveConnectionTools()!.connection_execute!.execute!(input, {
+                callId: "call-1",
+                messages: [],
+              } as never),
+          );
+          await hooks.publish({
+            type: "tool.call.completed",
+            idempotencyKey: toolKey,
+            output: { type: "result", output },
+            scope,
+          });
+          await emitNestedToolActions(
+            handleEvent,
+            { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+            "call-1",
+          );
+          await handleEvent(
+            createActionResultEvent({
+              result: {
+                callId: "call-1",
+                kind: "tool-result",
+                toolName: "connection_execute",
+                output: output as JsonValue,
+              },
+              sequence: 0,
+              stepIndex: 0,
+              turnId: "turn_0",
+            }),
+          );
+          await hooks.publish({
+            type: "step.attempt.completed",
+            idempotencyKey: attemptIdempotencyKey(scope),
+            scope,
+          });
+        });
+        await runtime.forceFlush();
+        expect(executeTool.mock.calls[0]).toEqual([
+          "get_issue",
+          { id: "ISSUE-1", includeRelations: false },
+          { abortSignal: undefined, callId: "call-1" },
+        ]);
+        expect(accepted.mock.calls).toHaveLength(4);
+        const actions = runtime.exporter
+          .getFinishedSpans()
+          .filter((span) => span.name === "agent.action");
+        expect(actions).toHaveLength(2);
+        const outer = actions.find((span) => span.attributes["agent.action.call_id"] === "call-1")!;
+        const nested = actions.find(
+          (span) => span.attributes["agent.action.call_id"] === "call-1:1",
+        )!;
+        expect(outer.attributes["agent.action.kind"]).toBe("tool-call");
+        expect(nested.parentSpanContext?.spanId).toBe(outer.spanContext().spanId);
+        expect(nested.attributes).toMatchObject({
+          "agent.action.kind": "nested-tool-call",
+          "agent.action.parent_call_id": "call-1",
+          "agent.action.name": "linear__get_issue",
+        });
+        const tool = runtime.exporter
+          .getFinishedSpans()
+          .find((span) => span.name === "execute_tool connection_execute")!;
+        expect(tool.parentSpanContext?.spanId).toBe(outer.spanContext().spanId);
+        expect(nested.attributes["gen_ai.tool.call.arguments"]).toBe(
+          audience === "public" ? '{"id":"ISSUE-1","includeRelations":false}' : undefined,
+        );
+        expect(tool.attributes["gen_ai.tool.call.arguments"]).toBe(
+          audience === "public" ? JSON.stringify(input) : undefined,
+        );
+        const metadataNested = runtime.metadata
+          .getFinishedSpans()
+          .find((span) => span.attributes["agent.action.call_id"] === "call-1:1")!;
+        expect(metadataNested.attributes).not.toHaveProperty("gen_ai.tool.call.arguments");
+      } finally {
+        await runtime.shutdown();
+      }
+    },
+  );
+
   it("preserves explicit trace-session identity on every remote and local-child span", async () => {
     vi.stubEnv("VERCEL_ENV", "preview");
     const runtime = { ...createRuntime(), memoryOperations: true };

@@ -177,6 +177,7 @@ function deserializeAction(value: unknown): AgentActionTraceState | undefined {
     kind: value.kind,
     name: value.name,
     parent: value.parent,
+    parentCallId: typeof value.parentCallId === "string" ? value.parentCallId : undefined,
     rootSessionId: value.rootSessionId,
     traceSessionId: decodeTraceSessionId(value),
     sessionId: value.sessionId,

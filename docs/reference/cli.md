@@ -397,6 +397,8 @@ Each workflow tool call has an `agent.action` span and an `execute_tool <tool>` 
 
 Outbound MCP `tools/call` requests add MCP semantic attributes to the matching `execute_tool` span. When eve has no tool span to enrich, it creates a `CLIENT` `tools/call <tool>` span. Each `tools/list` discovery also has a `CLIENT` span. Configured OpenTelemetry propagation fields are injected into MCP `params._meta` for JSON-RPC bodies up to 1 MiB and propagation metadata up to 8 KiB; larger requests are sent unchanged. eve removes its audience and session-lineage baggage before forwarding, and keeps the input/output content-capture policy local.
 
+`connection_execute` records the connector call as a child of its outer `agent.action` span, with `agent.action.kind=nested-tool-call` and `agent.action.parent_call_id` identifying the outer call. The nested span's `gen_ai.tool.call.arguments` holds the validated connector input, including schema defaults, when input capture is enabled. Its duration covers the reporting of the nested result, not the connector request; use the outer call's `execute_tool` span for execution timing.
+
 Each root agent turn starts a new trace. With local caller trace context, that trace includes the first turn of each local subagent it starts. Remote child turns and later local child turns start separate traces. If a worker is replaced, the new worker uses the prepared trace context for the same turn. Supply the conversation ID to show all related traces, oldest first.
 
 Every span carries a real duration. A turn's root `invoke_agent` span is written when the turn settles, so a running turn shows only its steps.

@@ -2029,6 +2029,8 @@ describe("createAgentOtelInstrumentation", () => {
       scope,
       type: "tool.call.completed",
     });
+    const later = Date.now() + 100;
+    const clock = vi.spyOn(Date, "now").mockReturnValue(later);
     await runtime.hooks.publish({
       callId: "tool-1",
       idempotencyKey: actionKey,
@@ -2038,6 +2040,7 @@ describe("createAgentOtelInstrumentation", () => {
       scope,
       type: "action.started",
     });
+    clock.mockRestore();
     await runtime.hooks.publish({
       idempotencyKey: actionKey,
       outcome: "completed",
@@ -2072,6 +2075,7 @@ describe("createAgentOtelInstrumentation", () => {
     const tool = byName(spans, "execute_tool weather")[0]!;
     const uncorrelatedTool = byName(spans, "execute_tool final_output")[0]!;
     expect(tool.parentSpanContext?.spanId).toBe(action.spanContext().spanId);
+    expect(nanos(action.startTime)).toBeLessThanOrEqual(nanos(tool.startTime));
     // Seconds, as `@ai-sdk/otel` records it; a publisher that measured nothing sets none.
     expect(tool.attributes["gen_ai.execute_tool.duration"]).toBe(1.5);
     expect(uncorrelatedTool.attributes["gen_ai.execute_tool.duration"]).toBeUndefined();

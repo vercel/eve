@@ -130,6 +130,7 @@ export function createAgentOtelInstrumentation(
       return turn?.context;
     },
     stateStore: input.stateStore,
+    toolStartTimeForAction: (idempotencyKey) => tools.startTimeForAction(idempotencyKey),
     tracer: input.tracer,
   });
   const approvals = createAgentApprovalInstrumentation({

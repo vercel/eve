@@ -57,11 +57,17 @@ export function createAgentActionInstrumentation(input: {
     event: InstrumentationActionStartedEvent,
   ) => SpanContext | undefined | PromiseLike<SpanContext | undefined>;
   readonly stateStore: AgentTraceStateStore;
+  readonly toolStartTimeForAction: (idempotencyKey: string) => number | undefined;
   readonly tracer: Tracer;
 }): AgentActionInstrumentation {
   const byAttempt = new Map<string, Set<string>>();
 
   const onStarted = async (event: InstrumentationActionStartedEvent): Promise<void> => {
+    // SDK execution can precede acceptance of the streamed action request.
+    const startTimeMs = Math.min(
+      event.startedAtMs ?? Date.now(),
+      input.toolStartTimeForAction(event.idempotencyKey) ?? Infinity,
+    );
     const traceContext = await input.resolveTraceContext(event);
     if (traceContext === undefined || !isSampledTrace(traceContext)) return;
 
@@ -74,15 +80,20 @@ export function createAgentActionInstrumentation(input: {
       kind: event.kind,
       name: event.name,
       parent: {
-        spanId: input.idGenerator.deriveSpanId(attemptIdempotencyKey(event.scope)),
+        spanId: input.idGenerator.deriveSpanId(
+          event.parentCallId === undefined
+            ? attemptIdempotencyKey(event.scope)
+            : `action:${actionIdempotencyKey(event.scope.sessionId, event.scope.turnId, event.parentCallId)}`,
+        ),
         traceFlags: traceContext.traceFlags,
         traceId: traceContext.traceId,
       },
+      parentCallId: event.parentCallId,
       rootSessionId: event.scope.rootSessionId ?? event.scope.sessionId,
       traceSessionId: traceSessionIdOf(event.scope),
       sessionId: event.scope.sessionId,
       spanId: input.idGenerator.deriveSpanId(`action:${event.idempotencyKey}`),
-      startTimeMs: Date.now(),
+      startTimeMs,
       stepIndex: event.scope.stepIndex,
       turnId: event.scope.turnId,
     };
@@ -114,7 +125,10 @@ export function createAgentActionInstrumentation(input: {
         {
           attributes: {
             "agent.action.call_id": state.callId,
-            "agent.action.kind": state.kind,
+            "agent.action.kind": state.parentCallId === undefined ? state.kind : "nested-tool-call",
+            ...(state.parentCallId === undefined
+              ? undefined
+              : { "agent.action.parent_call_id": state.parentCallId }),
             "agent.action.name": state.name,
             "agent.framework.name": "eve",
             "agent.framework.version": input.frameworkVersion,

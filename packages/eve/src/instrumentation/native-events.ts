@@ -65,6 +65,7 @@ export function createInstrumentationHandleEvent(
   const publishedInputs = new Set<string>();
   let activeTurnId = input.turnId;
   return async (event, messages) => {
+    const startedAtMs = Date.now();
     await handleEvent(event, messages);
     const lifecycleEvent = toLifecycleEvent(event, input, activeTurnId);
     if (event.type === "turn.started") activeTurnId = event.data.turnId;
@@ -104,7 +105,7 @@ export function createInstrumentationHandleEvent(
     }
     if (lifecycleEvent !== undefined) await hooks.publish(lifecycleEvent);
     if (event.type === "actions.requested") {
-      await publishActionStarts(event, input, hooks, publishedActions);
+      await publishActionStarts(event, input, hooks, publishedActions, startedAtMs);
     } else if (event.type === "action.result") {
       await publishActionTerminal(event, input, hooks);
     } else if (event.type === "input.requested") {
@@ -196,6 +197,7 @@ async function publishActionStarts(
   input: CreateInstrumentationHandleEventInput,
   hooks: InstrumentationHooks,
   published: Set<string>,
+  startedAtMs: number,
 ): Promise<void> {
   const scope = input.getAttemptScope?.();
   if (scope === undefined) return;
@@ -209,6 +211,10 @@ async function publishActionStarts(
     await hooks.publish(
       Object.freeze({
         callId: action.callId,
+        ...(action.kind === "tool-call" && action.parentCallId !== undefined
+          ? { parentCallId: action.parentCallId }
+          : undefined),
+        startedAtMs,
         idempotencyKey,
         input: capturesInputs ? action.input : undefined,
         ...(isRuntimeWorkflowToolAction(action) ? { isWorkflowTool: true } : undefined),

@@ -42,6 +42,7 @@ interface ToolSpanState {
 
 interface AgentToolInstrumentation {
   actionStarted(event: InstrumentationActionStartedEvent): Promise<void>;
+  startTimeForAction(idempotencyKey: string): number | undefined;
   contextFor(attemptId: string, idempotencyKey: string): Context | undefined;
   drain(attemptId: string, failure?: { readonly error: unknown }): void;
   readonly events: {
@@ -102,6 +103,7 @@ export function createAgentToolInstrumentation(input: {
   };
 
   return {
+    startTimeForAction: (idempotencyKey) => byAction.get(idempotencyKey)?.startTimeMs,
     async actionStarted(event) {
       const state = byAction.get(event.idempotencyKey);
       if (state === undefined || state.span !== undefined || state.finished === true) return;

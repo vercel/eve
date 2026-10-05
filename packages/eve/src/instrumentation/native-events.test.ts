@@ -1,5 +1,5 @@
 import { TEST_USAGE } from "#internal/testing/events.js";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { ActiveChannelDeliveriesKey } from "#context/keys.js";
@@ -286,12 +286,19 @@ describe("createInstrumentationHandleEvent", () => {
     await contextStorage.run(context, async () => {
       const handleEvent = createInstrumentationHandleEvent({
         getAttemptScope: () => scope,
-        handleEvent: async () => {},
+        handleEvent: async () => {
+          clock.mockReturnValue(2_000);
+        },
         hooks: { capturesContent: true, publish: async (event) => void events.push(event) },
         sessionId: "session-1",
       })!;
-      await handleEvent(requested);
-      await handleEvent(requested);
+      const clock = vi.spyOn(Date, "now").mockReturnValue(1_000);
+      try {
+        await handleEvent(requested);
+        await handleEvent(requested);
+      } finally {
+        clock.mockRestore();
+      }
     });
 
     const restored = await deserializeContext(await serializeContext(context));
@@ -384,6 +391,7 @@ describe("createInstrumentationHandleEvent", () => {
     expect(events.slice(0, 5)).toEqual([
       {
         callId: "delegate-1",
+        startedAtMs: 1_000,
         idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "delegate-1"),
         input: { task: "research" },
         kind: "subagent-call",
@@ -393,6 +401,7 @@ describe("createInstrumentationHandleEvent", () => {
       },
       {
         callId: "skill-1",
+        startedAtMs: 1_000,
         idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "skill-1"),
         input: { name: "research" },
         kind: "load-skill",
@@ -402,6 +411,7 @@ describe("createInstrumentationHandleEvent", () => {
       },
       {
         callId: "remote-1",
+        startedAtMs: 1_000,
         idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "remote-1"),
         input: { task: "analyze" },
         kind: "remote-agent-call",
@@ -411,6 +421,7 @@ describe("createInstrumentationHandleEvent", () => {
       },
       {
         callId: "add-1",
+        startedAtMs: 1_000,
         idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "add-1"),
         input: { a: 1, b: 2 },
         kind: "tool-call",
@@ -420,6 +431,7 @@ describe("createInstrumentationHandleEvent", () => {
       },
       {
         callId: "workflow-1",
+        startedAtMs: 1_000,
         idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "workflow-1"),
         input: { report: "weekly" },
         isWorkflowTool: true,
