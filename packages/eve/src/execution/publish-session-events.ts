@@ -429,8 +429,10 @@ export async function publishTerminalSessionEvent(input: {
     return;
   }
 
-  // No turn step ran, so install the session callback context that channel
-  // `session.completed` handlers read. Before any turn, it names `turn_0`.
+  // Terminal events publish outside any turn step, and only a turn step
+  // installs the session callback context that channel `session.completed`
+  // handlers read, so install it here. A prewarmed session that expires,
+  // resets, or closes before its first message has no turn yet: `turn_0`.
   const auth = ctx.get(AuthKey) ?? null;
   ctx.setVirtualContext(SessionKey, {
     auth: { current: auth, initiator: ctx.get(InitiatorAuthKey) ?? auth },

@@ -49,7 +49,7 @@ export async function finalizeSession(
     await emitTerminalSessionCompletionStep({
       sessionWritable: context.sessionWritable,
       serializedContext,
-      turn: session === undefined ? undefined : lastHarnessTurn(session.state),
+      turn: lastHarnessTurn(session?.state),
       usage,
     });
   } else if (outcome.kind === "failed") {
