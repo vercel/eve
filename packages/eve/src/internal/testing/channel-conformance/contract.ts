@@ -238,7 +238,7 @@ async function abandonSignIn(conversation: ChannelConversation) {
   await conversation.say(CHANGE_OF_PLANS);
 }
 
-export const hitlContract = [
+const questionRules = [
   {
     rule: "a rendered question shows every option a person can choose",
     source: "docs/tools/human-in-the-loop.md#questions",
@@ -340,6 +340,9 @@ export const hitlContract = [
       await conversation.waitForReplyTo("Saturday");
     },
   },
+] as const satisfies readonly ContractRule[];
+
+const approvalRules = [
   {
     rule: "a tool approval shows a choice to approve and one to cancel",
     source: "docs/tools/human-in-the-loop.md#approvals",
@@ -447,6 +450,9 @@ export const hitlContract = [
       await expectNotDeployed(conversation);
     },
   },
+] as const satisfies readonly ContractRule[];
+
+const answeredPromptRules = [
   {
     rule: "pressing an option clears the question's buttons",
     source: "#1 (Slack's answered question card)",
@@ -523,6 +529,9 @@ export const hitlContract = [
       await expectResponderNamed(conversation, APPROVAL_PROMPT);
     },
   },
+] as const satisfies readonly ContractRule[];
+
+const budgetRules = [
   {
     rule: "running out of budget opens budget prompt",
     source: "docs/agent-config.md#runtime-limits",
@@ -603,6 +612,9 @@ export const hitlContract = [
       await conversation.waitForReplyTo(LATER_MESSAGE);
     },
   },
+] as const satisfies readonly ContractRule[];
+
+const signInRules = [
   {
     rule: "a sign-in names the service and shows its sign-in link",
     source: "docs/connections/overview.mdx#self-hosted-interactive-oauth",
@@ -711,4 +723,19 @@ export const hitlContract = [
   },
 ] as const satisfies readonly ContractRule[];
 
-export type HitlRule = (typeof hitlContract)[number]["rule"];
+/** The contract's rules, grouped by the kind of prompt they cover. */
+export const hitlContractSections = [
+  { title: "Questions", rules: questionRules },
+  { title: "Tool approvals", rules: approvalRules },
+  { title: "Answered prompts", rules: answeredPromptRules },
+  { title: "Budget prompts", rules: budgetRules },
+  { title: "Sign-ins", rules: signInRules },
+] as const;
+
+export const hitlContract = hitlContractSections.flatMap(
+  (section): readonly HitlContractRule[] => section.rules,
+);
+
+type HitlContractRule = (typeof hitlContractSections)[number]["rules"][number];
+
+export type HitlRule = HitlContractRule["rule"];

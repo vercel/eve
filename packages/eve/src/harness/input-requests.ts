@@ -167,6 +167,20 @@ export function resolvePendingInput(input: {
   }
 }
 
+/**
+ * Answers an open budget prompt from new input's text before that input joins
+ * a message deferred behind the prompt. Joined, the text no longer matches an
+ * option, so the answer would queue behind the message it should release.
+ */
+export function answerSessionLimitFromText(
+  session: HarnessSession,
+  stepInput: StepInput | undefined,
+): StepInput | undefined {
+  if (stepInput === undefined || getDeferredStepInput(session) === undefined) return stepInput;
+  const limitBatch = getPendingInputBatches(session.state).find(isSessionLimitInputBatch);
+  return limitBatch === undefined ? stepInput : resolveTextMessageInput(limitBatch, stepInput);
+}
+
 type PendingInputRoute =
   | { readonly batch: PendingInputBatch; readonly kind: "session-limit" }
   | { readonly kind: "approvals" };

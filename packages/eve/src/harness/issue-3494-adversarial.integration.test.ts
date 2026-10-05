@@ -381,6 +381,23 @@ it("keeps a message waiting behind a budget prompt and runs it after the grant",
   ).toEqual(["Say hello.", "Read the status.", "Also say goodbye."]);
 });
 
+it("runs a message waiting behind a budget prompt after a typed approval", async () => {
+  const f = fixture("message-behind-session-limit-text", false, 1);
+  f.script.push("Initial text.");
+  await f.drive({ message: "Say hello." });
+  await f.drive({ message: "Read the status." });
+  expect((await f.drive({ message: "Also say goodbye." })).held).toEqual({ kind: "request" });
+
+  f.script.push(calls("read"), "FINAL");
+  await f.drive({ message: "approve" });
+  expect(f.executions).toEqual(["read"]);
+  expect(
+    f.events
+      .filter((event) => event.type === "message.received")
+      .map((event) => event.data.message),
+  ).toEqual(["Say hello.", "Read the status.", "Also say goodbye."]);
+});
+
 it("reaches the next budget prompt after a grant without an older approval [control]", async () => {
   const f = fixture("control-session-limit", false, 1);
   f.script.push("Initial text.");
