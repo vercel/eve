@@ -118,8 +118,11 @@ export function webChatDriver(): ClientDriver {
           ),
         async press(option) {
           const button = option.handle as Locator;
-          // An answered prompt disables its buttons, and clicking one does nothing.
-          if ((await button.count()) > 0 && (await button.isEnabled())) await button.click();
+          // A press on a button that's disabled, or that a re-render removed
+          // mid-press, lands nowhere, as it would for a person.
+          const pressable =
+            (await button.count()) > 0 && (await button.isEnabled().catch(() => false));
+          if (pressable) await button.click().catch(() => {});
         },
         async replies() {
           await look();
