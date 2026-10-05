@@ -131,12 +131,11 @@ const collectText = (node: MarkdownNode): string => {
   return node.children.map((child) => collectText(child as MarkdownNode)).join("");
 };
 
+const GITHUB_SLUG_REMOVE =
+  /[^\p{L}\p{N}\p{M}\p{Pc}\u0300-\u036f\u1ab0-\u1aff\u1dc0-\u1dff\u20d0-\u20ff\ufe20-\ufe2f -]/gu;
+
 const slugHeading = (value: string): string =>
-  value
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}_-]/gu, " ")
-    .trim()
-    .replace(/ +/g, "-");
+  value.toLowerCase().replace(GITHUB_SLUG_REMOVE, "").replace(/ /g, "-");
 
 const resolveMarkdownLinks = (value: unknown, sourceRevisionHref: string): void => {
   if (!value || typeof value !== "object") {

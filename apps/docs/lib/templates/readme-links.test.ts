@@ -47,6 +47,8 @@ describe("createReadmeHeadingIdsPlugin", () => {
         },
         { type: "heading", depth: 3, children: [{ type: "text", value: "Link wallet" }] },
         { type: "heading", depth: 3, children: [{ type: "text", value: "Link wallet-1" }] },
+        { type: "heading", depth: 3, children: [{ type: "text", value: "Node.js" }] },
+        { type: "heading", depth: 3, children: [{ type: "text", value: "Next.js setup" }] },
       ],
     };
 
@@ -55,6 +57,8 @@ describe("createReadmeHeadingIdsPlugin", () => {
     expect(tree.children[0]).toHaveProperty("data.hProperties.id", "link-wallet");
     expect(tree.children[1]).toHaveProperty("data.hProperties.id", "link-wallet-1");
     expect(tree.children[2]).toHaveProperty("data.hProperties.id", "link-wallet-1-1");
+    expect(tree.children[3]).toHaveProperty("data.hProperties.id", "nodejs");
+    expect(tree.children[4]).toHaveProperty("data.hProperties.id", "nextjs-setup");
   });
 });
 
