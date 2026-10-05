@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
+import { readDurableSession } from "#execution/durable-session-store.js";
+import { importConversation, readLegacySnapshot } from "#execution/legacy-session/snapshot.js";
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { defineParentSandbox, defineSandbox } from "#public/definitions/sandbox.js";
@@ -138,6 +140,43 @@ describe("ensureSandboxAccess", () => {
     });
     expect(setup).not.toHaveBeenCalled();
     expect(value.create).toHaveBeenCalledOnce();
+  });
+
+  it("starts a fresh sandbox for a session imported from eve 0.54", async () => {
+    const setup = vi.fn();
+    const value = fixture(setup);
+    const imported = importConversation(
+      readLegacySnapshot({
+        sessionId: "session-1",
+        snapshot: {
+          version: 1,
+          session: {
+            sessionId: "session-1",
+            continuationToken: "http:legacy",
+            history: [],
+            agent: { system: "" },
+            // eve 0.54 persisted a backend reconnect record, not provider state.
+            sandboxState: {
+              initialized: true,
+              session: {
+                backendName: "test",
+                metadata: { sandboxId: "sbx_old" },
+                sessionKey: "old",
+              },
+            },
+          },
+        },
+      }),
+    );
+
+    await open(
+      value.registry,
+      "session-1",
+      readDurableSession(imported.sessionState).sandboxState ?? null,
+    );
+
+    expect(setup).toHaveBeenCalledOnce();
+    expect(value.start).toHaveBeenCalledOnce();
   });
 
   it("passes empty live options when a child inherits its parent sandbox", async () => {

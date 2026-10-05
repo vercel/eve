@@ -251,6 +251,74 @@ describe("workflow tools", () => {
     expect(output.unexpected(workflowSdkNotice.unpinnedDelivery)).toEqual([]);
   }, 60_000);
 
+  it("records the message that answers a pending ctx.ask question", async () => {
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-tool-text-answer",
+      execute: confirmDeployWorkflow,
+      toolName: "confirm_deploy",
+    });
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: 'Run confirm_deploy with service "api"' },
+          serializedContext: buildWorkflowToolSerializedContext({
+            continuationToken: "http:workflow-tool-text-answer",
+            requestInput: true,
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      try {
+        const asked = await stream.nextTurn();
+        const request = (
+          filterEventsByType(asked, "input.requested")[0] as InputRequestedStreamEvent
+        ).data.requests[0]!;
+        await resumeSessionInbox(sessionCommandHookToken(run.runId), {
+          delivery: { channelKind: "http", channelName: "test", deliveryId: "delivery-answer" },
+          kind: "send",
+          payload: { message: "Deploy" },
+        });
+
+        const answered = await stream.nextTurn();
+        expect(filterEventsByType(answered, "input.resolved")).toMatchObject([
+          {
+            data: {
+              resolutions: [
+                {
+                  outcome: "answered",
+                  requestId: request.requestId,
+                  response: { optionId: "approve" },
+                },
+              ],
+            },
+          },
+        ]);
+        // A client renders the person's answer from the stream and reconciles
+        // its optimistic copy by delivery id, so the message must be recorded.
+        expect(
+          filterEventsByType(answered, "message.received"),
+          JSON.stringify(answered.map((event) => [event.type, event.meta.deliveryIds])),
+        ).toMatchObject([
+          { data: { message: "Deploy" }, meta: { deliveryIds: ["delivery-answer"] } },
+        ]);
+        expect(answered.slice(0, 2).map((event) => event.type)).toEqual([
+          "message.received",
+          "input.resolved",
+        ]);
+        // `send()` follows its delivery id to the turn boundary.
+        expect(answered.find((event) => event.type === "turn.completed")?.meta).toMatchObject({
+          deliveryIds: ["delivery-answer"],
+        });
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 60_000);
+
   it("exposes the principal that answered ctx.ask", async () => {
     const alice = {
       attributes: {},

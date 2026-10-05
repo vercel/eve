@@ -1,10 +1,7 @@
 import type { CompiledDynamicToolDefinition } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
-import {
-  registerDefinitionSource,
-  stampDefinitionKey,
-} from "#internal/authored-definition/source-identity.js";
+import { registerDefinitionSource } from "#internal/authored-definition/source-identity.js";
 import { isDynamicSentinel, type DynamicSentinel } from "#dynamic/definition.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
@@ -92,9 +89,7 @@ function createResolvedDynamicToolResolver(
     );
   }
 
-  const sourceKey = `dynamic-tool-source:${source.sourceId}`;
-  stampDefinitionKey(value, sourceKey);
-  registerDefinitionSource(sourceKey, {
+  registerDefinitionSource(value, {
     kind: "tool",
     logicalPath: source.logicalPath,
     name: source.slug,

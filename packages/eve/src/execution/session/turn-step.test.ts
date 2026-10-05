@@ -16,6 +16,7 @@ import {
   ContinuationHookTokensKey,
   ContinuationTokenKey,
   DynamicSubagentAgentConfigKey,
+  InitiatorAuthKey,
   SessionDynamicSubagentRuntimeRevisionKey,
   SessionDynamicModelReferenceKey,
   SessionDynamicToolMetadataKey,
@@ -1517,6 +1518,60 @@ describe("turnStep", () => {
     });
 
     expect(observed).toEqual(expected);
+  });
+
+  it.each([
+    {
+      current: {
+        attributes: {},
+        authenticator: "test",
+        issuer: "test",
+        principalId: "bob",
+        principalType: "user",
+        subject: "bob",
+      } satisfies SessionAuthContext,
+      title: "the follow-up caller",
+    },
+    { current: null, title: "an anonymous follow-up caller" },
+  ])("keeps $title current when cancelled before the first model call", async ({ current }) => {
+    installSessionStoreMocks([createStubSession()]);
+    const alice: SessionAuthContext = {
+      attributes: {},
+      authenticator: "test",
+      issuer: "test",
+      principalId: "alice",
+      principalType: "user",
+      subject: "alice",
+    };
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => async () => {
+      throw new TurnCancelledError();
+    });
+
+    const result = await turnStep({
+      input: {
+        auth: current,
+        kind: "deliver",
+        payloads: [{ message: "follow up" }],
+        deliveryMetadata: [
+          { channelKind: "eve", channelName: "eve", deliveryId: "delivery-b", payloadIndex: 0 },
+        ],
+      },
+      sessionWritable: createTestWritable(),
+      serializedContext: {
+        ...createSerializedContext(),
+        [AuthKey.name]: alice,
+        [InitiatorAuthKey.name]: alice,
+        [TurnDeliveryIdsKey.name]: ["delivery-a"],
+      },
+      sessionState: createStubSessionState(),
+    });
+
+    expect(result.action).toBe("cancelled");
+    expect(result.serializedContext).toMatchObject({
+      [AuthKey.name]: current,
+      [InitiatorAuthKey.name]: alice,
+      [TurnDeliveryIdsKey.name]: ["delivery-b"],
+    });
   });
 
   it("resumes a sign-in callback as the user who started it, not the last speaker", async () => {

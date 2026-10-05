@@ -4,6 +4,7 @@ import { linqChannel } from "#public/channels/linq/index.js";
 import {
   type ChannelDriver,
   type PlatformCall,
+  type Surface,
   numberedOptions,
   recordingFetch,
 } from "#internal/testing/channel-conformance/harness.js";
@@ -22,20 +23,25 @@ interface LinqPart {
 
 interface LinqMessageBody {
   readonly message?: { readonly parts?: readonly LinqPart[] };
+  /** An edit's replacement text. */
+  readonly text?: string;
 }
 
-/** Drives the real Linq adapter through a signed direct-message webhook. */
-export function linqDriver(): ChannelDriver {
+/** Drives the real Linq adapter through signed webhooks, in a group chat by default or 1:1. */
+export function linqDriver(surface: Exclude<Surface, "public"> = "shared"): ChannelDriver {
+  const group = surface === "shared";
   nextChat += 1;
   const chatId = `linq-conformance-chat-${nextChat}`;
   let messageId = 0;
+  let outbound = 0;
   let restoreFetch: (() => void) | undefined;
 
   function signedMessage(text: string): Request {
     messageId += 1;
     const body = JSON.stringify({
       data: {
-        chat: { id: chatId, is_group: false },
+        // Linq's bridge hears every group message; a mention would route past its handler.
+        chat: { id: chatId, is_group: group },
         direction: "inbound",
         id: `linq-inbound-${messageId}`,
         parts: [{ type: "text", value: text }],
@@ -61,17 +67,21 @@ export function linqDriver(): ChannelDriver {
   }
 
   return {
-    name: "linq",
+    name: group ? "linq" : "linq-dm",
     capabilities: ["text-replies"],
+    surface,
     createChannel(record) {
       const previousFetch = globalThis.fetch;
       const fakeFetch = recordingFetch(record, async (request) => {
         const url = new URL(request.url);
         const bodyText = await request.text();
+        outbound += 1;
+        const id = `linq-outbound-${outbound}`;
         return {
           body: bodyText === "" ? {} : JSON.parse(bodyText),
           method: `${request.method} ${url.pathname}`,
-          response: {},
+          // The adapter reads the sent or edited message's id back to edit it later.
+          response: { chat_id: chatId, id, message: { id } },
         };
       });
       // The adapter accepts no fetch option, so route only its test host globally and preserve other fetches.
@@ -106,9 +116,12 @@ export function linqDriver(): ChannelDriver {
   };
 }
 
+/** Text the bot sent (`POST …/messages`) or edited a message to (`PATCH /messages/:id`). */
 function postedText(call: PlatformCall): string | undefined {
+  const body = call.body as LinqMessageBody;
+  if (call.method.startsWith("PATCH ") && call.method.includes("/messages/")) return body.text;
   if (!call.method.endsWith("/messages")) return undefined;
-  const parts = (call.body as LinqMessageBody).message?.parts;
+  const parts = body.message?.parts;
   return parts
     ?.filter((part) => part.type === "text")
     .map((part) => part.value ?? "")

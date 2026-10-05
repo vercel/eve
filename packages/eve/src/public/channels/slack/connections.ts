@@ -9,8 +9,8 @@
  * delivering the actual challenge as an ephemeral "Sign in"
  * message visible only to the Slack user behind the event's `principalId`.
  *
- * When no user can be targeted (no Slack user for the principal, no challenge
- * URL, or the ephemeral delivery fails), the public status still leaves
+ * When no user can be targeted (no Slack user for the principal, no link or
+ * instructions to show, or the ephemeral delivery fails), the public status still leaves
  * the shared thread with safe progress feedback. The matching
  * `authorization.completed` handler edits that status post in place to
  * surface the outcome (`authorized` / `declined` / `failed` /
@@ -68,53 +68,63 @@ export function buildAuthCompletedText(input: {
   return `:x: ${input.displayName} authorization ${input.outcome}${tail}`;
 }
 
+/** The private sign-in prompt: a link to open, instructions to follow, or both. */
+interface AuthEphemeralPrompt {
+  readonly displayName: string;
+  readonly instructions?: string;
+  readonly url?: string;
+  readonly userCode?: string;
+}
+
 /**
  * Block Kit blocks for the private sign-in prompt. It names the service and
  * why it is asking before the button, because the user may not remember which
  * request needed it. A device-code flow's `userCode` is a fallback the
  * provider shows only sometimes, so it is a quiet hint below the button.
  */
-export function buildAuthEphemeralBlocks(input: {
-  /** Lets the person cancel the held turn instead of connecting. */
-  readonly cancel?: SignInCancelTarget;
-  readonly displayName: string;
-  readonly url: string;
-  readonly userCode?: string;
-}): unknown[] {
+export function buildAuthEphemeralBlocks(
+  input: AuthEphemeralPrompt & {
+    /** Lets the person cancel the held turn instead of connecting. */
+    readonly cancel?: SignInCancelTarget;
+  },
+): unknown[] {
+  const intro =
+    input.cancel === undefined
+      ? `*Connect ${input.displayName}*\nTo continue, I need access to your ${input.displayName} account. Only you can see this message.`
+      : `*Connect ${input.displayName}*\nI've paused until you connect your ${input.displayName} account or cancel. Only you can see this message.`;
   const blocks: unknown[] = [
     {
       type: "section",
       text: {
         type: "mrkdwn",
-        text:
-          input.cancel === undefined
-            ? `*Connect ${input.displayName}*\nTo continue, I need access to your ${input.displayName} account. Only you can see this message.`
-            : `*Connect ${input.displayName}*\nI've paused until you connect your ${input.displayName} account or cancel. Only you can see this message.`,
+        text: hasText(input.instructions) ? `${intro}\n\n${input.instructions}` : intro,
       },
     },
-    {
-      type: "actions",
-      elements: [
-        {
-          type: "button",
-          text: { type: "plain_text", text: truncatePlainText(`Connect ${input.displayName}`) },
-          url: input.url,
-          style: "primary",
-        },
-        ...(input.cancel === undefined
-          ? []
-          : [
-              {
-                type: "button",
-                action_id: SIGN_IN_CANCEL_ACTION_ID,
-                text: { type: "plain_text", text: "Cancel" },
-                value: JSON.stringify(input.cancel),
-              },
-            ]),
-      ],
-    },
   ];
-  if (input.userCode !== undefined && input.userCode.length > 0) {
+  const buttons = [
+    ...(!hasText(input.url)
+      ? []
+      : [
+          {
+            type: "button",
+            text: { type: "plain_text", text: truncatePlainText(`Connect ${input.displayName}`) },
+            url: input.url,
+            style: "primary",
+          },
+        ]),
+    ...(input.cancel === undefined
+      ? []
+      : [
+          {
+            type: "button",
+            action_id: SIGN_IN_CANCEL_ACTION_ID,
+            text: { type: "plain_text", text: "Cancel" },
+            value: JSON.stringify(input.cancel),
+          },
+        ]),
+  ];
+  if (buttons.length > 0) blocks.push({ type: "actions", elements: buttons });
+  if (hasText(input.userCode)) {
     blocks.push({
       type: "context",
       elements: [
@@ -129,14 +139,18 @@ export function buildAuthEphemeralBlocks(input: {
 }
 
 /** Notification text for the private sign-in prompt, for clients that show no blocks. */
-export function buildAuthEphemeralText(input: {
-  readonly displayName: string;
-  readonly url: string;
-  readonly userCode?: string;
-}): string {
-  const code =
-    input.userCode !== undefined && input.userCode.length > 0
-      ? ` If asked for a confirmation code, enter ${input.userCode}.`
-      : "";
-  return `Connect your ${input.displayName} account to continue: ${input.url}${code}`;
+export function buildAuthEphemeralText(input: AuthEphemeralPrompt): string {
+  const parts = [
+    !hasText(input.url)
+      ? `Connect your ${input.displayName} account to continue.`
+      : `Connect your ${input.displayName} account to continue: ${input.url}`,
+  ];
+  if (hasText(input.instructions)) parts.push(input.instructions);
+  if (hasText(input.userCode))
+    parts.push(`If asked for a confirmation code, enter ${input.userCode}.`);
+  return parts.join(" ");
+}
+
+function hasText(value: string | undefined): value is string {
+  return value !== undefined && value.length > 0;
 }

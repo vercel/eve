@@ -8,7 +8,10 @@
 
 import type { UserContent } from "ai";
 
+import { resolvedPromptLabel } from "#channel/resolved-prompt.js";
+import type { InputResolution } from "#protocol/message.js";
 import {
+  type InputOption,
   type InputRequest,
   type InputResponse,
   parseInputResponse,
@@ -29,6 +32,8 @@ const TELEGRAM_BUTTON_LABEL_MAX_LENGTH = 64;
 const TELEGRAM_INPUT_PLACEHOLDER_MAX_LENGTH = 64;
 const TELEGRAM_PROMPT_MAX_LENGTH = 4000;
 const TELEGRAM_INLINE_ROW_SIZE = 2;
+/** Keeps an edited prompt under Telegram's 4096-character message cap. */
+const TELEGRAM_RESOLVED_LABEL_MAX_LENGTH = 90;
 
 /**
  * Durable HITL state. `hitlCallbacks` maps compact callback ids to their stored
@@ -40,6 +45,15 @@ export interface TelegramHitlState {
   hitlCallbacks?: Record<string, InputResponse>;
   nextHitlCallbackId?: number;
   pendingFreeformReplies?: Record<string, string>;
+  /** Posted prompts with inline keyboards, keyed by requestId, until eve resolves them. */
+  hitlPrompts?: Record<string, TelegramHitlPrompt>;
+}
+
+/** What a posted prompt needs so its message can be edited once eve resolves it. */
+export interface TelegramHitlPrompt {
+  readonly messageId: string;
+  readonly options: readonly Pick<InputOption, "id" | "label">[];
+  readonly text: string;
 }
 
 /**
@@ -96,6 +110,40 @@ export function registerTelegramFreeformPrompt(
     ...state.pendingFreeformReplies,
     [input.messageId]: input.requestId,
   };
+}
+
+/** Records a posted inline-keyboard prompt so {@link takeTelegramResolvedPrompt} can edit it. */
+export function registerTelegramHitlPrompt(
+  state: TelegramHitlState,
+  request: InputRequest,
+  posted: { readonly messageId: string; readonly text: string },
+): void {
+  state.hitlPrompts = {
+    ...state.hitlPrompts,
+    [request.requestId]: {
+      ...posted,
+      options: (request.options ?? []).map(({ id, label }) => ({ id, label })),
+    },
+  };
+}
+
+/**
+ * Forgets a resolved prompt, returning the edit that
+ * replaces its keyboard with the outcome, or `undefined` when eve never posted it.
+ */
+export function takeTelegramResolvedPrompt(
+  state: TelegramHitlState,
+  resolution: InputResolution,
+): { readonly messageId: string; readonly text: string } | undefined {
+  const prompt = state.hitlPrompts?.[resolution.requestId];
+  if (prompt === undefined) return undefined;
+  const { [resolution.requestId]: _, ...rest } = state.hitlPrompts ?? {};
+  state.hitlPrompts = rest;
+  const label = truncate(
+    resolvedPromptLabel(resolution, prompt.options),
+    TELEGRAM_RESOLVED_LABEL_MAX_LENGTH,
+  );
+  return { messageId: prompt.messageId, text: `${prompt.text}\n\n${label}` };
 }
 
 /**
@@ -157,11 +205,10 @@ export function resolveTelegramInputResponses(
   for (const response of responses) {
     if (response.requestId.startsWith(TELEGRAM_CALLBACK_RESPONSE_PREFIX)) {
       const callbackData = response.requestId.slice(TELEGRAM_CALLBACK_RESPONSE_PREFIX.length);
+      // The mapping outlives the press: a later press of the same button still
+      // reaches the session, which reads an answered request's option as new input.
       const mapped = state.hitlCallbacks?.[callbackData];
-      if (mapped !== undefined) {
-        resolved.push(mapped);
-        delete state.hitlCallbacks?.[callbackData];
-      }
+      if (mapped !== undefined) resolved.push(mapped);
       continue;
     }
 

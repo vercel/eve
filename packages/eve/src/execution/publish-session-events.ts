@@ -240,7 +240,7 @@ async function publishInSessionScope<T>(
  * releases it. Events reach the stream through `SessionEventPublisher.emit`.
  */
 export interface SessionEventWriter {
-  /** Closes the session stream; only a terminal `done` step does this. */
+  /** Closes the session stream; only a terminal event (`done`, completion, or failure) does this. */
   close(): Promise<void>;
   /** Releases the writer lock so the next step can acquire it. Safe after `close()`. */
   release(): void;
@@ -384,11 +384,12 @@ type TerminalSessionEvent = Extract<
 /**
  * Publishes a terminal `session.completed` or `session.failed` from outside a
  * turn as the session's own event, through its channel adapter and
- * instrumentation. Stream-event hooks do not run: the ending session may not
+ * instrumentation, then closes the session stream so readers following it
+ * reach EOF. Stream-event hooks do not run: the ending session may not
  * restore, and no turn scope remains for authored code. Never throws.
  *
- * When the context cannot be restored, the event is only stamped and written so
- * the stream still ends: the one degraded write of a session event.
+ * When the context cannot be restored, the event is only stamped, written, and
+ * the stream closed: the one degraded write of a session event.
  */
 export async function publishTerminalSessionEvent(input: {
   readonly errorId?: string;
@@ -422,6 +423,7 @@ export async function publishTerminalSessionEvent(input: {
   // Emitted without its hooks; see above.
   const publish: HandleEventFn = async (event) => {
     await publisher.emit(event);
+    await publisher.writer.close();
   };
   let instrumentation: ReturnType<typeof bindSessionInstrumentation>;
   try {
@@ -460,6 +462,7 @@ async function writeUnroutedSessionEvent(
   const writer = openSessionEventWriter({ deliveryIds: () => undefined, sessionWritable });
   try {
     await writer.write(event);
+    await writer.close();
   } finally {
     writer.release();
   }

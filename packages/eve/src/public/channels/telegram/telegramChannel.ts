@@ -33,6 +33,7 @@ import {
 import {
   defaultEvents,
   defaultOnMessage,
+  defaultTelegramAuth,
   isTelegramBotMentioned,
 } from "#public/channels/telegram/defaults.js";
 import {
@@ -157,6 +158,7 @@ export interface TelegramChannelEvents {
   readonly "message.completed"?: TelegramEventHandler<"message.completed">;
   readonly "message.appended"?: TelegramEventHandler<"message.appended">;
   readonly "input.requested"?: TelegramEventHandler<"input.requested">;
+  readonly "input.resolved"?: TelegramEventHandler<"input.resolved">;
   readonly "turn.failed"?: TelegramEventHandler<"turn.failed">;
   readonly "turn.completed"?: TelegramEventHandler<"turn.completed">;
   readonly "turn.cancelled"?: TelegramEventHandler<"turn.cancelled">;
@@ -631,8 +633,10 @@ async function dispatchCallbackQuery(input: {
     if (!input.query.message || !state.chatId) return;
     try {
       const source = input.from(telegramContinuationTokenFromState(state));
+      // The presser acts as themselves, so a press that starts a turn lets
+      // their next message steer it.
       await source.respond([telegramCallbackInputResponse(input.query.data)], {
-        auth: null,
+        auth: defaultTelegramAuth({ ...input.query.message, from: input.query.from }),
       });
     } catch (error) {
       log.error("callback query delivery failed", { error });

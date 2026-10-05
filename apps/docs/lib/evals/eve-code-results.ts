@@ -36,11 +36,4 @@ export interface EveCodeBenchmarkSnapshot {
 
 export const eveCodeBenchmark = rawSnapshot as EveCodeBenchmarkSnapshot;
 
-/** Ranks by resolve rate, then by median latency, matching eve-bench's correctness-first order. */
-export function rankedHarnesses(results: EveCodeDatasetResults): EveCodeHarnessScore[] {
-  return [...results.harnesses].sort(
-    (left, right) =>
-      right.resolveRate.estimate - left.resolveRate.estimate ||
-      left.latencyP50Ms - right.latencyP50Ms,
-  );
-}
+export { rankedHarnesses } from "./eve-code-format";

@@ -7,11 +7,16 @@ import type {
   RenderedOption,
 } from "#internal/testing/channel-conformance/harness.js";
 
-/** Each drawer's footer: a question's, then a tool approval's. */
+/** An open-ended question's drawer: a text field and no options. */
+const FREEFORM_FOOTER = "Enter submit · Esc dismiss";
+/** Each drawer's footer: a question's, a tool approval's, then an open-ended question's. */
 const DRAWER_FOOTERS = [
   "↑/↓ move · enter to select · esc to dismiss",
   "y yes · n no · Ctrl-C cancel",
+  FREEFORM_FOOTER,
 ] as const;
+/** More drawers than any rule leaves pending at once. */
+const MAX_DRAWERS = 5;
 const FREEFORM_ROW = "Type your own answer…";
 
 /**
@@ -21,7 +26,9 @@ const FREEFORM_ROW = "Type your own answer…";
 export function tuiDriver(): ClientDriver {
   return {
     name: "tui",
+    // A local terminal shows only the person at it.
     capabilities: ["buttons", "text-replies"],
+    surface: "private",
     async open(host, wait) {
       // Wide enough that no reply wraps, so each one stays on one screen row.
       const screen = new MockScreen({ columns: 1000, rows: 60 });
@@ -51,15 +58,31 @@ export function tuiDriver(): ClientDriver {
 
       return {
         async say(text) {
-          // A question drawer holds the keyboard until Esc hands it back to the composer.
-          if (drawerOpen(screen)) keyboard.send("\x1b");
+          // A drawer holds the keyboard until Esc hands it back to the composer.
+          // Dismissing one shows the next pending request's, if any.
+          // Esc in the composer cancels the turn, so wait out each repaint first.
+          for (let drawers = 0; drawers < MAX_DRAWERS && drawerOpen(screen); drawers += 1) {
+            const before = screen.snapshot();
+            keyboard.send("\x1b");
+            await wait(
+              "the drawer to close",
+              () => (screen.snapshot() !== before ? true : undefined),
+              describe,
+            );
+          }
           await wait("the composer", () => (composerOpen(screen) ? true : undefined), describe);
-          keyboard.type(text);
+          // A typed newline submits, so multi-line text arrives as a bracketed paste.
+          keyboard.send(text.includes("\n") ? `\x1b[200~${text}\x1b[201~` : text);
           keyboard.enter();
         },
-        async waitForQuestion(prompt) {
-          await wait(`the question "${prompt}"`, () => focusedRow(screen, prompt), describe);
-          return readOptions(screen, keyboard, prompt);
+        async waitForQuestion(prompts) {
+          const prompt = await wait(
+            `one of the questions ${JSON.stringify(prompts)}`,
+            () => prompts.find((candidate) => focusedRow(screen, candidate) !== undefined),
+            describe,
+          );
+          if (screen.snapshot().includes(FREEFORM_FOOTER)) return { options: [], prompt };
+          return { options: readOptions(screen, keyboard, prompt), prompt };
         },
         async press(option) {
           // `waitForQuestion` leaves the cursor on the first option.
@@ -67,6 +90,15 @@ export function tuiDriver(): ClientDriver {
           keyboard.enter();
         },
         replies: () => readReplies(screen.snapshot()),
+        // The TUI asks in a drawer rather than a posted message, so an answered
+        // prompt shows no options once its drawer closes.
+        shownPrompt: (prompt) => ({
+          id: prompt,
+          options:
+            focusedRow(screen, prompt) === undefined ? [] : readOptions(screen, keyboard, prompt),
+          text: screen.snapshot(),
+        }),
+        shown: () => [{ onlyPerson: true, options: [], text: screen.snapshot() }],
         describe,
         async close() {
           renderer.requestInterrupt();

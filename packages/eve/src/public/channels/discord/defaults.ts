@@ -1,7 +1,11 @@
 import type { SessionAuthContext } from "#channel/types.js";
 
-import { extractErrorId, formatErrorHint } from "#internal/logging.js";
-import { splitDiscordMessageContent } from "#public/channels/discord/api.js";
+import { resolvedPromptLabel } from "#channel/resolved-prompt.js";
+import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
+import {
+  DISCORD_MESSAGE_CONTENT_MAX_LENGTH,
+  splitDiscordMessageContent,
+} from "#public/channels/discord/api.js";
 import type { DiscordCommandInteraction } from "#public/channels/discord/inbound.js";
 import { renderInputRequestComponents } from "#public/channels/discord/hitl.js";
 import type {
@@ -9,6 +13,8 @@ import type {
   DiscordCommandResult,
   DiscordContext,
 } from "#public/channels/discord/discordChannel.js";
+
+const log = createLogger("discord.defaults");
 
 /**
  * Builds the default {@link SessionAuthContext} for a Discord command
@@ -68,10 +74,45 @@ export const defaultEvents: DiscordChannelEvents = {
   async "input.requested"(event, channel, _ctx) {
     for (const request of event.requests) {
       const content = splitDiscordMessageContent(request.prompt)[0] ?? request.prompt;
-      await channel.discord.post({
-        components: renderInputRequestComponents(request),
-        content,
-      });
+      const components = renderInputRequestComponents(request);
+      const posted = await channel.discord.post({ components, content });
+      if (components.length === 0 || !posted.id) continue;
+      channel.state.hitlPrompts = {
+        ...channel.state.hitlPrompts,
+        [request.requestId]: {
+          content,
+          messageId: posted.id,
+          options: (request.options ?? []).map(({ id, label }) => ({ id, label })),
+        },
+      };
+    }
+  },
+
+  // Covers every way a prompt ends: a press, a modal answer, or a withdrawal.
+  // The bot token outlives the interaction token the prompt may have been posted with.
+  async "input.resolved"(event, channel, _ctx) {
+    for (const resolution of event.resolutions) {
+      const prompt = channel.state.hitlPrompts?.[resolution.requestId];
+      if (prompt === undefined) continue;
+      const { [resolution.requestId]: _, ...rest } = channel.state.hitlPrompts ?? {};
+      channel.state.hitlPrompts = rest;
+      const label = resolvedPromptLabel(resolution, prompt.options);
+      const content = `${prompt.content}\n\n${label}`.slice(0, DISCORD_MESSAGE_CONTENT_MAX_LENGTH);
+      try {
+        const response = await channel.discord.request(
+          `/channels/${encodeURIComponent(channel.discord.channelId)}/messages/${encodeURIComponent(prompt.messageId)}`,
+          { components: [], content },
+          { botAuth: true, method: "PATCH" },
+        );
+        if (!response.ok) {
+          log.warn("Discord answered prompt edit failed", {
+            requestId: resolution.requestId,
+            status: response.status,
+          });
+        }
+      } catch (error) {
+        log.warn("Discord answered prompt edit failed", { error, requestId: resolution.requestId });
+      }
     }
   },
 

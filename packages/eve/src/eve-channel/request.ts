@@ -9,6 +9,7 @@ import type {
 import type { Session } from "#channel/session.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
+import { isMissingWorkflowRunError } from "#internal/workflow/is-inactive-workflow-run-error.js";
 import {
   EVE_MESSAGE_STREAM_CONTENT_TYPE,
   EVE_MESSAGE_STREAM_FORMAT,
@@ -282,7 +283,10 @@ export async function createSessionStreamResponse(
   const includeTailIndex = parseIncludeTailIndex(request);
 
   try {
-    const tailIndex = includeTailIndex ? await session.getStreamTailIndex() : undefined;
+    // The event stream opens its durable source lazily, so an unknown or
+    // unreachable session would otherwise answer 200 and then fail mid-body.
+    // Resolving the tail first surfaces that before any bytes are committed.
+    const tailIndex = await session.getStreamTailIndex();
     const events = await session.getEventStream({ startIndex });
     const controlVersion =
       new URL(request.url).searchParams.get(EVE_STREAM_CONTROL_VERSION_QUERY) ===
@@ -297,20 +301,24 @@ export async function createSessionStreamResponse(
       [EVE_STREAM_FORMAT_HEADER]: EVE_MESSAGE_STREAM_FORMAT,
       [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION,
     });
-    if (tailIndex !== undefined) {
+    if (includeTailIndex) {
       headers.set(EVE_STREAM_TAIL_INDEX_HEADER, String(tailIndex));
     }
     return new Response(
       serializeAsNdjson(
         events,
         request.signal,
-        streamEventLimit(startIndex, tailIndex),
+        includeTailIndex ? streamEventLimit(startIndex, tailIndex) : undefined,
         controlVersion !== undefined,
       ),
       { headers },
     );
-  } catch {
-    return Response.json({ error: "Session not found.", ok: false }, { status: 404 });
+  } catch (error) {
+    const notFound = isMissingWorkflowRunError(error);
+    return Response.json(
+      { error: notFound ? "Session not found." : "Session stream unavailable.", ok: false },
+      { status: notFound ? 404 : 503 },
+    );
   }
 }
 

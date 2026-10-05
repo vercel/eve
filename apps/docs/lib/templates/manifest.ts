@@ -8,12 +8,14 @@ export type TemplateIntegration =
   | "GitHub"
   | "HTTP API"
   | "Linear"
+  | "Linq"
   | "Mux"
   | "Notion"
   | "Resend"
   | "Sanity"
   | "Sentry"
   | "Slack"
+  | "Stripe Link"
   | "Typefully"
   | "Vercel"
   | "Web chat";
@@ -33,6 +35,7 @@ export interface TemplateManifestEntry {
   slug: string;
   title: string;
   description: string;
+  descriptionLink?: { text: string; href: string };
   demoHref?: string;
   category: TemplateCategory;
   integrations: TemplateIntegration[];
@@ -128,6 +131,32 @@ export const templateManifest: TemplateManifestEntry[] = [
       "agent/tools/web_fetch.ts",
       "agent/tools/web_search.ts",
       "agent/tools/write_file.ts",
+    ],
+  },
+  {
+    slug: "openinstinct-eve-template",
+    title: "iMessage Agent as a Service",
+    setupPrompt:
+      "I want to build a multi-tenant iMessage agent service with eve, using OpenInstinct at https://github.com/Merit-Systems/OpenInstinct. Read its README and follow its deployment instructions. Preserve the existing project if my workspace is not empty. Explain the required Linq, Kernel, database, storage, and model provider setup, and distinguish optional account integrations from required services. Call out the repository's warning that the application is not intended for production use.",
+    description:
+      "OpenInstinct, a multi-tenant iMessage agent service built with eve and Linq, with user accounts, scoped memory, an encrypted vault, cloud browser automation, and Stripe Link wallet integration.",
+    descriptionLink: { text: "Stripe Link", href: "https://stripe.com/payments/link" },
+    sourceHref: "https://github.com/Merit-Systems/OpenInstinct/tree/main",
+    category: "Example",
+    model: "anthropic/claude-sonnet-5",
+    integrations: ["Linq", "Stripe Link", "Vercel"],
+    source: "Vercel Templates",
+    github: { owner: "Merit-Systems", repo: "OpenInstinct", ref: "main" },
+    files: [
+      "agent/agent.ts",
+      "agent/channels/eve.ts",
+      "agent/channels/linq.ts",
+      "agent/extensions/link.ts",
+      "agent/instructions.md",
+      "agent/lib/principal-scope.ts",
+      "agent/memory/profile.ts",
+      "agent/tools/run_browser.ts",
+      "agent/subagents/browser-agent/agent.ts",
     ],
   },
   {

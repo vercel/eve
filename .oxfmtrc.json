@@ -2,6 +2,7 @@
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
   "ignorePatterns": [
     "packages/eve/CHANGELOG.md",
+    "packages/eve/src/internal/testing/channel-conformance/MATRIX.md",
     "apps/docs/registry.json",
     "packages/eve/src/setup/scaffold/create/web-template.ts"
   ]

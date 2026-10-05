@@ -13,6 +13,8 @@ import type {
   TwilioInboundResult,
   TwilioVoiceResult,
 } from "#public/channels/twilio/twilioChannel.js";
+import type { ConnectionAuthorizationOutcome } from "#protocol/message.js";
+import { displayProperName } from "#shared/display-name.js";
 import type { InputRequest } from "#shared/input.js";
 
 /** Default phone-number auth projection for Twilio webhook actors. */
@@ -69,7 +71,7 @@ export function defaultOnVoiceTranscription(
   };
 }
 
-/** Built-in Twilio event handlers for text delivery and terminal errors. */
+/** Built-in Twilio event handlers for text delivery, sign-ins, and terminal errors. */
 export const defaultEvents: TwilioChannelEvents = {
   async "message.completed"(event, channel, _ctx) {
     if (event.finishReason === "tool-calls" || !event.message) return;
@@ -79,6 +81,33 @@ export const defaultEvents: TwilioChannelEvents = {
   async "input.requested"(event, channel, _ctx) {
     if (event.requests.length === 0) return;
     await channel.twilio.sendMessage(renderTwilioInputRequests(event.requests));
+  },
+
+  // An SMS thread is one person's, so the link and code can go in the message.
+  async "authorization.required"(event, channel, _ctx) {
+    if (event.candidateId !== undefined) return;
+    const challenge = event.authorization;
+    await channel.twilio.sendMessage(
+      [
+        `Sign in to ${challenge?.displayName ?? displayProperName(event.name)} to continue.`,
+        challenge?.instructions,
+        challenge?.userCode ? `Code: ${challenge.userCode}` : undefined,
+        challenge?.url,
+      ]
+        .filter((part): part is string => part !== undefined && part.length > 0)
+        .join("\n\n"),
+    );
+  },
+
+  async "authorization.completed"(event, channel, _ctx) {
+    if (event.candidateId !== undefined) return;
+    await channel.twilio.sendMessage(
+      renderAuthorizationOutcome({
+        displayName: event.authorization?.displayName ?? displayProperName(event.name),
+        outcome: event.outcome,
+        reason: event.reason,
+      }),
+    );
   },
 
   async "turn.failed"(event, channel, _ctx) {
@@ -125,4 +154,16 @@ function renderTwilioInputRequests(requests: readonly InputRequest[]): string {
     );
   }
   return sections.join("\n\n");
+}
+
+function renderAuthorizationOutcome(input: {
+  readonly displayName: string;
+  readonly outcome: ConnectionAuthorizationOutcome;
+  readonly reason?: string;
+}): string {
+  if (input.outcome === "authorized") return `${input.displayName} connected.`;
+  if (input.outcome === "declined") return `${input.displayName} sign-in cancelled.`;
+  const outcome = input.outcome === "timed-out" ? "timed out" : input.outcome;
+  const reason = input.reason === undefined ? "" : ` (${input.reason})`;
+  return `${input.displayName} sign-in ${outcome}${reason}.`;
 }

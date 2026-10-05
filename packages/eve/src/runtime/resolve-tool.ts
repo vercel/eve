@@ -2,10 +2,7 @@ import type { CompiledToolDefinition } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
 import { normalizeApproval } from "#internal/authored-definition/approval.js";
-import {
-  registerDefinitionSource,
-  stampDefinitionKey,
-} from "#internal/authored-definition/source-identity.js";
+import { registerDefinitionSource } from "#internal/authored-definition/source-identity.js";
 import { isToolSchema, toInputSchema, toOutputSchema } from "#tools/schema.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { loadResolvedModuleExport, ResolveAgentError } from "#runtime/resolve-helpers.js";
@@ -54,17 +51,11 @@ export async function resolveToolDefinition(
       describe(definition, "to return an object"),
     );
 
-    const sourceEntry = {
-      kind: "tool",
-      logicalPath: definition.logicalPath,
-      name: definition.name,
-      owner,
-    } as const;
-
-    const sourceKey = `tool-source:${definition.sourceId}`;
-    stampDefinitionKey(resolvedRecord, sourceKey);
-    registerDefinitionSource(sourceKey, sourceEntry);
-    registerDefinitionSource(`tool:${resolvedRecord.description}`, sourceEntry);
+    registerDefinitionSource(
+      resolvedRecord,
+      { kind: "tool", logicalPath: definition.logicalPath, name: definition.name },
+      `tool:${resolvedRecord.description}`,
+    );
 
     // A workflow tool's entry point runs from the workflow registry, never in process.
     const execute =

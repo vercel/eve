@@ -6,7 +6,11 @@ import {
   setReadFileStamp,
 } from "#execution/tools/file-state.js";
 import { resolveAbsoluteFilePath } from "#execution/sandbox/require-sandbox.js";
-import { readMediaMetadata, type MediaMetadata } from "#internal/attachments/media-metadata.js";
+import {
+  detectImageMediaType,
+  readMediaMetadata,
+  type MediaMetadata,
+} from "#internal/attachments/media-metadata.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import { capLineLength, MAX_OUTPUT_BYTES } from "#execution/sandbox/truncate-output.js";
 
@@ -19,14 +23,6 @@ const DEFAULT_LIMIT = 2000;
 
 // Matches the inline cap for inbound image attachments.
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
-const IMAGE_MEDIA_TYPES: Readonly<Record<string, string>> = {
-  gif: "image/gif",
-  jpeg: "image/jpeg",
-  jpg: "image/jpeg",
-  png: "image/png",
-  webp: "image/webp",
-};
-
 // ---------------------------------------------------------------------------
 // Input / result shapes
 // ---------------------------------------------------------------------------
@@ -78,9 +74,26 @@ export async function executeReadFileOnSandbox(
   const resolvedPath = await resolveAbsoluteFilePath(sandbox, filePath);
   const normalizedPath = normalizeModelPath(resolvedPath);
 
-  const imageMediaType = IMAGE_MEDIA_TYPES[normalizedPath.split(".").pop()?.toLowerCase() ?? ""];
-  if (imageMediaType !== undefined) {
-    return await readImageFile(sandbox, resolvedPath, normalizedPath, imageMediaType);
+  const bytes = await sandbox.readBinaryFile({ path: resolvedPath });
+  if (bytes === null) {
+    throw new Error(
+      `File not found: ${filePath}. Verify the path exists and is accessible in the sandbox.`,
+    );
+  }
+
+  // ── Classify as text, image, or unsupported binary ──────────────────
+  // Clean text stays text even behind an ASCII image signature such as
+  // `GIF89a`; real images always carry NUL or non-UTF-8 bytes.
+  const rawContent = decodeUtf8(bytes);
+  if (rawContent === undefined || rawContent.includes("\0")) {
+    const imageMediaType = detectImageMediaType(bytes);
+    if (imageMediaType !== undefined) {
+      return buildImageReadResult(bytes, normalizedPath, imageMediaType);
+    }
+    throw new Error(
+      `File "${filePath}" appears to be a binary file. ` +
+        "read_file only supports text files and PNG, JPEG, GIF, or WebP images.",
+    );
   }
 
   // ── Validate offset / limit ─────────────────────────────────────────
@@ -89,23 +102,6 @@ export async function executeReadFileOnSandbox(
 
   if (effectiveOffset < 1) {
     throw new Error(`offset must be >= 1. Received: ${effectiveOffset}.`);
-  }
-
-  // ── Read full file for fingerprinting ───────────────────────────────
-  const rawContent = await sandbox.readTextFile({ path: resolvedPath });
-
-  if (rawContent === null) {
-    throw new Error(
-      `File not found: ${filePath}. Verify the path exists and is accessible in the sandbox.`,
-    );
-  }
-
-  // ── Reject non-text (NUL bytes) ─────────────────────────────────────
-  if (rawContent.includes("\0")) {
-    throw new Error(
-      `File "${filePath}" contains NUL bytes and appears to be a binary file. ` +
-        "read_file only supports text files.",
-    );
   }
 
   // ── Split into lines ────────────────────────────────────────────────
@@ -202,18 +198,17 @@ export async function executeReadFileOnSandbox(
   };
 }
 
-async function readImageFile(
-  sandbox: SandboxSession,
-  resolvedPath: string,
-  path: string,
-  mediaType: string,
-): Promise<ReadFileResult> {
-  const bytes = await sandbox.readBinaryFile({ path: resolvedPath });
-  if (bytes === null) {
-    throw new Error(
-      `File not found: ${path}. Verify the path exists and is accessible in the sandbox.`,
-    );
+// Decodes exactly like `readTextFile` so write_file's stale-write check
+// fingerprints the same text this read stamps.
+function decodeUtf8(bytes: Uint8Array): string | undefined {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return undefined;
   }
+}
+
+function buildImageReadResult(bytes: Uint8Array, path: string, mediaType: string): ReadFileResult {
   if (bytes.byteLength > MAX_IMAGE_BYTES) {
     throw new Error(
       `Image "${path}" is ${bytes.byteLength} bytes; read_file shows images up to 3 MiB. ` +

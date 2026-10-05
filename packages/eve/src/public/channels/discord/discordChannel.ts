@@ -50,7 +50,7 @@ import { verifyDiscordInbound } from "#public/channels/discord/verifyInbound.js"
 import { readNonEmptyString } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
-import type { ValidatedInputResponse } from "#shared/input.js";
+import type { InputOption, ValidatedInputResponse } from "#shared/input.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import { discordAudience, discordInstrumentationMetadata } from "./audience.js";
 
@@ -87,6 +87,15 @@ export interface DiscordChannelState {
   initialResponseSent: boolean;
   /** Whether `conversationId` is a real Discord message id. */
   hasMessageAnchor: boolean;
+  /** Posted prompts with components, keyed by requestId, until eve resolves them. */
+  hitlPrompts?: Record<string, DiscordHitlPrompt>;
+}
+
+/** What a posted prompt needs so its message can be edited once eve resolves it. */
+export interface DiscordHitlPrompt {
+  readonly content: string;
+  readonly messageId: string;
+  readonly options: readonly Pick<InputOption, "id" | "label">[];
 }
 
 /** Discord channel credentials. */
@@ -140,6 +149,7 @@ export interface DiscordChannelEvents {
   readonly "message.completed"?: DiscordEventHandler<"message.completed">;
   readonly "message.appended"?: DiscordEventHandler<"message.appended">;
   readonly "input.requested"?: DiscordEventHandler<"input.requested">;
+  readonly "input.resolved"?: DiscordEventHandler<"input.resolved">;
   readonly "turn.failed"?: DiscordEventHandler<"turn.failed">;
   readonly "turn.completed"?: DiscordEventHandler<"turn.completed">;
   readonly "turn.cancelled"?: DiscordEventHandler<"turn.cancelled">;
@@ -336,10 +346,18 @@ function buildDiscordHandle(input: {
   const state = input.state;
   const credentials = mergeCredentials(input.config.credentials, state);
 
-  function anchor(posted: DiscordPostedMessage): void {
-    if (!posted.id || state.hasMessageAnchor) return;
-    state.conversationId = posted.id;
-    state.hasMessageAnchor = true;
+  /**
+   * The first posted message anchors the conversation. A press finds its
+   * session by the id of the message it is on, so every later message with
+   * components, such as a second pending question, is aliased too.
+   */
+  function anchor(posted: DiscordPostedMessage, body: DiscordMessageBody): void {
+    if (!posted.id) return;
+    if (state.hasMessageAnchor && body.components === undefined) return;
+    if (!state.hasMessageAnchor) {
+      state.conversationId = posted.id;
+      state.hasMessageAnchor = true;
+    }
     if (state.channelId) {
       input.session?.continuation?.alias(discordContinuationToken(state.channelId, posted.id));
     }
@@ -350,14 +368,15 @@ function buildDiscordHandle(input: {
   ): Promise<DiscordPostedMessage> {
     const channelId = state.channelId ?? "";
     if (!channelId) throw new Error("discordChannel: missing channel id for outbound message.");
+    const body = normalizePostInput(message);
     const posted = await sendDiscordChannelMessage({
       apiBaseUrl: api?.apiBaseUrl,
-      body: normalizePostInput(message),
+      body,
       credentials,
       fetch: api?.fetch,
       channelId,
     });
-    anchor(posted);
+    anchor(posted, body);
     return posted;
   }
 
@@ -366,15 +385,16 @@ function buildDiscordHandle(input: {
     if (!interactionToken) {
       throw new Error("discordChannel: missing interaction token for original response edit.");
     }
+    const body = normalizePostInput(message);
     const posted = await editDiscordOriginalResponse({
       apiBaseUrl: api?.apiBaseUrl,
-      body: normalizePostInput(message),
+      body,
       credentials,
       fetch: api?.fetch,
       interactionToken,
     });
     state.initialResponseSent = true;
-    anchor(posted);
+    anchor(posted, body);
     return posted;
   }
 
@@ -383,14 +403,15 @@ function buildDiscordHandle(input: {
     if (!interactionToken) {
       throw new Error("discordChannel: missing interaction token for followup message.");
     }
+    const body = normalizePostInput(message);
     const posted = await createDiscordFollowupMessage({
       apiBaseUrl: api?.apiBaseUrl,
-      body: normalizePostInput(message),
+      body,
       credentials,
       fetch: api?.fetch,
       interactionToken,
     });
-    anchor(posted);
+    anchor(posted, body);
     return posted;
   }
 

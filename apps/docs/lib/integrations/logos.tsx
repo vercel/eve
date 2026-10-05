@@ -320,7 +320,7 @@ const similarwebLogo = (props: LogoProps) => <SiSimilarweb {...props} />;
 
 const stripeLogo = (props: LogoProps) => <SiStripe color="default" {...props} />;
 
-const linkLogo = (props: LogoProps) => (
+export const linkLogo = (props: LogoProps) => (
   <svg fill="none" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" {...props}>
     <path d="M0 0h32v32H0z" fill="#00D66F" />
     <path
@@ -504,7 +504,7 @@ const liveblocksLogo = (props: LogoProps) => (
   </svg>
 );
 
-const linqLogo = (props: LogoProps) => (
+export const linqLogo = (props: LogoProps) => (
   <svg fill="none" viewBox="0 0 629.586 757.741" xmlns="http://www.w3.org/2000/svg" {...props}>
     <path
       fill="currentColor"

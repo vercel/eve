@@ -16,6 +16,9 @@ function stubSession(events: ReadableStream<unknown>): Session {
     async getEventStream() {
       return events;
     },
+    async getStreamTailIndex() {
+      return -1;
+    },
   } as Session;
 }
 

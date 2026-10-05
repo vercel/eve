@@ -2,6 +2,7 @@ import {
   createMcpHandler,
   McpServer,
   type McpToolAnnotations,
+  type StandardSchemaIssue,
   type StandardSchemaWithJSON,
 } from "#compiled/@modelcontextprotocol/server/index.js";
 
@@ -101,21 +102,56 @@ export function defineMcpTool<
           ...(input.definition.description === undefined
             ? {}
             : { description: input.definition.description }),
-          inputSchema: input.definition.inputSchema,
+          inputSchema: advertiseOnly(input.definition.inputSchema),
           ...(input.definition.outputSchema === undefined
             ? {}
             : { outputSchema: input.definition.outputSchema }),
         },
-        async (value, context) =>
-          await callTool(
+        async (value, context) => {
+          const checked = await input.definition.inputSchema["~standard"].validate(value);
+          if (checked.issues !== undefined) {
+            return toolError({
+              code: "invalid_input",
+              message: `Invalid arguments for tool ${input.definition.name}: ${checked.issues.map(formatIssue).join(", ")}`,
+              retryable: false,
+            });
+          }
+          return await callTool(
             input.call,
-            value as InferSchemaOutput<TInputSchema>,
+            checked.value as InferSchemaOutput<TInputSchema>,
             context.mcpReq.signal,
             auth,
-          ),
+          );
+        },
       );
     },
   };
+}
+
+/**
+ * The SDK both advertises and enforces a tool's input schema, but answers a
+ * rejected call with bare text. This copy keeps the advertised JSON Schema and
+ * accepts any arguments, so `defineMcpTool` checks them against the real
+ * schema and returns an `invalid_input` error like every other rejection.
+ */
+function advertiseOnly(schema: StandardSchemaWithJSON): StandardSchemaWithJSON {
+  const standard = schema["~standard"];
+  return {
+    "~standard": {
+      jsonSchema: standard.jsonSchema,
+      validate: (value) => ({ value }),
+      vendor: standard.vendor,
+      version: standard.version,
+    },
+  };
+}
+
+function formatIssue(issue: StandardSchemaIssue): string {
+  if (issue.path === undefined || issue.path.length === 0) return issue.message;
+  const path = issue.path
+    .map((segment) => String(typeof segment === "object" ? segment.key : segment))
+    .join(".");
+  return `${path}: ${issue.message}`;
 }
 
 interface McpStreamableHttpServerOptions {

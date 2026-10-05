@@ -48,6 +48,7 @@ export function twilioDriver(): ChannelDriver {
   return {
     name: "twilio",
     capabilities: ["text-replies"],
+    surface: "private",
     createChannel: (record) =>
       twilioChannel({
         allowFrom: "*",

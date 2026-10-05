@@ -14,11 +14,20 @@ import { createMemoryState } from "#compiled/@chat-adapter/state-memory/index.js
 import {
   type ChannelDriver,
   type PlatformCall,
+  type Surface,
   numberedOptions,
+  linkTargets,
 } from "#internal/testing/channel-conformance/harness.js";
 
 const ADAPTER = "conformance";
 const PERSON = { fullName: "Alice", isBot: false, isMe: false, userId: "alice", userName: "alice" };
+/** The signed-in person a real integration would attach from its own user directory. */
+const PERSON_AUTH = {
+  attributes: {},
+  authenticator: "conformance",
+  principalId: "alice",
+  principalType: "user",
+};
 let nextThread = 0;
 
 interface CardNode {
@@ -32,30 +41,74 @@ interface CardNode {
 
 type Inbound =
   | { readonly kind: "message"; readonly text: string }
-  | { readonly kind: "action"; readonly actionId: string; readonly value?: string };
+  | {
+      readonly kind: "action";
+      readonly actionId: string;
+      /** The posted message holding the pressed button. */
+      readonly messageId: string;
+      readonly value?: string;
+    };
+
+interface PressHandle {
+  readonly button: CardNode;
+  readonly messageId: string;
+}
+
+function messageIdOf(call: PlatformCall): string {
+  return (call.response as { readonly id: string }).id;
+}
+
+/** A card's buttons, or only those under `prompt` when the card holds several requests. */
+function buttonsOf(call: PlatformCall, prompt?: string): { handle: PressHandle; label: string }[] {
+  const card = cardOf(call.body as AdapterPostableMessage);
+  if (card === undefined) return [];
+  const messageId = messageIdOf(call);
+  return nodes(prompt === undefined ? card : requestSection(card, prompt))
+    .filter((node) => node.type === "button" && node.id !== undefined)
+    .map((button) => ({ handle: { button, messageId }, label: button.label ?? "" }));
+}
 
 /**
- * Drives `chatSdkChannel` with a card-capable direct-message adapter: one
- * thread, no streaming, and every message handed to eve with an empty
- * `context`. The fake adapter is the platform: it reads inbound JSON and
- * records every post and edit.
+ * Drives `chatSdkChannel` with a card-capable adapter: one thread, in a
+ * workspace channel by default or a direct message, no streaming, and every
+ * message handed to eve with an empty `context`. The fake adapter is the
+ * platform: it reads inbound JSON and records every post and edit.
  */
-export function chatSdkDriver(): ChannelDriver {
-  const driver = chatSdkDriverWith({ name: "chat-sdk", render: (posted) => posted });
+export function chatSdkDriver(surface: Exclude<Surface, "public"> = "shared"): ChannelDriver {
+  const driver = chatSdkDriverWith({
+    name: surface === "private" ? "chat-sdk-dm" : "chat-sdk",
+    render: (posted) => posted,
+    surface,
+  });
   return {
     ...driver,
     capabilities: ["buttons", "text-replies"],
+    surface,
     findOptions(call, prompt) {
       if (!isPost(call)) return undefined;
       const card = cardOf(call.body as AdapterPostableMessage);
       if (card === undefined || !texts(card).includes(prompt)) return undefined;
-      return nodes(card)
-        .filter((node) => node.type === "button" && node.id !== undefined)
-        .map((button) => ({ handle: button, label: button.label ?? "" }));
+      return buttonsOf(call, prompt);
     },
+    shownMessage(call) {
+      if (!isPost(call)) return undefined;
+      const card = cardOf(call.body as AdapterPostableMessage);
+      return {
+        id: messageIdOf(call),
+        links: linkTargets(card),
+        options: buttonsOf(call),
+        text: card === undefined ? (driver.postedText(call) ?? "") : texts(card),
+      };
+    },
+    personShownAs: [PERSON.fullName, PERSON.userName],
     press(option) {
-      const button = option.handle as CardNode;
-      return driver.inbound({ actionId: button.id!, kind: "action", value: button.value });
+      const { button, messageId } = option.handle as PressHandle;
+      return driver.inbound({
+        actionId: button.id!,
+        kind: "action",
+        messageId,
+        value: button.value,
+      });
     },
   };
 }
@@ -72,10 +125,12 @@ export function chatSdkTextDriver(): ChannelDriver {
   const driver = chatSdkDriverWith({
     name: "chat-sdk-text",
     render: (posted) => converter.renderPostable(posted),
+    surface: "private",
   });
   return {
     ...driver,
     capabilities: ["text-replies"],
+    surface: "private",
     findOptions(call, prompt) {
       if (!isPost(call) || typeof call.body !== "string" || !call.body.includes(prompt)) {
         return undefined;
@@ -101,7 +156,8 @@ class PlainTextConverter extends BaseFormatConverter {
 function chatSdkDriverWith(input: {
   readonly name: string;
   readonly render: (posted: AdapterPostableMessage) => unknown;
-}): Omit<ChannelDriver, "capabilities" | "findOptions" | "press"> & {
+  readonly surface: Exclude<Surface, "public">;
+}): Omit<ChannelDriver, "capabilities" | "findOptions" | "press" | "surface"> & {
   inbound(body: Inbound): Request;
 } {
   nextThread += 1;
@@ -120,7 +176,8 @@ function chatSdkDriverWith(input: {
     name: input.name,
     inbound,
     createChannel(record) {
-      const adapter = fakeAdapter(threadId, record, () => (sequence += 1), input.render);
+      const dm = input.surface === "private";
+      const adapter = fakeAdapter(threadId, record, () => (sequence += 1), input.render, dm);
       const bridge = chatSdkChannel({
         adapters: { [ADAPTER]: adapter },
         concurrency: "concurrent",
@@ -129,9 +186,21 @@ function chatSdkDriverWith(input: {
         streaming: false,
         userName: "eve",
       });
-      bridge.bot.onDirectMessage(async (thread, message) => {
-        await bridge.send(message.text, { auth: null, context: [], thread });
-      });
+      if (dm) {
+        bridge.bot.onDirectMessage(async (thread, message) => {
+          await bridge.send(message.text, { auth: PERSON_AUTH, context: [], thread });
+        });
+      } else {
+        // The wiring docs/channels/chat-sdk.mdx shows: a mention starts the session, and
+        // subscribing lets the rest of the thread continue it without one.
+        bridge.bot.onNewMention(async (thread, message) => {
+          await thread.subscribe();
+          await bridge.send(message.text, { auth: PERSON_AUTH, context: [], thread });
+        });
+        bridge.bot.onSubscribedMessage(async (thread, message) => {
+          await bridge.send(message.text, { auth: PERSON_AUTH, context: [], thread });
+        });
+      }
       return bridge.channel;
     },
     message: (text) => inbound({ kind: "message", text }),
@@ -155,7 +224,9 @@ function fakeAdapter(
   record: (call: PlatformCall) => void,
   nextId: () => number,
   render: (posted: AdapterPostableMessage) => unknown,
+  dm: boolean,
 ): Adapter {
+  const visibility = dm ? ("private" as const) : ("workspace" as const);
   let chat: ChatInstance | null = null;
   const self = {
     name: ADAPTER,
@@ -171,7 +242,7 @@ function fakeAdapter(
           {
             actionId: body.actionId,
             adapter,
-            messageId: id,
+            messageId: body.messageId,
             raw: body,
             threadId,
             user: PERSON,
@@ -183,7 +254,8 @@ function fakeAdapter(
         await chat?.processMessage(
           adapter,
           threadId,
-          inboundMessage(threadId, id, body.text),
+          // A person mentions the bot to start a channel thread; Chat routes the rest by subscription.
+          inboundMessage(threadId, id, body.text, !dm),
           options,
         );
       }
@@ -192,16 +264,16 @@ function fakeAdapter(
     channelIdFromThreadId: () => threadId,
     decodeThreadId: (id: string) => ({ threadId: id }),
     encodeThreadId: (input: { threadId: string }) => input.threadId,
-    getChannelVisibility: () => "private" as const,
-    isDM: () => true,
+    getChannelVisibility: () => visibility,
+    isDM: () => dm,
     parseMessage: (raw: { text?: string }) => inboundMessage(threadId, "parsed", raw.text ?? ""),
     renderFormatted: () => "",
     fetchMessages: async () => ({ messages: [] }),
     fetchThread: async (id: string) => ({
       channelId: threadId,
-      channelVisibility: "private" as const,
+      channelVisibility: visibility,
       id,
-      isDM: true,
+      isDM: dm,
       metadata: {},
     }),
     async postMessage(id: string, posted: AdapterPostableMessage) {
@@ -223,13 +295,13 @@ function fakeAdapter(
   return adapter;
 }
 
-function inboundMessage(threadId: string, id: string, text: string): Message {
+function inboundMessage(threadId: string, id: string, text: string, isMention = false): Message {
   return new Message({
     attachments: [],
     author: PERSON,
     formatted: parseMarkdown(text),
     id,
-    isMention: false,
+    isMention,
     metadata: { dateSent: new Date("2026-01-01T00:00:00.000Z"), edited: false },
     raw: { text },
     text,
@@ -241,6 +313,20 @@ function cardOf(posted: AdapterPostableMessage): CardNode | undefined {
   if (typeof posted !== "object" || posted === null) return undefined;
   if ("card" in posted) return posted.card as CardNode;
   return (posted as CardNode).type === "card" ? (posted as CardNode) : undefined;
+}
+
+/**
+ * A card batching several requests lists each one's prompt text, then its
+ * actions. Returns the part of `card` that belongs to `prompt`.
+ */
+function requestSection(card: CardNode, prompt: string): CardNode {
+  const children = card.children ?? [];
+  const start = children.findIndex(
+    (child) => child.type === "text" && child.content?.includes(prompt),
+  );
+  if (start < 0) return card;
+  const next = children.findIndex((child, index) => index > start && child.type === "text");
+  return { ...card, children: children.slice(start, next < 0 ? undefined : next) };
 }
 
 function nodes(node: CardNode): CardNode[] {

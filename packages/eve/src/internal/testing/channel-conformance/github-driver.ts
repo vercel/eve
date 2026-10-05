@@ -64,6 +64,7 @@ export function githubDriver(): ChannelDriver {
   return {
     name: "github",
     capabilities: ["text-replies"],
+    surface: "public",
     createChannel: (record) =>
       githubChannel({
         api: { fetch: recordingFetch(record, decode) },
