@@ -176,6 +176,8 @@ export default defineMcpClientConnection({
 
 eve sends the turn's user, and its initiator when that differs, in the `eve-forwarded-principal` header on every request. A turn with no caller, or an anonymous one, sends no header. The server must trust this deployment's route-authenticated identity in `trustedForwarders`; otherwise it refuses the request with `403`. See [Forwarded principals](../channels/mcp#forwarded-principals). A request carrying the header fails rather than follow a redirect, so the header never reaches another host. A principal over 16 KiB encoded fails the call before it is sent; trim its attributes.
 
+Authenticate the connection as this deployment, with a stable service credential, like the token above, not with user-scoped `connect("...")` or a per-caller resolver. eve resolves `auth` and `headers` once when it opens the client, but one client can serve turns from different users in a shared session, so the header is what names the user on each request. The server trusts the forwarder by that service identity, and grants the user's own access to downstream services itself.
+
 ## Control result size
 
 `connection_execute` returns an MCP tool's `structuredContent` when the server sends it. Otherwise it returns the result's text, parsed as JSON when the tool declares no output schema. Image, audio, and resource content reaches the model as file parts, and a result with `isError: true` fails the call with its text. MCP connections do not expose a per-result transform equivalent to an authored tool's [`toModelOutput`](/docs/tools#shape-what-the-model-sees-with-tomodeloutput).
