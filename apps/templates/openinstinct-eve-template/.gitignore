@@ -1,8 +1,0 @@
-node_modules
-.eve
-.vercel
-.workflow-data
-dist
-.DS_Store
-*.tsbuildinfo
-.env*
