@@ -30,6 +30,10 @@ export const TemplateReadme = ({ readme, sourceRevisionHref }: TemplateReadmePro
   );
   const components = useMemo<Partial<Components>>(
     () => ({
+      div: (props) => {
+        const { align: _align, ...htmlProps } = props as typeof props & { align?: string };
+        return <div {...htmlProps} className="text-left" />;
+      },
       a: ({ href, ...props }) => {
         const resolvedHref = resolveReadmeHref(href, sourceRevisionHref);
         if (!resolvedHref) {
