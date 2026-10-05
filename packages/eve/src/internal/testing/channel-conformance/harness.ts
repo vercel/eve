@@ -132,8 +132,11 @@ export interface ChannelDriver {
   createChannel(record: (call: PlatformCall) => void): unknown;
   /** Undoes anything `createChannel` installed outside the channel, such as a global `fetch`. */
   dispose?(): void;
-  /** A webhook request carrying a person's message. */
-  message(text: string): Request;
+  /**
+   * A webhook request carrying `person`'s message. Drivers with the
+   * `another-person` capability must send as `"bob"` when asked.
+   */
+  message(text: string, person: Person): Request;
   /**
    * The options a person can see in one outbound call that posts the question:
    * `undefined` when the call isn't the question, `[]` when it shows no options.
@@ -167,8 +170,8 @@ export type Person = "alice" | "bob";
 
 /** What a person can do and see in one channel conversation. Contract rules use only this. */
 export interface ChannelConversation {
-  /** The person sends a plain-text message. */
-  say(text: string): Promise<void>;
+  /** `person`, Alice unless given, sends a plain-text message. */
+  say(text: string, person?: Person): Promise<void>;
   /** Waits for the bot to post `prompt` with choices, returning them. */
   waitForQuestion(prompt: string): Promise<readonly RenderedOption[]>;
   /**
@@ -222,6 +225,11 @@ export interface ChannelConversation {
   /** How the person appears in the platform's text, in any form. */
   readonly personShownAs: readonly string[];
   runsOf(tool: CountedTool): number;
+  /**
+   * The caller each run of `tool` saw, in order, as one opaque string per
+   * principal, or `null` for no caller. Equal strings are the same principal.
+   */
+  callersOf(tool: CallerTool): readonly (string | null)[];
 }
 
 /**
@@ -242,8 +250,8 @@ export interface ClientDriver {
 
 /** A running client, as a person sees and uses it. */
 export interface ClientView {
-  /** The person sends a plain-text message. */
-  say(text: string): Promise<void>;
+  /** `person` sends a plain-text message. */
+  say(text: string, person: Person): Promise<void>;
   /**
    * Waits for the client to show one of `prompts`, returning which one and its
    * choices. A client may show several pending requests one at a time.
@@ -327,6 +335,9 @@ export type SignInTool = keyof typeof SIGN_IN_TOOLS;
 
 /** A tool whose runs a rule can count. */
 export type CountedTool = GatedTool | SignInTool | typeof PLAIN_TOOL;
+
+/** Tools that record the caller each run sees, as `session.auth.current`. */
+export type CallerTool = typeof PLAIN_TOOL | typeof GATED_TOOL;
 
 /** The code the fake provider hands back when a person finishes signing in. */
 const SIGN_IN_CODE = "conformance-code";
@@ -445,7 +456,7 @@ function webhookView(
   const promptsFrom = new Map<string, number>();
 
   return {
-    say: (text) => post(driver.message(text)),
+    say: (text, person) => post(driver.message(text, person)),
     press: (option, person) => post(driver.press(option, person)),
     waitForQuestion: (prompts) =>
       wait(
@@ -538,6 +549,7 @@ async function converse(
 ): Promise<void> {
   if (!isCompiledChannel(created)) throw new Error(`${label} is not a compiled channel.`);
   const channel: CompiledChannel = created;
+  const callers: Record<CallerTool, (string | null)[]> = { [GATED_TOOL]: [], [PLAIN_TOOL]: [] };
   const runs: Record<CountedTool, number> = {
     [GATED_TOOL]: 0,
     [REQUESTER_GATED_TOOL]: 0,
@@ -590,8 +602,9 @@ async function converse(
         loadNamespace: async () => ({
           default: defineTool({
             description: `Looks up meeting notes. Only call when asked to use ${PLAIN_TOOL}.`,
-            execute: async () => {
+            execute: async (_input, ctx) => {
               runs[PLAIN_TOOL] += 1;
+              callers[PLAIN_TOOL].push(callerKey(ctx.session.auth.current));
               return { notes: "Bob's review notes" };
             },
             inputSchema: z.object({}),
@@ -604,8 +617,9 @@ async function converse(
         logicalPath: "tools/ask_question.ts",
         loadNamespace: async () => ({ default: askQuestion() }),
       },
-      gatedTool(GATED_TOOL, "Deploys a release.", () => {
+      gatedTool(GATED_TOOL, "Deploys a release.", (caller) => {
         runs[GATED_TOOL] += 1;
+        callers[GATED_TOOL].push(callerKey(caller));
         return { deployed: true };
       }),
       gatedTool(SECOND_GATED_TOOL, "Publishes release notes.", () => {
@@ -742,9 +756,9 @@ async function converse(
     let signInsCompleted = 0;
 
     const conversation: ChannelConversation = {
-      async say(text) {
+      async say(text, person = "alice") {
         await waitForStepsToFinish([...sessions.values()], wait);
-        await view.say(text);
+        await view.say(text, person);
       },
       press: (option, person = "alice") => view.press(option, person),
       async waitForQuestion(prompt) {
@@ -821,6 +835,7 @@ async function converse(
         await deliverSignInCallback(callbackUrl);
       },
       runsOf: (tool) => runs[tool],
+      callersOf: (tool) => callers[tool],
       waitForRest: () => waitForRest([...sessions.values()], wait),
       shownPrompt(prompt) {
         if (view.shownPrompt === undefined) throw new Error(`${label} cannot read shown messages.`);
@@ -1025,7 +1040,7 @@ async function holdsFor(
 function gatedTool(
   name: GatedTool,
   description: string,
-  execute: () => unknown,
+  execute: (caller: SessionAuthContext | null) => unknown,
   response?: ApprovalResponsePolicy,
 ) {
   return {
@@ -1034,11 +1049,17 @@ function gatedTool(
       default: defineTool({
         approval: response === undefined ? always() : { request: always(), response },
         description: `${description} Only call when asked to use ${name}.`,
-        execute: async () => execute(),
+        execute: async (_input, ctx) => execute(ctx.session.auth.current),
         inputSchema: z.object({ release: z.string().optional() }),
       }),
     }),
   };
+}
+
+function callerKey(auth: SessionAuthContext | null): string | null {
+  if (auth === null) return null;
+  // The id first, so a truncated assertion message still shows who it was.
+  return JSON.stringify([auth.principalId, auth.principalType, auth.authenticator, auth.issuer]);
 }
 
 function samePrincipal(a: SessionAuthContext, b: SessionAuthContext): boolean {

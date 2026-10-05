@@ -121,11 +121,11 @@ export function discordDriver(surface: Exclude<Surface, "public"> = "shared"): C
         api: { fetch: recordingFetch(record, decode) },
         credentials: { applicationId: "APP1", botToken: "bot-token", publicKey: publicKeyHex },
       }),
-    message: (text) => {
+    message: (text, person) => {
       const id = nextInteraction();
       return signed(
         JSON.stringify({
-          ...where(),
+          ...where(PEOPLE[person]),
           application_id: "APP1",
           channel_id: channelId,
           data: { name: "ask", options: [{ name: "message", type: 3, value: text }] },

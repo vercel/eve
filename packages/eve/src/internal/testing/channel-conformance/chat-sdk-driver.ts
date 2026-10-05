@@ -44,7 +44,7 @@ interface CardNode {
 }
 
 type Inbound =
-  | { readonly kind: "message"; readonly text: string }
+  | { readonly kind: "message"; readonly person: Person; readonly text: string }
   | {
       readonly kind: "action";
       readonly actionId: string;
@@ -225,7 +225,7 @@ function chatSdkDriverWith(input: {
       }
       return bridge.channel;
     },
-    message: (text) => inbound({ kind: "message", text }),
+    message: (text, person) => inbound({ kind: "message", person, text }),
     postedText(call: PlatformCall) {
       if (!isPost(call)) return undefined;
       const posted = call.body as AdapterPostableMessage;
@@ -277,7 +277,7 @@ function fakeAdapter(
           adapter,
           threadId,
           // A person mentions the bot to start a channel thread; Chat routes the rest by subscription.
-          inboundMessage(threadId, id, body.text, !dm),
+          inboundMessage(threadId, id, body.text, !dm, PEOPLE[body.person]),
           options,
         );
       }
@@ -317,10 +317,16 @@ function fakeAdapter(
   return adapter;
 }
 
-function inboundMessage(threadId: string, id: string, text: string, isMention = false): Message {
+function inboundMessage(
+  threadId: string,
+  id: string,
+  text: string,
+  isMention = false,
+  author: (typeof PEOPLE)[Person] = PERSON,
+): Message {
   return new Message({
     attachments: [],
-    author: PERSON,
+    author,
     formatted: parseMarkdown(text),
     id,
     isMention,

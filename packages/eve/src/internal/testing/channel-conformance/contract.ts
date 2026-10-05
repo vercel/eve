@@ -6,6 +6,7 @@ import {
   type ConversationOptions,
   GATED_TOOL,
   type GatedTool,
+  type Person,
   PLAIN_TOOL,
   type RenderedOption,
   REQUESTER_GATED_TOOL,
@@ -106,6 +107,21 @@ async function steerPastApproval(conversation: ChannelConversation) {
   await askToDeploy(conversation);
   await conversation.say(ASIDE);
   await conversation.waitForReplyTo(ASIDE);
+}
+
+/** Each person in turn asks for {@link PLAIN_TOOL}; returns the caller each run saw. */
+async function lookUpNotesAs(
+  conversation: ChannelConversation,
+  people: readonly Person[],
+): Promise<readonly (string | null)[]> {
+  for (const [index, person] of people.entries()) {
+    // Numbered, so each run's reply, which quotes its message, can be told apart.
+    const request = `request ${index + 1}`;
+    await conversation.say(`Use ${PLAIN_TOOL} to find the review notes, ${request}.`, person);
+    await conversation.waitForShown(new RegExp(`Used ${PLAIN_TOOL} for .*${request}`, "su"));
+  }
+  expect(conversation.runsOf(PLAIN_TOOL), `${PLAIN_TOOL} runs`).toBe(people.length);
+  return conversation.callersOf(PLAIN_TOOL);
 }
 
 const HOTFIX = `Use ${REQUESTER_GATED_TOOL} to ship the fix.`;
@@ -871,6 +887,65 @@ export const hitlContract = [
       const options = await askToDeploy(conversation);
       await conversation.press(option(options, APPROVE_LABELS), "bob");
       await expectDeployed(conversation);
+    },
+  },
+  {
+    rule: "another person typing cancel and approve leaves a requester-only approval pending",
+    source: "docs/tools/human-in-the-loop.md#authorizing-approval-responses",
+    requires: ["another-person", "text-replies"],
+    async run(conversation) {
+      await askToReleaseHotfix(conversation);
+      await conversation.say("cancel", "bob");
+      await conversation.say("approve", "bob");
+      await expectStillPending(conversation);
+    },
+  },
+  {
+    rule: "the requester typing approve on a requester-only approval runs the tool",
+    source: "docs/tools/human-in-the-loop.md#authorizing-approval-responses",
+    requires: ["text-replies"],
+    async run(conversation) {
+      await askToReleaseHotfix(conversation);
+      await conversation.say("approve");
+      await expectReleased(conversation);
+    },
+  },
+  {
+    rule: "a tool sees the person who sent the message as its caller",
+    source: "docs/tools/overview.mdx",
+    requires: [],
+    // Platforms name the sender differently in a DM, e.g. Discord's user rather than member.
+    variesByConversation: true,
+    async run(conversation) {
+      const [caller] = await lookUpNotesAs(conversation, ["alice"]);
+      expect(caller, `${PLAIN_TOOL} ran with no caller`).not.toBeNull();
+    },
+  },
+  {
+    rule: "another person's message reaches tools as a different caller, and each person stays the same caller",
+    source: "docs/tools/overview.mdx",
+    requires: ["another-person"],
+    async run(conversation) {
+      const [alice, bob, aliceAgain] = await lookUpNotesAs(conversation, ["alice", "bob", "alice"]);
+      expect(bob, `${PLAIN_TOOL} ran with no caller for Bob`).not.toBeNull();
+      expect(bob, "Bob's message ran as Alice").not.toBe(alice);
+      expect(aliceAgain, "Alice ran as a different caller the second time").toBe(alice);
+    },
+  },
+  {
+    rule: "a tool another person approves still runs as the person who asked",
+    source: "#3079",
+    requires: ["another-person", "buttons"],
+    async run(conversation) {
+      const [alice] = await lookUpNotesAs(conversation, ["alice"]);
+      const options = await askToDeploy(conversation);
+      await conversation.press(option(options, APPROVE_LABELS), "bob");
+      await expectDeployed(conversation);
+      // Strings, so a failure shows whom it ran as.
+      expect(
+        JSON.stringify(conversation.callersOf(GATED_TOOL)),
+        `${GATED_TOOL} didn't run as the person who asked`,
+      ).toBe(JSON.stringify([alice]));
     },
   },
 ] as const satisfies readonly ContractRule[];

@@ -57,10 +57,15 @@ pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conform
 | message after ignored sign-in gets an answer, signing in late doesn't run | ✅ | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | message after ignored sign-in tells user it was cancelled | ✅ | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[14](#note-14)</sup> | ✅ | ❌<sup>[14](#note-14)</sup> |
 | the requester pressing Approve on a requester-only approval runs the tool | ✅ | ✅ |  | —<sup>[1](#note-1)</sup> | ❌<sup>[22](#note-22)</sup> |  | —<sup>[1](#note-1)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
-| another person pressing Approve on a requester-only approval leaves it pending | —<sup>[23](#note-23)</sup> | ✅ |  | —<sup>[24](#note-24)</sup> | ❌<sup>[22](#note-22)</sup> |  | —<sup>[24](#note-24)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[24](#note-24)</sup> | —<sup>[24](#note-24)</sup> | —<sup>[24](#note-24)</sup> |
-| another person pressing Cancel on a requester-only approval leaves it pending | —<sup>[23](#note-23)</sup> | ✅ |  | —<sup>[24](#note-24)</sup> | ❌<sup>[22](#note-22)</sup> |  | —<sup>[24](#note-24)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[24](#note-24)</sup> | —<sup>[24](#note-24)</sup> | —<sup>[24](#note-24)</sup> |
-| another person's rejected press leaves the approval's buttons in place | —<sup>[23](#note-23)</sup> | ✅ |  | —<sup>[24](#note-24)</sup> | ✅ |  | —<sup>[24](#note-24)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[24](#note-24)</sup> | —<sup>[24](#note-24)</sup> | —<sup>[24](#note-24)</sup> |
-| another person pressing Approve runs a tool with no response policy | —<sup>[23](#note-23)</sup> | ✅ |  | —<sup>[24](#note-24)</sup> | ✅ |  | —<sup>[24](#note-24)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[24](#note-24)</sup> | —<sup>[24](#note-24)</sup> | —<sup>[24](#note-24)</sup> |
+| another person pressing Approve on a requester-only approval leaves it pending | —<sup>[23](#note-23)</sup> | ✅ |  | —<sup>[24](#note-24)</sup> | ❌<sup>[22](#note-22)</sup> |  | —<sup>[24](#note-24)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[24](#note-24)</sup> |
+| another person pressing Cancel on a requester-only approval leaves it pending | —<sup>[23](#note-23)</sup> | ✅ |  | —<sup>[24](#note-24)</sup> | ❌<sup>[22](#note-22)</sup> |  | —<sup>[24](#note-24)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[24](#note-24)</sup> |
+| another person's rejected press leaves the approval's buttons in place | —<sup>[23](#note-23)</sup> | ✅ |  | —<sup>[24](#note-24)</sup> | ✅ |  | —<sup>[24](#note-24)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[24](#note-24)</sup> |
+| another person pressing Approve runs a tool with no response policy | —<sup>[23](#note-23)</sup> | ✅ |  | —<sup>[24](#note-24)</sup> | ✅ |  | —<sup>[24](#note-24)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[24](#note-24)</sup> |
+| another person typing cancel and approve leaves a requester-only approval pending | —<sup>[23](#note-23)</sup> | ✅ |  | —<sup>[23](#note-23)</sup> | —<sup>[2](#note-2)</sup> |  | —<sup>[23](#note-23)</sup> |  | ✅ |  | ✅ |  | ✅ |  | ✅ | ✅ | —<sup>[23](#note-23)</sup> |
+| the requester typing approve on a requester-only approval runs the tool | —<sup>[4](#note-4)</sup> | ❌<sup>[25](#note-25)</sup> |  | ❌<sup>[25](#note-25)</sup> | —<sup>[2](#note-2)</sup> |  | ❌<sup>[25](#note-25)</sup> |  | ❌<sup>[25](#note-25)</sup> |  | ❌<sup>[25](#note-25)</sup> |  | ❌<sup>[25](#note-25)</sup> |  | ❌<sup>[25](#note-25)</sup> | ❌<sup>[25](#note-25)</sup> | ❌<sup>[25](#note-25)</sup> |
+| a tool sees the person who sent the message as its caller | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| another person's message reaches tools as a different caller, and each person stays the same caller | —<sup>[23](#note-23)</sup> | ✅ |  | —<sup>[23](#note-23)</sup> | ✅ |  | —<sup>[23](#note-23)</sup> |  | ✅ |  | ✅ |  | ✅ |  | ✅ | ✅ | —<sup>[23](#note-23)</sup> |
+| a tool another person approves still runs as the person who asked | —<sup>[23](#note-23)</sup> | ❌<sup>[26](#note-26)</sup> |  | —<sup>[24](#note-24)</sup> | ❌<sup>[27](#note-27)</sup> |  | —<sup>[24](#note-24)</sup> |  | ❌<sup>[26](#note-26)</sup> |  | ❌<sup>[26](#note-26)</sup> |  | ❌<sup>[26](#note-26)</sup> |  | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[24](#note-24)</sup> |
 
 ## Notes
 
@@ -88,3 +93,6 @@ pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conform
 22. <a id="note-22"></a>a button press responds with `auth: null`, so no one can satisfy a response policy
 23. <a id="note-23"></a>the platform has no second person who can act
 24. <a id="note-24"></a>the platform has no second person who can act or buttons a person can press
+25. <a id="note-25"></a>#3680: a typed reply can't settle an approval that has a response policy
+26. <a id="note-26"></a>#3079: an approved tool runs as whoever approved it
+27. <a id="note-27"></a>a button press responds with `auth: null`, so the approved tool runs with no caller

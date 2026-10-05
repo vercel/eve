@@ -117,6 +117,22 @@ const QUEUED_BUDGET_REPLY = {
   },
 } satisfies Partial<Record<HitlRule, BrokenCell>>;
 
+/** No channel's typed reply can settle an approval that has a response policy. */
+const TYPED_POLICY_APPROVAL = {
+  "the requester typing approve on a requester-only approval runs the tool": {
+    reason: "#3680: a typed reply can't settle an approval that has a response policy",
+    symptom: /Timed out waiting for release_hotfix to run or be denied/u,
+  },
+} satisfies Partial<Record<HitlRule, BrokenCell>>;
+
+/** An approved call runs as whoever approved it, not the person who asked for it. */
+const APPROVER_RUNS_TOOL = {
+  "a tool another person approves still runs as the person who asked": {
+    reason: "#3079: an approved tool runs as whoever approved it",
+    symptom: /didn't run as the person who asked: expected '\["\[/u,
+  },
+} satisfies Partial<Record<HitlRule, BrokenCell>>;
+
 const SIGN_IN_NOT_SHOWN = /Timed out waiting for the bot to show/u;
 
 /** The channel has no default `authorization.required` renderer, so a sign-in shows nothing. */
@@ -161,6 +177,7 @@ const UNNAMED_RESPONDER =
   "a resolved prompt doesn't say who answered; input.resolved carries no responder";
 
 const CHAT_SDK_BROKEN = {
+  ...APPROVER_RUNS_TOOL,
   ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, [
     "approvalPress",
     "approvalText",
@@ -168,6 +185,7 @@ const CHAT_SDK_BROKEN = {
     "questionText",
   ]),
   ...QUEUED_BUDGET_REPLY,
+  ...TYPED_POLICY_APPROVAL,
 };
 
 const DISCORD_BROKEN = {
@@ -180,6 +198,10 @@ const DISCORD_BROKEN = {
       "another person pressing Cancel on a requester-only approval leaves it pending",
     ],
   ),
+  "a tool another person approves still runs as the person who asked": {
+    reason: "a button press responds with `auth: null`, so the approved tool runs with no caller",
+    symptom: /didn't run as the person who asked: expected '\[null\]'/u,
+  },
   ...budgetPromptNotShown(
     "a budget prompt's request id overflows Discord's 100-character custom_id, so posting it throws",
     "running out of budget opens budget prompt",
@@ -194,7 +216,9 @@ const DISCORD_BROKEN = {
 };
 
 const SLACK_BROKEN = {
+  ...APPROVER_RUNS_TOOL,
   ...QUEUED_BUDGET_REPLY,
+  ...TYPED_POLICY_APPROVAL,
   "a sign-in without a link shows its instructions": {
     reason: "Slack sends the private sign-in prompt only for a challenge with a URL",
     symptom: SIGN_IN_NOT_SHOWN,
@@ -210,8 +234,10 @@ const SLACK_BROKEN = {
 } satisfies Partial<Record<HitlRule, BrokenCell>>;
 
 const TEAMS_BROKEN = {
+  ...APPROVER_RUNS_TOOL,
   ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, ["approvalText", "questionPress", "questionText"]),
   ...QUEUED_BUDGET_REPLY,
+  ...TYPED_POLICY_APPROVAL,
   "a sign-in shows its confirmation code": {
     reason: "the Teams sign-in card omits the challenge's user code",
     symptom: SIGN_IN_NOT_SHOWN,
@@ -231,6 +257,7 @@ const SIGN_IN_LINK_POSTED_TO_THREAD = {
 } satisfies Partial<Record<HitlRule, BrokenCell>>;
 
 const TELEGRAM_BROKEN = {
+  ...APPROVER_RUNS_TOOL,
   ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, [
     "approvalPress",
     "approvalText",
@@ -238,6 +265,7 @@ const TELEGRAM_BROKEN = {
     "questionText",
   ]),
   ...QUEUED_BUDGET_REPLY,
+  ...TYPED_POLICY_APPROVAL,
 };
 
 const TUI_TYPED_APPROVAL =
@@ -259,7 +287,7 @@ const TUI_SINGLE_PERSON = "one person answers at their own terminal; there's nob
 const hitlConformance = {
   "chat-sdk": [
     { driver: chatSdkDriver, broken: { ...CHAT_SDK_BROKEN, ...SIGN_IN_ONLY_IN_DMS } },
-    { driver: chatSdkTextDriver, broken: QUEUED_BUDGET_REPLY },
+    { driver: chatSdkTextDriver, broken: { ...QUEUED_BUDGET_REPLY, ...TYPED_POLICY_APPROVAL } },
   ],
   "chat-sdk-dm": [{ dm: true, driver: () => chatSdkDriver("private"), broken: CHAT_SDK_BROKEN }],
   discord: [{ driver: discordDriver, broken: DISCORD_BROKEN }],
@@ -269,6 +297,7 @@ const hitlConformance = {
       driver: githubDriver,
       broken: {
         ...QUEUED_BUDGET_REPLY,
+        ...TYPED_POLICY_APPROVAL,
         ...noSignInRenderer(
           "a sign-in without a link shows its instructions",
           "completing a sign-in tells the person it succeeded",
@@ -282,6 +311,7 @@ const hitlConformance = {
       driver: linearDriver,
       broken: {
         ...QUEUED_BUDGET_REPLY,
+        ...TYPED_POLICY_APPROVAL,
         "only the person signing in sees the sign-in link and code": {
           reason:
             "the code is in the elicitation body the whole issue sees; who sees the auth signal's link is unverified",
@@ -290,8 +320,19 @@ const hitlConformance = {
       },
     },
   ],
-  linq: [{ driver: linqDriver, broken: { ...QUEUED_BUDGET_REPLY, ...SIGN_IN_ONLY_IN_DMS } }],
-  "linq-dm": [{ dm: true, driver: () => linqDriver("private"), broken: QUEUED_BUDGET_REPLY }],
+  linq: [
+    {
+      driver: linqDriver,
+      broken: { ...QUEUED_BUDGET_REPLY, ...TYPED_POLICY_APPROVAL, ...SIGN_IN_ONLY_IN_DMS },
+    },
+  ],
+  "linq-dm": [
+    {
+      dm: true,
+      driver: () => linqDriver("private"),
+      broken: { ...QUEUED_BUDGET_REPLY, ...TYPED_POLICY_APPROVAL },
+    },
+  ],
   slack: [{ driver: slackDriver, broken: SLACK_BROKEN }],
   "slack-dm": [{ dm: true, driver: () => slackDriver("private"), broken: SLACK_BROKEN }],
   teams: [{ driver: teamsDriver, broken: { ...TEAMS_BROKEN, ...SIGN_IN_LINK_POSTED_TO_THREAD } }],
@@ -324,6 +365,8 @@ const hitlConformance = {
           TUI_TYPED_APPROVAL,
         "a message while an approval is pending cancels it, so approving afterwards runs nothing":
           TUI_TYPED_APPROVAL,
+        "the requester typing approve on a requester-only approval runs the tool":
+          TUI_TYPED_APPROVAL,
         "pressing Approve names who approved on the approval": TUI_SINGLE_PERSON,
         "pressing an option names who answered on the question": TUI_SINGLE_PERSON,
         "answering a question by text names who answered on the question": TUI_SINGLE_PERSON,
@@ -335,6 +378,7 @@ const hitlConformance = {
       driver: twilioDriver,
       broken: {
         ...QUEUED_BUDGET_REPLY,
+        ...TYPED_POLICY_APPROVAL,
         ...noSignInRenderer(
           "a sign-in names the service and shows its sign-in link",
           "a sign-in shows its confirmation code",

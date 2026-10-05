@@ -113,13 +113,14 @@ export function teamsDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
         api: { fetch: recordingFetch(record, decode) },
         credentials: { tokenProvider: () => "test-token", webhookVerifier: () => true },
       }),
-    message: (text) =>
+    message: (text, person) =>
       personal
-        ? activity({ text, type: "message" })
+        ? activity({ from: PEOPLE[person], text, type: "message" })
         : // In a channel the default policy hears only mentions, so a person mentions the bot
           // each time, on its own line so the test model's line-based directives still read it.
           activity({
             entities: [{ mentioned: BOT, text: MENTION, type: "mention" }],
+            from: PEOPLE[person],
             text: `${text}\n${MENTION}`,
             textFormat: "xml",
             type: "message",

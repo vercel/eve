@@ -128,12 +128,12 @@ export function telegramDriver(surface: Exclude<Surface, "public"> = "shared"): 
         botUsername: BOT.username,
         credentials: { botToken: "bot-token", webhookSecretToken: SECRET },
       }),
-    message: (text) =>
+    message: (text, person) =>
       update({
         message: {
           chat: CHAT,
           date: 0,
-          from: PERSON,
+          from: PEOPLE[person],
           message_id: 1000 + updateId,
           ...addressed(text),
         },

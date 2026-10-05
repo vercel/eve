@@ -119,7 +119,7 @@ export function slackDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
         api: { fetch: recordingFetch(record, decode) },
         credentials: { botToken: "xoxb-conformance", signingSecret: SIGNING_SECRET },
       }),
-    message: (text) => {
+    message: (text, person) => {
       const ts = threadStarted ? nextTs() : threadTs;
       const thread = threadStarted ? { thread_ts: threadTs } : {};
       threadStarted = true;
@@ -136,7 +136,7 @@ export function slackDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
             channel: CHANNEL,
             event_ts: ts,
             ts,
-            user: PERSON,
+            user: PEOPLE[person].id,
           },
           // Slack names the installation that received the event, which is how eve knows its
           // own bot user, e.g. to strip that mention from a typed answer.
