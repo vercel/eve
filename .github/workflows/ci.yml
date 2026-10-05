@@ -71,6 +71,9 @@ jobs:
       - name: Run typecheck
         run: pnpm typecheck
 
+      - name: Typecheck eval experiment definitions
+        run: pnpm typecheck:eval-experiments
+
   test-unit:
     runs-on: ubuntu-latest
 
@@ -97,6 +100,9 @@ jobs:
 
       - name: Test workflow helpers
         run: node --test .github/scripts/*.test.mjs
+
+      - name: Test eval experiment harness
+        run: pnpm test:eval-experiments
 
   test-integration:
     name: test-integration (${{ matrix.os }})
