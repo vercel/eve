@@ -110,7 +110,7 @@ export type Surface =
   | "private";
 
 /**
- * Teaches the HITL conformance suite to speak one channel's platform protocol.
+ * Teaches the channel conformance suite to speak one channel's platform protocol.
  *
  * Drivers translate only between platform wire formats and conversation
  * actions. They never read session state, so they keep working across changes
@@ -596,7 +596,7 @@ async function converse(
   }
 
   const runtime = await createTestRuntime({
-    agent: { limits: options.limits, name: `${label}-hitl-conformance` },
+    agent: { limits: options.limits, name: `${label}-conformance` },
     modules: [
       {
         logicalPath: `tools/${PLAIN_TOOL}.ts`,
@@ -1058,7 +1058,7 @@ function matchPath(pattern: string, pathname: string): Record<string, string> | 
 
 function unsupported(name: string): () => never {
   return () => {
-    throw new Error(`The HITL conformance harness does not provide ctx.${name}.`);
+    throw new Error(`The channel conformance harness does not provide ctx.${name}.`);
   };
 }
 

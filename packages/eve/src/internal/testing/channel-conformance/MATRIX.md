@@ -1,4 +1,4 @@
-# HITL conformance matrix
+# Channel conformance matrix
 
 <!-- Generated from conformance.ts by matrix.test.ts. Do not edit by hand. -->
 

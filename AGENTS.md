@@ -74,7 +74,7 @@ proceed without local integration or scenario runs. CI is always the official
 line of defense, and every required check must pass before merge.
 
 Do not run a whole integration or scenario tier, or a whole multi-channel
-suite such as the HITL channel conformance suite, locally unless the task
+suite such as the channel conformance suite, locally unless the task
 expressly needs it (for example, the user asks, or you are chasing a failure
 only the full run reproduces). Scope local runs to the files and test names
 your change touches with a path and `-t` filter, and leave the full suites to

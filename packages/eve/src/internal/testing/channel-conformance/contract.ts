@@ -305,7 +305,7 @@ async function abandonSignIn(conversation: ChannelConversation) {
   await conversation.say(CHANGE_OF_PLANS);
 }
 
-export const hitlContract = [
+export const channelContract = [
   {
     rule: "a rendered question shows every option a person can choose",
     source: "docs/tools/human-in-the-loop.md#questions",
@@ -826,4 +826,4 @@ export const hitlContract = [
   },
 ] as const satisfies readonly ContractRule[];
 
-export type HitlRule = (typeof hitlContract)[number]["rule"];
+export type ContractRuleName = (typeof channelContract)[number]["rule"];
