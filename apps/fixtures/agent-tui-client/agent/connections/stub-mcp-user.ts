@@ -71,6 +71,7 @@ const pendingTokenExchanges = new Map<string, Promise<string>>();
 const principalTokens = new Map<string, string>();
 
 const definition: McpClientConnectionDefinition = {
+  instanceKey: "oauth-smoke",
   url,
   description:
     "Smoke-test stub MCP behind a real OAuth 2.1 + PKCE flow against the @emulators/microsoft IdP. Exposes the same echo_marker tool as stub-mcp.",
