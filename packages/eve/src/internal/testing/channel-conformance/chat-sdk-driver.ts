@@ -114,11 +114,9 @@ export function chatSdkDriver(surface: Exclude<Surface, "public"> = "shared"): C
 }
 
 /**
- * The same bridge behind a text-only adapter, as Photon iMessage's behaves:
- * every post reaches the person as the `chat` package's default plain-text
- * rendering, so a card shows only its fallback text and has nothing to press.
- * Photon's real adapter sends over gRPC, so this is the closest in-process
- * stand-in; it covers eve's bridge and the SDK fallback, not Photon itself.
+ * The same bridge behind a text-only adapter: every post reaches the person as
+ * the `chat` package's default plain-text rendering, so a card shows only its
+ * fallback text and has nothing to press.
  */
 export function chatSdkTextDriver(): ChannelDriver {
   const converter = new PlainTextConverter();

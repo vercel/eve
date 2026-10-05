@@ -208,7 +208,7 @@ export function deriveModalInputResponses(
 
 /**
  * Encodes the payload as a raw JSON array, which leaves room for long request
- * ids such as a session-limit prompt's `<sessionId>:limit:input:<tokens>`.
+ * ids such as a session-limit prompt's `<sessionId>:<turn>:limit:input:<tokens>`.
  */
 function encodeHitlCustomId(prefix: string, payload: HitlCustomIdPayload): string {
   const fields =

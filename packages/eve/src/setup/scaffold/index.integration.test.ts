@@ -557,7 +557,7 @@ describe("ensureChannel", () => {
       join(projectRoot, "components/ai-elements/question.tsx"),
       "utf8",
     );
-    expect(agentMessageSource).toContain('inputRequest?.kind === "question"');
+    expect(agentMessageSource).toContain("questionsFor(part.toolCallId)");
     expect(agentMessageSource).toContain("<QuestionRequest");
     expect(agentMessageSource).toContain("onInputResponses");
     expect(questionSource).toContain("export const Question");

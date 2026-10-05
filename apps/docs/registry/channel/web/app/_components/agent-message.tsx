@@ -1,6 +1,7 @@
 "use client";
 
 import type {
+  ConversationInput,
   EveAuthorizationPart,
   EveDynamicToolPart,
   EveMessage,
@@ -54,11 +55,13 @@ export function AgentMessage({
   isStreaming,
   message,
   onInputResponses,
+  questionsFor,
 }: {
   readonly canRespond: (requestId: string) => boolean;
   readonly isStreaming: boolean;
   readonly message: EveMessage;
   readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
+  readonly questionsFor: (callId: string) => readonly ConversationInput[];
 }) {
   const lastTextIndex = message.parts.reduce(
     (last, part, index) => (part.type === "text" ? index : last),
@@ -81,6 +84,7 @@ export function AgentMessage({
               key={partKey(part, index)}
               onInputResponses={onInputResponses}
               part={part}
+              questionsFor={questionsFor}
               showCaret={isStreaming && message.role === "assistant" && index === lastTextIndex}
             />
           ),
@@ -94,11 +98,13 @@ function AgentMessagePart({
   canRespond,
   onInputResponses,
   part,
+  questionsFor,
   showCaret,
 }: {
   readonly canRespond: (requestId: string) => boolean;
   readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
   readonly part: EveMessagePart;
+  readonly questionsFor: (callId: string) => readonly ConversationInput[];
   readonly showCaret: boolean;
 }) {
   switch (part.type) {
@@ -122,15 +128,20 @@ function AgentMessagePart({
     case "authorization":
       return <AuthorizationPrompt part={part} />;
     case "dynamic-tool": {
-      const inputRequest = part.toolMetadata?.eve?.inputRequest;
-      if (inputRequest?.kind === "question") {
+      const questions = questionsFor(part.toolCallId);
+      if (questions.length > 0) {
         return (
-          <QuestionRequest
-            canRespond={canRespond(inputRequest.requestId)}
-            inputRequest={inputRequest}
-            inputResponse={part.toolMetadata?.eve?.inputResponse}
-            onInputResponses={onInputResponses}
-          />
+          <div className="space-y-4">
+            {questions.map(({ request, response }) => (
+              <QuestionRequest
+                canRespond={canRespond(request.requestId)}
+                inputRequest={request}
+                inputResponse={response}
+                key={request.requestId}
+                onInputResponses={onInputResponses}
+              />
+            ))}
+          </div>
         );
       }
 

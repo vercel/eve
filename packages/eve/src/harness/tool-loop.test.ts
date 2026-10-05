@@ -1925,7 +1925,7 @@ describe("createToolLoopHarness", () => {
     });
   }
 
-  const LIMIT_REQUEST_ID = "test-session:limit:input:12";
+  const LIMIT_REQUEST_ID = "test-session:0:limit:input:12";
 
   it("parks on a deterministic continuation prompt when the session reaches its token limit", async () => {
     const { emit, events } = createEventCollector();
@@ -1992,7 +1992,7 @@ describe("createToolLoopHarness", () => {
             input: { kind: "token-cost", limitUsd: 1.5, usedCostUsd: 1.51 },
           },
           prompt: expect.stringContaining("$1.5 model token-cost limit"),
-          requestId: "test-session:limit:token-cost:1.51",
+          requestId: "test-session:0:limit:token-cost:1.51",
         },
       ],
     });
@@ -2005,7 +2005,7 @@ describe("createToolLoopHarness", () => {
       toolResults: [],
     });
     const resumed = await runStep(parked.session, {
-      inputResponses: [{ optionId: "continue", requestId: "test-session:limit:token-cost:1.51" }],
+      inputResponses: [{ optionId: "continue", requestId: "test-session:0:limit:token-cost:1.51" }],
     });
 
     expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(1);

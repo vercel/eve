@@ -4,6 +4,7 @@ import {
   type ContractRule,
   type HitlRule,
   hitlContract,
+  hitlContractSections,
 } from "#internal/testing/channel-conformance/contract.js";
 import {
   type ChannelCapability,
@@ -19,6 +20,7 @@ import { discordDriver } from "#internal/testing/channel-conformance/discord-dri
 import { githubDriver } from "#internal/testing/channel-conformance/github-driver.js";
 import { linearDriver } from "#internal/testing/channel-conformance/linear-driver.js";
 import { linqDriver } from "#internal/testing/channel-conformance/linq-driver.js";
+import { photonDriver } from "#internal/testing/channel-conformance/photon-driver.js";
 import { slackDriver } from "#internal/testing/channel-conformance/slack-driver.js";
 import { teamsDriver } from "#internal/testing/channel-conformance/teams-driver.js";
 import { telegramDriver } from "#internal/testing/channel-conformance/telegram-driver.js";
@@ -97,14 +99,6 @@ interface ConformanceChannel {
   readonly unsupported?: Partial<Record<HitlRule, string>>;
 }
 
-/** A message sent during a budget prompt is queued, and every later message queues behind it. */
-const QUEUED_BUDGET_REPLY = {
-  "query sent during budget prompt answered after budget approval": {
-    reason: "eve coalesces the queued reply with the later approve, which then matches no option",
-    symptom: /Timed out waiting for a reply to "Carol wants the review by Friday\."/u,
-  },
-} satisfies Partial<Record<HitlRule, BrokenCell>>;
-
 const SIGN_IN_NOT_SHOWN = /Timed out waiting for the bot to show/u;
 
 /** The channel has no default `authorization.required` renderer, so a sign-in shows nothing. */
@@ -113,19 +107,6 @@ function noSignInRenderer(...rules: HitlRule[]): Partial<Record<HitlRule, Broken
     rules.map((rule) => [
       rule,
       { reason: "the channel has no default sign-in renderer", symptom: SIGN_IN_NOT_SHOWN },
-    ]),
-  );
-}
-
-/** Budget prompts in `rules` never show; see each caller for why. */
-function budgetPromptNotShown(
-  reason: string,
-  ...rules: HitlRule[]
-): Partial<Record<HitlRule, BrokenCell>> {
-  return Object.fromEntries(
-    rules.map((rule) => [
-      rule,
-      { reason, symptom: /Timed out waiting for one of the questions \["This session has hit/u },
     ]),
   );
 }
@@ -155,7 +136,6 @@ const CHAT_SDK_BROKEN = {
     "questionPress",
     "questionText",
   ]),
-  ...QUEUED_BUDGET_REPLY,
 };
 
 const DISCORD_BROKEN = {
@@ -169,7 +149,6 @@ const DISCORD_BROKEN = {
 };
 
 const SLACK_BROKEN = {
-  ...QUEUED_BUDGET_REPLY,
   ...staleAnsweredPrompts(
     "only the button interaction handler edits a question; a typed answer leaves it",
     ["questionText"],
@@ -182,7 +161,6 @@ const SLACK_BROKEN = {
 
 const TEAMS_BROKEN = {
   ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, ["approvalText", "questionPress", "questionText"]),
-  ...QUEUED_BUDGET_REPLY,
 } satisfies Partial<Record<HitlRule, BrokenCell>>;
 
 /** The sign-in prompt, link included, goes to the whole thread. */
@@ -200,7 +178,6 @@ const TELEGRAM_BROKEN = {
     "questionPress",
     "questionText",
   ]),
-  ...QUEUED_BUDGET_REPLY,
 };
 
 const TUI_TYPED_APPROVAL =
@@ -224,7 +201,7 @@ const WEB_CHAT_SINGLE_PERSON =
 const hitlConformance = {
   "chat-sdk": [
     { driver: chatSdkDriver, broken: { ...CHAT_SDK_BROKEN, ...SIGN_IN_ONLY_IN_DMS } },
-    { driver: chatSdkTextDriver, broken: QUEUED_BUDGET_REPLY },
+    { driver: chatSdkTextDriver },
   ],
   "chat-sdk-dm": [{ dm: true, driver: () => chatSdkDriver("private"), broken: CHAT_SDK_BROKEN }],
   discord: [{ driver: discordDriver, broken: DISCORD_BROKEN }],
@@ -233,7 +210,6 @@ const hitlConformance = {
     {
       driver: githubDriver,
       broken: {
-        ...QUEUED_BUDGET_REPLY,
         ...noSignInRenderer(
           "a sign-in without a link shows its instructions",
           "completing a sign-in tells the person it succeeded",
@@ -246,7 +222,6 @@ const hitlConformance = {
     {
       driver: linearDriver,
       broken: {
-        ...QUEUED_BUDGET_REPLY,
         "only the person signing in sees the sign-in link and code": {
           reason:
             "the code is in the elicitation body the whole issue sees; who sees the auth signal's link is unverified",
@@ -255,8 +230,9 @@ const hitlConformance = {
       },
     },
   ],
-  linq: [{ driver: linqDriver, broken: { ...QUEUED_BUDGET_REPLY, ...SIGN_IN_ONLY_IN_DMS } }],
-  "linq-dm": [{ dm: true, driver: () => linqDriver("private"), broken: QUEUED_BUDGET_REPLY }],
+  linq: [{ driver: linqDriver, broken: SIGN_IN_ONLY_IN_DMS }],
+  "linq-dm": [{ dm: true, driver: () => linqDriver("private") }],
+  photon: [{ driver: photonDriver }],
   slack: [{ driver: slackDriver, broken: SLACK_BROKEN }],
   "slack-dm": [{ dm: true, driver: () => slackDriver("private"), broken: SLACK_BROKEN }],
   teams: [{ driver: teamsDriver, broken: { ...TEAMS_BROKEN, ...SIGN_IN_LINK_POSTED_TO_THREAD } }],
@@ -266,14 +242,6 @@ const hitlConformance = {
   tui: [
     {
       driver: tuiDriver,
-      broken: {
-        ...QUEUED_BUDGET_REPLY,
-        ...budgetPromptNotShown(
-          "a re-raised budget prompt keeps its request id, and eve/client ignores ids it has seen",
-          "pressing stop on budget prompt halts work, next message asks again",
-          "reply of stop on budget prompt halts work, next message asks again",
-        ),
-      },
       unsupported: {
         "pressing an option of an answered question sends it to the agent as new input":
           "an answered question's drawer closes, so nothing is left to press",
@@ -290,31 +258,14 @@ const hitlConformance = {
   twilio: [
     {
       driver: twilioDriver,
-      broken: QUEUED_BUDGET_REPLY,
     },
   ],
   "web-chat": [
     {
       driver: webChatDriver,
-      broken: {
-        ...QUEUED_BUDGET_REPLY,
-        ...budgetPromptNotShown(
-          "a re-raised budget prompt keeps its request id, and eve/client ignores ids it has seen",
-          "pressing stop on budget prompt halts work, next message asks again",
-        ),
-        "pressing options of two pending questions answers each with its own option": {
-          reason:
-            "a tool call's message part holds one input request, so a second ctx.ask on the same call replaces the first",
-          symptom:
-            /Timed out waiting for (one of the questions \["Which (day|time)|plan_review to return)/u,
-        },
-      },
       unsupported: {
         "pressing an option of an answered question sends it to the agent as new input":
           "an answered question disables its options, so nothing is left to press",
-        // Skipped rather than broken: whether the re-raised prompt shows depends on event timing.
-        "reply of stop on budget prompt halts work, next message asks again":
-          "a re-raised budget prompt keeps its request id, and eve/client ignores ids it has seen",
         "pressing Approve names who approved on the approval": WEB_CHAT_SINGLE_PERSON,
         "approving by text names who approved on the approval": WEB_CHAT_SINGLE_PERSON,
         "pressing an option names who answered on the question": WEB_CHAT_SINGLE_PERSON,
@@ -448,13 +399,21 @@ export function renderHitlConformanceMatrix(): string {
     const index = notes.get(note)!;
     return `${MATRIX_SYMBOLS[cell.kind]}<sup>[${index}](#note-${index})</sup>`;
   };
-  const rows = hitlContract.map((rule) =>
-    row([
-      // Non-breaking spaces keep each rule on one line; GitHub scrolls the table instead.
-      escape(rule.rule).replaceAll(" ", "\u00a0"),
-      ...entries.map((entry) => shown(entry, rule)),
-    ]),
-  );
+  // One table per section, each repeating the column header so it reads on its own.
+  const tables = hitlContractSections.flatMap((section) => [
+    `## ${section.title}`,
+    "",
+    row(["Rule", ...entries.map((entry) => `\`${nameOf(entry)}\``)]),
+    row(["---", ...entries.map(() => ":---:")]),
+    ...section.rules.map((rule) =>
+      row([
+        // Non-breaking spaces keep each rule on one line; GitHub scrolls the table instead.
+        escape(rule.rule).replaceAll(" ", "\u00a0"),
+        ...entries.map((entry) => shown(entry, rule)),
+      ]),
+    ),
+    "",
+  ]);
   return [
     "# HITL conformance matrix",
     "",
@@ -471,10 +430,7 @@ export function renderHitlConformanceMatrix(): string {
     "",
     "✅ passes · ❌ broken · — not supported",
     "",
-    row(["Rule", ...entries.map((entry) => `\`${nameOf(entry)}\``)]),
-    row(["---", ...entries.map(() => ":---:")]),
-    ...rows,
-    "",
+    ...tables,
     "## Notes",
     "",
     ...[...notes].map(([note, index]) => `${index}. <a id="note-${index}"></a>${note}`),

@@ -136,6 +136,7 @@ import {
 import { coordinateApprovalDelivery } from "#harness/approval-delivery-coordinator.js";
 import type { InstrumentationAttempt, InstrumentationStepScope } from "#instrumentation/runtime.js";
 import {
+  answerSessionLimitFromText,
   consumeDeferredStepInput,
   getApprovedTools,
   getPendingInputRequestIds,
@@ -650,7 +651,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // replay only after they finish.
     const stepInput =
       pendingCoordination === undefined
-        ? consumeDeferredStepInput({ input, session })
+        ? consumeDeferredStepInput({ input: answerSessionLimitFromText(session, input), session })
         : { input, session };
     session = stepInput.session;
     const coordination = await resolvePendingCoordination({
