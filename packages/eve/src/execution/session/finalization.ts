@@ -8,6 +8,7 @@ import type { TurnOutcome } from "#execution/session/turn-step-types.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
 import type { TokenUsage } from "#shared/token-usage.js";
+import { lastHarnessTurn } from "#harness/emission-state.js";
 import { getSessionUsage, takeSessionUsageDelta } from "#harness/turn-tag-state.js";
 import { notifyTurnCallerStep } from "#subagents/parent-notification.js";
 
@@ -48,6 +49,7 @@ export async function finalizeSession(
     await emitTerminalSessionCompletionStep({
       sessionWritable: context.sessionWritable,
       serializedContext,
+      turn: session === undefined ? undefined : lastHarnessTurn(session.state),
       usage,
     });
   } else if (outcome.kind === "failed") {
