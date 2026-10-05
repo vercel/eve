@@ -357,7 +357,7 @@ export default defineHook({
 });
 ```
 
-`toolResultFrom` recognizes the mounted `crm__search` result from the original definition, not the namespaced string. Publishers should keep tool descriptions distinct so eve can assign each definition an unambiguous identity.
+`toolResultFrom` recognizes the mounted `crm__search` result from the original definition, not the namespaced string. Publishers should keep descriptions distinct across different tool definitions so eve can assign each definition an unambiguous identity. Re-exporting the same definition, such as from a subagent's `tools/` directory, does not conflict.
 
 ### Bundled development extensions
 

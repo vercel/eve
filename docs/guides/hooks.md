@@ -135,6 +135,8 @@ import { search } from "@acme/crm/tools";
 const crmSearch = toolResultFrom(event.data.result, search); // typed; matches crm__search
 ```
 
+When one definition is mounted under more than one tool name, for example when a subagent re-exports an extension tool, `toolResultFrom` matches results from every mounted name.
+
 ### Persist events to your own database
 
 Every event carries a `meta` envelope with `meta.id`, a unique, sortable identifier for that event. It makes a natural primary key for an events table:

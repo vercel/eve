@@ -81,7 +81,7 @@ function toolResultFromImpl(
   if (entry.kind === "ambiguous") return undefined;
 
   if (entry.kind === "tool") {
-    if (result.toolName !== entry.name) return undefined;
+    if (!entry.names.has(result.toolName)) return undefined;
     return {
       callId: result.callId,
       output: result.output,
@@ -89,12 +89,15 @@ function toolResultFromImpl(
     };
   }
 
-  const prefix = entry.name + CONNECTION_TOOL_SEPARATOR;
-  if (!result.toolName.startsWith(prefix)) return undefined;
-  return {
-    callId: result.callId,
-    connectionToolName: result.toolName.slice(prefix.length),
-    output: result.output,
-    toolName: result.toolName,
-  };
+  for (const name of entry.names) {
+    const prefix = name + CONNECTION_TOOL_SEPARATOR;
+    if (!result.toolName.startsWith(prefix)) continue;
+    return {
+      callId: result.callId,
+      connectionToolName: result.toolName.slice(prefix.length),
+      output: result.output,
+      toolName: result.toolName,
+    };
+  }
+  return undefined;
 }
