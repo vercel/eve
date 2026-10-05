@@ -1088,6 +1088,7 @@ describe("resolvePendingInput with a session-limit continuation batch", () => {
       requests: [
         createSessionLimitContinuationRequest({
           sessionId: "sess-test",
+          turnSequence: 0,
           violation: { kind: "input", limit: 12, usedTokens: 12 },
         }),
       ],
@@ -1101,6 +1102,7 @@ describe("resolvePendingInput with a session-limit continuation batch", () => {
       requests: [
         createSessionLimitContinuationRequest({
           sessionId: "sess-test",
+          turnSequence: 0,
           violation: { kind: "input", limit: 12, usedTokens: 12 },
         }),
         approvalRequest(),
@@ -1118,7 +1120,7 @@ describe("resolvePendingInput with a session-limit continuation batch", () => {
     const result = resolvePendingInput({
       session: createLimitBatchSession(),
       stepInput: {
-        inputResponses: [{ optionId: "continue", requestId: "sess-test:limit:input:12" }],
+        inputResponses: [{ optionId: "continue", requestId: "sess-test:0:limit:input:12" }],
       },
     });
 
@@ -1133,7 +1135,7 @@ describe("resolvePendingInput with a session-limit continuation batch", () => {
     const result = resolvePendingInput({
       session: createLimitBatchSession(),
       stepInput: {
-        inputResponses: [{ optionId: "stop", requestId: "sess-test:limit:input:12" }],
+        inputResponses: [{ optionId: "stop", requestId: "sess-test:0:limit:input:12" }],
       },
     });
 
@@ -1167,6 +1169,7 @@ describe("resolvePendingInput with a session-limit continuation batch", () => {
       requests: [
         createSessionLimitContinuationRequest({
           sessionId: "sess-test",
+          turnSequence: 0,
           violation: { kind: "input", limit: 12, usedTokens: 12 },
         }),
       ],
@@ -1193,6 +1196,7 @@ describe("resolvePendingInput with a session-limit continuation batch", () => {
       requests: [
         createSessionLimitContinuationRequest({
           sessionId: "sess-test",
+          turnSequence: 0,
           violation: { kind: "input", limit: 12, usedTokens: 12 },
         }),
       ],
@@ -1207,7 +1211,7 @@ describe("resolvePendingInput with a session-limit continuation batch", () => {
 
     expect(result.outcome).toBe("unresolved");
     expect(getPendingInputRequestIds(result.session.state)).toEqual(
-      new Set(["approval-1", "sess-test:limit:input:12"]),
+      new Set(["approval-1", "sess-test:0:limit:input:12"]),
     );
     const deferred = consumeDeferredStepInput({ session: result.session });
     expect(deferred.input).toEqual({
@@ -1222,6 +1226,7 @@ describe("clearPendingSessionLimitPrompt", () => {
       requests: [
         createSessionLimitContinuationRequest({
           sessionId: "sess-test",
+          turnSequence: 0,
           violation: { kind: "input", limit: 12, usedTokens: 12 },
         }),
       ],

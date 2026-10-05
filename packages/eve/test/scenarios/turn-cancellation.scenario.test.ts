@@ -301,7 +301,9 @@ describe("turn cancellation descendant cascade", () => {
         );
         expect(tasks).toHaveLength(1);
         expect(requests).toHaveLength(1);
-        expect(requests[0]?.requestId.startsWith(`${response.sessionId}:limit:`)).toBe(true);
+        expect(requests[0]?.requestId).toMatch(
+          new RegExp(`^${response.sessionId}:\\d+:limit:`, "u"),
+        );
 
         const requestId = requests[0]?.requestId;
         if (requestId === undefined) throw new Error("Root limit prompt has no request id.");

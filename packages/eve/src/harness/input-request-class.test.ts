@@ -40,6 +40,7 @@ describe("isApprovalRequest", () => {
       isApprovalRequest(
         createSessionLimitContinuationRequest({
           sessionId: "sess-test",
+          turnSequence: 0,
           violation: { kind: "input", limit: 12, usedTokens: 12 },
         }),
       ),

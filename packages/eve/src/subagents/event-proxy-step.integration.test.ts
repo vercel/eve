@@ -87,6 +87,7 @@ function fixture() {
   };
   const request = createSessionLimitContinuationRequest({
     sessionId: "child-session",
+    turnSequence: 0,
     violation: { kind: "input", limit: 100, usedTokens: 101 },
   });
   const hookPayload: SubagentInputRequestHookPayload = {

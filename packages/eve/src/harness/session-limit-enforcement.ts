@@ -120,6 +120,7 @@ async function parkOnSessionUsageLimit(input: {
 }): Promise<StepResult> {
   const request = createSessionLimitContinuationRequest({
     sessionId: input.session.sessionId,
+    turnSequence: input.emissionState.sequence,
     violation: input.violation,
   });
   let emissionState = input.emissionState;

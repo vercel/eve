@@ -161,7 +161,7 @@ it("drops a stale session-limit continuation answer and keeps the rest of the in
   const stepInput = dropStaleSessionLimitContinuationResponses({
     pendingRequestIds: new Set(),
     stepInput: {
-      inputResponses: [{ optionId: "stop", requestId: "sess-1:limit:input:12" }],
+      inputResponses: [{ optionId: "stop", requestId: "sess-1:0:limit:input:12" }],
       message: "also do this",
     },
   });
@@ -174,12 +174,12 @@ it("drops a stale session-limit continuation answer and keeps the rest of the in
 
 it("keeps pending and non-continuation responses while dropping stale continuation answers", () => {
   const stepInput = dropStaleSessionLimitContinuationResponses({
-    pendingRequestIds: new Set(["question-1", "sess-1:limit:input:20"]),
+    pendingRequestIds: new Set(["question-1", "sess-1:0:limit:input:20"]),
     stepInput: {
       inputResponses: [
         { optionId: "candidate", requestId: "question-1" },
-        { optionId: "continue", requestId: "sess-1:limit:input:12" },
-        { optionId: "stop", requestId: "sess-1:limit:input:20" },
+        { optionId: "continue", requestId: "sess-1:0:limit:input:12" },
+        { optionId: "stop", requestId: "sess-1:0:limit:input:20" },
       ],
     },
   });
@@ -188,7 +188,7 @@ it("keeps pending and non-continuation responses while dropping stale continuati
   // to the currently pending continuation prompt pass through.
   expect(stepInput?.inputResponses).toEqual([
     { optionId: "candidate", requestId: "question-1" },
-    { optionId: "stop", requestId: "sess-1:limit:input:20" },
+    { optionId: "stop", requestId: "sess-1:0:limit:input:20" },
   ]);
 });
 
@@ -212,7 +212,7 @@ it("converts remaining stale responses after the drop pass", () => {
     stepInput: {
       inputResponses: [
         { optionId: "candidate", requestId: "question-1" },
-        { optionId: "stop", requestId: "sess-1:limit:input:12" },
+        { optionId: "stop", requestId: "sess-1:0:limit:input:12" },
       ],
     },
   });

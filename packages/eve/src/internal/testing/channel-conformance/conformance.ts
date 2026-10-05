@@ -111,19 +111,6 @@ function noSignInRenderer(...rules: HitlRule[]): Partial<Record<HitlRule, Broken
   );
 }
 
-/** Budget prompts in `rules` never show; see each caller for why. */
-function budgetPromptNotShown(
-  reason: string,
-  ...rules: HitlRule[]
-): Partial<Record<HitlRule, BrokenCell>> {
-  return Object.fromEntries(
-    rules.map((rule) => [
-      rule,
-      { reason, symptom: /Timed out waiting for one of the questions \["This session has hit/u },
-    ]),
-  );
-}
-
 /** Chat SDK's default sign-in, outside a DM, points the person at a DM it never sends. */
 const SIGN_IN_ONLY_IN_DMS = Object.fromEntries(
   [
@@ -255,13 +242,6 @@ const hitlConformance = {
   tui: [
     {
       driver: tuiDriver,
-      broken: {
-        ...budgetPromptNotShown(
-          "a re-raised budget prompt keeps its request id, and eve/client ignores ids it has seen",
-          "pressing stop on budget prompt halts work, next message asks again",
-          "reply of stop on budget prompt halts work, next message asks again",
-        ),
-      },
       unsupported: {
         "pressing an option of an answered question sends it to the agent as new input":
           "an answered question's drawer closes, so nothing is left to press",
@@ -283,18 +263,9 @@ const hitlConformance = {
   "web-chat": [
     {
       driver: webChatDriver,
-      broken: {
-        ...budgetPromptNotShown(
-          "a re-raised budget prompt keeps its request id, and eve/client ignores ids it has seen",
-          "pressing stop on budget prompt halts work, next message asks again",
-        ),
-      },
       unsupported: {
         "pressing an option of an answered question sends it to the agent as new input":
           "an answered question disables its options, so nothing is left to press",
-        // Skipped rather than broken: whether the re-raised prompt shows depends on event timing.
-        "reply of stop on budget prompt halts work, next message asks again":
-          "a re-raised budget prompt keeps its request id, and eve/client ignores ids it has seen",
         "pressing Approve names who approved on the approval": WEB_CHAT_SINGLE_PERSON,
         "approving by text names who approved on the approval": WEB_CHAT_SINGLE_PERSON,
         "pressing an option names who answered on the question": WEB_CHAT_SINGLE_PERSON,

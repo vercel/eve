@@ -753,13 +753,11 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
     });
 
     expect(execute).not.toHaveBeenCalled();
+    const [limitBatch] = limited.session.state?.["eve.runtime.pendingInputBatches"] as readonly {
+      readonly requests: readonly { readonly requestId: string }[];
+    }[];
     const resumed = await runStep(limited.session, {
-      inputResponses: [
-        {
-          optionId: "continue",
-          requestId: `${session.sessionId}:limit:input:12`,
-        },
-      ],
+      inputResponses: [{ optionId: "continue", requestId: limitBatch!.requests[0]!.requestId }],
     });
 
     expect(execute).toHaveBeenCalledExactlyOnceWith(
