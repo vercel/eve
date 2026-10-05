@@ -69,6 +69,10 @@ const TemplateDetailPage = async ({ params }: { params: Promise<PageParams> }) =
   const highlightedFiles = await Promise.all(entry.files.map(highlightFile));
   const canonicalUrl = new URL(`/templates/${entry.slug}`, getSiteOrigin()).toString();
   const structuredData = createStructuredData(entry, canonicalUrl);
+  const descriptionLink = entry.descriptionLink;
+  const descriptionLinkIndex = descriptionLink
+    ? entry.description.indexOf(descriptionLink.text)
+    : -1;
 
   return (
     <>
@@ -97,7 +101,19 @@ const TemplateDetailPage = async ({ params }: { params: Promise<PageParams> }) =
             </div>
           </div>
           <div className="min-w-0">
-            <p className="max-w-[520px] text-copy-16 text-gray-900">{entry.description}</p>
+            <p className="max-w-[520px] text-copy-16 text-gray-900">
+              {descriptionLink && descriptionLinkIndex >= 0 ? (
+                <>
+                  {entry.description.slice(0, descriptionLinkIndex)}
+                  <a className="underline underline-offset-4" href={descriptionLink.href}>
+                    {descriptionLink.text}
+                  </a>
+                  {entry.description.slice(descriptionLinkIndex + descriptionLink.text.length)}
+                </>
+              ) : (
+                entry.description
+              )}
+            </p>
             <div className="mt-6">
               <TemplateActions
                 demoHref={entry.demoHref}
