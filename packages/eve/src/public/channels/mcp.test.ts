@@ -234,8 +234,11 @@ describe("mcpChannel", () => {
     );
     await expect(jsonRpcResponse(oversizedStart)).resolves.toMatchObject({
       result: {
-        content: [{ text: expect.stringContaining("Input validation error"), type: "text" }],
+        content: [
+          { text: expect.stringContaining("Invalid arguments for tool agent_start"), type: "text" },
+        ],
         isError: true,
+        structuredContent: { error: { code: "invalid_input", retryable: false } },
       },
     });
 
@@ -255,7 +258,7 @@ describe("mcpChannel", () => {
       routeArgs(createSession),
     );
     await expect(jsonRpcResponse(oversizedUpdate)).resolves.toMatchObject({
-      result: { isError: true },
+      result: { isError: true, structuredContent: { error: { code: "invalid_input" } } },
     });
     expect(createSession).not.toHaveBeenCalled();
   });

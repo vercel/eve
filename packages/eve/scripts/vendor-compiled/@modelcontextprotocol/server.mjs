@@ -27,9 +27,27 @@ export interface McpToolAnnotations {
   readonly readOnlyHint?: boolean;
 }
 
+export interface StandardSchemaIssue {
+  readonly message: string;
+  readonly path?: readonly (PropertyKey | { readonly key: PropertyKey })[];
+}
+
+export type StandardSchemaResult<TOutput> =
+  | { readonly value: TOutput; readonly issues?: undefined }
+  | { readonly issues: readonly StandardSchemaIssue[] };
+
 export interface StandardSchemaWithJSON<TInput = unknown, TOutput = TInput> {
   readonly "~standard": {
+    readonly version: 1;
+    readonly vendor: string;
     readonly types?: { readonly input: TInput; readonly output: TOutput };
+    readonly validate: (
+      value: unknown,
+    ) => StandardSchemaResult<TOutput> | Promise<StandardSchemaResult<TOutput>>;
+    readonly jsonSchema: {
+      readonly input: (options: { readonly target: string }) => Record<string, unknown>;
+      readonly output: (options: { readonly target: string }) => Record<string, unknown>;
+    };
   };
 }
 
