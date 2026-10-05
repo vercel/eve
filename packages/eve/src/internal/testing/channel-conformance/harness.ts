@@ -175,15 +175,15 @@ export interface ChannelConversation {
   /** Waits until the bot replies to input that carried `text`, however the channel framed it. */
   waitForReplyTo(text: string): Promise<void>;
   /** How many test-model replies, plain or reporting a tool result, the bot has shown. */
-  replyCount(): number;
+  replyCount(): Promise<number>;
   /** Waits for the bot to show a test-model reply, plain or reporting a tool result. */
   waitForReply(): Promise<void>;
   /** Waits for the bot to show text matching `pattern`, returning the text that matched. */
   waitForShown(pattern: string | RegExp): Promise<string>;
   /** Everything the bot has shown that everyone in the conversation sees, joined. */
-  sharedText(): string;
+  sharedText(): Promise<string>;
   /** Every choice the bot's messages let a person press now, newest message first. */
-  shownOptions(): readonly RenderedOption[];
+  shownOptions(): Promise<readonly RenderedOption[]>;
   /** Waits for the turn to hold for a sign-in, however the channel shows it. */
   waitForSignIn(): Promise<void>;
   /**
@@ -202,7 +202,7 @@ export interface ChannelConversation {
    * Rules read it once an answer has settled, by which point the bot has had
    * every chance to update it.
    */
-  shownPrompt(prompt: string): ShownMessage;
+  shownPrompt(prompt: string): Promise<ShownMessage>;
   /** How the person appears in the platform's text, in any form. */
   readonly personShownAs: readonly string[];
   runsOf(tool: CountedTool): number;
@@ -236,13 +236,13 @@ export interface ClientView {
   /** The person presses one shown choice. */
   press(option: RenderedOption): Promise<void>;
   /** The bot replies the client shows now. */
-  replies(): readonly string[];
+  replies(): readonly string[] | Promise<readonly string[]>;
   /** The message that asked `prompt` as it stands now; see {@link ChannelConversation.shownPrompt}. */
-  shownPrompt?(prompt: string): ShownMessage;
+  shownPrompt?(prompt: string): ShownMessage | Promise<ShownMessage>;
   /** How the person appears in the client's text, in any form. */
   readonly personShownAs?: readonly string[];
   /** Everything the client shows now that a person can read or open, one entry per message. */
-  shown(): readonly ShownText[];
+  shown(): readonly ShownText[] | Promise<readonly ShownText[]>;
   /** What the client shows now, for timeout errors. */
   describe(): string;
   /** Stops the client and releases anything it holds, such as its event stream. */
@@ -649,6 +649,7 @@ async function converse(
           },
           attachSession,
           describe: unsupported("describe"),
+          invokeTool: unsupported("invokeTool"),
           params,
           requestIp: null,
           to: unsupported("to"),
@@ -678,8 +679,8 @@ async function converse(
     const replyWait = <T>(label: string, select: (reply: string) => T | undefined) =>
       wait(
         label,
-        () => {
-          for (const reply of view.replies()) {
+        async () => {
+          for (const reply of await view.replies()) {
             const selected = select(reply);
             if (selected !== undefined) return selected;
           }
@@ -687,9 +688,10 @@ async function converse(
         },
         view.describe,
       );
-    const replyCount = () =>
-      view.replies().filter((reply) => isMockReplyTo(reply, "") || reply.startsWith("Used "))
-        .length;
+    const replyCount = async () =>
+      (await view.replies()).filter(
+        (reply) => isMockReplyTo(reply, "") || reply.startsWith("Used "),
+      ).length;
     let signInsCompleted = 0;
 
     const conversation: ChannelConversation = {
@@ -727,27 +729,25 @@ async function converse(
         }),
       replyCount,
       waitForReply: async () =>
-        void (await wait("a reply", () => (replyCount() > 0 ? true : undefined), view.describe)),
+        void (await wait(
+          "a reply",
+          async () => ((await replyCount()) > 0 ? true : undefined),
+          view.describe,
+        )),
       waitForShown: (pattern) =>
         wait(
           `the bot to show ${String(pattern)}`,
-          () =>
-            view
-              .shown()
+          async () =>
+            (await view.shown())
               .map(({ text }) => text)
               .find((text) =>
                 typeof pattern === "string" ? text.includes(pattern) : pattern.test(text),
               ),
           view.describe,
         ),
-      shownOptions: () =>
-        view
-          .shown()
-          .toReversed()
-          .flatMap(({ options }) => options),
-      sharedText: () =>
-        view
-          .shown()
+      shownOptions: async () => (await view.shown()).toReversed().flatMap(({ options }) => options),
+      sharedText: async () =>
+        (await view.shown())
           .filter((shown) => !shown.onlyPerson)
           .map(({ text }) => text)
           .join("\n"),
@@ -773,9 +773,9 @@ async function converse(
       },
       runsOf: (tool) => runs[tool],
       waitForRest: () => waitForRest([...sessions.values()], wait),
-      shownPrompt(prompt) {
+      async shownPrompt(prompt) {
         if (view.shownPrompt === undefined) throw new Error(`${label} cannot read shown messages.`);
-        return view.shownPrompt(prompt);
+        return await view.shownPrompt(prompt);
       },
       personShownAs: view.personShownAs ?? [],
     };

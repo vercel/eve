@@ -499,8 +499,8 @@ describe("buildToolSet", () => {
   });
 
   it.each([
-    [{ id: "openai/gpt-5.4" }, WEB_SEARCH_EXA_OUTPUT_SCHEMA],
-    [{ id: "anthropic/claude-opus-4.6" }, WEB_SEARCH_EXA_OUTPUT_SCHEMA],
+    [{ id: "openai/gpt-5.4" }, "gateway.chat", WEB_SEARCH_EXA_OUTPUT_SCHEMA],
+    [{ id: "anthropic/claude-opus-4.6" }, "gateway.chat", WEB_SEARCH_EXA_OUTPUT_SCHEMA],
     [
       {
         id: "openai.chat/gpt-5.4",
@@ -511,6 +511,7 @@ describe("buildToolSet", () => {
           sourceKind: "module",
         },
       },
+      "openai.chat",
       WEB_SEARCH_OPENAI_OUTPUT_SCHEMA,
     ],
     [
@@ -523,6 +524,7 @@ describe("buildToolSet", () => {
           sourceKind: "module",
         },
       },
+      "anthropic.messages",
       WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA,
     ],
     [
@@ -535,12 +537,13 @@ describe("buildToolSet", () => {
           sourceKind: "module",
         },
       },
+      "google.generative-ai",
       WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA,
     ],
-    [{ id: "mistral/mistral-large" }, WEB_SEARCH_EXA_OUTPUT_SCHEMA],
-  ] satisfies Array<readonly [RuntimeModelReference, JsonObject]>)(
+    [{ id: "mistral/mistral-large" }, "gateway.chat", WEB_SEARCH_EXA_OUTPUT_SCHEMA],
+  ] satisfies Array<readonly [RuntimeModelReference, string, JsonObject]>)(
     "injects the selected web_search provider output schema",
-    async (modelReference, expectedOutputSchema) => {
+    async (modelReference, modelProvider, expectedOutputSchema) => {
       const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
         [
           "web_search",
@@ -558,6 +561,7 @@ describe("buildToolSet", () => {
 
       const result = await buildToolSetWithProviderTools({
         modelReference,
+        modelProvider,
         tools,
       });
 
@@ -583,6 +587,7 @@ describe("buildToolSet", () => {
 
     const result = await buildToolSetWithProviderTools({
       modelReference: { id: "openai/gpt-5.4" },
+      modelProvider: "gateway.chat",
       tools,
     });
 
@@ -615,6 +620,7 @@ describe("buildToolSet", () => {
           sourceKind: "module",
         },
       },
+      modelProvider: "some-provider",
       tools,
     });
 

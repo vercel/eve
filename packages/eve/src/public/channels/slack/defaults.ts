@@ -442,7 +442,8 @@ export const defaultEvents: SlackChannelInternalEvents = {
     // The challenge is user-specific: the sign-in link (and device code)
     // must only ever be visible to the person who started the sign-in, never posted into
     // the shared thread.
-    if (recipientUserId && challengeUrl) {
+    const instructions = event.authorization?.instructions;
+    if (recipientUserId && (challengeUrl || instructions)) {
       const { channelId, threadTs } = channel.state;
       // The turn's own sign-in holds it, so the prompt can cancel that turn.
       const cancel =
@@ -452,6 +453,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
       const prompt = {
         cancel,
         displayName,
+        instructions,
         url: challengeUrl,
         userCode: event.authorization?.userCode,
       };

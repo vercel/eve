@@ -24,6 +24,22 @@ const DEFAULT_EMISSION_STATE: HarnessEmissionState = {
   turnId: "",
 };
 
+/** A turn's id and sequence. */
+export interface HarnessTurnRef {
+  readonly id: string;
+  readonly sequence: number;
+}
+
+/**
+ * The open turn, or else the last completed one (the epilogue advances the
+ * sequence past it). `undefined` before the first turn.
+ */
+export function lastHarnessTurn(state: SessionStateMap | undefined): HarnessTurnRef | undefined {
+  const { sequence, turnId } = getHarnessEmissionState(state);
+  if (turnId !== "") return { id: turnId, sequence };
+  return sequence === 0 ? undefined : { id: `turn_${sequence - 1}`, sequence: sequence - 1 };
+}
+
 /** Reads the emission state, returning defaults when absent. */
 export function getHarnessEmissionState(state: SessionStateMap | undefined): HarnessEmissionState {
   const emissionState = state?.[HARNESS_EMISSION_STATE_KEY] as HarnessEmissionState | undefined;

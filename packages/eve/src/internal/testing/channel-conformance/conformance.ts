@@ -24,6 +24,7 @@ import { teamsDriver } from "#internal/testing/channel-conformance/teams-driver.
 import { telegramDriver } from "#internal/testing/channel-conformance/telegram-driver.js";
 import { tuiDriver } from "#internal/testing/channel-conformance/tui-driver.js";
 import { twilioDriver } from "#internal/testing/channel-conformance/twilio-driver.js";
+import { webChatDriver } from "#internal/testing/channel-conformance/web-chat-driver.js";
 
 export interface BrokenCell {
   readonly reason: string;
@@ -159,11 +160,6 @@ const CHAT_SDK_BROKEN = {
 
 const DISCORD_BROKEN = {
   ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, ["approvalPress", "questionPress"]),
-  ...budgetPromptNotShown(
-    "a budget prompt's request id overflows Discord's 100-character custom_id, so posting it throws",
-    "running out of budget opens budget prompt",
-    "pressing approve on budget prompt allows agent to continue",
-  ),
   ...noSignInRenderer(
     "a sign-in names the service and shows its sign-in link",
     "a sign-in shows its confirmation code",
@@ -174,10 +170,6 @@ const DISCORD_BROKEN = {
 
 const SLACK_BROKEN = {
   ...QUEUED_BUDGET_REPLY,
-  "a sign-in without a link shows its instructions": {
-    reason: "Slack sends the private sign-in prompt only for a challenge with a URL",
-    symptom: SIGN_IN_NOT_SHOWN,
-  },
   ...staleAnsweredPrompts(
     "only the button interaction handler edits a question; a typed answer leaves it",
     ["questionText"],
@@ -191,14 +183,6 @@ const SLACK_BROKEN = {
 const TEAMS_BROKEN = {
   ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, ["approvalText", "questionPress", "questionText"]),
   ...QUEUED_BUDGET_REPLY,
-  "a sign-in shows its confirmation code": {
-    reason: "the Teams sign-in card omits the challenge's user code",
-    symptom: SIGN_IN_NOT_SHOWN,
-  },
-  "a sign-in without a link shows its instructions": {
-    reason: "the Teams sign-in card omits the challenge's instructions",
-    symptom: SIGN_IN_NOT_SHOWN,
-  },
 } satisfies Partial<Record<HitlRule, BrokenCell>>;
 
 /** The sign-in prompt, link included, goes to the whole thread. */
@@ -222,11 +206,13 @@ const TELEGRAM_BROKEN = {
 const TUI_TYPED_APPROVAL =
   "the approval drawer holds the keyboard; a person answers it with y or n";
 const TUI_SINGLE_PERSON = "one person answers at their own terminal; there's nobody else to tell";
+const WEB_CHAT_SINGLE_PERSON =
+  "one person answers in their own browser tab; there's nobody else to tell";
 
 /**
  * Every first-party channel's and client's place in the HITL contract, keyed by
- * the directory whose `hitl-conformance.integration.test.ts` runs it. Each cell is
- * one of:
+ * the directory whose `hitl-conformance.integration.test.ts` runs it (`web-chat`
+ * runs from `test/browser`, since it needs a browser). Each cell is one of:
  *
  * - must pass;
  * - not supported: the platform lacks a capability the rule requires, or the
@@ -282,10 +268,6 @@ const hitlConformance = {
       driver: tuiDriver,
       broken: {
         ...QUEUED_BUDGET_REPLY,
-        "a sign-in names the service and shows its sign-in link": {
-          reason: "the TUI labels a sign-in with the tool name, not the challenge's displayName",
-          symptom: /Timed out waiting for the bot to show Calendar/u,
-        },
         ...budgetPromptNotShown(
           "a re-raised budget prompt keeps its request id, and eve/client ignores ids it has seen",
           "pressing stop on budget prompt halts work, next message asks again",
@@ -308,15 +290,35 @@ const hitlConformance = {
   twilio: [
     {
       driver: twilioDriver,
+      broken: QUEUED_BUDGET_REPLY,
+    },
+  ],
+  "web-chat": [
+    {
+      driver: webChatDriver,
       broken: {
         ...QUEUED_BUDGET_REPLY,
-        ...noSignInRenderer(
-          "a sign-in names the service and shows its sign-in link",
-          "a sign-in shows its confirmation code",
-          "a sign-in without a link shows its instructions",
-          "completing a sign-in tells the person it succeeded",
-          "message after ignored sign-in tells user it was cancelled",
+        ...budgetPromptNotShown(
+          "a re-raised budget prompt keeps its request id, and eve/client ignores ids it has seen",
+          "pressing stop on budget prompt halts work, next message asks again",
         ),
+        "pressing options of two pending questions answers each with its own option": {
+          reason:
+            "a tool call's message part holds one input request, so a second ctx.ask on the same call replaces the first",
+          symptom:
+            /Timed out waiting for (one of the questions \["Which (day|time)|plan_review to return)/u,
+        },
+      },
+      unsupported: {
+        "pressing an option of an answered question sends it to the agent as new input":
+          "an answered question disables its options, so nothing is left to press",
+        // Skipped rather than broken: whether the re-raised prompt shows depends on event timing.
+        "reply of stop on budget prompt halts work, next message asks again":
+          "a re-raised budget prompt keeps its request id, and eve/client ignores ids it has seen",
+        "pressing Approve names who approved on the approval": WEB_CHAT_SINGLE_PERSON,
+        "approving by text names who approved on the approval": WEB_CHAT_SINGLE_PERSON,
+        "pressing an option names who answered on the question": WEB_CHAT_SINGLE_PERSON,
+        "answering a question by text names who answered on the question": WEB_CHAT_SINGLE_PERSON,
       },
     },
   ],
@@ -418,12 +420,13 @@ export function renderHitlConformanceMatrix(): string {
   const nameOf = (entry: ConformanceChannel) => entry.driver().name;
   const dmOf = (entry: ConformanceChannel) =>
     all.filter((dm) => dm.dm === true && nameOf(dm) === `${nameOf(entry)}-dm`);
-  // The TUI, then Chat SDK's bridges, then channels with a DM column, then the
-  // rest. Each DM column sits right after its channel's shared-thread column.
+  // The TUI and web chat, then Chat SDK's bridges, then channels with a DM column,
+  // then the rest. Each DM column sits right after its channel's shared-thread column.
   const group = (entry: ConformanceChannel) => {
     if (nameOf(entry) === "tui") return 0;
-    if (nameOf(entry).startsWith("chat-sdk")) return 1;
-    return dmOf(entry).length > 0 ? 2 : 3;
+    if (nameOf(entry) === "web chat") return 1;
+    if (nameOf(entry).startsWith("chat-sdk")) return 2;
+    return dmOf(entry).length > 0 ? 3 : 4;
   };
   const entries = all
     .filter((entry) => entry.dm !== true)

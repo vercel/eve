@@ -92,8 +92,9 @@ export const createTemplateOgImage = async (title: string): Promise<ImageRespons
           letterSpacing: "-0.06em",
           lineHeight: 1,
           position: "absolute",
+          textWrap: "balance",
           top: 242,
-          whiteSpace: "nowrap",
+          width: 560,
         }}
       >
         {title}

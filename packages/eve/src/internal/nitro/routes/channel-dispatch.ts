@@ -28,6 +28,7 @@ import {
 } from "#internal/nitro/routes/runtime-artifacts.js";
 import { traceChannelRequest } from "#internal/nitro/routes/channel-request-instrumentation.js";
 import { resolveNitroChannelRuntimeBundle } from "#internal/nitro/routes/runtime-stack.js";
+import { createRouteInvokeTool } from "#internal/nitro/routes/route-invoke-tool.js";
 import { readVercelProjectLink } from "#internal/vercel/project-link.js";
 import { withVercelOidcProjectResolver } from "#channel/auth/vercel-oidc-project.js";
 import { withLocalDevRequestScope } from "#runtime/local-dev-capability.js";
@@ -277,6 +278,12 @@ async function buildRouteArgs(
             attachSession,
             ...channelOperations,
             ...createAgentDescriptionRouteArgs(() => resolveNitroCompiledArtifactsSource(config)),
+            invokeTool: createRouteInvokeTool({
+              agentName: bundle.agentName,
+              config,
+              origin: { adapter, agentName: bundle.agentName, channelName },
+              requestUrl: event.req.url,
+            }),
             params,
             requestIp,
             to,

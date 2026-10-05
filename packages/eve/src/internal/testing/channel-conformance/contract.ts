@@ -149,14 +149,14 @@ async function approveDeploy(conversation: ChannelConversation, by: Answer) {
 }
 
 /** Once answered, the prompt's message stops offering choices nobody can use anymore. */
-function expectButtonsCleared(conversation: ChannelConversation, prompt: string) {
-  const labels = conversation.shownPrompt(prompt).options.map((option) => option.label);
+async function expectButtonsCleared(conversation: ChannelConversation, prompt: string) {
+  const labels = (await conversation.shownPrompt(prompt)).options.map((option) => option.label);
   expect(labels, `the answered prompt still offers ${JSON.stringify(labels)}`).toEqual([]);
 }
 
 /** Once answered, the prompt's message shows everyone in the conversation who answered it. */
-function expectResponderNamed(conversation: ChannelConversation, prompt: string) {
-  const { text } = conversation.shownPrompt(prompt);
+async function expectResponderNamed(conversation: ChannelConversation, prompt: string) {
+  const { text } = await conversation.shownPrompt(prompt);
   expect(
     conversation.personShownAs.some((name) => text.includes(name)),
     `the answered prompt never names who answered: ${JSON.stringify(text)}`,
@@ -198,7 +198,7 @@ async function expectStoppedAndAskedAgain(conversation: ChannelConversation) {
   // Stopping keeps the session over budget, so the next message asks again.
   const options = await conversation.waitForQuestion(BUDGET_PROMPT);
   expect(options.map((option) => option.label).sort()).toEqual(["Approve", "Stop"]);
-  expect(conversation.replyCount(), "the bot replied after Stop").toBe(0);
+  expect(await conversation.replyCount(), "the bot replied after Stop").toBe(0);
 }
 
 const CALENDAR = SIGN_IN_TOOLS.read_calendar;
@@ -221,7 +221,9 @@ async function expectSignInToolResult(conversation: ChannelConversation) {
 async function requestSignIn(conversation: ChannelConversation, message: string) {
   await conversation.say(message);
   await conversation.waitForSignIn();
-  const open = conversation.shownOptions().find((option) => SIGN_IN_OPENERS.test(option.label));
+  const open = (await conversation.shownOptions()).find((option) =>
+    SIGN_IN_OPENERS.test(option.label),
+  );
   if (open !== undefined) await conversation.press(open);
 }
 
@@ -451,7 +453,7 @@ export const hitlContract = [
     requires: ["buttons"],
     async run(conversation) {
       await answerSaturday(conversation, "press");
-      expectButtonsCleared(conversation, PROMPT);
+      await expectButtonsCleared(conversation, PROMPT);
     },
   },
   {
@@ -461,7 +463,7 @@ export const hitlContract = [
     variesByConversation: true,
     async run(conversation) {
       await answerSaturday(conversation, "text");
-      expectButtonsCleared(conversation, PROMPT);
+      await expectButtonsCleared(conversation, PROMPT);
     },
   },
   {
@@ -470,7 +472,7 @@ export const hitlContract = [
     requires: ["buttons"],
     async run(conversation) {
       await answerSaturday(conversation, "press");
-      expectResponderNamed(conversation, PROMPT);
+      await expectResponderNamed(conversation, PROMPT);
     },
   },
   {
@@ -480,7 +482,7 @@ export const hitlContract = [
     variesByConversation: true,
     async run(conversation) {
       await answerSaturday(conversation, "text");
-      expectResponderNamed(conversation, PROMPT);
+      await expectResponderNamed(conversation, PROMPT);
     },
   },
   {
@@ -489,7 +491,7 @@ export const hitlContract = [
     requires: ["buttons"],
     async run(conversation) {
       await approveDeploy(conversation, "press");
-      expectButtonsCleared(conversation, APPROVAL_PROMPT);
+      await expectButtonsCleared(conversation, APPROVAL_PROMPT);
     },
   },
   {
@@ -499,7 +501,7 @@ export const hitlContract = [
     variesByConversation: true,
     async run(conversation) {
       await approveDeploy(conversation, "text");
-      expectButtonsCleared(conversation, APPROVAL_PROMPT);
+      await expectButtonsCleared(conversation, APPROVAL_PROMPT);
     },
   },
   {
@@ -508,7 +510,7 @@ export const hitlContract = [
     requires: ["buttons"],
     async run(conversation) {
       await approveDeploy(conversation, "press");
-      expectResponderNamed(conversation, APPROVAL_PROMPT);
+      await expectResponderNamed(conversation, APPROVAL_PROMPT);
     },
   },
   {
@@ -518,7 +520,7 @@ export const hitlContract = [
     variesByConversation: true,
     async run(conversation) {
       await approveDeploy(conversation, "text");
-      expectResponderNamed(conversation, APPROVAL_PROMPT);
+      await expectResponderNamed(conversation, APPROVAL_PROMPT);
     },
   },
   {
@@ -533,7 +535,7 @@ export const hitlContract = [
         "Approve",
         "Stop",
       ]);
-      expect(conversation.replyCount(), "the agent replied before anyone approved").toBe(0);
+      expect(await conversation.replyCount(), "the agent replied before anyone approved").toBe(0);
     },
   },
   {
@@ -637,7 +639,7 @@ export const hitlContract = [
     async run(conversation) {
       await requestSignIn(conversation, READ_CALENDAR);
       await conversation.waitForRest();
-      const shared = conversation.sharedText();
+      const shared = await conversation.sharedText();
       expect(shared, "a message everyone sees carried the sign-in link").not.toContain(
         CALENDAR.url,
       );

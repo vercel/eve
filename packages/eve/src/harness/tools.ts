@@ -8,16 +8,12 @@ import { resolveWebSearchBackend, resolveWebSearchProviderTool } from "#harness/
 import type { HarnessToolMap } from "#harness/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import { loadContext } from "#context/container.js";
-import {
-  authorizationPendingModelText,
-  isAuthorizationPendingModelOutput,
-  isAuthorizationSignal,
-  modelFacingAuthorizationOutput,
-} from "#harness/authorization.js";
+import { isAuthorizationSignal, modelFacingAuthorizationOutput } from "#harness/authorization.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { isApprovedToolCall, markApprovalRecheck } from "#harness/approval-recheck.js";
 import { toModelSchema } from "#tools/schema.js";
-import { normalizeToolJsonOutput, normalizeToolModelOutput } from "#harness/tool-model-output.js";
+import { normalizeToolJsonOutput } from "#harness/tool-model-output.js";
+import { toolCallModelOutput } from "#harness/tool-call-io.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 
@@ -64,54 +60,17 @@ export function buildToolSet(input: {
       inputSchema: toModelSchema(definition.inputSchema, "input"),
       strict: false,
       outputSchema: toModelSchema(definition.outputSchema, "output"),
-      ...(definition.execute !== undefined
+      ...(definition.execute !== undefined || authorToModelOutput !== undefined
         ? {
-            toModelOutput: async ({
+            toModelOutput: ({
               output,
               toolCallId,
             }: {
               readonly output: unknown;
               readonly toolCallId?: string;
-            }) => {
-              if (isAuthorizationPendingModelOutput(output)) {
-                return {
-                  type: "text" as const,
-                  value: authorizationPendingModelText(output.connections),
-                };
-              }
-              if (authorToModelOutput !== undefined) {
-                return normalizeToolModelOutput({
-                  output: await authorToModelOutput(output),
-                  toolCallId,
-                  toolName: definition.name,
-                });
-              }
-              if (typeof output === "string") {
-                return { type: "text" as const, value: output };
-              }
-              return normalizeToolModelOutput({
-                output: { type: "json" as const, value: output ?? null },
-                toolCallId,
-                toolName: definition.name,
-              });
-            },
+            }) => toolCallModelOutput(definition, output, toolCallId),
           }
-        : authorToModelOutput !== undefined
-          ? {
-              toModelOutput: async ({
-                output,
-                toolCallId,
-              }: {
-                readonly output: unknown;
-                readonly toolCallId?: string;
-              }) =>
-                normalizeToolModelOutput({
-                  output: await authorToModelOutput(output),
-                  toolCallId,
-                  toolName: definition.name,
-                }),
-            }
-          : {}),
+        : {}),
     });
     tools[definition.name] = aiTool;
     if (definition.approval !== undefined) {
@@ -227,6 +186,7 @@ export async function buildToolSetWithProviderTools(input: {
   readonly approvedTools?: ReadonlySet<string>;
   readonly disabledProviderTools?: ReadonlySet<string>;
   readonly modelReference: RuntimeModelReference;
+  readonly modelProvider?: string;
   readonly tools: HarnessToolMap;
 }): Promise<ToolSet> {
   const disabled = input.disabledProviderTools;
@@ -245,7 +205,11 @@ export async function buildToolSetWithProviderTools(input: {
       definition.execute === undefined &&
       !disabled?.has(definition.name)
     ) {
-      const backend = resolveWebSearchBackend(input.modelReference, handling.provider);
+      const backend = resolveWebSearchBackend(
+        input.modelReference,
+        handling.provider,
+        input.modelProvider,
+      );
       if (backend === null) {
         delete tools[definition.name];
       } else {

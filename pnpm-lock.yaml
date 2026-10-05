@@ -401,7 +401,7 @@ importers:
         version: 0.2.1(eve@packages+eve)
       '@browserbasehq/eve':
         specifier: ^0.1.0
-        version: 0.1.0(@cfworker/json-schema@4.1.1)(eve@packages+eve)(supports-color@10.2.2)
+        version: 0.1.0(@cfworker/json-schema@4.1.1)(eve@packages+eve)(playwright-core@1.63.0)(supports-color@10.2.2)
       '@chat-adapter/gchat':
         specifier: 4.41.0
         version: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
@@ -1773,6 +1773,9 @@ importers:
       picocolors:
         specifier: 'catalog:'
         version: 1.1.1
+      playwright-core:
+        specifier: 1.63.0
+        version: 1.63.0
       react:
         specifier: 'catalog:'
         version: 19.2.6
@@ -12440,6 +12443,11 @@ packages:
   player.style@0.3.4:
     resolution: {integrity: sha512-5O9bkbq0APQIkhptyZwp0gUgheCeImGPFo4hvPF2M5xBmgsUYzsUPHCfMye2xyeRE1zvQBKtziaC3jPgnHE1tw==}
 
+  playwright-core@1.63.0:
+    resolution: {integrity: sha512-rYCsBF/M5HjUch52bbtVONEFjv6Xu8sm8h72dNlR5bzIE1fvC/bxgspzkjSfU+MweEMmPM8KJebG6nnyxo5mCg==}
+    engines: {node: '>=20'}
+    hasBin: true
+
   pluralize@8.0.0:
     resolution: {integrity: sha512-Nc3IT5yHzflTfbjgqWcCPpo7DaKy4FnpB0l/zCAW0Tc7jxAiuqSxHasntB3D7887LSrA93kDJ9IXovxJYxyLCA==}
     engines: {node: '>=4'}
@@ -15474,10 +15482,10 @@ snapshots:
 
   '@braintree/sanitize-url@7.1.2': {}
 
-  '@browserbasehq/eve@0.1.0(@cfworker/json-schema@4.1.1)(eve@packages+eve)(supports-color@10.2.2)':
+  '@browserbasehq/eve@0.1.0(@cfworker/json-schema@4.1.1)(eve@packages+eve)(playwright-core@1.63.0)(supports-color@10.2.2)':
     dependencies:
       '@browserbasehq/sdk': 2.16.0
-      '@browserbasehq/stagehand': 3.7.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.4.3)
+      '@browserbasehq/stagehand': 3.7.0(@cfworker/json-schema@4.1.1)(playwright-core@1.63.0)(supports-color@10.2.2)(zod@4.4.3)
       eve: link:packages/eve
       zod: 4.4.3
     transitivePeerDependencies:
@@ -15501,7 +15509,7 @@ snapshots:
     transitivePeerDependencies:
       - encoding
 
-  '@browserbasehq/stagehand@3.7.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.4.3)':
+  '@browserbasehq/stagehand@3.7.0(@cfworker/json-schema@4.1.1)(playwright-core@1.63.0)(supports-color@10.2.2)(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 2.0.4
       '@anthropic-ai/sdk': 0.39.0
@@ -15535,6 +15543,7 @@ snapshots:
       bufferutil: 4.1.0
       chrome-launcher: 1.2.1(supports-color@10.2.2)
       ollama-ai-provider-v2: 1.5.5(zod@4.4.3)
+      playwright-core: 1.63.0
     transitivePeerDependencies:
       - '@cfworker/json-schema'
       - encoding
@@ -27633,6 +27642,8 @@ snapshots:
       media-chrome: 4.19.2(react@19.2.6)
     transitivePeerDependencies:
       - react
+
+  playwright-core@1.63.0: {}
 
   pluralize@8.0.0: {}
 

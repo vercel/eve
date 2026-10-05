@@ -2,7 +2,13 @@ import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapterContext } from "#channel/adapter.js";
 import { type ContextContainer, contextStorage } from "#context/container.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
-import { ParentSessionKey, TurnDeliveryIdsKey } from "#context/keys.js";
+import {
+  AuthKey,
+  InitiatorAuthKey,
+  ParentSessionKey,
+  SessionKey,
+  TurnDeliveryIdsKey,
+} from "#context/keys.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { setChannelContext } from "#execution/channel-context.js";
@@ -18,6 +24,7 @@ import { reconcileSessionContinuationToken } from "#execution/reconcile-session-
 import { hydrateDurableSession } from "#execution/session.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
+import type { HarnessTurnRef } from "#harness/emission-state.js";
 import { validateHarnessModelMessages, type HarnessModelMessage } from "#harness/messages.js";
 import type { HandleEventFn, HarnessSession, HarnessSessionBase } from "#harness/types.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
@@ -240,7 +247,7 @@ async function publishInSessionScope<T>(
  * releases it. Events reach the stream through `SessionEventPublisher.emit`.
  */
 export interface SessionEventWriter {
-  /** Closes the session stream; only a terminal `done` step does this. */
+  /** Closes the session stream; only a terminal event (`done`, completion, or failure) does this. */
   close(): Promise<void>;
   /** Releases the writer lock so the next step can acquire it. Safe after `close()`. */
   release(): void;
@@ -384,17 +391,20 @@ type TerminalSessionEvent = Extract<
 /**
  * Publishes a terminal `session.completed` or `session.failed` from outside a
  * turn as the session's own event, through its channel adapter and
- * instrumentation. Stream-event hooks do not run: the ending session may not
+ * instrumentation, then closes the session stream so readers following it
+ * reach EOF. Stream-event hooks do not run: the ending session may not
  * restore, and no turn scope remains for authored code. Never throws.
  *
- * When the context cannot be restored, the event is only stamped and written so
- * the stream still ends: the one degraded write of a session event.
+ * When the context cannot be restored, the event is only stamped, written, and
+ * the stream closed: the one degraded write of a session event.
  */
 export async function publishTerminalSessionEvent(input: {
   readonly errorId?: string;
   readonly event: TerminalSessionEvent;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionWritable: WritableStream<Uint8Array>;
+  /** The session's last turn, for channel handlers' `ctx.session.turn`. */
+  readonly turn?: HarnessTurnRef;
   /** The turn the event ends, for instrumentation. */
   readonly turnId?: string;
 }): Promise<void> {
@@ -419,9 +429,22 @@ export async function publishTerminalSessionEvent(input: {
     return;
   }
 
+  // Terminal events publish outside any turn step, and only a turn step
+  // installs the session callback context that channel `session.completed`
+  // handlers read, so install it here. A prewarmed session that expires,
+  // resets, or closes before its first message has no turn yet: `turn_0`.
+  const auth = ctx.get(AuthKey) ?? null;
+  ctx.setVirtualContext(SessionKey, {
+    auth: { current: auth, initiator: ctx.get(InitiatorAuthKey) ?? auth },
+    parent: ctx.get(ParentSessionKey),
+    sessionId,
+    turn: input.turn ?? { id: "turn_0", sequence: 0 },
+  });
+
   // Emitted without its hooks; see above.
   const publish: HandleEventFn = async (event) => {
     await publisher.emit(event);
+    await publisher.writer.close();
   };
   let instrumentation: ReturnType<typeof bindSessionInstrumentation>;
   try {
@@ -460,6 +483,7 @@ async function writeUnroutedSessionEvent(
   const writer = openSessionEventWriter({ deliveryIds: () => undefined, sessionWritable });
   try {
     await writer.write(event);
+    await writer.close();
   } finally {
     writer.release();
   }

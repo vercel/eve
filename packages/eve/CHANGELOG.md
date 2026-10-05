@@ -1,5 +1,12 @@
 # eve
 
+## 0.71.2
+
+### Patch Changes
+
+- 76e9079: Return a not-found or transient error before opening an unavailable session stream, and close streams after terminal failures.
+- 52ebf7d: Discord now posts session budget prompts instead of failing on a button ID over 100 characters. Slack sends its private sign-in prompt for sign-ins that only have instructions. Teams sign-in cards show the confirmation code and instructions, Twilio texts sign-ins and their outcome, and the dev TUI labels a sign-in with its display name. Discord buttons posted before this update stop working once it's deployed.
+
 ## 0.71.1
 
 ### Patch Changes
