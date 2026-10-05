@@ -18,6 +18,7 @@ describe.each(["static", "dynamic"] as const)(
     const requests: { method: string; protocolVersion: string | null }[] = [];
     let client: McpConnectionClient;
     let discoveryError: { code: number; message: string; data?: unknown } | undefined;
+    let discoveryDelayMs: number;
     let initializeError: { code: number; message: string } | undefined;
     let callResult: Record<string, unknown>;
 
@@ -67,6 +68,7 @@ describe.each(["static", "dynamic"] as const)(
         },
         message: "Unsupported protocol version",
       };
+      discoveryDelayMs = 0;
       initializeError = undefined;
       callResult = { content: [{ type: "text", text: "fixture-user" }] };
 
@@ -88,6 +90,7 @@ describe.each(["static", "dynamic"] as const)(
         let result: Record<string, unknown>;
         switch (message.method) {
           case "server/discover":
+            await new Promise((resolve) => setTimeout(resolve, discoveryDelayMs));
             if (discoveryError !== undefined) {
               return Response.json({ jsonrpc: "2.0", id: message.id, error: discoveryError });
             }
@@ -129,6 +132,7 @@ describe.each(["static", "dynamic"] as const)(
 
     afterEach(async () => {
       await client?.close();
+      vi.useRealTimers();
       vi.unstubAllGlobals();
     });
 
@@ -165,6 +169,25 @@ describe.each(["static", "dynamic"] as const)(
       await createClient();
       await expect(client.connect()).rejects.toMatchObject(discoveryError!);
       expect(requests).toEqual([{ method: "server/discover", protocolVersion: "2026-07-28" }]);
+    });
+
+    it("stays on the modern protocol when a modern-only server answers discovery slowly", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      await createClient();
+      discoveryError = undefined;
+      discoveryDelayMs = 2_000;
+      initializeError = { code: -32022, message: "Unsupported protocol version: 2025-11-25" };
+
+      await Promise.all([
+        expect(client.getToolMetadata()).resolves.toEqual([
+          expect.objectContaining({ name: "getMyUser" }),
+        ]),
+        vi.advanceTimersByTimeAsync(discoveryDelayMs),
+      ]);
+      expect(requests).toEqual([
+        { method: "server/discover", protocolVersion: "2026-07-28" },
+        { method: "tools/list", protocolVersion: "2026-07-28" },
+      ]);
     });
 
     it("propagates a failed handshake without retrying it or switching transports", async () => {
