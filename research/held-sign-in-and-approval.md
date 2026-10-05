@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/4132
 status: proposed
-last_updated: "2026-10-01"
+last_updated: "2026-10-05"
 ---
 
 # Sign-ins and tool approvals hold the turn
@@ -37,14 +37,15 @@ session.waiting
 
 While the turn is held:
 
-| Input                                                      | Result                                                                                                                                                                                                                           |
-| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Sign-in callback for the held attempt                      | Resumes the held turn.                                                                                                                                                                                                           |
-| Approval answer (any responder the policy accepts)         | Resumes the held turn.                                                                                                                                                                                                           |
-| Approval answer the response policy refuses                | Keeps the turn held and emits `turn.waiting` again, so the responder's request ends; another responder can still answer.                                                                                                         |
-| Message from the turn's own person                         | Steers the turn and cancels the held request. A sign-in reports `authorization.completed` with `outcome: "declined"`; an approval resolves as `ignored`. The model reads the message with a note that the request was cancelled. |
-| Message from anyone else                                   | Queues until the held turn ends, as it does behind a task.                                                                                                                                                                       |
-| `session.cancel()` (for example a Slack **Cancel** button) | Cancels the turn and withdraws every request it held: sign-ins report `authorization.completed` `declined`, approvals `input.resolved` `cancelled`, and each held call gets a not-run result.                                    |
+| Input                                                       | Result                                                                                                                                                                                                                           |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sign-in callback for the held attempt                       | Resumes the held turn.                                                                                                                                                                                                           |
+| Approval answer from the turn's own person (policy accepts) | Resumes the held turn.                                                                                                                                                                                                           |
+| Approval answer from anyone else (policy accepts)           | Ends the held turn with `turn.completed`; the approved work runs in a new turn for the responder.                                                                                                                                |
+| Approval answer the response policy refuses                 | Keeps the turn held and emits `turn.waiting` again, so the responder's request ends; another responder can still answer.                                                                                                         |
+| Message from the turn's own person                          | Steers the turn and cancels the held request. A sign-in reports `authorization.completed` with `outcome: "declined"`; an approval resolves as `ignored`. The model reads the message with a note that the request was cancelled. |
+| Message from anyone else                                    | Queues until the held turn ends, as it does behind a task.                                                                                                                                                                       |
+| `session.cancel()` (for example a Slack **Cancel** button)  | Cancels the turn and withdraws every request it held: sign-ins report `authorization.completed` `declined`, approvals `input.resolved` `cancelled`, and each held call gets a not-run result.                                    |
 
 There is no timeout: an answer, a steering message, or a cancel ends the
 hold, as with tasks.

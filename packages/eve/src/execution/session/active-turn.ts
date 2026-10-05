@@ -7,6 +7,7 @@ import {
   type SteeringOptions,
   type SteeringTurn,
 } from "#execution/session/input-queue.js";
+import { resolveTurnPrincipal } from "#execution/session/principal.js";
 import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
 import type { SessionExecutionInput } from "#execution/session/turn.js";
 import type { SessionInboxPayload } from "#execution/session-inbox/inbox.js";
@@ -44,10 +45,10 @@ export class ActiveTurn {
   private readonly mappedForHeldRequest = new Set<number>();
   private readonly runtimeResults: RuntimeEvent[] = [];
   private readonly controller = new AbortController();
-  private readonly expectedTurnId: string;
+  private expectedTurnId: string;
   private readonly input: SessionExecutionInput;
   /** Who alone steers the turn: its principal, or its delegated caller. */
-  private readonly identity: SteeringTurn;
+  private identity: SteeringTurn;
   private readonly unsubscribe: () => void;
   private unsubscribeDelivery: () => void;
   private steeringController = new AbortController();
@@ -68,6 +69,20 @@ export class ActiveTurn {
       if (this.cancelsThisTurn(payload)) this.abort();
     });
     this.unsubscribeDelivery = input.inbox.onDelivery(this.signalSteering);
+  }
+
+  /**
+   * A step that ended the held turn for another person's answer started that
+   * person's turn, which now owns steering and cancellation.
+   */
+  followHandOff(): void {
+    const { turnId } = this.input.cursor.sessionState.emissionState;
+    if (turnId === "" || turnId === this.expectedTurnId) return;
+    this.expectedTurnId = turnId;
+    this.identity = {
+      ...this.identity,
+      principal: resolveTurnPrincipal(undefined, this.input.cursor.serializedContext),
+    };
   }
 
   private readonly signalSteering = (payload: SessionInboxPayload): void => {

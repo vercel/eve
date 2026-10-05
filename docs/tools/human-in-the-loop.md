@@ -226,6 +226,8 @@ The run picks back up exactly where it parked. Because the pause is durable, not
 
 When a subagent requests input, eve emits the same `input.requested` event on its parent session. Answering through that parent session routes the response directly to the blocked child without invoking the parent model.
 
+An approval answered by the person whose turn asked for it resumes that turn. When someone else answers it, such as Bob approving a call from Alice's turn, Alice's turn ends with `turn.completed` and the approved call runs in a new turn for Bob: the stream emits `turn.started`, and the call and the rest of that turn see Bob as `ctx.session.auth.current`. Each turn acts for one person, so Bob's approval never makes Alice's turn act with Bob's identity.
+
 For approval requests, a follow-up message that doesn't match an option steers the turn instead of answering it. eve cancels the turn's pending approval, so the call doesn't run and `input.resolved` reports `outcome: "ignored"`, and the model reads the message next. This happens even when the message is sent with `turnPolicy: "queue"`, because a turn held on a person can't end until they act. Calls the person already approved in the same batch still run. A message from someone other than the person the turn serves waits until the turn ends. Cancelling the turn withdraws its approval: the call doesn't run, `input.resolved` reports `outcome: "cancelled"`, and a later answer to it approves nothing.
 
 See [Sessions, runs & streaming](/docs/concepts/sessions-runs-and-streaming) for the full event and resume contract that this builds on.
