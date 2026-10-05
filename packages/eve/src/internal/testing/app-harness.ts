@@ -41,6 +41,8 @@ import { mockSandbox, type MockSandbox } from "#internal/testing/mocks/mock-sand
  */
 interface TestAppDescriptor {
   readonly agent?: {
+    /** Full agent definition; overrides `model` and `limits`. */
+    readonly definition?: import("#public/definitions/agent.js").AgentDefinition;
     readonly limits?: {
       readonly maxInputTokensPerSession?: number | false;
       readonly maxOutputTokensPerSession?: number | false;
@@ -169,6 +171,7 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
     name: descriptor.agent?.name ?? DEFAULT_AGENT_NAME,
     model: descriptor.agent?.model ?? TEST_DEFAULT_MODEL_ID,
     limits: descriptor.agent?.limits,
+    ...(descriptor.agent?.definition === undefined ? {} : { agent: descriptor.agent.definition }),
     modules: [
       {
         loadNamespace: async () => {
