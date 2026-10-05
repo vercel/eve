@@ -504,7 +504,7 @@ const liveblocksLogo = (props: LogoProps) => (
   </svg>
 );
 
-const linqLogo = (props: LogoProps) => (
+export const linqLogo = (props: LogoProps) => (
   <svg fill="none" viewBox="0 0 629.586 757.741" xmlns="http://www.w3.org/2000/svg" {...props}>
     <path
       fill="currentColor"

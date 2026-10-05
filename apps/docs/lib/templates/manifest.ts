@@ -8,6 +8,7 @@ export type TemplateIntegration =
   | "GitHub"
   | "HTTP API"
   | "Linear"
+  | "Linq"
   | "Mux"
   | "Notion"
   | "Resend"
@@ -129,6 +130,26 @@ export const templateManifest: TemplateManifestEntry[] = [
       "agent/tools/web_search.ts",
       "agent/tools/write_file.ts",
     ],
+  },
+  {
+    slug: "openinstinct-eve-template",
+    title: "OpenInstinct",
+    setupPrompt:
+      "Set up the OpenInstinct eve template in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/openinstinct-eve-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about the required Linq connector and model provider setup. Explain that this starter does not include OpenInstinct's web app, vault, authorization, or browser worker before enabling it for personal accounts or secrets.",
+    description:
+      "An eve starter adapted from OpenInstinct's agent and Linq channel for an iMessage personal assistant, with its app-specific vault, authorization, and browser services left out.",
+    sourceHref: "https://github.com/vercel/eve/tree/main/apps/templates/openinstinct-eve-template",
+    category: "Example",
+    model: "anthropic/claude-sonnet-5",
+    integrations: ["Linq", "Vercel"],
+    source: "Vercel Templates",
+    github: {
+      owner: "vercel",
+      repo: "eve",
+      ref: "main",
+      pathPrefix: "apps/templates/openinstinct-eve-template",
+    },
+    files: ["agent/agent.ts", "agent/channels/linq.ts", "agent/instructions.md"],
   },
   {
     slug: "eve-slack-agent",
