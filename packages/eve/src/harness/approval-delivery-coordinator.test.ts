@@ -358,6 +358,62 @@ describe("coordinateApprovalDelivery", () => {
   });
 });
 
+describe("approval responses without a response policy", () => {
+  const alice: SessionAuthContext = { ...responder, principalId: "alice" };
+  const bob: SessionAuthContext = { ...responder, principalId: "bob" };
+
+  function parkedFor(requester: SessionAuthContext | null): HarnessSession {
+    const base = appendPendingInputBatch({
+      requests: [request],
+      responseMessages: [],
+      session: { ...parkedSession(), state: undefined },
+    });
+    if (requester === null) return base;
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, requester);
+    return contextStorage.run(ctx, () =>
+      appendPendingInputBatch({
+        requests: [request],
+        responseMessages: [],
+        session: { ...parkedSession(), state: undefined },
+      }),
+    );
+  }
+
+  function respond(session: HarnessSession, auth: SessionAuthContext, optionId = "approve") {
+    return coordinateApprovalDelivery({
+      now: 100,
+      session,
+      stepInput: {
+        attributedInputResponses: [{ auth, response: { optionId, requestId: request.requestId } }],
+      },
+      tools: new Map(),
+    });
+  }
+
+  it("lets the requester settle the call", async () => {
+    const result = await respond(parkedFor(alice), alice);
+    expect(result.feedback).toEqual([]);
+    expect(getApprovalAuditState(result.session.state).settlements).toHaveLength(1);
+  });
+
+  it.each(["approve", "cancel"])("rejects another principal's %s", async (optionId) => {
+    const result = await respond(parkedFor(alice), bob, optionId);
+    expect(result.feedback).toEqual([
+      "Only the person who requested this action can respond to this approval.",
+    ]);
+    expect(getApprovalAuditState(result.session.state).settlements).toEqual([]);
+    expect(result.stepInput?.inputResponses ?? []).toEqual([]);
+    expect(getPendingInputBatches(result.session.state)).toHaveLength(1);
+  });
+
+  it("lets anyone respond when the requester is unauthenticated", async () => {
+    const result = await respond(parkedFor(null), bob);
+    expect(result.feedback).toEqual([]);
+    expect(getApprovalAuditState(result.session.state).settlements).toHaveLength(1);
+  });
+});
+
 describe("text approval replay preparation", () => {
   function shouldPrepareApprovalReplayTools(input: {
     session: HarnessSession;

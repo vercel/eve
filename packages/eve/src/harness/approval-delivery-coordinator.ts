@@ -14,6 +14,7 @@ import {
   getApprovalAuditState,
   markApprovalCandidateAuthorizationRequired,
   settleAllowedCandidate,
+  sameResponder,
   settleDirectApprovalResponse,
   type ActiveApprovalCandidate,
   type ApprovalCandidateDecision,
@@ -32,6 +33,8 @@ import type { HarnessSession, HarnessToolMap, StepInput } from "#harness/types.j
 import type { InputRequest } from "#shared/input.js";
 
 const UNAUTHENTICATED_APPROVAL_FEEDBACK = "Authentication is required to respond to this approval.";
+const REQUESTER_ONLY_APPROVAL_FEEDBACK =
+  "Only the person who requested this action can respond to this approval.";
 const APPROVAL_AUTHORIZER_TIMEOUT_MS = 10_000;
 const APPROVAL_CANDIDATE_TTL_MS = 10 * 60_000;
 
@@ -144,6 +147,21 @@ export async function coordinateApprovalDelivery(input: {
           ? attributedResponder
           : (context?.get(AuthKey) ?? context?.get(SessionKey)?.auth.current ?? null);
       const decision = toCandidateDecision(response.optionId);
+      // Without a response policy, only the requester may settle the call. An
+      // unauthenticated or anonymous requester has no identity to match, so
+      // any responder may settle it. A tool opts into other responders by
+      // defining `approval.response`.
+      const requester = pendingInputRequester(session.state, response.requestId);
+      if (
+        responder !== null &&
+        decision !== undefined &&
+        requester !== null &&
+        !sameResponder(requester, responder)
+      ) {
+        consumed.add(response.requestId);
+        feedback.push(REQUESTER_ONLY_APPROVAL_FEEDBACK);
+        continue;
+      }
       if (responder !== null && decision !== undefined) {
         const settled = settleDirectApprovalResponse({
           actor: responder,

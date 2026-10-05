@@ -386,7 +386,7 @@ describe("turn connection approval restoration", () => {
     await fixture.step({
       delivery: {
         kind: "deliver",
-        auth: bob,
+        auth: alice,
         payloads: [
           {
             inputResponses: requests.map((request) => ({
@@ -424,7 +424,7 @@ describe("turn connection approval restoration", () => {
     await fixture.step({
       delivery: {
         kind: "deliver",
-        auth: bob,
+        auth: alice,
         payloads: [{ inputResponses: [{ requestId: request.requestId, optionId: "approve" }] }],
       },
     });

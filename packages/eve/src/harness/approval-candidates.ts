@@ -400,7 +400,7 @@ function projectResponder(responder: SessionAuthContext): ApprovalResponderIdent
   };
 }
 
-function sameResponder(
+export function sameResponder(
   a: Pick<SessionAuthContext, "authenticator" | "issuer" | "principalId" | "principalType">,
   b: Pick<SessionAuthContext, "authenticator" | "issuer" | "principalId" | "principalType">,
 ): boolean {
