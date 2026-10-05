@@ -16,7 +16,10 @@ import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import { askQuestion } from "#tools/provided/ask-question.js";
 import { defineWorkflowTool } from "#public/tools/index.js";
-import { askDayAndTimeWorkflow } from "#internal/testing/channel-conformance/two-questions-workflow.js";
+import {
+  askDayAndTimeWorkflow,
+  askRetroDayWorkflow,
+} from "#internal/testing/channel-conformance/two-questions-workflow.js";
 import { getWorld } from "#internal/workflow/runtime.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import {
@@ -348,6 +351,9 @@ export interface ConversationOptions {
 /** The test agent's tool that asks {@link DAY_PROMPT} and {@link TIME_PROMPT} at once. */
 export const TWO_QUESTIONS_TOOL = "plan_review";
 
+/** The test agent's tool that asks {@link RETRO_PROMPT}, which takes no free text. */
+export const RETRO_DAY_TOOL = "pick_retro_day";
+
 /** What a person sees once a tool call settles. */
 export type ToolOutcome =
   | { readonly kind: "ran"; readonly output: unknown }
@@ -619,6 +625,16 @@ async function converse(
             ? { status: "allowed" }
             : { reason: "Only the person who asked can respond.", status: "rejected" },
       ),
+      {
+        logicalPath: `tools/${RETRO_DAY_TOOL}.ts`,
+        loadNamespace: async () => ({
+          default: defineWorkflowTool({
+            description: `Schedules a retro. Only call when asked to use ${RETRO_DAY_TOOL}.`,
+            execute: askRetroDayWorkflow,
+            inputSchema: z.object({}),
+          }),
+        }),
+      },
       {
         logicalPath: `tools/${TWO_QUESTIONS_TOOL}.ts`,
         loadNamespace: async () => ({

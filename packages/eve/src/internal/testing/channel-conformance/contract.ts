@@ -9,6 +9,7 @@ import {
   PLAIN_TOOL,
   type RenderedOption,
   REQUESTER_GATED_TOOL,
+  RETRO_DAY_TOOL,
   type Surface,
   SECOND_GATED_TOOL,
   SIGN_IN_TOOLS,
@@ -16,6 +17,7 @@ import {
 } from "#internal/testing/channel-conformance/harness.js";
 import {
   DAY_PROMPT,
+  RETRO_PROMPT,
   TIME_PROMPT,
 } from "#internal/testing/channel-conformance/two-questions-workflow.js";
 
@@ -93,6 +95,17 @@ function option(
   const found = options?.find((candidate) => labels.includes(candidate.label));
   expect(found, `a ${labels.join(" or ")} option to press`).toBeDefined();
   return found!;
+}
+
+// Neither matches an option, a tool, or a number, so each steers the turn.
+const ASIDE = "Alice also wants the changelog summarized.";
+const FOLLOW_UP = "Alice asks what is still left to do.";
+
+/** Alice asks for a gated call, then talks about something else while its approval is pending. */
+async function steerPastApproval(conversation: ChannelConversation) {
+  await askToDeploy(conversation);
+  await conversation.say(ASIDE);
+  await conversation.waitForReplyTo(ASIDE);
 }
 
 const HOTFIX = `Use ${REQUESTER_GATED_TOOL} to ship the fix.`;
@@ -484,6 +497,61 @@ export const hitlContract = [
       await askToDeploy(conversation);
       await conversation.say("cancel");
       await expectNotDeployed(conversation);
+    },
+  },
+  {
+    rule: "a message while an approval is pending gets a reply without running the tool, and so does the next one",
+    source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
+    requires: ["text-replies"],
+    variesByConversation: true,
+    async run(conversation) {
+      await steerPastApproval(conversation);
+      // A turn left broken by the steer (#2874) would fail the message after it.
+      await conversation.say(FOLLOW_UP);
+      await conversation.waitForReplyTo(FOLLOW_UP);
+      await conversation.waitForRest();
+      expect(conversation.runsOf(GATED_TOOL), `${GATED_TOOL} ran without an Approve`).toBe(0);
+    },
+  },
+  {
+    rule: "a message while an approval is pending cancels it, so approving afterwards runs nothing",
+    // Policy since #4135. #4051 proposes keeping the approval open instead, which flips this rule.
+    source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
+    requires: ["text-replies"],
+    variesByConversation: true,
+    async run(conversation) {
+      await steerPastApproval(conversation);
+      // Approve however the channel still offers it: a button left on the card, or typing.
+      const approve = conversation
+        .shownOptions()
+        .find((candidate) => APPROVE_LABELS.includes(candidate.label));
+      if (approve === undefined) await conversation.say("approve");
+      else await conversation.press(approve);
+      await conversation.waitForRest();
+      expect(
+        conversation.runsOf(GATED_TOOL),
+        `${GATED_TOOL} ran on an approval the aside cancelled`,
+      ).toBe(0);
+    },
+  },
+  {
+    rule: "a message while a question without free text is pending withdraws it, and the next message gets a reply",
+    source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
+    requires: ["text-replies"],
+    variesByConversation: true,
+    async run(conversation) {
+      await conversation.say(`Use ${RETRO_DAY_TOOL} to schedule the retro.`);
+      await conversation.waitForQuestion(RETRO_PROMPT);
+      await conversation.say(ASIDE);
+      await conversation.waitForReplyTo(ASIDE);
+      // Once withdrawn, an option label is an ordinary message. A question left open would take it.
+      await conversation.say("Thursday");
+      await conversation.waitForRest();
+      expect(
+        conversation.sharedText(),
+        `${RETRO_DAY_TOOL} took "Thursday" as an answer after the aside`,
+      ).not.toMatch(/"day":"Thursday"/u);
+      await conversation.waitForReplyTo("Thursday");
     },
   },
   {

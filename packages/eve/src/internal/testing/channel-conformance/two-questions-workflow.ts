@@ -2,6 +2,7 @@ import type { ToolInputResponse, WorkflowToolContext } from "#public/tools/index
 
 export const DAY_PROMPT = "Which day works for the review?";
 export const TIME_PROMPT = "Which time works for the review?";
+export const RETRO_PROMPT = "Which day suits the retro?";
 
 /**
  * Asks two questions at once, so both are pending together. The test tier's
@@ -18,6 +19,24 @@ export async function askDayAndTimeWorkflow(
     ctx.ask({ display: "select", options: choices("Morning", "Afternoon"), prompt: TIME_PROMPT }),
   ]);
   return { day: summarize(day), time: summarize(time) };
+}
+
+/**
+ * Asks one question that takes no free text, so a message that matches no option
+ * steers the turn instead of answering it.
+ */
+export async function askRetroDayWorkflow(
+  _input: unknown,
+  ctx: WorkflowToolContext,
+): Promise<{ readonly day: string }> {
+  "use workflow";
+
+  const day = await ctx.ask({
+    display: "select",
+    options: choices("Thursday", "Friday"),
+    prompt: RETRO_PROMPT,
+  });
+  return { day: summarize(day) };
 }
 
 function choices(...labels: string[]) {
