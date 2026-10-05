@@ -95,8 +95,10 @@ export function createTelegramFetchFile(input: {
     }
 
     const bytes = Buffer.from(await response.arrayBuffer());
+    // Telegram's file endpoint serves everything as `application/octet-stream`,
+    // so the type the message declared is the only real one (#1217).
     const mediaType =
-      response.headers.get("content-type") ?? ref.mediaType ?? "application/octet-stream";
+      ref.mediaType ?? response.headers.get("content-type") ?? "application/octet-stream";
     const result: FetchFileResult = {
       bytes,
       filename: ref.filename,

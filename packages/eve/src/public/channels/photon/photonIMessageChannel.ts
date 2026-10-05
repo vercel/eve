@@ -137,7 +137,7 @@ async function dispatchMessage(
   const result = await onMessage({ thread }, message);
   if (result === null) return;
   await markReadBestEffort(bridge.bot.getAdapter("imessage"), thread, message);
-  const content = photonInboundContent(message);
+  const content = await photonInboundContent(message);
   if (content === undefined) return;
   await bridge.send(content, {
     auth: result.auth,

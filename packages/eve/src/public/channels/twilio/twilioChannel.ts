@@ -9,6 +9,7 @@ import { createLogger } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   callTwilioApi,
+  createTwilioFetchFile,
   sendTwilioMessage,
   twilioContinuationToken,
   updateTwilioCall,
@@ -27,6 +28,7 @@ import {
   parseTwilioTextMessage,
   parseTwilioVoiceCall,
   parseTwilioVoiceTranscription,
+  twilioMessageContent,
   type TwilioTextMessage,
   type TwilioVoiceCall,
   type TwilioVoiceTranscription,
@@ -316,6 +318,7 @@ export function twilioChannel(config: TwilioChannelConfig): TwilioChannel {
       };
     },
     audience: () => "private",
+    fetchFile: createTwilioFetchFile({ ...config.api, credentials: config.credentials }),
 
     context(state, session) {
       return rebuildTwilioContext(state, session, config);
@@ -563,17 +566,19 @@ async function dispatchText(input: {
   });
 
   try {
-    await input.from(twilioContinuationToken(message.from, message.to)).send(message.body, {
-      auth: result.auth,
-      context: [contextBlock],
-      state: {
-        from: message.from,
-        lastCallSid: null,
-        lastMessageSid: message.messageSid ?? null,
-        to: message.to ?? null,
-      },
-      title: result.title,
-    });
+    await input
+      .from(twilioContinuationToken(message.from, message.to))
+      .send(twilioMessageContent(message), {
+        auth: result.auth,
+        context: [contextBlock],
+        state: {
+          from: message.from,
+          lastCallSid: null,
+          lastMessageSid: message.messageSid ?? null,
+          to: message.to ?? null,
+        },
+        title: result.title,
+      });
   } catch (error) {
     log.error("text delivery failed", { error });
   }

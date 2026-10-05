@@ -180,7 +180,7 @@ async function dispatchMessage(
   const result = await onMessage({ thread }, message);
   if (result === null) return;
   await markReadBestEffort(bridge.bot.getAdapter("linq"), thread, message);
-  const content = linqInboundContent(message);
+  const content = await linqInboundContent(message);
   if (content === undefined) return;
   await bridge.send(content, {
     auth: result.auth,

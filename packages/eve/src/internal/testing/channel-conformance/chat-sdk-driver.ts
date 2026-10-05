@@ -1,4 +1,3 @@
-// Sends attachments with the text, as Linq and Photon do.
 import { chatSdkChannel, messageToUserContent } from "#public/channels/chat-sdk/index.js";
 import {
   type Adapter,
@@ -41,12 +40,16 @@ interface CardNode {
   readonly value?: string;
 }
 
+interface InboundFile extends Pick<SentFile, "mediaType" | "name"> {
+  readonly url: string;
+}
+
 type Inbound =
   | {
       readonly kind: "message";
       readonly text: string;
-      /** Files on the message, as the adapter lists them: a URL to each, not its bytes. */
-      readonly files?: readonly Pick<SentFile, "mediaType" | "name">[];
+      /** Files on the message, as the platform lists them: a URL to each, not its bytes. */
+      readonly files?: readonly InboundFile[];
     }
   | {
       readonly kind: "action";
@@ -170,6 +173,8 @@ function chatSdkDriverWith(input: {
   nextThread += 1;
   const threadId = `${ADAPTER}:D${nextThread}`;
   let sequence = 0;
+  /** Files a person sent, by the URL the platform lists each under. */
+  const uploads = new Map<string, SentFile>();
 
   function inbound(body: Inbound): Request {
     return new Request(`https://agent.example.com/eve/v1/${ADAPTER}`, {
@@ -184,7 +189,14 @@ function chatSdkDriverWith(input: {
     inbound,
     createChannel(record) {
       const dm = input.surface === "private";
-      const adapter = fakeAdapter(threadId, record, () => (sequence += 1), input.render, dm);
+      const adapter = fakeAdapter({
+        dm,
+        nextId: () => (sequence += 1),
+        record,
+        render: input.render,
+        threadId,
+        uploads,
+      });
       const bridge = chatSdkChannel({
         adapters: { [ADAPTER]: adapter },
         concurrency: "concurrent",
@@ -195,7 +207,7 @@ function chatSdkDriverWith(input: {
       });
       if (dm) {
         bridge.bot.onDirectMessage(async (thread, message) => {
-          await bridge.send(messageToUserContent(message), {
+          await bridge.send(await messageToUserContent(message), {
             auth: PERSON_AUTH,
             context: [],
             thread,
@@ -206,14 +218,14 @@ function chatSdkDriverWith(input: {
         // subscribing lets the rest of the thread continue it without one.
         bridge.bot.onNewMention(async (thread, message) => {
           await thread.subscribe();
-          await bridge.send(messageToUserContent(message), {
+          await bridge.send(await messageToUserContent(message), {
             auth: PERSON_AUTH,
             context: [],
             thread,
           });
         });
         bridge.bot.onSubscribedMessage(async (thread, message) => {
-          await bridge.send(messageToUserContent(message), {
+          await bridge.send(await messageToUserContent(message), {
             auth: PERSON_AUTH,
             context: [],
             thread,
@@ -224,7 +236,11 @@ function chatSdkDriverWith(input: {
     },
     message: (text, files = []) =>
       inbound({
-        files: files.map(({ mediaType, name }) => ({ mediaType, name })),
+        files: files.map((file) => {
+          const url = `https://files.conformance.example/${uploads.size + 1}/${encodeURIComponent(file.name)}`;
+          uploads.set(url, file);
+          return { mediaType: file.mediaType, name: file.name, url };
+        }),
         kind: "message",
         text,
       }),
@@ -243,13 +259,31 @@ function isPost(call: PlatformCall): boolean {
   return call.method === "postMessage" || call.method === "editMessage";
 }
 
-function fakeAdapter(
-  threadId: string,
-  record: (call: PlatformCall) => void,
-  nextId: () => number,
-  render: (posted: AdapterPostableMessage) => unknown,
-  dm: boolean,
-): Adapter {
+function fakeAdapter({
+  dm,
+  nextId,
+  record,
+  render,
+  threadId,
+  uploads,
+}: {
+  readonly dm: boolean;
+  readonly nextId: () => number;
+  readonly record: (call: PlatformCall) => void;
+  readonly render: (posted: AdapterPostableMessage) => unknown;
+  readonly threadId: string;
+  readonly uploads: ReadonlyMap<string, SentFile>;
+}): Adapter {
+  /** Downloads a file as an adapter's `fetchData` does: with its own auth, failing on a refusal. */
+  async function fetchData(url: string): Promise<Buffer> {
+    const file = uploads.get(url);
+    record({ body: {}, method: `GET ${url}`, response: {} });
+    if (file === undefined || file.downloadable === false) {
+      throw new Error(`Failed to fetch file: 403 Forbidden`);
+    }
+    return Buffer.from(file.bytes);
+  }
+
   const visibility = dm ? ("private" as const) : ("workspace" as const);
   let chat: ChatInstance | null = null;
   const self = {
@@ -279,7 +313,7 @@ function fakeAdapter(
           adapter,
           threadId,
           // A person mentions the bot to start a channel thread; Chat routes the rest by subscription.
-          inboundMessage(threadId, id, body.text, !dm, body.files),
+          inboundMessage(threadId, id, body.text, !dm, body.files, fetchData),
           options,
         );
       }
@@ -324,16 +358,17 @@ function inboundMessage(
   id: string,
   text: string,
   isMention = false,
-  files: readonly Pick<SentFile, "mediaType" | "name">[] = [],
+  files: readonly InboundFile[] = [],
+  fetchData?: (url: string) => Promise<Buffer>,
 ): Message {
   return new Message({
     attachments: files.map((file) => ({
+      fetchData: fetchData && (() => fetchData(file.url)),
       mimeType: file.mediaType,
       name: file.name,
       type: file.mediaType.startsWith("image/") ? ("image" as const) : ("file" as const),
-      // Nothing serves it: a URL eve doesn't download fails the same way a private one does.
-      // Loopback port 9 refuses at once, so the attempt never leaves the machine.
-      url: `http://127.0.0.1:9/files/${encodeURIComponent(file.name)}`,
+      // Private to the platform, as Slack's or Teams' are: only `fetchData` can download it.
+      url: file.url,
     })),
     author: PERSON,
     formatted: parseMarkdown(text),

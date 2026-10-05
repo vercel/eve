@@ -1,6 +1,7 @@
 import {
   callTwilioApi as callPrimitive,
   encodeTwilioForm,
+  fetchTwilioMedia,
   resolveTwilioCredential,
   TwilioApiError,
   type TwilioApiResponse,
@@ -8,7 +9,11 @@ import {
   type TwilioFetch,
 } from "#compiled/@chat-adapter/twilio/api.js";
 
+import type { FetchFileResult } from "#channel/adapter.js";
+import { EveAttachmentError } from "#internal/attachments/errors.js";
 import { resolveTwilioAuthToken, type TwilioAuthToken } from "#public/channels/twilio/verify.js";
+
+const DEFAULT_TWILIO_API_BASE_URL = "https://api.twilio.com";
 
 /**
  * Builds the Twilio channel-local continuation token (`<from>:<to>`).
@@ -127,6 +132,39 @@ export async function updateTwilioCall(input: TwilioUpdateCallInput): Promise<Tw
       )}.json`,
     }),
   );
+}
+
+/**
+ * Creates the channel's `fetchFile` for MMS media. Downloads URLs on the Twilio
+ * API origin with the account's Basic auth, and returns `null` for any other
+ * URL so it never receives the credentials.
+ */
+export function createTwilioFetchFile(
+  input: TwilioApiOptions,
+): (url: string) => Promise<FetchFileResult | null> {
+  const origin = new URL(input.apiBaseUrl ?? DEFAULT_TWILIO_API_BASE_URL).origin;
+  return async (url) => {
+    if (URL.parse(url)?.origin !== origin) return null;
+    try {
+      const bytes = await fetchTwilioMedia({
+        apiBaseUrl: input.apiBaseUrl,
+        credentials: await resolveCredentials(input.credentials),
+        fetch: input.fetch,
+        url,
+      });
+      return { bytes: Buffer.from(bytes) };
+    } catch (cause) {
+      throw new EveAttachmentError({
+        adapterKind: "twilio",
+        cause,
+        kind: "resolver-threw",
+        message:
+          cause instanceof TwilioApiError && cause.status !== 0
+            ? `Twilio media fetch returned HTTP ${cause.status}.`
+            : "Twilio media fetch failed.",
+      });
+    }
+  };
 }
 
 async function resolveCredentials(

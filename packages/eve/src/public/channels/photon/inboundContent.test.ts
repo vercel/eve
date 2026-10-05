@@ -16,18 +16,18 @@ function message(text: string, attachments: Message["attachments"] = []): Messag
   });
 }
 
-describe("photonInboundContent", () => {
-  it("returns plain text", () => {
-    expect(photonInboundContent(message("hello"))).toBe("hello");
+describe("photonInboundContent", async () => {
+  it("returns plain text", async () => {
+    expect(await photonInboundContent(message("hello"))).toBe("hello");
   });
 
-  it("drops blank messages", () => {
-    expect(photonInboundContent(message("  \n"))).toBeUndefined();
+  it("drops blank messages", async () => {
+    expect(await photonInboundContent(message("  \n"))).toBeUndefined();
   });
 
-  it("drops attachment-only messages when Photon provides no attachment URL", () => {
+  it("drops attachment-only messages when Photon provides no attachment URL", async () => {
     expect(
-      photonInboundContent(
+      await photonInboundContent(
         message("", [
           {
             mimeType: "image/jpeg",

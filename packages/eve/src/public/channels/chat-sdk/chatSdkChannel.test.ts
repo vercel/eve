@@ -846,12 +846,12 @@ describe("chatSdkChannel", () => {
   });
 });
 
-describe("messageToUserContent", () => {
-  it("returns the plain text when there are no attachments", () => {
-    expect(messageToUserContent(message("just text"))).toBe("just text");
+describe("messageToUserContent", async () => {
+  it("returns the plain text when there are no attachments", async () => {
+    expect(await messageToUserContent(message("just text"))).toBe("just text");
   });
 
-  it("builds text and file parts when attachments have URLs", () => {
+  it("builds text and file parts when attachments have URLs", async () => {
     const withAttachment = new Message({
       attachments: [
         {
@@ -871,7 +871,7 @@ describe("messageToUserContent", () => {
       threadId: THREAD_ID,
     });
 
-    const content = messageToUserContent(withAttachment);
+    const content = await messageToUserContent(withAttachment);
     expect(Array.isArray(content)).toBe(true);
     const parts = content as Exclude<typeof content, string>;
     expect(parts[0]).toEqual({ text: "see attached", type: "text" });
@@ -883,7 +883,7 @@ describe("messageToUserContent", () => {
     expect((parts[1] as { data: URL }).data.href).toBe("https://example.com/a.pdf");
   });
 
-  it("skips attachments without a URL, keeping the text part", () => {
+  it("skips attachments without a URL, keeping the text part", async () => {
     const withUrllessAttachment = new Message({
       attachments: [{ name: "pasted", type: "image" }],
       author: author(),
@@ -896,10 +896,12 @@ describe("messageToUserContent", () => {
       threadId: THREAD_ID,
     });
 
-    expect(messageToUserContent(withUrllessAttachment)).toEqual([{ text: "no url", type: "text" }]);
+    expect(await messageToUserContent(withUrllessAttachment)).toEqual([
+      { text: "no url", type: "text" },
+    ]);
   });
 
-  it("falls back to text when there are no usable parts", () => {
+  it("falls back to text when there are no usable parts", async () => {
     const emptyWithUrllessAttachment = new Message({
       attachments: [{ name: "pasted", type: "image" }],
       author: author(),
@@ -912,7 +914,7 @@ describe("messageToUserContent", () => {
       threadId: THREAD_ID,
     });
 
-    expect(messageToUserContent(emptyWithUrllessAttachment)).toBe("");
+    expect(await messageToUserContent(emptyWithUrllessAttachment)).toBe("");
   });
 });
 

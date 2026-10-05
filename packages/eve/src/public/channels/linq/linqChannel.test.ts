@@ -20,7 +20,7 @@ vi.mock("#public/channels/chat-sdk/index.js", () => ({
     channel: { routes: [] },
     send,
   }),
-  messageToUserContent: (message: Message) => message.text,
+  messageToUserContent: async (message: Message) => message.text,
 }));
 vi.mock("#compiled/@chat-adapter/state-memory/index.js", () => ({
   createMemoryState: vi.fn(),

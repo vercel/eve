@@ -7,24 +7,25 @@ import {
 } from "#public/channels/linear/auth.js";
 
 const LINEAR_UPLOAD_ORIGIN = "https://uploads.linear.app";
-const MARKDOWN_IMAGE_PATTERN =
-  /!\[([^\]\r\n]*)\]\(\s*(?:<([^>\r\n]+)>|([^\s)\r\n]+))(?:\s+(?:"[^"\r\n]*"|'[^'\r\n]*'|\([^)\r\n]*\)))?\s*\)/gu;
+// Linear writes an uploaded image as `![name](url)` and any other uploaded file as `[name](url)`.
+const MARKDOWN_UPLOAD_PATTERN =
+  /(!?)\[([^\]\r\n]*)\]\(\s*(?:<([^>\r\n]+)>|([^\s)\r\n]+))(?:\s+(?:"[^"\r\n]*"|'[^'\r\n]*'|\([^)\r\n]*\)))?\s*\)/gu;
 
-/** One trusted Linear upload referenced by markdown image syntax. */
-interface LinearUploadImageReference {
-  readonly altText: string;
+/** One trusted Linear upload referenced by markdown image or link syntax. */
+interface LinearUploadReference {
   readonly end: number;
+  /** Whether markdown embeds it as an image, so only image bytes are accepted for it. */
+  readonly image: boolean;
+  readonly label: string;
   readonly start: number;
   readonly url: URL;
 }
 
-/** Extracts markdown image references that target Linear's exact upload origin. */
-export function extractLinearUploadImageReferences(
-  markdown: string,
-): readonly LinearUploadImageReference[] {
-  const references: LinearUploadImageReference[] = [];
-  for (const match of markdown.matchAll(MARKDOWN_IMAGE_PATTERN)) {
-    const href = match[2] ?? match[3];
+/** Extracts markdown images and links that target Linear's exact upload origin. */
+export function extractLinearUploadReferences(markdown: string): readonly LinearUploadReference[] {
+  const references: LinearUploadReference[] = [];
+  for (const match of markdown.matchAll(MARKDOWN_UPLOAD_PATTERN)) {
+    const href = match[3] ?? match[4];
     const start = match.index;
     if (href === undefined || start === undefined) continue;
 
@@ -32,8 +33,9 @@ export function extractLinearUploadImageReferences(
     if (url === null) continue;
 
     references.push({
-      altText: match[1] ?? "",
       end: start + match[0].length,
+      image: match[1] === "!",
+      label: match[2] ?? "",
       start,
       url,
     });
@@ -41,15 +43,15 @@ export function extractLinearUploadImageReferences(
   return references;
 }
 
-/** Adds authenticated Linear upload images to otherwise text-only inbound content. */
-export async function attachLinearInboundImages(input: {
+/** Adds authenticated Linear uploads, images and other files, to otherwise text-only inbound content. */
+export async function attachLinearInboundUploads(input: {
   readonly content: UserContent;
   readonly credentials?: LinearChannelCredentials;
   readonly fetch?: LinearFetch;
 }): Promise<UserContent> {
   if (typeof input.content !== "string") return input.content;
 
-  const references = extractLinearUploadImageReferences(input.content);
+  const references = extractLinearUploadReferences(input.content);
   if (references.length === 0) return input.content;
 
   let token: string;
@@ -59,13 +61,13 @@ export async function attachLinearInboundImages(input: {
     return input.content;
   }
 
-  const fetchImage = input.fetch ?? fetch;
+  const fetchUpload = input.fetch ?? fetch;
   const files = await Promise.all(
-    references.map((reference) => fetchLinearUploadImage(reference.url, token, fetchImage)),
+    references.map((reference) => fetchLinearUpload(reference, token, fetchUpload)),
   );
   if (files.every((file) => file === null)) return input.content;
 
-  return buildLinearImageContent(input.content, references, files);
+  return buildLinearUploadContent(input.content, references, files);
 }
 
 function parseLinearUploadUrl(href: string): URL | null {
@@ -81,47 +83,54 @@ function parseLinearUploadUrl(href: string): URL | null {
   return url;
 }
 
-async function fetchLinearUploadImage(
-  url: URL,
+async function fetchLinearUpload(
+  reference: LinearUploadReference,
   token: string,
-  fetchImage: LinearFetch,
+  fetchUpload: LinearFetch,
 ): Promise<FilePart | null> {
-  if (parseLinearUploadUrl(url.href) === null) return null;
+  if (parseLinearUploadUrl(reference.url.href) === null) return null;
 
   try {
-    const response = await fetchImage(url.href, {
+    const response = await fetchUpload(reference.url.href, {
       credentials: "omit",
       headers: {
-        accept: "image/*",
+        accept: reference.image ? "image/*" : "*/*",
         authorization: `Bearer ${token}`,
       },
       redirect: "manual",
     });
     if (!response.ok) return null;
 
-    const mediaType = readImageMediaType(response.headers.get("content-type"));
+    const mediaType = readMediaType(response.headers.get("content-type"), reference.image);
     if (mediaType === null) return null;
 
-    return {
+    const file: FilePart = {
       data: Buffer.from(await response.arrayBuffer()),
       mediaType,
       type: "file",
     };
+    if (!reference.image && reference.label.length > 0) file.filename = reference.label;
+    return file;
   } catch {
     return null;
   }
 }
 
-function readImageMediaType(contentType: string | null): string | null {
+function readMediaType(contentType: string | null, image: boolean): string | null {
   const mediaType = contentType?.split(";", 1)[0]?.trim().toLowerCase();
-  return mediaType?.startsWith("image/") === true && mediaType.length > "image/".length
-    ? mediaType
-    : null;
+  if (image) {
+    return mediaType?.startsWith("image/") === true && mediaType.length > "image/".length
+      ? mediaType
+      : null;
+  }
+  // An HTML answer is a sign-in or error page, not the uploaded file.
+  if (mediaType === "text/html") return null;
+  return mediaType === undefined || mediaType.length === 0 ? "application/octet-stream" : mediaType;
 }
 
-function buildLinearImageContent(
+function buildLinearUploadContent(
   markdown: string,
-  references: readonly LinearUploadImageReference[],
+  references: readonly LinearUploadReference[],
   files: readonly (FilePart | null)[],
 ): UserContent {
   let cursor = 0;
@@ -133,7 +142,7 @@ function buildLinearImageContent(
     if (file === null || file === undefined) continue;
 
     text += markdown.slice(cursor, reference.start);
-    text += reference.altText;
+    text += reference.label;
     cursor = reference.end;
     attached.push(file);
   }

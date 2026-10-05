@@ -95,7 +95,7 @@ Start a session without an inbound webhook with `receive(linear, { target })`. S
 
 ### Attachments
 
-Markdown images hosted at `https://uploads.linear.app` in Agent Session prompts are fetched with the resolved Linear access token and included as image file parts. eve sends the bearer token only to that exact HTTPS origin; images from other hosts remain markdown text. If a Linear upload fails or returns non-image content, eve preserves its markdown reference and continues the text turn. Other inbound file attachments are not supported on this channel today.
+Files uploaded to Linear and referenced in an Agent Session prompt, whether as markdown images (`![name](url)`) or file links (`[name](url)`) hosted at `https://uploads.linear.app`, are fetched with the resolved Linear access token and included as file parts. eve sends the bearer token only to that exact HTTPS origin; images and links from other hosts remain markdown text. If a Linear upload fails, an image reference returns non-image content, or a file link returns an HTML page, eve preserves its markdown reference and continues the text turn.
 
 ### API handle
 
