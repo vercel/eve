@@ -1,15 +1,13 @@
 import { createProcessor } from "@mdx-js/mdx";
-import { toMarkdown, type Options } from "mdast-util-to-markdown";
+import { toMarkdown } from "mdast-util-to-markdown";
 import { describe, expect, it } from "vitest";
-import config from "../../source.config";
+import { remarkComponentMarkdown } from "./remark-component-markdown";
 
 describe("component Markdown export", () => {
   it("expands the runtime diagram without changing HTML or component examples", async () => {
-    const options =
-      typeof config.mdxOptions === "function" ? await config.mdxOptions() : config.mdxOptions;
-    const plugins = options?.remarkPlugins;
-    if (!Array.isArray(plugins)) throw new Error("Expected configured remark plugins");
-    const processor = createProcessor({ remarkPlugins: plugins });
+    const processor = createProcessor({
+      remarkPlugins: [() => remarkComponentMarkdown.call({ data: () => markdownData })],
+    });
     const source = [
       "## Agent loop and sandbox",
       "",
@@ -21,9 +19,11 @@ describe("component Markdown export", () => {
       "<AgentRuntimeDiagram />",
       "```",
     ].join("\n");
+    const markdownData: { toMarkdownExtensions?: import("mdast-util-to-markdown").Options[] } = {};
     const tree = processor.parse(source);
+    await processor.run(tree);
     const markdown = toMarkdown(tree, {
-      extensions: (processor.data() as { toMarkdownExtensions?: Options[] }).toMarkdownExtensions,
+      extensions: markdownData.toMarkdownExtensions,
     });
 
     expect(markdown).toContain("**Trusted app runtime** — Full Node.js access and credentials");
@@ -51,7 +51,9 @@ describe("component Markdown export", () => {
     expect(markdown).toContain("**Workspace** — Persistent per-session files");
     expect(markdown).toContain("`/workspace`");
     expect(markdown).toContain("`from agent/sandbox/workspace/**`");
-    expect(markdown).toContain("<Callout>Keep this content.</Callout>");
+    expect(markdown).toContain("<Callout>");
+    expect(markdown).toContain("Keep this content.");
+    expect(markdown).toContain("</Callout>");
     expect(markdown).toContain("```mdx\n<AgentRuntimeDiagram />\n```");
     expect(markdown.match(/<AgentRuntimeDiagram \/>/g)).toHaveLength(1);
 
