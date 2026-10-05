@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { expect } from "vitest";
 
 import {
@@ -7,6 +9,7 @@ import {
   GATED_TOOL,
   PLAIN_TOOL,
   type RenderedOption,
+  type SentFile,
   type Surface,
   SECOND_GATED_TOOL,
   SIGN_IN_TOOLS,
@@ -167,6 +170,64 @@ async function expectResponderNamed(conversation: ChannelConversation, prompt: s
  * A one-token input budget lets the model call that crosses it finish, so a
  * turn that calls a tool is held before the model reads the tool's result.
  */
+// Neither matches an option, a tool, or a number, so it steers the turn.
+const FOLLOW_UP = "Alice asks what is still left to do.";
+
+// The smallest valid JPEG (1x1) and PDF, so a channel's media checks accept them.
+const DIAGRAM: SentFile = {
+  bytes: Buffer.from(
+    "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/yQALCAABAAEBAREA/8wABgAQEAX/2gAIAQEAAD8A0s8g/9k=",
+    "base64",
+  ),
+  mediaType: "image/jpeg",
+  name: "diagram.jpg",
+};
+const REPORT: SentFile = {
+  bytes: Buffer.from(
+    "%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[]/Count 0>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n",
+  ),
+  mediaType: "application/pdf",
+  name: "report.pdf",
+};
+const LIST_ATTACHMENTS = "Alice asks to list the attachments.";
+// The test model's answer to LIST_ATTACHMENTS: every file part it was given, as JSON.
+const ATTACHMENTS_REPLY = /Attachments: (\[.*?\])(?:\s|$)/su;
+
+/** One file the test model saw, as it lists them: bytes and type, or a link it was left to fetch. */
+interface SeenFile {
+  readonly bytes?: number;
+  readonly mediaType: string;
+  readonly sha256?: string;
+  readonly url?: string;
+}
+
+/** Asks the agent which files it can see, and reads its answer from the channel's reply. */
+async function attachmentsSeen(conversation: ChannelConversation): Promise<readonly SeenFile[]> {
+  await conversation.say(LIST_ATTACHMENTS);
+  const shown = await conversation.waitForShown(ATTACHMENTS_REPLY);
+  return JSON.parse(ATTACHMENTS_REPLY.exec(shown)![1]!) as SeenFile[];
+}
+
+/** What the agent should see for `file`: its exact bytes, with its type. */
+function asSeen(file: SentFile): SeenFile {
+  return {
+    bytes: file.bytes.length,
+    mediaType: file.mediaType,
+    sha256: createHash("sha256").update(file.bytes).digest("hex").slice(0, 16),
+  };
+}
+
+/** Sends `file` with a message, then checks the agent sees exactly it. */
+async function expectFileReachesAgent(conversation: ChannelConversation, file: SentFile) {
+  await conversation.say(`Alice attached ${file.name}.`, [file]);
+  await conversation.waitForReplyTo(`Alice attached ${file.name}.`);
+  const seen = await attachmentsSeen(conversation);
+  expect(
+    seen.map(({ bytes, mediaType, sha256, url }) => ({ bytes, mediaType, sha256, url })),
+    `the agent saw ${JSON.stringify(seen)}`,
+  ).toEqual([{ ...asSeen(file), url: undefined }]);
+}
+
 const ONE_TOKEN_BUDGET = { limits: { maxInputTokensPerSession: 1 } } as const;
 const BUDGET_PROMPT =
   "This session has hit the input-token limit (1) per session. This is a guardrail against " +
@@ -707,6 +768,57 @@ export const hitlContract = [
     async run(conversation) {
       await abandonSignIn(conversation);
       await conversation.waitForShown(/\b(?:cancel|declin)/iu);
+    },
+  },
+  {
+    rule: "an image a person sends reaches the agent with its bytes and type",
+    source: "docs/channels/overview.mdx",
+    requires: ["attachments"],
+    variesByConversation: true,
+    async run(conversation) {
+      await expectFileReachesAgent(conversation, DIAGRAM);
+    },
+  },
+  {
+    rule: "a PDF a person sends reaches the agent with its bytes and type",
+    source: "docs/channels/overview.mdx",
+    requires: ["attachments"],
+    async run(conversation) {
+      await expectFileReachesAgent(conversation, REPORT);
+    },
+  },
+  {
+    rule: "a file that can't be downloaded reaches the agent as a note, not a link, and the next message still works",
+    source: "#855, #3419",
+    requires: ["attachments"],
+    async run(conversation) {
+      const text = `Alice attached ${DIAGRAM.name}.`;
+      await conversation.say(text, [{ ...DIAGRAM, downloadable: false }]);
+      await conversation.waitForReplyTo(text);
+      // A link left for the model provider fails again on every later turn (#3419).
+      expect(
+        await attachmentsSeen(conversation),
+        "the agent was handed a file it can't open",
+      ).toEqual([]);
+      await conversation.say(FOLLOW_UP);
+      await conversation.waitForReplyTo(FOLLOW_UP);
+    },
+  },
+  {
+    rule: "a file sent earlier in the conversation is still there on a later message",
+    source: "docs/channels/overview.mdx",
+    requires: ["attachments"],
+    async run(conversation) {
+      const text = `Alice attached ${DIAGRAM.name}.`;
+      await conversation.say(text, [DIAGRAM]);
+      await conversation.waitForReplyTo(text);
+      await conversation.say(FOLLOW_UP);
+      await conversation.waitForReplyTo(FOLLOW_UP);
+      const seen = await attachmentsSeen(conversation);
+      expect(
+        seen.map(({ bytes, mediaType, sha256 }) => ({ bytes, mediaType, sha256 })),
+        `two messages later the agent saw ${JSON.stringify(seen)}`,
+      ).toEqual([asSeen(DIAGRAM)]);
     },
   },
 ] as const satisfies readonly ContractRule[];

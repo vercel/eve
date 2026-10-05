@@ -53,6 +53,10 @@ pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conform
 | completing a sign-in tells the person it succeeded | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[15](#note-15)</sup> | ❌<sup>[15](#note-15)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[15](#note-15)</sup> | ✅ | ✅ |
 | message after ignored sign-in gets an answer, signing in late doesn't run | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | message after ignored sign-in tells user it was cancelled | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[15](#note-15)</sup> | ✅ | ✅ |
+| an image a person sends reaches the agent with its bytes and type | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ❌<sup>[21](#note-21)</sup> | ❌<sup>[21](#note-21)</sup> | ❌<sup>[21](#note-21)</sup> | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ✅ | ✅ | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ❌<sup>[22](#note-22)</sup> | ❌<sup>[22](#note-22)</sup> | —<sup>[20](#note-20)</sup> | ✅ | ❌<sup>[23](#note-23)</sup> |
+| a PDF a person sends reaches the agent with its bytes and type | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ❌<sup>[21](#note-21)</sup> |  | ❌<sup>[21](#note-21)</sup> | —<sup>[20](#note-20)</sup> |  | —<sup>[20](#note-20)</sup> |  | ✅ |  | —<sup>[20](#note-20)</sup> |  | ❌<sup>[22](#note-22)</sup> |  | —<sup>[20](#note-20)</sup> | ❌<sup>[24](#note-24)</sup> | ❌<sup>[23](#note-23)</sup> |
+| a file that can't be downloaded reaches the agent as a note, not a link, and the next message still works | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ❌<sup>[21](#note-21)</sup> |  | ❌<sup>[21](#note-21)</sup> | —<sup>[20](#note-20)</sup> |  | —<sup>[20](#note-20)</sup> |  | ✅ |  | —<sup>[20](#note-20)</sup> |  | ✅ |  | —<sup>[20](#note-20)</sup> | ✅ | ✅ |
+| a file sent earlier in the conversation is still there on a later message | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ❌<sup>[21](#note-21)</sup> |  | ❌<sup>[21](#note-21)</sup> | —<sup>[20](#note-20)</sup> |  | —<sup>[20](#note-20)</sup> |  | ✅ |  | —<sup>[20](#note-20)</sup> |  | ❌<sup>[22](#note-22)</sup> |  | —<sup>[20](#note-20)</sup> | ✅ | ❌<sup>[23](#note-23)</sup> |
 
 ## Notes
 
@@ -75,3 +79,8 @@ pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conform
 17. <a id="note-17"></a>the rule applies only where the conversation is public or shared, and this one is private
 18. <a id="note-18"></a>the sign-in prompt, link included, is posted to the whole thread
 19. <a id="note-19"></a>the code is in the elicitation body the whole issue sees; who sees the auth signal's link is unverified
+20. <a id="note-20"></a>the platform has no files a person can send
+21. <a id="note-21"></a>the bridge passes each attachment's URL to the model provider, whose download fails (#855, #3419)
+22. <a id="note-22"></a>#1217: Telegram serves files as application/octet-stream, which wins over their known type
+23. <a id="note-23"></a>the channel parses MMS media but never passes it to the agent
+24. <a id="note-24"></a>eve reads only uploaded images from Linear; other files stay links in the text

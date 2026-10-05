@@ -8,6 +8,7 @@ import type { CompiledModuleMap } from "#compiler/module-map.js";
 import type { ProgrammaticAgentModule } from "#compiler/source-graph.js";
 import type { SessionParent, SessionTurn } from "#context/keys.js";
 import { installBundledCompiledArtifacts } from "#runtime/loaders/bundled-artifacts.js";
+import { createSandboxPreparedArtifactsManifest } from "#shared/sandbox-prepared-artifacts.js";
 import type { SandboxAccess } from "#sandbox/state.js";
 import {
   createRuntimeSession,
@@ -152,12 +153,25 @@ const TEST_SANDBOX_PROVIDER = defineSandboxProvider({
   }),
 });
 
+/**
+ * Each session's sandbox, so a step that resumes it sees what earlier steps
+ * wrote, as with a real provider. A staged attachment, say, is read back on
+ * the next model call.
+ */
+const sessionSandboxes = new Map<string, MockSandbox>();
+
 function createHandle(sessionId: string) {
-  const sandbox = mockSandbox({ id: sessionId });
+  let sandbox = sessionSandboxes.get(sessionId);
+  if (sandbox === undefined) {
+    sandbox = mockSandbox({ id: sessionId });
+    sessionSandboxes.set(sessionId, sandbox);
+  }
+  const opened = sandbox;
   return {
-    sandbox: sandbox.session,
+    sandbox: opened.session,
     async onSessionDelete(options?: import("#shared/sandbox-provider.js").SandboxDeleteOptions) {
-      await sandbox.access.delete?.(options);
+      sessionSandboxes.delete(sessionId);
+      await opened.access.delete?.(options);
     },
     async onSessionStop() {},
     async onRuntimeShutdown() {},
@@ -202,7 +216,15 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
   const tools = descriptor.tools ?? [];
 
   function install(): void {
-    installBundledCompiledArtifacts({ manifest, moduleMap });
+    installBundledCompiledArtifacts({
+      manifest,
+      moduleMap,
+      // What `eve build` would record for the root sandbox, so a session that opens it (to
+      // stage an attachment, say) finds a provisioned template.
+      sandboxPreparedArtifacts: createSandboxPreparedArtifactsManifest([
+        { artifact: null, nodeId: "__root__", providerName: TEST_SANDBOX_PROVIDER.name },
+      ]),
+    });
   }
 
   async function run<T>(fn: () => Promise<T> | T): Promise<T> {

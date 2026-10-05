@@ -9,6 +9,8 @@ import {
   type RenderedOption,
   recordingFetch,
   linkTargets,
+  type SentFile,
+  serveFile,
 } from "#internal/testing/channel-conformance/harness.js";
 import { decodeSlackApiBody } from "#internal/testing/slack-api-body.js";
 
@@ -85,8 +87,31 @@ export function slackDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
     });
   }
 
+  /** Files a person uploaded, by the `url_private` Slack downloads each from. */
+  const uploads = new Map<string, SentFile>();
+  function slackFile(file: SentFile) {
+    const id = `F${uploads.size + 1}`;
+    const url = `https://files.slack.com/files-pri/${TEAM}-${id}/${file.name}`;
+    uploads.set(url, file);
+    return {
+      id,
+      mimetype: file.mediaType,
+      name: file.name,
+      size: file.bytes.length,
+      url_private: url,
+    };
+  }
+
   async function decode(request: Request): Promise<PlatformCall> {
-    const method = new URL(request.url).pathname.split("/").at(-1)!;
+    const url = new URL(request.url);
+    if (url.hostname === "files.slack.com") {
+      return {
+        body: {},
+        method: `GET ${url.pathname}`,
+        response: serveFile(uploads.get(url.href)),
+      };
+    }
+    const method = url.pathname.split("/").at(-1)!;
     const body = decodeSlackApiBody(await request.text(), request.headers.get("content-type"));
     const ts = nextTs();
     return {
@@ -107,14 +132,14 @@ export function slackDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
 
   return {
     name: dm ? "slack-dm" : "slack",
-    capabilities: ["buttons", "text-replies"],
+    capabilities: ["attachments", "buttons", "text-replies"],
     surface,
     createChannel: (record) =>
       slackChannel({
         api: { fetch: recordingFetch(record, decode) },
         credentials: { botToken: "xoxb-conformance", signingSecret: SIGNING_SECRET },
       }),
-    message: (text) => {
+    message: (text, files = []) => {
       const ts = threadStarted ? nextTs() : threadTs;
       const thread = threadStarted ? { thread_ts: threadTs } : {};
       threadStarted = true;
@@ -123,11 +148,18 @@ export function slackDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
       const event = dm
         ? { channel_type: "im", text, type: "message" }
         : { channel_type: "channel", text: `${text}\n<@${BOT}>`, type: "app_mention" };
+      // A message with uploads is a `file_share` in a DM; a mention carries its files as is.
+      const shared: Record<string, unknown> = {};
+      if (files.length > 0) {
+        shared.files = files.map(slackFile);
+        if (dm) shared.subtype = "file_share";
+      }
       return signed(
         JSON.stringify({
           event: {
             ...thread,
             ...event,
+            ...shared,
             channel: CHANNEL,
             event_ts: ts,
             ts,

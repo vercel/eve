@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type { LanguageModel } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { z } from "#compiled/zod/index.js";
@@ -365,8 +367,14 @@ function createFollowUpToolCallResult(input: {
   });
 }
 
+const LIST_ATTACHMENTS_DIRECTIVE = /\blist the attachments\b/iu;
+
 function createAssistantMessage(prompt: BootstrapPrompt): string {
   const lastUserMessage = getLastUserPromptText(prompt) ?? "Hello from eve";
+  // Lets tests see exactly which files reached the model, through a channel's real reply.
+  if (LIST_ATTACHMENTS_DIRECTIVE.test(lastUserMessage)) {
+    return `Attachments: ${JSON.stringify(listPromptFiles(prompt))}`;
+  }
   const systemLabels = getSystemPromptLabels(prompt);
   const systemProbe = resolveSystemProbe(prompt);
   const fixtureToken = resolveMockFixtureToken(prompt);
@@ -694,4 +702,41 @@ function isWeatherPayload(value: unknown): value is {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Every file part in the prompt's user messages, oldest first, as a test can compare it. */
+function listPromptFiles(prompt: BootstrapPrompt): readonly Record<string, unknown>[] {
+  return prompt.flatMap((message): Record<string, unknown>[] => {
+    if (message.role !== "user" || typeof message.content === "string") return [];
+    return message.content.flatMap((part): Record<string, unknown>[] => {
+      if (typeof part === "string" || part.type !== "file") return [];
+      const name = part.filename?.split("/").at(-1) ?? null;
+      const data = fileData(part.data);
+      if (data instanceof URL) return [{ mediaType: part.mediaType, name, url: data.href }];
+      if (data === undefined) return [{ mediaType: part.mediaType, name }];
+      const bytes = typeof data === "string" ? Buffer.from(data, "base64") : Buffer.from(data);
+      return [
+        {
+          bytes: bytes.length,
+          mediaType: part.mediaType,
+          name,
+          sha256: createHash("sha256").update(bytes).digest("hex").slice(0, 16),
+        },
+      ];
+    });
+  });
+}
+
+/** A file part's bytes or URL, from either the plain or the tagged (`{ type: "data" }`) shape. */
+function fileData(data: unknown): Uint8Array | string | URL | undefined {
+  if (typeof data === "string" || data instanceof Uint8Array || data instanceof URL) return data;
+  if (typeof data !== "object" || data === null) return undefined;
+  const tagged = data as {
+    readonly data?: unknown;
+    readonly type?: unknown;
+    readonly url?: unknown;
+  };
+  if (tagged.type === "url" && tagged.url instanceof URL) return tagged.url;
+  if (tagged.type === "data") return fileData(tagged.data);
+  return undefined;
 }

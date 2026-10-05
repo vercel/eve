@@ -105,6 +105,31 @@ const QUEUED_BUDGET_REPLY = {
   },
 } satisfies Partial<Record<HitlRule, BrokenCell>>;
 
+const IMAGE_REACHES_AGENT = "an image a person sends reaches the agent with its bytes and type";
+const PDF_REACHES_AGENT = "a PDF a person sends reaches the agent with its bytes and type";
+const UNDOWNLOADABLE_FILE =
+  "a file that can't be downloaded reaches the agent as a note, not a link, and the next message still works";
+const EARLIER_FILE = "a file sent earlier in the conversation is still there on a later message";
+
+/** The agent sees none of the files a person sent. */
+function filesNotSeen(reason: string, ...rules: HitlRule[]): Partial<Record<HitlRule, BrokenCell>> {
+  return Object.fromEntries(
+    rules.map((rule) => [rule, { reason, symptom: /the agent saw \[\]/u }]),
+  );
+}
+
+/** Chat SDK hands the model provider each attachment's URL, which it then fails to download. */
+const ATTACHMENT_URL_PASSED_THROUGH = Object.fromEntries(
+  [IMAGE_REACHES_AGENT, PDF_REACHES_AGENT, UNDOWNLOADABLE_FILE, EARLIER_FILE].map((rule) => [
+    rule,
+    {
+      reason:
+        "the bridge passes each attachment's URL to the model provider, whose download fails (#855, #3419)",
+      symptom: /AI_DownloadError/u,
+    },
+  ]),
+) satisfies Partial<Record<HitlRule, BrokenCell>>;
+
 const SIGN_IN_NOT_SHOWN = /Timed out waiting for the bot to show/u;
 
 /** The channel has no default `authorization.required` renderer, so a sign-in shows nothing. */
@@ -149,6 +174,7 @@ const UNNAMED_RESPONDER =
   "a resolved prompt doesn't say who answered; input.resolved carries no responder";
 
 const CHAT_SDK_BROKEN = {
+  ...ATTACHMENT_URL_PASSED_THROUGH,
   ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, [
     "approvalPress",
     "approvalText",
@@ -194,6 +220,12 @@ const SIGN_IN_LINK_POSTED_TO_THREAD = {
 } satisfies Partial<Record<HitlRule, BrokenCell>>;
 
 const TELEGRAM_BROKEN = {
+  ...filesNotSeen(
+    "#1217: Telegram serves files as application/octet-stream, which wins over their known type",
+    IMAGE_REACHES_AGENT,
+    PDF_REACHES_AGENT,
+    EARLIER_FILE,
+  ),
   ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, [
     "approvalPress",
     "approvalText",
@@ -224,7 +256,10 @@ const WEB_CHAT_SINGLE_PERSON =
 const hitlConformance = {
   "chat-sdk": [
     { driver: chatSdkDriver, broken: { ...CHAT_SDK_BROKEN, ...SIGN_IN_ONLY_IN_DMS } },
-    { driver: chatSdkTextDriver, broken: QUEUED_BUDGET_REPLY },
+    {
+      driver: chatSdkTextDriver,
+      broken: { ...QUEUED_BUDGET_REPLY, ...ATTACHMENT_URL_PASSED_THROUGH },
+    },
   ],
   "chat-sdk-dm": [{ dm: true, driver: () => chatSdkDriver("private"), broken: CHAT_SDK_BROKEN }],
   discord: [{ driver: discordDriver, broken: DISCORD_BROKEN }],
@@ -247,6 +282,10 @@ const hitlConformance = {
       driver: linearDriver,
       broken: {
         ...QUEUED_BUDGET_REPLY,
+        ...filesNotSeen(
+          "eve reads only uploaded images from Linear; other files stay links in the text",
+          PDF_REACHES_AGENT,
+        ),
         "only the person signing in sees the sign-in link and code": {
           reason:
             "the code is in the elicitation body the whole issue sees; who sees the auth signal's link is unverified",
@@ -290,7 +329,15 @@ const hitlConformance = {
   twilio: [
     {
       driver: twilioDriver,
-      broken: QUEUED_BUDGET_REPLY,
+      broken: {
+        ...QUEUED_BUDGET_REPLY,
+        ...filesNotSeen(
+          "the channel parses MMS media but never passes it to the agent",
+          IMAGE_REACHES_AGENT,
+          PDF_REACHES_AGENT,
+          EARLIER_FILE,
+        ),
+      },
     },
   ],
   "web-chat": [
@@ -337,6 +384,7 @@ type Cell =
   | { readonly kind: "broken"; readonly broken: BrokenCell };
 
 const CAPABILITY_NAMES: Record<ChannelCapability, string> = {
+  attachments: "files a person can send",
   buttons: "buttons a person can press",
   "text-replies": "plain-text replies",
 };

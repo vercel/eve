@@ -5,6 +5,7 @@ import {
   type PlatformCall,
   numberedOptions,
   recordingFetch,
+  type SentFile,
 } from "#internal/testing/channel-conformance/harness.js";
 
 const AUTH_TOKEN = "twilio-conformance-secret";
@@ -18,13 +19,20 @@ export function twilioDriver(): ChannelDriver {
   let messageSid = 0;
   const webhookUrl = "https://agent.example.com/eve/v1/twilio/messages";
 
-  function message(text: string): Request {
+  function message(text: string, files: readonly SentFile[] = []): Request {
     messageSid += 1;
+    // An MMS lists its media by URL, numbered from zero.
+    const media = files.flatMap((file, index) => [
+      [`MediaContentType${index}`, file.mediaType],
+      [`MediaUrl${index}`, `https://api.twilio.com/media/conformance/${messageSid}/${index}`],
+    ]);
     const params = new URLSearchParams({
       Body: text,
       From: PERSON,
       MessageSid: `SM-conformance-${messageSid}`,
+      NumMedia: String(files.length),
       To: TO,
+      ...Object.fromEntries(media),
     });
     return new Request(webhookUrl, {
       body: params,
@@ -47,7 +55,7 @@ export function twilioDriver(): ChannelDriver {
 
   return {
     name: "twilio",
-    capabilities: ["text-replies"],
+    capabilities: ["attachments", "text-replies"],
     surface: "private",
     createChannel: (record) =>
       twilioChannel({
