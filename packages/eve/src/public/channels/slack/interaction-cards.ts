@@ -71,7 +71,8 @@ function actionsContainActionId(actions: unknown, actionId: string): boolean {
   return actions.some((element) => isObjectRecord(element) && element.action_id === actionId);
 }
 
-function answeredBlocksFromActionBlock(input: {
+/** Retires an answered `card` in place: same single block, buttons replaced by the answer. */
+export function answeredBlocksFromActionBlock(input: {
   readonly answerLabel: string;
   readonly block: unknown;
   readonly userId: string;
