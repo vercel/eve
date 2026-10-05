@@ -134,8 +134,12 @@ export interface ChannelDriver {
   createChannel(record: (call: PlatformCall) => void): unknown;
   /** Undoes anything `createChannel` installed outside the channel, such as a global `fetch`. */
   dispose?(): void;
-  /** A webhook request carrying a person's message. */
-  message(text: string, files?: readonly SentFile[]): Request;
+  /**
+   * A webhook request carrying `person`'s message, with `files` attached if
+   * given. Drivers with the `another-person` capability must send as `"bob"`
+   * when asked.
+   */
+  message(text: string, person: Person, files?: readonly SentFile[]): Request;
   /**
    * The options a person can see in one outbound call that posts the question:
    * `undefined` when the call isn't the question, `[]` when it shows no options.
@@ -188,8 +192,8 @@ export interface SentFile {
 
 /** What a person can do and see in one channel conversation. Contract rules use only this. */
 export interface ChannelConversation {
-  /** The person sends a plain-text message, with `files` attached if given. */
-  say(text: string, files?: readonly SentFile[]): Promise<void>;
+  /** `person`, Alice unless given, sends a plain-text message, with `files` attached if given. */
+  say(text: string, person?: Person, files?: readonly SentFile[]): Promise<void>;
   /** Waits for the bot to post `prompt` with choices, returning them. */
   waitForQuestion(prompt: string): Promise<readonly RenderedOption[]>;
   /**
@@ -244,6 +248,11 @@ export interface ChannelConversation {
   /** How the person appears in the platform's text, in any form. */
   readonly personShownAs: readonly string[];
   runsOf(tool: CountedTool): number;
+  /**
+   * The caller each run of `tool` saw, in order, as one opaque string per
+   * principal, or `null` for no caller. Equal strings are the same principal.
+   */
+  callersOf(tool: typeof PLAIN_TOOL): readonly (string | null)[];
 }
 
 /**
@@ -264,8 +273,8 @@ export interface ClientDriver {
 
 /** A running client, as a person sees and uses it. */
 export interface ClientView {
-  /** The person sends a plain-text message, with `files` attached if given. */
-  say(text: string, files?: readonly SentFile[]): Promise<void>;
+  /** `person` sends a plain-text message, with `files` attached if given. */
+  say(text: string, person: Person, files?: readonly SentFile[]): Promise<void>;
   /**
    * Waits for the client to show one of `prompts`, returning which one and its
    * choices. A client may show several pending requests one at a time.
@@ -493,7 +502,7 @@ function webhookView(
   const promptsFrom = new Map<string, number>();
 
   return {
-    say: (text, files) => post(driver.message(text, files)),
+    say: (text, person, files) => post(driver.message(text, person, files)),
     press: (option, person) => post(driver.press(option, person)),
     waitForQuestion: (prompts) =>
       wait(
@@ -590,6 +599,7 @@ async function converse(
 ): Promise<void> {
   if (!isCompiledChannel(created)) throw new Error(`${label} is not a compiled channel.`);
   const channel: CompiledChannel = created;
+  const callers: (string | null)[] = [];
   const runs: Record<CountedTool, number> = {
     [GATED_TOOL]: 0,
     [REQUESTER_GATED_TOOL]: 0,
@@ -643,8 +653,9 @@ async function converse(
         loadNamespace: async () => ({
           default: defineTool({
             description: `Looks up meeting notes. Only call when asked to use ${PLAIN_TOOL}.`,
-            execute: async () => {
+            execute: async (_input, ctx) => {
               runs[PLAIN_TOOL] += 1;
+              callers.push(callerKey(ctx.session.auth.current));
               return { notes: "Bob's review notes" };
             },
             inputSchema: z.object({}),
@@ -808,12 +819,12 @@ async function converse(
     let signInsCompleted = 0;
 
     const conversation: ChannelConversation = {
-      async say(text, files) {
+      async say(text, person = "alice", files) {
         await waitForStepsToFinish([...sessions.values()], wait);
         // A step can be done before its aliases are claimed; see waitForAddress.
         const address = view.nextAddress?.();
         if (address !== undefined) await waitForAddress(address);
-        await view.say(text, files);
+        await view.say(text, person, files);
       },
       press: (option, person = "alice") => view.press(option, person),
       async waitForQuestion(prompt) {
@@ -904,6 +915,7 @@ async function converse(
         await deliverSignInCallback(callbackUrl);
       },
       runsOf: (tool) => runs[tool],
+      callersOf: () => callers,
       waitForRest: () => waitForRest([...sessions.values()], wait),
       async shownPrompt(prompt) {
         if (view.shownPrompt === undefined) throw new Error(`${label} cannot read shown messages.`);
@@ -1168,6 +1180,12 @@ function gatedTool(
       }),
     }),
   };
+}
+
+function callerKey(auth: SessionAuthContext | null): string | null {
+  if (auth === null) return null;
+  // The id first, so a truncated assertion message still shows who it was.
+  return JSON.stringify([auth.principalId, auth.principalType, auth.authenticator, auth.issuer]);
 }
 
 function samePrincipal(a: SessionAuthContext, b: SessionAuthContext): boolean {

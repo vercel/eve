@@ -133,7 +133,7 @@ export function discordDriver(surface: Exclude<Surface, "public"> = "shared"): C
         api: { fetch: recordingFetch(record, decode) },
         credentials: { applicationId: "APP1", botToken: "bot-token", publicKey: publicKeyHex },
       }),
-    message: (text, files = []) => {
+    message: (text, person, files = []) => {
       const id = nextInteraction();
       // Each file rides an attachment option (type 11) whose value names it in `resolved`.
       const attached = files.map((file, index) => {
@@ -158,7 +158,7 @@ export function discordDriver(surface: Exclude<Surface, "public"> = "shared"): C
       });
       return signed(
         JSON.stringify({
-          ...where(),
+          ...where(PEOPLE[person]),
           application_id: "APP1",
           channel_id: channelId,
           data: {

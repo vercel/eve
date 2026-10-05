@@ -9,6 +9,7 @@ import {
   GATED_TOOL,
   type GatedTool,
   OPEN_GATED_TOOL,
+  type Person,
   PLAIN_TOOL,
   type RenderedOption,
   REQUESTER_GATED_TOOL,
@@ -104,6 +105,21 @@ function option(
 // Neither matches an option, a tool, or a number, so each steers the turn.
 const ASIDE = "Alice also wants the changelog summarized.";
 const FOLLOW_UP = "Alice asks what is still left to do.";
+
+/** Each person in turn asks for {@link PLAIN_TOOL}; returns the caller each run saw. */
+async function lookUpNotesAs(
+  conversation: ChannelConversation,
+  people: readonly Person[],
+): Promise<readonly (string | null)[]> {
+  for (const [index, person] of people.entries()) {
+    // Numbered, so each run's reply, which quotes its message, can be told apart.
+    const request = `request ${index + 1}`;
+    await conversation.say(`Use ${PLAIN_TOOL} to find the review notes, ${request}.`, person);
+    await conversation.waitForShown(new RegExp(`Used ${PLAIN_TOOL} for .*${request}`, "su"));
+  }
+  expect(conversation.runsOf(PLAIN_TOOL), `${PLAIN_TOOL} runs`).toBe(people.length);
+  return conversation.callersOf(PLAIN_TOOL);
+}
 
 const HOTFIX = `Use ${REQUESTER_GATED_TOOL} to ship the fix.`;
 const HOTFIX_PROMPT = "Approve Release hotfix?";
@@ -268,7 +284,7 @@ async function attachmentsSeen(
   conversation: ChannelConversation,
   files?: readonly SentFile[],
 ): Promise<readonly SeenFile[]> {
-  await conversation.say(LIST_ATTACHMENTS, files);
+  await conversation.say(LIST_ATTACHMENTS, "alice", files);
   const shown = await conversation.waitForShown(ATTACHMENTS_REPLY);
   return JSON.parse(ATTACHMENTS_REPLY.exec(shown)![1]!) as SeenFile[];
 }
@@ -984,6 +1000,49 @@ const signInRules = [
       await expectRan(conversation, OPEN_GATED_TOOL, { rolledBack: true });
     },
   },
+  {
+    rule: "another person typing cancel and approve leaves a requester-only approval pending",
+    source: "docs/tools/human-in-the-loop.md#authorizing-approval-responses",
+    requires: ["another-person", "text-replies"],
+    async run(conversation) {
+      await askToReleaseHotfix(conversation);
+      await conversation.say("cancel", "bob");
+      await conversation.say("approve", "bob");
+      await expectStillPending(conversation);
+    },
+  },
+  {
+    rule: "the requester typing approve on a requester-only approval runs the tool",
+    source: "docs/tools/human-in-the-loop.md#authorizing-approval-responses",
+    requires: ["text-replies"],
+    async run(conversation) {
+      await askToReleaseHotfix(conversation);
+      await conversation.say("approve");
+      await expectReleased(conversation);
+    },
+  },
+  {
+    rule: "a tool sees the person who sent the message as its caller",
+    source: "docs/tools/overview.mdx",
+    requires: [],
+    // Platforms name the sender differently in a DM, e.g. Discord's user rather than member.
+    variesByConversation: true,
+    async run(conversation) {
+      const [caller] = await lookUpNotesAs(conversation, ["alice"]);
+      expect(caller, `${PLAIN_TOOL} ran with no caller`).not.toBeNull();
+    },
+  },
+  {
+    rule: "another person's message reaches tools as a different caller, and each person stays the same caller",
+    source: "docs/tools/overview.mdx",
+    requires: ["another-person"],
+    async run(conversation) {
+      const [alice, bob, aliceAgain] = await lookUpNotesAs(conversation, ["alice", "bob", "alice"]);
+      expect(bob, `${PLAIN_TOOL} ran with no caller for Bob`).not.toBeNull();
+      expect(bob, "Bob's message ran as Alice").not.toBe(alice);
+      expect(aliceAgain, "Alice ran as a different caller the second time").toBe(alice);
+    },
+  },
 ] as const satisfies readonly ContractRule[];
 
 const attachmentRules = [
@@ -1025,7 +1084,7 @@ const attachmentRules = [
     requires: ["attachments"],
     async run(conversation) {
       const text = `Alice attached ${DIAGRAM.name}.`;
-      await conversation.say(text, [DIAGRAM]);
+      await conversation.say(text, "alice", [DIAGRAM]);
       await conversation.waitForReplyTo(text);
       await conversation.say(FOLLOW_UP);
       await conversation.waitForReplyTo(FOLLOW_UP);

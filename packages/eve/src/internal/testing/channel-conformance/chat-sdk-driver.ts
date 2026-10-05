@@ -52,6 +52,7 @@ interface InboundFile extends Pick<SentFile, "mediaType" | "name"> {
 type Inbound =
   | {
       readonly kind: "message";
+      readonly person: Person;
       readonly text: string;
       /** Files on the message, as the platform lists them: a URL to each, not its bytes. */
       readonly files?: readonly InboundFile[];
@@ -244,7 +245,7 @@ function chatSdkDriverWith(input: {
       }
       return bridge.channel;
     },
-    message: (text, files = []) =>
+    message: (text, person, files = []) =>
       inbound({
         files: files.map((file) => {
           const url = `https://files.conformance.example/${uploads.size + 1}/${encodeURIComponent(file.name)}`;
@@ -252,6 +253,7 @@ function chatSdkDriverWith(input: {
           return { mediaType: file.mediaType, name: file.name, url };
         }),
         kind: "message",
+        person,
         text,
       }),
     postedText(call: PlatformCall) {
@@ -336,7 +338,7 @@ function fakeAdapter({
           adapter,
           threadId,
           // A person mentions the bot to start a channel thread; Chat routes the rest by subscription.
-          inboundMessage(threadId, id, body.text, !dm, body.files, fetchData),
+          inboundMessage(threadId, id, body.text, !dm, PEOPLE[body.person], body.files, fetchData),
           options,
         );
       }
@@ -395,6 +397,7 @@ function inboundMessage(
   id: string,
   text: string,
   isMention = false,
+  author: (typeof PEOPLE)[Person] = PERSON,
   files: readonly InboundFile[] = [],
   fetchData?: (url: string) => Promise<Buffer>,
 ): Message {
@@ -407,7 +410,7 @@ function inboundMessage(
       // Private to the platform, as Slack's or Teams' are: only `fetchData` can download it.
       url: file.url,
     })),
-    author: PERSON,
+    author,
     formatted: parseMarkdown(text),
     id,
     isMention,

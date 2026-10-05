@@ -3,6 +3,7 @@ import { signGitHubWebhookBody } from "#public/channels/github/verify.js";
 import {
   type ChannelDriver,
   type PlatformCall,
+  type Person,
   type RenderedOption,
   recordingFetch,
 } from "#internal/testing/channel-conformance/harness.js";
@@ -11,6 +12,11 @@ const SECRET = "github-conformance-secret";
 let nextConversation = 0;
 
 /** Drives GitHub issue comments through the signed App webhook route. */
+const PEOPLE = {
+  alice: { id: 1, login: "octocat", type: "User" },
+  bob: { id: 2, login: "hubot-bob", type: "User" },
+} as const;
+
 export function githubDriver(): ChannelDriver {
   // Repository and issue identities are the continuation key, so isolate each driver instance.
   nextConversation += 1;
@@ -19,7 +25,8 @@ export function githubDriver(): ChannelDriver {
   let delivery = 0;
   let commentId = 0;
 
-  function message(text: string): Request {
+  function message(text: string, person: Person): Request {
+    const user = PEOPLE[person];
     delivery += 1;
     commentId += 1;
     const payload = {
@@ -27,7 +34,7 @@ export function githubDriver(): ChannelDriver {
       comment: {
         body: `@testbot ${text}`,
         id: commentId,
-        user: { id: 1, login: "octocat", type: "User" },
+        user,
       },
       installation: { id: 55 },
       issue: { number: issueNumber },
@@ -37,7 +44,7 @@ export function githubDriver(): ChannelDriver {
         name: "eve",
         owner: { login: "vercel" },
       },
-      sender: { id: 1, login: "octocat", type: "User" },
+      sender: user,
     };
     const body = JSON.stringify(payload);
     return new Request("https://agent.example.com/eve/v1/github", {
@@ -63,7 +70,7 @@ export function githubDriver(): ChannelDriver {
 
   return {
     name: "github",
-    capabilities: ["text-replies"],
+    capabilities: ["another-person", "text-replies"],
     surface: "public",
     createChannel: (record) =>
       githubChannel({
