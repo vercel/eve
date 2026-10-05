@@ -54,7 +54,7 @@ const ALLOWED_ATTRIBUTE_DIFFERENCES = new Set([
   "eve.channel.name",
   "eve.tool.invocation",
   "eve.tool.outcome",
-  // On the direct span here; the conversation's tool span gains it separately.
+  // Both spans carry it; run times differ by construction.
   "gen_ai.execute_tool.duration",
 ]);
 
@@ -319,6 +319,8 @@ function comparableEvent(event: InstrumentationEvent) {
   const shape: Record<string, unknown> = { ...rest };
   // Ids differ by construction, as on the span.
   if ("callId" in shape) shape.callId = "<call>";
+  // Run times differ by construction; both sides must report one.
+  if (typeof shape.durationMs === "number") shape.durationMs = "<ms>";
   const output = shape.output as { readonly error?: unknown } | undefined;
   if (output?.error instanceof Error) {
     shape.output = { ...output, error: `${output.error.name}: ${output.error.message}` };
@@ -411,7 +413,11 @@ describe("invokeTool without declared OpenTelemetry", () => {
 
     expect(events.map(comparableEvent)).toEqual([
       { callId: "<call>", input: { text: SECRET }, toolName: "lookup", type: "tool.call.started" },
-      { output: { output: { echoed: SECRET }, type: "result" }, type: "tool.call.completed" },
+      {
+        durationMs: "<ms>",
+        output: { output: { echoed: SECRET }, type: "result" },
+        type: "tool.call.completed",
+      },
     ]);
     expect(exporter.getFinishedSpans()).toEqual([]);
   });

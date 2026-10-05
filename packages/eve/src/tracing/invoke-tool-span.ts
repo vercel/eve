@@ -292,6 +292,7 @@ function toolCallEvents(
                 : { type: "error" as const };
           await hooks.publish(
             Object.freeze({
+              durationMs: outcome.durationMs,
               idempotencyKey,
               output: Object.freeze(output),
               scope,
