@@ -678,8 +678,6 @@ describe("workflowEntry integration", () => {
     await withHeldApprovalRun(
       {
         agent: { name: "workflow-entry-held-approval" },
-        // Bob asks and approves; another responder's approval starts their own turn.
-        auth: BOB,
         modules: [gatedTool("approve_change", executions, approval)],
       },
       async ({ commandInbox, stream }) => {

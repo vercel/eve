@@ -5,6 +5,7 @@ import {
   type CoordinationDispatchInput,
   type CoordinationDispatchResult,
 } from "#execution/coordination-dispatch-shared.js";
+import { approverOfCall } from "#harness/approval-candidates.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { publishSessionEvents } from "#execution/publish-session-events.js";
 import {
@@ -56,7 +57,11 @@ async function dispatchCoordination(
   for (const task of prepared.plan) {
     const start = {
       agentContext: captureAgentSessionContext(prepared, task.callId, agentLimits),
-      auth: { current: prepared.auth, initiator: prepared.initiatorAuth },
+      // An approved call runs as whoever approved it; the rest as the turn's caller.
+      auth: {
+        current: approverOfCall(nextSession.state, task.callId) ?? prepared.auth,
+        initiator: prepared.initiatorAuth,
+      },
       batchEvent: batch.event,
       owner: input.workflowToolRunOwner,
       parentSession: prepared.parentSession,

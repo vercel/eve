@@ -16,6 +16,7 @@ import { normalizeToolJsonOutput } from "#harness/tool-model-output.js";
 import { toolCallModelOutput } from "#harness/tool-call-io.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
+import { iterateAsApprover, runAsApprover } from "#harness/approved-call-callers.js";
 
 type NativeApprovalStatus = Exclude<ApprovalStatus, boolean>;
 
@@ -121,13 +122,17 @@ export function wrapToolExecute(
   return (input, options) => {
     let output: unknown;
     try {
-      output = execute(input, options);
+      output = runAsApprover(options.toolCallId, () => execute(input, options));
     } catch (error) {
       return Promise.reject(error);
     }
 
     if (isAsyncIterable(output)) {
-      return normalizeToolExecuteIterable(output, definition.name, options);
+      return normalizeToolExecuteIterable(
+        iterateAsApprover(options.toolCallId, output),
+        definition.name,
+        options,
+      );
     }
 
     return Promise.resolve(output).then((value) =>

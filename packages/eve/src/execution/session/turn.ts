@@ -162,7 +162,6 @@ export class SessionExecution {
           steeringSignal: turn.steeringSignal,
         }),
       );
-      turn.followHandOff();
       if (result.compacted === true) turn.compacted = true;
       const pendingCallIds =
         result.action === "park" ? result.pendingCoordinationCallIds : undefined;

@@ -50,6 +50,7 @@ import {
 } from "#harness/messages.js";
 import { consumeDeferredStepInput } from "#harness/pending-input-batches.js";
 import type { HandleEventFn, HarnessSession, StepInput, StepResult } from "#harness/types.js";
+import { attributeApprovalAnswers } from "#execution/session/approval-response-caller.js";
 import type {
   DurableStepResult,
   TurnStepInput,
@@ -303,6 +304,19 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
         throw error;
       }
       resolved = results.length === 0 ? undefined : results.reduce(coalesceTurnInputs);
+    }
+    const approvalAnswers =
+      delivery?.auth === undefined
+        ? undefined
+        : attributeApprovalAnswers({
+            responder: delivery.auth,
+            state: durableSession.state,
+            stepInput: resolved,
+          });
+    if (approvalAnswers !== undefined) {
+      resolved = approvalAnswers;
+      if (previousAuth === undefined) ctx.delete(AuthKey);
+      else ctx.set(AuthKey, previousAuth);
     }
     const ignoredActiveDelivery =
       delivery !== undefined && resolved === undefined && !isHarnessBetweenTurns(initialSession);

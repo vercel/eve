@@ -191,7 +191,7 @@ import {
   workingTaskIds,
 } from "#execution/tasks/model-step.js";
 import { renderFinalOutputWhileWorkingError } from "#execution/tasks/render.js";
-import { answeredByAnotherPrincipal, endTurnForHandOff } from "#harness/turn-hand-off.js";
+import { setApprovedCallCallers } from "#harness/approved-call-callers.js";
 import {
   classifyModelCallError,
   ContentFilteredModelResponseError,
@@ -900,7 +900,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         : selectApprovalReplayBatch(session, coordinated.stepInput);
     const responseAuthorizationTools =
       replayBatch === undefined ? config.tools : await prepareApprovalTools(replayBatch);
-    const heldState = session.state;
     const pending = resolvePendingInput({
       history: resolvedCoordination.messages,
       resolveApprovalKey: resolveApprovalKeyFromTools(responseAuthorizationTools),
@@ -972,22 +971,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           );
         }
       }
-    }
-
-    if (
-      emit &&
-      emissionState.turnId !== "" &&
-      answeredByAnotherPrincipal({
-        answeredRequestIds: (pending.resolvedInputs ?? []).flatMap((batch) =>
-          batch.inputs.flatMap((entry) =>
-            entry.response === undefined ? [] : [entry.request.requestId],
-          ),
-        ),
-        responder: contextStorage.getStore()?.get(AuthKey) ?? null,
-        state: heldState,
-      })
-    ) {
-      emissionState = await endTurnForHandOff(emit, emissionState, pending.session.history);
     }
 
     // --- Turn preamble ------------------------------------------------------
@@ -1222,6 +1205,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const replayRequests = (pending.resolvedInputs ?? []).flatMap((batch) =>
       batch.inputs.filter((input) => input.outcome === "approved"),
     );
+    setApprovedCallCallers(pending.resolvedInputs, session.state);
     if (replayRequests.length > 0) {
       const replayTools = buildResponseAuthorizationTools({
         authoredTools: config.tools,

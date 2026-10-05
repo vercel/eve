@@ -604,15 +604,11 @@ describe("turn connection approval restoration", () => {
     expect(fixture.policyTurns).toEqual([batch.event!.turnId]);
     expect(fixture.response).toHaveBeenCalledOnce();
     expect(fixture.fetch).toHaveBeenCalledOnce();
-    // Bob answered Alice's held turn, so once his sign-in settles the
-    // approval, her turn ends and the approved call runs in his.
+    // The approval held its turn, so the responder's sign-in resumes it
+    // without starting another.
     const events = fixture.events.slice(start);
     expect(events.some((event) => event.type === "authorization.completed")).toBe(true);
-    expect(turnBoundaries(events)).toEqual([
-      `turn.completed ${batch.event!.turnId}`,
-      "turn.started turn_1",
-      "turn.completed turn_1",
-    ]);
+    expect(events.filter((event) => event.type === "turn.started")).toHaveLength(0);
   });
 
   it.each([false, true])(
@@ -655,13 +651,8 @@ describe("turn connection approval restoration", () => {
       expect(fixture.fetch).toHaveBeenCalledOnce();
       expect(getPendingInputBatches(readDurableSession(resumed.sessionState).state)).toEqual([]);
       expect(resumed.serializedContext).not.toHaveProperty("eve.pendingConnectionCalls");
-      // Bob approved Alice's call, so it runs in Bob's own turn.
-      expect(turnBoundaries(fixture.events)).toEqual([
-        "turn.started turn_0",
-        "turn.completed turn_0",
-        "turn.started turn_1",
-        "turn.completed turn_1",
-      ]);
+      // The approval held its turn, so approving it resumes the same turn.
+      expect(fixture.events.filter((event) => event.type === "turn.started")).toHaveLength(1);
       // The connection call is reported as a nested action of the approved call.
       const nestedCallId = `${request.action.callId}:1`;
       expect(fixture.events).toContainEqual(
@@ -747,11 +738,3 @@ describe("turn connection approval restoration", () => {
     expect(fixture.fetch).toHaveBeenCalledOnce();
   });
 });
-
-function turnBoundaries(events: readonly { readonly type: string; readonly data?: unknown }[]) {
-  return events.flatMap((event) =>
-    event.type === "turn.started" || event.type === "turn.completed"
-      ? [`${event.type} ${(event.data as { turnId: string }).turnId}`]
-      : [],
-  );
-}

@@ -16,13 +16,22 @@ import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.
 import { resumeHook, start } from "#internal/workflow/runtime.js";
 import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
+import {
+  type WorkflowExecuteToolDefinition,
+  defineWorkflowTool,
+} from "#tools/workflow-definition.js";
+import { reportCallerWorkflow } from "#internal/testing/workflow-tool-fixtures.js";
 
-const CHAIN = ["deploy_change", "read_notes", "publish_change"] as const;
-
-// Scripted model: call each tool in CHAIN once, in order, then reply.
+// Scripted model: calls each tool the first message names, in the order it
+// names them, once each, then replies.
 const scriptedModel = markMockModel(
   new MockLanguageModelV4({
-    doStream: async ({ prompt }) => {
+    doStream: async ({ prompt, tools }) => {
+      const first = JSON.stringify(prompt.find((message) => message.role === "user")?.content);
+      const chain = (tools ?? [])
+        .map((tool) => tool.name)
+        .filter((name) => first.includes(name))
+        .sort((a, b) => first.indexOf(a) - first.indexOf(b));
       const done = new Set(
         prompt.flatMap((message) =>
           message.role === "tool"
@@ -32,13 +41,13 @@ const scriptedModel = markMockModel(
             : [],
         ),
       );
-      const next = CHAIN.find((name) => !done.has(name));
+      const next = chain.find((name) => !done.has(name));
       return next === undefined
         ? textStreamResult("All done.")
         : toolCallStreamResult({ input: "{}", toolCallId: `call-${next}`, toolName: next });
     },
-    modelId: "repro-model",
-    provider: "repro",
+    modelId: "scripted-model",
+    provider: "eve-test",
   }),
 );
 
@@ -89,7 +98,14 @@ interface ChainRun {
  * Starts a session where Alice asks for deploy_change, read_notes, then
  * publish_change, the first and last gated, and hands `body` the run.
  */
-async function withChainRun(name: string, body: (run: ChainRun) => Promise<void>) {
+async function withChainRun(
+  name: string,
+  body: (run: ChainRun) => Promise<void>,
+  options: {
+    readonly message?: string;
+    readonly modules?: NonNullable<Parameters<typeof createTestRuntime>[0]>["modules"];
+  } = {},
+) {
   const seen: Array<{ tool: string; caller: string | null }> = [];
   const secondRequesters: Array<string | null> = [];
   const secondApproval: Approval = {
@@ -114,6 +130,7 @@ async function withChainRun(name: string, body: (run: ChainRun) => Promise<void>
       recordingTool("deploy_change", seen, always()),
       recordingTool("read_notes", seen),
       recordingTool("publish_change", seen, secondApproval),
+      ...(options.modules ?? []),
     ],
   });
   const continuationToken = `http:${name}`;
@@ -124,7 +141,9 @@ async function withChainRun(name: string, body: (run: ChainRun) => Promise<void>
       {
         kind: "initial",
         ownerDeploymentId: "dpl_inline",
-        input: { message: "Use deploy_change, then read_notes, then publish_change." },
+        input: {
+          message: options.message ?? "Use deploy_change, then read_notes, then publish_change.",
+        },
         serializedContext: {
           ...buildSerializedContext({ auth: ALICE, channelKind: "http", continuationToken }),
           "eve.capabilities": { requestInput: true },
@@ -176,34 +195,38 @@ function turnBoundaries(stage: Stage) {
     .map((event) => `${event.type} ${(event.data as { turnId: string }).turnId}`);
 }
 
-describe("approval turn hand-off", () => {
-  it("runs work another person approves in that person's own turn", async () => {
+describe("approval caller", () => {
+  it("runs only the call another person approves as that person", async () => {
     const { secondRequesters, seen, stages } = await withChainRun(
-      "approval-hand-off",
+      "approval-caller",
       async (run) => {
         await run.approve(BOB);
         await run.approve(ALICE);
       },
     );
 
+    // Bob's approval resumes Alice's turn; it does not start his own.
     expect(stages.map(turnBoundaries)).toEqual([
       ["turn.started turn_0"],
-      ["turn.completed turn_0", "turn.started turn_1"],
-      ["turn.completed turn_1", "turn.started turn_2", "turn.completed turn_2"],
+      [],
+      ["turn.completed turn_0"],
     ]);
     expect(seen).toEqual([
       { tool: "deploy_change", caller: "bob" },
-      { tool: "read_notes", caller: "bob" },
+      { tool: "read_notes", caller: "alice" },
       { tool: "publish_change", caller: "alice" },
     ]);
-    // publish_change was requested in Bob's turn.
-    expect(secondRequesters).toEqual(["bob"]);
+    expect(secondRequesters).toEqual(["alice"]);
   }, 60_000);
 
-  it("keeps one turn when the requester approves their own calls", async () => {
-    const { secondRequesters, seen, stages } = await withChainRun("approval-self", async (run) => {
-      await run.approve(ALICE);
-      await run.approve(ALICE);
+  it("lets the requester steer the turn after someone else approves a call", async () => {
+    const { seen, stages } = await withChainRun("approval-caller-steer", async (run) => {
+      await run.approve(BOB);
+      // The turn is still Alice's, so her message steers past publish_change.
+      const steered = await run.send(ALICE, "Never mind, skip publishing.");
+      expect(filterEventsByType(steered, "input.resolved")[0]?.data.resolutions).toMatchObject([
+        { outcome: "ignored" },
+      ]);
     });
 
     expect(stages.map(turnBoundaries)).toEqual([
@@ -211,24 +234,41 @@ describe("approval turn hand-off", () => {
       [],
       ["turn.completed turn_0"],
     ]);
-    expect(seen.map((entry) => entry.caller)).toEqual(["alice", "alice", "alice"]);
-    expect(secondRequesters).toEqual(["alice"]);
+    expect(seen).toEqual([
+      { tool: "deploy_change", caller: "bob" },
+      { tool: "read_notes", caller: "alice" },
+    ]);
   }, 60_000);
 
-  it("lets the responder, not the requester, steer the turn it took over", async () => {
-    const { seen, stages } = await withChainRun("approval-hand-off-steer", async (run) => {
-      await run.approve(BOB);
-      // Bob's turn now holds on publish_change, so Bob's message steers it.
-      const steered = await run.send(BOB, "Never mind, skip publishing.");
-      expect(filterEventsByType(steered, "input.resolved")[0]?.data.resolutions).toMatchObject([
-        { outcome: "ignored" },
-      ]);
-    });
+  it("starts an approved workflow tool's run as its approver", async () => {
+    const { stages } = await withChainRun(
+      "approval-caller-workflow",
+      async (run) => {
+        await run.approve(BOB);
+      },
+      {
+        message: "Use report_caller, then read_notes.",
+        modules: [
+          {
+            loadNamespace: async () => ({
+              default: defineWorkflowTool({
+                approval: always(),
+                description: "Report who runs this.",
+                execute: reportCallerWorkflow as WorkflowExecuteToolDefinition["execute"],
+                inputSchema: {},
+              }),
+            }),
+            logicalPath: "tools/report_caller.ts",
+          },
+        ],
+      },
+    );
 
-    expect(stages.map(turnBoundaries).slice(1)).toEqual([
-      ["turn.completed turn_0", "turn.started turn_1"],
-      ["turn.completed turn_1"],
-    ]);
-    expect(seen.map((entry) => entry.tool)).toEqual(["deploy_change", "read_notes"]);
+    const results = stages
+      .flat()
+      .flatMap((event) => (event.type === "action.result" ? [event.data.result] : []));
+    expect(results.find((result) => result.callId === "call-report_caller")?.output).toEqual({
+      caller: "bob",
+    });
   }, 60_000);
 });
