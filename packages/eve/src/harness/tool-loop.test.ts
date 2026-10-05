@@ -8248,7 +8248,7 @@ describe("createToolLoopHarness", () => {
     });
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(
-      createTestConfig("conversation", emit, {
+      createTestConfig(emit, {
         compactOnly: true,
         dispatchDynamicModelEvent,
       }),
