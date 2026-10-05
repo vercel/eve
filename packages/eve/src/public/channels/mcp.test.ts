@@ -575,6 +575,7 @@ describe("mcpChannel tools", () => {
     }));
     const files: SkillFileSource = {
       listFiles: async () => [{ path: "SKILL.md", size: 5 }],
+      listDirectories: async () => [],
       readFile: async () => new TextEncoder().encode("Body\n"),
     };
     const channel = mcpChannel({ agent: false, auth: () => principal, skills: true, tools: true });

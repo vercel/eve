@@ -34,7 +34,8 @@ export interface SkillServerAssetDirectory {
  * `<stagingDirectory>/files/<sha256>.bin`, which Nitro always inlines as a
  * `Uint8Array`. Identical files share one asset. Real paths, sizes, and
  * digests go into an eve-owned index registered as its own server asset.
- * Files over {@link MAX_SKILL_FILE_BYTES} are indexed by size only.
+ * Files over {@link MAX_SKILL_FILE_BYTES} are indexed by size only, and
+ * directories are indexed so empty ones survive the build.
  */
 export async function prepareSkillServerAssets(input: {
   /** Build-owned directory the staged assets and the index are written to. */
@@ -50,7 +51,7 @@ export async function prepareSkillServerAssets(input: {
   await mkdir(filesDirectory, { recursive: true });
   await mkdir(indexDirectory, { recursive: true });
 
-  const index: [string, SkillFilesIndexEntry[]][] = [];
+  const index: [string, SkillFilesIndexEntry[], readonly string[]][] = [];
   for (const skill of [...new Set(input.skills)].sort(comparePaths)) {
     const files: SkillFilesIndexEntry[] = [];
     for (const { path, size } of await source.listFiles(skill)) {
@@ -64,7 +65,7 @@ export async function prepareSkillServerAssets(input: {
       await writeFile(join(filesDirectory, skillFileStorageKey(sha256)), bytes);
       files.push([path, bytes.byteLength, sha256]);
     }
-    index.push([skill, files]);
+    index.push([skill, files, await source.listDirectories(skill)]);
   }
 
   const skillFilesIndex: SkillFilesIndex = { version: 1, skills: index };

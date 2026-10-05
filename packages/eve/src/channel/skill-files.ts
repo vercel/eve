@@ -52,6 +52,11 @@ export interface SkillFileEntry {
 export interface SkillFileSource {
   /** Regular files of one skill, sorted by path. Empty when the skill has no materialized files. */
   listFiles(skill: string): Promise<readonly SkillFileEntry[]>;
+  /**
+   * Every directory of one skill below its root, sorted by path, including
+   * empty ones that no listed file implies.
+   */
+  listDirectories(skill: string): Promise<readonly string[]>;
   readFile(skill: string, path: string): Promise<Uint8Array>;
 }
 
@@ -79,8 +84,12 @@ export type SkillFilesIndexEntry = readonly [path: string, size: number, sha256:
  */
 export interface SkillFilesIndex {
   readonly version: 1;
-  /** `[skill, entries]`, sorted by skill then path. */
-  readonly skills: readonly (readonly [string, readonly SkillFilesIndexEntry[]])[];
+  /** `[skill, files, directories]`, sorted by skill then path. */
+  readonly skills: readonly (readonly [
+    skill: string,
+    files: readonly SkillFilesIndexEntry[],
+    directories: readonly string[],
+  ])[];
 }
 
 /**
@@ -137,7 +146,7 @@ export function createCompiledSkillFileSource(input: {
  * served altered.
  */
 function createServerAssetSkillFileSource(openStorage: OpenSkillFileStorage): SkillFileSource {
-  let index: Promise<Map<string, readonly SkillFilesIndexEntry[]>> | undefined;
+  let index: Promise<Map<string, IndexedSkill>> | undefined;
   const loadIndex = () => {
     index ??= openStorage(SKILL_FILES_INDEX_SERVER_ASSET_BASE)
       .then((storage) => storage.getItemRaw(SKILL_FILES_INDEX_KEY))
@@ -150,10 +159,13 @@ function createServerAssetSkillFileSource(openStorage: OpenSkillFileStorage): Sk
   };
   return {
     async listFiles(skill) {
-      return ((await loadIndex()).get(skill) ?? []).map(([path, size]) => ({ path, size }));
+      return ((await loadIndex()).get(skill)?.files ?? []).map(([path, size]) => ({ path, size }));
+    },
+    async listDirectories(skill) {
+      return (await loadIndex()).get(skill)?.directories ?? [];
     },
     async readFile(skill, path) {
-      const entry = (await loadIndex()).get(skill)?.find(([indexed]) => indexed === path);
+      const entry = (await loadIndex()).get(skill)?.files.find(([indexed]) => indexed === path);
       if (entry === undefined) throw unknownFile(skill, path);
       const [, size, sha256] = entry;
       if (sha256 === null) throw tooLarge(skill, path, size);
@@ -174,7 +186,12 @@ function createServerAssetSkillFileSource(openStorage: OpenSkillFileStorage): Sk
   };
 }
 
-function parseSkillFilesIndex(raw: unknown): Map<string, readonly SkillFilesIndexEntry[]> {
+interface IndexedSkill {
+  readonly files: readonly SkillFilesIndexEntry[];
+  readonly directories: readonly string[];
+}
+
+function parseSkillFilesIndex(raw: unknown): Map<string, IndexedSkill> {
   const text =
     typeof raw === "string" ? raw : raw instanceof Uint8Array ? new TextDecoder().decode(raw) : "";
   let parsed: unknown;
@@ -189,7 +206,9 @@ function parseSkillFilesIndex(raw: unknown): Map<string, readonly SkillFilesInde
       "Skill files are not available: this server was not built by `eve build`, so it carries no skill files.",
     );
   }
-  return new Map(parsed.skills);
+  return new Map(
+    parsed.skills.map(([skill, files, directories]) => [skill, { directories, files }]),
+  );
 }
 
 function isSkillFilesIndex(value: unknown): value is SkillFilesIndex {
@@ -210,7 +229,9 @@ function isSkillFilesIndex(value: unknown): value is SkillFilesIndex {
             typeof file[0] === "string" &&
             Number.isSafeInteger(file[1]) &&
             (typeof file[2] === "string" || file[2] === null),
-        ),
+        ) &&
+        Array.isArray(entry[2]) &&
+        entry[2].every((directory: unknown) => typeof directory === "string"),
     )
   );
 }
@@ -231,8 +252,14 @@ export function createDiskSkillFileSource(skillsRoot: string): SkillFileSource {
     async listFiles(skill) {
       const skillRoot = `${skillsRoot}/${skill}`;
       if (!(await isRealDirectory(skillRoot))) return [];
-      const files = await listRegularFiles(skillRoot, "");
+      const { files } = await walkSkill(skillRoot);
       return files.sort((left, right) => comparePaths(left.path, right.path));
+    },
+    async listDirectories(skill) {
+      const skillRoot = `${skillsRoot}/${skill}`;
+      if (!(await isRealDirectory(skillRoot))) return [];
+      const { directories } = await walkSkill(skillRoot);
+      return directories.sort(comparePaths);
     },
     async readFile(skill, path) {
       const skillRoot = `${skillsRoot}/${skill}`;
@@ -288,20 +315,27 @@ async function isRealDirectory(path: string): Promise<boolean> {
   return (await lstatOrUndefined(path))?.isDirectory() === true;
 }
 
-async function listRegularFiles(directory: string, prefix: string): Promise<SkillFileEntry[]> {
-  const entries = await readdir(directory, { withFileTypes: true });
+/** The regular files and real directories below a skill root, unsorted. */
+async function walkSkill(
+  skillRoot: string,
+): Promise<{ files: SkillFileEntry[]; directories: string[] }> {
   const files: SkillFileEntry[] = [];
-  for (const entry of entries) {
-    const path = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
-    // Dirent reports symlinks as neither files nor directories, so they are skipped.
-    if (entry.isDirectory()) {
-      files.push(...(await listRegularFiles(`${directory}/${entry.name}`, path)));
-    } else if (entry.isFile()) {
-      const stats = await lstatOrUndefined(`${directory}/${entry.name}`);
-      if (stats?.isFile() === true) files.push({ path, size: stats.size });
+  const directories: string[] = [];
+  const walk = async (directory: string, prefix: string) => {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const path = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+      // Dirent reports symlinks as neither files nor directories, so they are skipped.
+      if (entry.isDirectory()) {
+        directories.push(path);
+        await walk(`${directory}/${entry.name}`, path);
+      } else if (entry.isFile()) {
+        const stats = await lstatOrUndefined(`${directory}/${entry.name}`);
+        if (stats?.isFile() === true) files.push({ path, size: stats.size });
+      }
     }
-  }
-  return files;
+  };
+  await walk(skillRoot, "");
+  return { directories, files };
 }
 
 function unknownFile(skill: string, path: string): SkillReadError {

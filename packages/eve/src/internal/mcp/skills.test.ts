@@ -10,8 +10,8 @@ import { createMcpStreamableHttpServer } from "#internal/mcp/streamable-http-ser
 
 /**
  * A skill's files; `null` is listed but missing on read (a deterministic
- * `SkillReadError`), and a function is called per read so a test can fail
- * transiently.
+ * `SkillReadError`), a function is called per read so a test can fail
+ * transiently, and a path ending in `/` is an empty directory.
  */
 type Files = Readonly<Record<string, string | Uint8Array | null | (() => string)>>;
 
@@ -32,11 +32,23 @@ function skillSource(skills: Readonly<Record<string, Files>>) {
     async listFiles(skill) {
       count(calls.list, skill);
       return Object.entries(skills[skill] ?? {})
+        .filter(([path]) => !path.endsWith("/"))
         .map(([path, content]) => ({
           path,
           size: content === null || typeof content === "function" ? 1 : encode(content).length,
         }))
         .sort((left, right) => (left.path < right.path ? -1 : 1));
+    },
+    async listDirectories(skill) {
+      const directories = new Set<string>();
+      for (const path of Object.keys(skills[skill] ?? {})) {
+        const segments = path.split("/").filter(Boolean);
+        const depth = path.endsWith("/") ? segments.length : segments.length - 1;
+        for (let index = 1; index <= depth; index += 1) {
+          directories.add(segments.slice(0, index).join("/"));
+        }
+      }
+      return [...directories].sort();
     },
     async readFile(skill, path) {
       count(calls.read, `${skill}/${path}`);
@@ -283,6 +295,64 @@ describe("MCP skills catalog", () => {
     ] as const) {
       const { result } = await call(method, params);
       expect(result, method).toMatchObject(hint);
+    }
+  });
+
+  it("reports a file removed after listing as an unknown resource", async () => {
+    let gone = false;
+    let failing = false;
+    const call = handler({
+      moved: {
+        ...doc("moved", "Loses a file."),
+        "notes.md": () => {
+          if (gone)
+            throw new SkillReadError("unknown-file", 'Skill "moved" has no file "notes.md".');
+          if (failing) throw new Error("EIO: storage failure");
+          return "notes\n";
+        },
+      },
+    });
+    expect((await call("skills/list")).result?.skills).toHaveLength(1);
+
+    gone = true;
+    expect((await call("resources/read", { uri: "skill://moved/notes.md" })).error).toMatchObject({
+      code: -32602,
+    });
+    gone = false;
+    failing = true;
+    expect((await call("resources/read", { uri: "skill://moved/notes.md" })).error).toMatchObject({
+      code: -32603,
+    });
+  });
+
+  it("lists every directory, empty ones included", async () => {
+    const call = handler({
+      tree: {
+        ...doc("tree", "Has empty directories."),
+        "templates/": "",
+        "scripts/run.sh": "echo\n",
+        "scripts/nested/": "",
+      },
+    });
+    const list = async (uri: string) => await call("resources/directory/read", { uri });
+    expect((await list("skill://tree")).result?.resources).toEqual([
+      { uri: "skill://tree/SKILL.md", name: "SKILL.md", mimeType: "text/markdown" },
+      { uri: "skill://tree/notes.md", name: "notes.md", mimeType: "text/markdown" },
+      { uri: "skill://tree/scripts", name: "scripts", mimeType: "inode/directory" },
+      { uri: "skill://tree/templates", name: "templates", mimeType: "inode/directory" },
+    ]);
+    expect((await list("skill://tree/scripts")).result?.resources).toEqual([
+      { uri: "skill://tree/scripts/nested", name: "nested", mimeType: "inode/directory" },
+      { uri: "skill://tree/scripts/run.sh", name: "run.sh", mimeType: "text/x-shellscript" },
+    ]);
+    expect((await list("skill://tree/templates")).result?.resources).toEqual([]);
+    expect((await list("skill://tree/scripts/nested")).result?.resources).toEqual([]);
+    for (const uri of [
+      "skill://tree/missing",
+      "skill://tree/notes.md",
+      "skill://tree/templates/x",
+    ]) {
+      expect((await list(uri)).error, uri).toMatchObject({ code: -32602 });
     }
   });
 

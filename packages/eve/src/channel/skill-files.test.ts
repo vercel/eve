@@ -19,6 +19,7 @@ const files: Readonly<Record<string, Uint8Array>> = {
 const memory: SkillFileSource = {
   listFiles: async () =>
     Object.entries(files).map(([path, bytes]) => ({ path, size: bytes.byteLength })),
+  listDirectories: async () => ["references"],
   readFile: async (_skill, path) => files[path]!,
 };
 
@@ -40,6 +41,7 @@ const bundled = createCompiledSkillFileSource({
                   ["huge.md", MAX_SKILL_FILE_BYTES + 1, null],
                   ["stale.md", 3, digest(new Uint8Array([9, 9, 9]))],
                 ],
+                ["templates"],
               ],
             ],
           })
@@ -48,6 +50,18 @@ const bundled = createCompiledSkillFileSource({
           : new Uint8Array([7, 7, 7]),
   }),
   workspaceResourceRoot: { logicalPath: "workspace-resources/__root__", rootEntries: [] },
+});
+
+describe("bundled skill files", () => {
+  it("lists files and directories from the build index", async () => {
+    await expect(bundled.listFiles("triage")).resolves.toEqual([
+      { path: "SKILL.md", size: 3 },
+      { path: "huge.md", size: MAX_SKILL_FILE_BYTES + 1 },
+      { path: "stale.md", size: 3 },
+    ]);
+    await expect(bundled.listDirectories("triage")).resolves.toEqual(["templates"]);
+    await expect(bundled.listDirectories("missing")).resolves.toEqual([]);
+  });
 });
 
 describe("readSkillFile", () => {

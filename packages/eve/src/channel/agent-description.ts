@@ -116,6 +116,7 @@ export function createAgentDescriptionRouteArgs(
   const load = () => loadDescribedAgent(resolveCompiledArtifactsSource());
   const skillFiles: SkillFileSource = {
     listFiles: async (skill) => await (await load()).files.listFiles(skill),
+    listDirectories: async (skill) => await (await load()).files.listDirectories(skill),
     readFile: async (skill, path) => await (await load()).files.readFile(skill, path),
   };
   const assertSkill = async (skill: string) => {

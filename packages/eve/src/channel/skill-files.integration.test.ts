@@ -25,6 +25,7 @@ describe("createDiskSkillFileSource", () => {
     const alias = join(root, "alias");
     const outside = join(root, "outside");
     await mkdir(join(skills, "triage", "references"), { recursive: true });
+    await mkdir(join(skills, "triage", "templates", "regional"), { recursive: true });
     await mkdir(outside, { recursive: true });
     await writeFile(join(skills, "triage", "SKILL.md"), "# Triage\n");
     await writeFile(join(skills, "triage", "references", "api.md"), "api\n");
@@ -49,6 +50,16 @@ describe("createDiskSkillFileSource", () => {
     ]);
     await expect(source.listFiles("linked")).resolves.toEqual([]);
     await expect(source.listFiles("missing")).resolves.toEqual([]);
+  });
+
+  it("lists every real directory, empty ones included", async () => {
+    await expect(source.listDirectories("triage")).resolves.toEqual([
+      "references",
+      "templates",
+      "templates/regional",
+    ]);
+    await expect(source.listDirectories("linked")).resolves.toEqual([]);
+    await expect(source.listDirectories("missing")).resolves.toEqual([]);
   });
 
   it("reads regular files under the real skill root", async () => {

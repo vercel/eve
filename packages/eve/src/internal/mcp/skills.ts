@@ -125,6 +125,8 @@ interface SkillSnapshot {
   readonly document: ServedFile;
   /** Served files by path, sorted by path. */
   readonly files: ReadonlyMap<string, SnapshotFile>;
+  /** Every directory below the skill root, empty ones included. */
+  readonly directories: ReadonlySet<string>;
 }
 
 interface SkillCatalog {
@@ -246,13 +248,33 @@ function registerSkillHandlers(
     const served =
       parsed.path === SKILL_ENTRY_FILE_NAME
         ? snapshot.document
-        : toServedFile(await files.readFile(snapshot.name, parsed.path));
+        : toServedFile(await readListedFile(files, snapshot.name, parsed.path, uri));
     const contents =
       served.text === undefined
         ? { uri, mimeType: file.mimeType, blob: Buffer.from(served.bytes).toString("base64") }
         : { uri, mimeType: file.mimeType, text: served.text };
     return { contents: [contents] };
   });
+}
+
+/**
+ * Reads a file the snapshot listed. One removed since then is an unknown
+ * resource; any other failure stays an internal error.
+ */
+async function readListedFile(
+  files: SkillFileSource,
+  skill: string,
+  path: string,
+  uri: string,
+): Promise<Uint8Array> {
+  try {
+    return await files.readFile(skill, path);
+  } catch (error) {
+    if (error instanceof SkillReadError && error.code === "unknown-file") {
+      throw new ResourceNotFoundError(uri);
+    }
+    throw error;
+  }
 }
 
 // ---------- Snapshots ----------
@@ -285,8 +307,11 @@ function decodeText(bytes: Uint8Array): string | undefined {
 function servedPaths(
   skill: string,
   files: readonly SkillFileEntry[],
+  directories: readonly string[],
 ): Map<string, string> | string {
   if (!isSafeSegment(skill)) return "its name is not a valid skill:// segment";
+  const unsafe = directories.find((path) => !path.split("/").every(isSafeSegment));
+  if (unsafe !== undefined) return `its directory "${unsafe}" is not a valid skill:// path`;
   if (files.length > MCP_SKILL_MAX_RESOURCES) {
     return `it has more than ${MCP_SKILL_MAX_RESOURCES} files`;
   }
@@ -323,7 +348,11 @@ async function snapshotSkill(
     warnOnce(`mcpChannel does not serve the skill "${skill.name}": ${reason}.`);
     return undefined;
   };
-  const paths = servedPaths(skill.name, await source.listFiles(skill.name));
+  const [listed, directories] = await Promise.all([
+    source.listFiles(skill.name),
+    source.listDirectories(skill.name),
+  ]);
+  const paths = servedPaths(skill.name, listed, directories);
   if (typeof paths === "string") return unserved(paths);
 
   const entries = [...paths.entries()].sort(([left], [right]) => comparePaths(left, right));
@@ -381,6 +410,7 @@ async function snapshotSkill(
       resources,
     },
     files: served,
+    directories: new Set(directories),
   };
 }
 
@@ -473,22 +503,18 @@ function listDirectory(
   snapshot: SkillSnapshot,
   directory: string | undefined,
 ): { uri: string; name: string; mimeType: string }[] | undefined {
+  // The skill root is always a directory; an empty one lists no children.
+  if (directory !== undefined && !snapshot.directories.has(directory)) return undefined;
   const prefix = directory === undefined ? "" : `${directory}/`;
-  const children = new Map<string, { uri: string; name: string; mimeType: string }>();
-  for (const [path, file] of snapshot.files) {
-    if (!path.startsWith(prefix)) continue;
-    const [name, ...below] = path.slice(prefix.length).split("/");
-    if (name === undefined || children.has(name)) continue;
-    const uri = skillFileUri(snapshot.name, `${prefix}${name}`);
-    const mimeType = below.length === 0 ? file.mimeType : DIRECTORY_MIME_TYPE;
-    children.set(name, { uri, name, mimeType });
-  }
-  // The skill root is always a directory; any other path is one only if a
-  // served file lies below it.
-  if (directory !== undefined && children.size === 0) return undefined;
-  return [...children.entries()]
-    .sort(([left], [right]) => comparePaths(left, right))
-    .map(([, child]) => child);
+  const children: { uri: string; name: string; mimeType: string }[] = [];
+  const add = (path: string, mimeType: string) => {
+    const name = path.slice(prefix.length);
+    if (!path.startsWith(prefix) || name.includes("/")) return;
+    children.push({ uri: skillFileUri(snapshot.name, path), name, mimeType });
+  };
+  for (const [path, file] of snapshot.files) add(path, file.mimeType);
+  for (const path of snapshot.directories) add(path, DIRECTORY_MIME_TYPE);
+  return children.sort((left, right) => comparePaths(left.name, right.name));
 }
 
 // ---------- URIs ----------
