@@ -171,7 +171,7 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
     name: descriptor.agent?.name ?? DEFAULT_AGENT_NAME,
     model: descriptor.agent?.model ?? TEST_DEFAULT_MODEL_ID,
     limits: descriptor.agent?.limits,
-    ...(descriptor.agent?.definition === undefined ? {} : { agent: descriptor.agent.definition }),
+    agent: descriptor.agent?.definition,
     modules: [
       {
         loadNamespace: async () => {

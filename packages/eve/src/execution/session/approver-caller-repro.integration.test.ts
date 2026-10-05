@@ -63,7 +63,7 @@ function recordingTool(
   return {
     loadNamespace: async () => ({
       default: defineTool({
-        ...(approval === undefined ? {} : { approval }),
+        approval,
         description: `Run ${name}.`,
         execute: (_input, ctx) => {
           seen.push({ tool: name, caller: ctx.session.auth.current?.principalId ?? null });
