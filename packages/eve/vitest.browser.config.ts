@@ -9,6 +9,8 @@ import { workflow } from "./src/internal/testing/workflow-vitest-plugin.js";
  * in-memory agent, like the integration tier, but over a real HTTP listener and
  * a real browser. These run in their own CI job, which installs Chromium with
  * `pnpm --filter eve exec playwright-core install chromium-headless-shell`.
+ * The first run also installs the Web Chat template's registry dependencies
+ * into a temp directory outside the workspace, so it needs the npm registry.
  */
 export default defineConfig({
   plugins: [workflow()],

@@ -1,9 +1,11 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { cp, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 import type { Locator, Page } from "playwright-core";
 
@@ -17,6 +19,12 @@ import type {
 const TEMPLATE_ROOT = fileURLToPath(
   new URL("../../../../../../apps/docs/registry/channel/web/", import.meta.url),
 );
+/** The registry item that lists the template's dependencies, as `eve integration setup web` installs them. */
+const REGISTRY_PATH = fileURLToPath(
+  new URL("../../../../../../apps/docs/registry.json", import.meta.url),
+);
+/** Outside the workspace, so the template's pins never touch the workspace lockfile. */
+const INSTALL_ROOT = join(tmpdir(), "eve-web-chat-template");
 const EVE_SOURCE_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 
 const ENTRY_ID = "virtual:web-chat-entry";
@@ -191,9 +199,48 @@ async function readButtons(buttons: Locator): Promise<RenderedOption[] | undefin
   return options;
 }
 
+/**
+ * Copies the template into a fresh app root beside the dependencies its
+ * registry item lists, the way `eve integration setup web` lays out an app.
+ */
+async function installTemplate(): Promise<string> {
+  const registry = JSON.parse(await readFile(REGISTRY_PATH, "utf8")) as {
+    items: { name: string; dependencies?: string[] }[];
+  };
+  const item = registry.items.find(({ name }) => name === "channel/web");
+  if (item?.dependencies === undefined) {
+    throw new Error(`${REGISTRY_PATH} has no channel/web item with dependencies.`);
+  }
+  const dependencies = Object.fromEntries(
+    item.dependencies.map((spec) => {
+      const at = spec.lastIndexOf("@");
+      return at > 0 ? [spec.slice(0, at), spec.slice(at + 1)] : [spec, "latest"];
+    }),
+  );
+  const manifest = `${JSON.stringify({ name: "web-chat-template", private: true, dependencies }, null, 2)}\n`;
+  // Written only after an install succeeds, so a failed one is retried.
+  const installedPath = join(INSTALL_ROOT, "installed.json");
+  if ((await readFile(installedPath, "utf8").catch(() => undefined)) !== manifest) {
+    await mkdir(INSTALL_ROOT, { recursive: true });
+    await writeFile(join(INSTALL_ROOT, "package.json"), manifest);
+    await promisify(execFile)("pnpm", ["install", "--ignore-workspace", "--prefer-offline"], {
+      cwd: INSTALL_ROOT,
+    });
+    await writeFile(installedPath, manifest);
+  }
+  const appRoot = await mkdtemp(join(tmpdir(), "eve-web-chat-app-"));
+  await cp(TEMPLATE_ROOT, appRoot, {
+    filter: (source) => !source.slice(TEMPLATE_ROOT.length).startsWith("node_modules"),
+    recursive: true,
+  });
+  await symlink(join(INSTALL_ROOT, "node_modules"), join(appRoot, "node_modules"), "dir");
+  return appRoot;
+}
+
 async function bundleTemplate(): Promise<string> {
   // Loaded on demand so the other channels' conformance files skip the bundler.
   const { build, defaultClientConditions } = await import("vite");
+  const appRoot = await installTemplate();
   const outDir = await mkdtemp(join(tmpdir(), "eve-web-chat-"));
   await build({
     build: {
@@ -226,7 +273,7 @@ async function bundleTemplate(): Promise<string> {
     ],
     resolve: {
       alias: [
-        { find: /^@\//u, replacement: TEMPLATE_ROOT },
+        { find: /^@\//u, replacement: `${appRoot}/` },
         // Test the eve source under change, not its last build.
         { find: /^eve\/react$/u, replacement: join(EVE_SOURCE_ROOT, "react/index.ts") },
       ],
@@ -234,7 +281,7 @@ async function bundleTemplate(): Promise<string> {
       conditions: [...defaultClientConditions, "eve-source"],
       dedupe: ["react", "react-dom"],
     },
-    root: TEMPLATE_ROOT,
+    root: appRoot,
   });
   return outDir;
 }
