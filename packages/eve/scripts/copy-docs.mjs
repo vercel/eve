@@ -1,7 +1,6 @@
 import { cp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { renderBenchmarkMarkdown } from "../../../apps/docs/lib/evals/eve-code-format.ts";
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const monorepoRoot = fileURLToPath(new URL("../../..", import.meta.url));
@@ -24,6 +23,8 @@ const page = await readFile(benchmarkPage, "utf8").catch((error) => {
   throw error;
 });
 if (page !== null) {
+  const { renderBenchmarkMarkdown } =
+    await import("../../../apps/docs/lib/evals/eve-code-format.ts");
   const snapshot = JSON.parse(
     await readFile(join(monorepoRoot, "apps/docs/lib/evals/eve-code-benchmark.json"), "utf8"),
   );
