@@ -133,11 +133,11 @@ export const templateManifest: TemplateManifestEntry[] = [
   },
   {
     slug: "openinstinct-eve-template",
-    title: "OpenInstinct",
+    title: "Multi-tenant iMessage Assistant",
     setupPrompt:
-      "Set up the OpenInstinct eve template in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/openinstinct-eve-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about the required Linq connector and model provider setup. Explain that this starter does not include OpenInstinct's web app, vault, authorization, or browser worker before enabling it for personal accounts or secrets.",
+      "Set up the multi-tenant iMessage assistant starter in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/openinstinct-eve-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about the required Linq connector and model provider setup. Explain that this starter accepts messages from every sender who reaches the line and does not yet implement user enrollment or tenant-scoped resource access. Follow the README's multi-tenant guidance before connecting customer accounts or data. Do not describe OpenInstinct's web app, vault, or browser worker as included capabilities.",
     description:
-      "An eve starter adapted from OpenInstinct's agent and Linq channel for an iMessage personal assistant, with its app-specific vault, authorization, and browser services left out.",
+      "A starter for building an iMessage assistant service for multiple customers with eve and Linq. Inspired by OpenInstinct; add user enrollment and tenant-scoped access in your application.",
     sourceHref: "https://github.com/vercel/eve/tree/main/apps/templates/openinstinct-eve-template",
     category: "Example",
     model: "anthropic/claude-sonnet-5",
