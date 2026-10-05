@@ -15,6 +15,7 @@ import type { CardElement } from "#compiled/chat/index.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
+import { maxBytesOf } from "#internal/attachments/limited-read.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { attachInputText } from "#internal/input-text.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -826,6 +827,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   const slackFetchFile = createSlackFetchFile({
     api,
     botToken: config.credentials?.botToken,
+    maxBytes: maxBytesOf(uploadPolicy),
   });
   const onInputResponse = config.onInputResponse ?? defaultOnInputResponse;
   const rendering = composeSlackRenderers(config.renderers ?? [], {

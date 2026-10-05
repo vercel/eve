@@ -57,7 +57,8 @@ describe("createTelegramFetchFile", () => {
         }),
       )
       .mockResolvedValueOnce(
-        new Response("PDF", { headers: { "content-type": "application/pdf" } }),
+        // Telegram serves every file as octet-stream; the declared type must win (#1217).
+        new Response("PDF", { headers: { "content-type": "application/octet-stream" } }),
       );
 
     const fetchFile = createTelegramFetchFile({

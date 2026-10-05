@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { EveAttachmentError } from "#internal/attachments/errors.js";
-import { assertWithinLimit, readLimitedBytes } from "#internal/attachments/limited-read.js";
+import {
+  assertWithinLimit,
+  limitedFetch,
+  readLimitedBytes,
+} from "#internal/attachments/limited-read.js";
 
 const MB = 1024 * 1024;
 
@@ -63,5 +67,27 @@ describe("assertWithinLimit", () => {
   it("fails bytes over the limit", () => {
     expect(() => assertWithinLimit(new Uint8Array(6), 5, "test")).toThrow(EveAttachmentError);
     expect(() => assertWithinLimit(new Uint8Array(5), 5, "test")).not.toThrow();
+  });
+});
+
+describe("limitedFetch", () => {
+  it("fails a body that passes the limit while the caller reads it", async () => {
+    const fetch = limitedFetch(async () => streamed(30 * MB, MB), 25 * MB, "test");
+    const response = await fetch("https://files.test/big");
+    await expect(response.arrayBuffer()).rejects.toThrow("it is over the 25 MB upload limit.");
+  });
+
+  it("refuses a response whose declared length is over the limit", async () => {
+    const fetch = limitedFetch(
+      async () => new Response("x", { headers: { "content-length": String(30 * MB) } }),
+      25 * MB,
+      "test",
+    );
+    await expect(fetch("https://files.test/big")).rejects.toThrow(EveAttachmentError);
+  });
+
+  it("passes a body within the limit through", async () => {
+    const fetch = limitedFetch(async () => new Response("hello"), 5, "test");
+    expect(await (await fetch("https://files.test/small")).text()).toBe("hello");
   });
 });

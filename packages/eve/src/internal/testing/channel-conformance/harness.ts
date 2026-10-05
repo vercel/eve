@@ -156,6 +156,12 @@ export interface ChannelDriver {
   shownMessage?(call: PlatformCall): ShownMessage | undefined;
   /** How the person driving the conversation appears in the platform's text, in any form. */
   readonly personShownAs?: readonly string[];
+  /**
+   * The address a person's next message continues, when it continues one the
+   * bot claimed, such as the Telegram message it replies to. The harness waits
+   * for the session to claim it before sending.
+   */
+  nextAddress?(): string | undefined;
 }
 
 /**
@@ -269,6 +275,8 @@ export interface ClientView {
   shownPrompt?(prompt: string): ShownMessage | Promise<ShownMessage>;
   /** How the person appears in the client's text, in any form. */
   readonly personShownAs?: readonly string[];
+  /** See {@link ChannelDriver.nextAddress}. */
+  nextAddress?(): string | undefined;
   /** Everything the client shows now that a person can read or open, one entry per message. */
   shown(): readonly ShownText[] | Promise<readonly ShownText[]>;
   /** What the client shows now, for timeout errors. */
@@ -512,6 +520,7 @@ function webhookView(
         .at(-1)!;
     },
     personShownAs: driver.personShownAs ?? [],
+    nextAddress: driver.nextAddress?.bind(driver),
     shown: () =>
       calls.flatMap((call) => {
         const shown = driver.shownMessage?.(call);
@@ -777,6 +786,9 @@ async function converse(
     const conversation: ChannelConversation = {
       async say(text, files) {
         await waitForStepsToFinish([...sessions.values()], wait);
+        // A step can be done before its aliases are claimed; see waitForAddress.
+        const address = view.nextAddress?.();
+        if (address !== undefined) await waitForAddress(address);
         await view.say(text, files);
       },
       press: (option, person = "alice") => view.press(option, person),
@@ -929,8 +941,11 @@ async function cancelUntilResting(session: Session): Promise<void> {
   while (Date.now() < deadline) {
     await session.cancel();
     const tail = await session.getStreamTailIndex();
-    const reader = (await session.getEventStream({ startIndex: tail })).getReader();
-    last = (await reader.read().finally(() => reader.cancel())).value?.type;
+    // An empty stream has nothing to read, and reading it waits for its first event.
+    if (tail >= 0) {
+      const reader = (await session.getEventStream({ startIndex: tail })).getReader();
+      last = (await reader.read().finally(() => reader.cancel())).value?.type;
+    }
     running = await runningSteps(session);
     if (last === "session.waiting" && running.length === 0) return;
     await new Promise((resolve) => setTimeout(resolve, 25));

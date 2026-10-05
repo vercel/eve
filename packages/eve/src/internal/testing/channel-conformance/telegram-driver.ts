@@ -1,3 +1,4 @@
+import { telegramContinuationToken } from "#public/channels/telegram/api.js";
 import { telegramChannel } from "#public/channels/telegram/index.js";
 import {
   type ChannelDriver,
@@ -203,6 +204,11 @@ export function telegramDriver(surface: Exclude<Surface, "public"> = "shared"): 
       };
     },
     personShownAs: [PERSON.first_name],
+    // A reply to the bot's message continues the session that posted it.
+    nextAddress: () =>
+      group && lastBotMessage !== undefined
+        ? telegramContinuationToken({ chatId: CHAT.id, conversationId: lastBotMessage })
+        : undefined,
     press: (option, person: Person) => {
       const { data, messageId } = option.handle as PressHandle;
       return update({

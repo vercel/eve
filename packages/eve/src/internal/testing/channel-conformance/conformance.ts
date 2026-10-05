@@ -131,27 +131,6 @@ function filesNotSeen(
   );
 }
 
-/**
- * The Chat SDK bridge hands the model provider each attachment's URL, which it
- * then fails to download. `symptom` is how the failed turn shows on the channel.
- */
-function attachmentUrlPassedThrough(
-  symptom: RegExp,
-): Partial<Record<ContractRuleName, BrokenCell>> {
-  return Object.fromEntries(
-    [IMAGE_REACHES_AGENT, PDF_REACHES_AGENT, UNDOWNLOADABLE_FILE, EARLIER_FILE].map((rule) => [
-      rule,
-      {
-        reason:
-          "the bridge passes each attachment's URL to the model provider, whose download fails (#855, #3419)",
-        symptom,
-      },
-    ]),
-  );
-}
-
-const ATTACHMENT_URL_PASSED_THROUGH = attachmentUrlPassedThrough(/AI_DownloadError/u);
-
 const SIGN_IN_NOT_SHOWN = /Timed out waiting for the bot to show/u;
 
 /** The channel has no default `authorization.required` renderer, so a sign-in shows nothing. */
@@ -185,7 +164,6 @@ const UNNAMED_RESPONDER =
   "a resolved prompt doesn't say who answered; input.resolved carries no responder";
 
 const CHAT_SDK_BROKEN = {
-  ...ATTACHMENT_URL_PASSED_THROUGH,
   ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, [
     "approvalPress",
     "approvalText",
@@ -255,12 +233,6 @@ const SIGN_IN_LINK_POSTED_TO_THREAD = {
 } satisfies Partial<Record<ContractRuleName, BrokenCell>>;
 
 const TELEGRAM_BROKEN = {
-  ...filesNotSeen(
-    "#1217: Telegram serves files as application/octet-stream, which wins over their known type",
-    IMAGE_REACHES_AGENT,
-    PDF_REACHES_AGENT,
-    EARLIER_FILE,
-  ),
   ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, [
     "approvalPress",
     "approvalText",
@@ -290,10 +262,7 @@ const WEB_CHAT_SINGLE_PERSON =
 const channelConformance = {
   "chat-sdk": [
     { driver: chatSdkDriver, broken: { ...CHAT_SDK_BROKEN, ...SIGN_IN_ONLY_IN_DMS } },
-    {
-      driver: chatSdkTextDriver,
-      broken: { ...ATTACHMENT_URL_PASSED_THROUGH },
-    },
+    { driver: chatSdkTextDriver },
   ],
   "chat-sdk-dm": [{ dm: true, driver: () => chatSdkDriver("private"), broken: CHAT_SDK_BROKEN }],
   discord: [{ driver: discordDriver, broken: DISCORD_BROKEN, unsupported: DISCORD_UNSUPPORTED }],
@@ -321,14 +290,6 @@ const channelConformance = {
     {
       driver: linearDriver,
       broken: {
-        ...filesNotSeen(
-          "eve reads only uploaded images from Linear; other files stay links in the text",
-          PDF_REACHES_AGENT,
-        ),
-        ...filesNotSeen(
-          "a Linear upload eve can't download stays a link in the text, with no note",
-          UNDOWNLOADABLE_FILE,
-        ),
         "only the person signing in sees the sign-in link and code": {
           reason:
             "the code is in the elicitation body the whole issue sees; who sees the auth signal's link is unverified",
@@ -362,20 +323,7 @@ const channelConformance = {
       },
     },
   ],
-  twilio: [
-    {
-      driver: twilioDriver,
-      broken: {
-        ...filesNotSeen(
-          "the channel parses MMS media but never passes it to the agent",
-          IMAGE_REACHES_AGENT,
-          PDF_REACHES_AGENT,
-          UNDOWNLOADABLE_FILE,
-          EARLIER_FILE,
-        ),
-      },
-    },
-  ],
+  twilio: [{ driver: twilioDriver }],
   "web-chat": [
     {
       driver: webChatDriver,
