@@ -271,7 +271,7 @@ describe("exported agent telemetry contract", () => {
         expect(outer.attributes["agent.action.kind"]).toBe("tool-call");
         expect(nested.parentSpanContext?.spanId).toBe(outer.spanContext().spanId);
         expect(nested.attributes).toMatchObject({
-          "agent.action.kind": "nested-tool-call",
+          "agent.action.kind": "tool-call",
           "agent.action.parent_call_id": "call-1",
           "agent.action.name": "linear__get_issue",
         });

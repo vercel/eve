@@ -125,7 +125,7 @@ export function createAgentActionInstrumentation(input: {
         {
           attributes: {
             "agent.action.call_id": state.callId,
-            "agent.action.kind": state.parentCallId === undefined ? state.kind : "nested-tool-call",
+            "agent.action.kind": state.kind,
             ...(state.parentCallId === undefined
               ? undefined
               : { "agent.action.parent_call_id": state.parentCallId }),
