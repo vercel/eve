@@ -312,6 +312,9 @@ const hitlConformance = {
       unsupported: {
         "pressing an option of an answered question sends it to the agent as new input":
           "an answered question disables its options, so nothing is left to press",
+        // Skipped rather than broken: whether the re-raised prompt shows depends on event timing.
+        "reply of stop on budget prompt halts work, next message asks again":
+          "a re-raised budget prompt keeps its request id, and eve/client ignores ids it has seen",
         "pressing Approve names who approved on the approval": WEB_CHAT_SINGLE_PERSON,
         "approving by text names who approved on the approval": WEB_CHAT_SINGLE_PERSON,
         "pressing an option names who answered on the question": WEB_CHAT_SINGLE_PERSON,
@@ -417,12 +420,13 @@ export function renderHitlConformanceMatrix(): string {
   const nameOf = (entry: ConformanceChannel) => entry.driver().name;
   const dmOf = (entry: ConformanceChannel) =>
     all.filter((dm) => dm.dm === true && nameOf(dm) === `${nameOf(entry)}-dm`);
-  // The TUI, then Chat SDK's bridges, then channels with a DM column, then the
-  // rest. Each DM column sits right after its channel's shared-thread column.
+  // The TUI and web chat, then Chat SDK's bridges, then channels with a DM column,
+  // then the rest. Each DM column sits right after its channel's shared-thread column.
   const group = (entry: ConformanceChannel) => {
     if (nameOf(entry) === "tui") return 0;
-    if (nameOf(entry).startsWith("chat-sdk")) return 1;
-    return dmOf(entry).length > 0 ? 2 : 3;
+    if (nameOf(entry) === "web chat") return 1;
+    if (nameOf(entry).startsWith("chat-sdk")) return 2;
+    return dmOf(entry).length > 0 ? 3 : 4;
   };
   const entries = all
     .filter((entry) => entry.dm !== true)
