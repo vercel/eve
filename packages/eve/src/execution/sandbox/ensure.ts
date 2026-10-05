@@ -51,7 +51,11 @@ interface OpenedSandbox {
 const pendingSandboxStarts = new Map<string, Promise<SandboxSessionState | null>>();
 
 export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Promise<SandboxAccess> {
-  let persisted: SandboxSessionState | null = input.state?.session ?? null;
+  // Sessions saved before the provider redesign (eve 0.64) hold a backend
+  // record with no `providerName`. No provider can resume it, so treat it as
+  // no sandbox and let the selector start a fresh one.
+  let persisted: SandboxSessionState | null =
+    input.state?.session?.providerName === undefined ? null : input.state.session;
   let opened: OpenedSandbox | undefined;
   let opening: Promise<SandboxProviderHandle> | undefined;
   let requiring: Promise<SandboxProviderHandle> | undefined;

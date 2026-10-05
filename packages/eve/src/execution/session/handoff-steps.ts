@@ -99,7 +99,13 @@ export async function validateSessionCheckpointStep(input: {
   const bundle = context.require(BundleKey);
   const session = readDurableSession(checkpoint.sessionState);
   const sandboxState = session.sandboxState?.session;
-  if (sandboxState !== null && sandboxState !== undefined) {
+  // A record without `providerName` predates the provider redesign (eve 0.64)
+  // and is ignored at runtime, so it must not block the handoff.
+  if (
+    sandboxState !== null &&
+    sandboxState !== undefined &&
+    sandboxState.providerName !== undefined
+  ) {
     const definition =
       getResolvedRuntimeAgentNode(bundle.graph, bundle.nodeId).sandboxRegistry.sandbox.inheritance
         ?.definition ??
