@@ -95,18 +95,15 @@ Proactive sessions need an existing conversation reference, because the Bot Fram
 
 ### Attachments
 
-Inbound files are off by default. Opt in to allow personal-scope downloads and public media URLs:
+Inbound files reach the agent as file parts. eve downloads images pasted into a message from Microsoft Bot Connector hosts with your bot credentials, and files uploaded in a personal chat from their pre-authenticated SharePoint download URL (`*.sharepoint.com` or `*.sharepoint.us`). A failed download reaches the agent as a short note. Personal-chat uploads need `supportsFiles: true` on the bot in your Teams app manifest.
+
+Use `allowedHosts` to download from other hosts, unauthenticated, or `enabled: false` to drop attachments:
 
 ```ts
 export default teamsChannel({
-  files: {
-    enabled: true,
-    allowedHosts: ["smba.trafficmanager.net", "contoso.sharepoint.com"],
-  },
+  files: { allowedHosts: ["files.contoso.com"] },
 });
 ```
-
-eve authenticates downloads from Microsoft Bot Connector hosts with your bot credentials. Downloads from other allowlisted hosts remain unauthenticated.
 
 ## What to read next
 

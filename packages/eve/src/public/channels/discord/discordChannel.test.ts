@@ -583,6 +583,7 @@ describe("defaultDiscordAuth", () => {
   it("derives guild-scoped user auth", () => {
     const auth = defaultDiscordAuth({
       applicationId: "APP1",
+      attachments: [],
       channelId: "C01",
       commandName: "ask",
       guildId: "G01",

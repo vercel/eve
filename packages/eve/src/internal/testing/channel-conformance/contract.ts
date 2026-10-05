@@ -201,9 +201,17 @@ interface SeenFile {
   readonly url?: string;
 }
 
-/** Asks the agent which files it can see, and reads its answer from the channel's reply. */
-async function attachmentsSeen(conversation: ChannelConversation): Promise<readonly SeenFile[]> {
-  await conversation.say(LIST_ATTACHMENTS);
+/**
+ * Asks the agent which files it can see, sending `files` with the question, and
+ * reads its answer from the channel's reply. Sending a file with the question
+ * keeps the check to one message, which a channel that starts a session per
+ * message, such as Discord's slash commands, can still answer.
+ */
+async function attachmentsSeen(
+  conversation: ChannelConversation,
+  files?: readonly SentFile[],
+): Promise<readonly SeenFile[]> {
+  await conversation.say(LIST_ATTACHMENTS, files);
   const shown = await conversation.waitForShown(ATTACHMENTS_REPLY);
   return JSON.parse(ATTACHMENTS_REPLY.exec(shown)![1]!) as SeenFile[];
 }
@@ -219,9 +227,7 @@ function asSeen(file: SentFile): SeenFile {
 
 /** Sends `file` with a message, then checks the agent sees exactly it. */
 async function expectFileReachesAgent(conversation: ChannelConversation, file: SentFile) {
-  await conversation.say(`Alice attached ${file.name}.`, [file]);
-  await conversation.waitForReplyTo(`Alice attached ${file.name}.`);
-  const seen = await attachmentsSeen(conversation);
+  const seen = await attachmentsSeen(conversation, [file]);
   expect(
     seen.map(({ bytes, mediaType, sha256, url }) => ({ bytes, mediaType, sha256, url })),
     `the agent saw ${JSON.stringify(seen)}`,
@@ -792,12 +798,9 @@ export const hitlContract = [
     source: "#855, #3419",
     requires: ["attachments"],
     async run(conversation) {
-      const text = `Alice attached ${DIAGRAM.name}.`;
-      await conversation.say(text, [{ ...DIAGRAM, downloadable: false }]);
-      await conversation.waitForReplyTo(text);
       // A link left for the model provider fails again on every later turn (#3419).
       expect(
-        await attachmentsSeen(conversation),
+        await attachmentsSeen(conversation, [{ ...DIAGRAM, downloadable: false }]),
         "the agent was handed a file it can't open",
       ).toEqual([]);
       await conversation.say(FOLLOW_UP);

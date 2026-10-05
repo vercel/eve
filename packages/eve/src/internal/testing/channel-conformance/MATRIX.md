@@ -53,10 +53,10 @@ pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conform
 | completing a sign-in tells the person it succeeded | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[15](#note-15)</sup> | ❌<sup>[15](#note-15)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[15](#note-15)</sup> | ✅ | ✅ |
 | message after ignored sign-in gets an answer, signing in late doesn't run | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | message after ignored sign-in tells user it was cancelled | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[15](#note-15)</sup> | ✅ | ✅ |
-| an image a person sends reaches the agent with its bytes and type | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ✅ | ✅ | ✅ | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ✅ | ✅ | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ✅ | ✅ | —<sup>[20](#note-20)</sup> | ✅ | ✅ |
-| a PDF a person sends reaches the agent with its bytes and type | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ✅ |  | ✅ | —<sup>[20](#note-20)</sup> |  | —<sup>[20](#note-20)</sup> |  | ✅ |  | —<sup>[20](#note-20)</sup> |  | ✅ |  | —<sup>[20](#note-20)</sup> | ✅ | ✅ |
-| a file that can't be downloaded reaches the agent as a note, not a link, and the next message still works | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ✅ |  | ✅ | —<sup>[20](#note-20)</sup> |  | —<sup>[20](#note-20)</sup> |  | ✅ |  | —<sup>[20](#note-20)</sup> |  | ✅ |  | —<sup>[20](#note-20)</sup> | ✅ | ✅ |
-| a file sent earlier in the conversation is still there on a later message | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ✅ |  | ✅ | —<sup>[20](#note-20)</sup> |  | —<sup>[20](#note-20)</sup> |  | ✅ |  | —<sup>[20](#note-20)</sup> |  | ✅ |  | —<sup>[20](#note-20)</sup> | ✅ | ✅ |
+| an image a person sends reaches the agent with its bytes and type | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[20](#note-20)</sup> | ✅ | ✅ |
+| a PDF a person sends reaches the agent with its bytes and type | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ✅ |  | ✅ | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[20](#note-20)</sup> | ✅ | ✅ |
+| a file that can't be downloaded reaches the agent as a note, not a link, and the next message still works | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ✅ |  | ✅ | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[20](#note-20)</sup> | ✅ | ✅ |
+| a file sent earlier in the conversation is still there on a later message | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ✅ |  | ✅ | —<sup>[21](#note-21)</sup> |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[20](#note-20)</sup> | ✅ | ✅ |
 
 ## Notes
 
@@ -80,3 +80,4 @@ pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conform
 18. <a id="note-18"></a>the sign-in prompt, link included, is posted to the whole thread
 19. <a id="note-19"></a>the code is in the elicitation body the whole issue sees; who sees the auth signal's link is unverified
 20. <a id="note-20"></a>the platform has no files a person can send
+21. <a id="note-21"></a>each slash command starts its own session, so no later message shares one with the file

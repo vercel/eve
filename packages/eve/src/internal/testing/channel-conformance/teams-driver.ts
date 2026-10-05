@@ -6,6 +6,8 @@ import {
   type Surface,
   recordingFetch,
   linkTargets,
+  type SentFile,
+  serveFile,
 } from "#internal/testing/channel-conformance/harness.js";
 
 let nextConversation = 0;
@@ -69,6 +71,31 @@ export function teamsDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
     ? { tenant: { id: TENANT } }
     : { channel: { id: "CHANNEL" }, team: { id: "TEAM" }, tenant: { id: TENANT } };
   let activityId = 0;
+  /** Files a person sent, by the URL Teams lists each under. */
+  const uploads = new Map<string, SentFile>();
+
+  /**
+   * A person's files as Teams attaches them: an image pasted into the message as
+   * a Bot Connector `contentUrl`, and any other file as an upload with a
+   * pre-authenticated SharePoint `downloadUrl`.
+   */
+  function attached(files: readonly SentFile[]): Record<string, unknown>[] {
+    return files.map((file) => {
+      const id = `${conversationId}-${uploads.size + 1}`.replaceAll(/[^\w-]/gu, "");
+      if (file.mediaType.startsWith("image/")) {
+        const url = `https://smba.trafficmanager.net/amer/v3/attachments/${id}/views/original`;
+        uploads.set(url, file);
+        return { contentType: file.mediaType, contentUrl: url, name: file.name };
+      }
+      const url = `https://contoso.sharepoint.com/personal/alice/${id}/${file.name}?tempauth=signed`;
+      uploads.set(url, file);
+      return {
+        content: { downloadUrl: url, fileType: file.name.split(".").at(-1), uniqueId: id },
+        contentType: "application/vnd.microsoft.teams.file.download.info",
+        name: file.name,
+      };
+    });
+  }
 
   function nextActivityId(): string {
     activityId += 1;
@@ -92,6 +119,20 @@ export function teamsDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
   }
 
   async function decode(request: Request): Promise<PlatformCall> {
+    const url = new URL(request.url);
+    if (uploads.has(url.href)) {
+      // Bot Connector attachments need the bot's token; a SharePoint download URL carries its own.
+      const authorized =
+        url.hostname !== "smba.trafficmanager.net" ||
+        request.headers.get("authorization") === "Bearer test-token";
+      return {
+        body: {},
+        method: `GET ${url.pathname}`,
+        response: authorized
+          ? serveFile(uploads.get(url.href))
+          : new Response("Unauthorized", { status: 401 }),
+      };
+    }
     const bodyText = await request.text();
     const body = bodyText === "" ? {} : JSON.parse(bodyText);
     const path = new URL(request.url).pathname;
@@ -102,19 +143,20 @@ export function teamsDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
 
   return {
     name: personal ? "teams-dm" : "teams",
-    capabilities: ["buttons", "text-replies"],
+    capabilities: ["attachments", "buttons", "text-replies"],
     surface,
     createChannel: (record) =>
       teamsChannel({
         api: { fetch: recordingFetch(record, decode) },
         credentials: { tokenProvider: () => "test-token", webhookVerifier: () => true },
       }),
-    message: (text) =>
+    message: (text, files = []) =>
       personal
-        ? activity({ text, type: "message" })
+        ? activity({ attachments: attached(files), text, type: "message" })
         : // In a channel the default policy hears only mentions, so a person mentions the bot
           // each time, on its own line so the test model's line-based directives still read it.
           activity({
+            attachments: attached(files),
             entities: [{ mentioned: BOT, text: MENTION, type: "mention" }],
             text: `${text}\n${MENTION}`,
             textFormat: "xml",

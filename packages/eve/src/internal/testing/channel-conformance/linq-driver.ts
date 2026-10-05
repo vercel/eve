@@ -7,12 +7,15 @@ import {
   type Surface,
   numberedOptions,
   recordingFetch,
+  type SentFile,
+  serveFile,
 } from "#internal/testing/channel-conformance/harness.js";
 
 const API_KEY = "linq-conformance-api-key";
 const SIGNING_KEY = Buffer.from("linq-conformance-signing-key");
 const SIGNING_SECRET = `whsec_${SIGNING_KEY.toString("base64")}`;
 const BASE_URL = "https://linq-conformance.invalid/api/partner";
+const CDN_HOST = "cdn.linqapp.com";
 const PERSON = "alice";
 let nextChat = 0;
 
@@ -35,16 +38,31 @@ export function linqDriver(surface: Exclude<Surface, "public"> = "shared"): Chan
   let messageId = 0;
   let outbound = 0;
   let restoreFetch: (() => void) | undefined;
+  /** Files a person sent, by the permanent CDN URL Linq lists each under. */
+  const uploads = new Map<string, SentFile>();
 
-  function signedMessage(text: string): Request {
+  function signedMessage(text: string, files: readonly SentFile[] = []): Request {
     messageId += 1;
+    // Linq sends each file as a `media` part beside the text.
+    const media = files.map((file, index) => {
+      const url = `https://${CDN_HOST}/${chatId}/${messageId}-${index}/${file.name}`;
+      uploads.set(url, file);
+      return {
+        filename: file.name,
+        id: `media-${messageId}-${index}`,
+        mime_type: file.mediaType,
+        size_bytes: file.bytes.length,
+        type: "media",
+        url,
+      };
+    });
     const body = JSON.stringify({
       data: {
         // Linq's bridge hears every group message; a mention would route past its handler.
         chat: { id: chatId, is_group: group },
         direction: "inbound",
         id: `linq-inbound-${messageId}`,
-        parts: [{ type: "text", value: text }],
+        parts: [{ type: "text", value: text }, ...media],
         sender_handle: { handle: PERSON, id: PERSON, is_me: false },
       },
       event_type: "message.received",
@@ -68,12 +86,19 @@ export function linqDriver(surface: Exclude<Surface, "public"> = "shared"): Chan
 
   return {
     name: group ? "linq" : "linq-dm",
-    capabilities: ["text-replies"],
+    capabilities: ["attachments", "text-replies"],
     surface,
     createChannel(record) {
       const previousFetch = globalThis.fetch;
       const fakeFetch = recordingFetch(record, async (request) => {
         const url = new URL(request.url);
+        if (url.hostname === CDN_HOST) {
+          return {
+            body: {},
+            method: `GET ${url.pathname}`,
+            response: serveFile(uploads.get(url.href)),
+          };
+        }
         const bodyText = await request.text();
         outbound += 1;
         const id = `linq-outbound-${outbound}`;
@@ -87,7 +112,9 @@ export function linqDriver(surface: Exclude<Surface, "public"> = "shared"): Chan
       // The adapter accepts no fetch option, so route only its test host globally and preserve other fetches.
       globalThis.fetch = async (input, init) => {
         const url = new URL(input instanceof Request ? input.url : input.toString());
-        if (url.hostname === new URL(BASE_URL).hostname) return fakeFetch(input, init);
+        if (url.hostname === new URL(BASE_URL).hostname || url.hostname === CDN_HOST) {
+          return fakeFetch(input, init);
+        }
         return previousFetch(input, init);
       };
       restoreFetch = () => {

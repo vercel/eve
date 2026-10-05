@@ -168,6 +168,11 @@ const DISCORD_BROKEN = {
   ),
 };
 
+const DISCORD_UNSUPPORTED = {
+  "a file sent earlier in the conversation is still there on a later message":
+    "each slash command starts its own session, so no later message shares one with the file",
+} satisfies Partial<Record<HitlRule, string>>;
+
 const SLACK_BROKEN = {
   ...QUEUED_BUDGET_REPLY,
   ...staleAnsweredPrompts(
@@ -230,8 +235,15 @@ const hitlConformance = {
     },
   ],
   "chat-sdk-dm": [{ dm: true, driver: () => chatSdkDriver("private"), broken: CHAT_SDK_BROKEN }],
-  discord: [{ driver: discordDriver, broken: DISCORD_BROKEN }],
-  "discord-dm": [{ dm: true, driver: () => discordDriver("private"), broken: DISCORD_BROKEN }],
+  discord: [{ driver: discordDriver, broken: DISCORD_BROKEN, unsupported: DISCORD_UNSUPPORTED }],
+  "discord-dm": [
+    {
+      dm: true,
+      driver: () => discordDriver("private"),
+      broken: DISCORD_BROKEN,
+      unsupported: DISCORD_UNSUPPORTED,
+    },
+  ],
   github: [
     {
       driver: githubDriver,

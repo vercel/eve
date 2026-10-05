@@ -8,6 +8,8 @@ import {
   type Surface,
   recordingFetch,
   linkTargets,
+  type SentFile,
+  serveFile,
 } from "#internal/testing/channel-conformance/harness.js";
 
 let nextChannel = 0;
@@ -52,6 +54,8 @@ export function discordDriver(surface: Exclude<Surface, "public"> = "shared"): C
   const { privateKey, publicKeyHex } = testKeys();
   let interactionId = 0;
   let messageId = 0;
+  /** Files a person attached, by the signed CDN URL Discord lists each under. */
+  const uploads = new Map<string, SentFile>();
   /** The message each interaction token's `@original` response is, once known. */
   const originals = new Map<string, string>();
 
@@ -70,9 +74,17 @@ export function discordDriver(surface: Exclude<Surface, "public"> = "shared"): C
   }
 
   async function decode(request: Request): Promise<PlatformCall> {
+    const url = new URL(request.url);
+    if (url.hostname === "cdn.discordapp.com") {
+      return {
+        body: {},
+        method: `GET ${url.pathname}`,
+        response: serveFile(uploads.get(url.href)),
+      };
+    }
     const text = await request.text();
     const body = text === "" ? {} : JSON.parse(text);
-    const path = new URL(request.url).pathname;
+    const path = url.pathname;
     if (path.endsWith("/typing")) {
       return { body, method: `POST ${path}`, response: {} };
     }
@@ -111,21 +123,55 @@ export function discordDriver(surface: Exclude<Surface, "public"> = "shared"): C
 
   return {
     name: dm ? "discord-dm" : "discord",
-    capabilities: ["buttons"],
+    capabilities: ["attachments", "buttons"],
     surface,
     createChannel: (record) =>
       discordChannel({
         api: { fetch: recordingFetch(record, decode) },
         credentials: { applicationId: "APP1", botToken: "bot-token", publicKey: publicKeyHex },
       }),
-    message: (text) => {
+    message: (text, files = []) => {
       const id = nextInteraction();
+      // Each file rides an attachment option (type 11) whose value names it in `resolved`.
+      const attached = files.map((file, index) => {
+        const attachmentId = `A_${id}_${index}`;
+        const url = `https://cdn.discordapp.com/attachments/${channelId}/${attachmentId}/${file.name}?ex=signed`;
+        uploads.set(url, file);
+        return {
+          attachmentId,
+          option: {
+            name: index === 0 ? "file" : `file${index + 1}`,
+            type: 11,
+            value: attachmentId,
+          },
+          resolved: {
+            content_type: file.mediaType,
+            filename: file.name,
+            id: attachmentId,
+            size: file.bytes.length,
+            url,
+          },
+        };
+      });
       return signed(
         JSON.stringify({
           ...where,
           application_id: "APP1",
           channel_id: channelId,
-          data: { name: "ask", options: [{ name: "message", type: 3, value: text }] },
+          data: {
+            name: "ask",
+            options: [
+              { name: "message", type: 3, value: text },
+              ...attached.map(({ option }) => option),
+            ],
+            ...(attached.length > 0 && {
+              resolved: {
+                attachments: Object.fromEntries(
+                  attached.map(({ attachmentId, resolved }) => [attachmentId, resolved]),
+                ),
+              },
+            }),
+          },
           id,
           token: `tok-${id}`,
           type: 2,
