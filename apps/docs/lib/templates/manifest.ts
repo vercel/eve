@@ -15,6 +15,7 @@ export type TemplateIntegration =
   | "Sanity"
   | "Sentry"
   | "Slack"
+  | "Stripe Link"
   | "Typefully"
   | "Vercel"
   | "Web chat";
@@ -143,7 +144,7 @@ export const templateManifest: TemplateManifestEntry[] = [
     sourceHref: "https://github.com/Merit-Systems/OpenInstinct/tree/main",
     category: "Example",
     model: "anthropic/claude-sonnet-5",
-    integrations: ["Linq", "Vercel"],
+    integrations: ["Linq", "Stripe Link", "Vercel"],
     source: "Vercel Templates",
     github: { owner: "Merit-Systems", repo: "OpenInstinct", ref: "main" },
     files: [
