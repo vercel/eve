@@ -33,7 +33,6 @@ const log = createLogger("harness.instrumentation-runtime-context");
 export interface BuildTelemetryRuntimeContextInput {
   readonly capturesContent: boolean;
   readonly context?: InstrumentationRuntimeContextSnapshot;
-  readonly eveVersion: string;
   readonly emissionState: TurnPosition;
   readonly environment: string;
   readonly modelInput: {
@@ -86,23 +85,15 @@ export function buildTelemetryRuntimeContext(
   }
 
   const providerRuntimeContext = resolveProviderRuntimeContext(input);
-  const context = input.context ?? snapshotInstrumentationRuntimeContext(contextStorage.getStore());
-  const projection = context.channel;
 
   return {
     ...providerRuntimeContext,
-    "eve.channel.kind": normalizeInstrumentationChannelKind(projection?.kind),
     "eve.environment": input.environment,
-    "eve.session.id": input.session.sessionId,
-    "eve.step.index": String(input.emissionState.stepIndex),
-    "eve.turn.id": input.emissionState.turnId,
-    "eve.turn.sequence": String(input.emissionState.sequence),
-    "eve.version": input.eveVersion,
   };
 }
 
 function buildInstrumentationStepStartedInput(
-  input: Omit<BuildTelemetryRuntimeContextInput, "eveVersion" | "environment">,
+  input: Omit<BuildTelemetryRuntimeContextInput, "environment">,
 ): InstrumentationStepStartedEventInput {
   const context = input.context ?? snapshotInstrumentationRuntimeContext(contextStorage.getStore());
   const projection = context.channel;

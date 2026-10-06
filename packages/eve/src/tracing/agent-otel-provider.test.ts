@@ -1481,12 +1481,12 @@ describe("createAgentOtelInstrumentation", () => {
     expect(step.attributes).toMatchObject({
       "agent.framework.name": "eve",
       "agent.model.id": "claude-test",
-      "agent.model.provider": "anthropic",
       "agent.usage.cache_read_tokens": 4,
       "agent.usage.cache_write_tokens": 2,
       "agent.usage.input_tokens": 10,
       "agent.usage.output_tokens": 5,
     });
+    expect(step.attributes).not.toHaveProperty("agent.model.provider");
     expect(model.attributes).toMatchObject({
       "gen_ai.response.id": "response-1",
       "gen_ai.response.model": "claude-response",
@@ -1626,7 +1626,7 @@ describe("createAgentOtelInstrumentation", () => {
     const actions = runtime!.exporter
       .getFinishedSpans()
       .filter((span) => span.attributes["gen_ai.operation.name"] === "execute_tool");
-    expect(actions.map((span) => span.attributes["agent.action.call_id"]).sort()).toEqual([
+    expect(actions.map((span) => span.attributes["gen_ai.tool.call.id"]).sort()).toEqual([
       "wait",
       "workflow",
     ]);
@@ -1905,7 +1905,7 @@ describe("createAgentOtelInstrumentation", () => {
       hooks: runtime.hooks,
       runInContext: runtime.runInContext,
       runtimeContext: {
-        "eve.session.id": "session-1",
+        "eve.environment": "production",
         "posthog.distinct_id": "user-123",
         nested: { ignored: undefined, team: "platform" },
         tags: ["a", "b"],
@@ -1921,7 +1921,7 @@ describe("createAgentOtelInstrumentation", () => {
     const model = byName(spans, "chat claude-test")[0]!;
     for (const span of [step, model]) {
       expect(span.attributes).toMatchObject({
-        "ai.settings.context.eve.session.id": "session-1",
+        "ai.settings.context.eve.environment": "production",
         "ai.settings.context.posthog.distinct_id": "user-123",
         "ai.settings.context.nested.team": "platform",
         "ai.settings.context.tags": ["a", "b"],
@@ -2240,10 +2240,12 @@ describe("createAgentOtelInstrumentation", () => {
     const spans = replacement.exporter.getFinishedSpans();
     const approval = byName(spans, "agent.approval")[0]!;
     const action = byName(spans, "execute_tool weather")[0]!;
+    expect(approval.attributes).not.toHaveProperty("agent.action.call_id");
+    expect(action.attributes).not.toHaveProperty("agent.action.call_id");
     expect(approval.parentSpanContext?.spanId).toBe(action.spanContext().spanId);
     expect(approval.status.code).toBe(SpanStatusCode.UNSET);
     expect(approval.attributes).toMatchObject({
-      "agent.action.call_id": "tool-1",
+      "gen_ai.tool.call.id": "tool-1",
       "agent.action.name": "weather",
       "agent.approval.kind": "tool-approval",
       "agent.approval.outcome": "approved",
@@ -2596,12 +2598,12 @@ describe("createAgentOtelInstrumentation", () => {
       await runtime.provider.forceFlush();
       return runtime.exporter
         .getFinishedSpans()
-        .find((span) => span.attributes["agent.action.call_id"] !== undefined)!;
+        .find((span) => span.attributes["gen_ai.tool.call.id"] !== undefined)!;
     };
 
     const recorded = await run(createRuntime(), "recorded");
+    expect(recorded.attributes).not.toHaveProperty("agent.action.error.code");
     expect(recorded.attributes).toMatchObject({
-      "agent.action.error.code": "PUBLISH_FAILED",
       "agent.action.outcome": "failed",
       "error.type": "PUBLISH_FAILED",
     });
@@ -2628,7 +2630,6 @@ describe("createAgentOtelInstrumentation", () => {
       "redacted",
     );
     expect(redacted.attributes).toMatchObject({
-      "agent.action.error.code": "PUBLISH_FAILED",
       "agent.action.outcome": "failed",
       "error.type": "PUBLISH_FAILED",
     });
@@ -3324,7 +3325,6 @@ describe("createAgentOtelInstrumentation", () => {
     const action = byName(spans, "execute_tool weather")[0]!;
     expect(action.status.code).toBe(SpanStatusCode.ERROR);
     expect(action.attributes).toMatchObject({
-      "agent.action.error.code": "TOOL_CALL_FAILED",
       "agent.action.outcome": "failed",
       "error.type": "TOOL_CALL_FAILED",
     });

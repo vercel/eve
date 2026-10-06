@@ -261,9 +261,9 @@ describe("exported agent telemetry contract", () => {
           .getFinishedSpans()
           .filter((span) => span.attributes["gen_ai.operation.name"] === "execute_tool");
         expect(actions).toHaveLength(2);
-        const outer = actions.find((span) => span.attributes["agent.action.call_id"] === "call-1")!;
+        const outer = actions.find((span) => span.attributes["gen_ai.tool.call.id"] === "call-1")!;
         const nested = actions.find(
-          (span) => span.attributes["agent.action.call_id"] === "call-1:1",
+          (span) => span.attributes["gen_ai.tool.call.id"] === "call-1:1",
         )!;
         expect(outer.attributes["agent.action.kind"]).toBe("tool-call");
         expect(nested.parentSpanContext?.spanId).toBe(outer.spanContext().spanId);
@@ -284,7 +284,7 @@ describe("exported agent telemetry contract", () => {
         );
         const metadataNested = runtime.metadata
           .getFinishedSpans()
-          .find((span) => span.attributes["agent.action.call_id"] === "call-1:1")!;
+          .find((span) => span.attributes["gen_ai.tool.call.id"] === "call-1:1")!;
         expect(metadataNested.attributes).not.toHaveProperty("gen_ai.tool.call.arguments");
       } finally {
         await runtime.shutdown();
@@ -1118,7 +1118,7 @@ describe("exported agent telemetry contract", () => {
       const workflow = parsed.find(
         (span) =>
           span.attributes["gen_ai.operation.name"] === "execute_tool" &&
-          span.attributes["agent.action.call_id"] === "workflow",
+          span.attributes["gen_ai.tool.call.id"] === "workflow",
       )!;
       const activation = parsed.find(
         (span) => span.name === "invoke_agent child" && isAgentTurnSpan(span),

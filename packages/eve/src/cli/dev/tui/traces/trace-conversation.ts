@@ -253,7 +253,9 @@ function turnSubagent(
   const name = stringAttribute(parent, "agent.action.name");
   return {
     name: name === undefined ? undefined : stripTerminalControls(name),
-    parentCallId: stringAttribute(parent, "agent.action.call_id"),
+    parentCallId:
+      stringAttribute(parent, "gen_ai.tool.call.id") ??
+      stringAttribute(parent, "agent.action.call_id"),
     parentTurnId,
   };
 }

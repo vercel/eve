@@ -238,8 +238,9 @@ describe("buildConversationItems", () => {
       ]),
       "ai.response.text": "Dispatching.",
     });
-    const parentAction = span("e".repeat(16), "agent.action", 20, 30, step1.spanId, {
-      "agent.action.call_id": "call-1",
+    const parentAction = span("e".repeat(16), "execute_tool echo-marker", 20, 30, step1.spanId, {
+      "gen_ai.operation.name": "execute_tool",
+      "gen_ai.tool.call.id": "call-1",
       "agent.action.kind": "subagent-call",
       "agent.action.name": "echo-marker",
       "agent.turn.id": "turn_0",

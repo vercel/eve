@@ -57,7 +57,6 @@ import {
 } from "#harness/turn-tag-state.js";
 import type { StepResult } from "#harness/types.js";
 import type { InstrumentationAttempt } from "#instrumentation/runtime.js";
-import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { maybeCompact } from "#harness/compaction/step.js";
 import { buildGatewayAttributionHeaders } from "./model.js";
@@ -79,7 +78,6 @@ import { logToolExecutionError, type ModelTools, prepareModelTools } from "./too
 import { extractGatewayCostUsd, extractTokenUsageDelta } from "./usage.js";
 
 const environment = process.env.NODE_ENV ?? "unknown";
-const eveVersion = resolveInstalledPackageInfo().version;
 
 const log = createLogger("harness.tool-loop");
 
@@ -311,7 +309,6 @@ export class ModelCaller {
       step.instrumentation?.resolveRuntimeContext({
         emissionState: step.position(),
         environment,
-        eveVersion,
         modelInput: { instructions, messages: this.modelMessages },
         session: step.session,
       }) ?? {};

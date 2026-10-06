@@ -56,11 +56,9 @@ const ALLOWED_ATTRIBUTE_DIFFERENCES = new Set([
   "eve.tool.invocation",
   "eve.tool.outcome",
   // Durable calls carry the accepted action's identity and lifecycle metadata.
-  "agent.action.call_id",
   "agent.action.kind",
   "agent.action.name",
   "agent.action.outcome",
-  "agent.action.error.code",
   // Accepted failures use the durable error code; direct failures retain the thrown type.
   "error.type",
   "agent.framework.name",

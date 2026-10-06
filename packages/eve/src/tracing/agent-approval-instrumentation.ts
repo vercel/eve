@@ -100,7 +100,7 @@ export function createAgentApprovalInstrumentation(input: {
           AGENT_SPAN_NAMES.approval,
           {
             attributes: {
-              "agent.action.call_id": state.actionCallId,
+              "gen_ai.tool.call.id": state.actionCallId,
               "agent.action.name": state.actionName,
               "agent.approval.kind": "tool-approval",
               "agent.approval.outcome": event.outcome,

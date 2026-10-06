@@ -170,8 +170,6 @@ export function createAgentToolInstrumentation(input: {
       );
       if (event.usage !== undefined) setAgentUsage(span, event.usage);
       if (event.type === "tool.call.failed") {
-        if (event.errorCode !== undefined)
-          span.setAttribute("agent.action.error.code", event.errorCode);
         recordToolError(span, event.error, event.errorCode);
       } else if (event.output.type === "error") {
         recordToolError(span, event.output.error);
@@ -204,7 +202,6 @@ export function createAgentToolInstrumentation(input: {
         `execute_tool ${state.name}`,
         {
           attributes: {
-            "agent.action.call_id": state.callId,
             "agent.action.kind": state.kind,
             "agent.action.name": state.name,
             ...(state.parentCallId === undefined

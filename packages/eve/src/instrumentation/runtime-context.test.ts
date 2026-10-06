@@ -35,13 +35,7 @@ const emissionState: TurnPosition = {
 const messages: readonly ModelMessage[] = [{ content: "hello", role: "user" }];
 
 const FRAMEWORK_KEYS = {
-  "eve.channel.kind": "unknown",
   "eve.environment": "test",
-  "eve.session.id": "test-session",
-  "eve.step.index": "1",
-  "eve.turn.id": "turn_2",
-  "eve.turn.sequence": "2",
-  "eve.version": "0.0.0-test",
 };
 
 function build(
@@ -49,7 +43,6 @@ function build(
 ): Record<string, unknown> | undefined {
   return buildTelemetryRuntimeContext({
     capturesContent: false,
-    eveVersion: "0.0.0-test",
     emissionState,
     environment: "test",
     modelInput: { instructions: undefined, messages },
@@ -64,11 +57,11 @@ describe("buildTelemetryRuntimeContext", () => {
     expect(build({ providerResolvers: undefined })).toBeUndefined();
   });
 
-  it("emits framework identifiers when no resolver is configured", () => {
+  it("emits only environment context when the resolver returns no values", () => {
     expect(build()).toEqual(FRAMEWORK_KEYS);
   });
 
-  it("reflects the active channel kind and exposes channel metadata to the resolver", () => {
+  it("exposes the active channel kind and metadata to the resolver", () => {
     const ctx = new ContextContainer();
     const resolver: RuntimeContextResolver = (input) => {
       if (input.channel.kind !== "channel:support") return undefined;
@@ -90,8 +83,8 @@ describe("buildTelemetryRuntimeContext", () => {
       }),
     );
 
-    expect(runtimeContext).toMatchObject({
-      "eve.channel.kind": "channel:support",
+    expect(runtimeContext).toEqual({
+      "eve.environment": "test",
       "slack.user_id": "U999",
     });
   });

@@ -361,7 +361,6 @@ export function createAgentOtelInstrumentation(
     const attempt = steps.get(event.scope);
     if (attempt === undefined) return;
     attempt.span.setAttribute("agent.model.id", event.model.modelId);
-    attempt.span.setAttribute("agent.model.provider", event.model.provider);
     const span = input.tracer.startSpan(
       modelSpanName(event.model.modelId),
       {

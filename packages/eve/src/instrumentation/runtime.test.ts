@@ -271,7 +271,6 @@ describe("initializeSessionInstrumentation", () => {
         },
         async (scope) =>
           scope.resolveRuntimeContext({
-            eveVersion: "0.0.0",
             emissionState: { sessionStarted: true, sequence: 0, stepIndex: 0, turnId: "turn-1" },
             environment: "test",
             modelInput: {
@@ -807,7 +806,6 @@ describe("bindInstrumentationRuntime", () => {
     };
     const readScopedState = (scope: InstrumentationStepScope<{ sessionId: string }>) => ({
       messageCount: scope.resolveRuntimeContext({
-        eveVersion: "0.0.0",
         emissionState: { sessionStarted: true, sequence: 0, stepIndex: 0, turnId: "turn-1" },
         environment: "test",
         modelInput: { instructions: undefined, messages: [{ content: "secret", role: "user" }] },
