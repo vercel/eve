@@ -1,5 +1,22 @@
 # eve
 
+## 0.71.3
+
+### Patch Changes
+
+- a8262be: When someone other than the person who asked approves a tool call, only that call now runs as the approver. Before, the approver became the caller for the rest of the turn, so later tool calls and approvals in that turn also ran with the approver's identity and credentials.
+- 8ecfd4f: Show the budget prompt again when someone sends a message after pressing Stop on it. The re-raised prompt reused the earlier prompt's request id, so `eve/client`, the Web Chat template, and the dev TUI treated it as already answered and left it unanswerable.
+- 8df6c83: Typing "approve" on a session budget prompt now resumes the session when you had already sent another message while the prompt was open. Before, eve joined your queued message and the approval into a single message that matched neither option, so the agent stayed blocked. The queued message now runs after the approval.
+- a2453a9: `chatgpt()` now sends `serviceTier: "fast"` to the Codex backend as `priority`, the value the Codex CLI uses for Fast mode, instead of failing with `400 Unsupported service_tier: fast`.
+- dcb995c: Select web search backends using the resolved model provider so dynamic models from non-Gateway providers do not receive AI Gateway tools.
+- 61e20b2: Return a not-found or transient error before opening an unavailable session stream, and close streams after terminal failures.
+- 77c2d3e: Include a new message in the first model step after cancelling a turn that was waiting for tool approval, instead of first replying to the cancelled call alone.
+- 1066932: `eve build` keeps the named exports of the Nitro preset entry. Builds with presets such as `NITRO_PRESET=node-middleware` export `middleware` and `handleUpgrade` again instead of only `default`.
+- 55d4604: Channel route handlers now receive `invokeTool(name, input, { auth })`, which runs one of the agent's tools as the given caller outside any conversation, with a sandbox that lasts for the call. Tools whose approval policy asks a person resolve to `approval-required` without running.
+- 61e20b2: Fix channel `session.completed` handlers throwing when a session expires, resets, or closes between turns. The handler's `ctx.session.turn` reports the session's last turn.
+- dd36ab3: Fix nested connector actions appearing as unrelated model tool calls in traces: they now carry their parent call ID and nest beneath the calling action. Action spans also retain their request start time and cover tool execution when SDK telemetry arrives first.
+- 3d78c3e: The Web Chat template now shows every question a tool call asks at once. Before, when a workflow called `ctx.ask` twice in parallel, the second question replaced the first, so the first question couldn't be answered and the tool stayed blocked.
+
 ## 0.71.2
 
 ### Patch Changes
