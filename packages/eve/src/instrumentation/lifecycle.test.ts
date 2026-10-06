@@ -262,7 +262,7 @@ describe("provider state lifecycle", () => {
     const actionKey = actionIdempotencyKey(scope.sessionId, scope.turnId, "call-1");
     const hooks = createInstrumentationHooks([
       {
-        events: { "action.started": (_event, ctx) => ctx.state.set("open") },
+        events: { "tool.call.started": (_event, ctx) => ctx.state.set("open") },
         name: "sink",
       },
     ]);
@@ -272,9 +272,9 @@ describe("provider state lifecycle", () => {
         idempotencyKey: actionKey,
         input: {},
         kind: "tool-call",
-        name: "tool",
+        toolName: "tool",
         scope,
-        type: "action.started",
+        type: "tool.call.started",
       });
       await hooks.publish({
         idempotencyKey: attemptIdempotencyKey(scope),
@@ -291,8 +291,8 @@ describe("provider state lifecycle", () => {
     const hooks = createInstrumentationHooks([
       {
         events: {
-          "action.failed": failed,
-          "action.started": (_event, ctx) => ctx.state.set("open"),
+          "tool.call.failed": failed,
+          "tool.call.started": (_event, ctx) => ctx.state.set("open"),
         },
         name: "sink",
       },
@@ -304,9 +304,9 @@ describe("provider state lifecycle", () => {
         idempotencyKey: actionKey,
         input: {},
         kind: "tool-call",
-        name: "tool",
+        toolName: "tool",
         scope,
-        type: "action.started",
+        type: "tool.call.started",
       });
       await hooks.publish({
         idempotencyKey: turnIdempotencyKey(scope.sessionId, scope.turnId),
@@ -321,7 +321,7 @@ describe("provider state lifecycle", () => {
     expect(failed.mock.calls[0]?.[0]).toMatchObject({
       errorCode: "ACTION_CANCELLED",
       outcome: "cancelled",
-      type: "action.failed",
+      type: "tool.call.failed",
     });
   });
 });
@@ -892,7 +892,7 @@ describe("trace policies", () => {
     const observed = vi.fn();
     const hooks = createInstrumentationHooks([
       {
-        events: { "action.started": observed },
+        events: { "tool.call.started": observed },
         name: "private-audit",
         tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: false }),
       },
@@ -903,9 +903,9 @@ describe("trace policies", () => {
       idempotencyKey: actionIdempotencyKey(scope.sessionId, scope.turnId, "call-1"),
       input: { secret: "private" },
       kind: "tool-call",
-      name: "weather",
+      toolName: "weather",
       scope,
-      type: "action.started",
+      type: "tool.call.started",
     });
 
     expect(observed.mock.calls[0]?.[0].input).toEqual({ secret: "private" });
@@ -1137,9 +1137,9 @@ describe("trace policies", () => {
     const metadataOnly = vi.fn();
     const wantsContent = vi.fn();
     const hooks = createInstrumentationHooks([
-      { events: { "action.failed": metadataOnly }, name: "metadata" },
+      { events: { "tool.call.failed": metadataOnly }, name: "metadata" },
       {
-        events: { "action.failed": wantsContent },
+        events: { "tool.call.failed": wantsContent },
         name: "content",
         tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
       },
@@ -1153,14 +1153,14 @@ describe("trace policies", () => {
       idempotencyKey: actionIdempotencyKey(scope.sessionId, scope.turnId, "call-1"),
       outcome: "failed",
       scope: actionScope,
-      type: "action.failed",
+      type: "tool.call.failed",
     });
 
     expect(metadataOnly.mock.calls[0]?.[0]).toMatchObject({
       error: undefined,
       errorCode: "SUBAGENT_EXECUTION_FAILED",
       outcome: "failed",
-      type: "action.failed",
+      type: "tool.call.failed",
     });
     expect(Object.isFrozen(metadataOnly.mock.calls[0]?.[0])).toBe(true);
     expect(wantsContent.mock.calls[0]?.[0].error).toEqual(error);
@@ -1171,7 +1171,7 @@ describe("trace policies", () => {
   it("keeps action outcome and usage when output content is withheld", async () => {
     const metadataOnly = vi.fn();
     const hooks = createInstrumentationHooks([
-      { events: { "action.completed": metadataOnly }, name: "metadata" },
+      { events: { "tool.call.completed": metadataOnly }, name: "metadata" },
     ]);
     await hooks.publish({
       acceptedAtMs: 1_234,
@@ -1179,7 +1179,7 @@ describe("trace policies", () => {
       outcome: "completed",
       output: { output: "private result", type: "result" },
       scope,
-      type: "action.completed",
+      type: "tool.call.completed",
       usage: { inputTokens: 10, outputTokens: 5 },
     });
 

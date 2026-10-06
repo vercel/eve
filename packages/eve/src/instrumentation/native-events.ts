@@ -2,8 +2,8 @@ import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { contextStorage } from "#context/container.js";
 import { instrumentChannelDelivery } from "#instrumentation/channel-delivery.js";
 import type {
-  InstrumentationActionFailedEvent,
-  InstrumentationActionStartedEvent,
+  InstrumentationToolCallFailedEvent,
+  InstrumentationToolCallStartedEvent,
   InstrumentationAttemptScope,
   InstrumentationHooks,
   InstrumentationInputRequestedEvent,
@@ -241,10 +241,10 @@ async function publishActionStarts(
         input: capturesInputs ? action.input : undefined,
         ...(deferred ? { isWorkflowTool: true } : undefined),
         kind: action.kind === "workflow-tool-call" ? "tool-call" : action.kind,
-        name: actionName(action),
+        toolName: actionName(action),
         scope,
-        type: "action.started",
-      } satisfies InstrumentationActionStartedEvent),
+        type: "tool.call.started",
+      } satisfies InstrumentationToolCallStartedEvent),
     );
   }
 }
@@ -262,8 +262,8 @@ async function publishActionTerminal(
   const { idempotencyKey, scope } = correlation;
   const capturesOutputs = hooks.capturesOutputs ?? hooks.capturesContent;
   if (correlation.toolCall !== undefined) {
-    await hooks.publish(Object.freeze(correlation.toolCall));
-    await hooks.publish(
+    await hooks.observeToolExecution?.(Object.freeze(correlation.toolCall));
+    await hooks.observeToolExecution?.(
       Object.freeze({
         type: "tool.call.completed",
         idempotencyKey: correlation.toolCall.idempotencyKey,
@@ -294,7 +294,7 @@ async function publishActionTerminal(
             : { type: "result" },
         ),
         scope,
-        type: "action.completed",
+        type: "tool.call.completed",
         usage: actionUsage(event.data.result),
       }),
     );
@@ -316,9 +316,9 @@ async function publishActionTerminal(
       idempotencyKey,
       outcome: event.data.status,
       scope,
-      type: "action.failed",
+      type: "tool.call.failed",
       usage: actionUsage(event.data.result),
-    } satisfies InstrumentationActionFailedEvent),
+    } satisfies InstrumentationToolCallFailedEvent),
   );
 }
 

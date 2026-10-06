@@ -1,7 +1,7 @@
 import type { Attributes, SpanContext } from "#compiled/@opentelemetry/api/index.js";
 
 import type {
-  InstrumentationActionKind,
+  InstrumentationToolCallKind,
   InstrumentationParentLineage,
   InstrumentationPrincipalSummary,
   InstrumentationTraceContext,
@@ -58,7 +58,7 @@ export interface AgentActionTraceState {
   readonly callId: string;
   readonly channelAudience?: ChannelAudience;
   readonly inputAttribute?: string;
-  readonly kind: InstrumentationActionKind;
+  readonly kind: InstrumentationToolCallKind;
   readonly name: string;
   readonly parent: InstrumentationTraceContext;
   readonly parentCallId?: string;

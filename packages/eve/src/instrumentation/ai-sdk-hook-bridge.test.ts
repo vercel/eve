@@ -453,7 +453,7 @@ describe("createAiSdkHookBridge", () => {
     const after = vi.fn();
     const hooks = createInstrumentationHooks([
       {
-        events: { "tool.call.failed": after },
+        toolExecution: { failed: after },
         name: "after",
         tracePolicy: contentTracePolicy,
       },
@@ -467,7 +467,6 @@ describe("createAiSdkHookBridge", () => {
 
     expect(after).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ error: reason, type: "tool.call.failed" }),
-      expect.anything(),
     );
   });
 
@@ -644,10 +643,9 @@ describe("createAiSdkHookBridge", () => {
       const actionStarted = vi.fn();
       const hooks = createInstrumentationHooks([
         {
-          events: {
-            "action.started": actionStarted,
-            "tool.call.completed": after,
-            "tool.call.started": before,
+          toolExecution: {
+            completed: after,
+            started: before,
           },
           name: "spy",
           tracePolicy: contentTracePolicy,
@@ -661,28 +659,22 @@ describe("createAiSdkHookBridge", () => {
         { callId: "call-1", toolCall, toolExecutionMs: 1, toolOutput },
       ]);
 
-      expect(before).toHaveBeenCalledExactlyOnceWith(
-        {
-          callId: "tool-1",
-          idempotencyKey: `tool:${scope.attemptId}:tool-1:0`,
-          frameworkTool: false,
-          input: { q: "eve" },
-          scope,
-          toolName: "search",
-          type: "tool.call.started",
-        },
-        expect.anything(),
-      );
-      expect(after).toHaveBeenCalledExactlyOnceWith(
-        {
-          durationMs: 1,
-          idempotencyKey: `tool:${scope.attemptId}:tool-1:0`,
-          output: expected,
-          scope,
-          type: "tool.call.completed",
-        },
-        expect.anything(),
-      );
+      expect(before).toHaveBeenCalledExactlyOnceWith({
+        callId: "tool-1",
+        idempotencyKey: `tool:${scope.attemptId}:tool-1:0`,
+        frameworkTool: false,
+        input: { q: "eve" },
+        scope,
+        toolName: "search",
+        type: "tool.call.started",
+      });
+      expect(after).toHaveBeenCalledExactlyOnceWith({
+        durationMs: 1,
+        idempotencyKey: `tool:${scope.attemptId}:tool-1:0`,
+        output: expected,
+        scope,
+        type: "tool.call.completed",
+      });
       expect(actionStarted).not.toHaveBeenCalled();
     },
   );
@@ -697,10 +689,9 @@ describe("createAiSdkHookBridge", () => {
         events: {
           "model.call.completed": modelCompleted,
           "model.call.started": modelStarted,
-          "tool.call.completed": toolCompleted,
-          "tool.call.started": toolStarted,
         },
         name: "metadata-only",
+        toolExecution: { completed: toolCompleted, started: toolStarted },
       },
     ]);
     const bridge = createAiSdkHookBridge(scope, hooks, undefined, undefined, () => true);
@@ -753,9 +744,9 @@ describe("createAiSdkHookBridge", () => {
     const metadataOnly = vi.fn();
     const wantsContent = vi.fn();
     const hooks = createInstrumentationHooks([
-      { events: { "tool.call.started": metadataOnly }, name: "metadata-only" },
+      { toolExecution: { started: metadataOnly }, name: "metadata-only" },
       {
-        events: { "tool.call.started": wantsContent },
+        toolExecution: { started: wantsContent },
         name: "wants-content",
         tracePolicy: contentTracePolicy,
       },
@@ -838,8 +829,8 @@ describe("createAiSdkHookBridge", () => {
     const terminalStates = new Map<string, unknown>();
     const hooks = createInstrumentationHooks([
       {
-        events: {
-          async "tool.call.started"(event) {
+        toolExecution: {
+          async started(event) {
             started.set(
               event.idempotencyKey,
               await new Promise<string>((resolve) => {
@@ -847,7 +838,7 @@ describe("createAiSdkHookBridge", () => {
               }),
             );
           },
-          "tool.call.completed"(event) {
+          completed(event) {
             terminalStates.set(event.idempotencyKey, started.get(event.idempotencyKey));
           },
         },

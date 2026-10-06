@@ -133,9 +133,9 @@ describe("local instrumentation runtime", () => {
         idempotencyKey: actionKey,
         input: {},
         kind: "tool-call",
-        name: "weather",
+        toolName: "weather",
         scope,
-        type: "action.started",
+        type: "tool.call.started",
       });
       await Reflect.apply(bridge.onToolExecutionStart!, bridge, [
         {
@@ -167,7 +167,7 @@ describe("local instrumentation runtime", () => {
         outcome: "completed",
         output: { output: { temperature: 72 }, type: "result" },
         scope,
-        type: "action.completed",
+        type: "tool.call.completed",
       });
       await hooks.publish({
         idempotencyKey: attemptIdempotencyKey(scope),

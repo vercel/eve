@@ -211,7 +211,7 @@ describe("exported agent telemetry contract", () => {
               turnId: "turn_0",
             }),
           );
-          await hooks.publish({
+          await hooks.observeToolExecution!({
             type: "tool.call.started",
             idempotencyKey: toolKey,
             callId: "call-1",
@@ -227,7 +227,7 @@ describe("exported agent telemetry contract", () => {
                 messages: [],
               } as never),
           );
-          await hooks.publish({
+          await hooks.observeToolExecution!({
             type: "tool.call.completed",
             idempotencyKey: toolKey,
             output: { type: "result", output },
@@ -576,15 +576,15 @@ describe("exported agent telemetry contract", () => {
               const toolKey = toolCallIdempotencyKey(scope, "tool", 0);
               const modelKey = modelCallIdempotencyKey(scope, 0, 0);
               await hooks.publish({
-                type: "action.started",
+                type: "tool.call.started",
                 idempotencyKey: actionKey,
                 scope,
                 callId: "tool",
-                name: "inspect",
+                toolName: "inspect",
                 kind: "tool-call",
                 input: {},
               });
-              await hooks.publish({
+              await hooks.observeToolExecution!({
                 type: "tool.call.started",
                 idempotencyKey: toolKey,
                 scope,
@@ -629,14 +629,14 @@ describe("exported agent telemetry contract", () => {
                   outcome: "approved",
                   response: {},
                 });
-                await hooks.publish({
+                await hooks.observeToolExecution!({
                   type: "tool.call.completed",
                   idempotencyKey: toolKey,
                   scope,
                   output: { type: "result", output: {} },
                 });
                 await hooks.publish({
-                  type: "action.completed",
+                  type: "tool.call.completed",
                   idempotencyKey: actionKey,
                   scope,
                   outcome: "completed",
@@ -878,11 +878,11 @@ describe("exported agent telemetry contract", () => {
           input: { secret: "private input" },
           isWorkflowTool: true,
           kind: "tool-call",
-          name: "coordinate",
+          toolName: "coordinate",
           scope,
-          type: "action.started",
+          type: "tool.call.started",
         });
-        await hooks.publish({
+        await hooks.observeToolExecution!({
           callId: "workflow",
           idempotencyKey: toolCallIdempotencyKey(scope, "workflow", 0),
           input: { secret: "private input" },
@@ -990,7 +990,7 @@ describe("exported agent telemetry contract", () => {
         });
       });
       await contextStorage.run(parent, async () => {
-        await hooks.publish({
+        await hooks.observeToolExecution!({
           idempotencyKey: toolCallIdempotencyKey(scope, "workflow", 0),
           output: { type: "result", output: "private output" },
           scope,
@@ -1001,7 +1001,7 @@ describe("exported agent telemetry contract", () => {
           outcome: "completed",
           output: { type: "result", output: "private output" },
           scope,
-          type: "action.completed",
+          type: "tool.call.completed",
         });
         await hooks.publish({
           idempotencyKey: attemptIdempotencyKey(scope),

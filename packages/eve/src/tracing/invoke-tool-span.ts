@@ -296,6 +296,8 @@ function toolCallEvents(
               output: Object.freeze(output),
               scope,
               type: "tool.call.completed",
+              outcome: outcome.type === "result" ? "completed" : "failed",
+              durationMs: outcome.durationMs,
             }),
           );
         },

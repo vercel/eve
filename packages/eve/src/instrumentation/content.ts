@@ -26,12 +26,6 @@ export function withInstrumentationDecision(
       return decision.recordInputs ? event : Object.freeze({ ...event, title: undefined });
     case "channel.delivery.started":
       return decision.recordInputs ? event : Object.freeze({ ...event, input: undefined });
-    case "action.started":
-      return decision.recordInputs ? event : Object.freeze({ ...event, input: undefined });
-    case "action.completed":
-      return decision.recordOutputs
-        ? event
-        : Object.freeze({ ...event, output: Object.freeze({ type: event.output.type }) });
     case "input.requested":
       return decision.recordOutputs ? event : Object.freeze({ ...event, request: undefined });
     case "input.resolved":
@@ -61,7 +55,6 @@ export function withInstrumentationDecision(
             ...event,
             providerMetadata: structuralProviderMetadata(event.providerMetadata),
           });
-    case "action.failed":
     case "model.call.failed":
     case "memory.operation.failed":
     case "session.failed":

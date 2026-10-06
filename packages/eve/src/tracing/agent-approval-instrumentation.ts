@@ -19,7 +19,7 @@ import { decodeTraceSessionId } from "#tracing/agent-trace-context-codec.js";
 import { AGENT_SPAN_NAMES } from "#tracing/agent-span-contract.js";
 import { recordAgentSpanError as recordError } from "#tracing/agent-span-error.js";
 import { withChannelAudience } from "#tracing/channel-audience-context.js";
-import type { AgentActionContext } from "#tracing/agent-action-instrumentation.js";
+import type { AgentToolContext } from "#tracing/agent-tool-instrumentation.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
 
@@ -45,7 +45,7 @@ export function createAgentApprovalInstrumentation(input: {
     sessionId: string,
     turnId: string,
     callId: string,
-  ) => Promise<AgentActionContext | undefined>;
+  ) => Promise<AgentToolContext | undefined>;
   readonly frameworkVersion: string;
   readonly idGenerator: AgentSpanIdGenerator;
   readonly tracer: Tracer;

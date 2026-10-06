@@ -144,7 +144,7 @@ export function createAiSdkHookBridge(
       );
       state.toolKeys.set(event.toolCall.toolCallId, key);
       const started = toToolCallStarted(state, key, event);
-      await hooks.publish(started);
+      await hooks.observeToolExecution?.(started);
     },
     executeTool({ toolCallId, execute }) {
       const key = state.toolKeys.get(toolCallId);
@@ -158,7 +158,7 @@ export function createAiSdkHookBridge(
       if (key === undefined) return;
       state.toolKeys.delete(toolCallId);
       const completed = toToolCallCompleted(state, key, event);
-      await hooks.publish(completed);
+      await hooks.observeToolExecution?.(completed);
     },
     async onAbort(event) {
       await failOpenOperations(event.reason);
@@ -177,7 +177,9 @@ export function createAiSdkHookBridge(
     }
     for (const idempotencyKey of state.toolKeys.values()) {
       pending.push(
-        hooks.publish(Object.freeze({ error, idempotencyKey, scope, type: "tool.call.failed" })),
+        hooks.observeToolExecution?.(
+          Object.freeze({ error, idempotencyKey, scope, type: "tool.call.failed" }),
+        ) ?? Promise.resolve(),
       );
     }
     state.modelKeys.clear();

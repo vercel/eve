@@ -240,6 +240,67 @@ describe("finalizeInstrumentationProviders", () => {
     expect(started.mock.calls[0]?.[0]).toMatchObject({ turnId: "turn-1" });
   });
 
+  it("publishes one durable tool lifecycle without duplicate SDK callbacks", async () => {
+    const started = vi.fn((_event, ctx) => ctx.state.set({ started: true }));
+    const completed = vi.fn((_event, ctx) => expect(ctx.state.get()).toEqual({ started: true }));
+    await register(
+      "audit",
+      defineInstrumentation({
+        events: {
+          "tool.call.started": started,
+          "tool.call.completed": completed,
+        },
+      }),
+    );
+    const runtime = finalizeInstrumentationProviders({ serviceName: "weather-agent" });
+    const hooks = runtime.hooks.forTrace!(traceContext("unknown"));
+    const scope = {
+      attemptId: "attempt",
+      attemptIndex: 0,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      stepIndex: 0,
+    };
+    await hooks.publish({
+      type: "tool.call.started",
+      idempotencyKey: "call",
+      callId: "call-1",
+      toolName: "weather",
+      kind: "tool-call",
+      input: undefined,
+      scope,
+    });
+    await hooks.observeToolExecution?.({
+      type: "tool.call.started",
+      idempotencyKey: "execution",
+      callId: "call-1",
+      toolName: "weather",
+      input: undefined,
+      scope,
+    });
+    await hooks.observeToolExecution?.({
+      type: "tool.call.completed",
+      idempotencyKey: "execution",
+      output: { type: "result" },
+      scope,
+    });
+    await hooks.publish({ type: "step.attempt.completed", idempotencyKey: "attempt", scope });
+    await hooks.publish({
+      type: "tool.call.completed",
+      idempotencyKey: "call",
+      outcome: "completed",
+      usage: { inputTokens: 10 },
+      output: { type: "result" },
+      scope,
+    });
+    expect(started).toHaveBeenCalledOnce();
+    expect(completed).toHaveBeenCalledOnce();
+    expect(completed.mock.calls[0]?.[0]).toMatchObject({
+      outcome: "completed",
+      usage: { inputTokens: 10 },
+    });
+  });
+
   it("still runs execution when no destination was declared", async () => {
     // A directory with no `otel()` has nothing to hang a span on, so
     // `runInContext` degrades to running the work directly rather than

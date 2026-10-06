@@ -10345,7 +10345,7 @@ describe("createToolLoopHarness", () => {
       });
       const started = vi.fn();
       const hooks = createInstrumentationHooks([
-        { events: { "action.started": started }, name: "actions" },
+        { events: { "tool.call.started": started }, name: "actions" },
       ]);
       const { emit } = createEventCollector();
       const runStep = createToolLoopHarness(
@@ -10361,8 +10361,8 @@ describe("createToolLoopHarness", () => {
         expect.objectContaining({
           callId: "call-delegate",
           kind: "tool-call",
-          name: "delegate",
-          type: "action.started",
+          toolName: "delegate",
+          type: "tool.call.started",
         }),
         expect.anything(),
       );

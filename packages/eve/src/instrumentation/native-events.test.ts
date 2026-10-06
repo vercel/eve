@@ -395,10 +395,10 @@ describe("createInstrumentationHandleEvent", () => {
         idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "delegate-1"),
         input: { task: "research" },
         kind: "subagent-call",
-        name: "delegate",
+        toolName: "delegate",
         isWorkflowTool: true,
         scope,
-        type: "action.started",
+        type: "tool.call.started",
       },
       {
         callId: "skill-1",
@@ -406,9 +406,9 @@ describe("createInstrumentationHandleEvent", () => {
         idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "skill-1"),
         input: { name: "research" },
         kind: "load-skill",
-        name: "load_skill",
+        toolName: "load_skill",
         scope,
-        type: "action.started",
+        type: "tool.call.started",
       },
       {
         callId: "remote-1",
@@ -416,10 +416,10 @@ describe("createInstrumentationHandleEvent", () => {
         idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "remote-1"),
         input: { task: "analyze" },
         kind: "remote-agent-call",
-        name: "remote",
+        toolName: "remote",
         isWorkflowTool: true,
         scope,
-        type: "action.started",
+        type: "tool.call.started",
       },
       {
         callId: "add-1",
@@ -427,9 +427,9 @@ describe("createInstrumentationHandleEvent", () => {
         idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "add-1"),
         input: { a: 1, b: 2 },
         kind: "tool-call",
-        name: "add",
+        toolName: "add",
         scope,
-        type: "action.started",
+        type: "tool.call.started",
       },
       {
         callId: "workflow-1",
@@ -438,22 +438,22 @@ describe("createInstrumentationHandleEvent", () => {
         input: { report: "weekly" },
         isWorkflowTool: true,
         kind: "tool-call",
-        name: "publish",
+        toolName: "publish",
         scope,
-        type: "action.started",
+        type: "tool.call.started",
       },
     ]);
     const terminals = events.filter(
       (event) =>
-        (event as { type: string }).type === "action.failed" ||
-        (event as { type: string }).type === "action.completed",
+        (event as { type: string }).type === "tool.call.failed" ||
+        (event as { type: string }).type === "tool.call.completed",
     );
     expect(terminals[0]).toMatchObject({
       errorCode: "ACTION_RESULT_FAILED",
       idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "delegate-1"),
       outcome: "failed",
       scope,
-      type: "action.failed",
+      type: "tool.call.failed",
       usage: {
         costUsd: 0.003,
         inputTokenDetails: { cacheReadTokens: 1, cacheWriteTokens: 2 },
@@ -467,7 +467,7 @@ describe("createInstrumentationHandleEvent", () => {
       outcome: "completed",
       output: { output: "done", type: "result" },
       scope,
-      type: "action.completed",
+      type: "tool.call.completed",
       usage: {
         costUsd: 0.012,
         inputTokenDetails: { cacheReadTokens: 3, cacheWriteTokens: 4 },
@@ -481,10 +481,10 @@ describe("createInstrumentationHandleEvent", () => {
       outcome: "completed",
       output: { output: 3, type: "result" },
       scope,
-      type: "action.completed",
+      type: "tool.call.completed",
       usage: undefined,
     });
-    expect(events).toHaveLength(12);
+    expect(events).toHaveLength(8);
     expect(events.every(Object.isFrozen)).toBe(true);
   });
 

@@ -517,7 +517,7 @@ export function bindInstrumentationRuntime(
       const hooks = bindHooks(readSessionContext());
       const scope = correlation.scope;
       const idempotencyKey = toolCallIdempotencyKey(scope, input.callId, 0);
-      await hooks.publish({
+      await hooks.observeToolExecution?.({
         type: "tool.call.started",
         callId: input.callId,
         idempotencyKey,
@@ -528,14 +528,14 @@ export function bindInstrumentationRuntime(
         input: (hooks.capturesInputs ?? hooks.capturesContent) ? input.input : undefined,
       });
       if (input.failed) {
-        await hooks.publish({
+        await hooks.observeToolExecution?.({
           type: "tool.call.failed",
           idempotencyKey,
           scope,
           completedAtMs: input.completedAtMs,
         });
       } else {
-        await hooks.publish({
+        await hooks.observeToolExecution?.({
           type: "tool.call.completed",
           idempotencyKey,
           scope,

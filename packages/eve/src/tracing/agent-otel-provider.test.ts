@@ -32,7 +32,7 @@ import type { AgentTraceStateStore } from "#tracing/agent-trace-state.js";
 import { InMemoryAgentTraceStateStore } from "#internal/testing/in-memory-agent-trace-state-store.js";
 import {
   createInstrumentationHooks,
-  type InstrumentationActionKind,
+  type InstrumentationToolCallKind,
   type InstrumentationAttemptScope,
   type InstrumentationContextRunner,
   type InstrumentationEvent,
@@ -140,7 +140,7 @@ async function emitAttempt(input: {
   readonly parentTraceContext?: InstrumentationTraceContext;
   readonly runInContext: InstrumentationContextRunner;
   readonly providerMetadata?: Readonly<Record<string, unknown>>;
-  readonly actionKind?: InstrumentationActionKind;
+  readonly actionKind?: InstrumentationToolCallKind;
   readonly runtimeContext?: Readonly<Record<string, unknown>>;
   readonly sessionId: string;
   readonly skipModelTerminal?: boolean;
@@ -234,9 +234,9 @@ async function emitAttempt(input: {
     idempotencyKey: actionKey,
     input: { secret: "value" },
     kind: input.actionKind ?? "tool-call",
-    name: "weather",
+    toolName: "weather",
     scope,
-    type: "action.started",
+    type: "tool.call.started",
   });
   await Reflect.apply(bridge.onToolExecutionStart!, bridge, [
     {
@@ -269,7 +269,7 @@ async function emitAttempt(input: {
             outcome: "completed",
             output: { output: { temperature: 72 }, type: "result" },
             scope,
-            type: "action.completed",
+            type: "tool.call.completed",
             usage: input.actionUsage,
           }
         : {
@@ -278,7 +278,7 @@ async function emitAttempt(input: {
             idempotencyKey: actionKey,
             outcome: "failed",
             scope,
-            type: "action.failed",
+            type: "tool.call.failed",
           },
     );
   }
@@ -2012,7 +2012,7 @@ describe("createAgentOtelInstrumentation", () => {
       scope,
       type: "step.attempt.started",
     });
-    await runtime.hooks.publish({
+    await runtime.hooks.observeToolExecution!({
       callId: "tool-1",
       idempotencyKey: toolKey,
       input: { secret: "value" },
@@ -2020,7 +2020,7 @@ describe("createAgentOtelInstrumentation", () => {
       toolName: "weather",
       type: "tool.call.started",
     });
-    await runtime.hooks.publish({
+    await runtime.hooks.observeToolExecution!({
       durationMs: 1500,
       idempotencyKey: toolKey,
       output: { output: "sunny", type: "result" },
@@ -2034,9 +2034,9 @@ describe("createAgentOtelInstrumentation", () => {
       idempotencyKey: actionKey,
       input: { secret: "value" },
       kind: "tool-call",
-      name: "weather",
+      toolName: "weather",
       scope,
-      type: "action.started",
+      type: "tool.call.started",
     });
     clock.mockRestore();
     await runtime.hooks.publish({
@@ -2044,10 +2044,10 @@ describe("createAgentOtelInstrumentation", () => {
       outcome: "completed",
       output: { output: "sunny", type: "result" },
       scope,
-      type: "action.completed",
+      type: "tool.call.completed",
     });
     const uncorrelatedToolKey = `tool:${scope.attemptId}:tool-2:0`;
-    await runtime.hooks.publish({
+    await runtime.hooks.observeToolExecution!({
       callId: "tool-2",
       idempotencyKey: uncorrelatedToolKey,
       input: {},
@@ -2055,7 +2055,7 @@ describe("createAgentOtelInstrumentation", () => {
       toolName: "final_output",
       type: "tool.call.started",
     });
-    await runtime.hooks.publish({
+    await runtime.hooks.observeToolExecution!({
       idempotencyKey: uncorrelatedToolKey,
       output: { output: "done", type: "result" },
       scope,
@@ -2116,9 +2116,9 @@ describe("createAgentOtelInstrumentation", () => {
         idempotencyKey: actionKey,
         input: { secret: "value" },
         kind: "tool-call",
-        name: "weather",
+        toolName: "weather",
         scope,
-        type: "action.started",
+        type: "tool.call.started",
       });
       await first.hooks.publish({
         idempotencyKey: attemptIdempotencyKey(scope),
@@ -2142,7 +2142,7 @@ describe("createAgentOtelInstrumentation", () => {
     await contextStorage.run(restored, async () => {
       // Approval-resumed tools can execute before the replacement AI SDK emits
       // a new step start. The persisted action context is still their parent.
-      await replacement.hooks.publish({
+      await replacement.hooks.observeToolExecution!({
         callId: "tool-1",
         idempotencyKey: toolKey,
         input: {},
@@ -2150,7 +2150,7 @@ describe("createAgentOtelInstrumentation", () => {
         toolName: "weather",
         type: "tool.call.started",
       });
-      await replacement.hooks.publish({
+      await replacement.hooks.observeToolExecution!({
         idempotencyKey: toolKey,
         output: { output: "ok", type: "result" },
         scope: replacementScope,
@@ -2162,7 +2162,7 @@ describe("createAgentOtelInstrumentation", () => {
         outcome: "completed",
         output: { output: { temperature: 72 }, type: "result" },
         scope,
-        type: "action.completed",
+        type: "tool.call.completed",
       });
     });
     await replacement.provider.forceFlush();
@@ -2206,9 +2206,9 @@ describe("createAgentOtelInstrumentation", () => {
         idempotencyKey: actionKey,
         input: { city: "SF" },
         kind: "tool-call",
-        name: "weather",
+        toolName: "weather",
         scope,
-        type: "action.started",
+        type: "tool.call.started",
       });
       await first.hooks.publish({
         action: { callId: "tool-1", name: "weather" },
@@ -2239,7 +2239,7 @@ describe("createAgentOtelInstrumentation", () => {
         outcome: "completed",
         output: { output: { temperature: 72 }, type: "result" },
         scope,
-        type: "action.completed",
+        type: "tool.call.completed",
       });
     });
     await replacement.provider.forceFlush();
@@ -2322,9 +2322,9 @@ describe("createAgentOtelInstrumentation", () => {
         idempotencyKey: actionKey,
         input: { city: "SF" },
         kind: "tool-call",
-        name: "weather",
+        toolName: "weather",
         scope,
-        type: "action.started",
+        type: "tool.call.started",
       });
       await runtime.hooks.publish({
         action: { callId: "tool-1", name: "weather" },
@@ -2348,7 +2348,7 @@ describe("createAgentOtelInstrumentation", () => {
         outcome: "completed",
         output: { output: { temperature: 72 }, type: "result" },
         scope,
-        type: "action.completed",
+        type: "tool.call.completed",
       });
       await runtime.hooks.publish({
         agentName: "weather",
@@ -2393,7 +2393,7 @@ describe("createAgentOtelInstrumentation", () => {
       scope,
       type: "step.attempt.started",
     });
-    await runtime.hooks.publish({
+    await runtime.hooks.observeToolExecution!({
       callId: "tool-1",
       idempotencyKey: "tool:session-1:turn-1:tool-1",
       input: { city: "SF" },
@@ -2449,11 +2449,11 @@ describe("createAgentOtelInstrumentation", () => {
       idempotencyKey: actionKey,
       input: { issue: "ISSUE-1" },
       kind: "tool-call",
-      name: "linear__get_issue",
+      toolName: "linear__get_issue",
       scope,
-      type: "action.started",
+      type: "tool.call.started",
     });
-    await runtime.hooks.publish({
+    await runtime.hooks.observeToolExecution!({
       callId: "tool-1",
       idempotencyKey: toolKey,
       input: { issue: "ISSUE-1" },
@@ -2483,7 +2483,7 @@ describe("createAgentOtelInstrumentation", () => {
     });
     withSpy.mockRestore();
 
-    await runtime.hooks.publish({
+    await runtime.hooks.observeToolExecution!({
       idempotencyKey: toolKey,
       output: { output: { title: "private issue" }, type: "result" },
       scope,
@@ -2494,7 +2494,7 @@ describe("createAgentOtelInstrumentation", () => {
       outcome: "completed",
       output: { output: { title: "private issue" }, type: "result" },
       scope,
-      type: "action.completed",
+      type: "tool.call.completed",
     });
     await runtime.hooks.publish({
       idempotencyKey: attemptIdempotencyKey(scope),
@@ -2595,9 +2595,9 @@ describe("createAgentOtelInstrumentation", () => {
         idempotencyKey: actionIdempotencyKey(sessionId, scope.turnId, "tool-1"),
         input: {},
         kind: "tool-call",
-        name: "publish",
+        toolName: "publish",
         scope,
-        type: "action.started",
+        type: "tool.call.started",
       });
       await runtime.hooks.publish({
         error: publishError,
@@ -2605,7 +2605,7 @@ describe("createAgentOtelInstrumentation", () => {
         idempotencyKey: actionIdempotencyKey(sessionId, scope.turnId, "tool-1"),
         outcome: "failed",
         scope,
-        type: "action.failed",
+        type: "tool.call.failed",
       });
       await runtime.provider.forceFlush();
       return runtime.exporter
@@ -3205,11 +3205,12 @@ describe("createAgentOtelInstrumentation", () => {
     };
     const key = actionIdempotencyKey("parent", "turn_0", "dispatch");
     await runtime.hooks.publish({
-      type: "action.started",
+      type: "tool.call.started",
       idempotencyKey: key,
       scope,
       callId: "dispatch",
-      name: "child",
+      toolName: "child",
+      input: undefined,
       kind: "subagent-call",
     });
     const action = (await store.getAction(key))!;
