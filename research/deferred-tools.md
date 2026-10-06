@@ -1,0 +1,717 @@
+---
+issue: TBD
+status: proposed
+last_updated: "2026-10-06"
+---
+
+# Deferred tools
+
+## Summary
+
+Agents tend to score better on evals when every tool and skill lives on the
+main agent, so the model doesn't have to hand each specialized task to a
+subagent. Large teams push that until the tool list fills the context. A few
+hundred tool definitions cost tens of thousands of tokens on every request,
+and the model starts picking the wrong tool. One popular MCP server alone,
+Playwright, spends 13.7k tokens on 21 tools
+([source](https://mariozechner.at/posts/2025-11-02-what-if-you-dont-need-mcp/)).
+
+This doc proposes a catalog of deferred capabilities that the model reaches
+through two fixed tools, `search` and `execute`:
+
+```ts
+search(opts: {
+  query?: string;
+  connection?: string;
+  signIn?: boolean;
+  limit?: number;
+  offset?: number;
+}): {
+  results: Array<
+    | { tool: string; description: string; signature: string }
+    | { skill: string; description: string } // follow-up
+  >;
+  total: number;
+  unavailable?: Array<{ connection: string; error: string; requiresSignIn?: true }>;
+};
+
+execute(
+  | { tool: string; input?: object }
+  | { skill: string } // follow-up
+  | { code: string }, // code mode, later
+);
+```
+
+- **One opt-in.** A tool sets `deferred: true` on `defineTool` or
+  `defineWorkflowTool`. A subagent sets `tool: "deferred"` on its
+  `defineAgent`. Both work for static and dynamic entries. Connection tools
+  are always deferred.
+- **`search` and `execute` replace `connection_search` and
+  `connection_execute`.** There is one catalog for everything.
+- **One dispatch path.** `execute({ tool, input })` looks the entry up by
+  name and runs it exactly like a direct call:
+  - an inline tool runs inline;
+  - a workflow tool starts its run;
+  - a subagent starts its child session;
+  - a connection tool calls its connection.
+- **Always registered.** Both tools exist in every session of every agent.
+  So entries, static or dynamic, can join or leave the catalog at any step
+  without changing the `tools` array.
+- **Cache stable.** Catalog entries never enter the `tools` array, the system
+  prompt, or a tool description. They are announced through one append-only
+  listing, under the invariants of
+  [cache-stable connection tools](./connection-execute.md).
+- **Ready for skills and code mode.** The `{ skill }` and `{ code }` variants
+  are reserved. Deferred skills and code mode are follow-ups that add
+  variants without changing the shape.
+
+```ts
+export default defineTool({
+  description: "Refund a paid Stripe invoice.",
+  deferred: true,
+  inputSchema: z.object({ invoiceId: z.string() }),
+  async execute({ invoiceId }) {
+    /* ... */
+  },
+});
+```
+
+This supersedes the model surface in `connection-execute.md`: the two
+connection tools, their nested actions, and the connection listing. The
+connection result format, sign-in, approval, and instance pinning carry over.
+
+## Current state
+
+- **Every tool is advertised.** Each static tool and each subagent tool the
+  session can use goes into the provider `tools` array on every step
+  (`harness/advertised-tools.ts`). The only filters are subagent visibility
+  (`availableInSubagents`, `rootOnly`) and `tool: false`.
+- **The harness already knows each tool's kind.** Every entry in the
+  `HarnessToolMap` carries `behavior.handling` (`tools/behavior.ts`):
+  - `dispatch` to `workflow-tool-call`, `subagent-call`,
+    `remote-agent-call`, or `self-agent-call`;
+  - `provider-tool`;
+  - nothing, for a plain tool with an inline `execute`.
+
+  Coordination reads it to decide whether a call runs inline, starts a
+  workflow run, or starts a child session (`harness/coordination.ts`).
+  Dynamic subagents join the same map each step
+  (`buildHarnessToolsWithDynamicSubagents`).
+
+- **Connection tools are the exception.** They aren't harness tools.
+  `connection_execute` (`execution/tools/connection-tools.ts`) is a
+  `defineTool` closure that calls the connection and reports a nested
+  `<connection>__<tool>` action. That pattern can't reach workflow tools or
+  subagents, because the harness has to see their call to park the turn and
+  start the run.
+- **Connections already have the cache machinery this doc reuses.**
+  - The listing is a `context.state` announcement
+    (`execution/connection-announcement.ts`, `harness/announcements.ts`).
+  - Search returns TypeScript signatures
+    (`runtime/connections/tool-signature.ts`), ranked by
+    `execution/tools/connection-search-rank.ts`.
+- **Name clash.** Inside the harness, "deferred tool" currently means a
+  workflow-backed tool, as in `Deferred tool "…" has no workflow.`
+  (`harness/coordination.ts`, `harness/tool-loop.ts`,
+  `execution/tasks/tool-entry-point.ts`). That internal term gets renamed to
+  "workflow tool" (8 occurrences).
+
+## Prior art
+
+### AI SDK
+
+Read in the versions eve pins: `ai@7.0.105`, `@ai-sdk/provider-utils@5.0.43`,
+`@ai-sdk/anthropic@4.0.56`, and `@ai-sdk/openai@4.0.69`.
+
+- **`deferLoading` and `toolSearch()`.** `BaseTool.deferLoading` hides a tool
+  until `toolSearch()` finds it. `createToolSearchState` (`ai/dist/index.js`)
+  keeps a `discovered` set in memory for one generation. Each step filters
+  `activeTools` down to tools that aren't deferred plus the ones discovered so
+  far. Search is word overlap on name and description, top five results, and
+  returns `{ name, description }` with no schema.
+- **It breaks the cache.** A tool the model finds is added to `tools` on the
+  next step, and the whole cached prefix is lost. The only cache-stable path
+  is code mode with `toolDiscovery: 'conversation'`. It also needs every
+  definition before the generation starts and drops discoveries when the
+  generation ends, which doesn't fit eve's durable step-by-step execution.
+- **Provider-native search.**
+  - Anthropic: `toolSearchRegex_20251119` and `toolSearchBm25_20251119` with
+    `providerOptions.anthropic.deferLoading`. The `toolChanges` option on
+    mid-conversation system messages also adds tools without losing the cache
+    (beta `mid-conversation-tool-changes-2026-07-01`).
+  - OpenAI: `openai.tools.toolSearch()` with
+    `providerOptions.openai.deferLoading` and tool namespaces.
+  - In all of these the provider runs discovery and the model calls the tool
+    directly by name. All of it is specific to one provider and some of it is
+    beta.
+
+### opencode
+
+Sources:
+[`dev@83802d8`](https://github.com/anomalyco/opencode/tree/83802d800e1f05d8823f9e0a85cfaa580986d086)
+and
+[`v2@6bffe79`](https://github.com/anomalyco/opencode/tree/6bffe7932efa9adc36b74e389598daecb4b17ac1),
+read but not run. Neither branch has `deferLoading`, `tool_search`, or
+provider-native search.
+
+- **`dev`.** Every MCP tool is a native `<server>_<tool>` definition, and
+  `tools/list_changed` updates the array mid-session. Experimental code mode
+  (`OPENCODE_EXPERIMENTAL_CODE_MODE`) replaces them with a single `execute`
+  tool. Its description holds the catalog, up to a budget of about 2,000
+  tokens, plus a `search()` helper, so a catalog change still changes `tools`.
+- **`v2`.** Code mode is on by default. Tools set `codemode: false` to stay
+  native: shell, read, edit, the skill and subagent tools, and MCP servers
+  configured that way. Everything else is reachable only through `execute`,
+  and calling those tools by name fails with "No tool named … is currently
+  available". The `execute` description is fixed. The catalog arrives as an
+  instruction baseline followed by appended diffs
+  (`codemode/instructions.ts`, `session/instruction-state.ts`). Each child call
+  runs the same permission check as a direct call (`tool/mcp.ts`).
+- **What carries over:**
+  - one catalog over local and MCP tools;
+  - an entry point named `execute` with a fixed description;
+  - `search()` and `tools.<ns>.<tool>()` inside programs;
+  - an append-only catalog;
+  - the same permission checks whichever way a tool is called.
+
+### pi
+
+Source:
+[`pi-mono@636703a`](https://github.com/badlogic/pi-mono/tree/636703a0a4f2f4d8558d08f2308cb41109585bf5).
+Built-in MCP, `tool_search`, and code mode shipped in 0.99.0, which reverses
+pi's earlier "no MCP" position.
+
+- **Per-tool exposure.** `coding-agent/src/core/extensions/types.ts` defines
+  `ToolExposure` as `direct`, `model-only`, `codemode`, `deferred`, or
+  `hidden`. MCP tools default to `codemode`. The `deferred` exposure routes a
+  tool through `tool_search`.
+- **Search activates matches.** `tool_search` uses BM25 over name,
+  description, schema text, and namespace, and calls
+  `setActiveTools([...active, ...matches])`. The model then calls the matched
+  tools directly by name. To keep the cache, pi depends on provider support:
+  - Anthropic: inline `tool_addition` blocks plus a `defer_loading`
+    placeholder tool. Without the placeholder, pi measured a full cache miss on
+    the first tool change.
+  - OpenAI: `additional_tools`, or a synthetic `tool_search_call`.
+  - Other providers: pi's own docs say the prefix can be invalidated.
+- **Fixed search description.** It never lists the searchable tools, so it
+  doesn't change as servers connect.
+- **Skills** are listed by name, description, and path in the system prompt
+  and read with the file tool. They aren't searchable.
+- **Community adapters.** `pi-mcp-adapter` uses a single proxy tool,
+  `mcp({ search })` then `mcp({ tool, args })`, which is the same shape as
+  this design.
+
+### What we take
+
+| Question                   | AI SDK                    | opencode v2              | pi                           | This design               |
+| -------------------------- | ------------------------- | ------------------------ | ---------------------------- | ------------------------- |
+| Opt-in                     | `deferLoading`            | `codemode` (default on)  | `exposure: "deferred"`       | `deferred: true`          |
+| One catalog with MCP       | No                        | Yes                      | Yes                          | Yes                       |
+| How a found tool is called | Directly, next step       | `tools.x()` in `execute` | Directly, next step          | `execute`, same step      |
+| `tools` array mid-session  | Grows                     | Fixed                    | Grows, except on 2 providers | Fixed                     |
+| Catalog delivery           | Search result only        | Baseline + diffs         | Search result only           | Baseline + diffs          |
+| Discovery state            | In memory, one generation | None                     | Session transcript           | None; search is stateless |
+
+## Design
+
+```text
+             tools array (fixed for every session)
+             ┌──────────────────────────────────────┐
+             │ direct tools...   search   execute   │
+             └──────────────────────────────────────┘
+messages:  [system prompt, no catalog names]
+           [context.state: catalog baseline]
+           ... turns ...
+           [context.state: catalog diff]          ← append only
+           ... compaction ...
+           [context.state: new baseline]
+
+execute({ tool, input })                          ← model history only
+  └─ resolve entry by name → dispatch as a direct call
+       inline tool   → execute
+       workflow tool → durable run (foreground parks, background returns a task)
+       subagent      → child session (local, remote, or root copy)
+       connection    → connection client ("linear.list_issues")
+```
+
+### Authoring API
+
+**Tools.** `deferred?: boolean` sits next to `availableInSubagents` in
+`ToolDefinitionBase`, so `defineTool` and `defineWorkflowTool` both accept it.
+It defaults to `false`.
+
+```ts title="agent/tools/deploy_service.ts"
+import { defineWorkflowTool } from "eve/tools";
+import { always } from "eve/tools/approval";
+import { z } from "zod";
+
+export default defineWorkflowTool({
+  description: "Review and deploy a service.",
+  deferred: true,
+  approval: always(),
+  inputSchema: z.object({ service: z.string() }),
+  async execute({ service }, ctx) {
+    "use workflow";
+    /* ... */
+  },
+});
+```
+
+**Subagents.** A subagent's `tool` setting already controls whether the
+subagent appears as a tool. It widens from `boolean` to
+`boolean | "deferred"`. This applies to `defineAgent`, remote agents,
+workspace agents, and dynamic subagent configs.
+
+```ts title="agent/subagents/billing_specialist/agent.ts"
+export default defineAgent({
+  description: "Resolve billing disputes and refunds.",
+  model: "anthropic/claude-sonnet-4.6",
+  tool: "deferred",
+});
+```
+
+- **What each value means:** `true` is a direct tool, `"deferred"` is a
+  catalog entry, and `false` is not a tool at all.
+- **On the root agent,** `tool: "deferred"` defers the built-in `agent`
+  self-delegation tool.
+- **Why `tool` and not a separate flag.** A separate `deferred` flag on
+  `defineAgent` would allow the contradiction `tool: false, deferred: true`.
+- **`ctx.agent(name)` is unchanged.** It resolves from the full registry
+  whatever `tool` says.
+
+**Built-in and extension tools** are deferred by spreading them, the same way
+they're overridden today:
+
+```ts title="agent/tools/bash.ts"
+import { defineTool } from "eve/tools";
+import { bash } from "eve/tools/bash";
+
+export default defineTool({ ...bash, deferred: true });
+```
+
+**Dynamic entries.** `DynamicToolEntry` accepts `deferred`, and dynamic
+subagent configs accept `tool: "deferred"`. Teams use this for catalogs that
+depend on the tenant or the user:
+
+```ts title="agent/tools/tenant.ts"
+import { defineDynamic } from "eve";
+import { defineTool } from "eve/tools";
+
+export default defineDynamic({
+  events: {
+    "session.started": async (_event, ctx) => {
+      const actions = await loadTenantActions(ctx.session);
+      return Object.fromEntries(
+        actions.map((action) => [
+          action.id,
+          defineTool({
+            description: action.description,
+            deferred: true,
+            inputSchema: action.inputSchema,
+            execute: (input) => runTenantAction(action.id, input),
+          }),
+        ]),
+      );
+    },
+  },
+});
+```
+
+- **Same rules as direct dynamic entries.** Names stay `slug__key`. A
+  dynamic tool still can't be a workflow tool. An entry the resolver no longer
+  returns can't be called: `execute` reports it as unknown and suggests the
+  closest names.
+- **Keys are validated.** Every dynamic entry name, direct or deferred, must
+  match `TOOL_SLUG_PATTERN`. Today a bad key fails only when the provider
+  rejects it, and a deferred name never reaches a provider, so eve has to
+  check it when the resolver returns it.
+- **Prefer session- or turn-scoped resolvers.** A `step.started` resolver
+  whose deferred set changes every step appends a listing diff every step.
+  The cache stays intact, but history grows.
+
+**Connection tools** are always catalog entries. There is no switch to make
+them direct; this matches what `connection_search` does today.
+
+**Provider tools can't be deferred.** These are tools with
+`behavior.handling.kind === "provider-tool"`, such as native web search. The
+provider has to see their definition, so deferring one is a compile error.
+
+### The catalog
+
+Every entry has one flat name. The name decides how the entry is found:
+
+| Entry         | Source                                                                | Name                                  | Lookup                                                                                 |
+| ------------- | --------------------------------------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------- |
+| Inline tool   | `deferred: true` on a static or dynamic tool with an inline `execute` | `refund_invoice`, `tenant__sync`      | Harness tools for the step, no dispatch handling                                       |
+| Workflow tool | `deferred: true` on `defineWorkflowTool`                              | `deploy_service`                      | Harness tools for the step, `workflow-tool-call`                                       |
+| Subagent      | `tool: "deferred"` on a local, remote, dynamic, or root-copy agent    | `billing_specialist`                  | Harness tools for the step, `subagent-call`, `remote-agent-call`, or `self-agent-call` |
+| Connection    | Every tool of every connection, after `tools.allow` and `tools.block` | `linear.list_issues`, `crm__api.list` | Connection registry, then `getToolMetadata()`                                          |
+
+- **A dot means a connection.** If a name contains `.`, the part before the
+  first `.` is the connection and the rest is that connection's tool.
+  Otherwise the name is looked up among the step's harness tools: authored and
+  dynamic tools plus static and dynamic subagents, in the precedence direct
+  calls use today.
+- **Why the dot rule is safe.**
+  - Connection names never contain `.`. Static and dynamic connections match
+    `CONNECTION_SLUG_PATTERN` (`[a-z0-9-]`). Extension connections are
+    `<namespace>__<name>`, and extension namespaces match
+    `EXTENSION_SLUG_PATTERN` (`[a-zA-Z0-9_-]`).
+  - So splitting at the first `.` is correct even when an MCP tool's own name
+    contains dots, which the MCP spec allows.
+  - Harness names never contain `.` either. Tool slugs match
+    `TOOL_SLUG_PATTERN`, extension namespaces exclude it, and dynamic keys are
+    now validated.
+  - So a name can never be both a connection tool and a harness tool, and eve
+    needs no collision checks.
+- **Why not `__`.** Extension connections already contain `__`, as do local
+  tool names. A name like `acme__crm__list` could be connection `acme` with
+  tool `crm__list` or connection `acme__crm` with tool `list`.
+- **Extension example.** An extension mounted as `crm` with
+  `connections/api.ts` contributes connection `crm__api`, so the model sees
+  its tools as `crm__api.list_issues`. Its own `tools/search.ts` is the
+  harness tool `crm__search`. `__` is the mount prefix and `.` separates a
+  connection from its tool.
+- **Matches code mode.** `linear.list_issues` reads the same as
+  `tools.linear.list_issues(input)` will.
+- **Dispatch is decided before anything runs.** For harness entries, the
+  dispatch handling is on the definition, which the harness already has. A
+  dotted name is always a connection call. So coordination can decide whether
+  a call parks without any network call.
+- **Scope.** The catalog holds only entries advertised to the current
+  session, so a child session never sees a tool with
+  `availableInSubagents: false`.
+- **Skills have their own key.** A skill is addressed as `{ skill }`, never
+  `{ tool }`, so a skill and a tool can share a name, as they can today. See
+  the [skills follow-up](#follow-up-deferred-skills).
+
+### Model surface
+
+**`search`**
+
+- **Input:** `{ query?, connection?, signIn?, limit?, offset? }`.
+  - `limit` defaults to 10 and is capped at 50.
+  - Leaving out `query` lists every entry. Pair it with `connection` to list
+    one connection's tools.
+  - `connection` and `signIn` mean what they mean on today's
+    `connection_search`. They stay on search because sign-in applies to a
+    whole connection, not one tool.
+- **Result:** `{ results, total, unavailable? }`.
+  - A tool entry is `{ tool, description, signature }`. `tool` is the exact
+    name to pass to `execute`.
+  - `signature` is TypeScript rendered from the input and output schemas by
+    `renderToolSignature`, which moves to a shared module. It is more compact
+    than JSON Schema, includes the output type, and is what a code-mode
+    program calls.
+  - Results don't say whether a tool is inline, a workflow, a subagent, or a
+    connection tool. The call is the same for all of them. Notes eve appends
+    to a direct tool's description, such as the `endsTurn` sentence or
+    background-task guidance, go at the end of `description` instead.
+  - `unavailable` reports connections that need sign-in or failed to list,
+    as it does today.
+- **Ranking.** The `connection_search` ranker, generalized to any entry. It
+  weights the name, then the connection name, input property names, the
+  description, and last property descriptions and the connection
+  description.
+- **Sign-in.** A plain search never prompts.
+  `search({ connection, signIn: true })` starts authorization for that one
+  connection.
+- **Description.** Fixed for each eve version. It names no entry. It says
+  that `search` finds the agent's own tools and services, not web pages, so
+  the model doesn't use it in place of `web_search`.
+
+**`execute`**
+
+- **Input:** `{ tool: string, input?: object }`. `input` defaults to `{}`.
+- **Wire schema.** The provider receives one flat object schema. Anthropic
+  rejects `oneOf`, `anyOf`, and `allOf` at the top of a tool's input schema
+  ([example](https://github.com/anthropics/claude-code/issues/4886)). When
+  the `skill` and `code` variants land, they become optional properties.
+  eve then requires exactly one of `tool`, `skill`, or `code`, and returns a
+  clear error otherwise. The union exists only in the docs and the TypeScript
+  types.
+- **Any entry, no prior search.** It calls any catalog entry by name, whether
+  or not it was searched for. There is no discovered set to persist or replay.
+- **Validation.** eve checks `input` against the entry's input schema before
+  dispatching, because the provider never saw that schema. Failures come back
+  as data the model can act on:
+  - An unknown name lists the closest entries.
+  - A direct tool returns `"<name>" is in your tool list; call it directly.`
+  - Invalid input returns the entry's `signature`.
+- **Description.** Fixed for each eve version. It tells the model to use
+  names exactly as `search` returns them, and to prefer connected services
+  over web search or general knowledge. That second sentence moves over from
+  `connection_search`.
+
+**Both tools**
+
+- **Always present.** Both exist in every session of every agent, root and
+  child, whether or not the catalog has entries. This is what lets dynamic
+  entries join the catalog on any step: the `tools` array never has to change
+  to reach them. A rule like "present while the catalog is non-empty" would
+  flip the array the first time a resolver returns a deferred entry.
+- **Cost of an empty catalog.** Two fixed definitions, about the size of
+  today's two connection tools, cached with the rest of the prefix. No
+  listing is appended, and `search` returns `{ results: [], total: 0 }`.
+- **Closed and reserved.** `agent/tools/search.ts`,
+  `agent/tools/execute.ts`, and the framework module that provides them are
+  compile errors in every agent, as the connection tool slots are today. The
+  error tells the author to rename the file. Extension tools are prefixed, so
+  an extension's `tools/search.ts` (`crm__search`) is unaffected.
+- **`defaultTools: false`** doesn't remove them.
+
+### Dispatch
+
+An `execute` call is dispatched as if the model had called its entry
+directly. The harness resolves the entry once per call
+(`resolveCatalogEntry(toolCall, tools)`) and uses it everywhere the harness
+looks a call up by name. Model history is the only place that keeps
+`execute`.
+
+| Concern                        | Harness entries (inline, workflow, subagent)                                        | Connection entries                                                              |
+| ------------------------------ | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Action name on the protocol    | The entry's name                                                                    | `<connection>.<tool>`                                                           |
+| Approval                       | The entry's `approval` and `approvalKey`                                            | The connection's `approval`, keyed `<connection>.<tool>`, with instance pinning |
+| Execution                      | Inline `execute`, a workflow run, or a child session, chosen by `behavior.handling` | The connection client, with result conversion and auth parking unchanged        |
+| `toModelOutput`, `endsTurn`    | The entry's                                                                         | The connection's file-part projection                                           |
+| `ctx.toolName`, `ctx.callId`   | The entry's name and the model's call id                                            | n/a                                                                             |
+| Labels, hooks, audience policy | The entry                                                                           | `Linear: List issues`, as today                                                 |
+| Eval assertions                | `t.calledTool("deploy_service")`, `t.calledSubagent(...)`                           | `t.calledTool("linear.list_issues")`                                            |
+| Model history                  | `execute` call and result, same call id                                             | Same                                                                            |
+
+- **One name everywhere.** The name the model passes to `execute` is also the
+  protocol action name, the approval `toolName` and key, and the eval
+  assertion name. For connection tools this renames `linear__list_issues`
+  to `linear.list_issues`. That affects:
+  - approval policies that compare `toolName`;
+  - "always approve" decisions recorded under the old key, which users must
+    approve once more;
+  - eval assertions.
+- **Harness entries need nothing new.** Once a call resolves to its entry,
+  the harness dispatches it exactly like a direct call, because the dispatch
+  handling is already on the definition.
+  - A foreground workflow tool parks the turn and starts its run.
+  - A background workflow tool returns its task receipt, and `task_wait` and
+    `task_cancel` work on the `taskId`.
+  - A subagent starts its child session, and the child's `session.started`
+    records the model's call id as `parentCallId`.
+- **Connection entries become harness definitions.** At resolve time, eve
+  builds a harness definition from the connection's metadata that is never
+  advertised: an `execute` that calls the client, the connection's approval,
+  and its model-output projection. The code is today's
+  `executeConnectionTool`, `connection-approval.ts`, and `tool-result.ts`,
+  moved behind that definition. The definition is built only after the call
+  is already known to be a connection call, so the network lookup it needs
+  never delays the decision to park.
+- **No nested actions.** Every entry, including a connection tool, is
+  reported as the call itself. The nested-action helper loses its only caller
+  and is removed. The `parentCallId` protocol field stays for code mode.
+- **Harness seams.** These are the places that look up by tool name today:
+  - `buildToolApproval` and `buildToolSet` (`harness/tools.ts`);
+  - `createRuntimeActionRequestFromToolCall`,
+    `createCoordinationRequestFromToolCall`, and subagent dispatch
+    (`harness/coordination.ts`);
+  - label and `endsTurn` lookup in `prepareModelTools`
+    (`harness/tool-loop.ts`);
+  - the history writer, which must record `execute` rather than
+    `result.toolName` or `subagentName`.
+
+  This is a change to the harness, and it is needed: without it, workflow
+  tools and subagents can't be deferred.
+
+- **Never AI SDK `deferLoading`.** eve builds its AI SDK tools itself and
+  never sets `deferLoading` or passes `toolSearch()`. Either one would bring
+  back the growing `tools` array.
+
+### Catalog listing
+
+One announcement under the key `catalog` replaces the connection listing.
+
+- **Baseline.** On a session's first model step, eve appends one
+  `context.state` message. It lists deferred tools and subagents by name and
+  connections by name and description. Each group is sorted.
+- **Why connection tools aren't listed by name.** Listing them would mean
+  connecting to every server, and possibly asking for sign-in, at session
+  start.
+- **Diffs.** Any of these changes appends a diff, or the full listing again
+  if that is shorter:
+  - a dynamic resolver adds or drops a deferred tool or subagent;
+  - a dynamic connection resolves;
+  - the session upgrades to a new deployment.
+
+  The renderer is today's connection diff, extended to three groups. It also
+  says which entries must no longer be called.
+
+- **After compaction,** the next step appends a fresh baseline.
+- **Names only for local entries.** Descriptions and signatures come from
+  `search`. At roughly 5 tokens per name, 300 entries cost about 1.5k tokens,
+  cached once per session.
+- **Empty catalog,** no message.
+
+```text
+More tools are available than your tool list shows. Find them with search and call them with execute.
+Tools: deploy_service, refund_invoice, stripe_list_disputes
+Agents: billing_specialist, researcher
+Connections:
+- linear: Linear issues and projects
+- petstore: Pet store inventory API
+```
+
+## Cache invariants
+
+1. **Fixed tools.** The `tools` array is identical on every step of a
+   session: same names, descriptions, schemas, and order. Catalog changes,
+   static or dynamic, never touch it, because `search` and `execute` are
+   always present.
+2. **No session-specific text** in the system prompt or any tool description.
+3. **Append-only history.** Listing changes only append messages, and earlier
+   messages are never rewritten.
+4. **No system-message fallback.** If the last message is an approval
+   response, the announcement waits for the next step.
+5. **Deterministic rendering.** Listings and signatures are sorted and
+   memoized per compiled tool or connection instance.
+6. **Calling an entry adds nothing.** An `execute` call, approval, park,
+   sign-in, child session, or resume never adds a definition. That is exactly
+   where AI SDK `toolSearch()` and pi's activation path lose the cache.
+
+## Removed
+
+- `connection_search` and `connection_execute`, their framework module
+  (`tools/framework/connection-tools.ts`), and their reserved slots, which
+  `search` and `execute` take over.
+- Nested actions for connection calls, and the nested-action helper.
+- The `<connection>__<tool>` action name, replaced by `<connection>.<tool>`.
+- The `connections` announcement, replaced by `catalog`.
+- References in `load_skill`'s not-found error, the dev TUI's
+  `connection_execute` rendering, and the channel task card.
+
+## Tests and rollout
+
+- **Captured-request unit test.** It drives one session through each entry:
+  - a `search`, then `execute` of an inline tool;
+  - a foreground workflow tool that parks and resumes;
+  - a background workflow tool;
+  - a deferred subagent;
+  - a connection tool that parks for sign-in;
+  - a dynamic connection resolving;
+  - a dynamic deferred tool and a dynamic deferred subagent appearing
+    mid-session, then one of them disappearing;
+  - an approval as the last message;
+  - compaction.
+
+  It asserts all six invariants. A second case covers an agent with an empty
+  catalog: both tools are present and no listing is appended.
+
+- **E2E: a new `agent-deferred-tools` fixture.** About 40 deferred entries:
+  inline tools, a workflow tool with approval, a background workflow tool, a
+  deferred subagent, a session-scoped dynamic resolver returning deferred
+  tools, and the self-contained petstore OpenAPI connection.
+  - World suites with the mock model: approval keyed to the entry, the
+    workflow tool parking and resuming, the background task receipt, the
+    subagent's child session, and a misspelled name corrected from the
+    suggestion.
+  - Real-model suite: cache reads on the steps after discovery, following
+    `agent-prompt-cache`.
+  - Migrate `agent-openapi-swagger` and `agent-workflow-tools` from the
+    connection tools.
+- **Measurements.** Run one task set three ways:
+  1. all tools direct,
+  2. long-tail tools deferred,
+  3. long-tail tools in subagents.
+
+  Compare task success, input tokens, cache read ratio, and model calls, at a
+  moderate tool count and at a large one.
+
+- **Ship gate.**
+  - Arm 2 matches arm 1 on success at the moderate count and beats it at the
+    large count.
+  - Arm 2 beats arm 3 on success.
+  - Connection evals don't regress.
+  - Agents with an empty catalog don't regress, now that every agent carries
+    the two tools.
+  - The model doesn't call `search` for web questions on agents that have
+    `web_search`.
+  - No cache regression after discovery.
+- **Later, gated by evals.** Descriptions or signatures in the listing, up to
+  a token budget, as opencode v2 does.
+- **Docs.**
+  - `tools/overview`: deferring a tool, and which tools to defer (keep
+    frequently used tools direct and defer the long tail).
+  - `tools/workflows`, `subagents/*` (`tool: "deferred"`), and
+    `concepts/built-in-tools` (`search` and `execute` instead of the
+    connection tools).
+  - `connections/overview`, `connections/mcp`, `guides/dynamic-capabilities`,
+    and `extensions` (the reserved names and the extension example).
+- **Changeset.** `minor`, because it:
+  - removes `connection_search` and `connection_execute`;
+  - reserves `search` and `execute` in every agent;
+  - renames connection tool actions from `<connection>__<tool>` to
+    `<connection>.<tool>`.
+
+## Decisions and alternatives considered
+
+| Decision            | Chosen                                                       | Rejected                                                                                                                       |
+| ------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| Tool names          | `search` and `execute`                                       | `tool_search` and `tool_execute` (no collision risk, but the names don't match the functions inside a code-mode program)       |
+| Search surface      | One `search` over every entry, connections included          | Keeping `connection_search` next to it (two places to look, two listings); a separate `skill_search`                           |
+| Variants            | A key per variant: `tool`, then `skill` and `code`           | One name space with markers such as `skill:pdf`; a `kind` field the model must echo                                            |
+| Presence            | Always, in every session of every agent                      | Only while the catalog is non-empty (flips `tools` when a dynamic entry appears); an agent-level flag                          |
+| Dynamic entries     | Deferrable, like static ones                                 | Static only (rules out per-tenant catalogs)                                                                                    |
+| Opt-in              | `deferred: true` on tools; `tool: "deferred"` on agents      | An agent-level list of names; `deferLoading` (eve never loads the definition); pi's `exposure` enum                            |
+| Discovery mechanism | Two fixed tools                                              | AI SDK `toolSearch()` or activation (grows `tools`); provider-native search (one provider at a time, partly beta)              |
+| Dispatch            | Resolve to an entry, then dispatch it like a direct call     | A `defineTool` proxy (can't reach workflow tools or subagents; duplicates approval)                                            |
+| Entry names         | One flat name; connection tools are `<connection>.<tool>`    | A separate `connection` argument (two-part key); `<connection>__<tool>` (ambiguous with extension connections and local names) |
+| Search output       | TypeScript `signature`                                       | Raw JSON Schema (larger, and code mode needs the signature anyway)                                                             |
+| Protocol shape      | Actions carry the entry's name; only history says `execute`  | An outer `execute` action with a nested entry action                                                                           |
+| Search state        | Stateless; any entry can be executed                         | A durable discovered set that execution checks                                                                                 |
+| Listing             | One append-only listing: names, plus connection descriptions | Nothing (the model can't tell when to search); full signatures (eval-gated)                                                    |
+
+## Follow-up: deferred skills
+
+Skills join the catalog under their own key. No `skill_search` is needed.
+
+- **Opt-in.** `deferred: true` in `SKILL.md` frontmatter, on `defineSkill`,
+  and on dynamic `defineSkill` entries.
+- **What the model sees.**
+  - Deferred skills leave the system prompt's skill section and the dynamic
+    skill announcement.
+  - The catalog listing gains a `Skills:` group of names, with diffs as
+    dynamic skills come and go. Today the dynamic skill announcement
+    re-renders the full list on every change.
+  - `search` returns `{ skill, description }` alongside tool results. One
+    query such as "fill a PDF form" can surface both a `pdf_fill` tool and a
+    `pdf-forms` skill.
+- **Loading.** `execute({ skill })` runs the existing `load-skill` action.
+  Activation, sandbox files under the skills root, and eval facts are the
+  same as for `load_skill` today. History shows an `execute` call whose
+  result is the skill's markdown.
+- **Retiring `load_skill`.** `execute` is always registered, so
+  `execute({ skill })` can load every skill, deferred or not. The skill
+  section of the prompt then points at `execute`, and `load_skill` goes away.
+- **Names.** The `skill` key keeps skills apart from tools, so a skill can
+  share a name with the tool it documents. Skill names still need a charset
+  check: there is no validation today, and dynamic skill keys aren't checked.
+- **Cache.** Nothing about presence changes, so deferred skills, static or
+  dynamic, only append listing diffs.
+
+## Later: code mode
+
+Code mode adds `execute({ code })`. The rest of this design carries over:
+
+| This design                    | Code mode                                                        |
+| ------------------------------ | ---------------------------------------------------------------- |
+| `search(opts)` tool            | `search(opts)` inside the program, same result shape             |
+| `execute({ tool, input })`     | `tools.deploy_service(input)`, `tools.linear.list_issues(input)` |
+| `execute({ skill })`           | Loading a skill from the program                                 |
+| One action per `execute` call  | One nested action per call, with `parentCallId`                  |
+| Approval on the model's call   | Approval on the nested action, parking mid-program               |
+| Catalog listing                | Unchanged                                                        |
+| Signatures in `search` results | The types the program is written against                         |
+
+- `execute({ tool, input })` is a one-call program, so both forms share one
+  dispatch path.
+- The `code` property appears only when code mode is on. That is fixed per
+  agent and eve version, never per step, so the `tools` array stays stable.
+- Names with `-` aren't JavaScript identifiers. A kebab-case connection such
+  as `google-drive` is called as `tools["google-drive"].list_files(input)`.
