@@ -9,6 +9,8 @@
 //
 // Usage: node scripts/eval-benchmark/publish.mjs <plan.json> <legs-dir> <records.jsonl>
 // Requires EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN, GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT.
+// TEMPORARY: EVE_BENCHMARK_BLOB_ROOT=preview/runs keeps pull request test runs
+// out of the runs/ prefix that ingest reads. Remove before merge.
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -22,6 +24,7 @@ import {
 } from "./records.mjs";
 
 const UPLOAD_CONCURRENCY = 8;
+const BLOB_ROOTS = ["runs", "preview/runs"];
 
 /**
  * @typedef {{
@@ -31,7 +34,7 @@ const UPLOAD_CONCURRENCY = 8;
  */
 
 /**
- * @param {{ plan: any, legs: ReturnType<typeof readLegs>, recordsJsonl: string, githubRunId: string, runAttempt: number, eveVersion: string, store: ImmutableStore }} input
+ * @param {{ plan: any, legs: ReturnType<typeof readLegs>, recordsJsonl: string, githubRunId: string, runAttempt: number, eveVersion: string, store: ImmutableStore, root?: string }} input
  */
 export async function publishRun({
   plan,
@@ -41,7 +44,10 @@ export async function publishRun({
   runAttempt,
   eveVersion,
   store,
+  root = "runs",
 }) {
+  if (!BLOB_ROOTS.includes(root))
+    throw new Error(`Blob root must be one of ${BLOB_ROOTS.join(", ")} (got "${root}").`);
   const records = recordsJsonl
     .split("\n")
     .filter(Boolean)
@@ -52,7 +58,7 @@ export async function publishRun({
       throw new Error(`Record ${record.fixture}/${record.eval_id} belongs to another run.`);
   }
 
-  const prefix = `runs/${githubRunId}/${runAttempt}`;
+  const prefix = `${root}/${githubRunId}/${runAttempt}`;
   const uploads = legs.flatMap(({ leg, dir }) =>
     dir === undefined
       ? []
@@ -170,6 +176,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     runAttempt: Number(process.env.GITHUB_RUN_ATTEMPT ?? "1"),
     eveVersion: JSON.parse(readFileSync("packages/eve/package.json", "utf8")).version,
     store: await vercelBlobStore(token),
+    root: process.env.EVE_BENCHMARK_BLOB_ROOT || undefined,
   });
   console.error(
     `Published ${result.records} records and ${result.objects} objects to ${result.prefix}.`,

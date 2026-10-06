@@ -8,6 +8,13 @@ on:
   schedule:
     # Nightly; skipped when main has not moved since the last successful run.
     - cron: "23 7 * * *"
+  # TEMPORARY: lets a same-repo PR exercise the workflow end to end and publish
+  # under preview/runs/. The `run-eval-benchmark` label runs one model, one
+  # fixture, and one attempt; `run-eval-benchmark-full` runs the nightly matrix
+  # with one attempt instead of the registry's three. Remove this trigger and every `pull_request` branch below
+  # before merge: it hands the Blob token to PR code.
+  pull_request:
+    types: [labeled]
   # Also dispatched by release.yml after an eve release publishes.
   workflow_dispatch:
     inputs:
@@ -35,6 +42,12 @@ jobs:
   plan:
     name: plan
     runs-on: ubuntu-latest
+    # TEMPORARY: pull_request gate; see the trigger above.
+    if: >-
+      github.event_name != 'pull_request' ||
+      ((github.event.label.name == 'run-eval-benchmark' ||
+      github.event.label.name == 'run-eval-benchmark-full') &&
+      github.event.pull_request.head.repo.full_name == github.repository)
     permissions:
       contents: read
       actions: read
@@ -48,7 +61,7 @@ jobs:
       evals_per_leg: ${{ steps.plan.outputs.evals_per_leg }}
     steps:
       - name: Require main
-        if: github.ref != 'refs/heads/main'
+        if: github.event_name != 'pull_request' && github.ref != 'refs/heads/main'
         run: |
           echo "::error::Benchmark results publish only from refs/heads/main (got ${GITHUB_REF})."
           exit 1
@@ -56,6 +69,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # TEMPORARY: a PR plans its head commit, not the merge commit.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Setup Node.js
@@ -68,8 +83,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
+          PLANNED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          echo "sha=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "sha=${PLANNED_SHA}" >> "$GITHUB_OUTPUT"
           if [ "$EVENT_NAME" = "schedule" ]; then
             last_sha="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow eval-benchmark.yml \
               --branch main --status success --limit 1 --json headSha --jq '.[0].headSha // ""')"
@@ -85,10 +101,14 @@ jobs:
         id: plan
         if: steps.skip.outputs.run == 'true'
         env:
-          BENCHMARK_MODELS: ${{ inputs.models }}
-          BENCHMARK_FIXTURES: ${{ inputs.fixtures }}
-          BENCHMARK_ATTEMPTS: ${{ inputs.attempts }}
-        run: node scripts/eval-benchmark/plan.mjs "$RUNNER_TEMP/plan.json" "$GITHUB_SHA"
+          # TEMPORARY: pull request runs use one attempt. `run-eval-benchmark`
+          # also narrows to one model and fixture; `run-eval-benchmark-full`
+          # keeps every registry model and fixture.
+          BENCHMARK_MODELS: ${{ github.event.label.name == 'run-eval-benchmark' && 'openai-high' || inputs.models }}
+          BENCHMARK_FIXTURES: ${{ github.event.label.name == 'run-eval-benchmark' && 'agent-tools' || inputs.fixtures }}
+          BENCHMARK_ATTEMPTS: ${{ github.event_name == 'pull_request' && '1' || inputs.attempts }}
+          PLANNED_SHA: ${{ steps.skip.outputs.sha }}
+        run: node scripts/eval-benchmark/plan.mjs "$RUNNER_TEMP/plan.json" "$PLANNED_SHA"
 
       - name: Upload plan
         if: steps.skip.outputs.run == 'true'
@@ -351,4 +371,6 @@ jobs:
       - name: Publish to Blob
         env:
           EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN: ${{ secrets.EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN }}
+          # TEMPORARY: keep pull request test runs out of the runs/ prefix ingest reads.
+          EVE_BENCHMARK_BLOB_ROOT: ${{ github.event_name == 'pull_request' && 'preview/runs' || 'runs' }}
         run: node scripts/eval-benchmark/publish.mjs "$RUNNER_TEMP/plan/plan.json" "$RUNNER_TEMP/legs" "$RUNNER_TEMP/records.jsonl"
