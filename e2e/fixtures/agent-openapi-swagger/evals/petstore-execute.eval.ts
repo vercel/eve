@@ -1,3 +1,4 @@
+import { requireMockModel } from "@eve-e2e/config/mock-script";
 import { defineEval } from "eve/evals";
 
 const INVENTORY_TOOL = "petstore__getInventory";
@@ -7,9 +8,7 @@ export default defineEval({
     "search lists an OpenAPI connection's operations, and execute calls one over HTTP under its full name.",
 
   async test(t) {
-    if (process.env.EVE_E2E_MODEL !== "mock") {
-      t.skip("Requires the deterministic mock model to issue the exact calls.");
-    }
+    requireMockModel(t);
 
     const turn = await t.send("PETSTORE_EXECUTE_E2E");
 

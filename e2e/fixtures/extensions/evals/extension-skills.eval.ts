@@ -1,3 +1,4 @@
+import { requireMockModel } from "@eve-e2e/config/mock-script";
 import { defineEval } from "eve/evals";
 
 const TOOLKIT_INCIDENT_TOKEN = "toolkit-incident-dynamic-ok-7T2X";
@@ -10,9 +11,7 @@ const TOOLKIT_INCIDENT_TOKEN = "toolkit-incident-dynamic-ok-7T2X";
 export default defineEval({
   description: "execute({ skill }) loads static and dynamic extension skills under their mounts.",
   async test(t) {
-    if (process.env.EVE_E2E_MODEL !== "mock") {
-      t.skip("Requires the deterministic mock model to load the exact skills.");
-    }
+    requireMockModel(t);
 
     const turn = await t.send(
       "SKILL-LOAD toolkit__toolkit-guide toolkit__incident toolkit-alt__incident local-guide",

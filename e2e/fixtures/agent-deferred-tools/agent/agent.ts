@@ -1,9 +1,10 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
 import {
+  execute,
   latestTaskResult,
+  loadSkills,
   outputOf,
   playScript,
-  type ScriptedCall,
 } from "@eve-e2e/config/mock-script";
 import { defineAgent } from "eve";
 import type { MockModelRequest, MockModelResponse } from "eve/evals";
@@ -20,14 +21,6 @@ const DEFERRED_SAMPLES = [
   "billing_specialist",
   `ledger_${LEDGER_REGIONS[0]}`,
 ];
-
-/** An `execute` call with a fixed id, so the script knows once it has a result. */
-function execute(
-  id: string,
-  target: { readonly tool: string; readonly input?: object } | { readonly skill: string },
-): ScriptedCall {
-  return { id, input: () => target, name: "execute" };
-}
 
 /** The first tool `execute` suggested in its error for the call with `id`. */
 function suggestedTool(request: MockModelRequest, id: string): string | undefined {
@@ -85,18 +78,7 @@ const SCENARIOS: Record<string, (request: MockModelRequest) => MockModelResponse
       (done) => reportTask(done, "billing_specialist", "SPECIALIST-RESULT"),
     ),
   "DEFERRED-SKILLS": (request) =>
-    playScript(
-      request,
-      [
-        execute("load-pdf-forms", { skill: "pdf-forms" }),
-        execute("load-release-notes", { skill: "release_notes" }),
-        execute("load-tenant-playbook", { skill: "tenant-playbook" }),
-      ],
-      (done) =>
-        ["load-pdf-forms", "load-release-notes", "load-tenant-playbook"]
-          .map((id) => outputOf(done, id).trim().split("\n").at(-1))
-          .join(" "),
-    ),
+    loadSkills(request, ["pdf-forms", "release_notes", "tenant-playbook"]),
   /** Calls a misspelled tool, then the first name the error suggests. */
   "DEFERRED-MISSPELLED": (request) =>
     playScript(

@@ -1,3 +1,4 @@
+import { requireMockModel } from "@eve-e2e/config/mock-script";
 import { defineEval } from "eve/evals";
 
 /** Failed tool outputs carry the error message; match its text whatever its wrapping. */
@@ -8,9 +9,7 @@ export default defineEval({
     "execute returns each MCP result shape, validates input before a call reaches the server, and suggests the closest tool for an unknown name.",
 
   async test(t) {
-    if (process.env.EVE_E2E_MODEL !== "mock") {
-      t.skip("Requires the deterministic mock model to issue the exact calls.");
-    }
+    requireMockModel(t);
 
     const turn = await t.send("KENNEL_MCP_E2E");
     turn.expectOk();

@@ -1,12 +1,18 @@
 /**
  * Building blocks for tests of the step catalog: agent entries of each kind,
- * a session bundle with skills, and in-memory connections.
+ * a session bundle with skills, in-memory connections, and a session context
+ * that holds them.
  */
 
 import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { AuthKey, SessionIdKey } from "#context/keys.js";
+import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
+import { buildStepCatalog } from "#execution/catalog/step-catalog.js";
+import { CallbackBaseUrlKey } from "#harness/authorization.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
-import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
+import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import {
   type ConnectionClient,
@@ -229,4 +235,42 @@ export function connectionTool(
   description = `${name} description`,
 ): ConnectionToolMetadata {
   return { description, inputSchema, name };
+}
+
+/**
+ * Alice's session with `tools`, `skills`, and `connections`, and the step
+ * catalog built from it. `run` runs code inside the session's context.
+ */
+export function catalogContext(
+  input: {
+    readonly connections?: readonly FakeConnection[];
+    readonly dynamicSubagents?: readonly string[];
+    readonly session?: { readonly rootSessionId?: string };
+    readonly skills?: readonly CatalogSkillSource[];
+    readonly tools?: readonly HarnessToolDefinition[];
+  } = {},
+) {
+  const ctx = new ContextContainer();
+  ctx.set(AuthKey, {
+    attributes: {},
+    authenticator: "test",
+    principalId: "alice",
+    principalType: "user",
+  });
+  ctx.set(SessionIdKey, "catalog-session");
+  ctx.set(CallbackBaseUrlKey, "https://agent.example.com");
+  ctx.set(
+    BundleKey,
+    catalogBundle({ dynamicSubagents: input.dynamicSubagents, skills: input.skills }),
+  );
+  if (input.connections !== undefined) {
+    ctx.set(ConnectionRegistryKey, connectionRegistry(input.connections));
+  }
+  const catalog = buildStepCatalog({
+    agentTools: toolMap(...(input.tools ?? [])),
+    ctx,
+    endsTurn: true,
+    session: input.session ?? {},
+  });
+  return { catalog, ctx, run: <T>(fn: () => T) => contextStorage.run(ctx, fn) };
 }
