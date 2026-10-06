@@ -20,7 +20,6 @@ import { isConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import { connectionToolName } from "#connections/ownership.js";
 import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
-import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { isApprovalRecheck } from "#harness/approval-recheck.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
@@ -71,8 +70,9 @@ function instanceKey(connection: ResolvedConnectionDefinition): string {
 /** No instance id matches this, so the call fails when it runs. */
 const CHANGED_INSTANCE = "\u0000changed";
 
-/** The entry for one tool of one connection instance. */
+/** The entry for one tool of one connection instance in `registry`. */
 export function connectionEntry(
+  registry: ConnectionRegistry,
   connection: ResolvedConnectionDefinition,
   toolName: string,
 ): HarnessToolDefinition {
@@ -82,9 +82,9 @@ export function connectionEntry(
     deferred: true,
     description: "",
     execute: (input: unknown, options: ToolExecuteOptions) =>
-      callConnectionTool(connection, toolName, input, options),
+      callConnectionTool(registry, connection, toolName, input, options),
     // Checked before approval, so no one is asked to approve a call that cannot run.
-    inputSchema: refineJsonSchema({}, (input) => checkInput(connection, toolName, input)),
+    inputSchema: refineJsonSchema({}, (input) => checkInput(registry, connection, toolName, input)),
     label: { start: () => label },
     name: connectionToolName(connection.connectionName, toolName),
     toModelOutput: connectionToolModelOutput,
@@ -96,12 +96,12 @@ export function connectionEntry(
 // ---------------------------------------------------------------------------
 
 async function callConnectionTool(
+  registry: ConnectionRegistry,
   connection: ResolvedConnectionDefinition,
   toolName: string,
   rawInput: unknown,
   options: ToolExecuteOptions,
 ): Promise<unknown> {
-  const registry = requireRegistry();
   releaseApprovalPin(options.toolCallId, connection);
   assertPendingAuthorizationInstances(registry, [connection]);
 
@@ -120,7 +120,7 @@ async function callConnectionTool(
   }
   // Validation may have run before a sign-in made the tools listable.
   const checked = await checkCall(connection, tools, toolName, rawInput);
-  if ("error" in checked) throw new Error(checked.error);
+  if ("issues" in checked) throw new Error(issuesMessage(checked.issues));
   const { input, tool } = checked;
 
   let raw: unknown;
@@ -140,25 +140,26 @@ async function callConnectionTool(
 }
 
 async function checkInput(
+  registry: ConnectionRegistry,
   connection: ResolvedConnectionDefinition,
   toolName: string,
   input: unknown,
 ): Promise<StandardSchemaV1.Result<unknown>> {
   let tools: readonly ConnectionToolMetadata[];
   try {
-    tools = await requireRegistry().getClient(connection.connectionName).getToolMetadata();
+    tools = await registry.getClient(connection.connectionName).getToolMetadata();
   } catch (error) {
     // Only the call itself can start the sign-in that makes its tools listable.
     if (isConnectionAuthorizationRequiredError(error)) return { value: input };
     return { issues: [{ message: listingFailureMessage(connection.connectionName, error) }] };
   }
   const checked = await checkCall(connection, tools, toolName, input);
-  return "error" in checked ? { issues: [{ message: checked.error }] } : { value: checked.input };
+  return "issues" in checked ? { issues: checked.issues } : { value: checked.input };
 }
 
 type CallCheck =
   | { readonly input: JsonObject; readonly tool: ConnectionToolMetadata }
-  | { readonly error: string };
+  | { readonly issues: readonly StandardSchemaV1.Issue[] };
 
 /** The tool a call runs and its input with schema defaults filled in, or why it cannot run. */
 async function checkCall(
@@ -168,23 +169,31 @@ async function checkCall(
   input: unknown,
 ): Promise<CallCheck> {
   const tool = tools.find((entry) => entry.name === toolName);
-  if (tool === undefined) return { error: unknownToolMessage(connection, toolName, tools) };
+  if (tool === undefined) {
+    return { issues: [{ message: unknownToolMessage(connection, toolName, tools) }] };
+  }
   const result = await defineJsonSchema(tool.inputSchema as JsonObject)["~standard"].validate(
     isObject(input) ? input : {},
   );
   if (result.issues === undefined) return { input: result.value as JsonObject, tool };
-  const issues = result.issues
-    .map((issue) => {
-      const path = (issue.path ?? [])
+  return {
+    issues: [
+      ...result.issues,
+      { message: `Signature: ${connectionToolSignature(connection, tool)}` },
+    ],
+  };
+}
+
+/** The issues as one error message, each led by the path it is about. */
+function issuesMessage(issues: readonly StandardSchemaV1.Issue[]): string {
+  return issues
+    .map(({ message, path = [] }) => {
+      const at = path
         .map((segment) => (typeof segment === "object" ? String(segment.key) : String(segment)))
         .join(".");
-      return path.length > 0 ? `${path}: ${issue.message}` : issue.message;
+      return at.length > 0 ? `${at}: ${message}` : message;
     })
-    .join("; ");
-  const name = connectionToolName(connection.connectionName, tool.name);
-  return {
-    error: `Invalid input for "${name}": ${issues}. Signature: ${connectionToolSignature(connection, tool)}`,
-  };
+    .join(" ");
 }
 
 function unknownToolMessage(
@@ -201,12 +210,6 @@ function unknownToolMessage(
       ? ` Closest tools: ${suggestions.join(", ")}.`
       : ` Find its tools with search({ connection: "${connectionName}" }).`;
   return `Connection "${connectionName}" has no tool named "${toolName}".${hint}`;
-}
-
-function requireRegistry(): ConnectionRegistry {
-  const registry = loadContext().get(ConnectionRegistryKey);
-  if (registry === undefined) throw new Error("This agent has no connections.");
-  return registry;
 }
 
 // ---------------------------------------------------------------------------

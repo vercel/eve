@@ -6,8 +6,6 @@
 
 import { isConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import { connectionToolName } from "#connections/ownership.js";
-import { loadContext } from "#context/container.js";
-import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import type { AuthorizationSignal } from "#harness/authorization.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createLogger } from "#internal/logging.js";
@@ -104,12 +102,14 @@ type SearchCandidate = RankCandidate & {
 };
 
 /**
- * Builds `search` over one step's deferred entries. `describe` returns an
- * entry's description as the model would read it in its tool list.
+ * Builds `search` over one step's deferred entries and the connections in
+ * `registry`. `describe` returns an entry's description as the model would
+ * read it in its tool list.
  */
 export function createSearchTool(input: {
   readonly deferred: readonly HarnessToolDefinition[];
   readonly describe: (definition: HarnessToolDefinition) => string;
+  readonly registry: ConnectionRegistry | undefined;
 }): HarnessToolDefinition {
   return {
     description: SEARCH_DESCRIPTION,
@@ -140,7 +140,7 @@ async function search(
       "search with signIn: true requires `connection`. Ask the user to sign in to one connection at a time.",
     );
   }
-  const registry = loadContext().get(ConnectionRegistryKey);
+  const { registry } = catalog;
   const targets = searchedConnections(registry, connectionName);
   const candidates: SearchCandidate[] =
     connectionName === undefined
