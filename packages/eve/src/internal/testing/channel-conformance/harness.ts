@@ -299,7 +299,14 @@ export const SECOND_GATED_TOOL = "publish_notes";
  */
 export const REQUESTER_GATED_TOOL = "release_hotfix";
 
-export type GatedTool = typeof GATED_TOOL | typeof SECOND_GATED_TOOL | typeof REQUESTER_GATED_TOOL;
+/** An always-gated tool whose response policy lets anyone approve or cancel the call. */
+export const OPEN_GATED_TOOL = "roll_back_release";
+
+export type GatedTool =
+  | typeof GATED_TOOL
+  | typeof SECOND_GATED_TOOL
+  | typeof REQUESTER_GATED_TOOL
+  | typeof OPEN_GATED_TOOL;
 
 /** The test agent's plain tool: it runs without asking anyone. */
 export const PLAIN_TOOL = "look_up_notes";
@@ -535,6 +542,7 @@ async function converse(
   const runs: Record<CountedTool, number> = {
     [GATED_TOOL]: 0,
     [REQUESTER_GATED_TOOL]: 0,
+    [OPEN_GATED_TOOL]: 0,
     [SECOND_GATED_TOOL]: 0,
     [PLAIN_TOOL]: 0,
     read_calendar: 0,
@@ -618,6 +626,15 @@ async function converse(
           request.principal !== null && samePrincipal(response.principal, request.principal)
             ? { status: "allowed" }
             : { reason: "Only the person who asked can respond.", status: "rejected" },
+      ),
+      gatedTool(
+        OPEN_GATED_TOOL,
+        "Rolls back a release.",
+        () => {
+          runs[OPEN_GATED_TOOL] += 1;
+          return { rolledBack: true };
+        },
+        () => ({ status: "allowed" }),
       ),
       {
         logicalPath: `tools/${TWO_QUESTIONS_TOOL}.ts`,

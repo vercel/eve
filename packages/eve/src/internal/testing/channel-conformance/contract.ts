@@ -6,6 +6,7 @@ import {
   type ConversationOptions,
   GATED_TOOL,
   type GatedTool,
+  OPEN_GATED_TOOL,
   PLAIN_TOOL,
   type RenderedOption,
   REQUESTER_GATED_TOOL,
@@ -101,6 +102,14 @@ const HOTFIX_PROMPT = "Approve Release hotfix?";
 async function askToReleaseHotfix(conversation: ChannelConversation) {
   await conversation.say(HOTFIX);
   return await conversation.waitForQuestion(HOTFIX_PROMPT);
+}
+
+const ROLL_BACK = `Use ${OPEN_GATED_TOOL} to undo the release.`;
+const ROLL_BACK_PROMPT = "Approve Roll back release?";
+
+async function askToRollBack(conversation: ChannelConversation) {
+  await conversation.say(ROLL_BACK);
+  return await conversation.waitForQuestion(ROLL_BACK_PROMPT);
 }
 
 async function expectRan(conversation: ChannelConversation, tool: GatedTool, output: unknown) {
@@ -810,13 +819,13 @@ const signInRules = [
     },
   },
   {
-    rule: "another person pressing Approve runs a tool with no response policy",
+    rule: "another person pressing Approve on an open approval runs the tool",
     source: "docs/tools/human-in-the-loop.md#authorizing-approval-responses",
     requires: ["another-person", "buttons"],
     async run(conversation) {
-      const options = await askToDeploy(conversation);
+      const options = await askToRollBack(conversation);
       await conversation.press(option(options, APPROVE_LABELS), "bob");
-      await expectDeployed(conversation);
+      await expectRan(conversation, OPEN_GATED_TOOL, { rolledBack: true });
     },
   },
 ] as const satisfies readonly ContractRule[];

@@ -159,6 +159,7 @@ const DISCORD_BROKEN = {
       "the requester pressing Approve on a requester-only approval runs the tool",
       "another person pressing Approve on a requester-only approval leaves it pending",
       "another person pressing Cancel on a requester-only approval leaves it pending",
+      "another person pressing Approve on an open approval runs the tool",
     ],
   ),
   ...noSignInRenderer(
