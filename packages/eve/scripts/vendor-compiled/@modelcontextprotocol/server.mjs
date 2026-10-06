@@ -14,9 +14,25 @@ export interface CallToolRequest {
   };
 }
 
+export type McpJsonObject = Readonly<Record<string, unknown>>;
+
 export interface McpRequestHandlerExtra {
   readonly mcpReq: {
+    /** The 2026-07-28 per-request envelope (\`io.modelcontextprotocol/*\` keys). */
+    readonly envelope?: McpJsonObject;
+    /** Bare multi-round-trip responses keyed by the server's input request keys. */
+    readonly inputResponses?: McpJsonObject;
+    /** The value \`requestState.verify\` resolved with, or the raw string. */
+    requestState<T = unknown>(): T | undefined;
     readonly signal: AbortSignal;
+  };
+}
+
+export interface McpServerOptions {
+  readonly capabilities?: McpJsonObject;
+  readonly instructions?: string;
+  readonly requestState?: {
+    readonly verify?: (state: string, ctx: McpRequestHandlerExtra) => unknown;
   };
 }
 
@@ -72,10 +88,7 @@ export declare class Server {
 }
 
 export declare class McpServer {
-  constructor(info: { readonly name: string; readonly version: string }, options?: {
-    readonly capabilities?: Readonly<Record<string, unknown>>;
-    readonly instructions?: string;
-  });
+  constructor(info: { readonly name: string; readonly version: string }, options?: McpServerOptions);
   registerTool<TInput = unknown, TOutput = TInput>(
     name: string,
     config: {
@@ -90,6 +103,31 @@ export declare class McpServer {
     ) => unknown | Promise<unknown>,
   ): void;
 }
+
+export interface RequestStateCodec<T = unknown> {
+  mint(payload: T): Promise<string>;
+  verify(state: string, ctx: McpRequestHandlerExtra): Promise<T>;
+}
+
+export declare function createRequestStateCodec<T = unknown>(options: {
+  readonly key: Uint8Array | string;
+  readonly ttlSeconds?: number;
+}): RequestStateCodec<T>;
+
+export type InputResponseView =
+  | { readonly kind: "missing" }
+  | {
+      readonly kind: "elicit";
+      readonly action: "accept" | "cancel" | "decline";
+      readonly content?: McpJsonObject;
+    }
+  | { readonly kind: "roots" }
+  | { readonly kind: "sampling" };
+
+export declare function inputResponse(
+  responses: McpJsonObject | undefined,
+  key: string,
+): InputResponseView;
 
 export interface McpRequestContext {
   readonly era: "legacy" | "modern";

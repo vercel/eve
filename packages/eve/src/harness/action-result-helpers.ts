@@ -9,6 +9,7 @@ import {
   isAuthorizationPendingModelOutput,
 } from "#harness/authorization.js";
 import { withToolOutputSerializationError } from "#harness/tool-output-serialization.js";
+import { isRemoteInputSignal, modelFacingRemoteInputOutput } from "#harness/remote-input.js";
 
 type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
 type ToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
@@ -30,6 +31,9 @@ function toJsonValue(value: unknown): JsonValue {
   }
   if (isAuthorizationPendingModelOutput(value)) {
     return parseJsonValue(authorizationPendingAsJsonObject(value));
+  }
+  if (isRemoteInputSignal(value)) {
+    return parseJsonValue(modelFacingRemoteInputOutput(value));
   }
 
   return parseJsonValue(value === undefined ? null : value);

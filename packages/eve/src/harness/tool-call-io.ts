@@ -6,6 +6,7 @@ import {
 } from "#harness/authorization.js";
 import { resolveToolCallInputObject } from "#harness/coordination.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import { isRemoteInputPendingOutput, remoteInputPendingModelText } from "#harness/remote-input.js";
 import { normalizeToolModelOutput, type ToolModelOutputValue } from "#harness/tool-model-output.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { JsonObject } from "#shared/json.js";
@@ -65,6 +66,9 @@ export async function toolCallModelOutput(
 ): Promise<ToolModelOutputValue> {
   if (isAuthorizationPendingModelOutput(output)) {
     return { type: "text", value: authorizationPendingModelText(output.connections) };
+  }
+  if (isRemoteInputPendingOutput(output)) {
+    return { type: "text", value: remoteInputPendingModelText(output.connection) };
   }
   if (definition.toModelOutput !== undefined) {
     return normalizeToolModelOutput({

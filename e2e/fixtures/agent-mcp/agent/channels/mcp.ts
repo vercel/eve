@@ -1,6 +1,6 @@
 import { mcpChannel } from "eve/channels/mcp";
 
-import { SERVICE_ID, SERVICE_TOKEN } from "../../fixture";
+import { REQUEST_STATE_SECRET, SERVICE_ID, SERVICE_TOKEN } from "../../fixture";
 
 export default mcpChannel({
   auth: (request) =>
@@ -12,5 +12,6 @@ export default mcpChannel({
           principalType: "service",
         }
       : null,
+  requestStateSecret: REQUEST_STATE_SECRET,
   tools: true,
 });

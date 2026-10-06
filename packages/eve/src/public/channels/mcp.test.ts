@@ -604,10 +604,10 @@ describe("mcpChannel tools", () => {
       ["note", completed("saved", "Saved."), { content: [{ text: "Saved.", type: "text" }] }],
       ["note", { message: "Bad id.", status: "invalid-input" }, { code: "invalid_input" }],
       ["note", { reason: "Not today.", status: "denied" }, { code: "denied" }],
-      ["note", { status: "approval-required" }, { code: "approval_required" }],
+      ["note", { callId: "c", status: "approval-required" }, { code: "approval_required" }],
       [
         "note",
-        { connections: ["linear"], status: "authorization-required" },
+        { callId: "c", signIns: [{ connection: "linear" }], status: "authorization-required" },
         { code: "authorization_required", message: expect.stringContaining("linear") },
       ],
       ["note", { message: "Boom.", status: "failed" }, { code: "internal", message: "Boom." }],
@@ -630,6 +630,153 @@ describe("mcpChannel tools", () => {
         signal: expect.any(AbortSignal),
       });
     }
+  });
+
+  it("asks over input_required with a requestState bound to the caller, tool, and arguments", async () => {
+    vi.stubEnv("EVE_MCP_REQUEST_STATE_SECRET", "");
+    vi.stubEnv("EVE_DEV", "");
+    const bob: SessionAuthContext = { ...principal, principalId: "user-2" };
+    const both = { elicitation: { form: {}, url: {} } };
+    const signIn = { connection: "linear", url: "https://linear.example/oauth" };
+    const done = { modelOutput: { type: "text", value: "Saved." }, output: "saved" } as const;
+    const invokeTool = vi.fn<InvokeToolFn>();
+    const serveModern = (requestStateSecret?: string) => {
+      const channel = mcpChannel({
+        agent: false,
+        auth: (request) => (request.headers.get("x-user") === "bob" ? bob : principal),
+        requestStateSecret,
+        tools: true,
+      });
+      const post = channel.routes[1]!;
+      if (post.transport === "websocket") throw new Error("expected HTTP route");
+      const args = routeArgs(vi.fn(), {
+        describe: async () => ({ name: "compiled-agent", tools: [lookup, note] }),
+        invokeTool,
+      });
+      return async (
+        params: Record<string, unknown>,
+        options: { readonly capabilities?: object; readonly user?: string } = {},
+      ) =>
+        (await jsonRpcResponse(
+          await post.handler(
+            modernMcpRequest(params, options.capabilities ?? both, options.user),
+            args,
+          ),
+        )) as { result?: Record<string, any>; error?: { code: number } };
+    };
+    const rpc = serveModern("k".repeat(32));
+    const expiresAt = (state: string) =>
+      JSON.parse(Buffer.from(state.slice(3, state.lastIndexOf(".")), "base64url").toString()).p
+        .expiresAt as number;
+    const note1 = { arguments: { text: "hi" }, name: "note" };
+
+    // 2025-style clients, and clients that declared no elicitation, get the errors.
+    invokeTool.mockResolvedValue({ callId: "c1", status: "approval-required" });
+    expect((await rpc(note1, { capabilities: {} })).result).toMatchObject({
+      structuredContent: { error: { code: "approval_required" } },
+    });
+    const asked = (await rpc(note1)).result!;
+    expect(asked).toMatchObject({
+      inputRequests: { "dev.eve/approval": { params: { mode: "form" } } },
+      resultType: "input_required",
+    });
+    const approvalState = asked.requestState as string;
+
+    // A forged, rebound, or expired state never reaches invokeTool. The SDK
+    // refuses a bad MAC or expiry; eve refuses a state minted for another call.
+    invokeTool.mockClear();
+    const forged = `${approvalState.slice(0, -2)}xx`;
+    const now = Date.now();
+    const rebound = { result: { structuredContent: { error: { code: "invalid_input" } } } };
+    const refusals: Array<[string, Record<string, unknown>, { user?: string }, object, number?]> = [
+      ["forged", { ...note1, requestState: forged }, {}, { error: { code: -32_602 } }],
+      [
+        "other arguments",
+        { ...note1, arguments: { text: "bye" }, requestState: approvalState },
+        {},
+        rebound,
+      ],
+      [
+        "other tool",
+        { arguments: { id: "7" }, name: "lookup", requestState: approvalState },
+        {},
+        rebound,
+      ],
+      ["other caller", { ...note1, requestState: approvalState }, { user: "bob" }, rebound],
+      [
+        "expired",
+        { ...note1, requestState: approvalState },
+        {},
+        { error: { code: -32_602 } },
+        now + 11 * 60_000,
+      ],
+    ];
+    for (const [label, params, options, expected, at] of refusals) {
+      const clock = at === undefined ? undefined : vi.spyOn(Date, "now").mockReturnValue(at);
+      expect(await rpc(params, options), label).toMatchObject(expected);
+      clock?.mockRestore();
+    }
+    expect(invokeTool).not.toHaveBeenCalled();
+
+    // Approving re-runs the call as the same caller; a sign-in round follows
+    // and carries the answer, and a re-sent round keeps its first expiry.
+    invokeTool.mockResolvedValueOnce({
+      callId: "c1",
+      signIns: [signIn],
+      status: "authorization-required",
+    });
+    const approve = { "dev.eve/approval": { action: "accept", content: { approved: true } } };
+    const signInRound = (
+      await rpc({ ...note1, inputResponses: approve, requestState: approvalState })
+    ).result!;
+    expect(invokeTool).toHaveBeenLastCalledWith(
+      "note",
+      { text: "hi" },
+      {
+        approval: { approved: true },
+        auth: principal,
+        callId: "c1",
+        signal: expect.any(AbortSignal),
+      },
+    );
+    expect(signInRound.inputRequests).toEqual({
+      "dev.eve/authorization:linear": {
+        method: "elicitation/create",
+        params: { message: "Sign in to linear to continue.", mode: "url", url: signIn.url },
+      },
+    });
+    const resent = (await rpc({ ...note1, requestState: signInRound.requestState })).result!;
+    expect(invokeTool).toHaveBeenCalledTimes(1);
+    expect(expiresAt(resent.requestState)).toBe(expiresAt(signInRound.requestState));
+
+    invokeTool.mockResolvedValueOnce({ ...done, status: "completed" });
+    const signedIn = { "dev.eve/authorization:linear": { action: "accept" } };
+    expect(
+      (await rpc({ ...note1, inputResponses: signedIn, requestState: resent.requestState })).result,
+    ).toMatchObject({ content: [{ text: "Saved.", type: "text" }] });
+    expect(invokeTool).toHaveBeenLastCalledWith(
+      "note",
+      { text: "hi" },
+      expect.objectContaining({
+        approval: { approved: true },
+        callId: "c1",
+      }),
+    );
+
+    // Without a secret, only the tools that would ask fail, naming the variable.
+    const unsigned = serveModern();
+    invokeTool.mockResolvedValueOnce({ callId: "c2", status: "approval-required" });
+    expect((await unsigned(note1)).result).toMatchObject({
+      structuredContent: {
+        error: {
+          code: "internal",
+          message: expect.stringContaining("EVE_MCP_REQUEST_STATE_SECRET"),
+        },
+      },
+    });
+    invokeTool.mockResolvedValueOnce({ ...done, status: "completed" });
+    expect((await unsigned(note1)).result).toMatchObject({ content: [{ text: "Saved." }] });
+    vi.unstubAllEnvs();
   });
 
   it("checks arguments against the tool's JSON schema before invoking it", async () => {
@@ -687,6 +834,35 @@ function mcpRequest(body: unknown, headers: Record<string, string> = {}): Reques
     },
     method: "POST",
   });
+}
+
+function modernMcpRequest(
+  params: Record<string, unknown>,
+  capabilities: object,
+  user?: string,
+): Request {
+  const headers: Record<string, string> = {
+    "mcp-method": "tools/call",
+    "mcp-name": String(params.name),
+    "mcp-protocol-version": MCP_PROTOCOL_VERSION,
+  };
+  if (user !== undefined) headers["x-user"] = user;
+  return mcpRequest(
+    {
+      id: 1,
+      jsonrpc: "2.0",
+      method: "tools/call",
+      params: {
+        ...params,
+        _meta: {
+          "io.modelcontextprotocol/clientCapabilities": capabilities,
+          "io.modelcontextprotocol/clientInfo": { name: "test-client", version: "0.0.0" },
+          "io.modelcontextprotocol/protocolVersion": MCP_PROTOCOL_VERSION,
+        },
+      },
+    },
+    headers,
+  );
 }
 
 function requestWithHost(url: string, init: RequestInit = {}): Request {

@@ -10,6 +10,7 @@ import { buildCallbackContext } from "#context/build-callback-context.js";
 import { loadContext } from "#context/container.js";
 import { isAuthorizationSignal, modelFacingAuthorizationOutput } from "#harness/authorization.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
+import { isRemoteInputSignal, modelFacingRemoteInputOutput } from "#harness/remote-input.js";
 import { isApprovedToolCall, markApprovalRecheck } from "#harness/approval-recheck.js";
 import { toModelSchema } from "#tools/schema.js";
 import { normalizeToolJsonOutput } from "#harness/tool-model-output.js";
@@ -159,6 +160,10 @@ function normalizeToolExecuteOutput(
   if (isAuthorizationSignal(output)) {
     stashToolInterrupt(loadContext(), options.toolCallId, output);
     return modelFacingAuthorizationOutput(output);
+  }
+  if (isRemoteInputSignal(output)) {
+    stashToolInterrupt(loadContext(), options.toolCallId, output);
+    return modelFacingRemoteInputOutput(output);
   }
   return normalizeToolJsonOutput({
     boundary: "execute",
