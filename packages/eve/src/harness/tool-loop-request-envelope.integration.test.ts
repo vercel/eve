@@ -3,11 +3,14 @@ import type { LanguageModel } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { SessionDynamicInstructionsKey } from "#context/keys.js";
+import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
+import { SessionDynamicInstructionsKey, StaticModelReferenceKey } from "#context/keys.js";
 import { mockModel, type MockModelRequest } from "#evals/mock-model.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession } from "#harness/types.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
+import { createSessionStartedEvent } from "#protocol/message.js";
+import { defineSkill } from "#public/definitions/skill.js";
 
 // The harness runs outside a workflow body here, where run attributes cannot
 // be written; the attribute contract is covered by emit.test.ts.
@@ -80,6 +83,58 @@ describe("model request envelope accounting", () => {
     expect(third.session.history.some((message) => JSON.stringify(message).includes(policy))).toBe(
       false,
     );
+  });
+
+  it("does not let a new announcement mask later instruction growth", async () => {
+    const ctx = new ContextContainer();
+    // Dynamic resolvers read the session's model.
+    ctx.set(StaticModelReferenceKey, { id: "task" });
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: createSessionStartedEvent(),
+      messages: [],
+      resolvers: [
+        {
+          eventNames: ["session.started"],
+          events: {
+            "session.started": () =>
+              defineSkill({
+                description: "Available skill description ".repeat(600),
+                markdown: "# Tenant policy",
+              }),
+          },
+          exportName: "default",
+          logicalPath: "skills/tenant-policy.ts",
+          slug: "tenant-policy",
+          sourceId: "skills/tenant-policy.ts",
+          sourceKind: "module",
+        },
+      ],
+    });
+    let summaries = 0;
+    const task = mockModel({
+      respond: () => ({ text: "Done.", usage: { inputTokens: 8_000 } }),
+    });
+    const summary = mockModel({
+      respond: () => {
+        summaries++;
+        return "Earlier work is summarized.";
+      },
+    });
+    const runStep = createToolLoopHarness({
+      tools: new Map(),
+      resolveModel: async (reference) =>
+        (reference.id === "summary" ? summary : task) as LanguageModel,
+    });
+    const first = await contextStorage.run(ctx, () =>
+      runStep(session(), { message: "First task." }),
+    );
+    expect(summaries).toBe(0);
+    // The skills announcement joined durable history on the first step.
+    expect(JSON.stringify(first.session.history)).toContain("Available skill description");
+    setInstructions(ctx, 600);
+    await contextStorage.run(ctx, () => runStep(first.session, { message: "Second task." }));
+    expect(summaries).toBe(1);
   });
 
   it("rechecks instructions added before an empty-response retry", async () => {
