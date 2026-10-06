@@ -354,6 +354,8 @@ async function executeConnectionTool(
   const auth = createAuthorizationExecution();
   if (scoped !== undefined) await auth.complete(scoped);
   const client = registry.getClient(connection.connectionName);
+  // A client that connected anonymously before sign-in must reconnect with the new token.
+  if (scoped !== undefined && auth.isJustAuthorized(scoped)) await client.close();
 
   let tools: readonly ConnectionToolMetadata[];
   try {
@@ -467,7 +469,10 @@ async function completePendingAuthorizations(
   for (const connection of connections) {
     if (!results.some((result) => result.name === connection.connectionName)) continue;
     const scoped = await resolveInteractiveAuthorization(registry, connection.connectionName);
-    if (scoped !== undefined) await auth.complete(scoped);
+    if (scoped === undefined) continue;
+    await auth.complete(scoped);
+    // A client that connected anonymously before sign-in must reconnect with the new token.
+    if (auth.isJustAuthorized(scoped)) await registry.getClient(connection.connectionName).close();
   }
 }
 
