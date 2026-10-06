@@ -160,31 +160,6 @@ export function createInstrumentationDispatcher(
       capturesOutputs,
       forTrace,
       publish,
-      async observeToolExecution(event) {
-        for (const provider of providers) {
-          if (provider.toolExecution === undefined) continue;
-          const decision = decisions.get(provider);
-          if (decision === undefined || decision.action === "drop") continue;
-          try {
-            const projected = withInstrumentationDecision(event, decision);
-            const visible =
-              provider.projectEvent === undefined
-                ? projected
-                : await provider.projectEvent(projected);
-            if (visible.type === "tool.call.started")
-              await provider.toolExecution.started?.(visible);
-            else if (visible.type === "tool.call.completed")
-              await provider.toolExecution.completed?.(visible);
-            else if (visible.type === "tool.call.failed")
-              await provider.toolExecution.failed?.(visible);
-          } catch (error) {
-            log.warn("tool execution tracing failed", {
-              error: formatError(error),
-              provider: provider.name,
-            });
-          }
-        }
-      },
     };
   }
 

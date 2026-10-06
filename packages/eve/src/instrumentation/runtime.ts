@@ -517,36 +517,21 @@ export function bindInstrumentationRuntime(
       const hooks = bindHooks(readSessionContext());
       const scope = correlation.scope;
       const idempotencyKey = toolCallIdempotencyKey(scope, input.callId, 0);
-      await hooks.observeToolExecution?.({
-        type: "tool.call.started",
-        callId: input.callId,
-        idempotencyKey,
-        scope,
-        toolName: input.toolName,
-        startedAtMs: input.startedAtMs,
-        frameworkTool: true,
-        input: (hooks.capturesInputs ?? hooks.capturesContent) ? input.input : undefined,
-      });
-      if (input.failed) {
-        await hooks.observeToolExecution?.({
-          type: "tool.call.failed",
+      await runtime.runInContext(
+        {
+          type: "tool.call",
+          callId: input.callId,
           idempotencyKey,
           scope,
+          toolName: input.toolName,
+          startedAtMs: input.startedAtMs,
+          frameworkTool: true,
+          input: (hooks.capturesInputs ?? hooks.capturesContent) ? input.input : undefined,
           completedAtMs: input.completedAtMs,
-        });
-      } else {
-        await hooks.observeToolExecution?.({
-          type: "tool.call.completed",
-          idempotencyKey,
-          scope,
-          completedAtMs: input.completedAtMs,
-          durationMs: input.completedAtMs - input.startedAtMs,
-          output: {
-            type: "result",
-            output: (hooks.capturesOutputs ?? hooks.capturesContent) ? input.output : undefined,
-          },
-        });
-      }
+          failed: input.failed,
+        },
+        () => Promise.resolve(),
+      );
     },
     createHandleEvent: (input) => {
       const sessionContext = readSessionContext();

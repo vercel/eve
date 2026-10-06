@@ -522,7 +522,6 @@ export function createAgentOtelInstrumentation(
 
   return {
     hook: {
-      toolExecution: tools.execution,
       events: {
         ...channelDeliveries,
         ...approvals,
@@ -587,16 +586,26 @@ export function createAgentOtelInstrumentation(
         recordInputs: recordInputs && effective?.action === "record" && effective.recordInputs,
         recordOutputs: recordOutputs && effective?.action === "record" && effective.recordOutputs,
       };
-      if (parent === undefined) return execute();
-      const withErrorPolicy = withErrorContent(parent, toolContentPolicy.recordOutputs);
-      const operationContext =
-        operation.type === "tool.call"
-          ? withAgentToolContentPolicy(withErrorPolicy, toolContentPolicy)
-          : withErrorPolicy;
-      return context.with(
-        markAgentTraceContext(withOperationConversation(operationContext, operation.scope)),
-        execute,
-      );
+      const run = (executionParent: Context | undefined) => {
+        const activeParent = executionParent ?? parent;
+        if (activeParent === undefined) return execute();
+        const withErrorPolicy = withErrorContent(activeParent, toolContentPolicy.recordOutputs);
+        const operationContext =
+          operation.type === "tool.call"
+            ? withAgentToolContentPolicy(withErrorPolicy, toolContentPolicy)
+            : withErrorPolicy;
+        return context.with(
+          markAgentTraceContext(withOperationConversation(operationContext, operation.scope)),
+          execute,
+        );
+      };
+      return operation.type === "tool.call"
+        ? tools.runInContext(
+            { ...operation, input: toolContentPolicy.recordInputs ? operation.input : undefined },
+            run,
+            toolContentPolicy.recordOutputs,
+          )
+        : run(undefined);
     },
   };
 

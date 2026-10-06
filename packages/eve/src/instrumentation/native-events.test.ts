@@ -391,6 +391,7 @@ describe("createInstrumentationHandleEvent", () => {
     expect(events.slice(0, 5)).toEqual([
       {
         callId: "delegate-1",
+        frameworkTool: false,
         startedAtMs: 1_000,
         idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "delegate-1"),
         input: { task: "research" },
@@ -402,6 +403,7 @@ describe("createInstrumentationHandleEvent", () => {
       },
       {
         callId: "skill-1",
+        frameworkTool: false,
         startedAtMs: 1_000,
         idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "skill-1"),
         input: { name: "research" },
@@ -412,6 +414,7 @@ describe("createInstrumentationHandleEvent", () => {
       },
       {
         callId: "remote-1",
+        frameworkTool: false,
         startedAtMs: 1_000,
         idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "remote-1"),
         input: { task: "analyze" },
@@ -423,6 +426,7 @@ describe("createInstrumentationHandleEvent", () => {
       },
       {
         callId: "add-1",
+        frameworkTool: false,
         startedAtMs: 1_000,
         idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "add-1"),
         input: { a: 1, b: 2 },
@@ -433,6 +437,7 @@ describe("createInstrumentationHandleEvent", () => {
       },
       {
         callId: "workflow-1",
+        frameworkTool: false,
         startedAtMs: 1_000,
         idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "workflow-1"),
         input: { report: "weekly" },

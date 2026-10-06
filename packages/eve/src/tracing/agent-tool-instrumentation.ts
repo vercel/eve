@@ -11,6 +11,7 @@ import {
 
 import type {
   InstrumentationAttemptScope,
+  InstrumentationExecutionOperation,
   InstrumentationToolCallStartedEvent,
   InstrumentationToolCallTerminalEvent,
 } from "#instrumentation/lifecycle.js";
@@ -64,11 +65,11 @@ interface AgentToolInstrumentation {
     readonly "tool.call.failed": (event: InstrumentationToolCallTerminalEvent) => Promise<void>;
     readonly "tool.call.started": (event: InstrumentationToolCallStartedEvent) => Promise<void>;
   };
-  readonly execution: {
-    readonly started: (event: InstrumentationToolCallStartedEvent) => Promise<void>;
-    readonly completed: (event: InstrumentationToolCallTerminalEvent) => Promise<void>;
-    readonly failed: (event: InstrumentationToolCallTerminalEvent) => Promise<void>;
-  };
+  runInContext<T>(
+    operation: Extract<InstrumentationExecutionOperation, { type: "tool.call" }>,
+    execute: (parent: Context | undefined) => PromiseLike<T>,
+    recordOutputs: boolean,
+  ): Promise<T>;
 }
 
 /** Enriches durable tool calls, exporting SDK-only calls under their step. */
@@ -122,6 +123,7 @@ export function createAgentToolInstrumentation(input: {
       inputAttribute: input.recordInputs ? contentAttribute(event.input) : undefined,
       kind: event.kind ?? "tool-call",
       name: event.toolName,
+      toolAttributes: { "agent.tool.is_framework": event.frameworkTool === true },
       parent: {
         spanId: input.idGenerator.deriveSpanId(
           event.parentCallId === undefined
@@ -311,7 +313,43 @@ export function createAgentToolInstrumentation(input: {
       "tool.call.failed": onDispatchTerminal,
       "tool.call.started": onDispatchStarted,
     },
-    execution: { started: onStarted, completed: onTerminal, failed: onTerminal },
+    async runInContext(operation, execute, recordOutputs) {
+      if (operation.callId === undefined || operation.toolName === undefined) {
+        return execute(
+          byAttempt.get(operation.scope.attemptId)?.get(operation.idempotencyKey)?.context,
+        );
+      }
+      await onStarted({
+        ...operation,
+        callId: operation.callId,
+        toolName: operation.toolName,
+        input: operation.input,
+        type: "tool.call.started",
+      });
+      const state = byAttempt.get(operation.scope.attemptId)?.get(operation.idempotencyKey);
+      const startedAtMs = operation.startedAtMs ?? Date.now();
+      try {
+        const result = await execute(state?.context);
+        await onTerminal({
+          type: operation.failed ? "tool.call.failed" : "tool.call.completed",
+          idempotencyKey: operation.idempotencyKey,
+          scope: operation.scope,
+          completedAtMs: operation.completedAtMs ?? Date.now(),
+          durationMs: (operation.completedAtMs ?? Date.now()) - startedAtMs,
+          output: { type: "result", output: recordOutputs ? result : undefined },
+        });
+        return result;
+      } catch (error) {
+        await onTerminal({
+          type: "tool.call.failed",
+          idempotencyKey: operation.idempotencyKey,
+          scope: operation.scope,
+          completedAtMs: Date.now(),
+          error: recordOutputs ? error : undefined,
+        });
+        throw error;
+      }
+    },
   };
 
   function getAttemptStates(attemptId: string): Map<string, ToolSpanState> {

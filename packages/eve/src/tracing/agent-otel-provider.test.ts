@@ -2012,21 +2012,20 @@ describe("createAgentOtelInstrumentation", () => {
       scope,
       type: "step.attempt.started",
     });
-    await runtime.hooks.observeToolExecution!({
-      callId: "tool-1",
-      idempotencyKey: toolKey,
-      input: { secret: "value" },
-      scope,
-      toolName: "weather",
-      type: "tool.call.started",
-    });
-    await runtime.hooks.observeToolExecution!({
-      durationMs: 1500,
-      idempotencyKey: toolKey,
-      output: { output: "sunny", type: "result" },
-      scope,
-      type: "tool.call.completed",
-    });
+    const executionStart = Date.now();
+    await runtime.runInContext(
+      {
+        callId: "tool-1",
+        idempotencyKey: toolKey,
+        input: { secret: "value" },
+        scope,
+        toolName: "weather",
+        type: "tool.call",
+        startedAtMs: executionStart,
+        completedAtMs: executionStart + 1500,
+      },
+      () => Promise.resolve("sunny"),
+    );
     const later = Date.now() + 100;
     const clock = vi.spyOn(Date, "now").mockReturnValue(later);
     await runtime.hooks.publish({
@@ -2047,20 +2046,17 @@ describe("createAgentOtelInstrumentation", () => {
       type: "tool.call.completed",
     });
     const uncorrelatedToolKey = `tool:${scope.attemptId}:tool-2:0`;
-    await runtime.hooks.observeToolExecution!({
-      callId: "tool-2",
-      idempotencyKey: uncorrelatedToolKey,
-      input: {},
-      scope,
-      toolName: "final_output",
-      type: "tool.call.started",
-    });
-    await runtime.hooks.observeToolExecution!({
-      idempotencyKey: uncorrelatedToolKey,
-      output: { output: "done", type: "result" },
-      scope,
-      type: "tool.call.completed",
-    });
+    await runtime.runInContext(
+      {
+        callId: "tool-2",
+        idempotencyKey: uncorrelatedToolKey,
+        input: {},
+        scope,
+        toolName: "final_output",
+        type: "tool.call",
+      },
+      () => Promise.resolve("done"),
+    );
     await runtime.hooks.publish({
       idempotencyKey: attemptIdempotencyKey(scope),
       scope,
@@ -2079,7 +2075,7 @@ describe("createAgentOtelInstrumentation", () => {
     expect(nanos(tool.startTime)).toBeLessThan(BigInt(later) * 1_000_000n);
     // Seconds, as `@ai-sdk/otel` records it; a publisher that measured nothing sets none.
     expect(tool.attributes["gen_ai.execute_tool.duration"]).toBe(1.5);
-    expect(uncorrelatedTool.attributes["gen_ai.execute_tool.duration"]).toBeUndefined();
+    expect(uncorrelatedTool.attributes["gen_ai.execute_tool.duration"]).toEqual(expect.any(Number));
     expect(uncorrelatedTool.parentSpanContext?.spanId).toBe(
       byName(spans, "agent.step")[0]!.spanContext().spanId,
     );
@@ -2142,20 +2138,17 @@ describe("createAgentOtelInstrumentation", () => {
     await contextStorage.run(restored, async () => {
       // Approval-resumed tools can execute before the replacement AI SDK emits
       // a new step start. The persisted action context is still their parent.
-      await replacement.hooks.observeToolExecution!({
-        callId: "tool-1",
-        idempotencyKey: toolKey,
-        input: {},
-        scope: replacementScope,
-        toolName: "weather",
-        type: "tool.call.started",
-      });
-      await replacement.hooks.observeToolExecution!({
-        idempotencyKey: toolKey,
-        output: { output: "ok", type: "result" },
-        scope: replacementScope,
-        type: "tool.call.completed",
-      });
+      await replacement.runInContext(
+        {
+          callId: "tool-1",
+          idempotencyKey: toolKey,
+          input: {},
+          scope: replacementScope,
+          toolName: "weather",
+          type: "tool.call",
+        },
+        () => Promise.resolve("ok"),
+      );
       await replacement.hooks.publish({
         acceptedAtMs,
         idempotencyKey: actionKey,
@@ -2393,18 +2386,16 @@ describe("createAgentOtelInstrumentation", () => {
       scope,
       type: "step.attempt.started",
     });
-    await runtime.hooks.observeToolExecution!({
-      callId: "tool-1",
-      idempotencyKey: "tool:session-1:turn-1:tool-1",
-      input: { city: "SF" },
-      scope,
-      toolName: "weather",
-      type: "tool.call.started",
-    });
-
     const withSpy = vi.spyOn(context, "with");
     await runtime.runInContext(
-      { idempotencyKey: "tool:session-1:turn-1:tool-1", scope, type: "tool.call" },
+      {
+        idempotencyKey: "tool:session-1:turn-1:tool-1",
+        scope,
+        type: "tool.call",
+        callId: "tool-1",
+        toolName: "weather",
+        input: { city: "SF" },
+      },
       async () => undefined,
     );
 
@@ -2453,42 +2444,37 @@ describe("createAgentOtelInstrumentation", () => {
       scope,
       type: "tool.call.started",
     });
-    await runtime.hooks.observeToolExecution!({
-      callId: "tool-1",
-      idempotencyKey: toolKey,
-      input: { issue: "ISSUE-1" },
-      scope,
-      toolName: "linear__get_issue",
-      type: "tool.call.started",
-    });
-
     const withSpy = vi.spyOn(context, "with");
-    await runtime.runInContext({ idempotencyKey: toolKey, scope, type: "tool.call" }, async () => {
-      const active = withSpy.mock.calls[0]?.[0];
-      expect(active).toBeDefined();
-      expect(agentToolContentPolicy(active!)).toEqual({
-        recordInputs: false,
-        recordOutputs: false,
-      });
-      annotateAgentToolSpan(
-        {
-          "eve.connection.name": "linear",
-          "gen_ai.operation.name": "execute_tool",
-          "gen_ai.tool.name": "get_issue",
-          "jsonrpc.request.id": "7",
-          "mcp.method.name": "tools/call",
-        },
-        active!,
-      );
-    });
+    await runtime.runInContext(
+      {
+        idempotencyKey: toolKey,
+        scope,
+        type: "tool.call",
+        callId: "tool-1",
+        toolName: "linear__get_issue",
+        input: { issue: "ISSUE-1" },
+      },
+      async () => {
+        const active = withSpy.mock.calls[0]?.[0];
+        expect(active).toBeDefined();
+        expect(agentToolContentPolicy(active!)).toEqual({
+          recordInputs: false,
+          recordOutputs: false,
+        });
+        annotateAgentToolSpan(
+          {
+            "eve.connection.name": "linear",
+            "gen_ai.operation.name": "execute_tool",
+            "gen_ai.tool.name": "get_issue",
+            "jsonrpc.request.id": "7",
+            "mcp.method.name": "tools/call",
+          },
+          active!,
+        );
+      },
+    );
     withSpy.mockRestore();
 
-    await runtime.hooks.observeToolExecution!({
-      idempotencyKey: toolKey,
-      output: { output: { title: "private issue" }, type: "result" },
-      scope,
-      type: "tool.call.completed",
-    });
     await runtime.hooks.publish({
       idempotencyKey: actionKey,
       outcome: "completed",

@@ -528,12 +528,6 @@ export type InstrumentationEventHandler<TEvent> = (
 
 /** Internal normalized provider shape consumed by the instrumentation bus. */
 export interface InstrumentationProviderDefinition {
-  /** Internal execution observations; not authored lifecycle hooks. */
-  readonly toolExecution?: {
-    readonly started?: (event: InstrumentationToolCallStartedEvent) => void | PromiseLike<void>;
-    readonly completed?: (event: InstrumentationToolCallCompletedEvent) => void | PromiseLike<void>;
-    readonly failed?: (event: InstrumentationToolCallFailedEvent) => void | PromiseLike<void>;
-  };
   readonly name: string;
   /** Durable state identity, separate from the human-readable log name. */
   readonly stateNamespace?: string;
@@ -628,6 +622,13 @@ export type InstrumentationExecutionOperation =
       readonly idempotencyKey: string;
       readonly scope: InstrumentationAttemptScope;
       readonly type: "tool.call";
+      readonly callId?: string;
+      readonly toolName?: string;
+      readonly input?: unknown;
+      readonly frameworkTool?: boolean;
+      readonly startedAtMs?: number;
+      readonly completedAtMs?: number;
+      readonly failed?: boolean;
     }
   | {
       readonly idempotencyKey: string;
@@ -638,10 +639,6 @@ export type InstrumentationExecutionOperation =
 
 /** Provider-neutral hook operations consumed by the AI SDK bridge. */
 export interface InstrumentationHooks {
-  /** Supplies execution data without publishing a lifecycle event. */
-  observeToolExecution?(
-    event: InstrumentationToolCallStartedEvent | InstrumentationToolCallTerminalEvent,
-  ): Promise<void>;
   /**
    * Whether any provider admitted by this bound trace requests content.
    *

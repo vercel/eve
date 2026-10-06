@@ -12,7 +12,6 @@ import type {
   InstrumentationPointEvent,
   InstrumentationTraceContext,
   InstrumentationUsage,
-  InstrumentationToolCallCompletedEvent,
 } from "#instrumentation/lifecycle.js";
 import {
   actionIdempotencyKey,
@@ -242,6 +241,7 @@ async function publishActionStarts(
         ...(deferred ? { isWorkflowTool: true } : undefined),
         kind: action.kind === "workflow-tool-call" ? "tool-call" : action.kind,
         toolName: actionName(action),
+        frameworkTool: input.isFrameworkTool?.(actionName(action)) === true,
         scope,
         type: "tool.call.started",
       } satisfies InstrumentationToolCallStartedEvent),
@@ -261,24 +261,6 @@ async function publishActionTerminal(
   if (correlation === undefined) return;
   const { idempotencyKey, scope } = correlation;
   const capturesOutputs = hooks.capturesOutputs ?? hooks.capturesContent;
-  if (correlation.toolCall !== undefined) {
-    await hooks.observeToolExecution?.(Object.freeze(correlation.toolCall));
-    await hooks.observeToolExecution?.(
-      Object.freeze({
-        type: "tool.call.completed",
-        idempotencyKey: correlation.toolCall.idempotencyKey,
-        scope,
-        completedAtMs:
-          contextStorage.getStore()?.get(RuntimeActionSettlementTimesKey)?.[
-            event.data.result.callId
-          ] ?? Date.now(),
-        output:
-          event.data.status === "completed"
-            ? { type: "result", output: capturesOutputs ? event.data.result.output : undefined }
-            : { type: "error", error: capturesOutputs ? event.data.result.output : undefined },
-      } satisfies InstrumentationToolCallCompletedEvent),
-    );
-  }
 
   if (event.data.status === "completed") {
     await hooks.publish(

@@ -211,28 +211,21 @@ describe("exported agent telemetry contract", () => {
               turnId: "turn_0",
             }),
           );
-          await hooks.observeToolExecution!({
-            type: "tool.call.started",
-            idempotencyKey: toolKey,
-            callId: "call-1",
-            input,
-            toolName: "connection_execute",
-            scope,
-          });
           const output = await runtime.runInContext(
-            { idempotencyKey: toolKey, scope, type: "tool.call" },
+            {
+              idempotencyKey: toolKey,
+              scope,
+              type: "tool.call",
+              callId: "call-1",
+              toolName: "connection_execute",
+              input,
+            },
             () =>
               resolveConnectionTools()!.connection_execute!.execute!(input, {
                 callId: "call-1",
                 messages: [],
               } as never),
           );
-          await hooks.observeToolExecution!({
-            type: "tool.call.completed",
-            idempotencyKey: toolKey,
-            output: { type: "result", output },
-            scope,
-          });
           await emitNestedToolActions(
             handleEvent,
             { sequence: 0, stepIndex: 0, turnId: "turn_0" },
@@ -584,14 +577,6 @@ describe("exported agent telemetry contract", () => {
                 kind: "tool-call",
                 input: {},
               });
-              await hooks.observeToolExecution!({
-                type: "tool.call.started",
-                idempotencyKey: toolKey,
-                scope,
-                callId: "tool",
-                toolName: "inspect",
-                input: {},
-              });
               await hooks.publish({
                 type: "model.call.started",
                 idempotencyKey: modelKey,
@@ -629,12 +614,17 @@ describe("exported agent telemetry contract", () => {
                   outcome: "approved",
                   response: {},
                 });
-                await hooks.observeToolExecution!({
-                  type: "tool.call.completed",
-                  idempotencyKey: toolKey,
-                  scope,
-                  output: { type: "result", output: {} },
-                });
+                await runtime.runInContext(
+                  {
+                    type: "tool.call",
+                    idempotencyKey: toolKey,
+                    scope,
+                    callId: "tool",
+                    toolName: "inspect",
+                    input: {},
+                  },
+                  () => Promise.resolve({}),
+                );
                 await hooks.publish({
                   type: "tool.call.completed",
                   idempotencyKey: actionKey,
@@ -882,14 +872,6 @@ describe("exported agent telemetry contract", () => {
           scope,
           type: "tool.call.started",
         });
-        await hooks.observeToolExecution!({
-          callId: "workflow",
-          idempotencyKey: toolCallIdempotencyKey(scope, "workflow", 0),
-          input: { secret: "private input" },
-          toolName: "coordinate",
-          scope,
-          type: "tool.call.started",
-        });
         const approvalKey = inputIdempotencyKey("parent", "turn_0", "approval");
         await hooks.publish({
           action: { callId: "workflow", name: "coordinate" },
@@ -990,12 +972,17 @@ describe("exported agent telemetry contract", () => {
         });
       });
       await contextStorage.run(parent, async () => {
-        await hooks.observeToolExecution!({
-          idempotencyKey: toolCallIdempotencyKey(scope, "workflow", 0),
-          output: { type: "result", output: "private output" },
-          scope,
-          type: "tool.call.completed",
-        });
+        await runtime.runInContext(
+          {
+            type: "tool.call",
+            idempotencyKey: toolCallIdempotencyKey(scope, "workflow", 0),
+            scope,
+            callId: "workflow",
+            toolName: "coordinate",
+            input: { secret: "private input" },
+          },
+          () => Promise.resolve("private output"),
+        );
         await hooks.publish({
           idempotencyKey: actionKey,
           outcome: "completed",

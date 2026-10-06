@@ -270,20 +270,17 @@ describe("finalizeInstrumentationProviders", () => {
       input: undefined,
       scope,
     });
-    await hooks.observeToolExecution?.({
-      type: "tool.call.started",
-      idempotencyKey: "execution",
-      callId: "call-1",
-      toolName: "weather",
-      input: undefined,
-      scope,
-    });
-    await hooks.observeToolExecution?.({
-      type: "tool.call.completed",
-      idempotencyKey: "execution",
-      output: { type: "result" },
-      scope,
-    });
+    await runtime.runInContext(
+      {
+        type: "tool.call",
+        idempotencyKey: "execution",
+        callId: "call-1",
+        toolName: "weather",
+        input: undefined,
+        scope,
+      },
+      () => Promise.resolve(),
+    );
     await hooks.publish({ type: "step.attempt.completed", idempotencyKey: "attempt", scope });
     await hooks.publish({
       type: "tool.call.completed",
