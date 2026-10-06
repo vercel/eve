@@ -1,13 +1,13 @@
 import type { LanguageModel } from "ai";
-import { MockLanguageModelV3 } from "ai/test";
+import { MockLanguageModelV4 } from "ai/test";
 
 import { markMockModel } from "#internal/mock-model-identity.js";
 import { TASK_RESULT_TAG, TASKS_NOTE_LABEL } from "#execution/tasks/render.js";
 import { isPendingApprovalsSnippet } from "#harness/hitl/approval-prompt.js";
 
-type GenerateOptions = Parameters<MockLanguageModelV3["doGenerate"]>[0];
-type GenerateResult = Awaited<ReturnType<MockLanguageModelV3["doGenerate"]>>;
-type StreamResult = Awaited<ReturnType<MockLanguageModelV3["doStream"]>>;
+type GenerateOptions = Parameters<MockLanguageModelV4["doGenerate"]>[0];
+type GenerateResult = Awaited<ReturnType<MockLanguageModelV4["doGenerate"]>>;
+type StreamResult = Awaited<ReturnType<MockLanguageModelV4["doStream"]>>;
 type StreamPart = StreamResult["stream"] extends ReadableStream<infer Part> ? Part : never;
 type PromptPart = Exclude<GenerateOptions["prompt"][number]["content"], string>[number];
 type ToolResultOutput = Extract<PromptPart, { type: "tool-result" }>["output"];
@@ -127,7 +127,7 @@ export function mockModel(
   const modelId = options.modelId ?? DEFAULT_MODEL_ID;
 
   return markMockModel(
-    new MockLanguageModelV3({
+    new MockLanguageModelV4({
       modelId,
       provider: options.provider ?? DEFAULT_PROVIDER,
       doGenerate: async (callOptions) =>
