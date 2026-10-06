@@ -9,6 +9,7 @@ import type {
   CancelTurnResult,
   ClearSessionResult,
   CompactSessionResult,
+  GetEventStreamOptions,
   ResetSessionResult,
   Runtime,
   SessionAuthContext,
@@ -61,8 +62,12 @@ export interface Session {
   clear(): Promise<ClearSessionResult>;
   /** Terminally retires this exact session ID. */
   reset(options?: { reason?: string }): Promise<ResetSessionResult>;
-  /** Opens the recorded stream. Throws `SessionStrandedError` while its owner is stranded. */
-  getEventStream(options?: { startIndex?: number }): Promise<ReadableStream<MessageStreamEvent>>;
+  /**
+   * Opens the recorded stream. Following it throws `SessionStrandedError`
+   * while its owner is stranded; `follow: false` reads recorded history up to
+   * the current tail without inspecting or changing the session.
+   */
+  getEventStream(options?: GetEventStreamOptions): Promise<ReadableStream<MessageStreamEvent>>;
   getStreamTailIndex(): Promise<number>;
 }
 
@@ -175,7 +180,7 @@ export function createSession(
         sessionId: id,
       });
     },
-    async getEventStream(options?: { startIndex?: number }) {
+    async getEventStream(options?: GetEventStreamOptions) {
       return runtime.getEventStream(id, options);
     },
     async getStreamTailIndex() {

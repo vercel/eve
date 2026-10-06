@@ -1,5 +1,6 @@
 import type { UserContent } from "ai";
 
+import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -23,6 +24,18 @@ export function healthResponse(): Response {
     status: "ready",
     workflowId: workflowEntryReference.workflowId,
   });
+}
+
+/** Clients display the error text directly; keep operator details in structured fields. */
+export function strandedSessionResponse(error: unknown): Response | undefined {
+  if (!SessionStrandedError.is(error)) return undefined;
+  const body: Record<string, unknown> = {
+    code: "session_stranded",
+    error: "This session is no longer available.",
+    ok: false,
+  };
+  if (error.owner.eveVersion !== undefined) body.eveVersion = error.owner.eveVersion;
+  return Response.json(body, { headers: { "cache-control": "no-store" }, status: 409 });
 }
 
 /** Where a remote child the parent session recorded runs, and its credential key. */

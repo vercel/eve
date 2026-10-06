@@ -86,6 +86,7 @@ import {
   type RemoteAgentBinding,
   normalizeEveCors,
   resolveOnMessage,
+  strandedSessionResponse,
 } from "#eve-channel/support.js";
 import type { EveChannel, EveChannelInput, EveEventContext } from "#eve-channel/types.js";
 
@@ -445,6 +446,8 @@ export function eveChannel(input: EveChannelInput): EveChannel {
               ? await session.send(body.message!, options)
               : await session.respond(body.inputResponses, options);
         } catch (error) {
+          const stranded = strandedSessionResponse(error);
+          if (stranded !== undefined) return stranded;
           const errorId = logError(log, "session-message request failed", error, { sessionId });
           return Response.json(
             { error: "Failed to send the session message.", errorId, ok: false },
@@ -557,25 +560,18 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         try {
           result = await attachSession(sessionId).clear();
         } catch (error) {
+          const stranded = strandedSessionResponse(error);
+          if (stranded !== undefined) return stranded;
           const errorId = logError(log, "session-clear request failed", error, { sessionId });
           return Response.json(
             { error: "Failed to clear the session context.", errorId, ok: false },
             { status: 500 },
           );
         }
-        return Response.json(
-          result.status === "accepted"
-            ? ({
-                ok: true,
-                sessionId: result.sessionId,
-                status: "accepted",
-              } satisfies ClearResponse)
-            : ({ ok: true, status: "no_active_session" } satisfies ClearResponse),
-          {
-            headers: { "cache-control": "no-store" },
-            status: result.status === "accepted" ? 202 : 200,
-          },
-        );
+        return Response.json({ ok: true, ...result } satisfies ClearResponse, {
+          headers: { "cache-control": "no-store" },
+          status: result.status === "accepted" ? 202 : 200,
+        });
       }),
 
       POST(EVE_SESSION_RESET_ROUTE_PATTERN, async (req, { attachSession, params }) => {

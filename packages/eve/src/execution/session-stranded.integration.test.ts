@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createChannelAddress } from "#channel/channel-address.js";
 import { createSession } from "#channel/session.js";
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
+import { createSessionStreamResponse } from "#eve-channel/request.js";
 import type { Runtime } from "#channel/types.js";
 import {
   EVE_SESSION_ATTRIBUTE,
@@ -299,6 +300,20 @@ describe("stranded sessions", () => {
         expect(refusal).toBeInstanceOf(SessionStrandedError);
         expect(refusal).toMatchObject({ owner: { eveVersion: PREVIOUS_EVE_VERSION } });
         expect((refusal as Error).message).not.toContain(stranded.runId);
+        const response = await createSessionStreamResponse(
+          new Request(`https://eve.test/eve/v1/session/${stranded.runId}/stream`),
+          createSession(stranded.runId, runtime),
+        );
+        expect(response.status).toBe(409);
+        await expect(response.json()).resolves.toMatchObject({ code: "session_stranded" });
+        // Recorded history stays readable without resetting the session first.
+        const history = await createSessionStreamResponse(
+          new Request(`https://eve.test/eve/v1/session/${stranded.runId}/stream?follow=false`),
+          createSession(stranded.runId, runtime),
+        );
+        expect(history.status).toBe(200);
+        expect(history.headers.get("x-eve-stream-tail-index")).not.toBeNull();
+        await expect(history.text()).resolves.toBeTypeOf("string");
         expect(runtime.createSession).not.toHaveBeenCalled();
         await expect(stranded.status).resolves.toBe("running");
         await expect(listEventIds(stranded.runId)).resolves.toEqual(eventsBefore);

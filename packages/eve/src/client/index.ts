@@ -6,7 +6,7 @@ export { EveAgentStore } from "#client/eve-agent-store.js";
 export { Client } from "#client/client.js";
 export { AgentInfoResponseError } from "#client/agent-info-error.js";
 export { HealthResponseError } from "#client/health-response-error.js";
-export { ClientError } from "#client/client-error.js";
+export { ClientError, ClientSessionStrandedError } from "#client/client-error.js";
 export { defaultMessageReducer } from "#client/message-reducer.js";
 export { conversationReducer } from "#client/conversation-reducer.js";
 export { openConversationInputs } from "#client/conversation-state.js";

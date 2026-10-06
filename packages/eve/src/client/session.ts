@@ -7,7 +7,7 @@ import {
   createEveSessionStreamRoutePath,
 } from "#protocol/routes.js";
 import { ClientAgentSession } from "#client/agent-session.js";
-import { ClientError } from "#client/client-error.js";
+import { ClientError, createClientError } from "#client/client-error.js";
 import { MessageResponse } from "#client/message-response.js";
 import { followStreamIterable, sleep } from "#client/open-stream.js";
 import {
@@ -430,7 +430,7 @@ async function postTurn(
   });
   if (!response.ok) {
     const responseBody = await response.text();
-    throw new ClientError(response.status, responseBody, response.headers);
+    throw createClientError(response.status, responseBody, response.headers);
   }
   return response;
 }

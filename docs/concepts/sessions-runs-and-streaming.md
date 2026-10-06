@@ -265,6 +265,8 @@ Clear removes model-message history in place, including static and dynamic user-
 
 Reset terminally retires the exact session ID. A reset ID never becomes a new session; create another session explicitly for a fresh conversation. Compact, clear, and reset return `"no_active_session"` when the target is already inactive.
 
+A [stranded session](./execution-model-and-durability#stranded-sessions) cannot run commands. Reset still works: eve cancels the stranded workflow run and returns `"reset"`. Clear is refused with `409 session_stranded` (`SessionStrandedError` from a `Session` handle), because it would keep a session that cannot run. Compact returns `"no_active_session"` and cancel returns `"no_active_turn"`.
+
 ## Reconnect and rewind
 
 The stream is durable. Every event is recorded before a step completes, so consumers can reconnect from their cursor when an HTTP connection ends. A nonnegative `startIndex` is an absolute event count: use it to pick up where you dropped off or pass `0` to rewind to the start.
@@ -294,7 +296,7 @@ curl -i "http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream?startIndex=<cou
 # x-eve-stream-tail-index: <tail>
 ```
 
-The lookup is opt-in; requests without the parameter get no header. The TypeScript client wraps this into `stream({ follow: false })`.
+The lookup is opt-in; requests without the parameter get no header. Passing `follow=false` instead bounds the response at the durable tail on the server and implies the header. A bounded read only reads recorded history, so it also works for a [stranded session](./execution-model-and-durability#stranded-sessions), whose live stream returns `409 session_stranded`. The TypeScript client wraps this into `stream({ follow: false })`.
 
 ## Use the client from TypeScript
 

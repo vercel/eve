@@ -6,6 +6,7 @@ export {
   PATCH,
   POST,
   PUT,
+  SessionStrandedError,
   WS,
   createWebSocketUpgradeServer,
   defineChannel,

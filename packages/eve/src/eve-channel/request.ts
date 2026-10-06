@@ -8,6 +8,7 @@ import type {
   TurnPolicy,
 } from "#channel/types.js";
 import type { Session } from "#channel/session.js";
+import { strandedSessionResponse } from "#eve-channel/support.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
 import { isMissingWorkflowRunError } from "#internal/workflow/is-inactive-workflow-run-error.js";
@@ -297,13 +298,14 @@ export async function createSessionStreamResponse(
 ): Promise<Response> {
   const startIndex = parseStartIndex(request);
   if (startIndex instanceof Response) return startIndex;
-  const includeTailIndex = parseIncludeTailIndex(request);
+  const follow = parseFollow(request);
+  const includeTailIndex = !follow || parseIncludeTailIndex(request);
 
   try {
-    // An unknown or unreachable session would otherwise answer 200 and then
-    // fail mid-body, so the tail must resolve before any bytes are committed.
-    // The event stream opens alongside it to save a round trip.
-    const eventsPromise = session.getEventStream({ startIndex });
+    // Resolve the tail before committing a response; otherwise an unknown or
+    // unreachable session would answer 200 and fail mid-body. Open the event
+    // stream alongside the tail lookup to avoid an extra round trip.
+    const eventsPromise = session.getEventStream({ follow, startIndex });
     // Handled below; this keeps an early rejection from being reported as unhandled.
     eventsPromise.catch(() => {});
     let tailIndex: number;
@@ -340,6 +342,8 @@ export async function createSessionStreamResponse(
       { headers },
     );
   } catch (error) {
+    const stranded = strandedSessionResponse(error);
+    if (stranded !== undefined) return stranded;
     const notFound = isMissingWorkflowRunError(error);
     return Response.json(
       { error: notFound ? "Session not found." : "Session stream unavailable.", ok: false },
@@ -609,6 +613,12 @@ function toClientContextMessage(content: string): string {
 export function parseIncludeTailIndex(request: Request): boolean {
   const raw = new URL(request.url).searchParams.get("includeTailIndex");
   return raw === "1" || raw === "true";
+}
+
+/** `follow=false` (or `0`) bounds the read at the durable tail; following is the default. */
+function parseFollow(request: Request): boolean {
+  const raw = new URL(request.url).searchParams.get("follow");
+  return raw !== "0" && raw !== "false";
 }
 
 export function parseStartIndex(request: Request): number | undefined | Response {

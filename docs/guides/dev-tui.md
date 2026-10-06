@@ -35,6 +35,8 @@ Before your first message, the empty composer may suggest asking your local agen
 | `/help`     | List available commands.                                                                                                                                     |
 | `/exit`     | Quit the UI.                                                                                                                                                 |
 
+When a message or stream reconnection reaches a [stranded session](../concepts/execution-model-and-durability#stranded-sessions), the TUI says why and which eve version built it, when known. New messages and approvals are not delivered. Run `/new` to end the stranded session; your next message starts a fresh one. `/clear` is refused, because it would keep the stranded session. A session from a previous `eve dev` invocation that the same eve version built is not stranded; see [local workflow recovery](../reference/cli#local-workflow-recovery). A message accepted before the upgrade is not redelivered.
+
 `/login`, `/model`, `/add`, `/deploy`, `/info`, and `/traces` are available when `eve dev` runs locally. They are unavailable when the UI connects through `eve remote connect`.
 
 ## Set up a new agent

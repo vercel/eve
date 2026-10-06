@@ -38,6 +38,7 @@ export type {
   SessionCallback,
   TurnPolicy,
 } from "#channel/types.js";
+export { SessionStrandedError } from "#channel/session-stranded-error.js";
 export type { Session, SessionHandle } from "#channel/session.js";
 export type { ChannelAudience } from "#shared/channel-audience.js";
 export type {

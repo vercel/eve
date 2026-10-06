@@ -116,6 +116,15 @@ await source.reset({ reason: "Start over" });
 const currentSession = await resolveSession(threadId);
 ```
 
+When the session at an address is
+[stranded](../concepts/execution-model-and-durability#stranded-sessions) because another eve version
+built it, `send()` ends that session and starts a fresh one. The message becomes the fresh
+session's first turn, and the fresh session can read recent text from the earlier conversation;
+see [What a replacement session receives](../concepts/execution-model-and-durability#what-a-replacement-session-receives). Concurrent sends to the same stranded address still
+produce one fresh session. A `respond()` call, or a `deliver()` that includes input responses,
+carries answers a fresh session has no request for, so it throws `SessionStrandedError` and leaves
+the stranded session in place.
+
 `Session` is fixed: every call targets exactly one durable ID. It never creates,
 follows, or resolves a replacement.
 
@@ -129,6 +138,23 @@ await session.compact();
 await session.clear();
 await session.reset({ reason: "Retire this session" });
 await session.getEventStream({ startIndex: 12 });
+```
+
+For a stranded session, `Session.send()`, `Session.respond()`, and a following
+`Session.getEventStream()` throw `SessionStrandedError` from `eve/channels` and deliver nothing.
+`getEventStream({ follow: false })` still reads the recorded history up to the current tail without
+changing the session. `error.owner.eveVersion` names the eve release that built the session when it recorded one. Call
+`reset()` to end the stranded session, then start a new one:
+
+```ts
+import { SessionStrandedError } from "eve/channels";
+
+try {
+  await attachSession(sessionId).send(text, { auth });
+} catch (error) {
+  if (!SessionStrandedError.is(error)) throw error;
+  await attachSession(sessionId).reset({ reason: "Session was stranded by an upgrade" });
+}
 ```
 
 `respond()` accepts exact response literals directly. If responses have already

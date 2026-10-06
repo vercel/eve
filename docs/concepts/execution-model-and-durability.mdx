@@ -37,6 +37,51 @@ Every workflow run records each step it executes, so a session that ran on one r
 
 The move happens once the turn settles and nothing else is waiting: no queued messages, running tasks or subagents, or pending human input. The new run receives the compacted history and settled state, then waits for the next message. If a single message reaches an otherwise idle session before the move completes, eve moves the session with that message, and the message's turn runs on the new run. If work is still pending, eve tries again after a later turn settles. The session keeps its ID, event stream, continuation addresses, and deadline; compaction never extends [`sessionTimeoutMs`](../agent-config#runtime-limits). If the new run cannot take ownership, the current run keeps the session, writes a `session handoff failed` warning to its runtime logs, and tries again later.
 
+### Stranded sessions
+
+A session is stranded when another eve version built the workflow run that owns it. A run can only be replayed by the eve version that started it, so the conversation is still stored, but nothing on the current deployment can process a new message. On worlds without per-deployment routing, eve checks the owner before delivering channel messages and input responses, rather than committing them to a session that cannot answer.
+
+eve treats every world other than Vercel Workflow as running one eve version at a time, so a stranded session can never run again:
+
+| World                        | When a session is stranded                                                                                                                                                                                                            |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Vercel Workflow              | eve does not check. Each run keeps executing on the deployment that started it, and handoff moves idle sessions to newer deployments.                                                                                                 |
+| Local world with `eve start` | After any upgrade that changes the eve version. Sessions created before eve recorded its version on the run are treated the same way.                                                                                                 |
+| Postgres and other worlds    | Same as the local world. Serve one world from one eve version at a time: a deployment running another version cannot replay these sessions, and eve does not route runs between deployments.                                          |
+| `eve dev`                    | After an eve version change. A session from a previous dev server invocation built by the same eve version is not stranded: it stays dormant until you restart `eve dev` with [`--resume`](../reference/cli#local-workflow-recovery). |
+
+eve ends a stranded session without running any of its code. When that happens depends on the kind of run:
+
+- **A root session**, one that a channel or client started, stays where it is. It keeps its address and executes nothing until a new channel message replaces it, a reset ends it, or its session timeout elapses, whichever comes first.
+- **A subagent session or workflow tool run**, including a task, is cancelled the next time the world delivers work to it, for example when the local world or Postgres recovers active runs at startup. No later message could resume its interrupted work, so eve does not wait.
+
+See [How a stranded session ends](#how-a-stranded-session-ends) for the details.
+
+For a root session, what happens next depends on how the message is addressed:
+
+- **A channel address**, such as a Slack thread or any `from(address).send(...)`, resets the stranded session and starts a fresh session at the same address. The message becomes the fresh session's first turn. Concurrent messages to the address produce one fresh session. A delivery that carries input responses, with or without a message, throws `SessionStrandedError` and leaves the stranded session in place, because a fresh session has no request for them to answer. See [custom channels](../channels/custom#channel-operations-and-session-handles).
+- **A session ID** is never reset implicitly. The eve HTTP channel returns `409` with `code: "session_stranded"` and the `eveVersion` that built the session when it recorded one. `Session.send()` and `Session.respond()` throw `SessionStrandedError` from `eve/channels`, and the TypeScript client's `ClientSession.send()` and `respond()` throw `ClientSessionStrandedError` from `eve/client`. Nothing is delivered, and the stranded run keeps its status and event log. See [Start and continue a session](../channels/eve#start-and-continue-a-session).
+- **Following a stream** of a stranded session returns the same `409 session_stranded`. The TypeScript client stops reconnecting and reports `ClientSessionStrandedError`; the TUI explains how to recover. An existing connection learns this when it reconnects. Messages accepted before the upgrade are not redelivered.
+- **Reading recorded history** still works. A bounded read (`stream({ follow: false })`, or `follow=false` on the stream route) returns the events recorded so far without inspecting or changing the session, so you can read a stranded conversation before deciding to reset it.
+- **Reset** works on a stranded session through a channel address or a session ID. **Clear** would keep a session that cannot run, so it is refused: `Session.clear()` throws `SessionStrandedError`, the eve HTTP channel returns `409 session_stranded`, and nothing changes. Reset the session instead.
+- **Session timeouts** end a stranded session the same way a reset does; see [How a stranded session ends](#how-a-stranded-session-ends).
+
+A reset ends the stranded session without running any of its code. eve cancels the session's owner run and, after a handoff, the original run that anchors its event stream, then waits until the world releases the session's addresses. If another run has taken over the session since eve inspected it, the reset ends nothing and fails so the request can be retried. The stranded session's `session.completed` and `session.failed` hooks do not run; the fresh session runs `session.started` as usual. Before cancelling, eve attempts to append a `session.failed` event with code `session_stranded` and close the old stream, without invoking authored hooks. Stream publication is best effort and waits at most 5 seconds: missing payload keys, unavailable storage, or a stalled write do not prevent reset. Each step tolerates an earlier attempt having completed it, so a reset that fails part way can be retried.
+
+Each reset logs a `warn` record, `Reset stranded session`, with the previous session ID, both eve versions, and the `trigger`: `message`, `reset`, or `timeout`.
+
+A reset cannot be undone. Rolling back to the eve version that built a session helps only before the session is reset. On a world other than Vercel Workflow, pin the exact eve version in `package.json` so upgrades happen only when you choose them.
+
+#### How a stranded session ends
+
+A stranded root session ends on its next channel message, a reset, or its [session timeout](../agent-config#runtime-limits), whichever comes first. It executes nothing while it waits. When the local world or Postgres recovers active runs at startup, eve acknowledges the root session's delivery without replaying it and logs a warning naming the run and both eve versions. The run keeps its `pending` or `running` status and its addresses. A later restart skips it the same way.
+
+The timeout is the session's own durable timer, armed for the deadline `sessionTimeoutMs` sets from the session's creation or latest deployment handoff (30 days by default; compaction handoffs keep the deadline). The timer is a separate workflow run that keeps working after the upgrade, and when it fires on a stranded session it ends the session the same way a reset does, without starting a fresh one. The next message to the address then starts an ordinary session. A session with `sessionTimeoutMs: false` has no timer, so a stranded one stays until a message or a reset, just as a healthy one would stay open.
+
+Ending a root session does not find or cancel its subagent sessions and workflow tool runs. Each one is cancelled when a delivery for it reaches the current deployment, with the cancellation reason `Run retired: its eve deployment is no longer available`, and eve logs a `Retired stranded descendant run` warning. A run that never receives a delivery, such as one parked in a dormant `eve dev` generation, can stay active; cancel it in your Workflow world if you need to. Cancellation does not run authored cleanup or lifecycle hooks, undo side effects, or stop independent external jobs, and results and approvals do not carry over to a replacement session.
+
+Runs that recorded no eve version, including every run from a release before eve recorded versions, are treated as stranded.
+
 ### Upgrading sessions from the former execution model
 
 You can upgrade directly from a release that used a session driver and separate

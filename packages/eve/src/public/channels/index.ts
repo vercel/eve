@@ -14,6 +14,7 @@ export {
   type ClearSessionResult,
   type CompactSessionResult,
   type ResetSessionResult,
+  SessionStrandedError,
   type Channel,
   type ChannelAudience,
   type AudienceCaller,

@@ -641,8 +641,9 @@ export interface Runtime {
    * The framework HTTP session-stream route forwards the `startIndex` query
    * parameter unchanged.
    *
-   * Throws `SessionStrandedError` when the session's owner cannot execute
-   * here.
+   * A following read throws `SessionStrandedError` when the session's owner
+   * cannot execute here. A historical read (`follow: false`) never inspects
+   * or changes the session's lifecycle.
    */
   getEventStream(
     sessionId: string,
@@ -668,4 +669,10 @@ export interface GetEventStreamOptions {
    * (replay the entire stream).
    */
   readonly startIndex?: number;
+  /**
+   * Whether to keep following events recorded after the read opens. When
+   * `false`, the stream ends at the durable tail observed when it opens, and
+   * it stays readable while the session is stranded. Defaults to `true`.
+   */
+  readonly follow?: boolean;
 }
