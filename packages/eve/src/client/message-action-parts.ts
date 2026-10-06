@@ -91,7 +91,7 @@ export function normalizeActionResult(result: RuntimeActionResult): ActionDescri
     case "load-skill-result":
       return {
         kind: "load-skill",
-        name: result.name ?? "",
+        name: result.name ?? SKILL_ENTRY_NAME,
         toolName: SKILL_ENTRY_NAME,
       };
     case "tool-result":

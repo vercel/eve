@@ -5,6 +5,7 @@ import type {
   InputResolutionOutcome,
   UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
+import { SKILL_ENTRY_NAME } from "#protocol/catalog-tools.js";
 import { requestedSkill } from "#shared/action-request-name.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#shared/action-types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
@@ -249,7 +250,7 @@ function actionName(action: RuntimeActionRequest): string {
 function resultName(result: RuntimeActionResult): string {
   switch (result.kind) {
     case "load-skill-result":
-      return result.name ?? "";
+      return result.name ?? SKILL_ENTRY_NAME;
     case "subagent-result":
       return result.subagentName;
     default:

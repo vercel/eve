@@ -1,3 +1,4 @@
+import { SKILL_ENTRY_NAME } from "#protocol/catalog-tools.js";
 import type { RuntimeActionRequest } from "#shared/action-types.js";
 import { isObject } from "#shared/guards.js";
 
@@ -16,11 +17,11 @@ export function actionRequestName(action: RuntimeActionRequest): string {
   }
 }
 
-/** The skill a `load-skill` request loads. */
+/** The skill a `load-skill` request loads, or the loader itself when its input names none. */
 export function requestedSkill(
   action: Extract<RuntimeActionRequest, { readonly kind: "load-skill" }>,
 ): string {
-  return skillTarget(action.input) ?? "";
+  return skillTarget(action.input) ?? SKILL_ENTRY_NAME;
 }
 
 /** The skill an `execute` input names, if it names one. */
