@@ -15,8 +15,6 @@ import type {
   DiscordChannelEvents,
   DiscordCommandResult,
   DiscordContext,
-  DiscordInputResponseInteraction,
-  DiscordInputResponseResult,
 } from "#public/channels/discord/discordChannel.js";
 
 const log = createLogger("discord.defaults");
@@ -58,14 +56,6 @@ export function defaultOnCommand(
   _ctx: DiscordContext,
   interaction: DiscordCommandInteraction,
 ): DiscordCommandResult {
-  return { auth: defaultDiscordAuth(interaction) };
-}
-
-/** Default input-response hook: answer as the user who pressed or submitted. */
-export function defaultOnInputResponse(
-  _ctx: DiscordContext,
-  interaction: DiscordInputResponseInteraction,
-): DiscordInputResponseResult {
   return { auth: defaultDiscordAuth(interaction) };
 }
 

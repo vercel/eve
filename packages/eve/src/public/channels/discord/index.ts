@@ -29,6 +29,7 @@ export {
   type DiscordContext,
   type DiscordEventContext,
   type DiscordHandle,
+  type DiscordInputResponseContext,
   type DiscordInputResponseInteraction,
   type DiscordInputResponseResult,
   type DiscordReceiveTarget,

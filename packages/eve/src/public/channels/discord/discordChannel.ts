@@ -22,9 +22,9 @@ import {
   type DiscordPostedMessage,
 } from "#public/channels/discord/api.js";
 import {
+  defaultDiscordAuth,
   defaultEvents,
   defaultOnCommand,
-  defaultOnInputResponse,
 } from "#public/channels/discord/defaults.js";
 import {
   deriveComponentInputResponses,
@@ -70,6 +70,12 @@ type EventData<T extends UnstampedMessageStreamEvent["type"]> =
 /** Pre-dispatch Discord context passed to inbound command hooks. */
 export interface DiscordContext {
   readonly discord: DiscordHandle;
+}
+
+/** Context passed to `discordChannel({ onInputResponse })` before eve answers the pending request. */
+export interface DiscordInputResponseContext extends DiscordContext {
+  /** Auth derived from the Discord user who pressed or submitted, as `defaultDiscordAuth` builds it. */
+  readonly defaultAuth: SessionAuthContext;
 }
 
 /** Channel-owned Discord context returned by `context()`. */
@@ -195,11 +201,12 @@ export interface DiscordChannelConfig {
    * Authorizes a button press, select, or modal submission before it answers a
    * pending request. Return `{ auth }` to accept the answer, or `null` to drop
    * it and keep the request pending. Thrown errors are logged and drop the
-   * answer. Defaults to the interacting user's Discord auth; set it alongside a
-   * custom `onCommand` so the same person gets the same principal either way.
+   * answer. Defaults to the interacting user's Discord auth. With a custom
+   * `onCommand` and no `onInputResponse`, every answer is dropped: set it to
+   * give a person's answers the same principal, and gating, as their commands.
    */
   onInputResponse?(
-    ctx: DiscordContext,
+    ctx: DiscordInputResponseContext,
     interaction: DiscordInputResponseInteraction,
   ): DiscordInputResponseResult | Promise<DiscordInputResponseResult>;
 
@@ -254,7 +261,9 @@ export interface DiscordChannel extends Channel<
 /** Discord channel factory for HTTP Interactions and proactive channel messages. */
 export function discordChannel(config: DiscordChannelConfig = {}): DiscordChannel {
   const onCommand = config.onCommand ?? defaultOnCommand;
-  const onInputResponse = config.onInputResponse ?? defaultOnInputResponse;
+  const onInputResponse =
+    config.onInputResponse ??
+    (config.onCommand === undefined ? acceptAsPresser : dropUnmappedInputResponse);
   const mergedEvents: DiscordChannelEvents = { ...defaultEvents, ...config.events };
 
   return defineChannel<
@@ -702,7 +711,10 @@ async function dispatchInputResponses(input: {
   let result: DiscordInputResponseResult;
   try {
     result = await input.onInputResponse(
-      { discord: buildDiscordHandle({ config: input.config, state }) },
+      {
+        defaultAuth: defaultDiscordAuth(input.interaction),
+        discord: buildDiscordHandle({ config: input.config, state }),
+      },
       input.interaction,
     );
   } catch (error) {
@@ -719,6 +731,21 @@ async function dispatchInputResponses(input: {
   } catch (error) {
     log.error("interaction response delivery failed", { error });
   }
+}
+
+function acceptAsPresser(ctx: DiscordInputResponseContext): DiscordInputResponseResult {
+  return { auth: ctx.defaultAuth };
+}
+
+/**
+ * A custom `onCommand` may map users to its own principals or keep some out.
+ * The default Discord auth would match neither, so answers fail closed.
+ */
+function dropUnmappedInputResponse(): null {
+  log.warn(
+    "dropped a Discord input response: onCommand is customized but onInputResponse is not; set onInputResponse to accept button presses and modal submissions",
+  );
+  return null;
 }
 
 function stateFromInteraction(
