@@ -15,8 +15,6 @@ import {
   getPendingAuthorization,
   PendingAuthorizationResultKey,
 } from "#harness/authorization.js";
-import { getPendingCoordinationBatch } from "#harness/coordination.js";
-import { getPendingInputBatches } from "#harness/pending-input-batches.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession, HarnessToolMap, StepInput, StepResult } from "#harness/types.js";
 import {
@@ -34,6 +32,7 @@ import {
   toolMap,
   workflowTool,
 } from "#internal/testing/catalog-fixtures.js";
+import { parkedSteps } from "#internal/testing/session-machine.js";
 import {
   createSessionStartedEvent,
   createTurnStartedEvent,
@@ -249,13 +248,10 @@ describe("step catalog in the harness (real AI SDK)", () => {
     );
     await drive({ message: "Alice asks for a refund of invoice in_1." });
 
-    // An approval, during which a dynamic deferred tool appears. The approval
-    // response must stay the last message, so its step announces nothing.
+    // An approval, during which a dynamic deferred tool appears.
     reply(calls(call("credit", "execute", { tool: "issue_credit" })));
     const awaitingApproval = await drive({ message: "Alice asks for a credit for Bob." });
-    const [approval] = getPendingInputBatches(awaitingApproval.session.state).flatMap(
-      (batch) => batch.requests,
-    );
+    const [approval] = parkedSteps(awaitingApproval.session).flatMap((step) => step.requests);
     expect(approval?.action.toolName).toBe("issue_credit");
     await resolveTenantTools();
     const approvalStep = mark();
@@ -269,7 +265,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
     reply(calls(call("deploy", "execute", { input: { service: "api" }, tool: "deploy_service" })));
     const deploying = await drive({ message: "Alice asks to deploy the api service." });
     expect(
-      getPendingCoordinationBatch(deploying.session.state)?.tasks.map((task) => task.toolName),
+      parkedSteps(deploying.session).flatMap((step) => step.tasks.map((task) => task.toolName)),
     ).toEqual(["deploy_service"]);
     reply(text("Deployed api."));
     await drive({
@@ -295,7 +291,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
     );
     const delegating = await drive({ message: "Alice asks for research and a dispute review." });
     expect(
-      getPendingCoordinationBatch(delegating.session.state)?.tasks.map((task) => task.toolName),
+      parkedSteps(delegating.session).flatMap((step) => step.tasks.map((task) => task.toolName)),
     ).toEqual(["research", "billing_specialist"]);
     reply(text("Both are underway."));
     await drive({
@@ -509,9 +505,9 @@ describe("step catalog in the harness (real AI SDK)", () => {
     }
 
     // 4. No system-message fallback: the dynamic tool that appeared during the
-    // approval is announced on the step after the approval response.
-    expect(listingFor(approvalStep)).toHaveLength(1);
-    expect(listingFor(approvalStep + 1).at(-1)).toContain("Tools added: tenant__sync");
+    // approval joins history as a diff on the approval's own step.
+    expect(listingFor(approvalStep)).toHaveLength(2);
+    expect(listingFor(approvalStep).at(-1)).toContain("Tools added: tenant__sync");
 
     // 5. Deterministic rendering is owned by listing.test.ts; here each change
     // lands as one diff, and compaction starts a fresh baseline.
@@ -531,7 +527,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
     const announcedAt = requests.flatMap((_request, index) =>
       index > 0 && listingFor(index).length > listingFor(index - 1).length ? [index] : [],
     );
-    expect(announcedAt).toEqual([approvalStep + 1, connectionStep, changedStep, skillStep]);
+    expect(announcedAt).toEqual([approvalStep, connectionStep, changedStep, skillStep]);
 
     // The stand-in result for calls the harness dispatches after the step never
     // reaches the model or the protocol.
@@ -557,7 +553,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
       driver.events.flatMap((event) =>
         event.type === "actions.requested"
           ? event.data.actions.map((action) =>
-              "toolName" in action ? action.toolName : action.kind,
+              "toolName" in action ? action.toolName : "name" in action ? action.name : action.kind,
             )
           : [],
       ),
@@ -630,9 +626,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
 
     const parked = await driver.drive({ message: "Alice asks to archive Bob's account." });
 
-    const requests = getPendingInputBatches(parked.session.state).flatMap(
-      (batch) => batch.requests,
-    );
+    const requests = parkedSteps(parked.session).flatMap((step) => step.requests);
     expect(requests.map((request) => request.action)).toEqual([
       expect.objectContaining({ callId: "archive", toolName: "crm__archive_account" }),
     ]);
