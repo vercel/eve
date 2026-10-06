@@ -18,7 +18,6 @@ import { resolveAgent } from "#runtime/resolve-agent.js";
 import { resolveDynamicSubagentDefinition } from "#runtime/resolve-dynamic-subagent.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
 import { createRuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
-import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import { createRuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
 import { createWorkspacePromptSection } from "#runtime/workspace/spec.js";
@@ -154,10 +153,7 @@ async function resolveRuntimeAgentNode(
           .replaceAll("/", "-"),
       ];
     }),
-    reservedToolNames: [
-      LOAD_SKILL_TOOL_NAME,
-      ...toolRegistry.preparedTools.map((tool) => tool.name),
-    ],
+    reservedToolNames: toolRegistry.preparedTools.map((tool) => tool.name),
     subagents: await resolveRuntimeSubagents({
       childNodeIdsByParentNodeId: input.childNodeIdsByParentNodeId,
       manifest: input.manifest,

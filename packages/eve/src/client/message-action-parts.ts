@@ -1,3 +1,4 @@
+import { SKILL_ENTRY_NAME } from "#protocol/catalog-tools.js";
 import { actionRequestName } from "#shared/action-request-name.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#shared/action-types.js";
 import type { InputRequest } from "#shared/input.js";
@@ -74,7 +75,7 @@ export function normalizeActionRequest(action: RuntimeActionRequest): ActionDesc
   const name = actionRequestName(action);
   switch (action.kind) {
     case "load-skill":
-      return { kind: "load-skill", name, toolName: "eve:load-skill" };
+      return { kind: "load-skill", name, toolName: SKILL_ENTRY_NAME };
     case "tool-call":
     case "workflow-tool-call":
       return { kind: "tool-call", name, toolName: name };
@@ -90,8 +91,8 @@ export function normalizeActionResult(result: RuntimeActionResult): ActionDescri
     case "load-skill-result":
       return {
         kind: "load-skill",
-        name: result.name ?? "load_skill",
-        toolName: "eve:load-skill",
+        name: result.name ?? "",
+        toolName: SKILL_ENTRY_NAME,
       };
     case "tool-result":
       return {

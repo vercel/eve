@@ -21,7 +21,6 @@ import { createPreparedRuntimeSubagentTool } from "#runtime/subagents/registry.j
 import { normalizeDynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { normalizeDynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
-import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import type { AgentToolExposure } from "#shared/agent-definition.js";
 import { toErrorMessage } from "#shared/errors.js";
 
@@ -144,9 +143,8 @@ function assertToolNameAvailable(
     );
   }
   if (tool === false) return;
-  const authoredTools = ctx.get(BundleKey)?.toolRegistry.toolsByName.keys() ?? [];
-  const toolNames = new Set([LOAD_SKILL_TOOL_NAME, ...authoredTools]);
-  if (!toolNames.has(resolver.name)) return;
+  const authoredTools = ctx.get(BundleKey)?.toolRegistry.toolsByName;
+  if (authoredTools?.has(resolver.name) !== true) return;
   throw new Error(
     `Dynamic subagent "${resolver.name}" from "${resolver.logicalPath}" collides with the tool "${resolver.name}". Set the subagent's tool to false when that tool wraps it.`,
   );

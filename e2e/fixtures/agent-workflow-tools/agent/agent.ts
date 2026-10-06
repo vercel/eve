@@ -49,7 +49,7 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
     const skillCallId = auditing ? "audit-policy" : "initial-policy";
     if (!request.toolResults.some((entry) => entry.id === skillCallId)) {
       return {
-        toolCalls: [{ id: skillCallId, name: "load_skill", input: { skill: "delegation-policy" } }],
+        toolCalls: [{ id: skillCallId, name: "execute", input: { skill: "delegation-policy" } }],
       };
     }
     const mode = (/SUBAGENT-HOOKS:(direct|background|waiting)/u.exec(hookScenario)?.[1] ??

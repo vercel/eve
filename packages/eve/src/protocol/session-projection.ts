@@ -5,6 +5,7 @@ import type {
   InputResolutionOutcome,
   UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
+import { requestedSkill } from "#shared/action-request-name.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#shared/action-types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { JsonValue } from "#shared/json.js";
@@ -235,7 +236,7 @@ function settleCall(call: SessionCall, status: SessionCallStatus, error?: Action
 function actionName(action: RuntimeActionRequest): string {
   switch (action.kind) {
     case "load-skill":
-      return "load_skill";
+      return requestedSkill(action);
     case "subagent-call":
     case "remote-agent-call":
       return action.name;
@@ -248,7 +249,7 @@ function actionName(action: RuntimeActionRequest): string {
 function resultName(result: RuntimeActionResult): string {
   switch (result.kind) {
     case "load-skill-result":
-      return "load_skill";
+      return result.name ?? "";
     case "subagent-result":
       return result.subagentName;
     default:

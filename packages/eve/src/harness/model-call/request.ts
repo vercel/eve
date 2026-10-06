@@ -1,10 +1,10 @@
 import type { ModelMessage, SystemModelMessage } from "ai";
 
 import { buildDynamicInstructionMessages } from "#context/dynamic-instruction-lifecycle.js";
-import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
-import { HistoryStateKey } from "#context/keys.js";
+import { DynamicSkillManifestKey, HistoryStateKey } from "#context/keys.js";
 import { catalogAnnouncements } from "#execution/catalog/listing.js";
 import type { StepCatalog } from "#execution/catalog/step-catalog.js";
+import { dynamicSkillAnnouncements } from "#execution/skills/instructions.js";
 import { taskSystemMessages } from "#execution/tasks/model-step.js";
 import { createCurrentMessages } from "#harness/current-messages.js";
 import {
@@ -44,9 +44,10 @@ export function requestMessages(
   messages.addSystem(
     taskSystemMessages(input.catalog.offersTasks, { finalReplyOnly: input.hidesHeldText }),
   );
+  const announced = ctx?.get(HistoryStateKey)?.announcements;
   messages.addAnnouncements({
-    availableSkills: ctx?.get(PendingSkillAnnouncementKey),
-    keyed: catalogAnnouncements(input.catalog, ctx?.get(HistoryStateKey)?.announcements),
+    ...catalogAnnouncements(input.catalog, announced),
+    ...dynamicSkillAnnouncements(ctx?.get(DynamicSkillManifestKey), announced),
   });
   if (input.pendingApprovalsNote !== undefined) {
     messages.add(input.pendingApprovalsNote, "context.state", { cacheFriendly: false });

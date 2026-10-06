@@ -38,10 +38,6 @@ const localDefaults = defineProgrammaticAgentSource({
       loadNamespace: () => import("#tools/provided/web-fetch.js"),
     },
     {
-      logicalPath: "tools/load_skill.ts",
-      loadNamespace: () => import("#tools/provided/load-skill.js"),
-    },
-    {
       logicalPath: "tools/web_search.ts",
       loadNamespace: () => import("#tools/provided/web-search.js"),
     },

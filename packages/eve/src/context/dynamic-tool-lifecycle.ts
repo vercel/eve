@@ -27,7 +27,7 @@ import type {
 } from "#protocol/message.js";
 import { assertNotConnectionOwned } from "#connections/ownership.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
-import { TOOL_SLUG_PATTERN } from "#discover/grammar.js";
+import { TOOL_SLUG_PATTERN, TOOL_SLUG_RULE } from "#discover/grammar.js";
 import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
 import { ALLOWED_DYNAMIC_TOOL_EVENTS } from "#dynamic/definition.js";
 import { isBrandedToolEntry, type DynamicToolEntry } from "#tools/dynamic.js";
@@ -71,7 +71,7 @@ function qualifyDynamicToolNames(
     const name = `${prefix}${entryKey}`;
     if (!TOOL_SLUG_PATTERN.test(name)) {
       throw new Error(
-        `Dynamic tool resolver "${resolver.logicalPath}" returned illegal tool name "${name}". Expected ASCII letters, digits, underscores, and dashes only, starting with a letter, up to 64 characters.`,
+        `Dynamic tool resolver "${resolver.logicalPath}" returned illegal tool name "${name}". ${TOOL_SLUG_RULE}`,
       );
     }
     const reservation = eveNamespaceReservation(name);

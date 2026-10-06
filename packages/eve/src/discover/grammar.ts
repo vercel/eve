@@ -122,6 +122,10 @@ export const DISCOVER_EXTENSION_NAME_INVALID = "discover/extension-name-invalid"
  */
 export const TOOL_SLUG_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
 
+/** {@link TOOL_SLUG_PATTERN} in words, for errors about a name that breaks it. */
+export const TOOL_SLUG_RULE =
+  "Expected ASCII letters, digits, underscores, and dashes only, starting with a letter, up to 64 characters.";
+
 /**
  * Connection filename charset. Connections use the same lowercase
  * kebab-case rule as sandbox since they are not directly exposed to
@@ -431,9 +435,7 @@ export function createToolNameDiagnostic(
 
   return createDiscoverErrorDiagnostic({
     code: DISCOVER_TOOL_NAME_INVALID,
-    message:
-      `Tool filename "${slotName}" is not a legal tool name. ` +
-      `Expected ASCII letters, digits, underscores, and dashes only, starting with a letter, up to 64 characters.`,
+    message: `Tool filename "${slotName}" is not a legal tool name. ${TOOL_SLUG_RULE}`,
     sourcePath,
   });
 }

@@ -41,6 +41,7 @@ export type {
   EveEvalSession,
   EveEvalSessionResult,
   EveEvalScheduleDispatchResult,
+  EveEvalSkillLoad,
   EveEvalSubagentCall,
   EveEval,
   EveEvalConfig,

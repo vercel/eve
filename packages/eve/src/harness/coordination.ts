@@ -7,6 +7,7 @@ import type {
   RuntimeWorkflowTaskRequest,
   WorkflowToolCallEntry,
 } from "#shared/action-types.js";
+import { EXECUTE_TOOL_NAME, SKILL_ENTRY_NAME } from "#protocol/catalog-tools.js";
 import { markRuntimeWorkflowToolAction } from "#shared/action-types.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
@@ -66,9 +67,10 @@ export async function runtimeResultCalls(
   const settled: { part: ToolResultPart; result: RuntimeActionResult }[] = [];
   for (const result of results) {
     switch (result.kind) {
+      // A skill load is always an `execute` call in history.
       case "load-skill-result":
         settled.push({
-          part: toolResult(result, "load_skill", toToolResultOutput(result)),
+          part: toolResult(result, EXECUTE_TOOL_NAME, toToolResultOutput(result)),
           result,
         });
         continue;
@@ -163,12 +165,8 @@ export function createRuntimeActionRequestFromToolCall(input: {
     callId: input.toolCall.toolCallId,
     toolName: input.toolCall.toolName,
   });
-  if (definition?.frameworkAction === "load-skill") {
-    return {
-      callId: input.toolCall.toolCallId,
-      input: toolInput,
-      kind: "load-skill",
-    };
+  if (input.toolCall.toolName === SKILL_ENTRY_NAME) {
+    return { callId: input.toolCall.toolCallId, input: toolInput, kind: "load-skill" };
   }
   const handling = definition?.behavior?.handling;
   if (
