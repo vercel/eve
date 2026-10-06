@@ -1743,7 +1743,7 @@ describe("turnStep", () => {
       serializedContext: {
         ...createSerializedContext(),
         [TurnDeliveryIdsKey.name]: ["previous-delivery"],
-        [HistoryStateKey.name]: { availableSkills: announcement },
+        [HistoryStateKey.name]: { announcements: { skills: announcement } },
       },
       sessionState: createStubSessionState(),
     });
@@ -1752,7 +1752,7 @@ describe("turnStep", () => {
       action: "cancelled",
       serializedContext: {
         [TurnDeliveryIdsKey.name]: ["cancelled-delivery"],
-        [HistoryStateKey.name]: { availableSkills: announcement },
+        [HistoryStateKey.name]: { announcements: { skills: announcement } },
         [SessionDynamicModelReferenceKey.name]: {
           id: "anthropic/claude-opus-4.6",
           contextWindowTokens: 1_000_000,

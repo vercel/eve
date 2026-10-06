@@ -1,5 +1,6 @@
 import type { ModelMessage } from "ai";
 
+import { TOOL_SLUG_PATTERN, TOOL_SLUG_RULE } from "#discover/grammar.js";
 import { ALLOWED_DYNAMIC_SKILL_EVENTS } from "#dynamic/definition.js";
 import { isBrandedSkillEntry, type SkillPackageDefinition } from "#shared/skill-definition.js";
 import {
@@ -12,13 +13,11 @@ import {
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
 import type { ResolvedDynamicSkillResolver } from "#runtime/types.js";
-import { formatAvailableSkillsSection } from "#execution/skills/instructions.js";
 import { createLogger } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { ContextContainer } from "#context/container.js";
 import {
   type DurableDynamicSkillMetadata,
-  type DynamicSkillManifest,
   DynamicSkillManifestKey,
   DynamicSkillSandboxKey,
   SandboxKey,
@@ -33,38 +32,33 @@ const log = createLogger("dynamic-skills");
 // ---------------------------------------------------------------------------
 
 function qualifyDynamicSkillNames(
-  resolver: { readonly slug: string; readonly extensionNamespace?: string },
+  resolver: ResolvedDynamicSkillResolver,
   isSingle: boolean,
   entries: Readonly<Record<string, SkillPackageDefinition>>,
-): Array<{ name: string; entryKey: string; entry: SkillPackageDefinition }> {
-  const keys = Object.keys(entries);
-  const result: Array<{ name: string; entryKey: string; entry: SkillPackageDefinition }> = [];
-
-  if (keys.length === 0) return result;
-
+): Array<{ name: string; entry: SkillPackageDefinition }> {
   // A single returned defineSkill is named after the file slug (already
-  // namespaced for an extension). A map names each entry by its bare key.
-  if (isSingle) {
-    result.push({ name: resolver.slug, entryKey: keys[0]!, entry: entries[keys[0]!]! });
-  } else {
-    // Map entries from an extension resolver are prefixed with the mount
-    // namespace so extension-produced skills are namespaced like the extension's
-    // static skills; a non-extension resolver's keys stay bare.
-    const prefix =
-      resolver.extensionNamespace !== undefined ? `${resolver.extensionNamespace}__` : "";
-    for (const key of keys) {
-      result.push({ name: `${prefix}${key}`, entryKey: key, entry: entries[key]! });
-    }
-  }
-  for (const { name } of result) {
+  // namespaced for an extension). A map names each entry by its bare key,
+  // prefixed with the mount namespace for an extension resolver.
+  const prefix =
+    resolver.extensionNamespace !== undefined ? `${resolver.extensionNamespace}__` : "";
+  const named = Object.entries(entries).map(([key, entry]) => ({
+    entry,
+    name: isSingle ? resolver.slug : `${prefix}${key}`,
+  }));
+  for (const { name } of named) {
     const reservation = eveNamespaceReservation(name);
     if (reservation !== undefined) {
       throw new Error(
-        `Dynamic skill resolver "${resolver.slug}" returned the reserved skill name "${name}". ${reservation}; rename the skill.`,
+        `Dynamic skill resolver "${resolver.logicalPath}" returned the reserved skill name "${name}". ${reservation}; rename the skill.`,
+      );
+    }
+    if (!TOOL_SLUG_PATTERN.test(name)) {
+      throw new Error(
+        `Dynamic skill resolver "${resolver.logicalPath}" returned illegal skill name "${name}". ${TOOL_SLUG_RULE}`,
       );
     }
   }
-  return result;
+  return named;
 }
 
 interface DynamicSkillUpdate {
@@ -82,19 +76,9 @@ interface SandboxSkillPackage {
   readonly skill: MaterializableSkillPackage;
 }
 
-function formatDynamicSkillAnnouncement(manifest: DynamicSkillManifest): string {
-  const skills = Object.values(manifest)
-    .flat()
-    .map(({ description, name, revision }) => ({
-      description,
-      hasFiles: revision !== undefined,
-      name,
-    }));
-  return formatAvailableSkillsSection(skills) ?? "Available skills: none";
-}
-
 function toDurableSkill(skill: MaterializableSkillPackage): DurableDynamicSkillMetadata {
   return {
+    deferred: skill.deferred === true ? true : undefined,
     description: skill.description,
     markdown: skill.markdown,
     name: skill.name,
@@ -155,32 +139,13 @@ async function syncDynamicSkillFiles(input: {
 }
 
 // ---------------------------------------------------------------------------
-// Single entry detection
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Context key for pending announcements
-// ---------------------------------------------------------------------------
-
-import { ContextKey } from "#context/key.js";
-
-/**
- * Durable pending skill announcement text. Set by
- * {@link dispatchDynamicSkillEvent} whenever the dynamic skill manifest
- * changes. Read by the tool-loop to inject the announcement into model
- * context.
- */
-export const PendingSkillAnnouncementKey = new ContextKey<string>("eve.pendingSkillAnnouncement");
-
-// ---------------------------------------------------------------------------
 // Event dispatch
 // ---------------------------------------------------------------------------
 
 /**
  * Dispatches a stream event to dynamic skill resolvers. On a matching
- * event: runs handlers, stores instructions in durable context, syncs
- * changed supporting files to the sandbox, and stores a pending
- * announcement for the tool-loop to inject.
+ * event: runs handlers, stores instructions in durable context, and syncs
+ * changed supporting files to the sandbox.
  */
 export async function dispatchDynamicSkillEvent(input: {
   readonly ctx: ContextContainer;
@@ -189,20 +154,6 @@ export async function dispatchDynamicSkillEvent(input: {
   readonly messages: readonly ModelMessage[];
 }): Promise<void> {
   const { ctx, resolvers, event, messages } = input;
-
-  // Subagent event steps do not initialize sandbox access.
-  // Rebuild announcements only at boundaries that prepare model context.
-  if (!ALLOWED_DYNAMIC_SKILL_EVENTS.has(event.type) && event.type !== "step.started") return;
-
-  // Build phase: rebuild announcement from durable manifest when the
-  // virtual key is empty (step boundary crossed).
-  if (ctx.get(PendingSkillAnnouncementKey) === undefined) {
-    const manifest = ctx.get(DynamicSkillManifestKey);
-    if (manifest !== undefined && Object.keys(manifest).length > 0) {
-      ctx.setVirtualContext(PendingSkillAnnouncementKey, formatDynamicSkillAnnouncement(manifest));
-    }
-  }
-
   if (!ALLOWED_DYNAMIC_SKILL_EVENTS.has(event.type)) return;
 
   const matching = resolvers.filter((r) => r.eventNames.includes(event.type));
@@ -276,7 +227,7 @@ export async function dispatchDynamicSkillEvent(input: {
   }
 
   // A dynamic skill whose name matches an authored skill overrides it:
-  // load_skill prefers the dynamic body, and supporting files replace the
+  // loading prefers the dynamic body, and supporting files replace the
   // authored package at the same sandbox path. Two dynamic resolvers
   // emitting the same name is a genuine ambiguity and still throws.
   const dynamicSkillOwners = new Map<string, string>();
@@ -295,5 +246,4 @@ export async function dispatchDynamicSkillEvent(input: {
   await syncDynamicSkillFiles({ ctx, next, previous });
 
   ctx.set(DynamicSkillManifestKey, newManifest);
-  ctx.setVirtualContext(PendingSkillAnnouncementKey, formatDynamicSkillAnnouncement(newManifest));
 }

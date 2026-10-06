@@ -275,7 +275,6 @@ function createRegisteredHarnessToolDefinition(input: {
       scope: def.name,
     }),
     frameworkTool: isFrameworkTool(def) || def.owner.kind === "framework",
-    frameworkAction: def.behavior?.presentation === "load-skill" ? "load-skill" : undefined,
     inputSchema: def.inputSchema ?? UNSPECIFIED_INPUT_SCHEMA,
     name: def.name,
     approval: def.approval,

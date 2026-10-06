@@ -1,10 +1,11 @@
 import type { RuntimeActionRequest } from "#shared/action-types.js";
+import { isObject } from "#shared/guards.js";
 
-/** The tool, agent, or `load_skill` a request targets. */
+/** The tool, agent, or skill a request targets. */
 export function actionRequestName(action: RuntimeActionRequest): string {
   switch (action.kind) {
     case "load-skill":
-      return "load_skill";
+      return requestedSkill(action);
     case "subagent-call":
       return action.subagentName;
     case "remote-agent-call":
@@ -13,4 +14,16 @@ export function actionRequestName(action: RuntimeActionRequest): string {
     case "workflow-tool-call":
       return action.toolName;
   }
+}
+
+/** The skill a `load-skill` request loads. */
+export function requestedSkill(
+  action: Extract<RuntimeActionRequest, { readonly kind: "load-skill" }>,
+): string {
+  return skillTarget(action.input) ?? "";
+}
+
+/** The skill an `execute` input names, if it names one. */
+export function skillTarget(input: unknown): string | undefined {
+  return isObject(input) && typeof input.skill === "string" ? input.skill : undefined;
 }

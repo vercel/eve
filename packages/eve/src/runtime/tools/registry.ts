@@ -133,6 +133,5 @@ function prepareToolBehavior(
   return {
     availability: behavior.availability,
     handling,
-    presentation: behavior.presentation,
   };
 }

@@ -233,7 +233,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       40: "Sandbox provider handle hooks were renamed to onSandboxStop and onSandboxDelete.",
     },
   },
-  skill: { current: 2, supported: [1, 2], dropped: {} },
+  skill: { current: 3, supported: [1, 2, 3], dropped: {} },
   dynamicSkill: {
     current: 34,
     supported: [

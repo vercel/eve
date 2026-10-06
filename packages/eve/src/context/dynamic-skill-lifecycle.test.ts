@@ -1,10 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
-import {
-  PendingSkillAnnouncementKey,
-  dispatchDynamicSkillEvent,
-} from "#context/dynamic-skill-lifecycle.js";
+import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
 import {
   StaticModelReferenceKey,
   DynamicSkillManifestKey,
@@ -118,98 +115,6 @@ function writtenPaths(sandbox: ReturnType<typeof mockSandbox>): string[] {
 }
 
 describe("dispatchDynamicSkillEvent", () => {
-  it.each(["task.started", "task.settled", "turn.completed"] as const)(
-    "does not access the sandbox to rebuild announcements on %s",
-    async (type) => {
-      const ctx = new ContextContainer();
-      const manifest = {
-        policy: [{ name: "policy", description: "Tenant policy", markdown: "Tenant policy" }],
-      };
-      ctx.set(DynamicSkillManifestKey, manifest);
-
-      await dispatchDynamicSkillEvent({
-        ctx,
-        event: { type, data: {} } as UnstampedMessageStreamEvent,
-        messages: [],
-        resolvers: [],
-      });
-
-      expect(ctx.get(DynamicSkillManifestKey)).toEqual(manifest);
-      expect(ctx.has(PendingSkillAnnouncementKey)).toBe(false);
-    },
-  );
-
-  it("restores the skill announcement at the next model step without resolving skills again", async () => {
-    const { access, ctx } = createCtx();
-    const handler = vi.fn(() => makeSkill("Tenant policy"));
-    const resolver = createResolver("policy", handler);
-    await dispatchDynamicSkillEvent({
-      ctx,
-      event: makeEvent(),
-      messages: [],
-      resolvers: [resolver],
-    });
-    const announcement = ctx.get(PendingSkillAnnouncementKey);
-    expect(announcement).toContain("policy: Tenant policy");
-    ctx.clearVirtualContext();
-    ctx.setVirtualContext(SandboxKey, access);
-
-    await dispatchDynamicSkillEvent({
-      ctx,
-      event: { type: "step.started", data: {} } as UnstampedMessageStreamEvent,
-      messages: [],
-      resolvers: [resolver],
-    });
-
-    expect(ctx.get(PendingSkillAnnouncementKey)).toBe(announcement);
-    expect(handler).toHaveBeenCalledOnce();
-  });
-
-  it("announces when all dynamic skills are withdrawn without opening the sandbox", async () => {
-    const { ctx, get } = createCtx();
-    let enabled = true;
-    const resolver = createResolver("tenant", () =>
-      enabled ? makeSkill("Tenant policy", "Follow tenant policy.") : null,
-    );
-
-    await dispatch(ctx, resolver);
-
-    expect(ctx.get(PendingSkillAnnouncementKey)).toContain("- tenant: Tenant policy");
-    expect(ctx.get(PendingSkillAnnouncementKey)).not.toContain("tenant/SKILL.md");
-    expect(ctx.get(DynamicSkillManifestKey)).toEqual({
-      tenant: [{ description: "Tenant policy", markdown: "Follow tenant policy.", name: "tenant" }],
-    });
-
-    enabled = false;
-    await dispatch(ctx, resolver);
-
-    expect(ctx.get(DynamicSkillManifestKey)).toEqual({});
-    expect(ctx.get(PendingSkillAnnouncementKey)).toBe("Available skills: none");
-    expect(get).not.toHaveBeenCalled();
-  });
-
-  it("rebuilds the announcement after a step boundary without opening the sandbox", async () => {
-    const { ctx, get } = createCtx();
-    await dispatch(
-      ctx,
-      createResolver("tenant", () => makeSkill("Tenant policy", "Body", { "a.md": "a" })),
-    );
-    get.mockClear();
-    ctx.clearVirtualContext();
-
-    await dispatchDynamicSkillEvent({
-      ctx,
-      event: { type: "step.started", data: {} } as UnstampedMessageStreamEvent,
-      messages: [],
-      resolvers: [],
-    });
-
-    expect(ctx.get(PendingSkillAnnouncementKey)).toContain(
-      `- tenant: Tenant policy (path: $HOME/.agents/skills/tenant/SKILL.md)`,
-    );
-    expect(get).not.toHaveBeenCalled();
-  });
-
   it("stores SKILL.md as authored, including frontmatter", async () => {
     const { ctx } = createCtx();
     await dispatch(
@@ -220,23 +125,6 @@ describe("dispatchDynamicSkillEvent", () => {
     expect(ctx.get(DynamicSkillManifestKey)?.tenant?.[0]?.markdown).toBe(
       "---\nname: tenant\n---\n# Body\n",
     );
-  });
-
-  it("keeps remaining dynamic skills in the announcement when one resolver removes its skill", async () => {
-    const { ctx } = createCtx();
-    let tenantEnabled = true;
-    const tenant = createResolver("tenant", () =>
-      tenantEnabled ? makeSkill("Tenant policy") : null,
-    );
-    const support = createResolver("support", () => makeSkill("Support policy"));
-
-    await dispatch(ctx, tenant, support);
-    tenantEnabled = false;
-    await dispatch(ctx, tenant, support);
-
-    const announcement = ctx.get(PendingSkillAnnouncementKey);
-    expect(announcement).not.toContain("tenant: Tenant policy");
-    expect(announcement).toContain("support: Support policy");
   });
 
   it("names map entries by their bare key", async () => {
@@ -251,7 +139,6 @@ describe("dispatchDynamicSkillEvent", () => {
     expect(ctx.get(DynamicSkillManifestKey)).toEqual({
       custom: [{ description: "Talk like a dog", markdown: "Woof.", name: "talk-like-a-dog" }],
     });
-    expect(ctx.get(PendingSkillAnnouncementKey)).toContain("talk-like-a-dog: Talk like a dog");
   });
 
   it("prefixes map entries with the mount namespace for an extension resolver", async () => {
@@ -270,7 +157,6 @@ describe("dispatchDynamicSkillEvent", () => {
         { description: "Triage an account", markdown: "Triage.", name: "crm__triage" },
       ],
     });
-    expect(ctx.get(PendingSkillAnnouncementKey)).toContain("crm__triage: Triage an account");
   });
 
   it("lets a dynamic skill override a same-named authored skill instead of throwing", async () => {
@@ -316,7 +202,6 @@ describe("dispatchDynamicSkillEvent", () => {
 
     expect(sandbox.writes).toEqual([]);
     expect(ctx.get(DynamicSkillManifestKey)).toBeUndefined();
-    expect(ctx.get(PendingSkillAnnouncementKey)).toBeUndefined();
   });
 });
 

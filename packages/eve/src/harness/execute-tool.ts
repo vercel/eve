@@ -26,7 +26,7 @@ export interface HarnessToolDefinition {
   /** Optional JSON input substituted when this tool starts its workflow body. */
   readonly executeInput?: (input: unknown) => JsonValue;
   readonly frameworkTool?: boolean;
-  readonly frameworkAction?: "load-skill" | "task-cancel" | "task-wait";
+  readonly frameworkAction?: "task-cancel" | "task-wait";
   readonly inputSchema: FlexibleSchema;
   readonly name: string;
   readonly approval?: Approval;

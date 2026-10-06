@@ -159,6 +159,7 @@ function combineDerivedFacts(sessions: readonly EveEvalSessionResult[]): EveEval
   if (sessions.length === 0) return createEmptyDerivedFacts();
 
   const toolCalls = sessions.flatMap((session) => session.derived.toolCalls);
+  const skillLoads = sessions.flatMap((session) => session.derived.skillLoads);
   const subagentCalls = sessions.flatMap((session) => session.derived.subagentCalls);
   const inputRequests = sessions.flatMap((session) => session.derived.inputRequests);
   const failureCode = sessions.find((session) => session.derived.failureCode !== undefined)?.derived
@@ -167,6 +168,7 @@ function combineDerivedFacts(sessions: readonly EveEvalSessionResult[]): EveEval
   return {
     toolCalls,
     toolCallCount: toolCalls.length,
+    skillLoads,
     subagentCalls,
     subagentCallCount: subagentCalls.length,
     inputRequests,

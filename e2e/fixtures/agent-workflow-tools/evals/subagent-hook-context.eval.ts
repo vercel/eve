@@ -36,7 +36,6 @@ export default (["direct", "background"] as const).map((mode) =>
       const scenario = SCENARIOS[mode];
       const initial = await t.send(scenario.request);
       initial.expectOk();
-      initial.calledTool("load_skill", { count: 1, status: "completed" });
       initial.messageIncludes("Alice's hook audit");
       if (mode === "background") {
         initial.event("message.completed", {
@@ -48,14 +47,6 @@ export default (["direct", "background"] as const).map((mode) =>
 
       const audit = await initial.session.send(scenario.audit);
       audit.expectOk();
-      audit.calledTool("load_skill", { count: 1, status: "completed" });
-      t.eventsSatisfy("the parent's dynamic skill remains loadable after delegation", () =>
-        [initial, audit].every((turn) =>
-          String(turn.toolCalls.find((call) => call.name === "load_skill")?.output).includes(
-            "DELEGATION-POLICY:",
-          ),
-        ),
-      );
       audit.calledTool("read_subagent_hooks", { count: 1, status: "completed" });
       const records = readHookAudit(audit);
       t.eventsSatisfy(

@@ -1,15 +1,15 @@
 ---
 title: "Skills"
-description: "Author load-on-demand procedures the model pulls into context with load_skill."
+description: "Author load-on-demand procedures the model pulls into context with execute."
 ---
 
 A skill is a model-loadable procedure that follows the `SKILL.md` convention. It is a markdown document, optionally a packaged directory with supporting files, that the model pulls into context on demand rather than carrying on every turn. eve advertises each skill's description, and the model loads the full body only when a turn calls for it. This is progressive disclosure, the same model the broader Agent Skills standard uses, so a skill authored against that standard ports over as-is.
 
 ## How loading works
 
-eve scans the files under `agent/skills/` and exposes each one's description to the model alongside a framework-owned `load_skill` tool. When a request matches a skill's description (or you name the skill outright), the model calls `load_skill`, and eve appends that skill's markdown to the active turn's context.
+eve scans the files under `agent/skills/` and lists each one's name and description in the system prompt. When a request matches a skill's description (or you name the skill outright), the model loads it with `execute({ skill })`, and the skill's markdown becomes the call's result in the active turn. Every agent has the [`execute` tool](./concepts/built-in-tools#search-and-execute). A load reports a `load-skill` action named for the skill, and `t.loadedSkill` asserts it in [evals](./evals/assertions).
 
-Listing skills and loading their instructions do not require a sandbox: `load_skill` returns static instructions from the compiled agent and dynamic instructions from session state. Only access to supporting package files requires a sandbox. Builds may also prewarm sandbox templates that contain static package files. Supporting files are available under `$HOME/.agents/skills/<skill>/`, with `/workspace/skills/<skill>/` as the fallback when `$HOME` is unavailable. Sibling references inside `SKILL.md`, such as `references/checklist.md`, are relative to the directory containing that specific `SKILL.md`.
+Listing skills and loading their instructions do not require a sandbox: loading returns static instructions from the compiled agent and dynamic instructions from session state. Only access to supporting package files requires a sandbox. Builds may also prewarm sandbox templates that contain static package files. Supporting files are available under `$HOME/.agents/skills/<skill>/`, with `/workspace/skills/<skill>/` as the fallback when `$HOME` is unavailable. Sibling references inside `SKILL.md`, such as `references/checklist.md`, are relative to the directory containing that specific `SKILL.md`.
 
 The description is a routing hint, not a label. Write it as the task that should trigger activation:
 
@@ -19,6 +19,19 @@ Use when the user needs a release checklist or changelog workflow.
 
 Loading a skill adds instructions, never a new execution surface. Tools stay visible whether a skill is loaded or not. If you need typed runtime behavior, reach for a [tool](./tools) instead.
 
+## Deferred skills
+
+An agent with many skills can keep most of them out of the system prompt. Set `deferred: true` in the frontmatter or on `defineSkill`:
+
+```md title="agent/skills/pdf-forms/SKILL.md"
+---
+description: Fill and validate PDF forms.
+deferred: true
+---
+```
+
+A deferred skill is listed by name only, in the same append-only context message as deferred tools. The model finds its description with `search`, which ranks skills and tools together, and loads it with `execute({ skill })`. Its markdown, supporting files, and eval assertions work as they do for any other skill. Dynamic skills accept `deferred` too; see [Dynamic capabilities](./guides/dynamic-capabilities#dynamic-skills).
+
 ## Markdown vs `defineSkill`
 
 The smallest skill is a flat markdown file. The content is the procedure, and the name comes from the path.
@@ -26,6 +39,8 @@ The smallest skill is a flat markdown file. The content is the procedure, and th
 ```md title="agent/skills/forecast.md"
 Use the weather tool before answering forecast or temperature questions.
 ```
+
+A skill's name comes from its path and must use only ASCII letters, digits, underscores, and dashes, start with a letter, and have at most 64 characters. The compiler rejects any other name.
 
 A flat markdown skill can skip the `description` frontmatter. When it does, eve advertises the first non-empty, non-code-fence line of the body with any leading `#`, `>`, `*`, or `-` marker stripped. If the body has no such line, eve falls back to the literal `Instructions for the <name> skill.`, which is a weak routing hint, so add a `description` when you want the model to route on intent.
 
@@ -40,7 +55,7 @@ When the task is novel or ambiguous, gather evidence first, then answer with the
 key facts and the remaining uncertainty.
 ```
 
-eve reads `description`, optional `license`, and string `metadata`; other `SKILL.md` frontmatter is accepted as a no-op.
+eve reads `description`, optional `license`, string `metadata`, and `deferred`; other `SKILL.md` frontmatter is accepted as a no-op.
 
 When markdown can't express what you need (typed values, generated content, or inline sibling files), author the skill in TypeScript with `defineSkill` from `eve/skills`:
 

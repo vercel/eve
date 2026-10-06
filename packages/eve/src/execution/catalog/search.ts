@@ -1,8 +1,8 @@
 /**
- * `eve__search`: finds catalog entries, the agent's deferred tools and every
- * connection tool, by keyword. It never prompts: a connection whose tools need
- * sign-in is found as its sign-in entry instead. Its definition is fixed for
- * each eve version, so the catalog can change without changing the model's
+ * `eve__search`: finds catalog entries, the agent's deferred tools and skills
+ * and every connection tool, by keyword. It never prompts: a connection whose
+ * tools need sign-in is found as its sign-in entry instead. Its definition is
+ * fixed for each eve version, so the catalog can change without changing the model's
  * tool list.
  */
 
@@ -23,13 +23,15 @@ import {
 import { connectionSignInEntry } from "./connection-entry.js";
 import { closestNames, isEmptyQuery, rankCandidates, type RankCandidate } from "./rank.js";
 import { connectionToolSignature, entrySignature } from "./signatures.js";
+import type { CatalogSkill } from "./skills.js";
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
 
 const SEARCH_DESCRIPTION = [
-  "Find your own tools, agents, and connected services by keyword; this searches what you can do, not the web.",
-  `Returns each match's exact tool name, description, and TypeScript signature, to call with ${EXECUTE_TOOL_NAME}.`,
+  "Find your own tools, agents, skills, and connected services by keyword; this searches what you can do, not the web.",
+  `Returns each tool's exact name, description, and TypeScript signature, to call with ${EXECUTE_TOOL_NAME}({ tool, input }),`,
+  `and each skill's name and description, to load with ${EXECUTE_TOOL_NAME}({ skill }).`,
   'When you already know a name or connection, from the catalog listing, an earlier result, or an error, search it directly: the exact name, or "<connection>__", which is faster and returns only that connection\'s tools.',
   `A connection that needs sign-in appears as a tool named after the connection: calling it with ${EXECUTE_TOOL_NAME} asks the user to sign in.`,
 ].join(" ");
@@ -60,11 +62,9 @@ interface SearchInput {
   readonly query?: string;
 }
 
-interface SearchResult {
-  readonly description: string;
-  readonly signature: string;
-  readonly tool: string;
-}
+type SearchResult =
+  | { readonly description: string; readonly signature: string; readonly tool: string }
+  | { readonly description: string; readonly path?: string; readonly skill: string };
 
 interface UnavailableConnection {
   readonly connection: string;
@@ -86,14 +86,15 @@ type SearchCandidate = RankCandidate & {
 };
 
 /**
- * Builds `eve__search` over one step's deferred entries and the connections in
- * `registry`. `describe` returns an entry's description as the model would
- * read it in its tool list.
+ * Builds `eve__search` over one step's deferred entries and skills and the
+ * connections in `registry`. `describe` returns an entry's description as the
+ * model would read it in its tool list.
  */
 export function createSearchTool(input: {
   readonly deferred: readonly HarnessToolDefinition[];
   readonly describe: (definition: HarnessToolDefinition) => string;
   readonly registry: ConnectionRegistry | undefined;
+  readonly skills: readonly CatalogSkill[];
 }): HarnessToolDefinition {
   return {
     description: SEARCH_DESCRIPTION,
@@ -118,9 +119,10 @@ async function search(
   const namespace = parseNamespace(query);
   const inScope = (name: string) => namespace === undefined || inNamespace(name, namespace);
 
-  const candidates = catalog.deferred
-    .map((definition) => entryCandidate(definition, catalog.describe))
-    .filter((candidate) => inScope(candidate.fullName));
+  const candidates: SearchCandidate[] = [
+    ...catalog.deferred.map((definition) => entryCandidate(definition, catalog.describe)),
+    ...catalog.skills.map(skillCandidate),
+  ].filter((candidate) => inScope(candidate.fullName));
   const unavailable: UnavailableConnection[] = [];
   const { registry } = catalog;
   if (registry !== undefined) {
@@ -250,6 +252,15 @@ function entryCandidate(
       tool: definition.name,
     }),
     fullName: definition.name,
+  };
+}
+
+function skillCandidate({ description, name, path }: CatalogSkill): SearchCandidate {
+  return {
+    description,
+    fullName: name,
+    name,
+    result: () => ({ description, path, skill: name }),
   };
 }
 

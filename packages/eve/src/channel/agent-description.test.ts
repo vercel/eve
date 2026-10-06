@@ -27,7 +27,7 @@ it("describes only the tools invokeTool can run, sorted by name", () => {
     bindings: {
       "source:deploy": { owner: { kind: "application" } },
       "source:lookup": { owner: { kind: "extension" } },
-      "source:load_skill": { owner: { feature: "skills", kind: "framework" } },
+      "source:web_fetch": { owner: { feature: "eve:defaults", kind: "framework" } },
       "source:plan": { owner: { kind: "application" } },
       "source:remote": { owner: { kind: "application" } },
     },
@@ -39,7 +39,7 @@ it("describes only the tools invokeTool can run, sorted by name", () => {
     tools: [
       tool("lookup", { outputSchema: { type: "object" } }),
       tool("deploy", { requiresApproval: true }),
-      tool("load_skill"),
+      tool("web_fetch"),
       tool("plan", { behavior: { handling: { kind: "workflow-tool" } } }),
       tool("remote", { hasExecute: false }),
     ],

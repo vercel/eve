@@ -60,7 +60,6 @@ describe("presentTool", () => {
     expect(presentTool("bash", { command: "pnpm test" }).title).toBe("Run pnpm test");
     expect(presentTool("glob", { pattern: "**/*.ts" }).title).toBe("Glob **/*.ts");
     expect(presentTool("grep", { pattern: "useEve" }).title).toBe("Grep useEve");
-    expect(presentTool("load_skill", { skill: "commit" }).title).toBe("Load commit");
     expect(presentTool("read_file", { filePath: "/workspace/agent.ts" })).toMatchObject({
       title: "Read /workspace/agent.ts",
       group: { verb: "Read", singularNoun: "file", pluralNoun: "files" },
@@ -156,7 +155,6 @@ describe("presentTool", () => {
       bash: { command: "ls" },
       glob: { pattern: "**/*.ts" },
       grep: { pattern: "useEve" },
-      load_skill: { skill: "commit" },
       read_file: { filePath: "/workspace/a.ts" },
       web_fetch: { url: "https://example.com" },
       web_search: { query: "eve framework" },

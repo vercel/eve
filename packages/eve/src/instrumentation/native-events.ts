@@ -35,6 +35,7 @@ import {
   type RuntimeActionResult,
 } from "#shared/action-types.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
+import { requestedSkill } from "#shared/action-request-name.js";
 
 export interface CreateInstrumentationHandleEventInput {
   readonly isFrameworkTool?: (name: string) => boolean;
@@ -221,7 +222,7 @@ async function publishActionStarts(
             type: "tool.call.started",
             callId: action.callId,
             toolName: actionName(action),
-            frameworkTool: input.isFrameworkTool?.(actionName(action)) === true,
+            frameworkTool: isFrameworkAction(action, input),
             scope,
             idempotencyKey: toolCallIdempotencyKey(scope, action.callId, 0),
             startedAtMs: Date.now(),
@@ -238,7 +239,7 @@ async function publishActionStarts(
         ...(deferred ? { isWorkflowTool: true } : undefined),
         kind: action.kind === "workflow-tool-call" ? "tool-call" : action.kind,
         toolName: actionName(action),
-        frameworkTool: input.isFrameworkTool?.(actionName(action)) === true,
+        frameworkTool: isFrameworkAction(action, input),
         scope,
         type: "tool.call.started",
       } satisfies InstrumentationToolCallStartedEvent),
@@ -323,9 +324,17 @@ function actionUsage(result: RuntimeActionResult): InstrumentationUsage | undefi
   return usage;
 }
 
+/** A skill load runs eve's skill loader; any other call is eve's when its tool is. */
+function isFrameworkAction(
+  action: RuntimeActionRequest,
+  input: Pick<CreateInstrumentationHandleEventInput, "isFrameworkTool">,
+): boolean {
+  return action.kind === "load-skill" || input.isFrameworkTool?.(actionName(action)) === true;
+}
+
 function actionName(action: RuntimeActionRequest): string {
   if (action.kind === "tool-call" || action.kind === "workflow-tool-call") return action.toolName;
-  if (action.kind === "load-skill") return "load_skill";
+  if (action.kind === "load-skill") return requestedSkill(action);
   return action.name;
 }
 
