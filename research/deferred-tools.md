@@ -232,7 +232,7 @@ execute({ tool, input })                          ← model history only
        inline tool   → execute
        workflow tool → durable run (foreground parks, background returns a task)
        subagent      → child session (local, remote, or root copy)
-       connection    → connection client ("linear.list_issues")
+       connection    → connection client ("linear__list_issues")
 ```
 
 ### Authoring API
@@ -318,14 +318,18 @@ export default defineDynamic({
 });
 ```
 
-- **Same rules as direct dynamic entries.** Names stay `slug__key`. A
-  dynamic tool still can't be a workflow tool. An entry the resolver no longer
-  returns can't be called: `execute` reports it as unknown and suggests the
-  closest names.
+- **Same rules as direct dynamic entries.**
+  - A map entry is named by its bare key, with the mount prefix added for an
+    extension's resolver. Authors add their own prefix when they want one,
+    such as `tenant__export`.
+  - A dynamic tool still can't be a workflow tool.
+  - An entry the resolver no longer returns can't be called: `execute`
+    reports it as unknown and suggests the closest names.
 - **Keys are validated.** Every dynamic entry name, direct or deferred, must
   match `TOOL_SLUG_PATTERN`. Today a bad key fails only when the provider
-  rejects it, and a deferred name never reaches a provider, so eve has to
-  check it when the resolver returns it.
+  rejects it, and a deferred name never reaches a provider. Checking it when
+  the resolver returns it means any entry that works deferred also works
+  direct.
 - **Prefer session- or turn-scoped resolvers.** A `step.started` resolver
   whose deferred set changes every step appends a listing diff every step.
   The cache stays intact, but history grows.
@@ -339,46 +343,71 @@ provider has to see their definition, so deferring one is a compile error.
 
 ### The catalog
 
-Every entry has one flat name. The name decides how the entry is found:
+Every entry has one flat name: the same name it has, or would have, as a
+direct tool. `__` is the only namespace separator, as it is everywhere in eve
+today.
 
-| Entry         | Source                                                                | Name                                  | Lookup                                                                                 |
-| ------------- | --------------------------------------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------- |
-| Inline tool   | `deferred: true` on a static or dynamic tool with an inline `execute` | `refund_invoice`, `tenant__sync`      | Harness tools for the step, no dispatch handling                                       |
-| Workflow tool | `deferred: true` on `defineWorkflowTool`                              | `deploy_service`                      | Harness tools for the step, `workflow-tool-call`                                       |
-| Subagent      | `tool: "deferred"` on a local, remote, dynamic, or root-copy agent    | `billing_specialist`                  | Harness tools for the step, `subagent-call`, `remote-agent-call`, or `self-agent-call` |
-| Connection    | Every tool of every connection, after `tools.allow` and `tools.block` | `linear.list_issues`, `crm__api.list` | Connection registry, then `getToolMetadata()`                                          |
+| Entry         | Source                                                                | Name                                            | Lookup                                                                                 |
+| ------------- | --------------------------------------------------------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Inline tool   | `deferred: true` on a static or dynamic tool with an inline `execute` | `refund_invoice`, `crm__search`, `tenant__sync` | Harness tools for the step, no dispatch handling                                       |
+| Workflow tool | `deferred: true` on `defineWorkflowTool`                              | `deploy_service`                                | Harness tools for the step, `workflow-tool-call`                                       |
+| Subagent      | `tool: "deferred"` on a local, remote, dynamic, or root-copy agent    | `billing_specialist`, `crm__reviewer`           | Harness tools for the step, `subagent-call`, `remote-agent-call`, or `self-agent-call` |
+| Connection    | Every tool of every connection, after `tools.allow` and `tools.block` | `linear__list_issues`, `crm__api__list_issues`  | The owning connection, then its `getToolMetadata()`                                    |
 
-- **A dot means a connection.** If a name contains `.`, the part before the
-  first `.` is the connection and the rest is that connection's tool.
-  Otherwise the name is looked up among the step's harness tools: authored and
-  dynamic tools plus static and dynamic subagents, in the precedence direct
-  calls use today.
-- **Why the dot rule is safe.**
-  - Connection names never contain `.`. Static and dynamic connections match
-    `CONNECTION_SLUG_PATTERN` (`[a-z0-9-]`). Extension connections are
-    `<namespace>__<name>`, and extension namespaces match
-    `EXTENSION_SLUG_PATTERN` (`[a-zA-Z0-9_-]`).
-  - So splitting at the first `.` is correct even when an MCP tool's own name
-    contains dots, which the MCP spec allows.
-  - Harness names never contain `.` either. Tool slugs match
-    `TOOL_SLUG_PATTERN`, extension namespaces exclude it, and dynamic keys are
-    now validated.
-  - So a name can never be both a connection tool and a harness tool, and eve
-    needs no collision checks.
-- **Why not `__`.** Extension connections already contain `__`, as do local
-  tool names. A name like `acme__crm__list` could be connection `acme` with
-  tool `crm__list` or connection `acme__crm` with tool `list`.
-- **Extension example.** An extension mounted as `crm` with
-  `connections/api.ts` contributes connection `crm__api`, so the model sees
-  its tools as `crm__api.list_issues`. Its own `tools/search.ts` is the
-  harness tool `crm__search`. `__` is the mount prefix and `.` separates a
-  connection from its tool.
-- **Matches code mode.** `linear.list_issues` reads the same as
-  `tools.linear.list_issues(input)` will.
+- **Owners.** A `__` prefix names the entry's owner:
+  - an extension mount: `crm__search`;
+  - a connection: `linear__list_issues`;
+  - a memory slot: `<slot>__<key>`.
+
+  Owners nest. An extension mounted as `crm` with `connections/api.ts`
+  contributes connection `crm__api`, whose tools are `crm__api__list_issues`.
+  A prefix an author adds by convention, such as `tenant__export`, has no
+  owner.
+
+- **A connection owns its name and its `__` prefix.** No tool, subagent,
+  memory tool, extension contribution, or other connection may be named
+  `linear` or start with `linear__` while connection `linear` exists.
+  - **Only connections need the rule.** They are the only entries eve can't
+    list up front, because listing their tools needs a network call and maybe
+    a sign-in. Every other name is known, and exact duplicates are already
+    errors.
+  - **Checked on names alone.** eve never lists a connection's tools to check
+    it.
+  - **When it's checked.** Static names are checked at compile time. Dynamic
+    connections, tools, subagents, and memory tools are checked when they
+    resolve. The entry that introduces the conflict is rejected with an error
+    naming both sides, for example:
+
+    ```text
+    Dynamic tool "linear__sync" starts with "linear__", which belongs to connection "linear". Rename the map key.
+    ```
+
+  - **Nested connections.** Connection `acme__crm` conflicts with connection
+    `acme`. Without the rule, `acme__crm__list` could mean connection `acme`
+    with tool `crm__list`, or connection `acme__crm` with tool `list`.
+- **Routing.** `execute({ tool })` first looks for an exact match among the
+  step's harness tools: authored and dynamic tools plus static and dynamic
+  subagents, in the precedence direct calls use today. Otherwise it finds the
+  connection whose `<name>__` starts `tool`, and the rest is that
+  connection's tool name, checked against its metadata.
+  - The ownership rule allows at most one candidate, so the order of the
+    checks never changes the result.
+  - The rest of the name is never split again, so MCP tool names work
+    whatever characters they contain.
 - **Dispatch is decided before anything runs.** For harness entries, the
   dispatch handling is on the definition, which the harness already has. A
-  dotted name is always a connection call. So coordination can decide whether
-  a call parks without any network call.
+  name under a connection's prefix is always a connection call. So
+  coordination can decide whether a call parks without any network call.
+- **Deferring never renames.** The model sees the same name in its tool list,
+  in `search` results, in `execute` input, and in history. All of these keep
+  working whether a tool is direct or deferred: protocol action names,
+  approvals and `approvalKey`, evals, hooks, `toolResultFrom`, display titles,
+  and extension overrides such as `agent/tools/crm__search.ts`.
+- **Namespaces are recorded, not parsed.** Each entry records its owners as
+  data. The ownership check, labels such as `Linear: List issues`, and later
+  code mode (`tools.crm.api.list_issues`) read that record. They never split
+  a name at `__`. A convention prefix with no owner stays part of the name,
+  as in `tools.tenant__export`.
 - **Scope.** The catalog holds only entries advertised to the current
   session, so a child session never sees a tool with
   `availableInSubagents: false`.
@@ -469,25 +498,22 @@ directly. The harness resolves the entry once per call
 looks a call up by name. Model history is the only place that keeps
 `execute`.
 
-| Concern                        | Harness entries (inline, workflow, subagent)                                        | Connection entries                                                              |
-| ------------------------------ | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| Action name on the protocol    | The entry's name                                                                    | `<connection>.<tool>`                                                           |
-| Approval                       | The entry's `approval` and `approvalKey`                                            | The connection's `approval`, keyed `<connection>.<tool>`, with instance pinning |
-| Execution                      | Inline `execute`, a workflow run, or a child session, chosen by `behavior.handling` | The connection client, with result conversion and auth parking unchanged        |
-| `toModelOutput`, `endsTurn`    | The entry's                                                                         | The connection's file-part projection                                           |
-| `ctx.toolName`, `ctx.callId`   | The entry's name and the model's call id                                            | n/a                                                                             |
-| Labels, hooks, audience policy | The entry                                                                           | `Linear: List issues`, as today                                                 |
-| Eval assertions                | `t.calledTool("deploy_service")`, `t.calledSubagent(...)`                           | `t.calledTool("linear.list_issues")`                                            |
-| Model history                  | `execute` call and result, same call id                                             | Same                                                                            |
+| Concern                        | Harness entries (inline, workflow, subagent)                                        | Connection entries                                                               |
+| ------------------------------ | ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Action name on the protocol    | The entry's name                                                                    | `<connection>__<tool>`, as today                                                 |
+| Approval                       | The entry's `approval` and `approvalKey`                                            | The connection's `approval`, keyed `<connection>__<tool>`, with instance pinning |
+| Execution                      | Inline `execute`, a workflow run, or a child session, chosen by `behavior.handling` | The connection client, with result conversion and auth parking unchanged         |
+| `toModelOutput`, `endsTurn`    | The entry's                                                                         | The connection's file-part projection                                            |
+| `ctx.toolName`, `ctx.callId`   | The entry's name and the model's call id                                            | n/a                                                                              |
+| Labels, hooks, audience policy | The entry                                                                           | `Linear: List issues`, as today                                                  |
+| Eval assertions                | `t.calledTool("deploy_service")`, `t.calledSubagent(...)`                           | `t.calledTool("linear__list_issues")`, unchanged                                 |
+| Model history                  | `execute` call and result, same call id                                             | Same                                                                             |
 
 - **One name everywhere.** The name the model passes to `execute` is also the
   protocol action name, the approval `toolName` and key, and the eval
-  assertion name. For connection tools this renames `linear__list_issues`
-  to `linear.list_issues`. That affects:
-  - approval policies that compare `toolName`;
-  - "always approve" decisions recorded under the old key, which users must
-    approve once more;
-  - eval assertions.
+  assertion name. For connection tools that is today's `<connection>__<tool>`.
+  So existing approval policies, recorded "always approve" decisions,
+  `toolResultFrom`, and eval assertions keep working.
 - **Harness entries need nothing new.** Once a call resolves to its entry,
   the harness dispatches it exactly like a direct call, because the dispatch
   handling is already on the definition.
@@ -581,7 +607,6 @@ Connections:
   (`tools/framework/connection-tools.ts`), and their reserved slots, which
   `search` and `execute` take over.
 - Nested actions for connection calls, and the nested-action helper.
-- The `<connection>__<tool>` action name, replaced by `<connection>.<tool>`.
 - The `connections` announcement, replaced by `catalog`.
 - References in `load_skill`'s not-found error, the dev TUI's
   `connection_execute` rendering, and the channel task card.
@@ -641,31 +666,34 @@ Connections:
   - `tools/workflows`, `subagents/*` (`tool: "deferred"`), and
     `concepts/built-in-tools` (`search` and `execute` instead of the
     connection tools).
-  - `connections/overview`, `connections/mcp`, `guides/dynamic-capabilities`,
-    and `extensions` (the reserved names and the extension example).
+  - `connections/overview`, `connections/mcp`, `guides/dynamic-capabilities`
+    (bare map keys, and the connection prefix rule), and `extensions` (the
+    reserved names and how mount prefixes nest with connections).
 - **Changeset.** `minor`, because it:
   - removes `connection_search` and `connection_execute`;
   - reserves `search` and `execute` in every agent;
-  - renames connection tool actions from `<connection>__<tool>` to
-    `<connection>.<tool>`.
+  - rejects names that start with a connection's prefix, which an existing
+    agent may already have, such as connection `linear` beside a tool named
+    `linear__sync`.
 
 ## Decisions and alternatives considered
 
-| Decision            | Chosen                                                       | Rejected                                                                                                                       |
-| ------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| Tool names          | `search` and `execute`                                       | `tool_search` and `tool_execute` (no collision risk, but the names don't match the functions inside a code-mode program)       |
-| Search surface      | One `search` over every entry, connections included          | Keeping `connection_search` next to it (two places to look, two listings); a separate `skill_search`                           |
-| Variants            | A key per variant: `tool`, then `skill` and `code`           | One name space with markers such as `skill:pdf`; a `kind` field the model must echo                                            |
-| Presence            | Always, in every session of every agent                      | Only while the catalog is non-empty (flips `tools` when a dynamic entry appears); an agent-level flag                          |
-| Dynamic entries     | Deferrable, like static ones                                 | Static only (rules out per-tenant catalogs)                                                                                    |
-| Opt-in              | `deferred: true` on tools; `tool: "deferred"` on agents      | An agent-level list of names; `deferLoading` (eve never loads the definition); pi's `exposure` enum                            |
-| Discovery mechanism | Two fixed tools                                              | AI SDK `toolSearch()` or activation (grows `tools`); provider-native search (one provider at a time, partly beta)              |
-| Dispatch            | Resolve to an entry, then dispatch it like a direct call     | A `defineTool` proxy (can't reach workflow tools or subagents; duplicates approval)                                            |
-| Entry names         | One flat name; connection tools are `<connection>.<tool>`    | A separate `connection` argument (two-part key); `<connection>__<tool>` (ambiguous with extension connections and local names) |
-| Search output       | TypeScript `signature`                                       | Raw JSON Schema (larger, and code mode needs the signature anyway)                                                             |
-| Protocol shape      | Actions carry the entry's name; only history says `execute`  | An outer `execute` action with a nested entry action                                                                           |
-| Search state        | Stateless; any entry can be executed                         | A durable discovered set that execution checks                                                                                 |
-| Listing             | One append-only listing: names, plus connection descriptions | Nothing (the model can't tell when to search); full signatures (eval-gated)                                                    |
+| Decision            | Chosen                                                                                | Rejected                                                                                                                                                                                                                     |
+| ------------------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tool names          | `search` and `execute`                                                                | `tool_search` and `tool_execute` (no collision risk, but the names don't match the functions inside a code-mode program)                                                                                                     |
+| Search surface      | One `search` over every entry, connections included                                   | Keeping `connection_search` next to it (two places to look, two listings); a separate `skill_search`                                                                                                                         |
+| Variants            | A key per variant: `tool`, then `skill` and `code`                                    | One name space with markers such as `skill:pdf`; a `kind` field the model must echo                                                                                                                                          |
+| Presence            | Always, in every session of every agent                                               | Only while the catalog is non-empty (flips `tools` when a dynamic entry appears); an agent-level flag                                                                                                                        |
+| Dynamic entries     | Deferrable, like static ones                                                          | Static only (rules out per-tenant catalogs)                                                                                                                                                                                  |
+| Opt-in              | `deferred: true` on tools; `tool: "deferred"` on agents                               | An agent-level list of names; `deferLoading` (eve never loads the definition); pi's `exposure` enum                                                                                                                          |
+| Discovery mechanism | Two fixed tools                                                                       | AI SDK `toolSearch()` or activation (grows `tools`); provider-native search (one provider at a time, partly beta)                                                                                                            |
+| Dispatch            | Resolve to an entry, then dispatch it like a direct call                              | A `defineTool` proxy (can't reach workflow tools or subagents; duplicates approval)                                                                                                                                          |
+| Entry names         | One flat name, `__` as the only namespace separator, and connections own their prefix | `<connection>.<tool>` (a second separator for one owner, and it renames connection tools); dots everywhere, encoded as `__` for providers (deferring would rename a tool); a separate `connection` argument (a two-part key) |
+| Owners              | Recorded on each entry as data                                                        | Recovered by splitting names at `__` (can't tell an owner from a convention prefix)                                                                                                                                          |
+| Search output       | TypeScript `signature`                                                                | Raw JSON Schema (larger, and code mode needs the signature anyway)                                                                                                                                                           |
+| Protocol shape      | Actions carry the entry's name; only history says `execute`                           | An outer `execute` action with a nested entry action                                                                                                                                                                         |
+| Search state        | Stateless; any entry can be executed                                                  | A durable discovered set that execution checks                                                                                                                                                                               |
+| Listing             | One append-only listing: names, plus connection descriptions                          | Nothing (the model can't tell when to search); full signatures (eval-gated)                                                                                                                                                  |
 
 ## Follow-up: deferred skills
 
@@ -711,6 +739,10 @@ Code mode adds `execute({ code })`. The rest of this design carries over:
 
 - `execute({ tool, input })` is a one-call program, so both forms share one
   dispatch path.
+- Program paths come from the owners each entry records, not from splitting
+  names: `linear__list_issues` is `tools.linear.list_issues`,
+  `crm__api__list_issues` is `tools.crm.api.list_issues`, and
+  `tenant__export`, which has no owner, is `tools.tenant__export`.
 - The `code` property appears only when code mode is on. That is fixed per
   agent and eve version, never per step, so the `tools` array stays stable.
 - Names with `-` aren't JavaScript identifiers. A kebab-case connection such
