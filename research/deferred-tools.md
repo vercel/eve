@@ -712,8 +712,9 @@ Connections:
 2. **No session-specific text** in the system prompt or any tool description.
 3. **Append-only history.** Listing changes only append messages, and earlier
    messages are never rewritten.
-4. **No system-message fallback.** If the last message is an approval
-   response, the announcement waits for the next step.
+4. **No system-message fallback.** Announcements are always messages
+   appended to history. They never fall back to the system prompt, including
+   on the step that runs approved calls.
 5. **Deterministic rendering.** Listings are sorted, and a signature is a
    pure function of its schema, so the same entry always renders the same
    text. `search` renders signatures only for the page it returns.
@@ -836,7 +837,7 @@ Everything in this section lands in [3/3].
     `execute({ skill })` for a deferred static skill with package files;
   - a deferred dynamic skill appearing on `turn.started`, then loading;
   - `execute({ skill })` for a skill that isn't deferred;
-  - an approval as the last message;
+  - a catalog change on the step that runs an approved call;
   - compaction.
 
   It asserts all six invariants. A second case covers an agent with an empty
