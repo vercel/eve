@@ -5,6 +5,7 @@ import { iMessageAdapter } from "#compiled/@photon-ai/chat-adapter-imessage/inde
 import {
   type ChannelDriver,
   type PlatformCall,
+  type SentFile,
   numberedOptions,
 } from "#internal/testing/channel-conformance/harness.js";
 
@@ -35,12 +36,31 @@ export function photonDriver(): ChannelDriver {
   let sequence = 0;
   let restore: (() => void) | undefined;
 
-  function webhook(text: string): Request {
+  function webhook(text: string, files: readonly SentFile[] = []): Request {
     sequence += 1;
+    const content =
+      files.length === 0
+        ? { text, type: "text" }
+        : {
+            // A message with files arrives as a group: its text, then one attachment per file.
+            items: [
+              { content: { text, type: "text" } },
+              ...files.map((file, index) => ({
+                content: {
+                  id: `photon-attachment-${sequence}-${index}`,
+                  mimeType: file.mediaType,
+                  name: file.name,
+                  size: file.bytes.length,
+                  type: "attachment",
+                },
+              })),
+            ],
+            type: "group",
+          };
     const body = JSON.stringify({
       event: "messages",
       message: {
-        content: { text, type: "text" },
+        content,
         direction: "inbound",
         id: `photon-inbound-${sequence}`,
         sender: { id: PERSON },
@@ -66,7 +86,7 @@ export function photonDriver(): ChannelDriver {
 
   return {
     name: "photon",
-    capabilities: ["text-replies"],
+    capabilities: ["attachments", "text-replies"],
     surface: "private",
     createChannel(record) {
       async function recordSend(method: string, builder: ContentBuilder) {

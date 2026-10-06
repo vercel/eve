@@ -1,4 +1,5 @@
-import { chatSdkChannel } from "#public/channels/chat-sdk/index.js";
+// Sends attachments with the text, as Linq and Photon do.
+import { chatSdkChannel, messageToUserContent } from "#public/channels/chat-sdk/index.js";
 import {
   type Adapter,
   type AdapterPostableMessage,
@@ -19,6 +20,7 @@ import {
   type Surface,
   numberedOptions,
   linkTargets,
+  type SentFile,
 } from "#internal/testing/channel-conformance/harness.js";
 
 const ADAPTER = "conformance";
@@ -44,7 +46,12 @@ interface CardNode {
 }
 
 type Inbound =
-  | { readonly kind: "message"; readonly text: string }
+  | {
+      readonly kind: "message";
+      readonly text: string;
+      /** Files on the message, as the adapter lists them: a URL to each, not its bytes. */
+      readonly files?: readonly Pick<SentFile, "mediaType" | "name">[];
+    }
   | {
       readonly kind: "action";
       readonly actionId: string;
@@ -89,8 +96,8 @@ export function chatSdkDriver(surface: Exclude<Surface, "public"> = "shared"): C
     ...driver,
     capabilities:
       surface === "private"
-        ? ["buttons", "text-replies"]
-        : ["another-person", "buttons", "text-replies"],
+        ? ["attachments", "buttons", "text-replies"]
+        : ["attachments", "another-person", "buttons", "text-replies"],
     surface,
     findOptions(call, prompt) {
       if (!isPost(call)) return undefined;
@@ -136,7 +143,7 @@ export function chatSdkTextDriver(): ChannelDriver {
   });
   return {
     ...driver,
-    capabilities: ["text-replies"],
+    capabilities: ["attachments", "text-replies"],
     surface: "private",
     findOptions(call, prompt) {
       if (!isPost(call) || typeof call.body !== "string" || !call.body.includes(prompt)) {
@@ -196,7 +203,7 @@ function chatSdkDriverWith(input: {
       });
       if (dm) {
         bridge.bot.onDirectMessage(async (thread, message) => {
-          await bridge.send(message.text, {
+          await bridge.send(messageToUserContent(message), {
             auth: userAuth(message.author.userId),
             context: [],
             thread,
@@ -207,14 +214,14 @@ function chatSdkDriverWith(input: {
         // subscribing lets the rest of the thread continue it without one.
         bridge.bot.onNewMention(async (thread, message) => {
           await thread.subscribe();
-          await bridge.send(message.text, {
+          await bridge.send(messageToUserContent(message), {
             auth: userAuth(message.author.userId),
             context: [],
             thread,
           });
         });
         bridge.bot.onSubscribedMessage(async (thread, message) => {
-          await bridge.send(message.text, {
+          await bridge.send(messageToUserContent(message), {
             auth: userAuth(message.author.userId),
             context: [],
             thread,
@@ -223,7 +230,12 @@ function chatSdkDriverWith(input: {
       }
       return bridge.channel;
     },
-    message: (text) => inbound({ kind: "message", text }),
+    message: (text, files = []) =>
+      inbound({
+        files: files.map(({ mediaType, name }) => ({ mediaType, name })),
+        kind: "message",
+        text,
+      }),
     postedText(call: PlatformCall) {
       if (!isPost(call)) return undefined;
       const posted = call.body as AdapterPostableMessage;
@@ -275,7 +287,7 @@ function fakeAdapter(
           adapter,
           threadId,
           // A person mentions the bot to start a channel thread; Chat routes the rest by subscription.
-          inboundMessage(threadId, id, body.text, !dm),
+          inboundMessage(threadId, id, body.text, !dm, body.files),
           options,
         );
       }
@@ -315,9 +327,22 @@ function fakeAdapter(
   return adapter;
 }
 
-function inboundMessage(threadId: string, id: string, text: string, isMention = false): Message {
+function inboundMessage(
+  threadId: string,
+  id: string,
+  text: string,
+  isMention = false,
+  files: readonly Pick<SentFile, "mediaType" | "name">[] = [],
+): Message {
   return new Message({
-    attachments: [],
+    attachments: files.map((file) => ({
+      mimeType: file.mediaType,
+      name: file.name,
+      type: file.mediaType.startsWith("image/") ? ("image" as const) : ("file" as const),
+      // The AI SDK refuses IP-literal URLs before connecting, so the provider's download
+      // fails as it would for a private platform URL, and nothing leaves the machine.
+      url: `http://127.0.0.1:9/files/${encodeURIComponent(file.name)}`,
+    })),
     author: PERSON,
     formatted: parseMarkdown(text),
     id,

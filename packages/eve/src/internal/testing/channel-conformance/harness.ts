@@ -91,6 +91,8 @@ export function linkTargets(value: unknown): string[] {
  * capability a driver lacks is skipped for that channel as "not supported".
  */
 export type ChannelCapability =
+  /** A person can send a file, such as an image or a PDF, with a message. */
+  | "attachments"
   /** Someone besides the person who started the conversation can act in it. */
   | "another-person"
   /** A person can press a rendered choice. */
@@ -112,7 +114,7 @@ export type Surface =
   | "private";
 
 /**
- * Teaches the HITL conformance suite to speak one channel's platform protocol.
+ * Teaches the channel conformance suite to speak one channel's platform protocol.
  *
  * Drivers translate only between platform wire formats and conversation
  * actions. They never read session state, so they keep working across changes
@@ -130,7 +132,7 @@ export interface ChannelDriver {
   /** Undoes anything `createChannel` installed outside the channel, such as a global `fetch`. */
   dispose?(): void;
   /** A webhook request carrying a person's message. */
-  message(text: string): Request;
+  message(text: string, files?: readonly SentFile[]): Request;
   /**
    * The options a person can see in one outbound call that posts the question:
    * `undefined` when the call isn't the question, `[]` when it shows no options.
@@ -162,10 +164,23 @@ export interface ChannelDriver {
  */
 export type Person = "alice" | "bob";
 
+/**
+ * A file a person sends, as the platform holds it. A driver serves its bytes
+ * from the fake platform the way the real one would, including its download
+ * headers, so the channel's real download code runs.
+ */
+export interface SentFile {
+  readonly name: string;
+  readonly mediaType: string;
+  readonly bytes: Uint8Array;
+  /** When false, the platform refuses the download, as it would for a missing scope or a remote file. */
+  readonly downloadable?: boolean;
+}
+
 /** What a person can do and see in one channel conversation. Contract rules use only this. */
 export interface ChannelConversation {
-  /** The person sends a plain-text message. */
-  say(text: string): Promise<void>;
+  /** The person sends a plain-text message, with `files` attached if given. */
+  say(text: string, files?: readonly SentFile[]): Promise<void>;
   /** Waits for the bot to post `prompt` with choices, returning them. */
   waitForQuestion(prompt: string): Promise<readonly RenderedOption[]>;
   /**
@@ -239,8 +254,8 @@ export interface ClientDriver {
 
 /** A running client, as a person sees and uses it. */
 export interface ClientView {
-  /** The person sends a plain-text message. */
-  say(text: string): Promise<void>;
+  /** The person sends a plain-text message, with `files` attached if given. */
+  say(text: string, files?: readonly SentFile[]): Promise<void>;
   /**
    * Waits for the client to show one of `prompts`, returning which one and its
    * choices. A client may show several pending requests one at a time.
@@ -360,6 +375,20 @@ export type ToolOutcome =
   | { readonly kind: "ran"; readonly output: unknown }
   | { readonly kind: "denied" };
 
+/**
+ * The platform's answer to a download of `file`: its bytes under
+ * `contentType` (the platform's header, which can differ from the file's own
+ * type), or a refusal when the file isn't downloadable.
+ */
+export function serveFile(file: SentFile | undefined, contentType = file?.mediaType): Response {
+  if (file === undefined || file.downloadable === false) {
+    return new Response("Forbidden", { status: 403 });
+  }
+  return new Response(new Uint8Array(file.bytes), {
+    headers: { "content-type": contentType ?? "application/octet-stream" },
+  });
+}
+
 /** A `fetch` for an HTTP platform API: `decode` turns each request into a call and its answer. */
 export function recordingFetch(
   record: (call: PlatformCall) => void,
@@ -368,7 +397,8 @@ export function recordingFetch(
   return async (input, init) => {
     const call = await decode(new Request(input, init));
     record(call);
-    return Response.json(call.response);
+    // A file download answers with bytes, not JSON.
+    return call.response instanceof Response ? call.response : Response.json(call.response);
   };
 }
 
@@ -446,7 +476,7 @@ function webhookView(
   const promptsFrom = new Map<string, number>();
 
   return {
-    say: (text) => post(driver.message(text)),
+    say: (text, files) => post(driver.message(text, files)),
     press: (option, person) => post(driver.press(option, person)),
     waitForQuestion: (prompts) =>
       wait(
@@ -585,7 +615,7 @@ async function converse(
   }
 
   const runtime = await createTestRuntime({
-    agent: { limits: options.limits, name: `${label}-hitl-conformance` },
+    agent: { limits: options.limits, name: `${label}-conformance` },
     modules: [
       {
         logicalPath: `tools/${PLAIN_TOOL}.ts`,
@@ -745,9 +775,9 @@ async function converse(
     let signInsCompleted = 0;
 
     const conversation: ChannelConversation = {
-      async say(text) {
+      async say(text, files) {
         await waitForStepsToFinish([...sessions.values()], wait);
-        await view.say(text);
+        await view.say(text, files);
       },
       press: (option, person = "alice") => view.press(option, person),
       async waitForQuestion(prompt) {
@@ -1077,7 +1107,7 @@ function matchPath(pattern: string, pathname: string): Record<string, string> | 
 
 function unsupported(name: string): () => never {
   return () => {
-    throw new Error(`The HITL conformance harness does not provide ctx.${name}.`);
+    throw new Error(`The channel conformance harness does not provide ctx.${name}.`);
   };
 }
 
