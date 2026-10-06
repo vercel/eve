@@ -8,8 +8,9 @@ last_updated: "2026-10-06"
 
 Superseded by [deferred tools](./deferred-tools.md). `search` and `execute`
 replace `connection_search` and `connection_execute` with one catalog that also
-covers deferred tools and subagents. Connection tools are named
-`<connection>.<tool>`, and connection calls no longer report nested actions. The result format, sign-in, approval, instance
+covers deferred tools and subagents. Connection tools keep their
+`<connection>__<tool>` names, and connection calls no longer report nested
+actions. The result format, sign-in, approval, instance
 pinning, and cache invariants below carry over. The model surface below
 records the shipped connection tools, not current guidance.
 
