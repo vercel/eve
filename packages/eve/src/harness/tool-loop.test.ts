@@ -9930,7 +9930,7 @@ describe("createToolLoopHarness", () => {
       }
     });
 
-    it("injects eve.version alongside session context when runtimeContext is configured", async () => {
+    it("retains environment context when runtimeContext returns no values", async () => {
       setupMockAgent({
         finishReason: "stop",
         response: { messages: [{ content: "Hello!", role: "assistant" }] },
@@ -9950,10 +9950,7 @@ describe("createToolLoopHarness", () => {
         telemetry?: { integrations?: unknown; isEnabled?: boolean };
       };
       const runtimeContext = agentCall?.runtimeContext;
-      expect(runtimeContext).toBeDefined();
-      expect(runtimeContext?.["eve.version"]).toEqual(expect.any(String));
-      expect(runtimeContext?.["eve.version"]).not.toBe("");
-      expect(runtimeContext?.["eve.session.id"]).toBe("test-session");
+      expect(runtimeContext).toEqual({ "eve.environment": "test" });
       expect(agentCall?.telemetry?.isEnabled).toBe(true);
       expect(agentCall?.telemetry?.integrations).toEqual([
         mockCreateAiSdkHookBridge.mock.results[0]!.value,
@@ -10245,16 +10242,11 @@ describe("createToolLoopHarness", () => {
           turn: { id: "turn_0", sequence: 0 },
         }),
       );
-      expect(agentCall?.runtimeContext).toMatchObject({
-        "eve.channel.kind": "channel:support",
-        "eve.session.id": "test-session",
-        "eve.step.index": "0",
-        "eve.turn.id": "turn_0",
-        "eve.turn.sequence": "0",
+      expect(agentCall?.runtimeContext).toEqual({
+        "eve.environment": "test",
         "slack.user_id": "U123",
         "turn.id": "turn_0",
       });
-      expect(agentCall?.runtimeContext?.["eve.version"]).toEqual(expect.any(String));
       expect(agentCall?.telemetry?.includeRuntimeContext).toEqual(
         Object.fromEntries(Object.keys(agentCall?.runtimeContext ?? {}).map((key) => [key, true])),
       );
@@ -10304,8 +10296,8 @@ describe("createToolLoopHarness", () => {
       const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
         runtimeContext?: Record<string, unknown>;
       };
-      expect(agentCall?.runtimeContext).toMatchObject({
-        "eve.session.id": "test-session",
+      expect(agentCall?.runtimeContext).toEqual({
+        "eve.environment": "test",
       });
       expect(logs.records).toContainEqual(
         expect.objectContaining({

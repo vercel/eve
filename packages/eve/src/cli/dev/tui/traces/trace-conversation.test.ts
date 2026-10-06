@@ -158,7 +158,7 @@ describe("buildConversationItems", () => {
       },
     }));
     const parentAction = span("e".repeat(16), "agent.action", 5900, 6000, parent[0]!.spanId, {
-      "agent.action.call_id": "call-7",
+      "gen_ai.tool.call.id": "call-7",
       "agent.action.kind": "subagent-call",
       "agent.action.name": "echo-marker",
       "agent.turn.id": "turn_0",
@@ -314,23 +314,20 @@ describe("buildConversationItems", () => {
     expect(items[0]?.error).toBe(true);
   });
 
-  it.each(["gen_ai.usage", "agent.usage"])(
-    "keeps model spans that carry only %s token usage",
-    (prefix) => {
-      const turn = span("a".repeat(16), "agent.turn", 0, 0, undefined, {});
-      const step = span("b".repeat(16), "agent.step", 10, 5000, turn.spanId, {});
-      const model = span("c".repeat(16), "ai.streamText.doStream", 20, 2000, step.spanId, {
-        "gen_ai.input.messages": JSON.stringify([
-          { parts: [{ content: "hi", type: "text" }], role: "user" },
-        ]),
-        [`${prefix}.input_tokens`]: 100,
-        [`${prefix}.output_tokens`]: 10,
-      });
-      const items = buildConversationItems(trace([turn, step, model]));
-      expect(items.map((item) => item.kind)).toEqual(["assistant"]);
-      expect(items[0]?.inputTokens).toBe(100);
-    },
-  );
+  it("keeps model spans that carry only standard token usage", () => {
+    const turn = span("a".repeat(16), "agent.turn", 0, 0, undefined, {});
+    const step = span("b".repeat(16), "agent.step", 10, 5000, turn.spanId, {});
+    const model = span("c".repeat(16), "ai.streamText.doStream", 20, 2000, step.spanId, {
+      "gen_ai.input.messages": JSON.stringify([
+        { parts: [{ content: "hi", type: "text" }], role: "user" },
+      ]),
+      "gen_ai.usage.input_tokens": 100,
+      "gen_ai.usage.output_tokens": 10,
+    });
+    const items = buildConversationItems(trace([turn, step, model]));
+    expect(items.map((item) => item.kind)).toEqual(["assistant"]);
+    expect(items[0]?.inputTokens).toBe(100);
+  });
 
   it("flags error tool calls", () => {
     const turn = span("a".repeat(16), "agent.turn", 0, 0, undefined, {});
@@ -339,7 +336,7 @@ describe("buildConversationItems", () => {
       "gen_ai.input.messages": JSON.stringify([
         { parts: [{ content: "hi", type: "text" }], role: "user" },
       ]),
-      "agent.usage.input_tokens": 10,
+      "gen_ai.usage.input_tokens": 10,
     });
     const action = span(
       "d".repeat(16),
@@ -429,7 +426,7 @@ describe("renderConversationItem", () => {
         { parts: [{ content: "hi", type: "text" }], role: "user" },
       ]),
       "ai.response.text": "reply",
-      "agent.usage.input_tokens": 100,
+      "gen_ai.usage.input_tokens": 100,
     });
     const assistant = buildConversationItems(trace([turn, step, model])).find(
       (item) => item.kind === "assistant",

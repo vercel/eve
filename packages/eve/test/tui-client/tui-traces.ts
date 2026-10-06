@@ -140,7 +140,7 @@ void (async () => {
       end: 7_000,
       parentSpanId: turn,
       attributes: {
-        "agent.action.call_id": "call-1",
+        "gen_ai.tool.call.id": "call-1",
         "agent.action.kind": "subagent-call",
         "agent.action.name": "echo",
         "agent.turn.id": "turn_0",

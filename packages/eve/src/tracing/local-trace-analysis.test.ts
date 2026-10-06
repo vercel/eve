@@ -87,7 +87,7 @@ describe("analyzeLocalTrace", () => {
       attributes: {
         "agent.action.kind": "tool-call",
         "agent.action.name": "read_file",
-        "agent.action.call_id": "call-1",
+        "gen_ai.tool.call.id": "call-1",
         "agent.session.id": "target",
         "agent.turn.id": "turn-1",
       },
@@ -168,63 +168,47 @@ describe("analyzeLocalTrace", () => {
     ]);
   });
 
-  it.each([
-    [
-      "gen_ai.usage.input_tokens",
-      "gen_ai.usage.output_tokens",
-      "gen_ai.usage.cache_read.input_tokens",
-      "gen_ai.usage.cache_write.input_tokens",
-    ],
-    [
-      "agent.usage.input_tokens",
-      "agent.usage.output_tokens",
-      "agent.usage.cache_read_tokens",
-      "agent.usage.cache_write_tokens",
-    ],
-  ])(
-    "reports per-model token usage from %s without inventing missing metrics",
-    (input, output, read, write) => {
-      const model = span({
+  it("reports standard per-model token usage without inventing missing metrics", () => {
+    const model = span({
+      attributes: {
+        "gen_ai.operation.name": "chat",
+        "gen_ai.usage.input_tokens": 100,
+        "gen_ai.usage.output_tokens": 10,
+        "gen_ai.usage.cache_read.input_tokens": 80,
+        "gen_ai.usage.cache_write.input_tokens": 0,
+      },
+      endMs: 10,
+      name: "chat test-model",
+      spanId: "a".repeat(16),
+      startMs: 0,
+    });
+    const analysis = analyzeLocalTrace(traceId, [
+      model,
+      {
+        ...model,
+        name: "invoke_agent",
+        attributes: { "gen_ai.usage.input_tokens": 100 },
+        spanId: "b".repeat(16),
+      },
+      {
+        ...model,
         attributes: {
           "gen_ai.operation.name": "chat",
-          [input]: 100,
-          [output]: 10,
-          [read]: 80,
-          [write]: 0,
+          "gen_ai.usage.input_tokens": -1,
+          "gen_ai.usage.output_tokens": Infinity,
         },
-        endMs: 10,
-        name: "chat test-model",
-        spanId: "a".repeat(16),
-        startMs: 0,
-      });
-      const analysis = analyzeLocalTrace(traceId, [
-        model,
-        {
-          ...model,
-          name: "invoke_agent",
-          attributes: { "agent.usage.input_tokens": 100 },
-          spanId: "b".repeat(16),
-        },
-        {
-          ...model,
-          attributes: {
-            "gen_ai.operation.name": "chat",
-            [input]: -1,
-            [output]: Infinity,
-          },
-          spanId: "c".repeat(16),
-        },
-      ]);
-      expect(analysis.records).toHaveLength(2);
-      expect(analysis.records[0]?.usage).toEqual({
-        inputTokens: 100,
-        outputTokens: 10,
-        cacheReadTokens: 80,
-        cacheWriteTokens: 0,
-      });
-      expect(analysis.records[1]?.usage).toBeUndefined();
-    },
-  );
+        spanId: "c".repeat(16),
+      },
+    ]);
+    expect(analysis.records).toHaveLength(2);
+    expect(analysis.records[0]?.usage).toEqual({
+      inputTokens: 100,
+      outputTokens: 10,
+      cacheReadTokens: 80,
+      cacheWriteTokens: 0,
+    });
+    expect(analysis.records[1]?.usage).toBeUndefined();
+  });
 
   it("counts errors outside the timeline and uses the current run identity", () => {
     const analysis = analyzeLocalTrace(
