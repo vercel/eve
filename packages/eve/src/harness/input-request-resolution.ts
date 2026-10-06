@@ -1,5 +1,14 @@
+import type { ModelMessage } from "ai";
+
+import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import type { StepCoordinates as PendingInputBatchEvent } from "#harness/session-machine/view.js";
+import { createActionResultEvent, type UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
+
+type ToolResultPart = Extract<
+  Extract<ModelMessage, { role: "tool" }>["content"][number],
+  { type: "tool-result" }
+>;
 
 const IGNORED_INPUT_REASON = "Ignored because the user continued without responding.";
 export const TOOL_EXECUTION_DENIED_MESSAGE = "Tool execution was denied.";
@@ -62,5 +71,38 @@ export function resolveApprovalOutcome(response: InputResponse | undefined): {
     approved: false,
     reason: TOOL_EXECUTION_INVALID_APPROVAL_MESSAGE,
     status: "invalid",
+  };
+}
+
+/** What the model reads when an approved call's tool went away before the call could run. */
+export function unavailableToolMessage(toolName: string): string {
+  return `The approved tool "${toolName}" is no longer available, so the call didn't run. If the task still needs it, find an available tool with search and make a new call, which needs approval again.`;
+}
+
+/**
+ * A call that ends without running: the failed action result the stream reports, and the
+ * `error-text` result the model reads.
+ */
+export function failedCallResult(
+  at: PendingInputBatchEvent,
+  call: { readonly callId: string; readonly message: string; readonly toolName: string },
+): { readonly event: UnstampedMessageStreamEvent; readonly part: ToolResultPart } {
+  const { callId, message, toolName } = call;
+  return {
+    event: createActionResultEvent({
+      ...at,
+      result: createRuntimeToolResultFromValue({
+        callId,
+        isError: true,
+        output: message,
+        toolName,
+      }),
+    }),
+    part: {
+      output: { type: "error-text", value: message },
+      toolCallId: callId,
+      toolName,
+      type: "tool-result",
+    },
   };
 }

@@ -12,7 +12,11 @@ import { isInlineAuthorizationToolResult } from "#harness/inline-tool-authorizat
 import { toolCallModelOutput } from "#harness/tool-call-io.js";
 import { projectDeltaPresentation, projectResultPresentation } from "#harness/tool-presentation.js";
 import { recheckApprovedCall, wrapToolExecute } from "#harness/tools.js";
-import { TOOL_EXECUTION_DENIED_MESSAGE } from "#harness/input-request-resolution.js";
+import {
+  failedCallResult,
+  TOOL_EXECUTION_DENIED_MESSAGE,
+  unavailableToolMessage,
+} from "#harness/input-request-resolution.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { HarnessToolLookup } from "#harness/types.js";
 import { createActionPartialEvent, createActionResultEvent } from "#protocol/message.js";
@@ -67,25 +71,9 @@ export async function runApprovedCalls(input: {
     toolName: string,
     message: string,
   ): Promise<ApprovedCallResult> => {
-    await input.publish(
-      createActionResultEvent({
-        ...at,
-        result: createRuntimeToolResultFromValue({
-          callId,
-          isError: true,
-          output: message,
-          toolName,
-        }),
-      }),
-    );
-    return {
-      part: {
-        output: { type: "error-text", value: message },
-        toolCallId: callId,
-        toolName,
-        type: "tool-result",
-      },
-    };
+    const failed = failedCallResult(at, { callId, message, toolName });
+    await input.publish(failed.event);
+    return { part: failed.part };
   };
   const executed = await Promise.allSettled(
     input.requests.map(async (request) => {
@@ -253,11 +241,6 @@ export async function runApprovedCalls(input: {
     settled: completed.flatMap((call) => call.settled),
     toolResults: completed.flatMap((call) => call.toolResults),
   };
-}
-
-/** What the model reads when an approved call's tool went away before the call could run. */
-function unavailableToolMessage(toolName: string): string {
-  return `The approved tool "${toolName}" is no longer available, so the call didn't run. If the task still needs it, find an available tool with search and make a new call, which needs approval again.`;
 }
 
 type ToolExecutionStart = Parameters<NonNullable<Telemetry["onToolExecutionStart"]>>[0];

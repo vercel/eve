@@ -11,9 +11,11 @@ import { authorizationEventFields } from "#harness/authorization-event-fields.js
 import { renderPendingApprovalsSnippet } from "#harness/hitl/approval-prompt.js";
 import { isApprovalRequest } from "#harness/input-request-class.js";
 import {
+  failedCallResult,
   resolveApprovalOutcome,
   resolveInputOutcome,
   TOOL_EXECUTION_DENIED_MESSAGE,
+  unavailableToolMessage,
   type ResolvedInputBatch,
 } from "#harness/input-request-resolution.js";
 import { coalesceTurnInputs, createFrameworkUserMessage } from "#harness/messages.js";
@@ -320,29 +322,45 @@ export function answer(
 
   const grants = new Set(turn.grants);
   const batches: ResolvedInputBatch[] = [];
-  const rejected: UnstampedMessageStreamEvent[] = [];
+  const results: UnstampedMessageStreamEvent[] = [];
+  const unavailable = new Set(
+    policy.audit.settlements
+      .filter((settlement) => settlement.outcome === "unavailable")
+      .map((settlement) => settlement.requestId),
+  );
   const suspended = turn.suspended.map((step) => {
     if (!answered.includes(step)) return step;
     let messages = step.messages;
     const approvedRequests: InputRequest[] = [];
     for (const request of step.requests) {
+      const { callId, toolName } = request.action;
+      if (unavailable.has(request.requestId)) {
+        const failed = failedCallResult(step.event, {
+          callId,
+          message: unavailableToolMessage(toolName),
+          toolName,
+        });
+        messages = withResult(messages, failed.part);
+        results.push(failed.event);
+        continue;
+      }
       const { approved, reason, status } = resolveApprovalOutcome(byId.get(request.requestId));
       if (approved) {
-        grants.add(input.approvalKey(request) ?? request.action.toolName);
+        grants.add(input.approvalKey(request) ?? toolName);
         approvedRequests.push(request);
         continue;
       }
       messages = withResult(messages, {
         output: { reason, type: "execution-denied" },
-        toolCallId: request.action.callId,
-        toolName: request.action.toolName,
+        toolCallId: callId,
+        toolName,
         type: "tool-result",
       });
-      rejected.push(
+      results.push(
         createActionResultEvent({
           rejected: true,
           result: {
-            callId: request.action.callId,
+            callId,
             isError: true,
             kind: "tool-result",
             output: {
@@ -351,7 +369,7 @@ export function answer(
               message: reason ?? TOOL_EXECUTION_DENIED_MESSAGE,
               tool: { result: "not_run" },
             },
-            toolName: request.action.toolName,
+            toolName,
           },
           ...step.event,
         }),
@@ -367,7 +385,7 @@ export function answer(
     const approved = [...(step.approved ?? []), ...approvedRequests];
     return { ...step, messages, requests: [], ...(approved.length > 0 && { approved }) };
   });
-  events.push(...batches.map(resolvedEvent), ...rejected);
+  events.push(...batches.map(resolvedEvent), ...results);
   turn = { ...turn, grants: [...grants], suspended };
   return done({
     consumedMessage: resolved?.messageConsumed,
@@ -455,7 +473,8 @@ function reportApprovalProgress(
     );
   }
   for (const settlement of audit.settlements) {
-    if (!isOpen(settlement.requestId)) continue;
+    // An unavailable request's candidate reported it failed, with the reason.
+    if (!isOpen(settlement.requestId) || settlement.outcome === "unavailable") continue;
     events.push(
       createApprovalSettledEvent({
         outcome: settlement.outcome === "allowed" ? "approved" : "cancelled",

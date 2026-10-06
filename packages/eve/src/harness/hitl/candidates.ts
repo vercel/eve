@@ -37,9 +37,10 @@ export interface ApprovalResponderIdentity {
 
 export interface ApprovalSettlementAuditRecord {
   readonly actor: ApprovalResponderIdentity;
-  /** The approver's full auth, which the approved call runs as. Absent for cancellations. */
+  /** The approver's full auth, which the approved call runs as. Present only when allowed. */
   readonly approver?: SessionAuthContext;
-  readonly outcome: "allowed" | "cancelled";
+  /** `unavailable`: the request's entry was gone, so its call is reported unavailable, never run. */
+  readonly outcome: "allowed" | "cancelled" | "unavailable";
   readonly requestId: string;
   readonly settledAt: number;
   readonly candidateId?: string;
@@ -229,6 +230,30 @@ export function settleAllowedCandidate(input: {
   });
 }
 
+/**
+ * Settles a request whose entry is gone, which no response can approve and no call can run: the
+ * candidate fails with `reason`, its competitors go stale, and the call is reported unavailable.
+ */
+export function settleUnavailableCandidate(input: {
+  readonly candidateId: string;
+  readonly reason: string;
+  readonly settledAt: number;
+  readonly state: SessionStateMap | undefined;
+}): ApprovalStateTransition {
+  const state = expireApprovalCandidates({ now: input.settledAt, state: input.state });
+  const candidate = readApprovalState(state).activeCandidates[input.candidateId];
+  if (candidate === undefined) return { changed: false, state };
+  return settleRequest({
+    candidateId: candidate.candidateId,
+    outcome: "unavailable",
+    reason: input.reason,
+    requestId: candidate.requestId,
+    responder: candidate.responder,
+    settledAt: input.settledAt,
+    state,
+  });
+}
+
 /** Atomically settles a direct authenticated approval response. */
 export function settleDirectApprovalResponse(input: {
   readonly actor: SessionAuthContext;
@@ -272,6 +297,8 @@ export function getApprovalAuditState(state: SessionStateMap | undefined): {
 function settleRequest(input: {
   readonly candidateId?: string;
   readonly outcome: ApprovalSettlementAuditRecord["outcome"];
+  /** Why the settling candidate failed, for an unavailable request. */
+  readonly reason?: string;
   readonly requestId: string;
   readonly responder: SessionAuthContext;
   readonly settledAt: number;
@@ -298,11 +325,13 @@ function settleRequest(input: {
       activeCandidates[candidate.candidateId] = candidate;
       continue;
     }
+    const settling = candidate.candidateId === input.candidateId;
     candidateHistory.push(
       toCandidateAuditRecord({
         candidate,
         completedAt: input.settledAt,
-        status: candidate.candidateId === input.candidateId ? "allowed" : "stale",
+        reason: settling ? input.reason : undefined,
+        status: !settling ? "stale" : input.outcome === "unavailable" ? "failed" : "allowed",
       }),
     );
   }
