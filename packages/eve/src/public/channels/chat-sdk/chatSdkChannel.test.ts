@@ -21,6 +21,7 @@ import type {
   AdapterPostableMessage,
   Attachment,
   ChatInstance,
+  EphemeralMessage,
   FetchResult,
   FormattedContent,
   MessageMetadata,
@@ -513,6 +514,117 @@ describe("chatSdkChannel", () => {
         threadId: THREAD_ID,
       },
     ]);
+  });
+
+  describe("a sign-in outside a direct message", () => {
+    const signIn = makeEvent("authorization.required", {
+      authorization: { url: "https://connect.example.com/a/sca_1", userCode: "ABC-123" },
+      name: "notion",
+      principalId: AUTH.principalId,
+      sequence: 0,
+      stepIndex: 0,
+      turnId: "turn-1",
+    });
+    const PRIVATE_STATUS =
+      "Authorization required for Notion. I sent you the sign-in details privately.";
+    const DM_NOTICE =
+      "Authorization required for Notion. Continue in a direct message with this agent.";
+    const alice = author();
+    const bob = { ...author(), fullName: "Bob", userId: "user-2", userName: "bob" };
+
+    /** Delivers a message from `from`, sent as `caller`, then raises the sign-in. */
+    async function signInAfter(
+      adapter: TestAdapter & Adapter,
+      messages: ReadonlyArray<{
+        readonly caller: typeof AUTH | null;
+        readonly from?: Message["author"];
+      }>,
+    ) {
+      const bridge = chatSdkChannel({
+        adapters: { test: adapter },
+        state: memoryState(),
+        userName: "bot",
+      });
+      const state: ChatSdkChannelState = { thread: serializedThread() };
+      const channelAdapter = withState(getAdapter(bridge.channel), state);
+      const ctx = buildAdapterContext(channelAdapter, stubAccessor());
+      for (const { caller, from } of messages) {
+        const currentMessage = from === undefined ? undefined : message("hi", from).toJSON();
+        await channelAdapter.deliver!(
+          { message: "hi", state: { thread: { ...serializedThread(), currentMessage } } },
+          { ...ctx, session: { auth: { current: caller, initiator: caller } } } as never,
+        );
+      }
+      await callEvent(channelAdapter, signIn, ctx);
+      return adapter.posted.map(({ message: posted }) => posted);
+    }
+
+    it.each([
+      {
+        name: "shows the challenge only to the person signing in",
+        postEphemeral: async () => ({
+          id: "e1",
+          threadId: THREAD_ID,
+          usedFallback: false,
+          raw: {},
+        }),
+        status: PRIVATE_STATUS,
+      },
+      {
+        name: "points at a DM when the adapter can't deliver privately",
+        postEphemeral: async () => null,
+        status: DM_NOTICE,
+      },
+      {
+        name: "points at a DM when the private delivery fails",
+        postEphemeral: async () => {
+          throw new Error("ephemeral failed");
+        },
+        status: DM_NOTICE,
+      },
+    ])("$name", async ({ postEphemeral, status }) => {
+      const adapter = testAdapter();
+      const ephemerals: Array<{ message: AdapterPostableMessage; userId: string }> = [];
+      adapter.postEphemeral = async (_threadId, userId, posted) => {
+        ephemerals.push({ message: posted, userId });
+        return postEphemeral();
+      };
+
+      const posted = await signInAfter(adapter, [{ caller: AUTH, from: alice }]);
+
+      expect(posted).toEqual([{ markdown: status }]);
+      expect(ephemerals).toEqual([
+        {
+          message: {
+            markdown:
+              "Authorization required for Notion.\n\nCode: ABC-123\n\nhttps://connect.example.com/a/sca_1",
+          },
+          userId: alice.userId,
+        },
+      ]);
+    });
+
+    it.each([
+      { name: "an anonymous sender", messages: [{ caller: null, from: alice }] },
+      { name: "a bot author", messages: [{ caller: AUTH, from: { ...alice, isBot: true } }] },
+      { name: "a send without its message", messages: [{ caller: AUTH }] },
+      {
+        name: "a principal two people send as",
+        messages: [
+          { caller: AUTH, from: alice },
+          { caller: AUTH, from: bob },
+        ],
+      },
+    ])("sends the challenge to no one after $name", async ({ messages }) => {
+      const adapter = testAdapter();
+      const ephemeral = vi.fn();
+      adapter.postEphemeral = ephemeral;
+
+      const posted = await signInAfter(adapter, messages);
+
+      expect(posted).toEqual([{ markdown: DM_NOTICE }]);
+      expect(ephemeral).not.toHaveBeenCalled();
+    });
   });
 
   it("does not throw when the adapter's startTyping is not implemented", async () => {
@@ -1046,6 +1158,12 @@ class TestAdapter {
   startTypingError: Error | null = null;
   editError: Error | null = null;
   rehydrateAttachment?: (attachment: Attachment) => Attachment;
+  /** Native ephemerals, when a test gives the adapter them. */
+  postEphemeral?: (
+    threadId: string,
+    userId: string,
+    message: AdapterPostableMessage,
+  ) => Promise<EphemeralMessage | null>;
 
   async initialize(chat: ChatInstance): Promise<void> {
     this.chat = chat;
@@ -1163,10 +1281,10 @@ class TestAdapter {
   }
 }
 
-function message(text: string): Message {
+function message(text: string, from: Message["author"] = author()): Message {
   return new Message({
     attachments: [],
-    author: author(),
+    author: from,
     formatted: parseMarkdown(text),
     id: "message-1",
     isMention: true,

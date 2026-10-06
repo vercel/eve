@@ -32,7 +32,7 @@ export function defaultAuthorizationEvents(): Pick<
             ? undefined
             : channel.state.usersByPrincipal?.[event.principalId];
         message =
-          userId !== undefined && (await postPrivately(channel.thread, userId, prompt))
+          typeof userId === "string" && (await postPrivately(channel.thread, userId, prompt))
             ? `Authorization required for ${displayName}. I sent you the sign-in details privately.`
             : `Authorization required for ${displayName}. Continue in a direct message with this agent.`;
       }

@@ -81,8 +81,11 @@ export interface ChatSdkChannelState extends Record<string, unknown> {
   pendingToolCallMessage?: string | null;
   /** Authorization status messages, keyed by connection name. */
   pendingAuthMessageIds?: Record<string, string>;
-  /** The Chat SDK user id behind each principal that sent a message, so a sign-in reaches them privately. */
-  usersByPrincipal?: Record<string, string>;
+  /**
+   * The Chat SDK user behind each principal that sent a message, so a sign-in
+   * reaches them privately. `null` once more than one person sent as it.
+   */
+  usersByPrincipal?: Record<string, string | null>;
   /** Posted input request cards, keyed by message id, until eve resolves every request on them. */
   pendingInputCards?: Record<string, ChatSdkPendingInputCard>;
   streamStepIndex?: number | null;
@@ -632,7 +635,11 @@ async function bridgeRespond<TAdapters extends ChatSdkAdapters>(
   });
 }
 
-/** Records the author of the delivery's message as the Chat SDK user behind its caller. */
+/**
+ * Records the author of the delivery's message as the Chat SDK user behind its
+ * caller. A principal several people send as, such as tenant auth, names no one
+ * person, so it records `null` rather than whoever spoke last.
+ */
 function recordPrincipalUser(
   state: ChatSdkChannelState,
   caller: SessionAuthContext | null,
@@ -642,7 +649,12 @@ function recordPrincipalUser(
   const thread = (payload.state as Partial<ChatSdkChannelState> | undefined)?.thread;
   const author = thread?.currentMessage?.author;
   if (author === undefined || author.isBot === true || author.isMe) return;
-  state.usersByPrincipal = { ...state.usersByPrincipal, [caller.principalId]: author.userId };
+  const recorded = state.usersByPrincipal?.[caller.principalId];
+  if (recorded === author.userId || recorded === null) return;
+  state.usersByPrincipal = {
+    ...state.usersByPrincipal,
+    [caller.principalId]: recorded === undefined ? author.userId : null,
+  };
 }
 
 function activeFrom(operation: "respond" | "send"): ChannelFrom<ChatSdkChannelState> {
