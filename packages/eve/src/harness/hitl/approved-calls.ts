@@ -60,32 +60,57 @@ export async function runApprovedCalls(input: {
   readonly settled: readonly ApprovedCallResult[];
   readonly toolResults: readonly TypedToolResult<ToolSet>[];
 }> {
-  const calls = input.requests.map((request) => {
-    const definition = input.tools.get(request.action.toolName);
-    const execute = definition === undefined ? undefined : wrapToolExecute(definition);
-    if (definition === undefined || execute === undefined) {
-      throw new Error(
-        "The approved tool is no longer available. Request a new tool call and approval.",
-      );
-    }
-    return { request, definition, execute };
-  });
   const at = {
     sequence: input.position.sequence,
     stepIndex: input.position.stepIndex,
     turnId: input.position.turnId,
   };
+  /** A call that ends without running: the stream reports it failed, and the model reads why. */
+  const settleFailure = async (
+    callId: string,
+    toolName: string,
+    message: string,
+  ): Promise<ApprovedCallResult> => {
+    await input.publish(
+      createActionResultEvent({
+        ...at,
+        result: createRuntimeToolResultFromValue({
+          callId,
+          isError: true,
+          output: message,
+          toolName,
+        }),
+      }),
+    );
+    return {
+      part: {
+        output: { type: "error-text", value: message },
+        toolCallId: callId,
+        toolName,
+        type: "tool-result",
+      },
+    };
+  };
   const executed = await Promise.allSettled(
-    calls.map(async ({ request, definition, execute }) => {
+    input.requests.map(async (request) => {
       const settled: ApprovedCallResult[] = [];
       const toolResults: TypedToolResult<ToolSet>[] = [];
       const { callId, toolName, input: args } = request.action;
+      const definition = input.tools.get(toolName);
+      const execute = definition === undefined ? undefined : wrapToolExecute(definition);
       // Once the tool runs, the call settles even if the turn is cancelled: a result reaches the
       // session, so it never runs a call with side effects a second time.
       let started = false;
       let completed: ApprovedCallResult | undefined;
       try {
         throwIfTurnAborted(input.abortSignal);
+        // A connection or dynamic tool can go away while its call waits for approval.
+        if (definition === undefined || execute === undefined) {
+          return {
+            settled: [await settleFailure(callId, toolName, unavailableToolMessage(toolName))],
+            toolResults,
+          };
+        }
         // As in the AI SDK: the stored input revalidates against the tool's own schema and runs
         // unchanged, so the call that runs is the one the person approved.
         const validation = await asSchema(
@@ -93,30 +118,7 @@ export async function runApprovedCalls(input: {
         ).validate?.(args);
         if (validation?.success === false) {
           const message = `The approved input is no longer valid for tool "${toolName}". Request a new tool call and approval.`;
-          await input.publish(
-            createActionResultEvent({
-              ...at,
-              result: createRuntimeToolResultFromValue({
-                callId,
-                isError: true,
-                output: message,
-                toolName,
-              }),
-            }),
-          );
-          return {
-            settled: [
-              {
-                part: {
-                  type: "tool-result" as const,
-                  toolCallId: callId,
-                  toolName,
-                  output: { type: "error-text" as const, value: message },
-                },
-              },
-            ],
-            toolResults,
-          };
+          return { settled: [await settleFailure(callId, toolName, message)], toolResults };
         }
         const recheck = await recheckApprovedCall(definition, {
           abortSignal: input.abortSignal,
@@ -250,30 +252,9 @@ export async function runApprovedCalls(input: {
           if (completed !== undefined) return { settled: [completed], toolResults };
           return { settled: [interruptedResult(callId, toolName)], toolResults };
         }
-        const message = toError(error).message;
         logError(log, "approved tool failed", error, { toolName, toolCallId: callId });
-        await input.publish(
-          createActionResultEvent({
-            ...at,
-            result: createRuntimeToolResultFromValue({
-              callId,
-              isError: true,
-              output: message,
-              toolName,
-            }),
-          }),
-        );
         return {
-          settled: [
-            {
-              part: {
-                type: "tool-result" as const,
-                toolCallId: callId,
-                toolName,
-                output: { type: "error-text" as const, value: message },
-              },
-            },
-          ],
+          settled: [await settleFailure(callId, toolName, toError(error).message)],
           toolResults,
         };
       }
@@ -300,6 +281,11 @@ function interruptedResult(callId: string, toolName: string): ApprovedCallResult
       type: "tool-result",
     },
   };
+}
+
+/** What the model reads when an approved call's tool went away before the call could run. */
+function unavailableToolMessage(toolName: string): string {
+  return `The approved tool "${toolName}" is no longer available, so the call didn't run. If the task still needs it, find an available tool with search and make a new call, which needs approval again.`;
 }
 
 type ToolExecutionStart = Parameters<NonNullable<Telemetry["onToolExecutionStart"]>>[0];
