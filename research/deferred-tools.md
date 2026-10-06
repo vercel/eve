@@ -486,11 +486,12 @@ today.
   working whether a tool is direct or deferred: protocol action names,
   approvals and `approvalKey`, evals, hooks, `toolResultFrom`, display titles,
   and extension overrides such as `agent/tools/crm__search.ts`.
-- **Namespaces are recorded, not parsed.** Each entry records its owners as
-  data. The ownership check, labels such as `Linear: List issues`, and later
-  code mode (`tools.crm.api.list_issues`) read that record. They never split
-  a name at `__`. A convention prefix with no owner stays part of the name,
-  as in `tools.tenant__export`.
+- **Namespaces are never parsed.** The ownership check compares names
+  against connection names, and a connection entry knows its connection,
+  which gives labels such as `Linear: List issues`. Nothing splits a name at
+  `__`. Code mode will record owners on each entry for program paths such as
+  `tools.crm.api.list_issues`; a convention prefix with no owner stays part
+  of the name, as in `tools.tenant__export`.
 - **Scope.** The catalog holds only entries advertised to the current
   session, so a child session never sees a tool with
   `availableInSubagents: false`.
@@ -634,8 +635,16 @@ looks a call up by name. Model history is the only place that keeps
   are unchanged. History holds an `execute` call whose result is the skill's
   markdown. Loading needs no approval, as today.
 - **No nested actions.** Every entry, including a connection tool, is
-  reported as the call itself. The nested-action helper loses its only caller
-  and is removed. The `parentCallId` protocol field stays for code mode.
+  reported as the call itself. The nested-action helper and the tool-call
+  action's `parentCallId` field lose their only producer and are removed.
+  Code mode adds the field back for calls made from a program.
+- **`execute` inside the AI SDK.** The AI SDK decides per tool name whether
+  to run a tool, so `execute` always has a run function. For an inline entry
+  it runs the entry's own `execute`. For a workflow tool or subagent it
+  returns a dispatch marker that the harness strips from the step, then
+  dispatches the resolved call through the existing workflow and
+  child-session path. The marker is hidden from telemetry and lives in one
+  module.
 - **Harness seams.** These are the places that look up by tool name today:
   - `buildToolApproval` and `buildToolSet` (`harness/tools.ts`);
   - `createRuntimeActionRequestFromToolCall`,
@@ -705,8 +714,9 @@ Connections:
    messages are never rewritten.
 4. **No system-message fallback.** If the last message is an approval
    response, the announcement waits for the next step.
-5. **Deterministic rendering.** Listings and signatures are sorted and
-   memoized per compiled tool or connection instance.
+5. **Deterministic rendering.** Listings are sorted, and a signature is a
+   pure function of its schema, so the same entry always renders the same
+   text. `search` renders signatures only for the page it returns.
 6. **Calling an entry adds nothing.** An `execute` call, skill load,
    approval, park, sign-in, child session, or resume never adds a definition. That is exactly
    where AI SDK `toolSearch()` and pi's activation path lose the cache.
@@ -761,8 +771,8 @@ start.
   - `connection-approval.ts` moves behind the connection entry's definition.
 - **Nested actions.** `harness/nested-actions.ts` and its callers in
   `harness/emission.ts` and `harness/step-hooks.ts`, plus their rendering in
-  the dev TUI trace view and the channel task card. The `parentCallId`
-  protocol field stays for code mode.
+  the dev TUI trace view and the channel task card, and the tool-call
+  action's `parentCallId` field with its span attribute.
 - **`load_skill`.** `execution/tools/load-skill.ts`,
   `tools/provided/load-skill.ts`, `public/tools/load-skill.ts`, the
   `eve/tools/load_skill` export, its framework source registration, the
@@ -795,11 +805,11 @@ start.
 Three stacked PRs. The first two hold all of the implementation and add no
 tests. The third holds all of the new tests.
 
-| PR            | Scope                                                                                                                                                                                                                                                                                                                                                                            |
-| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [1/3] Catalog | Naming groundwork (connection prefix ownership, key and name validation, recorded owners, the internal rename); `deferred` on tools and workflow tools; `tool: "deferred"` on subagents; dynamic entries; `search` and `execute`; the step entry table and call resolution; the catalog listing; connection tools as entries; removal of the connection tools and nested actions |
-| [2/3] Skills  | `deferred` in frontmatter and `defineSkill`, static and dynamic; skill results in `search`; `execute({ skill })`; removal of `load_skill` and the skill announcement channel                                                                                                                                                                                                     |
-| [3/3] Tests   | Every new test, listed below. Fixes the tests surface go back into [1/3] or [2/3] before the stack merges.                                                                                                                                                                                                                                                                       |
+| PR            | Scope                                                                                                                                                                                                                                                                                                                                                           |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [1/3] Catalog | Naming groundwork (connection prefix ownership, key and name validation, the internal rename); `deferred` on tools and workflow tools; `tool: "deferred"` on subagents; dynamic entries; `search` and `execute`; the step entry table and call resolution; the catalog listing; connection tools as entries; removal of the connection tools and nested actions |
+| [2/3] Skills  | `deferred` in frontmatter and `defineSkill`, static and dynamic; skill results in `search`; `execute({ skill })`; removal of `load_skill` and the skill announcement channel                                                                                                                                                                                    |
+| [3/3] Tests   | Every new test, listed below. Fixes the tests surface go back into [1/3] or [2/3] before the stack merges.                                                                                                                                                                                                                                                      |
 
 - **The stack merges together.** [1/3] and [2/3] delete the old e2e evals
   with the paths they cover, and [3/3] adds the new ones. So [1/3] and [2/3]
@@ -849,6 +859,12 @@ Everything in this section lands in [3/3].
   covered: connection approval, sign-in, dynamic connections, MCP result
   content, input validation, dynamic skills, skill overrides, and extension
   skills. They are written from the behavior, not ported from the old files.
+- **Unit coverage for rules whose old tests were deleted.** Subagent
+  visibility in the step catalog, the task tools offered per session,
+  connection prefix ownership at compile and resolve time, dynamic tool and
+  subagent collisions (including the `tool: false` wrapper pattern),
+  connection input validated before approval, and listing failures that
+  aren't sign-in.
 - **Measurements.** Run one task set three ways:
   1. all tools and skills direct,
   2. long-tail tools and skills deferred,
@@ -901,7 +917,8 @@ Everything in this section lands in [3/3].
 | Discovery mechanism | Two fixed tools                                                                              | AI SDK `toolSearch()` or activation (grows `tools`); provider-native search (one provider at a time, partly beta)                                                                                                            |
 | Dispatch            | Resolve to an entry, then dispatch it like a direct call                                     | A `defineTool` proxy (can't reach workflow tools or subagents; duplicates approval)                                                                                                                                          |
 | Entry names         | One flat name, `__` as the only namespace separator, and connections own their prefix        | `<connection>.<tool>` (a second separator for one owner, and it renames connection tools); dots everywhere, encoded as `__` for providers (deferring would rename a tool); a separate `connection` argument (a two-part key) |
-| Owners              | Recorded on each entry as data                                                               | Recovered by splitting names at `__` (can't tell an owner from a convention prefix)                                                                                                                                          |
+| Owners              | Recorded on each entry as data, added with code mode                                         | Recovered by splitting names at `__` (can't tell an owner from a convention prefix)                                                                                                                                          |
+| Dispatch marker     | `execute` returns a marker for workflow and subagent entries; the harness strips it          | Renaming calls in a provider middleware (connection tools can't join the tool set without listing every connection, so they would need a second path)                                                                        |
 | Search output       | TypeScript `signature`                                                                       | Raw JSON Schema (larger, and code mode needs the signature anyway)                                                                                                                                                           |
 | Protocol shape      | Actions carry the entry's name; only history says `execute`                                  | An outer `execute` action with a nested entry action                                                                                                                                                                         |
 | Search state        | Stateless; any entry can be executed                                                         | A durable discovered set that execution checks                                                                                                                                                                               |
@@ -918,15 +935,15 @@ Code mode adds `execute({ code })`. The rest of this design carries over:
 | `search(opts)` tool            | `search(opts)` inside the program, same result shape             |
 | `execute({ tool, input })`     | `tools.deploy_service(input)`, `tools.linear.list_issues(input)` |
 | `execute({ skill })`           | Loading a skill from the program                                 |
-| One action per `execute` call  | One nested action per call, with `parentCallId`                  |
+| One action per `execute` call  | One nested action per call, with `parentCallId` added back       |
 | Approval on the model's call   | Approval on the nested action, parking mid-program               |
 | Catalog listing                | Unchanged                                                        |
 | Signatures in `search` results | The types the program is written against                         |
 
 - `execute({ tool, input })` is a one-call program, so both forms share one
   dispatch path.
-- Program paths come from the owners each entry records, not from splitting
-  names: `linear__list_issues` is `tools.linear.list_issues`,
+- Each entry records its owners, and program paths come from that record,
+  not from splitting names: `linear__list_issues` is `tools.linear.list_issues`,
   `crm__api__list_issues` is `tools.crm.api.list_issues`, and
   `tenant__export`, which has no owner, is `tools.tenant__export`.
 - The `code` property appears only when code mode is on. That is fixed per
