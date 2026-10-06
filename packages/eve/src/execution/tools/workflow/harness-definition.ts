@@ -40,6 +40,7 @@ export function createPreparedWorkflowToolHarnessDefinition(
   }
   return createWorkflowToolHarnessDefinition({
     definition: {
+      frameworkTool: tool.kind !== "authored-tool" || tool.owner.kind === "framework",
       behavior: tool.behavior,
       description: tool.description,
       inputSchema: toInputSchema(tool.inputSchema) ?? UNSPECIFIED_INPUT_SCHEMA,

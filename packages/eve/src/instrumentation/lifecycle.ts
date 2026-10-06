@@ -83,17 +83,6 @@ export type InstrumentationContentPart =
     };
 
 /**
- * What eve dispatched an action as. The model sees every action as a tool, so
- * this is the only thing that separates a subagent or remote-agent call from an
- * ordinary tool in a trace.
- */
-export type InstrumentationActionKind =
-  | "load-skill"
-  | "remote-agent-call"
-  | "subagent-call"
-  | "tool-call";
-
-/**
  * How one action ended.
  *
  * `type` survives a provider that declined content, so whether the tool errored
@@ -463,7 +452,16 @@ export type InstrumentationModelCallTerminalEvent =
 
 export type InstrumentationToolOutput = InstrumentationActionOutput;
 
+/** How eve dispatches the action. */
+export type InstrumentationActionKind =
+  | "load-skill"
+  | "remote-agent-call"
+  | "subagent-call"
+  | "tool-call";
+
 export interface InstrumentationToolCallStartedEvent {
+  readonly frameworkTool?: boolean;
+  readonly startedAtMs?: number;
   readonly type: "tool.call.started";
   readonly callId: string;
   readonly idempotencyKey: string;
@@ -473,6 +471,7 @@ export interface InstrumentationToolCallStartedEvent {
 }
 
 export interface InstrumentationToolCallCompletedEvent {
+  readonly completedAtMs?: number;
   readonly type: "tool.call.completed";
   /** How long the tool's `execute` ran, in milliseconds, when the publisher measured it. */
   readonly durationMs?: number;
@@ -482,6 +481,7 @@ export interface InstrumentationToolCallCompletedEvent {
 }
 
 export interface InstrumentationToolCallFailedEvent {
+  readonly completedAtMs?: number;
   readonly type: "tool.call.failed";
   /** Content. Absent unless this provider's trace policy records this direction. */
   readonly error?: unknown;

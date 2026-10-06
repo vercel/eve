@@ -665,6 +665,7 @@ describe("createAiSdkHookBridge", () => {
         {
           callId: "tool-1",
           idempotencyKey: `tool:${scope.attemptId}:tool-1:0`,
+          frameworkTool: false,
           input: { q: "eve" },
           scope,
           toolName: "search",
@@ -702,7 +703,7 @@ describe("createAiSdkHookBridge", () => {
         name: "metadata-only",
       },
     ]);
-    const bridge = createAiSdkHookBridge(scope, hooks);
+    const bridge = createAiSdkHookBridge(scope, hooks, undefined, undefined, () => true);
     const toolCall = { input: { q: "eve" }, toolCallId: "tool-1", toolName: "search" };
 
     await Reflect.apply(bridge.onLanguageModelCallStart!, bridge, [
@@ -736,6 +737,9 @@ describe("createAiSdkHookBridge", () => {
     ]);
 
     expect(modelStarted.mock.calls[0]?.[0].input).toBeUndefined();
+    expect(toolStarted.mock.calls[0]?.[0]).toMatchObject({
+      frameworkTool: true,
+    });
     expect(modelCompleted.mock.calls[0]?.[0].content).toBeUndefined();
     // Structure survives: usage, the finish reason, and the tool's identity are
     // not what was said.

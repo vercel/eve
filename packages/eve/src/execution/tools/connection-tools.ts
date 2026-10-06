@@ -162,27 +162,31 @@ export function resolveConnectionTools(): DynamicToolSet | null {
     .filter((approval): approval is Approval => approval !== undefined);
 
   return {
-    [CONNECTION_SEARCH_TOOL_NAME]: defineTool({
-      description: CONNECTION_SEARCH_DESCRIPTION,
-      inputSchema: CONNECTION_SEARCH_INPUT_SCHEMA,
-      execute: defineDurableCallback({ callback: searchConnectionTools, closure: {} }),
-      label: {
-        start: defineDurableCallback({ callback: connectionSearchLabel, closure: {} }),
-      },
-    }),
-    [CONNECTION_EXECUTE_TOOL_NAME]: defineTool({
-      description: CONNECTION_EXECUTE_DESCRIPTION,
-      inputSchema: CONNECTION_EXECUTE_INPUT_SCHEMA,
-      execute: defineDurableCallback({ callback: executeConnectionTool, closure: {} }),
-      label: {
-        start: defineDurableCallback({ callback: connectionToolLabel, closure: {} }),
-      },
-      toModelOutput: defineDurableCallback({
-        callback: (_closure: object, output: unknown) => connectionToolModelOutput(output),
-        closure: {},
+    [CONNECTION_SEARCH_TOOL_NAME]: frameworkTool(
+      defineTool({
+        description: CONNECTION_SEARCH_DESCRIPTION,
+        inputSchema: CONNECTION_SEARCH_INPUT_SCHEMA,
+        execute: defineDurableCallback({ callback: searchConnectionTools, closure: {} }),
+        label: {
+          start: defineDurableCallback({ callback: connectionSearchLabel, closure: {} }),
+        },
       }),
-      ...connectionExecuteApproval(approvals),
-    }),
+    ),
+    [CONNECTION_EXECUTE_TOOL_NAME]: frameworkTool(
+      defineTool({
+        description: CONNECTION_EXECUTE_DESCRIPTION,
+        inputSchema: CONNECTION_EXECUTE_INPUT_SCHEMA,
+        execute: defineDurableCallback({ callback: executeConnectionTool, closure: {} }),
+        label: {
+          start: defineDurableCallback({ callback: connectionToolLabel, closure: {} }),
+        },
+        toModelOutput: defineDurableCallback({
+          callback: (_closure: object, output: unknown) => connectionToolModelOutput(output),
+          closure: {},
+        }),
+        ...connectionExecuteApproval(approvals),
+      }),
+    ),
   };
 }
 
@@ -505,3 +509,4 @@ function requireConnection(
       : `Connection "${name}" is not available. Available connections: ${available.join(", ")}.`,
   );
 }
+import { frameworkTool } from "#tools/provided/framework-tool.js";

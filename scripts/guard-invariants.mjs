@@ -121,6 +121,8 @@
  *             `execution/legacy-remote-agent/`. Only the ingress files that
  *             route protocol-1 callers into it may import it, so deleting the
  *             directory removes protocol 1 without a search.
+ *   rule 49 — Provided tool definitions carry a framework tool flag,
+ *             so telemetry ownership survives renamed and namespaced tools.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -1117,6 +1119,64 @@ async function checkRule30VendoredCompiledPackageJson() {
   return violations;
 }
 
+// Provided definitions must carry identity, not rely on their filesystem or runtime name.
+async function checkFrameworkActionIdentity() {
+  const violations = [];
+  const roots = ["packages/eve/src/tools/provided", "packages/eve/src/tools/framework"];
+  const files = [];
+  for (const root of roots) {
+    for await (const file of walkFiles(join(REPO_ROOT, root))) files.push(file);
+  }
+  files.push({
+    absPath: join(REPO_ROOT, "packages/eve/src/execution/tools/connection-tools.ts"),
+    relPath: "packages/eve/src/execution/tools/connection-tools.ts",
+  });
+  for (const { absPath, relPath } of files) {
+    if (!absPath.endsWith(".ts") || absPath.endsWith(".test.ts")) continue;
+    const source = await readFile(absPath, "utf8");
+    const ast = ts.createSourceFile(relPath, source, ts.ScriptTarget.Latest, true);
+    const report = (node, message) =>
+      violations.push({
+        rule: 49,
+        file: toPosix(relPath),
+        line: ast.getLineAndCharacterOfPosition(node.getStart(ast)).line + 1,
+        message,
+      });
+    const visit = (node) => {
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+        const name = node.expression.text;
+        if (["defineTool", "defineWorkflowTool", "stampToolDefinition"].includes(name)) {
+          const parent = node.parent;
+          if (
+            !ts.isCallExpression(parent) ||
+            !ts.isIdentifier(parent.expression) ||
+            parent.expression.text !== "frameworkTool"
+          )
+            report(
+              node,
+              "Wrap provided tool definitions in frameworkTool(definition), so renamed tools remain marked in traces.",
+            );
+        }
+      }
+      if (ts.isObjectLiteralExpression(node)) {
+        const properties = new Map(
+          node.properties
+            .filter(ts.isPropertyAssignment)
+            .map((property) => [property.name.getText(ast), property.initializer]),
+        );
+        if (properties.has("frameworkAction")) {
+          const flag = properties.get("frameworkTool");
+          if (flag === undefined || flag.kind !== ts.SyntaxKind.TrueKeyword)
+            report(node, "Framework harness tools must declare frameworkTool: true.");
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(ast);
+  }
+  return violations;
+}
+
 // ---------- Rule 31: removed CLI entry points stay removed ----------
 
 const ACTIVE_CLI_REFERENCE_EXTENSIONS = /\.(?:[cm]?[jt]sx?|mdx?|json|ya?ml)$/;
@@ -1658,6 +1718,7 @@ async function main() {
   // Rule 47
   violations.push(...state.rule47);
   violations.push(...state.rule48);
+  violations.push(...(await checkFrameworkActionIdentity()));
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

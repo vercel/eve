@@ -86,6 +86,16 @@ export function createInstrumentationDispatcher(
         );
         const failure = terminalActionFailure(snapshot);
         for (const action of pendingActions) {
+          if (action.toolCall !== undefined) {
+            await publish(action.toolCall);
+            await publish({
+              type: "tool.call.failed",
+              idempotencyKey: action.toolCall.idempotencyKey,
+              scope: action.scope,
+              completedAtMs: Date.now(),
+              error: failure.error,
+            });
+          }
           await publish({
             ...failure,
             idempotencyKey: action.idempotencyKey,

@@ -12,12 +12,14 @@ import type {
   InstrumentationPointEvent,
   InstrumentationTraceContext,
   InstrumentationUsage,
+  InstrumentationToolCallCompletedEvent,
 } from "#instrumentation/lifecycle.js";
 import {
   actionIdempotencyKey,
   inputIdempotencyKey,
   sessionIdempotencyKey,
   turnIdempotencyKey,
+  toolCallIdempotencyKey,
 } from "#instrumentation/lifecycle.js";
 import {
   rememberInstrumentationActionScope,
@@ -36,6 +38,7 @@ import {
 import type { ChannelAudience } from "#shared/channel-audience.js";
 
 export interface CreateInstrumentationHandleEventInput {
+  readonly isFrameworkTool?: (name: string) => boolean;
   readonly traceSessionId?: string;
   readonly agentName?: string;
   readonly channelKind?: string;
@@ -204,10 +207,29 @@ async function publishActionStarts(
   const capturesInputs = hooks.capturesInputs ?? hooks.capturesContent;
 
   for (const action of event.data.actions) {
+    const deferred =
+      isRuntimeWorkflowToolAction(action) ||
+      action.kind === "subagent-call" ||
+      action.kind === "remote-agent-call";
     const idempotencyKey = actionIdempotencyKey(input.sessionId, event.data.turnId, action.callId);
     if (published.has(idempotencyKey)) continue;
     published.add(idempotencyKey);
-    rememberInstrumentationActionScope(idempotencyKey, scope);
+    rememberInstrumentationActionScope(
+      idempotencyKey,
+      scope,
+      deferred
+        ? {
+            type: "tool.call.started",
+            callId: action.callId,
+            toolName: actionName(action),
+            frameworkTool: input.isFrameworkTool?.(actionName(action)) === true,
+            scope,
+            idempotencyKey: toolCallIdempotencyKey(scope, action.callId, 0),
+            startedAtMs: Date.now(),
+            input: capturesInputs ? action.input : undefined,
+          }
+        : undefined,
+    );
     await hooks.publish(
       Object.freeze({
         callId: action.callId,
@@ -217,7 +239,7 @@ async function publishActionStarts(
         startedAtMs,
         idempotencyKey,
         input: capturesInputs ? action.input : undefined,
-        ...(isRuntimeWorkflowToolAction(action) ? { isWorkflowTool: true } : undefined),
+        ...(deferred ? { isWorkflowTool: true } : undefined),
         kind: action.kind === "workflow-tool-call" ? "tool-call" : action.kind,
         name: actionName(action),
         scope,
@@ -239,6 +261,24 @@ async function publishActionTerminal(
   if (correlation === undefined) return;
   const { idempotencyKey, scope } = correlation;
   const capturesOutputs = hooks.capturesOutputs ?? hooks.capturesContent;
+  if (correlation.toolCall !== undefined) {
+    await hooks.publish(Object.freeze(correlation.toolCall));
+    await hooks.publish(
+      Object.freeze({
+        type: "tool.call.completed",
+        idempotencyKey: correlation.toolCall.idempotencyKey,
+        scope,
+        completedAtMs:
+          contextStorage.getStore()?.get(RuntimeActionSettlementTimesKey)?.[
+            event.data.result.callId
+          ] ?? Date.now(),
+        output:
+          event.data.status === "completed"
+            ? { type: "result", output: capturesOutputs ? event.data.result.output : undefined }
+            : { type: "error", error: capturesOutputs ? event.data.result.output : undefined },
+      } satisfies InstrumentationToolCallCompletedEvent),
+    );
+  }
 
   if (event.data.status === "completed") {
     await hooks.publish(

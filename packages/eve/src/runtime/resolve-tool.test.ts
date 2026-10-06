@@ -8,6 +8,9 @@ import { toolResultFrom } from "#public/tools/result.js";
 import { resolveToolDefinition } from "#runtime/resolve-tool.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import { defineTool } from "#tools/definition.js";
+import { sleep } from "#tools/provided/sleep.js";
+import { noReply } from "#tools/provided/no-reply.js";
+import { isFrameworkTool } from "#tools/provided/framework-tool.js";
 
 const definition: CompiledToolDefinition = {
   description: "Deploy a project.",
@@ -33,6 +36,25 @@ function moduleMap(value: unknown): CompiledModuleMap {
 }
 
 describe("resolveToolDefinition", () => {
+  it.each([
+    { tool: sleep(), action: "sleep", workflow: true },
+    { tool: noReply(), action: "no_reply", workflow: false },
+  ])(
+    "marks $action after an author spreads and renames the provided definition",
+    async ({ tool, workflow }) => {
+      const compiled = { ...definition, description: tool.description };
+      if (workflow)
+        compiled.behavior = {
+          availability: [],
+          handling: { kind: "workflow-tool", entryPoint: "execute", workflowId: "sleep-workflow" },
+        };
+      const resolved = await resolveToolDefinition(compiled, moduleMap({ ...tool }), undefined, {
+        kind: "application",
+      });
+      expect(resolved.name).toBe("deploy");
+      expect(isFrameworkTool(resolved)).toBe(true);
+    },
+  );
   it("reattaches authored label callbacks", async () => {
     const resolved = await resolveToolDefinition(
       definition,

@@ -1,4 +1,5 @@
 import type { WebSearchProvider } from "#shared/web-search.js";
+import { frameworkTool } from "./framework-tool.js";
 
 export type { WebSearchProvider };
 
@@ -37,10 +38,10 @@ export interface WebSearchToolDefinition {
  * ```
  */
 export function webSearch(input: WebSearchToolInput): WebSearchToolDefinition {
-  return {
+  return frameworkTool({
     kind: WEB_SEARCH_TOOL_KIND,
     provider: input.provider,
-  };
+  });
 }
 
 /** Default provider-managed web search configuration. */

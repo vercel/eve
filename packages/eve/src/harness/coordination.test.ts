@@ -16,8 +16,47 @@ import { toolOutput } from "#tools/model-output.js";
 import { setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
 import { isRuntimeWorkflowToolAction } from "#shared/action-types.js";
+import { createPreparedWorkflowToolHarnessDefinition } from "#execution/tools/workflow/harness-definition.js";
+import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
 
 describe("createRuntimeActionRequestFromToolCall", () => {
+  it.each(["subagent", "remote"] as const)(
+    "retains %s dispatch identity for a background agent tool",
+    (kind) => {
+      const target =
+        kind === "remote"
+          ? {
+              kind: "remote-agent-call" as const,
+              remoteAgentName: "reviewer",
+              nodeId: "reviewer-node",
+            }
+          : { kind: "subagent-call" as const, subagentName: "reviewer", nodeId: "reviewer-node" };
+      const prepared: PreparedRuntimeDelegationTool = {
+        kind,
+        name: "reviewer",
+        nodeId: "reviewer-node",
+        logicalPath: "subagents/reviewer",
+        sourceId: "reviewer",
+        description: "Review a draft.",
+        inputSchema: { type: "object" },
+        behavior: { availability: [], handling: { kind: "dispatch", target } },
+      };
+      const tool = createPreparedWorkflowToolHarnessDefinition(prepared);
+      const action = createRuntimeActionRequestFromToolCall({
+        toolCall: {
+          input: { message: "Review Alice's draft." },
+          toolCallId: "review",
+          toolName: "reviewer",
+        },
+        tools: new Map([["reviewer", tool]]),
+      });
+      expect(action).toMatchObject({
+        kind: target.kind,
+        nodeId: "reviewer-node",
+        name: "reviewer",
+      });
+    },
+  );
   const loadSkillCall = {
     input: { skill: "research" },
     toolCallId: "call-skill",
@@ -179,7 +218,12 @@ describe("createRuntimeActionRequestFromToolCall", () => {
         ]),
       }),
     ).toEqual({
-      action: { callId: "call-deploy", input: {}, kind: "tool-call", toolName: "deploy" },
+      action: {
+        callId: "call-deploy",
+        input: {},
+        kind: "tool-call",
+        toolName: "deploy",
+      },
     });
   });
 

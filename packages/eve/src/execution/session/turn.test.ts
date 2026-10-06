@@ -38,6 +38,7 @@ import type {
   WorkflowToolRunRef,
 } from "#execution/tools/workflow/messages.js";
 import type { TokenUsage } from "#shared/token-usage.js";
+import { traceTaskToolCallStep } from "#execution/session/task-tool-tracing-step.js";
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -60,12 +61,17 @@ vi.mock("#execution/tools/workflow/interrupt.js", () => ({
 vi.mock("#execution/session/turn-waiting-step.js", () => ({
   publishTurnWaitingStep: vi.fn(async () => ({ stateDelta: {} })),
 }));
+vi.mock("#execution/session/task-tool-tracing-step.js", () => ({
+  startTaskToolCallsStep: vi.fn(async () => Date.now()),
+  traceTaskToolCallStep: vi.fn(async () => ({ stateDelta: {} })),
+}));
 vi.mock("#execution/tools/workflow/emit-workflow-tool-run-report-step.js", () => ({
   emitAgentStartedStep: vi.fn(),
   emitWorkflowToolRunReportStep: vi.fn(),
 }));
 
 beforeEach(() => {
+  vi.mocked(traceTaskToolCallStep).mockClear();
   vi.mocked(routeDeliverToChildren)
     .mockReset()
     .mockImplementation(
@@ -998,6 +1004,16 @@ describe("SessionExecution checkpoints", () => {
     // no workflow tool run to stop.
     expect(dispatchCoordinationStep).not.toHaveBeenCalled();
     expect(cancelDescendantTurnsStep).not.toHaveBeenCalled();
+    expect(traceTaskToolCallStep).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        callId: "wait-call",
+        toolName: "task_wait",
+        failed: true,
+        startedAtMs: expect.any(Number),
+        completedAtMs: expect.any(Number),
+      }),
+    );
   });
 
   it("admits an idle agent task's usage report while the turn waits and counts it", async () => {

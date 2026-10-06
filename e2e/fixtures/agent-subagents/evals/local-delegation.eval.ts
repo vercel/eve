@@ -16,6 +16,15 @@ export default defineEval({
     );
     completed.expectOk();
     completed.messageIncludes(SUBAGENT_TOKEN);
+    completed.eventsSatisfy("local agent calls preserve dispatch kind", (events) =>
+      events.some(
+        (event) =>
+          event.type === "actions.requested" &&
+          event.data.actions.some(
+            (action) => action.kind === "subagent-call" && action.name === "echo-marker",
+          ),
+      ),
+    );
 
     t.succeeded();
     t.calledSubagent("echo-marker", { status: "completed" });

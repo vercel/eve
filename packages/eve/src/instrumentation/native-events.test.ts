@@ -396,6 +396,7 @@ describe("createInstrumentationHandleEvent", () => {
         input: { task: "research" },
         kind: "subagent-call",
         name: "delegate",
+        isWorkflowTool: true,
         scope,
         type: "action.started",
       },
@@ -416,6 +417,7 @@ describe("createInstrumentationHandleEvent", () => {
         input: { task: "analyze" },
         kind: "remote-agent-call",
         name: "remote",
+        isWorkflowTool: true,
         scope,
         type: "action.started",
       },
@@ -441,7 +443,12 @@ describe("createInstrumentationHandleEvent", () => {
         type: "action.started",
       },
     ]);
-    expect(events[5]).toMatchObject({
+    const terminals = events.filter(
+      (event) =>
+        (event as { type: string }).type === "action.failed" ||
+        (event as { type: string }).type === "action.completed",
+    );
+    expect(terminals[0]).toMatchObject({
       errorCode: "ACTION_RESULT_FAILED",
       idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "delegate-1"),
       outcome: "failed",
@@ -454,7 +461,7 @@ describe("createInstrumentationHandleEvent", () => {
         outputTokens: 2,
       },
     });
-    expect(events[6]).toEqual({
+    expect(terminals[1]).toEqual({
       acceptedAtMs: 1_234,
       idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "remote-1"),
       outcome: "completed",
@@ -468,7 +475,7 @@ describe("createInstrumentationHandleEvent", () => {
         outputTokens: 5,
       },
     });
-    expect(events[7]).toEqual({
+    expect(terminals[2]).toEqual({
       acceptedAtMs: undefined,
       idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "add-1"),
       outcome: "completed",
@@ -477,7 +484,7 @@ describe("createInstrumentationHandleEvent", () => {
       type: "action.completed",
       usage: undefined,
     });
-    expect(events).toHaveLength(8);
+    expect(events).toHaveLength(12);
     expect(events.every(Object.isFrozen)).toBe(true);
   });
 

@@ -141,6 +141,7 @@ export function replayDynamicTools(
       -readonly [K in keyof HarnessToolDefinition]: HarnessToolDefinition[K];
     } = {
       availableInSubagents: entry.availableInSubagents,
+      frameworkTool: entry.frameworkTool,
       description: entry.description,
       endsTurn: entry.endsTurn,
       execute: createToolExecuteWithAuth({

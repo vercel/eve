@@ -12,6 +12,7 @@ export interface TaskWaitInput {
  * call defers out of the model step and the session parks the turn itself.
  */
 export const taskWaitTool: HarnessToolDefinition = {
+  frameworkTool: true,
   description: TASK_WAIT_DESCRIPTION,
   frameworkAction: "task-wait",
   inputSchema: defineJsonSchema<TaskWaitInput>({

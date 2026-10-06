@@ -71,6 +71,7 @@ export function createAgentToolInstrumentation(input: {
   const byAttempt = new Map<string, Map<string, ToolSpanState>>();
 
   const onStarted = async (event: InstrumentationToolCallStartedEvent): Promise<void> => {
+    if (byAttempt.get(event.scope.attemptId)?.has(event.idempotencyKey)) return;
     const actionKey = actionIdempotencyKey(event.scope.sessionId, event.scope.turnId, event.callId);
     const fallback = input.resolveFallback(event);
     let state = fallback === undefined ? undefined : reserve(event, actionKey, fallback);
@@ -167,7 +168,7 @@ export function createAgentToolInstrumentation(input: {
       fallbackParent: parent.context,
       idempotencyKey: event.idempotencyKey,
       spanId,
-      startTimeMs: Date.now(),
+      startTimeMs: event.startedAtMs ?? Date.now(),
     };
     state.context = withAgentToolSpanContext(state.context, {
       recordInputs: input.recordInputs,
@@ -235,7 +236,7 @@ export function createAgentToolInstrumentation(input: {
       const result = contentAttribute(terminal.output.output);
       if (result !== undefined) span.setAttribute("gen_ai.tool.call.result", result);
     }
-    span.end();
+    span.end(terminal?.completedAtMs);
     byAction.delete(state.actionKey);
     const states = byAttempt.get(state.attemptId);
     states?.delete(state.idempotencyKey);
@@ -243,10 +244,9 @@ export function createAgentToolInstrumentation(input: {
   }
 }
 
-function toolAttributes(
-  event: InstrumentationToolCallStartedEvent,
-): Record<string, string | number> {
+function toolAttributes(event: InstrumentationToolCallStartedEvent): Attributes {
   return {
+    "agent.tool.is_framework": event.frameworkTool === true,
     ...(event.scope.functionId === undefined
       ? {}
       : { "gen_ai.agent.name": event.scope.functionId }),

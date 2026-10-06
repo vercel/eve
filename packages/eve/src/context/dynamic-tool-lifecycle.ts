@@ -1,4 +1,5 @@
 import type { ModelMessage } from "ai";
+import { isFrameworkTool } from "#tools/provided/framework-tool.js";
 
 import { isWorkflowToolDefinition } from "#tools/workflow-definition.js";
 
@@ -323,6 +324,7 @@ function createMetadata(input: {
       name: input.name,
     }),
     description: input.entry.description,
+    frameworkTool: isFrameworkTool(input.entry) || undefined,
     endsTurn: readDynamicEndsTurn(input.name, input.entry.endsTurn) || undefined,
     entryKey: input.entryKey,
     inputSchema: serializeInputSchema(input.entry.inputSchema),

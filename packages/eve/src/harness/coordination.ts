@@ -356,7 +356,29 @@ export function createRuntimeActionRequestFromToolCall(input: {
     toolName: input.toolCall.toolName,
   });
   if (definition?.frameworkAction === "load-skill") {
-    return { callId: input.toolCall.toolCallId, input: toolInput, kind: "load-skill" };
+    return {
+      callId: input.toolCall.toolCallId,
+      input: toolInput,
+      kind: "load-skill",
+    };
+  }
+  const handling = definition?.behavior?.handling;
+  if (
+    definition !== undefined &&
+    handling?.kind === "dispatch" &&
+    handling.target.kind !== "workflow-tool-call"
+  ) {
+    const target = handling.target;
+    const common = {
+      callId: input.toolCall.toolCallId,
+      description: definition.description,
+      input: toolInput,
+      name: input.toolCall.toolName,
+      nodeId: target.nodeId,
+    };
+    return target.kind === "remote-agent-call"
+      ? { ...common, kind: "remote-agent-call", remoteAgentName: target.remoteAgentName }
+      : { ...common, kind: "subagent-call", subagentName: target.subagentName };
   }
   const action: RuntimeActionRequest = {
     callId: input.toolCall.toolCallId,

@@ -16,10 +16,13 @@ export type AgentRouterTool = WorkflowTaskToolDefinition<AgentRouterInput, JsonV
  * agent targets. Each call runs as a task.
  */
 export function agentRouter(): AgentRouterTool {
-  return defineWorkflowTool({
-    availableInSubagents: false,
-    description: AGENT_ROUTER_TOOL_DESCRIPTION,
-    inputSchema: AGENT_ROUTER_INPUT_SCHEMA,
-    task: runAgentRouterTask,
-  });
+  return frameworkTool(
+    defineWorkflowTool({
+      availableInSubagents: false,
+      description: AGENT_ROUTER_TOOL_DESCRIPTION,
+      inputSchema: AGENT_ROUTER_INPUT_SCHEMA,
+      task: runAgentRouterTask,
+    }),
+  );
 }
+import { frameworkTool } from "./framework-tool.js";

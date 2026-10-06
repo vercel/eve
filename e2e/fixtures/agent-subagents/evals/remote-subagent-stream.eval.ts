@@ -22,6 +22,15 @@ export default defineEval({
   async test(t) {
     const turn = await t.send(CREATE_CHILD_MESSAGE);
     turn.expectOk();
+    turn.eventsSatisfy("remote agent calls preserve dispatch kind", (events) =>
+      events.some(
+        (event) =>
+          event.type === "actions.requested" &&
+          event.data.actions.some(
+            (action) => action.kind === "remote-agent-call" && action.name === "remote-loopback",
+          ),
+      ),
+    );
     const started = await requireRemoteSession(t, turn);
 
     const childEvents: MessageStreamEvent[] = [];

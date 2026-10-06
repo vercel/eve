@@ -32,6 +32,7 @@ interface AttemptState {
   readonly runtimeContext?: Readonly<Record<string, unknown>>;
   readonly scope: InstrumentationAttemptScope;
   readonly toolKeys: Map<string, string>;
+  readonly isFrameworkTool?: (name: string) => boolean;
   operation?: InstrumentationOperationRef;
   // Only the number is kept: it disambiguates call identities within an attempt.
   stepNumber?: number;
@@ -48,6 +49,7 @@ export function createAiSdkHookBridge(
   hooks: InstrumentationHooks,
   runInContext: InstrumentationContextRunner = directRunInContext,
   runtimeContext?: Readonly<Record<string, unknown>>,
+  isFrameworkTool?: (name: string) => boolean,
 ): Telemetry {
   const state: AttemptState = {
     capturesInputs: hooks.capturesInputs ?? hooks.capturesContent,
@@ -61,6 +63,7 @@ export function createAiSdkHookBridge(
         : undefined,
     scope,
     toolKeys: new Map(),
+    isFrameworkTool,
   };
   const nextModelCallKey = (stepNumber: number): string => {
     const callIndex = state.modelCallIndexes.get(stepNumber) ?? 0;
@@ -304,6 +307,7 @@ function toToolCallStarted(
 ): InstrumentationToolCallStartedEvent {
   return Object.freeze({
     callId: source.toolCall.toolCallId,
+    frameworkTool: state.isFrameworkTool?.(source.toolCall.toolName) === true,
     idempotencyKey,
     input: state.capturesInputs ? source.toolCall.input : undefined,
     scope: state.scope,

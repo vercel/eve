@@ -1505,6 +1505,7 @@ describe("createAgentOtelInstrumentation", () => {
       "gen_ai.agent.name": "weather",
       "gen_ai.operation.name": "execute_tool",
       "gen_ai.tool.call.id": "tool-1",
+      "agent.tool.is_framework": false,
       "gen_ai.tool.name": "weather",
       "gen_ai.tool.type": "function",
     });
