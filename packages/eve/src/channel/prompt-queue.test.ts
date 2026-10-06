@@ -70,6 +70,20 @@ describe("promptQueueEvents", () => {
     expect(show.mock.calls.map(([, request]) => request.requestId)).toEqual(["day"]);
   });
 
+  it("throws instead of showing nothing when the step's projection is missing", async () => {
+    const show = vi.fn(async (_channel: unknown, _request: InputRequest) => {});
+    const handlers = promptQueueEvents(show);
+    const channel = { ctx: new ContextContainer(), state: { shownPromptId: "day" } };
+    await expect(
+      handlers["input.resolved"](
+        { resolutions: [{ kind: "question", outcome: "answered", requestId: "day" }], ...AT },
+        channel,
+      ),
+    ).rejects.toThrow("initialized projection");
+    expect(channel.state.shownPromptId).toBe("day");
+    expect(show).not.toHaveBeenCalled();
+  });
+
   it("tries a request it could not show again on the next event", async () => {
     const show = vi
       .fn(async (_channel: unknown, _request: InputRequest): Promise<boolean> => true)

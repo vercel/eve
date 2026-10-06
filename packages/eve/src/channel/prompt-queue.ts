@@ -1,8 +1,8 @@
 import { contextStorage } from "#context/container.js";
 import type { ContextReader } from "#context/key.js";
 import { firstOpenInput } from "#harness/open-input-request.js";
-import { projectionFor } from "#harness/session-machine/current.js";
-import { foldSession, initialSessionProjection } from "#protocol/session-projection.js";
+import { currentProjection } from "#harness/session-machine/current.js";
+import { foldSession } from "#protocol/session-projection.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { InputRequest } from "#shared/input.js";
 
@@ -60,9 +60,13 @@ export function promptQueueEvents<TChannel extends { state: PromptQueueState }>(
   };
 }
 
-/** The session's record as of the last event it published. */
+/**
+ * The session's record as of the last event it published. Throws rather than read an empty
+ * record when the step's projection is missing: an empty one would show nothing open, so the
+ * next prompt would silently never post.
+ */
 function publishedProjection(channel: object) {
   // A handler's channel context carries the context of the step that publishes the event.
   const ctx = (channel as { readonly ctx?: ContextReader }).ctx ?? contextStorage.getStore();
-  return ctx === undefined ? initialSessionProjection() : projectionFor(ctx, undefined);
+  return currentProjection(ctx);
 }

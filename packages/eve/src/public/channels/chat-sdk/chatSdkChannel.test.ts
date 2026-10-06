@@ -66,7 +66,10 @@ function withState(adapter: ChannelAdapter<any>, state: ChatSdkChannelState): Ch
 }
 
 function stubAccessor() {
-  return { get: () => undefined, set: () => {} } as any;
+  const accessor = { get: () => undefined, set: () => {} } as any;
+  // A step enters its projection before it publishes.
+  enterSessionProjection(accessor, undefined);
+  return accessor;
 }
 
 const stubAlsContext = (() => {
