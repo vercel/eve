@@ -25,6 +25,7 @@ import type {
   ToolCallLike,
 } from "#harness/types.js";
 import { EXECUTE_TOOL_NAME } from "#protocol/catalog-tools.js";
+import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { isObject } from "#shared/guards.js";
@@ -110,12 +111,17 @@ export function buildStepCatalog(input: {
   for (const [name, definition] of entries) {
     (definition.deferred === true ? deferred : direct).set(name, definition);
   }
-  const connections = input.ctx?.get(ConnectionRegistryKey)?.getConnections() ?? [];
+  // Read once here: validation runs while the SDK parses the stream, where the
+  // context store may not be active.
+  const registry = input.ctx?.get(ConnectionRegistryKey);
+  const connections = registry?.getConnections() ?? [];
   const advertised = new Map(direct);
   // Listed tools include `search` and `execute`, so `execute` naming one of
   // them says to call it directly rather than that it does not exist.
   const get = (name: string): HarnessToolDefinition | undefined =>
-    entries.get(name) ?? advertised.get(name) ?? connectionEntryNamed(name, connections);
+    entries.get(name) ??
+    advertised.get(name) ??
+    (registry === undefined ? undefined : connectionEntryNamed(name, registry, connections));
   const describe = (definition: HarnessToolDefinition) => describeEntry(definition, input.endsTurn);
   const catalog: StepCatalog = {
     advertised,
@@ -137,7 +143,7 @@ export function buildStepCatalog(input: {
     },
   };
   for (const tool of [
-    createSearchTool({ deferred: [...deferred.values()], describe }),
+    createSearchTool({ deferred: [...deferred.values()], describe, registry }),
     createExecuteTool(catalog),
   ]) {
     advertised.set(tool.name, tool);
@@ -197,12 +203,13 @@ function isVisible(
 
 function connectionEntryNamed(
   name: string,
+  registry: ConnectionRegistry,
   connections: readonly ResolvedConnectionDefinition[],
 ): HarnessToolDefinition | undefined {
   for (const connection of connections) {
     const prefix = connectionToolName(connection.connectionName, "");
     if (name.length > prefix.length && name.startsWith(prefix)) {
-      return connectionEntry(connection, name.slice(prefix.length));
+      return connectionEntry(registry, connection, name.slice(prefix.length));
     }
   }
   return undefined;
@@ -252,9 +259,14 @@ async function resolveExecuteInput(
   const checked = await checkToolCallInput(definition, input, "");
   if (checked.kind === "threw") throw checked.error;
   if (checked.kind === "invalid") {
-    // A connection tool's validation adds its own signature; agent entries get one here.
-    const signature = catalog.entries.has(tool) ? ` Signature: ${entrySignature(definition)}` : "";
-    return failure("input", `${checked.message}${signature}`);
+    // A connection tool's validation reports its own signature; agent entries get one here.
+    const issues = catalog.entries.has(tool)
+      ? [...checked.issues, { message: `Signature: ${entrySignature(definition)}` }]
+      : checked.issues;
+    // The entry's issues rather than its message, so the SDK's report is the only wrapper.
+    return {
+      issues: issues.map(({ message, path = [] }) => ({ message, path: ["input", ...path] })),
+    };
   }
   return { value: { input: checked.value, tool } };
 }
