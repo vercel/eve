@@ -35,6 +35,7 @@ import {
 import { createJsonSchemaSample } from "#runtime/agent/mock-structured-output.js";
 import { FINAL_OUTPUT_TOOL_NAME } from "#harness/final-output.js";
 import { readTaskResults } from "#execution/tasks/render.js";
+import { CATALOG_TOOL_NAMES } from "#protocol/catalog-tools.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 
 const MOCK_RUNTIME_MODEL_PROVIDER = "eve-runtime-mock";
@@ -643,10 +644,12 @@ function findRelevantTool(
   // `load_skill` is reachable only through skill-relevance selection
   // (createSkillLoadResult); matching it by name here would re-call it on
   // every step, because its results are invisible to the tool-result check.
+  // Every session has `search` and `execute`, whose names are ordinary words.
   const explicitTool = tools.find(
     (tool) =>
       tool.name !== "agent" &&
       tool.name !== LOAD_SKILL_TOOL_NAME &&
+      !CATALOG_TOOL_NAMES.includes(tool.name) &&
       normalizedMessage.includes(normalizeText(tool.name)),
   );
   if (explicitTool !== undefined) {

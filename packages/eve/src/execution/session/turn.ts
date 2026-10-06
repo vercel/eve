@@ -473,7 +473,7 @@ export class SessionExecution {
    * return now: a timeout of 0, a result already waiting, or nothing working.
    * Any other `task_wait` parks the open turn, reported once as
    * `turn.waiting`, and the turn resolves it alongside the step's other
-   * deferred calls.
+   * workflow tool calls.
    */
   private async answerTaskToolCalls(
     calls: readonly TaskToolCall[],

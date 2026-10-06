@@ -195,7 +195,7 @@ arguments, and approval options as static [MCP](../connections/mcp) and
 [OpenAPI](../connections/openapi) connections. Each resolved connection joins
 the per-step connection registry. eve announces it to the model in an
 append-only context message, and the model reaches its tools through
-`connection_search` and `connection_execute`, so the tool list never changes.
+`search` and `execute`, so the tool list never changes.
 
 Set `instanceKey` on every authenticated dynamic connection. Use a stable,
 non-secret account or tenant identifier, and change it whenever the endpoint,
@@ -216,6 +216,12 @@ and dashes, starting with a letter, up to 64 characters. Map keys are bare;
 eve does not prefix them with the file slug. A dynamic connection overrides a
 same-named static connection. Two effective dynamic resolvers cannot emit the
 same name; namespace one map key to remove the ambiguity.
+
+A connection owns its name and every name that starts with `<name>__`. When a
+dynamic connection resolves, eve rejects it if its name is, or is the `__`
+prefix of, one of the agent's tools, subagents, current dynamic tools, or
+other connections. Dynamic tools and dynamic subagents get the same check when
+they resolve. The error names both sides.
 
 ### Events and recovery
 
@@ -346,9 +352,11 @@ A recovery rebind is not a new lifecycle event, but it can run resolver code aga
 
 A single return produces one tool named after the file slug, identical to a static tool. A map names each entry by its **bare key** — there is no automatic slug prefix. If a bare name might collide, namespace the key yourself by including the prefix in the key (e.g. return `{ "tenant__export": … }` to get `tenant__export`).
 
+A map key must be a legal tool name: ASCII letters, digits, underscores, and dashes, starting with a letter, up to 64 characters. `search` and `execute` are reserved for the [built-in tools](../concepts/built-in-tools#search-and-execute), and a key cannot be a connection's name or start with its `<name>__` prefix. eve rejects such a key when the resolver returns it.
+
 ### Conflicts
 
-A dynamic connection, tool, or skill whose name matches an **authored** one **overrides** it — a per-caller resolver can replace a static capability by name. Two **dynamic** resolvers of the same capability type emitting the same name is a genuine ambiguity and throws; namespace one of the keys manually to resolve it.
+A dynamic connection, tool, or skill whose name matches an **authored** one **overrides** it — a per-caller resolver can replace a static capability by name. Workflow tools and subagents are the exception: a dynamic tool can't take one of their names, and eve logs the error and skips that resolver's result. Two **dynamic** resolvers of the same capability type emitting the same name is a genuine ambiguity and throws; namespace one of the keys manually to resolve it.
 
 ### Events
 

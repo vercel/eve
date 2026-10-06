@@ -3,7 +3,7 @@ title: "MCP Connections"
 description: "Connect an eve agent to a remote MCP server, authorize it with Vercel Connect or static credentials, and control which tools the model can discover."
 ---
 
-MCP connections point eve at a remote MCP server you do not author. The server publishes its tools and schemas, and the model finds and calls them through `connection_search` and `connection_execute`.
+MCP connections point eve at a remote MCP server you do not author. The server publishes its tools and schemas, and the model finds them with `search` and calls them with `execute`.
 
 Use MCP when the service already has an MCP server, when the server owns tool schemas dynamically, or when one connection should expose a family of related remote tools. Use an [OpenAPI connection](./openapi) instead when the service publishes an HTTP API contract and you want eve to generate one tool per operation.
 
@@ -48,8 +48,8 @@ For OAuth-backed MCP servers, use the shared [Vercel Connect flow](../connection
 
 eve asks the user to sign in only when the MCP server asks for it. When a connection has `auth` but no token yet, because its `getToken` throws `ConnectionAuthorizationRequiredError`, eve connects without an `Authorization` header and lists the server's tools. Any other error from `getToken` still fails the connection.
 
-- **The server rejects every request without a token.** Most hosted OAuth servers, such as Linear, GitHub, and Notion, answer `initialize` or `tools/list` with HTTP `401`. A plain `connection_search` lists the connection under `unavailable` with `requiresSignIn: true`. Calling `connection_search({ connection, signIn: true })` or any of its tools with `connection_execute` asks the user to sign in.
-- **The server lists tools without a token.** `connection_search` returns its tools with no prompt, and `connection_execute` runs tools the server answers anonymously. Sign-in starts only when a tool call comes back with HTTP `401`, or with an error result that carries a `WWW-Authenticate` challenge in `_meta["mcp/www_authenticate"]`.
+- **The server rejects every request without a token.** Most hosted OAuth servers, such as Linear, GitHub, and Notion, answer `initialize` or `tools/list` with HTTP `401`. A plain `search` lists the connection under `unavailable` with `requiresSignIn: true`. Calling `search({ connection, signIn: true })`, or any of its tools with `execute`, asks the user to sign in.
+- **The server lists tools without a token.** `search` returns its tools with no prompt, and `execute` runs tools the server answers anonymously. Sign-in starts only when a tool call comes back with HTTP `401`, or with an error result that carries a `WWW-Authenticate` challenge in `_meta["mcp/www_authenticate"]`.
 
 After the user signs in, the call that asked for it runs again. eve reconnects with the token and reloads the tool list, which may now include tools the server hides from anonymous callers. A connection that already has a token sends it on every request, as before.
 
@@ -180,7 +180,7 @@ Authenticate the connection as this deployment, with a stable service credential
 
 ## Control result size
 
-`connection_execute` returns an MCP tool's `structuredContent` when the server sends it. Otherwise it returns the result's text, parsed as JSON when the tool declares no output schema. Image, audio, and resource content reaches the model as file parts, and a result with `isError: true` fails the call with its text. MCP connections do not expose a per-result transform equivalent to an authored tool's [`toModelOutput`](/docs/tools#shape-what-the-model-sees-with-tomodeloutput).
+An MCP tool call returns the tool's `structuredContent` when the server sends it. Otherwise it returns the result's text, parsed as JSON when the tool declares no output schema. Image, audio, and resource content reaches the model as file parts, and a result with `isError: true` fails the call with its text. MCP connections do not expose a per-result transform equivalent to an authored tool's [`toModelOutput`](/docs/tools#shape-what-the-model-sees-with-tomodeloutput).
 
 When a remote tool returns more data than the model needs, narrow the result at the MCP server. Prefer a purpose-built search or summary tool, or return a stable handle that another call can use to fetch a smaller slice. If you do not control the server and an equivalent upstream API is available, replace only that operation with an authored tool that stores the full payload outside model context and projects the needed fields through `toModelOutput`. Block the original MCP operation through [`tools.block`](#tool-filters) so the model does not see duplicate tools.
 

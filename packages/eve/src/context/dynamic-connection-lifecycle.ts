@@ -1,6 +1,8 @@
 import { getAdapterKind } from "#channel/adapter.js";
 import type { ContextContainer } from "#context/container.js";
 import { AuthKey, InitiatorAuthKey, SessionIdKey } from "#context/keys.js";
+import { assertNotConnectionOwned } from "#connections/ownership.js";
+import { dynamicToolNames } from "#context/build-dynamic-tools.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { ALLOWED_DYNAMIC_CONNECTION_EVENTS } from "#dynamic/definition.js";
 import { CONNECTION_SLUG_PATTERN } from "#discover/grammar.js";
@@ -9,7 +11,7 @@ import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { readStampedConnectionProtocol } from "#public/definitions/connections/protocol.js";
 import type { DynamicConnectionResolveContext } from "#public/definitions/connections/dynamic.js";
 import { ConnectionRegistryImpl } from "#runtime/connections/registry.js";
-import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { resolveDynamicConnectionValue } from "#runtime/resolve-connection.js";
 import type {
   ResolvedConnectionDefinition,
@@ -94,6 +96,7 @@ export async function dispatchDynamicConnectionEvent(input: {
     })),
   );
   const updates = new Map<string, readonly ResolvedConnectionDefinition[]>();
+  const entryNames = agentEntryNames(input.ctx);
   let failedResolver: ResolvedDynamicConnectionResolver | undefined;
   for (let index = 0; index < outcomes.length; index += 1) {
     const outcome = outcomes[index]!;
@@ -106,6 +109,7 @@ export async function dispatchDynamicConnectionEvent(input: {
       failedResolver ??= resolver;
       continue;
     }
+    assertOwnsNoEntries(outcome.value.connections, resolver, entryNames);
     updates.set(outcome.value.resolver.slug, outcome.value.connections);
   }
   if (failedResolver !== undefined) {
@@ -118,6 +122,32 @@ export async function dispatchDynamicConnectionEvent(input: {
     input.event.type === "session.started" ? "session" : "turn",
     updates,
   );
+}
+
+/** The agent's tool and subagent names, which no connection may own. */
+function agentEntryNames(ctx: ContextContainer): readonly string[] {
+  const bundle = ctx.get(BundleKey);
+  return [
+    ...(bundle?.toolRegistry.toolsByName.keys() ?? []),
+    ...(bundle?.subagentRegistry.subagentsByName.keys() ?? []),
+    ...dynamicToolNames(ctx),
+  ];
+}
+
+function assertOwnsNoEntries(
+  connections: readonly ResolvedConnectionDefinition[],
+  resolver: ResolvedDynamicConnectionResolver,
+  entryNames: readonly string[],
+): void {
+  const connectionNames = connections.map((connection) => connection.connectionName);
+  for (const name of entryNames) {
+    assertNotConnectionOwned({
+      connectionNames,
+      name,
+      remedy: `Rename it, or the dynamic connection that "${resolver.logicalPath}" returned.`,
+      subject: "Tool or subagent",
+    });
+  }
 }
 
 function buildConnectionResolveContext(ctx: ContextContainer): DynamicConnectionResolveContext {

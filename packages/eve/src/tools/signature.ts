@@ -1,6 +1,6 @@
 /**
- * Renders a connection tool's input and output JSON Schemas as a compact
- * TypeScript signature, e.g.
+ * Renders a tool's input and output JSON Schemas as a compact TypeScript
+ * signature, e.g.
  * `list_issues(input: { teamId: string; first?: number /* maximum: 50 *\/ }): Promise<unknown>`.
  *
  * Constraints the model must respect (`minimum`, `maximum`, `pattern`, …) stay

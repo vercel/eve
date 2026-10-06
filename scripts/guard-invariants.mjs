@@ -1223,10 +1223,6 @@ async function checkFrameworkActionIdentity() {
   for (const root of roots) {
     for await (const file of walkFiles(join(REPO_ROOT, root))) files.push(file);
   }
-  files.push({
-    absPath: join(REPO_ROOT, "packages/eve/src/execution/tools/connection-tools.ts"),
-    relPath: "packages/eve/src/execution/tools/connection-tools.ts",
-  });
   for (const { absPath, relPath } of files) {
     if (!absPath.endsWith(".ts") || absPath.endsWith(".test.ts")) continue;
     const source = await readFile(absPath, "utf8");

@@ -2,9 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { DynamicSkillManifestKey, SandboxKey } from "#context/keys.js";
-import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
-import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedSkillDefinition } from "#runtime/types.js";
 import { readToolBehavior } from "#tools/behavior.js";
@@ -33,7 +31,6 @@ describe("loadSkill", () => {
       "Loading adds the skill instructions to the current turn.",
     );
     expect(loadSkill.description).toContain("Available skills block");
-    expect(loadSkill.description).not.toContain("connection_search");
   });
 });
 
@@ -143,27 +140,5 @@ describe("load_skill executor", () => {
     await expect(
       contextStorage.run(ctx, () => execute({ skill: "talk-like-a-dog" }, {} as never)),
     ).rejects.toThrow("Available skills: custom__bark, custom__talk-like-a-dog.");
-  });
-
-  it("redirects an installed connection mistakenly passed as a skill", async () => {
-    const registry = {
-      dispose: async () => {},
-      getClient: () => {
-        throw new Error("Not used by load_skill");
-      },
-      getConnectionApproval: () => undefined,
-      getConnectionNames: () => ["linear"],
-      getConnections: () => [],
-    } satisfies ConnectionRegistry;
-    const ctx = new ContextContainer();
-    ctx.set(SandboxKey, mockSandbox().access);
-    ctx.set(ConnectionRegistryKey, registry);
-    const execute = skillToolExecutor(ctx);
-
-    await expect(
-      contextStorage.run(ctx, () => execute({ skill: "linear" }, {} as never)),
-    ).rejects.toThrow(
-      '"linear" is a connection, not a skill. Find its tools with connection_search and connection "linear", then call them with connection_execute.',
-    );
   });
 });

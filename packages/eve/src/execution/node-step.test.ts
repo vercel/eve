@@ -377,6 +377,8 @@ describe("createExecutionNodeStep", () => {
     ctx.set(InitiatorAuthKey, null);
     ctx.set(BundleKey, {
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      subagentRegistry: rootNode.subagentRegistry,
+      toolRegistry: rootNode.toolRegistry,
     } as never);
     ctx.set(ChannelKey, { kind: "http" });
     ctx.set(SessionIdKey, "sess-root");
@@ -461,6 +463,8 @@ describe("createExecutionNodeStep", () => {
     ctx.set(InitiatorAuthKey, null);
     ctx.set(BundleKey, {
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      subagentRegistry: node.subagentRegistry,
+      toolRegistry: node.toolRegistry,
     } as never);
     ctx.set(ChannelKey, { kind: "http" });
     ctx.set(SessionIdKey, "sess-dynamic");

@@ -12,6 +12,7 @@ import type { ModuleSourceRef } from "#shared/source-ref.js";
 import {
   isDynamicModelDefinition,
   type PublicAgentStaticModelDefinition,
+  type AgentToolExposure,
 } from "#shared/agent-definition.js";
 import type { DynamicToolEventName } from "#dynamic/definition.js";
 import type { CompiledAgentDefinition, CompiledRuntimeModelReference } from "#compiler/manifest.js";
@@ -87,7 +88,7 @@ export async function compileAgentConfig(
     name: string;
     reasoning?: CompiledAgentDefinition["reasoning"];
     source: ModuleSourceRef;
-    tool?: boolean;
+    tool?: AgentToolExposure;
     limits?: CompiledAgentDefinition["limits"];
   } = {
     compaction,

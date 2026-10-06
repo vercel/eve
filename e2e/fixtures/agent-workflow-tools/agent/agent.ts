@@ -24,8 +24,8 @@ const HOOK_SCENARIO_CALLS = {
 function respondToPublicCatalog(request: MockModelRequest): MockModelResponse | string {
   const call = (id: string, tool: string) => ({
     id,
-    name: "connection_execute",
-    input: { connection: "public-catalog", tool, input: {} },
+    name: "execute",
+    input: { tool: `public-catalog__${tool}`, input: {} },
   });
   const byId = new Map(request.toolResults.map((entry) => [entry.id, entry]));
   if (!byId.has("public-catalog-items")) {
@@ -87,50 +87,9 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
     return respondToPublicCatalog(request);
   }
   const message =
-    [...request.userMessages]
-      .reverse()
-      .find((entry) => entry.startsWith("WORKFLOW-") || entry.includes("private-catalog")) ?? "";
+    [...request.userMessages].reverse().find((entry) => entry.startsWith("WORKFLOW-")) ?? "";
   const scenario = respondToTaskScenario(request, directiveOf(message));
   if (scenario !== undefined) return scenario;
-  if (message.includes("private-catalog")) {
-    const search = [...request.toolResults]
-      .reverse()
-      .find((entry) => entry.name === "connection_search");
-    if (search === undefined) {
-      return {
-        toolCalls: [
-          {
-            name: "connection_search",
-            input: { connection: "private-catalog", query: "items" },
-          },
-        ],
-      };
-    }
-    // A plain search reports the connection as requiring sign-in; `signIn` asks the user.
-    if (JSON.stringify(search.output).includes('"requiresSignIn":true')) {
-      return {
-        toolCalls: [
-          {
-            name: "connection_search",
-            input: { connection: "private-catalog", query: "items", signIn: true },
-          },
-        ],
-      };
-    }
-    const execute = request.toolResults.find((entry) => entry.name === "connection_execute");
-    if (execute === undefined) {
-      return {
-        toolCalls: [
-          {
-            name: "connection_execute",
-            input: { connection: "private-catalog", tool: "list_items", input: {} },
-          },
-        ],
-      };
-    }
-    return JSON.stringify(execute.output);
-  }
-
   const stepAuth = /WORKFLOW-STEP-AUTH-(IMPLICIT|EXPLICIT|REJECTED)/u.exec(message);
   if (stepAuth !== null) {
     const result = request.toolResults.find((entry) => entry.name === "authorize_service");

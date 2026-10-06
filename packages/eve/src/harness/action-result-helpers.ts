@@ -125,15 +125,17 @@ export function createToolResultMessagePartFromToolError(
  */
 export function createRuntimeToolResultFromMessagePart(
   part: ToolResultPart,
+  /** The entry the result's call ran, which history names `execute` for a call made through it. */
+  toolName: string,
 ): RuntimeToolResultActionResult {
   return createRuntimeToolResultFromValue({
     callId: part.toolCallId,
     output: toolResultOutputToJsonValue({
       output: part.output,
       toolCallId: part.toolCallId,
-      toolName: part.toolName,
+      toolName,
     }),
-    toolName: part.toolName,
+    toolName,
     isError: isToolResultError(part.output),
   });
 }

@@ -24,7 +24,7 @@ export default defineAgent({
 
 This turns off the optional defaults described below. Add back only the tools the agent needs with the command in each tool's section. Existing files under `agent/tools/` remain available, including same-name replacements such as `agent/tools/bash.ts`.
 
-`connection_search` and `connection_execute` stay available when the agent has connections because they provide access to connection tools.
+`search` and `execute` stay available because they reach deferred tools, deferred agents, and connection tools.
 
 ### `bash`
 
@@ -294,17 +294,19 @@ import { disableTool } from "eve/tools";
 export default disableTool();
 ```
 
-### `connection_search`
+### `search` and `execute`
 
-`connection_search` and `connection_execute` give the model every tool from the agent's [connections](../connections) without adding each tool to the model's tool list. eve adds both when the agent has a static connection or a dynamic connection resolver, even when `defaultTools` is `false`, so there is no add command.
+`search` and `execute` let the model reach entries that are not in its tool list: tools defined with `deferred: true`, agents defined with `tool: "deferred"`, and every tool from the agent's [connections](../connections). eve adds both to every session of every agent, even when `defaultTools` is `false`, so there is no add command.
 
-- `connection_search({ query?, connection?, signIn?, limit?, offset? })` returns matching tools with their connection, name, description, and a TypeScript signature rendered from the tool's schemas. Omit `query` to list every tool, or pair it with `connection` to list one connection's tools. A plain search never asks the user to sign in. For a connection whose server will not list its tools until the user signs in, the result tells the model that sign-in is needed: the connection appears under `unavailable` with `requiresSignIn: true` and an error that points to `signIn: true`. Tools from the other connections are still returned.
-- `connection_search({ connection, signIn: true, query? })` asks the user to sign in to that one connection when they have not yet, then returns its matching tools. Without `connection` it fails, so the user is asked about one service at a time.
-- `connection_execute({ connection, tool, input })` checks `input` against the tool's input schema, calls the tool, and returns its result. When the server asks for the user's authorization, it also asks the user to sign in and the call parks until sign-in completes. The stream reports the call as a nested action named `<connection>__<tool>`, such as `linear__list_issues`, whose `parentCallId` is the `connection_execute` call id.
+- `search({ query?, connection?, signIn?, limit?, offset? })` returns matching entries, each with its exact `tool` name, its `description`, and a TypeScript `signature` rendered from its schemas, plus the `total` number of matches. Omit `query` to list every entry, or pass `connection` to search only that connection's tools. A plain search never asks the user to sign in. A connection whose server will not list its tools until the user signs in appears under `unavailable` with `requiresSignIn: true` and an error that points to `signIn: true`. Matches from everything else are still returned.
+- `search({ connection, signIn: true, query? })` asks the user to sign in to that one connection when they have not yet, then returns its matching tools. Without `connection` it fails, so the user is asked about one service at a time.
+- `execute({ tool, input })` calls the entry named `tool` with `input`. A connection tool's name is `<connection>__<tool>`, such as `linear__list_issues`. eve checks `input` against the entry's input schema. An invalid input fails with the entry's signature, an unknown name fails with the closest names, and a tool already in the model's tool list fails with a reminder to call it directly. When the server asks for the user's authorization, the call asks the user to sign in and parks until sign-in completes.
 
-The definitions of both tools never change during a session. eve lists connection names and descriptions in append-only context messages rather than in the system prompt, so finding a tool, signing in, or resolving a dynamic connection keeps the cached prompt prefix.
+After `execute` resolves its entry, the call runs exactly like a direct call to that entry. Approval policies and `approvedTools`, workflow tools and tasks, agents, `endsTurn`, `toModelOutput`, hooks, and stream events all see the entry's own name and input, such as `linear__list_issues`. Only model history records the call as `execute`.
 
-The tools cannot be replaced or disabled. The compiler rejects an authored `agent/tools/connection_search.ts`, `agent/tools/connection_execute.ts`, or `agent/tools/connection_tools.ts`. An agent without connections has neither tool.
+eve tells the model what it can reach in append-only context messages rather than in the system prompt: the names of deferred tools and agents, and each connection's name and description. A later step adds a message only when that listing changes. The definitions of `search` and `execute` never change, so adding a deferred entry, signing in, or resolving a dynamic connection keeps the cached prompt prefix.
+
+Both names are reserved. The compiler rejects an authored `agent/tools/search.ts` or `agent/tools/execute.ts`, and a subagent or dynamic tool cannot use either name.
 
 ### `task_wait` and `task_cancel`
 

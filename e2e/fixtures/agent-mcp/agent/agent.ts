@@ -11,16 +11,16 @@ function directiveCall(message: string): MockModelToolCall | undefined {
   if (message.includes("MCP_WHOAMI")) {
     return {
       id: "mcp-whoami",
-      input: { connection: LOOPBACK_CONNECTION, input: {}, tool: "whoami" },
-      name: "connection_execute",
+      input: { input: {}, tool: `${LOOPBACK_CONNECTION}__whoami` },
+      name: "execute",
     };
   }
   const notice = PUBLISH_DIRECTIVE.exec(message)?.[1];
   if (notice !== undefined) {
     return {
       id: "mcp-publish",
-      input: { connection: LOOPBACK_CONNECTION, input: { notice }, tool: "publish_notice" },
-      name: "connection_execute",
+      input: { input: { notice }, tool: `${LOOPBACK_CONNECTION}__publish_notice` },
+      name: "execute",
     };
   }
   return undefined;

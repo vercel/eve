@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionCompileMount } from "#compiler/load-binding-namespace.js";
 import { NodeModuleEvaluationContext } from "#compiler/module-lifecycle.js";
+import { assertStaticConnectionOwnership } from "#compiler/connection-ownership.js";
 import { bindingMountId } from "#compiler/extension-mount-bindings.js";
 
 import type { AgentSourceManifest } from "#discover/manifest.js";
@@ -621,6 +622,13 @@ class AgentGraphCompiler {
     assertUniqueBy(connections, (connection) => connection.connectionName, "connection name");
     assertUniqueBy(dynamicConnections, (connection) => connection.slug, "dynamic connection slug");
     assertUniqueBy(skills, (skill) => skill.name, "skill name");
+    assertStaticConnectionOwnership({
+      connectionNames: connections.map((connection) => connection.connectionName),
+      subagentNames: state.projected.subagents
+        .filter((subagent) => selectedSourceIds.has(subagent.candidate.sourceId))
+        .map((subagent) => subagent.source.subagentId),
+      toolNames: tools.map((tool) => tool.name),
+    });
 
     const channelRoutes = compileChannelRoutes(state, channels, this.diagnostics, input.nodeId);
     const extensionMounts = compileExtensionMounts(input.manifest, state.composed, input.nodePath);

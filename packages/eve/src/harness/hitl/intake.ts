@@ -1,5 +1,5 @@
-import { buildResponseAuthorizationTools } from "#context/build-dynamic-tools.js";
-import { collectDeferredCalls } from "#harness/coordination.js";
+import { buildStepCatalog } from "#execution/catalog/step-catalog.js";
+import { collectWorkflowCalls } from "#harness/coordination.js";
 import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
 import { stepStartedForResolvers } from "#harness/session-machine/resolver-events.js";
 import {
@@ -15,7 +15,7 @@ import { prepareTurnInput } from "#harness/step/intake.js";
 import { placeTurnInput } from "#harness/step/prompt.js";
 import { SessionLimitDeclinedError } from "#harness/turn-cancellation.js";
 import { bumpSessionRuntimeUsageLimits } from "#harness/turn-tag-state.js";
-import type { HarnessToolMap, StepInput, StepResult } from "#harness/types.js";
+import type { HarnessToolLookup, StepInput, StepResult } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import {
   answer,
@@ -61,8 +61,8 @@ export type HumanInputIntake =
  */
 export interface ApprovedWork {
   readonly limit?: { readonly granted: boolean };
-  /** The tools a parked step's calls run with: those of the step that asked. */
-  readonly toolsOf: (step: SuspendedStep | undefined) => HarnessToolMap;
+  /** The entries a parked step's calls run with: those of the step that asked. */
+  readonly toolsOf: (step: SuspendedStep | undefined) => HarnessToolLookup;
 }
 
 /**
@@ -91,9 +91,9 @@ export async function acceptHumanInput(
       : typed;
   // Restoring a turn's tools runs its resolvers, so a step's tools are restored once, and again
   // only after another step's.
-  const restoredTools = new Map<string, HarnessToolMap>();
+  const restoredTools = new Map<string, HarnessToolLookup>();
   let restoredStep: string | undefined;
-  const restoreTools = async (parked: SuspendedStep | undefined): Promise<HarnessToolMap> => {
+  const restoreTools = async (parked: SuspendedStep | undefined): Promise<HarnessToolLookup> => {
     const at = parked?.event ?? step.position();
     const key = `${at.turnId}:${at.stepIndex}`;
     const restored = restoredTools.get(key);
@@ -111,7 +111,12 @@ export async function acceptHumanInput(
         messages: step.projectHistory(step.session.history),
       });
     }
-    const tools = buildResponseAuthorizationTools({ authoredTools: config.tools, context: ctx });
+    const tools = buildStepCatalog({
+      agentTools: config.tools,
+      ctx,
+      endsTurn: false,
+      session: step.session,
+    });
     restoredTools.set(key, tools);
     restoredStep = key;
     return tools;
@@ -257,7 +262,7 @@ export async function dispatchApprovedWorkflows(step: Step, work: ApprovedWork):
     );
     if (requests.length === 0) continue;
     approved.push(...requests);
-    const deferred = collectDeferredCalls({
+    const dispatched = collectWorkflowCalls({
       session: step.session,
       toolCalls: requests.map(({ action }) => ({
         input: action.input,
@@ -267,8 +272,8 @@ export async function dispatchApprovedWorkflows(step: Step, work: ApprovedWork):
       tools,
       turnId: parked.event.turnId,
     });
-    step.session = deferred.session;
-    tasks.push(...deferred.workflowRequests);
+    step.session = dispatched.session;
+    tasks.push(...dispatched.workflowRequests);
   }
   if (tasks.length === 0) return false;
   await step.apply(
@@ -297,8 +302,10 @@ export async function runApprovedLocalCalls(
   });
   const approved = local.flatMap(({ requests }) => requests);
   step.frameworkToolNames = new Set(
-    local.flatMap(({ tools }) =>
-      [...tools].filter(([, tool]) => tool.frameworkTool === true).map(([name]) => name),
+    local.flatMap(({ requests, tools }) =>
+      requests
+        .map((request) => request.action.toolName)
+        .filter((name) => tools.get(name)?.frameworkTool === true),
     ),
   );
   setApprovedCallCallers(approved, step.session.state);

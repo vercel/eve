@@ -24,7 +24,7 @@ export default defineOpenAPIConnection({
 });
 ```
 
-Each operation becomes a tool named by its `operationId`, reported as `<connection>__<operationId>`, for example `petstore__getInventory`. When an operation has no `operationId`, eve derives a deterministic `<method>_<sanitized-path>` name instead. The model calls it with `connection_execute({ connection: "petstore", tool: "getInventory", input })` and receives `{ status, statusText, body }`.
+Each operation becomes a tool named by its `operationId`, reported as `<connection>__<operationId>`, for example `petstore__getInventory`. When an operation has no `operationId`, eve derives a deterministic `<method>_<sanitized-path>` name instead. The model calls it with `execute({ tool: "petstore__getInventory", input })` and receives `{ status, statusText, body }`.
 
 `spec` can be a URL that eve fetches at runtime, or an inline parsed OpenAPI object. A spec URL must use `https` (plain `http` is allowed only for loopback hosts such as `localhost` during local development), and eve re-checks the transport after any redirects. Prefer a URL when the provider owns the contract and updates it; prefer an inline object for private APIs, generated specs you pin in source control, or small hand-authored contracts.
 
