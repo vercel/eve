@@ -1,3 +1,9 @@
+import { contextStorage } from "#context/container.js";
+import type { ContextReader } from "#context/key.js";
+import { firstOpenInput } from "#harness/open-input-request.js";
+import { projectionFor } from "#harness/session-machine/current.js";
+import { foldSession, initialSessionProjection } from "#protocol/session-projection.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { InputRequest } from "#shared/input.js";
 
 /**
@@ -6,67 +12,57 @@ import type { InputRequest } from "#shared/input.js";
  * shows that one and holds the rest until it is answered.
  */
 export interface PromptQueueState {
-  /** Open requests in the order a typed reply answers them; the first is shown. */
-  promptQueue?: readonly InputRequest[];
+  /** The request the channel last showed, which a typed reply answers. */
+  shownPromptId?: string;
 }
 
 /**
- * Orders open requests the way a typed reply answers them: a budget prompt first, since the
- * session settles it before anything else, then the rest in the order the session asked.
- */
-export function inReplyOrder<T>(items: readonly T[], requestOf: (item: T) => InputRequest): T[] {
-  const isLimit = (item: T) => requestOf(item).kind === "session-limit";
-  return [...items.filter(isLimit), ...items.filter((item) => !isLimit(item))];
-}
-
-/**
- * Event handlers that call `show` with one request at a time: the first open
- * request, then each next one once the shown request is answered or withdrawn.
- * An approval counts as answered once it settles, before the rest of its batch.
+ * Event handlers that call `show` with the request a typed reply answers now,
+ * each time that request changes. They read which requests are open from the
+ * session's own record of the events it published, so a request that closed
+ * never shows, and one the channel failed to show is tried again on the next
+ * event. `show` returns `false` when it could not show the request.
  */
 export function promptQueueEvents<TChannel extends { state: PromptQueueState }>(
-  show: (channel: TChannel, request: InputRequest) => Promise<void>,
+  show: (channel: TChannel, request: InputRequest) => Promise<boolean | void>,
 ) {
-  async function update(
-    channel: TChannel,
-    next: (queue: readonly InputRequest[]) => readonly InputRequest[],
-  ) {
-    const queue = channel.state.promptQueue ?? [];
-    const updated = next(queue);
-    channel.state.promptQueue = updated;
-    const [shown] = updated;
-    if (shown !== undefined && shown.requestId !== queue[0]?.requestId) {
-      await show(channel, shown);
+  async function refresh(channel: TChannel, event: UnstampedMessageStreamEvent) {
+    // The session records the event only after its handlers run.
+    const first = firstOpenInput(foldSession(publishedProjection(channel), event))?.request;
+    if (first === undefined) {
+      delete channel.state.shownPromptId;
+      return;
     }
+    if (first.requestId === channel.state.shownPromptId) return;
+    if ((await show(channel, first)) === false) return;
+    channel.state.shownPromptId = first.requestId;
   }
-  const settle = (channel: TChannel, requestIds: readonly string[]) =>
-    update(channel, (queue) => queue.filter((request) => !requestIds.includes(request.requestId)));
 
   return {
     async "input.requested"(
-      event: { readonly requests: readonly InputRequest[] },
+      data: Extract<UnstampedMessageStreamEvent, { type: "input.requested" }>["data"],
       channel: TChannel,
     ): Promise<void> {
-      await update(channel, (queue) => {
-        const queued = new Set(queue.map((request) => request.requestId));
-        const all = [...queue, ...event.requests.filter((r) => !queued.has(r.requestId))];
-        return inReplyOrder(all, (request) => request);
-      });
+      await refresh(channel, { data, type: "input.requested" });
     },
     async "input.resolved"(
-      event: { readonly resolutions: readonly { readonly requestId: string }[] },
+      data: Extract<UnstampedMessageStreamEvent, { type: "input.resolved" }>["data"],
       channel: TChannel,
     ): Promise<void> {
-      await settle(
-        channel,
-        event.resolutions.map((resolution) => resolution.requestId),
-      );
+      await refresh(channel, { data, type: "input.resolved" });
     },
     async "approval.settled"(
-      event: { readonly requestId: string },
+      data: Extract<UnstampedMessageStreamEvent, { type: "approval.settled" }>["data"],
       channel: TChannel,
     ): Promise<void> {
-      await settle(channel, [event.requestId]);
+      await refresh(channel, { data, type: "approval.settled" });
     },
   };
+}
+
+/** The session's record as of the last event it published. */
+function publishedProjection(channel: object) {
+  // A handler's channel context carries the context of the step that publishes the event.
+  const ctx = (channel as { readonly ctx?: ContextReader }).ctx ?? contextStorage.getStore();
+  return ctx === undefined ? initialSessionProjection() : projectionFor(ctx, undefined);
 }

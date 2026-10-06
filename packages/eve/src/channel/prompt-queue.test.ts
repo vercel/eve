@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { promptQueueEvents, type PromptQueueState } from "#channel/prompt-queue.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { enterSessionProjection, recordPublishedEvent } from "#harness/session-machine/current.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { InputRequest } from "#shared/input.js";
+
+const AT = { sequence: 0, stepIndex: 0, turnId: "turn_0" };
 
 function question(requestId: string): InputRequest {
   return {
@@ -13,23 +18,63 @@ function question(requestId: string): InputRequest {
   };
 }
 
+function requested(...requests: InputRequest[]): UnstampedMessageStreamEvent {
+  return { data: { requests, ...AT }, type: "input.requested" };
+}
+
+function resolved(requestId: string): UnstampedMessageStreamEvent {
+  return {
+    data: { resolutions: [{ kind: "question", outcome: "answered", requestId }], ...AT },
+    type: "input.resolved",
+  };
+}
+
+/** Publishes `events` as a session does: each handler runs, then the session records it. */
+async function publish(
+  show: (channel: unknown, request: InputRequest) => Promise<boolean | void>,
+  events: readonly UnstampedMessageStreamEvent[],
+) {
+  const handlers = promptQueueEvents(show) as Record<
+    string,
+    (data: unknown, channel: { state: PromptQueueState }) => Promise<void>
+  >;
+  const channel: { state: PromptQueueState } = { state: {} };
+  const ctx = new ContextContainer();
+  enterSessionProjection(ctx, undefined);
+  await contextStorage.run(ctx, async () => {
+    for (const event of events) {
+      await handlers[event.type]?.("data" in event ? event.data : undefined, channel);
+      recordPublishedEvent(ctx, event);
+    }
+  });
+}
+
 describe("promptQueueEvents", () => {
   it("shows a budget prompt ahead of a request already shown, then returns to it", async () => {
     const show = vi.fn(async (_channel: unknown, _request: InputRequest) => {});
-    const events = promptQueueEvents(show);
-    const channel: { state: PromptQueueState } = { state: {} };
-
-    await events["input.requested"]({ requests: [question("day")] }, channel);
-    await events["input.requested"](
-      { requests: [{ ...question("budget"), kind: "session-limit" }] },
-      channel,
-    );
-    await events["input.resolved"]({ resolutions: [{ requestId: "budget" }] }, channel);
-
+    await publish(show, [
+      requested(question("day")),
+      requested({ ...question("budget"), kind: "session-limit" }),
+      resolved("budget"),
+    ]);
     expect(show.mock.calls.map(([, request]) => request.requestId)).toEqual([
       "day",
       "budget",
       "day",
     ]);
+  });
+
+  it("never shows a request again once it closed, even when it is requested again", async () => {
+    const show = vi.fn(async (_channel: unknown, _request: InputRequest) => {});
+    await publish(show, [requested(question("day")), resolved("day"), requested(question("day"))]);
+    expect(show.mock.calls.map(([, request]) => request.requestId)).toEqual(["day"]);
+  });
+
+  it("tries a request it could not show again on the next event", async () => {
+    const show = vi
+      .fn(async (_channel: unknown, _request: InputRequest): Promise<boolean> => true)
+      .mockResolvedValueOnce(false);
+    await publish(show, [requested(question("day")), requested(question("time"))]);
+    expect(show.mock.calls.map(([, request]) => request.requestId)).toEqual(["day", "day"]);
   });
 });

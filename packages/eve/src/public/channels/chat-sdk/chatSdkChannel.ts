@@ -384,7 +384,7 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
   >[1];
 
   async function showPrompt(channel: EventChannel, request: InputRequest) {
-    if (!channel.thread) return;
+    if (!channel.thread) return false;
     const posted = await channel.thread.post(renderInputRequests([request], inputActionPrefix));
     if (!posted.id || channel.state.editSupported === false) return;
     channel.state.pendingInputCards = {

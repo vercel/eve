@@ -6,6 +6,7 @@ import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.j
 import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
+import { enterSessionProjection, recordPublishedEvent } from "#harness/session-machine/current.js";
 import { SessionKey } from "#context/keys.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -84,6 +85,12 @@ function callEvent(
   ctx: any,
 ): Promise<UnstampedMessageStreamEvent> {
   return contextStorage.run(stubAlsContext, () => callAdapterEventHandler(adapter, event, ctx));
+}
+
+/** Delivers `event` as a session publishes it: the handler runs, then the session records it. */
+async function publishEvent(adapter: ChannelAdapter, event: UnstampedMessageStreamEvent, ctx: any) {
+  await callEvent(adapter, event, ctx);
+  recordPublishedEvent(ctx.ctx, event);
 }
 
 function makeEvent<T extends UnstampedMessageStreamEvent["type"]>(
@@ -913,9 +920,12 @@ describe("chatSdkChannel", () => {
     const channelAdapter = withState(getAdapter(bridge.channel), {
       thread: serializedThread(),
     });
-    const ctx = buildAdapterContext(channelAdapter, stubAccessor());
+    const accessor = stubAccessor();
+    const ctx = buildAdapterContext(channelAdapter, accessor);
+    // The channel reads the session's record of what it published.
+    enterSessionProjection(accessor, undefined);
 
-    await callEvent(
+    await publishEvent(
       channelAdapter,
       makeEvent("input.requested", {
         requests: [
@@ -954,7 +964,7 @@ describe("chatSdkChannel", () => {
     ]);
 
     // A reply can only answer the request it sees, so the next one waits its turn.
-    await callEvent(
+    await publishEvent(
       channelAdapter,
       makeEvent("input.resolved", {
         resolutions: [{ kind: "question", outcome: "answered", requestId: "request-1" }],

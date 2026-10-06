@@ -5,6 +5,7 @@ import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.j
 import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
+import { enterSessionProjection, recordPublishedEvent } from "#harness/session-machine/current.js";
 import { SessionKey } from "#context/keys.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -54,6 +55,12 @@ function callEvent(
   ctx: any,
 ): Promise<UnstampedMessageStreamEvent> {
   return contextStorage.run(stubAlsContext, () => callAdapterEventHandler(adapter, event, ctx));
+}
+
+/** Delivers `event` as a session publishes it: the handler runs, then the session records it. */
+async function publishEvent(adapter: ChannelAdapter, event: UnstampedMessageStreamEvent, ctx: any) {
+  await callEvent(adapter, event, ctx);
+  recordPublishedEvent(ctx.ctx, event);
 }
 
 function makeEvent<T extends UnstampedMessageStreamEvent["type"]>(
@@ -685,9 +692,12 @@ describe("twilioChannel() default event handlers", () => {
       ),
       { from: "+15551234567", lastCallSid: null, lastMessageSid: "SM123", to: "+15557654321" },
     );
-    const ctx = buildAdapterContext(adapter, stubAccessor());
+    const accessor = stubAccessor();
+    const ctx = buildAdapterContext(adapter, accessor);
+    // The channel reads the session's record of what it published.
+    enterSessionProjection(accessor, undefined);
 
-    await callEvent(
+    await publishEvent(
       adapter,
       makeEvent("input.requested", {
         requests: [
@@ -726,7 +736,7 @@ describe("twilioChannel() default event handlers", () => {
       "Approve Deploy release?\n\n1. Approve\n2. Cancel\n\nReply with a number to choose.",
     ]);
 
-    await callEvent(
+    await publishEvent(
       adapter,
       makeEvent("approval.settled", {
         outcome: "approved",
@@ -743,7 +753,7 @@ describe("twilioChannel() default event handlers", () => {
     );
 
     // The batch resolving later reports both requests again; nothing more is sent.
-    await callEvent(
+    await publishEvent(
       adapter,
       makeEvent("input.resolved", {
         resolutions: [

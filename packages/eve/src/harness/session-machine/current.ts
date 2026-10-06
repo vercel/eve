@@ -10,8 +10,15 @@ import type { MessageStreamEvent, UnstampedMessageStreamEvent } from "#protocol/
 import { SESSION_PROJECTION_STATE_KEY, storedProjection } from "./view.js";
 
 // A step-local holder for the projection as the step publishes. It survives provider scope
-// resets but never serializes with context; the step saves it into session state.
-const liveProjections = new WeakMap<ContextReader, { projection: SessionProjection }>();
+// resets but never serializes with context; the step saves it into session state. Rooted on
+// `globalThis`, like the context key registry, so every bundled copy of eve in a step, such as
+// a channel's, reads the same one.
+const LIVE_PROJECTIONS_GLOBAL_KEY = Symbol.for("eve.live-session-projections");
+type LiveProjectionsGlobal = typeof globalThis & {
+  [LIVE_PROJECTIONS_GLOBAL_KEY]?: WeakMap<ContextReader, { projection: SessionProjection }>;
+};
+const liveProjections = ((globalThis as LiveProjectionsGlobal)[LIVE_PROJECTIONS_GLOBAL_KEY] ??=
+  new WeakMap());
 
 export function enterSessionProjection(
   ctx: ContextReader,
