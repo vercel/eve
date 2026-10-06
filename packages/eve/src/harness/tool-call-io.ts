@@ -1,5 +1,6 @@
-import { asSchema } from "ai";
+import { asSchema, TypeValidationError } from "ai";
 
+import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import {
   authorizationPendingModelText,
   isAuthorizationPendingModelOutput,
@@ -8,13 +9,19 @@ import { resolveToolCallInputObject } from "#harness/coordination.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { normalizeToolModelOutput, type ToolModelOutputValue } from "#harness/tool-model-output.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { isObject } from "#shared/guards.js";
 import type { JsonObject } from "#shared/json.js";
 import { toModelSchema } from "#tools/schema.js";
 
 /** The result of checking one tool call's input the way a model-issued call is checked. */
 export type ToolCallInputCheck =
   | { readonly kind: "valid"; readonly value: JsonObject }
-  | { readonly kind: "invalid"; readonly message: string }
+  | {
+      readonly kind: "invalid";
+      /** What is wrong with the input, for a caller that reports it in its own words. */
+      readonly issues: readonly StandardSchemaV1.Issue[];
+      readonly message: string;
+    }
   | { readonly kind: "threw"; readonly error: unknown };
 
 /**
@@ -31,10 +38,7 @@ export async function checkToolCallInput(
   try {
     value = resolveToolCallInputObject(input, { callId, toolName: definition.name });
   } catch (error) {
-    return {
-      kind: "invalid",
-      message: `Invalid input for tool "${definition.name}": ${toErrorMessage(error)}`,
-    };
+    return invalidInput(definition.name, error);
   }
   let result: Awaited<ReturnType<NonNullable<ReturnType<typeof asSchema>["validate"]>>>;
   try {
@@ -48,10 +52,27 @@ export async function checkToolCallInput(
   }
   return result.success
     ? { kind: "valid", value: result.value as JsonObject }
-    : {
-        kind: "invalid",
-        message: `Invalid input for tool "${definition.name}": ${toErrorMessage(result.error)}`,
-      };
+    : invalidInput(definition.name, result.error);
+}
+
+function invalidInput(toolName: string, error: unknown): ToolCallInputCheck {
+  return {
+    issues: schemaIssues(error),
+    kind: "invalid",
+    message: `Invalid input for tool "${toolName}": ${toErrorMessage(error)}`,
+  };
+}
+
+/** The schema's own issues; any other failure is reported as one issue. */
+function schemaIssues(error: unknown): readonly StandardSchemaV1.Issue[] {
+  const cause = TypeValidationError.isInstance(error) ? error.cause : undefined;
+  return Array.isArray(cause) && cause.every(isIssue)
+    ? cause
+    : [{ message: toErrorMessage(error) }];
+}
+
+function isIssue(value: unknown): value is StandardSchemaV1.Issue {
+  return isObject(value) && typeof value.message === "string";
 }
 
 /**
