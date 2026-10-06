@@ -1,3 +1,4 @@
+import { requireMockModel } from "@eve-e2e/config/mock-script";
 import { defineEval } from "eve/evals";
 
 const INVENTORY_TOOL = "petstore-approval__getInventory";
@@ -7,9 +8,7 @@ export default defineEval({
     "A connection's approval asks about the connection tool by its own name, and the call runs once approved.",
 
   async test(t) {
-    if (process.env.EVE_E2E_MODEL !== "mock") {
-      t.skip("Requires the deterministic mock model to issue the exact call.");
-    }
+    requireMockModel(t);
 
     const parked = await t.send("PETSTORE_APPROVAL_E2E");
     const session = parked.session;

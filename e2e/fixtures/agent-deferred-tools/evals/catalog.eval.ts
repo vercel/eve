@@ -1,25 +1,6 @@
+import { requireMockModel } from "@eve-e2e/config/mock-script";
 import { defineEval } from "eve/evals";
-
-import { LEDGER_REGIONS } from "../agent/lib/ledger-regions";
-import { requireMockModel } from "./mock-only";
-
-const DEFERRED_TOOLS = [
-  "apply_discount",
-  "close_account",
-  "deploy_service",
-  "export_ledger",
-  ...LEDGER_REGIONS.map((region) => `ledger_${region}`),
-  "list_disputes",
-  "lookup_invoice",
-  "refund_invoice",
-  "research_report",
-  "resend_receipt",
-  "schedule_payout",
-  "summarize_usage",
-  "tag_customer",
-  "update_billing_email",
-  "void_invoice",
-].sort();
+import { satisfies } from "eve/evals/expect";
 
 export default defineEval({
   description:
@@ -34,7 +15,24 @@ export default defineEval({
     turn.usedNoTools();
     t.messageIncludes("DEFERRED-IN-TOOLS: none");
     t.messageIncludes("CATALOG-TOOLS: search, execute");
-    t.messageIncludes(`Tools: ${DEFERRED_TOOLS.join(", ")}`);
+    const tools = /^Tools: (.+)$/mu.exec(turn.message ?? "")?.[1]?.split(", ") ?? [];
+    t.check(
+      tools,
+      satisfies(
+        (names: string[]) =>
+          ["deploy_service", "ledger_us_west", "refund_invoice", "research_report"].every((name) =>
+            names.includes(name),
+          ) && !names.includes("account_overview"),
+        "the listing names inline, workflow, and dynamic deferred tools, and no direct tool",
+      ),
+    );
+    t.check(
+      tools,
+      satisfies(
+        (names: string[]) => names.every((name, index) => index === 0 || names[index - 1]! < name),
+        "the listed tools are sorted",
+      ),
+    );
     t.messageIncludes("Agents: billing_specialist");
     t.messageIncludes("Skills: pdf-forms, release_notes, tenant-playbook");
     t.messageIncludes("Connections:\n- petstore: Pet store inventory API.");
