@@ -781,6 +781,81 @@ describe("compileAgentManifest source graph", () => {
     );
   });
 
+  it.each([
+    ["tools/search.ts", disableTool()],
+    [
+      "tools/execute.ts",
+      defineTool({ description: "Replacement.", execute: () => null, inputSchema: {} }),
+    ],
+  ])("rejects authored %s because the catalog tools are closed", async (logicalPath, entry) => {
+    const sourceRegistry = registry([
+      { logicalPath, loadNamespace: async () => ({ default: entry }) },
+    ]);
+
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow(`"agent/${logicalPath}" is reserved.`);
+  });
+
+  it("rejects a deferred provider tool, which the provider has to see", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "tools/web_search.ts",
+        loadNamespace: async () => ({
+          default: { ...webSearch({ provider: "exa" }), deferred: true },
+        }),
+      },
+    ]);
+
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow("Provider tools can't be deferred");
+  });
+
+  describe("connection name ownership", () => {
+    const linear = {
+      logicalPath: "connections/linear.ts",
+      loadNamespace: async () => ({
+        default: defineMcpClientConnection({
+          description: "Linear.",
+          url: "https://mcp.linear.example",
+        }),
+      }),
+    };
+    const tool = (name: string) => ({
+      logicalPath: `tools/${name}.ts`,
+      loadNamespace: async () => ({
+        default: defineTool({ description: name, execute: () => null, inputSchema: {} }),
+      }),
+    });
+
+    it.each([
+      [
+        "linear__sync",
+        'Tool "linear__sync" starts with "linear__", which belongs to connection "linear". Rename the tool file.',
+      ],
+      ["linear", 'Tool "linear" has the same name as connection "linear". Rename the tool file.'],
+    ])("rejects a tool named %s beside connection linear", async (name, message) => {
+      const sourceRegistry = registry([linear, tool(name)]);
+
+      await expect(
+        compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+      ).rejects.toThrow(message);
+    });
+
+    it("allows a convention prefix that no connection owns", async () => {
+      const sourceRegistry = registry([linear, tool("linearize"), tool("tenant__export")]);
+
+      const compiled = await compileAgentManifest(manifest(), {
+        sourceRegistries: [sourceRegistry],
+      });
+
+      expect(compiled.tools.map((entry) => entry.name)).toEqual(
+        expect.arrayContaining(["linearize", "tenant__export"]),
+      );
+    });
+  });
+
   it("projects a local subagent node once", async () => {
     let toolSourceIterations = 0;
     const child = createAgentSourceManifest({
