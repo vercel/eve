@@ -33,8 +33,7 @@ const {
   rebindMissingCompiledDynamicToolCallbacks,
   validateDurableDynamicToolCallbacks,
 } = await import("#context/dynamic-tool-lifecycle.js");
-const { buildDynamicTools, buildResponseAuthorizationTools, replayDynamicTools } =
-  await import("#context/build-dynamic-tools.js");
+const { buildDynamicTools, replayDynamicTools } = await import("#context/build-dynamic-tools.js");
 
 import { ContextContainer } from "#context/container.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
@@ -1500,7 +1499,7 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
     const ctx = createCtx();
     const executeFn = vi.fn(() => ({ data: "from-programmatic" }));
     const resolver = createResolver("fwk", ["session.started"], () => ({
-      search: createProgrammaticTool("programmatic search", executeFn),
+      lookup: createProgrammaticTool("programmatic search", executeFn),
     }));
 
     await dispatchDynamicToolEvent({
@@ -1516,13 +1515,13 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
 
     const tools = buildDynamicTools(ctx);
     expect(tools).toHaveLength(1);
-    expect(tools[0]!.name).toBe("search");
+    expect(tools[0]!.name).toBe("lookup");
 
     // Simulate step boundary — virtual context cleared, durable survives
 
     const replayedTools = buildDynamicTools(ctx);
     expect(replayedTools).toHaveLength(1);
-    expect(replayedTools[0]!.name).toBe("search");
+    expect(replayedTools[0]!.name).toBe("lookup");
 
     // Execute the replayed tool — the original closure is invoked
     await replayedTools[0]!.execute!({ query: "test" }, executeOptions);
@@ -1559,7 +1558,7 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
   it("framework and authored tools coexist in session scope", async () => {
     const ctx = createCtx();
     const frameworkResolver = createResolver("fwk", ["session.started"], () => ({
-      search: createProgrammaticTool("programmatic search"),
+      lookup: createProgrammaticTool("programmatic search"),
     }));
     const authoredResolver = createResolver("authored", ["session.started"], () => ({
       query: createReplayableTool("authored query"),
@@ -1577,7 +1576,7 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
 
     const tools = buildDynamicTools(ctx);
     expect(tools).toHaveLength(2);
-    expect(tools.map((t) => t.name).sort()).toEqual(["query", "search"]);
+    expect(tools.map((t) => t.name).sort()).toEqual(["lookup", "query"]);
   });
 
   it("single-entry programmatic tool uses slug as name", async () => {
@@ -1910,53 +1909,6 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
     getDynamicCallbackRegistry().delete("guarded");
   });
 
-  it("uses the first dynamic definition for response authorization", () => {
-    const ctx = createCtx();
-    registerTestCallback("guarded", "execute", () => null);
-    registerTestCallback("guarded", "approvalRequest", () => "user-approval");
-    registerTestCallback(
-      "guarded",
-      "approvalResponse",
-      async () => ({ status: "allowed" }) as const,
-    );
-    ctx.set(StepDynamicToolMetadataKey, [
-      {
-        callbacks: {
-          approvalRequest: { closure: {} },
-          approvalResponse: { closure: {} },
-          execute: { closure: {} },
-        },
-        description: "step",
-        entryKey: "step:guarded",
-        inputSchema: { type: "object" },
-        name: "guarded",
-        resolverSlug: "step",
-      },
-    ]);
-    ctx.set(SessionDynamicToolMetadataKey, [
-      {
-        callbacks: {
-          approvalRequest: { closure: {} },
-          approvalResponse: { closure: {} },
-          execute: { closure: {} },
-        },
-        description: "session",
-        entryKey: "session:guarded",
-        inputSchema: { type: "object" },
-        name: "guarded",
-        resolverSlug: "session",
-      },
-    ]);
-
-    const tools = buildResponseAuthorizationTools({
-      authoredTools: new Map(),
-      context: ctx,
-    });
-
-    expect(tools.get("guarded")?.description).toBe("step");
-    getDynamicCallbackRegistry().delete("guarded");
-  });
-
   it("rejects an untransformed tool atomically without resolver hydration", async () => {
     const logs = captureLogRecords();
     const ctx = createCtx();
@@ -2121,7 +2073,7 @@ describe("dynamic callback binding isolation", () => {
       const resolver = createResolver("conditional", ["session.started"], (_event, rawContext) => {
         const context = rawContext as { session: { id: string } };
         return {
-          search: variantTool(
+          lookup: variantTool(
             context.session.id === first.require(SessionIdKey) ? "guarded" : "open",
             "original",
           ),
@@ -2140,7 +2092,7 @@ describe("dynamic callback binding isolation", () => {
       if (cold) {
         clearDurableDynamicCallbacks(first.require(SessionIdKey));
         const changedCapture = createResolver("conditional", ["session.started"], () => ({
-          search: variantTool("guarded", "recaptured"),
+          lookup: variantTool("guarded", "recaptured"),
         }));
         await refreshDynamicSessionToolsForRuntimeRevision({
           ctx: restored,
@@ -2157,7 +2109,7 @@ describe("dynamic callback binding isolation", () => {
       });
       expect(tool!.approvalKey!({})).toBe("guarded");
       await expect(
-        resolveApprovalPolicy(tool!.approval!)(createApprovalContext({ toolName: "search" })),
+        resolveApprovalPolicy(tool!.approval!)(createApprovalContext({ toolName: "lookup" })),
       ).resolves.toBe("user-approval");
       expect(await tool!.toModelOutput!({})).toEqual({ type: "text", value: "guarded" });
       const approval = tool!.approval!;
@@ -2181,7 +2133,7 @@ describe("dynamic callback binding isolation", () => {
         ctx,
         resolvers: [
           createResolver(slug, ["session.started"], () => ({
-            search: variantTool(implementation, slug),
+            lookup: variantTool(implementation, slug),
           })),
         ],
         event: makeEvent("session.started"),
@@ -2201,7 +2153,7 @@ describe("dynamic callback binding isolation", () => {
         ctx,
         resolvers: [
           createResolver("shared-owner", [eventName], () => ({
-            search: variantTool(scope, scope),
+            lookup: variantTool(scope, scope),
           })),
         ],
         event: makeEvent(eventName),
@@ -2219,7 +2171,7 @@ describe("dynamic callback binding isolation", () => {
     const first = createCtx();
     const second = createCtx();
     const resolver = createResolver("conditional", ["session.started"], () => ({
-      search: variantTool("guarded", "original"),
+      lookup: variantTool("guarded", "original"),
     }));
     for (const ctx of [first, second]) {
       await dispatchDynamicToolEvent({
@@ -2247,7 +2199,7 @@ describe("dynamic callback binding isolation", () => {
     const first = createCtx();
     const second = createCtx();
     const resolver = createResolver("conditional", ["session.started"], () => ({
-      search: variantTool("guarded", "original"),
+      lookup: variantTool("guarded", "original"),
     }));
     for (const ctx of [first, second]) {
       await dispatchDynamicToolEvent({
@@ -2331,7 +2283,7 @@ describe("dynamic callback cache recovery", () => {
       const ctx = createCtx();
       const eventName = `${scope}.started`;
       const resolver = createResolver("evicted", [eventName], () => ({
-        search: createReplayableTool(),
+        lookup: createReplayableTool(),
       }));
       await dispatchDynamicToolEvent({
         ctx,
@@ -2341,7 +2293,7 @@ describe("dynamic callback cache recovery", () => {
       });
       ctx.set(SessionDynamicToolRuntimeRevisionKey, "stable");
       for (let index = 0; index < 1_024; index++) {
-        registerTestCallback("search", "execute", () => ({ wrong: true }), {
+        registerTestCallback("lookup", "execute", () => ({ wrong: true }), {
           sessionId: `cache-pressure-${index}`,
           scope,
           resolverSlug: "evicted",

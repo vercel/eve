@@ -146,12 +146,6 @@ describe("presentTool", () => {
     expect(presentTool("agent", { message: "Audit the auth flow.\nDetails…" }).title).toBe(
       "Delegate Audit the auth flow.",
     );
-    expect(presentTool("connection_search", { query: "linear issues" }).title).toBe(
-      "Search linear issues",
-    );
-    expect(
-      presentTool("connection_execute", { connection: "linear", tool: "list_issues" }).title,
-    ).toBe("Call linear.list_issues");
     expect(presentTool("final_output", { anything: true }).title).toBe("Return final output");
   });
 

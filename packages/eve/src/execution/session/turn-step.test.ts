@@ -263,7 +263,7 @@ function createTurnStepTestBundle(modelCallsPerStep?: number) {
     hookRegistry: createRuntimeHookRegistry([]),
     moduleMap: { nodes: {} },
     resolvedAgent: { config },
-    subagentRegistry: {},
+    subagentRegistry: { dynamicResolvers: [] },
     toolRegistry: {},
     turnAgent: TestTurnAgent,
   } as never;
@@ -3005,8 +3005,8 @@ describe("turnStep", () => {
         config: {},
         dynamicToolResolvers: [dynamicToolResolver],
       },
-      subagentRegistry: {},
-      toolRegistry: {},
+      subagentRegistry: { dynamicResolvers: [], preparedTools: [] },
+      toolRegistry: { toolsByName: new Map() },
       turnAgent: TestTurnAgent,
     } as never;
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);

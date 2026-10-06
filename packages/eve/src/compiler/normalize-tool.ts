@@ -115,6 +115,7 @@ export async function compileToolEntry(
     kind: "tool",
     definition: {
       availableInSubagents: entry.definition.availableInSubagents,
+      deferred: entry.definition.deferred,
       behavior:
         workflow === undefined
           ? entry.definition.behavior === undefined

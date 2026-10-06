@@ -304,15 +304,12 @@ export const defaultEvents: SlackChannelInternalEvents = {
   },
 
   // Calls in one step stream in one at a time, so the step keeps its first
-  // label, or the model's narration, and counts the rest. Calls a tool makes
-  // on the model's behalf, such as a connection tool, belong to their parent.
+  // label, or the model's narration, and counts the rest.
   async "actions.requested"(event, channel, _ctx) {
     const narration = channel.state.pendingToolCallMessage;
     channel.state.pendingToolCallMessage = null;
     const actions = event.actions.filter(
-      (action) =>
-        action.kind !== "tool-call" ||
-        (!isTaskControlTool(action.toolName) && action.parentCallId === undefined),
+      (action) => action.kind !== "tool-call" || !isTaskControlTool(action.toolName),
     );
     if (!narration && actions.length === 0) return;
     const stream = stepStream(channel.state, event.turnId, event.stepIndex);

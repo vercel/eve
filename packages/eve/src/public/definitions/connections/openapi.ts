@@ -26,8 +26,8 @@ export type OpenAPISpecSource = string | Record<string, unknown>;
  * `"vercel"`.
  *
  * Each operation in the document becomes a connection tool the model can
- * find with `connection_search` and call with `connection_execute`; events
- * report the call as `vercel__getProjects`. The tool name is the operation's
+ * find with `search` and call with `execute` as `vercel__getProjects`, the
+ * name events report the call under. The tool name is the operation's
  * `operationId`; operations without one get a deterministic synthesized
  * name (`<method>_<sanitized-path>`).
  *
@@ -55,8 +55,8 @@ export interface OpenAPIConnectionDefinition {
   /**
    * Human-readable summary of the connection and its operations.
    *
-   * The model sees it in the connection listing eve announces, so it
-   * can choose which connection to search with `connection_search`.
+   * The model sees it in the catalog listing eve announces, so it can
+   * choose which connection to search.
    */
   readonly description: string;
   /**
@@ -109,9 +109,8 @@ export interface OpenAPIConnectionDefinition {
    */
   toolCall?: ConnectionToolCallDefinition;
   /**
-   * Operation filter keyed on `operationId`. When set,
-   * `connection_search` returns and `connection_execute` calls only
-   * operations whose id passes the filter.
+   * Operation filter keyed on `operationId`. When set, the model can find
+   * and call only operations whose id passes the filter.
    *
    * Specify exactly one of `allow` or `block`. Mirrors `tools` on MCP
    * connections, but names operations rather than tools.

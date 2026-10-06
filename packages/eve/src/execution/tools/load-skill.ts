@@ -41,7 +41,7 @@ async function executeLoadSkillTool(args: LoadSkillInput): Promise<unknown> {
   if (connectionName === undefined) throw new Error(message);
   throw new Error(
     `${message} "${connectionName}" is a connection, not a skill. ` +
-      `Find its tools with connection_search and connection "${connectionName}", then call them with connection_execute.`,
+      `Find its tools with search and connection "${connectionName}", then call them with execute.`,
   );
 }
 

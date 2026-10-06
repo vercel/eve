@@ -7,6 +7,7 @@ import type {
 import type { ScheduleDefinition, ScheduleRunHandler } from "#public/definitions/schedule.js";
 import type { SkillDefinition, SkillFileContent } from "#public/definitions/skill.js";
 import {
+  expectAgentToolExposure,
   expectBoolean,
   expectFunction,
   expectObjectRecord,
@@ -118,7 +119,7 @@ export function normalizeAgentDefinition(
   }
 
   if (record.tool !== undefined) {
-    definition.tool = expectBoolean(record.tool, message);
+    definition.tool = expectAgentToolExposure(record.tool, message);
   }
 
   if (record.limits !== undefined) {

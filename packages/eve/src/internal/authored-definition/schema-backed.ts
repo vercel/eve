@@ -106,6 +106,11 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   }
   if (isWebSearchToolDefinition(value)) {
     const record = expectObjectRecord(value, message);
+    if (record.deferred !== undefined) {
+      throw new Error(
+        `${message} Provider tools can't be deferred: the provider has to see their definition. Remove "deferred".`,
+      );
+    }
     expectOnlyKnownKeys(record, ["kind", "provider"], message);
     const provider = expectString(record.provider, message);
     if (provider !== "exa" && provider !== "parallel" && provider !== "browserbase") {
@@ -132,6 +137,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
     record,
     [
       "availableInSubagents",
+      "deferred",
       "endsTurn",
       "label",
       "auth",
@@ -164,6 +170,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
       record.availableInSubagents === undefined
         ? undefined
         : expectBoolean(record.availableInSubagents, message),
+    deferred: record.deferred === undefined ? undefined : expectBoolean(record.deferred, message),
     description: expectString(record.description, message),
     endsTurn:
       record.endsTurn === undefined || typeof record.endsTurn === "boolean"

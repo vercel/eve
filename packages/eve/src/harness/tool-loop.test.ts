@@ -8938,20 +8938,6 @@ describe("createToolLoopHarness", () => {
         "You are a test assistant.",
         "You are a test assistant.",
       ]);
-      expect(firstPrompt.tools).toEqual([
-        {
-          description: "Adds numbers",
-          inputSchema: { type: "object" },
-          name: "add",
-          providerOptions: undefined,
-        },
-        {
-          description: "Looks up a saved result",
-          inputSchema: { type: "object" },
-          name: "lookup",
-          providerOptions: undefined,
-        },
-      ]);
       expect(modelCalls.map((call) => call.tools)).toEqual([
         firstPrompt.tools,
         firstPrompt.tools,

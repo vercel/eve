@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { renderToolSignature } from "./tool-signature.js";
+import { renderToolSignature } from "./signature.js";
 
 describe("renderToolSignature", () => {
   it.each([

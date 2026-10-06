@@ -6,6 +6,7 @@ import {
   type RemoteAgentUrl,
 } from "#public/definitions/remote-agent.js";
 import { normalizePublicRoutePrefix } from "#shared/public-route-prefix.js";
+import type { AgentToolExposure } from "#shared/agent-definition.js";
 
 const WORKSPACE_AGENT_NAME = Symbol.for("eve.workspace-agent.name");
 
@@ -28,10 +29,12 @@ export interface WorkspaceAgentDefinition {
   /** Name of the peer workspace member, such as `research`. */
   readonly name: string;
   /**
-   * Whether eve exposes this workspace peer to the parent model as a tool.
-   * Defaults to `true`; `false` keeps it callable from workflow tools.
+   * How eve exposes this workspace peer to the parent model: `true` lists it
+   * as a tool, `"deferred"` makes it a catalog entry the model finds with
+   * `search` and calls with `execute`, and `false` keeps it callable only from
+   * workflow tools. Defaults to `true`.
    */
-  readonly tool?: boolean;
+  readonly tool?: AgentToolExposure;
   /** Overrides environment-aware workspace routing and service authentication. */
   readonly transport?: WorkspaceAgentTransport;
 }

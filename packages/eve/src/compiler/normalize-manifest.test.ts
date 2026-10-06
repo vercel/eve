@@ -217,7 +217,6 @@ describe("compileAgentManifest source graph", () => {
 
     expect(compiled.config.defaultTools).toBe(false);
     expect(compiled.tools.map((tool) => tool.name).sort()).toEqual(["bash", "weather"]);
-    expect(compiled.dynamicTools.map((tool) => tool.slug)).toEqual(["connection_tools"]);
     expect(compiled.tools.find((tool) => tool.name === "bash")?.description).toBe(
       "Application-owned shell replacement.",
     );
@@ -230,23 +229,6 @@ describe("compileAgentManifest source graph", () => {
         )
         .map((entry) => entry.source.logicalPath),
     ).toEqual(["tools/bash.ts"]);
-  });
-
-  it.each([
-    ["tools/connection_search.ts", disableTool()],
-    [
-      "tools/connection_execute.ts",
-      defineTool({ description: "Replacement.", execute: () => null, inputSchema: {} }),
-    ],
-    ["tools/connection_tools.ts", disableTool()],
-  ])("rejects authored %s because the connection tools are closed", async (logicalPath, entry) => {
-    const sourceRegistry = registry([
-      { logicalPath, loadNamespace: async () => ({ default: entry }) },
-    ]);
-
-    await expect(
-      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
-    ).rejects.toThrow(`"agent/${logicalPath}" is reserved.`);
   });
 
   it("allows disableTool for the root agent tool", async () => {

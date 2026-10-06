@@ -61,7 +61,6 @@ export interface AgentActionTraceState {
   readonly kind: InstrumentationToolCallKind;
   readonly name: string;
   readonly parent: InstrumentationTraceContext;
-  readonly parentCallId?: string;
   readonly rootSessionId: string;
   readonly sessionId: string;
   readonly spanId: string;

@@ -17,6 +17,8 @@ export interface HarnessToolDefinition {
   readonly label?: InternalToolLabelDefinition;
   readonly approvalKey?: (toolInput: Readonly<Record<string, unknown>>) => string;
   readonly behavior?: PreparedToolBehavior;
+  /** Kept out of the model's tool list; the model reaches it through `search` and `execute`. */
+  readonly deferred?: boolean;
   readonly description: string;
   /** A successful call ends the turn without a final reply; see `ToolDefinition.endsTurn`. */
   readonly endsTurn?: InternalToolDefinition["endsTurn"];
