@@ -336,10 +336,14 @@ function comparableEvent(event: InstrumentationEvent) {
 
 beforeEach(() => {
   exporter = new InMemorySpanExporter();
+  // Content is captured for a private audience only in development, the
+  // environment `runInConversation` declares; the direct call reads it from here.
+  vi.stubEnv("EVE_DEV", "1");
 });
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   await runtime?.shutdown();
   runtime = undefined;
   apiTrace.disable();

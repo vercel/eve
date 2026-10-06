@@ -125,6 +125,8 @@ function useTracing(tracePolicy?: TraceCapturePolicy, capturesContent = false): 
 }
 
 beforeEach(() => {
+  // Content is captured for a private audience only in development.
+  vi.stubEnv("EVE_DEV", "1");
   exporter = new InMemorySpanExporter();
   provider = new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] });
   apiContext.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
@@ -133,6 +135,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await provider.shutdown();
   apiTrace.disable();
   apiContext.disable();
