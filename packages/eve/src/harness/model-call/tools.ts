@@ -83,9 +83,11 @@ export function endsTurnTools(catalog: StepCatalog, applies: boolean): EndsTurnT
 /** The names of the entries eve provides, which tracing marks as framework tools. */
 export function frameworkToolNames(catalog: StepCatalog): ReadonlySet<string> {
   return new Set(
-    [...catalog.advertised.values(), ...catalog.entries.values(), catalog.get(SKILL_ENTRY_NAME)]
-      .filter((definition) => definition?.frameworkTool === true)
-      .map((definition) => definition!.name),
+    [
+      ...catalog.advertised.values(),
+      ...catalog.entries.values(),
+      catalog.get(SKILL_ENTRY_NAME),
+    ].flatMap((definition) => (definition?.frameworkTool === true ? [definition.name] : [])),
   );
 }
 
