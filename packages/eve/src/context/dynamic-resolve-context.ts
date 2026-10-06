@@ -2,7 +2,9 @@ import type { ModelMessage } from "ai";
 
 import type { DynamicResolveContext } from "#dynamic/definition.js";
 import type { AlsContext } from "#context/container.js";
+import { createAgentModelSelection } from "#context/agent-model-selection.js";
 import { getEffectiveModelSelection } from "#context/effective-model.js";
+import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import {
   AuthKey,
   ChannelInstrumentationKey,
@@ -10,7 +12,7 @@ import {
   InitiatorAuthKey,
   ContinuationTokenKey,
 } from "#context/keys.js";
-import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getAdapterKind } from "#channel/adapter.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
 
@@ -35,7 +37,13 @@ export function buildResolveContext(
   const effectiveModel = getEffectiveModelSelection(ctx);
 
   return {
-    model: effectiveModel === null ? null : { id: effectiveModel.reference.id },
+    model:
+      effectiveModel === null
+        ? null
+        : createAgentModelSelection({
+            ...effectiveModel,
+            nodeId: ctx.get(BundleKey)?.nodeId ?? ROOT_COMPILED_AGENT_NODE_ID,
+          }),
     session: {
       id: sessionId,
       auth: {

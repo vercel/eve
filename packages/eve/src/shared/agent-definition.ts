@@ -3,6 +3,7 @@ import type { JsonObject } from "#shared/json.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import {
   isDynamicSentinel,
+  type AgentModelSelection,
   type DynamicResolveContext,
   type DynamicSentinel,
 } from "#dynamic/definition.js";
@@ -375,6 +376,16 @@ export type PublicAgentDefinition = PublicAgentDefinitionBase &
     | {
         /** Resolver that must select a concrete model before model-dependent work. */
         readonly model: PublicAgentDynamicModelDefinition;
+        readonly modelContextWindowTokens?: never;
+        readonly modelOptions?: never;
+      }
+    | {
+        /**
+         * The resolver's `ctx.model`, reused as-is with its provider and
+         * context window. Only dynamic subagents may return it; `agent.ts`
+         * rejects it.
+         */
+        readonly model: AgentModelSelection;
         readonly modelContextWindowTokens?: never;
         readonly modelOptions?: never;
       }

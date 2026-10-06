@@ -90,7 +90,7 @@ async function loadSourceBackedRuntimeModelReference(
     definition: reference.source,
     kindLabel: `runtime model "${reference.id}"`,
     moduleMap: scope.moduleMap,
-    nodeId: scope.nodeId,
+    nodeId: reference.sourceNodeId ?? scope.nodeId,
   });
   const normalizedDefinition = normalizeAgentDefinition(
     definition,
@@ -104,7 +104,10 @@ async function loadSourceBackedRuntimeModelReference(
     );
   }
 
-  if (isDynamicModelDefinition(model)) {
+  if (
+    isDynamicModelDefinition(model) ||
+    (typeof model !== "string" && !isRuntimeLanguageModel(model))
+  ) {
     throw new Error(
       `Expected the authored agent config export "${reference.source.exportName ?? "default"}" from "${reference.source.logicalPath}" to provide a static runtime model.`,
     );
@@ -145,6 +148,9 @@ export async function loadDynamicRuntimeModelDefinition(input: {
 
   return authoredModel;
 }
+
+export const DURABLE_PROVIDER_OBJECT_ERROR =
+  'Dynamic model selection returned a provider object, but durable model selections must be serializable. Return a model id string, or use a "step.started" model resolver.';
 
 export async function resolveRuntimeModelSelection(input: {
   readonly catalog?: RuntimeModelCatalog;
@@ -190,9 +196,7 @@ export async function resolveRuntimeModelSelection(input: {
 
   validateRuntimeLanguageModel(selectedModel);
   if (input.durability === "durable") {
-    throw new Error(
-      'Dynamic model selection returned a provider object, but durable model selections must be serializable. Return a model id string, or use a "step.started" model resolver.',
-    );
+    throw new Error(DURABLE_PROVIDER_OBJECT_ERROR);
   }
 
   const formattedId = formatLanguageModelGatewayId(selectedModel);

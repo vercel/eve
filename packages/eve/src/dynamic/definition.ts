@@ -39,6 +39,20 @@ export const ALLOWED_DYNAMIC_CONNECTION_EVENTS: ReadonlySet<string> = new Set<Dy
 );
 
 /**
+ * Effective model of the current agent, as exposed to dynamic resolvers.
+ *
+ * Return it as a dynamic subagent's `model` to run that subagent on the same
+ * model, including authored provider instances. Only values received through
+ * `ctx.model` are accepted.
+ */
+export interface AgentModelSelection {
+  /** Model id, e.g. `"openai/gpt-5.5"`. */
+  readonly id: string;
+  /** Context window of the model, in tokens, when known. */
+  readonly contextWindowTokens?: number;
+}
+
+/**
  * Context passed to a dynamic resolver's event handler.
  *
  * Exposes read-only session identity, auth, and channel metadata. State
@@ -48,8 +62,11 @@ export const ALLOWED_DYNAMIC_CONNECTION_EVENTS: ReadonlySet<string> = new Set<Dy
 export interface DynamicResolveContext {
   /** Active cancellation signal when resolving a dynamic model. */
   readonly abortSignal?: AbortSignal;
-  /** Effective model for this resolver, or `null` before dynamic model selection. */
-  readonly model: { readonly id: string } | null;
+  /**
+   * Effective model for this resolver, or `null` before dynamic model selection.
+   * A dynamic subagent can return it as its `model` to run on the same model.
+   */
+  readonly model: AgentModelSelection | null;
   readonly session: {
     readonly id: string;
     readonly auth: SessionAuth;

@@ -76,14 +76,24 @@ export function defineSelfModificationAgent(
 ): DynamicSentinel<DynamicSubagentDefinition | null> {
   const resolve = async (_event: unknown, ctx: DynamicResolveContext) => {
     const bound = selfModification.config;
-    const configuredModel = options.model ?? bound.model ?? ctx.model?.id;
+    const explicitModel = options.model ?? bound.model;
+    const configuredModel = explicitModel ?? ctx.model ?? undefined;
     const reasoning =
       options.reasoning ??
       bound.reasoning ??
       (configuredModel === undefined ? DEFAULT_AGENT_REASONING : undefined);
     const config = resolveSelfModificationConfig(options.config ?? bound);
     const mode = resolveSelfModificationMode(config);
-    const model = configuredModel ?? FALLBACK_SELF_MODIFICATION_MODEL;
+    // Returning `ctx.model` itself keeps the parent's provider and context
+    // window; rebuilding the model from its id would route it through Gateway.
+    const childAgent = (description: string) =>
+      explicitModel === undefined && ctx.model !== null
+        ? defineAgent({ description, model: ctx.model, reasoning })
+        : defineAgent({
+            description,
+            model: explicitModel ?? FALLBACK_SELF_MODIFICATION_MODEL,
+            reasoning,
+          });
     const description = renderDescription([
       "Delegate here immediately when the user asks to change the self-modification subagent's model, reasoning, or configuration. Also delegate when the user asks to change this eve agent or its authored source.",
       sourceDelegation,
@@ -97,7 +107,7 @@ export function defineSelfModificationAgent(
     ]);
     if (mode === "local") {
       if (getLocalDevCapability() === undefined) return null;
-      return defineAgent({ description, model, reasoning });
+      return childAgent(description);
     }
     if (mode !== "deployed" || config.deployed === undefined) return null;
     if (config.deployed.credentials.kind === "pat" && !hasGitHubCredential()) return null;
@@ -113,7 +123,7 @@ export function defineSelfModificationAgent(
     } catch {
       return null;
     }
-    return defineAgent({ description, model, reasoning });
+    return childAgent(description);
   };
 
   return defineDynamic({

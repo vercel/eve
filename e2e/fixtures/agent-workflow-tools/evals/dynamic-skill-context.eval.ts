@@ -86,7 +86,7 @@ export default (["direct", "waiting"] as const).map((mode) =>
         const label = `${event}[${index}]`;
         const expected: Omit<typeof context, "messages"> = {
           abortSignal: null,
-          model: { id: "eve-mock/model" },
+          model: { id: "eve-mock/model", contextWindowTokens: 1_000_000 },
           session: {
             id: started.sessionId,
             auth: {

@@ -6,7 +6,7 @@ import type {
 import type { ExactDefinition } from "#public/definitions/exact.js";
 import type { RemoteAgentDefinition } from "#public/definitions/remote-agent.js";
 import { defineDynamic as defineDynamicBase } from "#dynamic/definition.js";
-import type { DynamicEvents, DynamicSentinel } from "#dynamic/definition.js";
+import type { AgentModelSelection, DynamicEvents, DynamicSentinel } from "#dynamic/definition.js";
 
 declare const DEFINED_AGENT: unique symbol;
 
@@ -52,7 +52,7 @@ export type DefinedAgent<TAgent extends AgentDefinition = AgentDefinition> = TAg
  */
 export type DynamicLocalSubagentDefinition = Extract<
   AgentDefinition,
-  { readonly model: PublicAgentStaticModelDefinition }
+  { readonly model: PublicAgentStaticModelDefinition | AgentModelSelection }
 > & { readonly description: string };
 
 /** Definition a dynamic subagent resolver may select at runtime. */

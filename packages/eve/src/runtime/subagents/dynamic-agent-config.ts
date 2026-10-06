@@ -1,12 +1,17 @@
+import { readAgentModelSelection } from "#context/agent-model-selection.js";
 import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
 import type { ContextAccessor } from "#context/key.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
-import { resolveRuntimeModelSelection } from "#runtime/agent/resolve-model.js";
+import {
+  DURABLE_PROVIDER_OBJECT_ERROR,
+  resolveRuntimeModelSelection,
+} from "#runtime/agent/resolve-model.js";
 import type { RuntimeModelCatalog } from "#runtime/agent/model-catalog.js";
 import {
   isDynamicModelDefinition,
   type AgentLimitsDefinition,
   type AgentReasoningDefinition,
+  type PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
 
 export interface DynamicSubagentAgentConfig {
@@ -57,13 +62,10 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
     tool?: boolean;
   } = {
     description: definition.description,
-    model: await normalizeDurableModelSelection({
+    model: await normalizeDynamicSubagentModel({
       catalog: input.catalog,
-      selection: {
-        model: definition.model,
-        modelContextWindowTokens: definition.modelContextWindowTokens,
-        modelOptions: definition.modelOptions,
-      },
+      definition,
+      message,
       state: input.state,
     }),
   };
@@ -100,6 +102,45 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
   }
 
   return config;
+}
+
+/**
+ * A `ctx.model` selection reuses the parent's stored reference, including its
+ * authored source and the node that holds it, so the subagent reaches the same
+ * provider. Live step-scoped provider instances cannot be stored and fail like
+ * any other non-serializable selection.
+ */
+async function normalizeDynamicSubagentModel(input: {
+  readonly catalog?: RuntimeModelCatalog;
+  readonly definition: ReturnType<typeof normalizeAgentDefinition>;
+  readonly message: string;
+  readonly state: ContextAccessor;
+}): Promise<DynamicSubagentModelReference> {
+  const { definition } = input;
+  const inherited = readAgentModelSelection(definition.model);
+  if (inherited === undefined) {
+    return await normalizeDurableModelSelection({
+      catalog: input.catalog,
+      selection: {
+        // Validated as a model id or provider object during selection.
+        model: definition.model as PublicAgentStaticModelDefinition,
+        modelContextWindowTokens: definition.modelContextWindowTokens,
+        modelOptions: definition.modelOptions,
+      },
+      state: input.state,
+    });
+  }
+  if (definition.modelContextWindowTokens !== undefined || definition.modelOptions !== undefined) {
+    throw new Error(
+      `${input.message} A "model" from ctx.model already carries its metadata; remove "modelContextWindowTokens" and "modelOptions".`,
+    );
+  }
+  if (inherited.model !== undefined) {
+    throw new Error(DURABLE_PROVIDER_OBJECT_ERROR);
+  }
+  // The subagent's own `reasoning` applies, as it does for a model id.
+  const { reasoning: _reasoning, ...reference } = inherited.reference;
+  return reference;
 }
 
 async function normalizeDurableModelSelection(input: {

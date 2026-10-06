@@ -83,18 +83,23 @@ export default defineDynamic({
 
       return defineAgent({
         description: "Analyze financial and accounting data.",
-        model: ctx.model ? ctx.model.id : "openai/gpt-5.5-mini",
+        model: ctx.model ?? "openai/gpt-5.5-mini",
       });
     },
   },
 });
 ```
 
-`ctx.model` is the parent's effective model when the resolver runs. In this
-example, this dynamic subagent uses the parent's effective model when it is
-available falls back to `openai/gpt-5.5-mini` if the parent has not selected
-one yet. The returned child config snapshots the model ID; a later parent
-model change does not retarget the child.
+`ctx.model` is the parent's effective model when the resolver runs, with its
+`id` and, when known, `contextWindowTokens`. In this example, the dynamic
+subagent runs on the parent's model when one is selected and falls back to
+`openai/gpt-5.5-mini` otherwise. Returning `ctx.model` itself, rather than
+`ctx.model.id`, keeps the parent's provider and context window, so it also
+works for provider instances authored in `agent.ts` and for models AI Gateway
+does not list. The child config snapshots that model; a later parent model
+change does not retarget the child. A provider instance selected by a
+`step.started` model resolver cannot be stored, so returning it fails; give
+the subagent an explicit model in that case.
 
 eve always compiles the subagent's filesystem resources, including its
 instructions, tools, skills, connections, sandbox, and nested subagents. It

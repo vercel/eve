@@ -23,7 +23,15 @@ export const BOOTSTRAP_RUNTIME_MODEL_ID = "eve-bootstrap-model";
  * Runtime-owned model identifier prepared for one harness turn.
  */
 export type RuntimeModelReference = Readonly<
-  InternalAgentModelDefinition & { reasoning?: AgentReasoningDefinition }
+  InternalAgentModelDefinition & {
+    reasoning?: AgentReasoningDefinition;
+    /**
+     * Agent node whose compiled modules hold `source`. Set when a dynamic
+     * subagent inherits a source-backed model from another node; otherwise
+     * the source resolves in the executing node.
+     */
+    sourceNodeId?: string;
+  }
 >;
 
 /**
