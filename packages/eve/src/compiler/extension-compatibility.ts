@@ -76,7 +76,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     current: 72,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 31, 32, 33, 52, 54,
-      60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72,
+      60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 72,
     ],
     dropped: {
       21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -112,6 +112,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       57: "Stream events gained task.started and task.settled, and input.requested, authorization events, and agent.started carry the taskId of the task they come from. The subagent.called, subagent.completed, subagent.started, and subagent.event stream events were removed; agent calls report task.started, task.settled, and agent.started.",
       58: "Approval response policies now run for Cancel as well as Approve; a policy written for Approve only could reject every Cancel.",
       59: "Approval response policies now run for Cancel as well as Approve; a policy written for Approve only could reject every Cancel.",
+      71: "AI SDK evaluation models became decision models; auto() accepts decision models only",
     },
   },
   channel: {
