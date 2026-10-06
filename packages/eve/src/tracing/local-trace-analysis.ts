@@ -138,13 +138,13 @@ function recordFor(operation: LocalTraceOperation, startTimeNs: bigint): TraceTi
     record.actionDurationMs = operation.actionDurationMs;
   if (category === "model") {
     const usage: Mutable<TraceTokenUsage> = {};
-    for (const [field, attribute] of Object.entries({
-      inputTokens: "agent.usage.input_tokens",
-      outputTokens: "agent.usage.output_tokens",
-      cacheReadTokens: "agent.usage.cache_read_tokens",
-      cacheWriteTokens: "agent.usage.cache_write_tokens",
-    })) {
-      const value = span.attributes[attribute];
+    for (const [field, [attribute, historicalAttribute]] of Object.entries({
+      inputTokens: ["gen_ai.usage.input_tokens", "agent.usage.input_tokens"],
+      outputTokens: ["gen_ai.usage.output_tokens", "agent.usage.output_tokens"],
+      cacheReadTokens: ["gen_ai.usage.cache_read.input_tokens", "agent.usage.cache_read_tokens"],
+      cacheWriteTokens: ["gen_ai.usage.cache_write.input_tokens", "agent.usage.cache_write_tokens"],
+    } as const)) {
+      const value = span.attributes[attribute] ?? span.attributes[historicalAttribute];
       if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
         usage[field as keyof TraceTokenUsage] = value;
       }

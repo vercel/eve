@@ -1139,8 +1139,6 @@ describe("exported agent telemetry contract", () => {
         "agent.run.id": "child",
         "gen_ai.usage.input_tokens": 10,
         "gen_ai.usage.output_tokens": 5,
-        "agent.usage.input_tokens": 10,
-        "agent.usage.output_tokens": 5,
       });
       expect(normalizeTraceForest(parsed, exported)).toEqual([
         "conversation original-conversation",

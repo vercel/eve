@@ -24,9 +24,11 @@ export function setAgentUsage(span: Span, usage: InstrumentationUsage): void {
   }
 }
 
-/** Applies standard GenAI token usage while retaining eve's compatibility attributes. */
+/** Applies standard GenAI token usage and retains eve's cost attribute. */
 export function setGenAiUsage(span: Span, usage: InstrumentationUsage): void {
-  setAgentUsage(span, usage);
+  if (usage.costUsd !== undefined) {
+    span.setAttribute(AGENT_USAGE_ATTRIBUTES.costUsd, usage.costUsd);
+  }
   if (usage.inputTokens !== undefined) {
     span.setAttribute("gen_ai.usage.input_tokens", usage.inputTokens);
   }

@@ -20,8 +20,12 @@ import { localTraceSpanCostUsd, type LocalTraceSummary } from "#tracing/local-tr
  */
 export function spanMetricChips(span: LocalTraceSpan): string[] {
   const chips: string[] = [];
-  const input = numberAttribute(span, "agent.usage.input_tokens");
-  const output = numberAttribute(span, "agent.usage.output_tokens");
+  const input =
+    numberAttribute(span, "gen_ai.usage.input_tokens") ??
+    numberAttribute(span, "agent.usage.input_tokens");
+  const output =
+    numberAttribute(span, "gen_ai.usage.output_tokens") ??
+    numberAttribute(span, "agent.usage.output_tokens");
   if (input !== undefined) chips.push(`↑${formatCompactTokenCount(input)}`);
   if (output !== undefined) chips.push(`↓${formatCompactTokenCount(output)}`);
   const cost = localTraceSpanCostUsd(span);

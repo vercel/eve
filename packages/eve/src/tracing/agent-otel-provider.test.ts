@@ -1470,8 +1470,8 @@ describe("createAgentOtelInstrumentation", () => {
     expect(turn.kind).toBe(SpanKind.INTERNAL);
     expect(turn.attributes).toMatchObject({
       "agent.name": "weather",
-      "agent.usage.input_tokens": 10,
-      "agent.usage.output_tokens": 5,
+      "gen_ai.usage.input_tokens": 10,
+      "gen_ai.usage.output_tokens": 5,
       "gen_ai.agent.name": "weather",
       "gen_ai.conversation.id": "session-1",
       "gen_ai.operation.name": "invoke_agent",
@@ -1495,6 +1495,16 @@ describe("createAgentOtelInstrumentation", () => {
       "gen_ai.usage.input_tokens": 10,
       "gen_ai.usage.output_tokens": 5,
     });
+    for (const span of [turn, model]) {
+      for (const key of [
+        "agent.usage.input_tokens",
+        "agent.usage.output_tokens",
+        "agent.usage.cache_read_tokens",
+        "agent.usage.cache_write_tokens",
+      ]) {
+        expect(span.attributes).not.toHaveProperty(key);
+      }
+    }
     expect(tool.attributes).toMatchObject({
       "agent.action.kind": "tool-call",
       "agent.action.name": "weather",

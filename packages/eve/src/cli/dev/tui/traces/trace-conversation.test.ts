@@ -58,8 +58,8 @@ function weatherTurn(): LocalTraceSpan[] {
     "gen_ai.request.model": "claude-test",
     "gen_ai.input.messages": messages,
     "ai.response.text": "Let me check.",
-    "agent.usage.input_tokens": 6200,
-    "agent.usage.output_tokens": 50,
+    "gen_ai.usage.input_tokens": 6200,
+    "gen_ai.usage.output_tokens": 50,
   });
   const action = span("d".repeat(16), "agent.action", 2100, 2400, turn.spanId, {
     "agent.action.name": "get_weather",
@@ -314,20 +314,23 @@ describe("buildConversationItems", () => {
     expect(items[0]?.error).toBe(true);
   });
 
-  it("keeps model spans that carry only token usage", () => {
-    const turn = span("a".repeat(16), "agent.turn", 0, 0, undefined, {});
-    const step = span("b".repeat(16), "agent.step", 10, 5000, turn.spanId, {});
-    const model = span("c".repeat(16), "ai.streamText.doStream", 20, 2000, step.spanId, {
-      "gen_ai.input.messages": JSON.stringify([
-        { parts: [{ content: "hi", type: "text" }], role: "user" },
-      ]),
-      "agent.usage.input_tokens": 100,
-      "agent.usage.output_tokens": 10,
-    });
-    const items = buildConversationItems(trace([turn, step, model]));
-    expect(items.map((item) => item.kind)).toEqual(["assistant"]);
-    expect(items[0]?.inputTokens).toBe(100);
-  });
+  it.each(["gen_ai.usage", "agent.usage"])(
+    "keeps model spans that carry only %s token usage",
+    (prefix) => {
+      const turn = span("a".repeat(16), "agent.turn", 0, 0, undefined, {});
+      const step = span("b".repeat(16), "agent.step", 10, 5000, turn.spanId, {});
+      const model = span("c".repeat(16), "ai.streamText.doStream", 20, 2000, step.spanId, {
+        "gen_ai.input.messages": JSON.stringify([
+          { parts: [{ content: "hi", type: "text" }], role: "user" },
+        ]),
+        [`${prefix}.input_tokens`]: 100,
+        [`${prefix}.output_tokens`]: 10,
+      });
+      const items = buildConversationItems(trace([turn, step, model]));
+      expect(items.map((item) => item.kind)).toEqual(["assistant"]);
+      expect(items[0]?.inputTokens).toBe(100);
+    },
+  );
 
   it("flags error tool calls", () => {
     const turn = span("a".repeat(16), "agent.turn", 0, 0, undefined, {});

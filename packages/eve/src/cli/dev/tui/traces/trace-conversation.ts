@@ -114,9 +114,13 @@ export function buildConversationItems(trace: LocalTrace): ConversationItem[] {
     if (isModelSpan(span)) {
       const text = stringAttribute(span, "ai.response.text");
       const reasoning = stringAttribute(span, "ai.response.reasoning");
-      const hasUsage =
-        numberAttribute(span, "agent.usage.input_tokens") !== undefined ||
-        numberAttribute(span, "agent.usage.output_tokens") !== undefined;
+      const inputTokens =
+        numberAttribute(span, "gen_ai.usage.input_tokens") ??
+        numberAttribute(span, "agent.usage.input_tokens");
+      const outputTokens =
+        numberAttribute(span, "gen_ai.usage.output_tokens") ??
+        numberAttribute(span, "agent.usage.output_tokens");
+      const hasUsage = inputTokens !== undefined || outputTokens !== undefined;
       const hasToolCalls = span.attributes["ai.response.tool_calls"] !== undefined;
       const isEmpty =
         (text === undefined || text.trim().length === 0) &&
@@ -131,9 +135,9 @@ export function buildConversationItems(trace: LocalTrace): ConversationItem[] {
           costUsd: stepCostUsd(span, byId),
           durationMs: spanDurationMs(span),
           error: span.statusCode === 2,
-          inputTokens: numberAttribute(span, "agent.usage.input_tokens"),
+          inputTokens,
           model: stringAttribute(span, "gen_ai.request.model"),
-          outputTokens: numberAttribute(span, "agent.usage.output_tokens"),
+          outputTokens,
           reasoning,
           span,
           subagent,

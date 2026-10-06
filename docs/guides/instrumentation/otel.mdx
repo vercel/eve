@@ -153,6 +153,10 @@ Use `gen_ai.tool.call.id` to correlate tool and approval spans. Tool failures us
 `error.type`. These attributes replace the duplicate `agent.action.call_id` and
 `agent.action.error.code` fields without changing trace schema version 4.
 
+Model and activation spans record token counts under `gen_ai.usage.*`, without
+duplicate `agent.usage.*` token fields. Step and tool spans retain `agent.usage.*`.
+Cost values remain unchanged.
+
 A remote child starts a separate trace with a root `invoke_agent` span. Its first
 turn links to the caller with `eve.link.type=agent.dispatch`. The receiving
 deployment applies its sampler. Queries for local dispatches must use
