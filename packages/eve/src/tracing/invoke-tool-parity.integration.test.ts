@@ -22,7 +22,6 @@ import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { buildToolSet } from "#harness/tools.js";
 import {
-  actionIdempotencyKey,
   turnIdempotencyKey,
   type InstrumentationEvent,
   type InstrumentationProviderDefinition,
@@ -37,6 +36,8 @@ import type { TraceCapturePolicy } from "#shared/trace-policy.js";
 import { defineJsonSchema } from "#tools/schema.js";
 import { installInstrumentationRuntime } from "#tracing/install-instrumentation-runtime.js";
 import { collectOtelPipeline, otel, otelIntegration } from "#tracing/otel-declaration.js";
+import { createActionResultEvent, createActionsRequestedEvent } from "#protocol/message.js";
+import type { JsonValue } from "#shared/json.js";
 
 /**
  * One tool, run by a model in a conversation and by `invokeTool`, must export
@@ -54,6 +55,19 @@ const ALLOWED_ATTRIBUTE_DIFFERENCES = new Set([
   "eve.channel.name",
   "eve.tool.invocation",
   "eve.tool.outcome",
+  // Durable calls carry the accepted action's identity and lifecycle metadata.
+  "agent.action.call_id",
+  "agent.action.kind",
+  "agent.action.name",
+  "agent.action.outcome",
+  "agent.action.error.code",
+  // Accepted failures use the durable error code; direct failures retain the thrown type.
+  "error.type",
+  "agent.framework.name",
+  "agent.framework.version",
+  "agent.step.attempt",
+  "agent.step.index",
+  "agent.turn.id",
   // Both spans carry it; run times differ by construction.
   "gen_ai.execute_tool.duration",
 ]);
@@ -178,8 +192,7 @@ function install(
 
 /**
  * Runs `toolName` the way a turn does: the model call gets the attempt's own
- * telemetry, so the AI SDK hook bridge publishes the tool events, inside an
- * action as the harness reports it.
+ * telemetry, with the harness's accepted action events owning the tool lifecycle.
  */
 async function runInConversation(toolName: string, modelInput: string): Promise<void> {
   // A fresh session per run: agent trace state is keyed by session and turn.
@@ -217,18 +230,26 @@ async function runInConversation(toolName: string, modelInput: string): Promise<
         { environment: "development", eveVersion: "test", hasInput: true, session: { sessionId } },
         async (step) => {
           const attempt = step.prepareAttempt({ attemptIndex: 0, stepIndex: 0, turnId: "turn_0" });
-          const scope = attempt.scope;
-          const actionKey = actionIdempotencyKey(sessionId, "turn_0", callId);
-          await hooks.publish({
-            callId,
-            idempotencyKey: actionKey,
-            input: { text: SECRET },
-            kind: "tool-call",
-            name: toolName,
-            scope,
-            type: "action.started",
-          });
-          await generateText({
+          const handleEvent = step.createHandleEvent({
+            getAttemptScope: () => attempt.scope,
+            handleEvent: async () => {},
+          })!;
+          await handleEvent(
+            createActionsRequestedEvent({
+              actions: [
+                {
+                  callId,
+                  input: modelInput === "" ? {} : JSON.parse(modelInput),
+                  kind: "tool-call",
+                  toolName,
+                },
+              ],
+              sequence: 0,
+              stepIndex: 0,
+              turnId: "turn_0",
+            }),
+          );
+          const result = await generateText({
             model: new MockLanguageModelV3({
               doGenerate: async () => ({
                 content: [{ input: modelInput, toolCallId: callId, toolName, type: "tool-call" }],
@@ -245,13 +266,28 @@ async function runInConversation(toolName: string, modelInput: string): Promise<
             telemetry: attempt.telemetry,
             tools: buildToolSet({ tools }),
           });
-          await hooks.publish({
-            idempotencyKey: actionKey,
-            outcome: "completed",
-            output: { output: {}, type: "result" },
-            scope,
-            type: "action.completed",
-          });
+          const output = result.content.find(
+            (part) => part.type === "tool-result" || part.type === "tool-error",
+          )!;
+          await handleEvent(
+            createActionResultEvent({
+              result: {
+                callId,
+                kind: "tool-result",
+                toolName,
+                output: (output.type === "tool-result"
+                  ? output.output
+                  : {
+                      code: "tool-execution-failed",
+                      message: (output.error as Error).message,
+                    }) as JsonValue,
+                isError: output.type === "tool-error",
+              },
+              sequence: 0,
+              stepIndex: 0,
+              turnId: "turn_0",
+            }),
+          );
           await attempt.complete();
         },
       );
@@ -304,13 +340,19 @@ function comparable(span: ReadableSpan) {
     exceptions: span.events
       .filter((event) => event.name === "exception")
       .map((event) => ({
-        message: event.attributes?.["exception.message"],
+        message: comparableErrorMessage(event.attributes?.["exception.message"]),
         type: event.attributes?.["exception.type"],
       })),
     kind: span.kind,
     name: span.name,
-    status: span.status,
+    status: { ...span.status, message: comparableErrorMessage(span.status.message) },
   };
+}
+
+function comparableErrorMessage(message: unknown): unknown {
+  // Durable failures serialize error text before restoring the accepted span.
+  if (typeof message === "string" && message.startsWith('"')) return JSON.parse(message);
+  return message;
 }
 
 function comparableEvent(event: InstrumentationEvent) {
@@ -323,10 +365,20 @@ function comparableEvent(event: InstrumentationEvent) {
     readonly scope: unknown;
   };
   const shape: Record<string, unknown> = { ...rest };
+  // Durable acceptance adds lifecycle metadata; direct calls have no persisted action.
+  for (const name of ["acceptedAtMs", "startedAtMs", "frameworkTool", "kind", "usage", "errorCode"])
+    delete shape[name];
   // Ids differ by construction, as on the span.
   if ("callId" in shape) shape.callId = "<call>";
-  // Run times differ by construction; both sides must report one.
-  if (typeof shape.durationMs === "number") shape.durationMs = "<ms>";
+  // Durable acceptance has no execute duration; the direct duration has its own assertion.
+  delete shape.durationMs;
+  if (shape.type === "tool.call.failed") {
+    shape.type = "tool.call.completed";
+    const output: Record<string, unknown> = { type: "error" };
+    if (shape.error !== undefined) output.error = shape.error;
+    shape.output = output;
+    delete shape.error;
+  }
   const output = shape.output as { readonly error?: unknown } | undefined;
   if (output?.error instanceof Error) {
     shape.output = { ...output, error: `${output.error.name}: ${output.error.message}` };
@@ -365,6 +417,12 @@ describe.each<Policy>(["record", "inputs only", "none"])(
       expect(viaInvoke.events).toEqual(conversation.events);
       expect(viaInvoke.nestedParent).toBe(conversation.nestedParent);
       if (toolName === "lookup") expect(viaInvoke.nestedParent).toBe(true);
+      if (toolName === "explode") {
+        expect(viaInvoke.raw.attributes["error.type"]).toBe(
+          policy === "record" ? "Error" : "_OTHER",
+        );
+        expect(conversation.raw.attributes["error.type"]).toBe("tool-execution-failed");
+      }
 
       // The policy applies the same way on both paths.
       const text = JSON.stringify(viaInvoke.span);
@@ -424,7 +482,7 @@ describe("invokeTool without declared OpenTelemetry", () => {
     expect(events.map(comparableEvent)).toEqual([
       { callId: "<call>", input: { text: SECRET }, toolName: "lookup", type: "tool.call.started" },
       {
-        durationMs: "<ms>",
+        outcome: "completed",
         output: { output: { echoed: SECRET }, type: "result" },
         type: "tool.call.completed",
       },

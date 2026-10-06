@@ -164,6 +164,7 @@ async function traced(
   const spanName = `execute_tool ${input.toolName}`;
   const parent = withChannelAudience(base, conversation.audience);
   const attributes: Attributes = {
+    "agent.tool.is_framework": false,
     "gen_ai.agent.name": input.agentName,
     "gen_ai.operation.name": "execute_tool",
     "gen_ai.tool.call.id": input.callId,
@@ -298,7 +299,6 @@ function toolCallEvents(
               scope,
               type: "tool.call.completed",
               outcome: outcome.type === "result" ? "completed" : "failed",
-              durationMs: outcome.durationMs,
             }),
           );
         },
