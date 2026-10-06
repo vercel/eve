@@ -115,6 +115,7 @@ export function chatSdkDriver(surface: Exclude<Surface, "public"> = "shared"): C
       return {
         id: messageIdOf(call),
         links: linkTargets(card),
+        onlyPerson: isDirectMessage(call),
         options: buttonsOf(call),
         text: card === undefined ? (driver.postedText(call) ?? "") : texts(card),
       };
@@ -268,6 +269,14 @@ function isPost(call: PlatformCall): boolean {
   return call.method === "postMessage" || call.method === "editMessage";
 }
 
+/** A DM thread the bot opened with one person, beside the conversation's own thread. */
+const DIRECT_MESSAGE_THREAD = `${ADAPTER}:direct-message:`;
+
+function isDirectMessage(call: PlatformCall): boolean {
+  const { threadId } = call.response as { readonly threadId?: string };
+  return threadId?.startsWith(DIRECT_MESSAGE_THREAD) === true;
+}
+
 function fakeAdapter({
   dm,
   nextId,
@@ -348,13 +357,25 @@ function fakeAdapter({
       isDM: dm,
       metadata: {},
     }),
+    // No native ephemerals, as on Discord or Linq: `postEphemeral` falls back to a DM.
+    async openDM(userId: string) {
+      return `${DIRECT_MESSAGE_THREAD}${userId}`;
+    },
     async postMessage(id: string, posted: AdapterPostableMessage) {
       const messageId = `posted-${nextId()}`;
-      record({ body: render(posted), method: "postMessage", response: { id: messageId } });
+      record({
+        body: render(posted),
+        method: "postMessage",
+        response: { id: messageId, threadId: id },
+      });
       return { id: messageId, raw: posted, threadId: id };
     },
     async editMessage(id: string, messageId: string, posted: AdapterPostableMessage) {
-      record({ body: render(posted), method: "editMessage", response: { id: messageId } });
+      record({
+        body: render(posted),
+        method: "editMessage",
+        response: { id: messageId, threadId: id },
+      });
       return { id: messageId, raw: posted, threadId: id };
     },
     async addReaction() {},

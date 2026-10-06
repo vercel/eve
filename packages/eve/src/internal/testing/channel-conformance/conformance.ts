@@ -129,8 +129,11 @@ function noSignInRenderer(
   );
 }
 
-/** Chat SDK's default sign-in, outside a DM, points the person at a DM it never sends. */
-const SIGN_IN_ONLY_IN_DMS = Object.fromEntries(
+/**
+ * Linq's group sign-in can't reach the person privately: its `openDM` needs a phone
+ * handle, and a message names its sender only by the handle's opaque id.
+ */
+const LINQ_SIGN_IN_NOT_PRIVATE = Object.fromEntries(
   [
     "a sign-in names the service and shows its sign-in link",
     "a sign-in shows its confirmation code",
@@ -138,7 +141,8 @@ const SIGN_IN_ONLY_IN_DMS = Object.fromEntries(
   ].map((rule) => [
     rule,
     {
-      reason: "outside a DM the bot says to continue in a direct message but never sends one",
+      reason:
+        "Linq's openDM needs the person's phone handle, but a message names its sender by an opaque handle id, so the bot can only say to continue in a direct message",
       symptom: SIGN_IN_NOT_SHOWN,
     },
   ]),
@@ -231,10 +235,7 @@ const WEB_CHAT_SINGLE_PERSON =
  *   failure (such as harness breakage) both turn it red.
  */
 const channelConformance = {
-  "chat-sdk": [
-    { driver: chatSdkDriver, broken: { ...CHAT_SDK_BROKEN, ...SIGN_IN_ONLY_IN_DMS } },
-    { driver: chatSdkTextDriver },
-  ],
+  "chat-sdk": [{ driver: chatSdkDriver, broken: CHAT_SDK_BROKEN }, { driver: chatSdkTextDriver }],
   "chat-sdk-dm": [{ dm: true, driver: () => chatSdkDriver("private"), broken: CHAT_SDK_BROKEN }],
   discord: [{ driver: discordDriver, broken: DISCORD_BROKEN, unsupported: DISCORD_UNSUPPORTED }],
   "discord-dm": [
@@ -269,7 +270,7 @@ const channelConformance = {
       },
     },
   ],
-  linq: [{ driver: linqDriver, broken: SIGN_IN_ONLY_IN_DMS }],
+  linq: [{ driver: linqDriver, broken: LINQ_SIGN_IN_NOT_PRIVATE }],
   "linq-dm": [{ dm: true, driver: () => linqDriver("private") }],
   photon: [{ driver: photonDriver }],
   slack: [{ driver: slackDriver, broken: SLACK_BROKEN }],

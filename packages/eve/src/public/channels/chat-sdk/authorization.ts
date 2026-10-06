@@ -1,6 +1,9 @@
 import type { Thread } from "#compiled/chat/index.js";
+import { createLogger, logError } from "#internal/logging.js";
 import { isNotImplemented } from "#public/channels/chat-sdk/notImplemented.js";
 import type { ChatSdkChannelEvents } from "#public/channels/chat-sdk/chatSdkChannel.js";
+
+const log = createLogger("chat-sdk.authorization");
 
 /** Built-in connection authorization handlers for Chat SDK threads. */
 export function defaultAuthorizationEvents(): Pick<
@@ -14,14 +17,25 @@ export function defaultAuthorizationEvents(): Pick<
       if (pending[event.name] !== undefined) return;
 
       const displayName = authorizationDisplayName(event.name, event.authorization?.displayName);
-      const message = channel.thread.isDM
-        ? authorizationPrompt({
-            displayName,
-            instructions: event.authorization?.instructions,
-            url: event.authorization?.url,
-            userCode: event.authorization?.userCode,
-          })
-        : `Authorization required for ${displayName}. Continue in a direct message with this agent.`;
+      const prompt = authorizationPrompt({
+        displayName,
+        instructions: event.authorization?.instructions,
+        url: event.authorization?.url,
+        userCode: event.authorization?.userCode,
+      });
+      // Outside a DM the challenge is a credential: it goes only to the person signing in,
+      // and the thread sees a link-free status the completion handler can edit.
+      let message = prompt;
+      if (!channel.thread.isDM) {
+        const userId =
+          event.principalId === undefined
+            ? undefined
+            : channel.state.usersByPrincipal?.[event.principalId];
+        message =
+          userId !== undefined && (await postPrivately(channel.thread, userId, prompt))
+            ? `Authorization required for ${displayName}. I sent you the sign-in details privately.`
+            : `Authorization required for ${displayName}. Continue in a direct message with this agent.`;
+      }
       const posted = await channel.thread.post({ markdown: message });
       if (posted.id) {
         channel.state.pendingAuthMessageIds = { ...pending, [event.name]: posted.id };
@@ -53,6 +67,21 @@ export function defaultAuthorizationEvents(): Pick<
         await safeStartTyping(channel.thread, "Connected. Resuming...");
     },
   };
+}
+
+/**
+ * Shows `markdown` to `userId` alone: natively where the adapter can, else in a
+ * DM. False when the adapter can do neither or the send fails.
+ */
+async function postPrivately(thread: Thread, userId: string, markdown: string): Promise<boolean> {
+  try {
+    return (await thread.postEphemeral(userId, { markdown }, { fallbackToDM: true })) !== null;
+  } catch (error) {
+    if (!isNotImplemented(error)) {
+      logError(log, "failed to deliver sign-in privately", error, { threadId: thread.id });
+    }
+    return false;
+  }
 }
 
 async function safeStartTyping(thread: Thread, status: string): Promise<void> {

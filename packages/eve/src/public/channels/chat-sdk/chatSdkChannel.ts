@@ -5,7 +5,9 @@ import type {
   ChannelRespondOptions,
   ChannelSendOptions,
 } from "#channel/channel-operations.js";
-import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import { defaultDeliverResult } from "#channel/adapter.js";
+import type { SessionHandle } from "#channel/session.js";
+import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
@@ -79,6 +81,8 @@ export interface ChatSdkChannelState extends Record<string, unknown> {
   pendingToolCallMessage?: string | null;
   /** Authorization status messages, keyed by connection name. */
   pendingAuthMessageIds?: Record<string, string>;
+  /** The Chat SDK user id behind each principal that sent a message, so a sign-in reaches them privately. */
+  usersByPrincipal?: Record<string, string>;
   /** Posted input request cards, keyed by message id, until eve resolves every request on them. */
   pendingInputCards?: Record<string, ChatSdkPendingInputCard>;
   streamStepIndex?: number | null;
@@ -344,6 +348,14 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
         auth: input.auth,
         state: { thread },
       });
+    },
+    // `session.auth.current` is the caller of this delivery.
+    deliver(
+      payload,
+      channel: ChatSdkChannelContext<TAdapters> & { readonly session: SessionHandle },
+    ) {
+      recordPrincipalUser(channel.state, channel.session.auth.current, payload);
+      return defaultDeliverResult(payload);
     },
     events: mergedEvents,
   });
@@ -618,6 +630,19 @@ async function bridgeRespond<TAdapters extends ChatSdkAdapters>(
     ...respondOptions,
     auth: auth ?? null,
   });
+}
+
+/** Records the author of the delivery's message as the Chat SDK user behind its caller. */
+function recordPrincipalUser(
+  state: ChatSdkChannelState,
+  caller: SessionAuthContext | null,
+  payload: DeliverPayload,
+): void {
+  if (caller === null) return;
+  const thread = (payload.state as Partial<ChatSdkChannelState> | undefined)?.thread;
+  const author = thread?.currentMessage?.author;
+  if (author === undefined || author.isBot === true || author.isMe) return;
+  state.usersByPrincipal = { ...state.usersByPrincipal, [caller.principalId]: author.userId };
 }
 
 function activeFrom(operation: "respond" | "send"): ChannelFrom<ChatSdkChannelState> {
