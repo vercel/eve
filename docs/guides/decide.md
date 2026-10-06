@@ -5,7 +5,7 @@ description: "Choose agent models automatically or ask typed questions in your t
 
 Use `auto` from `eve/models` to choose an agent model from an allowlist before
 inference begins. It uses the [AI SDK decision API](https://ai-sdk.dev/docs/ai-sdk-core/decisions),
-so the decider can be a Vercel AI Gateway model ID or an decision model from
+so the decider can be a Vercel AI Gateway model ID or a decision model from
 an installed provider. Use `decide` from `eve/ai` to ask typed questions in
 your own tools or application code.
 
@@ -183,7 +183,7 @@ Eval authors can use `t.judge(...)` to turn decision answers into scored asserti
 
 ## Decide tool approvals
 
-Use `auto({ model? })` when an decision model should decide whether a
+Use `auto({ model? })` when a decision model should decide whether a
 tool call can run automatically or needs human approval. It accepts the same
 AI SDK decision model strings and provider instances described above and
 defaults to `typesafe-ai/jev`:
@@ -220,7 +220,7 @@ capped at 16,000 characters. Requests without user text and latest messages over
 the limit fail before provider I/O.
 
 Decision validation, retries, provider errors, and model resolution follow AI
-SDK semantics. Without `fallback`, an decider error fails the turn. With
+SDK semantics. Without `fallback`, a decider error fails the turn. With
 `fallback`, eve uses and retains that model for the rest of the turn. Cancelling
 the active turn aborts decision and prevents a routed or fallback choice from
 being retained.

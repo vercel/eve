@@ -24,7 +24,7 @@ const model: Exclude<Experimental_DecisionModel, string> = {
 };
 
 export default defineEval({
-  description: "Single and batched judges score a fixture response through an decision model.",
+  description: "Single and batched judges score a fixture response through a decision model.",
   judge: { model },
   async test(t) {
     const turn = await t.send("Alice needs a routine summary of the selected model.");

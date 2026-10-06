@@ -145,7 +145,7 @@ t.judge("The response addresses the request.", {
 
 Use the provider's `decisionModel` factory, not a language model instance. AI SDK supplies decision adapters for supported language models. Provider support and the decision contract are experimental; see [AI SDK decision](https://ai-sdk.dev/docs/ai-sdk-core/decisions).
 
-String model IDs resolve through the default provider's decision API. Gateway accepts native decision models such as `typesafe-ai/jev`; passing a language model ID such as `openai/gpt-6-luna` does not automatically select the OpenAI adapter. Use an decision-model instance as shown above for language models.
+String model IDs resolve through the default provider's decision API. Gateway accepts native decision models such as `typesafe-ai/jev`; passing a language model ID such as `openai/gpt-6-luna` does not automatically select the OpenAI adapter. Use a decision-model instance as shown above for language models.
 
 Missing credentials, invalid answers, unsupported question types, and provider errors become failed gates even for tracked-only judgments. They do not silently skip the eval or select another model. Validation, authentication, and retries use the shared `decide` implementation.
 

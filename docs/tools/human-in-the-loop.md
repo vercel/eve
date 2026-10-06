@@ -37,7 +37,7 @@ export default defineTool({
 | `never()`  | Never require approval (the default when omitted).                                 |
 | `once()`   | Require approval only the first time the tool runs in a session; auto-allow after. |
 | `always()` | Require approval before every call.                                                |
-| `auto()`   | Ask an decision model whether to run the exact call or require user approval.      |
+| `auto()`   | Ask a decision model whether to run the exact call or require user approval.       |
 
 By default, omitted `approval` behaves like `never()`, so tool calls may execute without human approval. Require human approval or other safeguards for sensitive, irreversible, regulated, financial, healthcare, employment, housing, legal, safety-impacting, user-impacting, or external side-effecting actions.
 
