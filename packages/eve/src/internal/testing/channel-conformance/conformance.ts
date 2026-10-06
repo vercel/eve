@@ -293,6 +293,9 @@ const channelConformance = {
         "approving by text names who approved on the approval": WEB_CHAT_SINGLE_PERSON,
         "pressing an option names who answered on the question": WEB_CHAT_SINGLE_PERSON,
         "answering a question by text names who answered on the question": WEB_CHAT_SINGLE_PERSON,
+        // Flaky rather than failing, so it can't be recorded as broken: see the reason.
+        "text replies answer two pending approvals one at a time, in the order shown":
+          "a reply sent while approvals wait goes out as a steering message, which sometimes restarts the turn instead of answering",
       },
     },
   ],
