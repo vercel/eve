@@ -254,7 +254,7 @@ export function accumulateTurnUsage(input: {
  * Adds usage to session totals without touching the in-flight turn totals:
  * the delegated spend a parent counts, or a run's tally of what its
  * `ctx.agent` sessions spent. Turn tags attribute only the parent's own model
- * calls (child spend is attributed by the caller's durable `agent.action`
+ * calls (child spend is attributed by the caller's durable `execute_tool`
  * span); session totals feed the session token limits and the remaining-quota
  * budget granted to later delegations.
  */

@@ -211,11 +211,10 @@ describe("local instrumentation runtime", () => {
     expect(formatTraceTree(spans)).toEqual([
       "invoke_agent weather",
       "  agent.step",
-      "    agent.action",
-      "      execute_tool weather",
-      "        user.tool-work",
       "    chat model-1",
       "      user.model-work",
+      "    execute_tool weather",
+      "      user.tool-work",
     ]);
     for (const exported of spans.filter((span) => !span.name.startsWith("user."))) {
       expect(exported.attributes).toEqual(

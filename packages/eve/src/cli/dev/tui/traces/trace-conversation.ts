@@ -1,7 +1,7 @@
 /**
  * Conversation view for the `/traces` viewer: the same trace, re-told as a
  * flow of user messages, assistant replies, and tool calls instead of a
- * latency waterfall. Activation and action spans provide the user and tool
+ * latency waterfall. Activation and tool spans provide the user and tool
  * cards directly; model response spans provide assistant cards.
  */
 
@@ -59,7 +59,7 @@ export interface ConversationSubagent {
 /** Max rendered lines for one collapsed card payload (args, result, or text). */
 const CARD_PAYLOAD_LINES = 3;
 
-/** Builds the conversation flow from eve's activation, model, and action spans. */
+/** Builds the conversation flow from eve's activation, model, and tool spans. */
 export function buildConversationItems(trace: LocalTrace): ConversationItem[] {
   const byId = new Map(trace.spans.map((span) => [span.spanId, span]));
   const subagents = new Map<string, ConversationSubagent>();
@@ -165,14 +165,21 @@ export function buildConversationItems(trace: LocalTrace): ConversationItem[] {
       }
       continue;
     }
-    if (span.name === "agent.action") {
+    if (
+      span.attributes["gen_ai.operation.name"] === "execute_tool" ||
+      span.name === "agent.action"
+    ) {
       entries.push({
         item: {
           kind: "tool",
           args: stringAttribute(span, "gen_ai.tool.call.arguments"),
           durationMs: spanDurationMs(span),
           error: span.statusCode === 2,
-          name: stripTerminalControls(stringAttribute(span, "agent.action.name") ?? "action"),
+          name: stripTerminalControls(
+            stringAttribute(span, "gen_ai.tool.name") ??
+              stringAttribute(span, "agent.action.name") ??
+              "tool",
+          ),
           result: unwrapJsonString(stringAttribute(span, "gen_ai.tool.call.result")),
           span,
           subagent,
@@ -238,7 +245,7 @@ function turnSubagent(
     };
   }
   const parent = turn.parentSpanId === undefined ? undefined : byId.get(turn.parentSpanId);
-  if (parent === undefined || parent.name !== "agent.action") return undefined;
+  if (parent === undefined) return undefined;
   const kind = stringAttribute(parent, "agent.action.kind");
   if (kind !== "subagent-call" && kind !== "remote-agent-call") return undefined;
   const parentTurnId = stringAttribute(parent, "agent.turn.id");

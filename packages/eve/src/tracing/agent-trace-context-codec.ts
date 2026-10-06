@@ -185,6 +185,30 @@ function deserializeAction(value: unknown): AgentActionTraceState | undefined {
     startTimeMs: value.startTimeMs,
     stepIndex: value.stepIndex,
     turnId: value.turnId,
+    toolEndTimeMs: typeof value.toolEndTimeMs === "number" ? value.toolEndTimeMs : undefined,
+    toolFailed: value.toolFailed === true,
+    toolErrorAttribute:
+      typeof value.toolErrorAttribute === "string" ? value.toolErrorAttribute : undefined,
+    toolAttributes: isRecord(value.toolAttributes)
+      ? Object.fromEntries(
+          Object.entries(value.toolAttributes).filter(
+            (
+              entry,
+            ): entry is [string, NonNullable<AgentActionTraceState["toolAttributes"]>[string]] => {
+              const attribute = entry[1];
+              return (
+                typeof attribute === "string" ||
+                typeof attribute === "number" ||
+                typeof attribute === "boolean" ||
+                (Array.isArray(attribute) &&
+                  attribute.every((entry) =>
+                    ["string", "number", "boolean"].includes(typeof entry),
+                  ))
+              );
+            },
+          ),
+        )
+      : undefined,
   };
 }
 

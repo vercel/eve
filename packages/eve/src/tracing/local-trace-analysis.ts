@@ -119,7 +119,9 @@ function recordFor(operation: LocalTraceOperation, startTimeNs: bigint): TraceTi
     spanId: span.spanId,
     startOffsetMs: Number(span.startTimeNs - startTimeNs) / 1_000_000,
   };
-  const callId = traceStringAttribute(span, "agent.action.call_id");
+  const callId =
+    traceStringAttribute(span, "gen_ai.tool.call.id") ??
+    traceStringAttribute(span, "agent.action.call_id");
   const model = traceModelName(span);
   const sessionId = traceSessionId(span);
   const name = traceToolName(span);

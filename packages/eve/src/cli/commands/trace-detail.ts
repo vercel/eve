@@ -14,7 +14,7 @@ import { localTraceSpanCostUsd, type LocalTraceSummary } from "#tracing/local-tr
 /**
  * Compact metrics for one tree row: token chips (`↑1.4K`/`↓213`), cost
  * (`$0.0031`). Only chips whose attributes the span actually carries — rows
- * without usage stay clean. Tool names belong to eve's durable `agent.action`
+ * without usage stay clean. Tool names belong to eve's durable `execute_tool`
  * label instead of the AI SDK's child span.
  * Raw values: callers sanitize for their output surface.
  */

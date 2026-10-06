@@ -135,8 +135,7 @@ agent turn:
 invoke_agent <agent>
   └── agent.step
         ├── chat <model>
-        └── agent.action
-              └── execute_tool <tool>
+        └── execute_tool <tool>
 ```
 
 Each root agent turn starts a new trace. If eve receives a local caller's trace

@@ -140,6 +140,7 @@ export function createAgentOtelInstrumentation(
     tracer: input.tracer,
   });
   const tools = createAgentToolInstrumentation({
+    stateStore: input.stateStore,
     actionContextFor: actions.contextFor,
     idGenerator: input.idGenerator,
     recordInputs,

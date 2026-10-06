@@ -25,7 +25,6 @@ import type { AgentActionTraceState, AgentTraceStateStore } from "#tracing/agent
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import { isSampledTrace } from "#tracing/sampled-trace.js";
 import { withChannelAudience } from "#tracing/channel-audience-context.js";
-import { AGENT_SPAN_NAMES } from "#tracing/agent-span-contract.js";
 import { recordAgentSpanError as recordError } from "#tracing/agent-span-error.js";
 
 interface AgentActionInstrumentation {
@@ -47,7 +46,7 @@ export interface AgentActionContext {
   readonly spanContext: SpanContext;
 }
 
-/** Builds durable `agent.action` spans around eve's runtime dispatch boundary. */
+/** Completes durable tool spans at eve's runtime dispatch boundary. */
 export function createAgentActionInstrumentation(input: {
   readonly frameworkVersion: string;
   readonly idGenerator: AgentSpanIdGenerator;
@@ -121,7 +120,7 @@ export function createAgentActionInstrumentation(input: {
     const invocation = isAgentInvocation(state.kind);
     const span = input.idGenerator.withSpanId(state.spanId, () =>
       input.tracer.startSpan(
-        AGENT_SPAN_NAMES.action,
+        `execute_tool ${state.name}`,
         {
           attributes: {
             "agent.action.call_id": state.callId,
@@ -130,12 +129,16 @@ export function createAgentActionInstrumentation(input: {
               ? undefined
               : { "agent.action.parent_call_id": state.parentCallId }),
             "agent.action.name": state.name,
+            "gen_ai.operation.name": "execute_tool",
+            "gen_ai.tool.call.id": state.callId,
+            "gen_ai.tool.name": state.name,
+            "gen_ai.tool.type": "function",
             "agent.framework.name": "eve",
             "agent.framework.version": input.frameworkVersion,
             "agent.step.attempt": state.attemptIndex,
             "agent.step.index": state.stepIndex,
             "agent.turn.id": state.turnId,
-            ...agentSpanNamingAttributes(AGENT_SPAN_NAMES.action),
+            ...agentSpanNamingAttributes(`execute_tool ${state.name}`, "execute_tool"),
             ...agentTraceIdentityAttributes({
               rootSessionId: state.rootSessionId,
               traceSessionId: state.traceSessionId,
@@ -147,6 +150,7 @@ export function createAgentActionInstrumentation(input: {
                   "agent.invocation.role": "caller",
                 }
               : undefined),
+            ...state.toolAttributes,
           },
           kind: state.kind === "remote-agent-call" ? SpanKind.CLIENT : SpanKind.INTERNAL,
           startTime: state.startTimeMs,
@@ -154,7 +158,7 @@ export function createAgentActionInstrumentation(input: {
         contextFromActionState(state),
       ),
     );
-    if (!invocation && state.inputAttribute !== undefined) {
+    if (state.inputAttribute !== undefined) {
       span.setAttribute("gen_ai.tool.call.arguments", state.inputAttribute);
     }
     return span;
@@ -204,7 +208,10 @@ export function createAgentActionInstrumentation(input: {
     event: InstrumentationActionTerminalEvent,
   ): void {
     const span = startSpan(state);
-    span.setAttribute("agent.action.outcome", event.outcome);
+    span.setAttribute(
+      "agent.action.outcome",
+      state.toolFailed === true && event.outcome === "completed" ? "failed" : event.outcome,
+    );
     if (event.usage !== undefined) {
       setAgentUsage(span, event.usage);
     }
@@ -215,13 +222,21 @@ export function createAgentActionInstrumentation(input: {
       recordActionError(span, event.error, event.errorCode);
     } else if (event.output.type === "error") {
       recordActionError(span, event.output.error);
+    } else if (state.toolFailed === true) {
+      recordActionError(
+        span,
+        state.toolErrorAttribute,
+        typeof state.toolAttributes?.["error.type"] === "string"
+          ? state.toolAttributes["error.type"]
+          : undefined,
+      );
     } else {
-      if (input.recordOutputs && !isAgentInvocation(state.kind)) {
+      if (input.recordOutputs) {
         const result = contentAttribute(event.output.output);
         if (result !== undefined) span.setAttribute("gen_ai.tool.call.result", result);
       }
     }
-    span.end(event.acceptedAtMs);
+    span.end(event.acceptedAtMs ?? state.toolEndTimeMs);
   }
 }
 

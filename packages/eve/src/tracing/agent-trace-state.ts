@@ -1,4 +1,4 @@
-import type { SpanContext } from "#compiled/@opentelemetry/api/index.js";
+import type { Attributes, SpanContext } from "#compiled/@opentelemetry/api/index.js";
 
 import type {
   InstrumentationActionKind,
@@ -68,6 +68,10 @@ export interface AgentActionTraceState {
   readonly startTimeMs: number;
   readonly stepIndex: number;
   readonly turnId: string;
+  readonly toolAttributes?: Attributes;
+  readonly toolEndTimeMs?: number;
+  readonly toolFailed?: boolean;
+  readonly toolErrorAttribute?: string;
 }
 
 /** Provider-owned serializable storage for durable agent trace state. */

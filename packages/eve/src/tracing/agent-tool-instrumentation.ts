@@ -21,6 +21,7 @@ import { agentTraceIdentityAttributes, traceSessionIdOf } from "#tracing/agent-o
 import { withChannelAudience } from "#tracing/channel-audience-context.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import type { AgentActionContext } from "#tracing/agent-action-instrumentation.js";
+import type { AgentTraceStateStore } from "#tracing/agent-trace-state.js";
 import { recordAgentSpanError as recordError } from "#tracing/agent-span-error.js";
 import { withAgentToolSpanContext } from "#tracing/agent-tool-span-context.js";
 
@@ -38,6 +39,7 @@ interface ToolSpanState {
   span?: Span;
   terminal?: InstrumentationToolCallTerminalEvent;
   pendingError?: { readonly error: unknown; readonly errorType?: string };
+  correlated?: true;
 }
 
 interface AgentToolInstrumentation {
@@ -52,7 +54,7 @@ interface AgentToolInstrumentation {
   };
 }
 
-/** Keeps SDK tool spans parented to actions even when SDK telemetry wins the event race. */
+/** Enriches durable tool calls, exporting SDK-only calls under their step. */
 export function createAgentToolInstrumentation(input: {
   readonly actionContextFor: (
     sessionId: string,
@@ -66,6 +68,7 @@ export function createAgentToolInstrumentation(input: {
     event: InstrumentationToolCallStartedEvent,
   ) => { readonly context: Context; readonly spanContext: SpanContext } | undefined;
   readonly tracer: Tracer;
+  readonly stateStore: AgentTraceStateStore;
 }): AgentToolInstrumentation {
   const byAction = new Map<string, ToolSpanState>();
   const byAttempt = new Map<string, Map<string, ToolSpanState>>();
@@ -84,7 +87,7 @@ export function createAgentToolInstrumentation(input: {
       if (actionParent === undefined) return;
       state = reserve(event, actionKey, actionParent);
     }
-    if (actionParent !== undefined) startSpan(state, actionParent.context);
+    if (actionParent !== undefined) await correlate(state);
   };
 
   const onTerminal = async (event: InstrumentationToolCallTerminalEvent): Promise<void> => {
@@ -98,7 +101,7 @@ export function createAgentToolInstrumentation(input: {
         state.event.scope.turnId,
         state.event.callId,
       );
-      if (actionParent !== undefined) startSpan(state, actionParent.context);
+      if (actionParent !== undefined) await correlate(state);
     }
     finishIfReady(state);
   };
@@ -114,7 +117,7 @@ export function createAgentToolInstrumentation(input: {
         event.callId,
       );
       if (actionParent === undefined) return;
-      startSpan(state, actionParent.context);
+      await correlate(state);
       finishIfReady(state);
     },
     contextFor: (attemptId, idempotencyKey) =>
@@ -124,7 +127,8 @@ export function createAgentToolInstrumentation(input: {
       if (states === undefined) return;
       for (const state of states.values()) {
         if (state.finished === true) continue;
-        if (state.span === undefined) startSpan(state, state.fallbackParent);
+        if (state.span === undefined && state.correlated !== true)
+          startSpan(state, state.fallbackParent);
         finish(state, failure);
       }
       byAttempt.delete(attemptId);
@@ -150,7 +154,7 @@ export function createAgentToolInstrumentation(input: {
     actionKey: string,
     parent: { readonly context: Context; readonly spanContext: SpanContext },
   ): ToolSpanState {
-    const spanId = input.idGenerator.deriveSpanId(`tool:${event.idempotencyKey}`);
+    const spanId = input.idGenerator.deriveSpanId(`action:${actionKey}`);
     const state: ToolSpanState = {
       actionKey,
       attemptId: event.scope.attemptId,
@@ -213,13 +217,79 @@ export function createAgentToolInstrumentation(input: {
   }
 
   function finishIfReady(state: ToolSpanState): void {
-    if (state.span === undefined || state.terminal === undefined) return;
+    if ((state.span === undefined && state.correlated !== true) || state.terminal === undefined)
+      return;
     finish(state);
+  }
+
+  async function correlate(state: ToolSpanState): Promise<void> {
+    const action =
+      (await input.stateStore.getAction(state.actionKey)) ??
+      (await input.stateStore.findAction(state.event.scope.sessionId, state.event.callId));
+    if (action === undefined) return;
+    state.correlated = true;
+    state.context = trace.setSpan(
+      state.context,
+      trace.wrapSpanContext({
+        isRemote: false,
+        spanId: action.spanId,
+        traceFlags: action.parent.traceFlags,
+        traceId: action.parent.traceId,
+      }),
+    );
+    const terminal = state.terminal;
+    const toolFailed =
+      state.pendingError !== undefined ||
+      terminal?.type === "tool.call.failed" ||
+      terminal?.output.type === "error";
+    const error =
+      state.pendingError?.error ??
+      (terminal?.type === "tool.call.failed"
+        ? terminal.error
+        : terminal?.output.type === "error"
+          ? terminal.output.error
+          : undefined);
+    const attributes: Attributes = {
+      ...action.toolAttributes,
+      ...(state.event.scope.functionId === undefined ||
+      action.kind === "subagent-call" ||
+      action.kind === "remote-agent-call"
+        ? undefined
+        : { "gen_ai.agent.name": state.event.scope.functionId }),
+      "agent.tool.is_framework": state.event.frameworkTool === true,
+      ...state.additionalAttributes,
+      ...(state.pendingError?.errorType === undefined
+        ? undefined
+        : { "error.type": state.pendingError.errorType }),
+      ...(terminal?.type === "tool.call.completed" && terminal.durationMs !== undefined
+        ? { "gen_ai.execute_tool.duration": terminal.durationMs / 1000 }
+        : undefined),
+    };
+    await input.stateStore.setAction(
+      actionIdempotencyKey(action.sessionId, action.turnId, action.callId),
+      {
+        ...action,
+        startTimeMs: Math.min(action.startTimeMs, state.startTimeMs),
+        toolAttributes: attributes,
+        toolEndTimeMs: terminal?.completedAtMs ?? action.toolEndTimeMs,
+        toolFailed: toolFailed || action.toolFailed,
+        toolErrorAttribute:
+          input.recordOutputs && error !== undefined
+            ? contentAttribute(error instanceof Error ? error.message : error)
+            : action.toolErrorAttribute,
+      },
+    );
   }
 
   function finish(state: ToolSpanState, failure?: { readonly error: unknown }): void {
     const span = state.span;
-    if (span === undefined || state.finished === true) return;
+    if (state.finished === true) return;
+    if (state.correlated === true) {
+      state.finished = true;
+      forget(state);
+      return;
+    }
+    if (span === undefined) return;
     state.finished = true;
     const terminal = state.terminal;
     // As `@ai-sdk/otel` records it: execute's own run time, in seconds, success or error.
@@ -237,6 +307,10 @@ export function createAgentToolInstrumentation(input: {
       if (result !== undefined) span.setAttribute("gen_ai.tool.call.result", result);
     }
     span.end(terminal?.completedAtMs);
+    forget(state);
+  }
+
+  function forget(state: ToolSpanState): void {
     byAction.delete(state.actionKey);
     const states = byAttempt.get(state.attemptId);
     states?.delete(state.idempotencyKey);
