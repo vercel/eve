@@ -632,6 +632,7 @@ describe("buildToolSet", () => {
     const result = await buildToolSetWithProviderTools({
       modelReference: { id: "openai/gpt-5.4" },
       modelProvider: "gateway.chat",
+      ...catalogOf(tools),
       tools,
     });
     const search = result.web_search!;
@@ -652,6 +653,7 @@ describe("buildToolSet", () => {
     const disabled = await buildToolSetWithProviderTools({
       modelReference: { id: "openai/gpt-5.4" },
       modelProvider: "gateway.chat",
+      ...catalogOf(tools),
       tools,
       disabledProviderTools: new Set(["web_search"]),
     });
@@ -660,6 +662,7 @@ describe("buildToolSet", () => {
     const direct = await buildToolSetWithProviderTools({
       modelReference: { id: "gpt-5.4" },
       modelProvider: "openai.chat",
+      ...catalogOf(tools),
       tools,
     });
     expect(direct.web_search).toMatchObject({ id: "openai.web_search" });
