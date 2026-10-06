@@ -47,7 +47,7 @@ function expectFiveReviewers(started: EveEvalTurn) {
     .filter((event) => event.type === "actions.requested")
     .flatMap(({ data }) =>
       data.actions
-        .filter((action) => action.kind === "tool-call" && action.toolName === "reviewer")
+        .filter((action) => action.kind === "subagent-call" && action.subagentName === "reviewer")
         .map(() => `${data.turnId}:${data.stepIndex}`),
     );
   assert.equal(launchSteps.length, 5, "five reviewer requests");
