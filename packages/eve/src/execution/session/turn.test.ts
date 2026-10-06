@@ -524,7 +524,10 @@ describe("SessionExecution checkpoints", () => {
     ).resolves.toMatchObject({ cancelled: true, kind: "park" });
     expect(dispatchCoordinationStep).toHaveBeenCalledTimes(1);
     expect(inbox.next).not.toHaveBeenCalled();
-    expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({ sessionState });
+    expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
+      serializedContext: {},
+      sessionState,
+    });
   });
 
   it("consumes the cancelling command while retaining accepted follow-ups", async () => {
@@ -1507,7 +1510,6 @@ function stateWithBlockingRun(): DurableSessionState {
 function state(continuationToken: string): DurableSessionState {
   return createTestSessionState({
     continuationToken,
-    emissionState: { sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "turn_0" },
     hasProxyInputRequests: false,
     sessionId: "session-1",
   });

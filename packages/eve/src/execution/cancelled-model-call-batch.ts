@@ -6,6 +6,7 @@ import { preserveCancelledTurnMessage } from "#execution/cancelled-turn-message.
 import { createDurableSessionValues } from "#execution/durable-session-store.js";
 import type { DurableStepResult } from "#execution/session/turn-step-types.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
+import { saveSessionProjection } from "#harness/session-machine/current.js";
 import { preserveSerializedInstrumentationState } from "#instrumentation/state.js";
 import { preserveSerializedAgentTraceState } from "#tracing/agent-trace-context-store.js";
 
@@ -30,6 +31,7 @@ export async function createCancelledModelCallBatchResult(input: {
           preserveCancelledTurnMessage(checkpointSession, input.stepInput),
         )
       : checkpointSession;
+  // The stream keeps every event the cancelled batch published, so the projection does too.
   const checkpointContext = {
     ...(input.checkpoint?.serializedContext ?? input.beforeBatchContext),
     [AuthKey.name]: interruptedContext[AuthKey.name],
@@ -45,6 +47,6 @@ export async function createCancelledModelCallBatchResult(input: {
       ),
       interruptedContext,
     ),
-    ...createDurableSessionValues(cancelledSession),
+    ...createDurableSessionValues(saveSessionProjection(cancelledSession, input.ctx)),
   };
 }

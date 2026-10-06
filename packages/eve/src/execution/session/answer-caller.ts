@@ -1,5 +1,6 @@
 import type { SessionAuthContext } from "#channel/types.js";
-import { getPendingInputBatches } from "#harness/pending-input-batches.js";
+import { openInputs } from "#protocol/session-projection.js";
+import { storedProjection } from "#harness/session-machine/view.js";
 import type { SessionStateMap, StepInput } from "#harness/types.js";
 
 /**
@@ -20,9 +21,12 @@ export function attributeAnswers(input: {
   if (stepInput === undefined || stepInput.message !== undefined || responses.length === 0) {
     return undefined;
   }
+  // The session's own requests; a relayed one belongs to the run that asked.
   const requests = new Map(
-    getPendingInputBatches(input.state).flatMap((batch) =>
-      batch.requests.map((request) => [request.requestId, request.kind] as const),
+    openInputs(storedProjection(input.state)).flatMap((open) =>
+      open.taskId === undefined && open.callId === undefined
+        ? [[open.request.requestId, open.request.kind] as const]
+        : [],
     ),
   );
   if (!responses.every((response) => requests.has(response.requestId))) return undefined;

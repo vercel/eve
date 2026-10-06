@@ -1,3 +1,7 @@
+import {
+  conversationProjection,
+  withConversationProjection,
+} from "#client/conversation-projection.js";
 import type { EveAgentReducer, EveAgentReducerEvent } from "#client/reducer.js";
 import {
   createAuthorizationCompletedPart,
@@ -11,7 +15,6 @@ import type {
   EveMessagePart,
 } from "#client/message-reducer-types.js";
 import {
-  approvedApproval,
   createToolMetadata,
   mergeToolMetadata,
   normalizeActionRequest,
@@ -26,9 +29,9 @@ import {
   upsertMessage,
 } from "#client/message-reducer-primitives.js";
 import { messageRun } from "#client/message-run-parts.js";
-import { createSettledTaskPart } from "#client/message-task-parts.js";
-import type { InputResponse } from "#shared/input.js";
-import type { AuthorizationCompletedStreamEvent, InputResolution } from "#protocol/message.js";
+import type { AuthorizationCompletedStreamEvent } from "#protocol/message.js";
+import { foldSession, initialSessionProjection } from "#protocol/session-projection.js";
+import { toolPartState } from "#client/tool-part-state.js";
 
 export type {
   EveAuthorizationChallenge,
@@ -57,12 +60,14 @@ function receivedMessageEventId(event: MessageReceivedEvent): string {
  * The returned projection keeps eve-owned types while following the AI SDK
  * `messages[].parts[]` rendering convention used by AI Elements. It projects
  * text, reasoning, tool calls, tool results, tool approvals, submitted HITL
- * responses, and authorization prompts.
+ * responses, and authorization prompts. A tool part's `state` comes from the
+ * session projection the data carries, the same lifecycle every eve reader
+ * folds; its events supply only the part's content.
  */
 export function defaultMessageReducer(): EveAgentReducer<EveMessageData> {
   return {
     initial() {
-      return { messages: [] };
+      return withConversationProjection({ messages: [] }, initialSessionProjection());
     },
     reduce(data, event) {
       return reduceMessageData(data, event);
@@ -71,6 +76,17 @@ export function defaultMessageReducer(): EveAgentReducer<EveMessageData> {
 }
 
 function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): EveMessageData {
+  const projection = foldSession(conversationProjection(data), event);
+  const content = withConversationProjection(reduceContent(data, event), projection);
+  const callIds = toolCallIds(content, event);
+  return withConversationProjection(
+    callIds.length === 0 ? content : withToolPartStates(content, callIds),
+    projection,
+  );
+}
+
+/** What an event says about the conversation's messages and parts. */
+function reduceContent(data: EveMessageData, event: EveAgentReducerEvent): EveMessageData {
   switch (event.type) {
     case "client.message.submitted":
     case "client.message.failed":
@@ -87,14 +103,6 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
         },
         event.data.turnId,
       );
-
-    case "input.resolved": {
-      let next = data;
-      for (const resolution of event.data.resolutions) {
-        next = resolveInputRequest(next, resolution);
-      }
-      return next;
-    }
 
     case "message.received":
       return upsertMessage(
@@ -152,28 +160,21 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
     case "action.input.appended": {
       const existing = findToolPart(data, event.data.callId);
       if (existing !== undefined && existing.state !== "input-streaming") return data;
-
       const inputText =
         (existing?.state === "input-streaming" ? existing.inputText : "") +
         event.data.inputTextDelta;
-
-      const nextPart: EveDynamicToolPart = {
+      return upsertToolPart(data, event.data.turnId, event.data.stepIndex, {
         input: undefined,
         inputText,
         state: "input-streaming",
         stepIndex: event.data.stepIndex,
         toolCallId: event.data.callId,
         toolMetadata: existing?.toolMetadata ?? {
-          eve: {
-            kind: "unknown",
-            name: event.data.toolName,
-          },
+          eve: { kind: "unknown", name: event.data.toolName },
         },
         toolName: event.data.toolName,
         type: "dynamic-tool",
-      };
-
-      return upsertToolPart(data, event.data.turnId, event.data.stepIndex, nextPart);
+      });
     }
 
     case "actions.requested": {
@@ -204,136 +205,106 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
         if (
           existing?.approval?.id === request.requestId ||
           (existing !== undefined && isSettledToolPart(existing))
-        )
+        ) {
           continue;
+        }
         const descriptor = normalizeActionRequest(request.action);
         next = updateAssistantMessage(next, event.data.turnId, (message) =>
           upsertPart(ensureStepStartPart(message, event.data.stepIndex), {
-            approval: {
-              id: request.requestId,
-            },
+            ...existing,
+            approval: { id: request.requestId },
             input: request.action.input,
             state: "approval-requested",
-            stepIndex: event.data.stepIndex,
+            stepIndex: existing?.stepIndex ?? event.data.stepIndex,
             toolCallId: request.action.callId,
             toolMetadata: createToolMetadata(descriptor, {
               inputRequest: toMessageInputRequest(request),
             }),
             toolName: descriptor.toolName,
             type: "dynamic-tool",
-          }),
+          } as EveDynamicToolPart),
         );
       }
       return next;
     }
 
-    case "approval.candidate":
-      // Candidate progress is responder-specific. Applications can consume the
-      // raw stream event for private UI without changing the shared tool part.
-      return data;
-
-    case "approval.settled": {
-      const existing = findToolPartByApprovalId(data, event.data.requestId);
-      if (existing === undefined) return data;
-      if (event.data.outcome === "approved") {
-        const approval = { approved: true as const, id: event.data.requestId, reason: undefined };
-        return updateToolPart(
-          data,
-          existing.toolCallId,
-          existing.state === "output-available"
-            ? { ...existing, approval }
-            : { ...toolPartIdentity(existing), approval, state: "approval-responded" },
-        );
-      }
-      if (existing.state === "output-available") return data;
-      return updateToolPart(data, existing.toolCallId, {
-        ...toolPartIdentity(existing),
-        approval: {
-          approved: false,
-          id: event.data.requestId,
-          reason: "Tool execution was cancelled.",
-        },
-        state: "output-denied",
-      });
-    }
-
     case "action.result": {
-      const descriptor = normalizeActionResult(event.data.result);
+      // A task call's result is only its start receipt, which can arrive after the task settled.
+      if (conversationProjection(data).calls[event.data.result.callId]?.taskId !== undefined)
+        return data;
       const existing = findToolPart(data, event.data.result.callId);
-      const denied =
-        event.data.status === "rejected" || event.data.error?.code === "TOOL_EXECUTION_DENIED";
-      const failed = event.data.status === "failed" && !denied;
-      const approvalId = existing?.approval?.id ?? event.data.result.callId;
-      const toolMetadata = mergeToolMetadata(
-        existing?.toolMetadata,
-        createToolMetadata(descriptor),
-      );
-      const resultPartBase = {
+      const descriptor = normalizeActionResult(event.data.result);
+      const succeeded =
+        event.data.status === undefined || event.data.status === "completed"
+          ? event.data.result.isError !== true && event.data.error === undefined
+          : false;
+      const part = {
+        ...existing,
         input: existing?.input,
-        stepIndex: event.data.stepIndex,
+        stepIndex: existing?.stepIndex ?? event.data.stepIndex,
         toolCallId: event.data.result.callId,
-        toolMetadata,
+        toolMetadata: mergeToolMetadata(existing?.toolMetadata, createToolMetadata(descriptor)),
         toolName: existing?.toolName ?? descriptor.toolName,
         type: "dynamic-tool" as const,
       };
-
-      let nextPart: EveDynamicToolPart;
-      if (denied) {
-        nextPart = {
-          ...resultPartBase,
-          approval: {
-            approved: false,
-            id: approvalId,
-            reason: event.data.error?.message,
-          },
-          state: "output-denied",
-        };
-      } else if (failed) {
-        nextPart = {
-          ...resultPartBase,
-          approval: approvedApproval(existing),
-          errorText: event.data.error?.message ?? stringifyUnknown(event.data.result.output),
-          state: "output-error",
-        };
-      } else {
-        nextPart = {
-          ...resultPartBase,
-          approval: approvedApproval(existing),
-          output: event.data.result.output,
-          state: "output-available",
-        };
-      }
-
-      return upsertToolPart(data, event.data.turnId, event.data.stepIndex, nextPart);
+      const outcome = succeeded
+        ? { errorText: undefined, output: event.data.result.output }
+        : {
+            errorText: event.data.error?.message ?? stringifyUnknown(event.data.result.output),
+            output: undefined,
+          };
+      return upsertToolPart(data, event.data.turnId, event.data.stepIndex, {
+        ...part,
+        ...outcome,
+        partial: undefined,
+      } as EveDynamicToolPart);
     }
 
     case "action.partial": {
       const existing = findToolPart(data, event.data.result.callId);
-      if (existing !== undefined && isSettledToolPart(existing)) {
-        return data;
-      }
-
+      if (existing !== undefined && isSettledToolPart(existing)) return data;
       const descriptor = normalizeActionResult(event.data.result);
-      const nextPart: EveDynamicToolPart = {
-        approval: approvedApproval(existing),
+      return upsertToolPart(data, event.data.turnId, event.data.stepIndex, {
+        ...existing,
         input: existing?.input,
         output: event.data.result.output,
         partial: true,
         state: "output-available",
-        stepIndex: event.data.stepIndex,
+        stepIndex: existing?.stepIndex ?? event.data.stepIndex,
         toolCallId: event.data.result.callId,
         toolMetadata: mergeToolMetadata(existing?.toolMetadata, createToolMetadata(descriptor)),
         toolName: existing?.toolName ?? descriptor.toolName,
         type: "dynamic-tool",
-      };
-
-      return upsertToolPart(data, event.data.turnId, event.data.stepIndex, nextPart);
+      } as EveDynamicToolPart);
     }
 
+    case "input.resolved": {
+      let next = data;
+      for (const { requestId, response } of event.data.resolutions) {
+        const existing =
+          response === undefined ? undefined : findToolPartByApprovalId(next, requestId);
+        if (existing === undefined) continue;
+        next = replaceToolPart(next, {
+          ...existing,
+          toolMetadata: mergeToolMetadata(existing.toolMetadata, {
+            eve: {
+              inputResponse: response,
+              kind: existing.toolMetadata?.eve?.kind ?? "unknown",
+              name: existing.toolMetadata?.eve?.name ?? existing.toolName,
+            },
+          }),
+        });
+      }
+      return next;
+    }
+
+    // A task's outcome is its call's: the call's `action.result` was only the start receipt.
     case "task.settled": {
       const existing = findToolPart(data, event.data.callId);
       if (existing === undefined) return data;
-      return replaceToolPart(data, createSettledTaskPart(existing, event));
+      const { error, output, status } = event.data;
+      const outcome = status === "completed" ? { output } : { errorText: error?.message };
+      return replaceToolPart(data, { ...existing, ...outcome } as EveDynamicToolPart);
     }
 
     case "authorization.required":
@@ -376,26 +347,19 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
       }));
 
     case "turn.completed":
-      return updateAssistantMessage(data, event.data.turnId, (message) => ({
-        ...message,
-        metadata: { ...message.metadata, status: "complete" },
-        parts: removeStreamingToolParts(closeStreamingRuns(message.parts)),
-      }));
-
     case "turn.cancelled":
-      // Finalize whatever the cancelled turn streamed: no message.completed
-      // or reasoning.completed will follow a partial append.
-      return updateAssistantMessage(data, event.data.turnId, (message) => ({
-        ...message,
-        metadata: { ...message.metadata, status: "complete" },
-        parts: removeStreamingToolParts(closeStreamingRuns(message.parts)),
-      }));
-
     case "turn.failed": {
-      const existing = data.messages.find(
-        (message) => message.role === "assistant" && message.metadata?.turnId === event.data.turnId,
-      );
-      if (existing === undefined) return data;
+      // A failed turn that streamed nothing has no message to finalize. Otherwise finalize what
+      // the turn streamed: no completion follows a partial append.
+      if (
+        event.type === "turn.failed" &&
+        !data.messages.some(
+          (message) =>
+            message.role === "assistant" && message.metadata?.turnId === event.data.turnId,
+        )
+      ) {
+        return data;
+      }
       return updateAssistantMessage(data, event.data.turnId, (message) => ({
         ...message,
         metadata: { ...message.metadata, status: "complete" },
@@ -403,12 +367,49 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
       }));
     }
 
-    case "session.failed":
-      return data;
-
     default:
       return data;
   }
+}
+
+/** The tool calls whose state the event may have changed. */
+function toolCallIds(data: EveMessageData, event: EveAgentReducerEvent): readonly string[] {
+  const byRequest = (requestId: string) =>
+    findToolPartByApprovalId(data, requestId)?.toolCallId ?? [];
+  switch (event.type) {
+    case "actions.requested":
+      return event.data.actions.map((action) => action.callId);
+    case "input.requested":
+      return event.data.requests.map((request) => request.action.callId);
+    case "action.result":
+    case "action.partial":
+      return [event.data.result.callId];
+    case "task.started":
+    case "task.settled":
+      return [event.data.callId];
+    case "input.resolved":
+      return event.data.resolutions.flatMap((resolution) => byRequest(resolution.requestId));
+    case "approval.settled":
+      return [byRequest(event.data.requestId)].flat();
+    default:
+      return [];
+  }
+}
+
+function withToolPartStates(data: EveMessageData, callIds: readonly string[]): EveMessageData {
+  let next = data;
+  for (const callId of new Set(callIds)) {
+    const part = findToolPart(next, callId);
+    if (part === undefined) continue;
+    const derived = toolPartState(next, part);
+    if (derived !== part) {
+      next = withConversationProjection(
+        replaceToolPart(next, derived),
+        conversationProjection(data),
+      );
+    }
+  }
+  return next;
 }
 
 function closeStreamingRuns(
@@ -426,61 +427,6 @@ function closeStreamingRuns(
 
 function removeStreamingToolParts(parts: readonly EveMessagePart[]): readonly EveMessagePart[] {
   return parts.filter((part) => part.type !== "dynamic-tool" || part.state !== "input-streaming");
-}
-
-function respondToInputRequest(data: EveMessageData, response: InputResponse): EveMessageData {
-  const existing = findToolPartByApprovalId(data, response.requestId);
-  if (!existing) return data;
-
-  const approval: { id: string; reason?: string } = {
-    id: response.requestId,
-  };
-  if (response.text !== undefined) {
-    approval.reason = response.text;
-  }
-
-  const toolMetadata = mergeToolMetadata(existing.toolMetadata, {
-    eve: {
-      inputResponse: response,
-      kind: existing.toolMetadata?.eve?.kind ?? "unknown",
-      name: existing.toolMetadata?.eve?.name ?? existing.toolName,
-    },
-  });
-  return updateToolPart(
-    data,
-    existing.toolCallId,
-    existing.state === "output-available"
-      ? { ...existing, approval: { ...approval, approved: true }, toolMetadata }
-      : { ...toolPartIdentity(existing), approval, state: "approval-responded", toolMetadata },
-  );
-}
-
-function resolveInputRequest(data: EveMessageData, resolution: InputResolution): EveMessageData {
-  if (resolution.response !== undefined) {
-    // A batch's resolution repeats answers that `approval.settled` already decided.
-    const decided = findToolPartByApprovalId(data, resolution.requestId)?.approval?.approved;
-    return decided === undefined ? respondToInputRequest(data, resolution.response) : data;
-  }
-
-  const existing = findToolPartByApprovalId(data, resolution.requestId);
-  if (!existing) return data;
-
-  return updateToolPart(data, existing.toolCallId, {
-    ...toolPartIdentity(existing),
-    output: { status: resolution.outcome },
-    state: "output-available",
-  });
-}
-
-function toolPartIdentity(part: EveDynamicToolPart) {
-  return {
-    input: part.input,
-    stepIndex: part.stepIndex,
-    toolCallId: part.toolCallId,
-    toolMetadata: part.toolMetadata,
-    toolName: part.toolName,
-    type: part.type,
-  };
 }
 
 function updateAssistantMessage(

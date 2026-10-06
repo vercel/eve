@@ -1,84 +1,15 @@
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
-import { getSessionUsage } from "#harness/turn-tag-state.js";
-import type {
-  DeliverPayload,
-  SubagentAuthorizationEventHookPayload,
-  SubagentInputRequestHookPayload,
-} from "#channel/types.js";
-import { getHarnessEmissionState } from "#harness/emission.js";
+import type { DeliverPayload } from "#channel/types.js";
 import { resolveInputOutcome } from "#harness/input-request-resolution.js";
-import type { PendingInputBatchEvent } from "#harness/pending-input-batches.js";
-import {
-  getProxyInputRequests,
-  toProxyInputRequestEntries,
-} from "#harness/proxy-input-requests.js";
+import type { StepCoordinates as PendingInputBatchEvent } from "#harness/session-machine/view.js";
+import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { WorkflowAskRoute, ProxyInputRequest } from "#harness/proxy-input-requests.js";
-import type { HarnessEmitFn, HarnessSessionBase, SessionStateMap } from "#harness/types.js";
-import {
-  createInputRequestedEvent,
-  createTurnWaitingEvent,
-  type InputResolution,
-} from "#protocol/message.js";
+import type { SessionStateMap } from "#harness/types.js";
+import type { InputResolution } from "#protocol/message.js";
 import type { InputResponse } from "#shared/input.js";
 import { resolveTextToResponse } from "#channel/resolve-text.js";
 import { inputTextKey, readAnswerText } from "#internal/input-text.js";
-import { SESSION_LIMIT_STOP_OPTION_ID } from "#harness/session-limit-continuation.js";
-
-// ---------------------------------------------------------------------------
-// Upward proxy emission
-// ---------------------------------------------------------------------------
-
-/**
- * Runs the parent-side work for a `subagent-input-request`: emits the request,
- * then `turn.waiting` for the parent's open turn. The call that asked is still
- * running, so the turn stays open until the answer lets that call settle. The
- * returned proxy entries route the eventual response back down to the asker.
- */
-export async function emitProxiedInputRequest(input: {
-  readonly emit: HarnessEmitFn;
-  readonly hookPayload: SubagentInputRequestHookPayload;
-  readonly session: HarnessSessionBase;
-}): Promise<readonly (readonly [requestId: string, route: ProxyInputRequest])[]> {
-  await input.emit(
-    createInputRequestedEvent({
-      requests: input.hookPayload.event.requests,
-      sequence: input.hookPayload.event.sequence,
-      stepIndex: input.hookPayload.event.stepIndex,
-      taskId: input.hookPayload.event.taskId,
-      turnId: input.hookPayload.event.turnId,
-    }),
-  );
-  await input.emit(createTurnWaitingOnInputEvent(input.session));
-  return toProxyInputRequestEntries(input.hookPayload);
-}
-
-/**
- * Runs the parent-side work for a `subagent-authorization-event`: re-emits the
- * event, and after `authorization.required` parks the parent's open turn with
- * `turn.waiting`. The sign-in completes on the asker's own callback while the
- * call keeps running, so the parent's turn neither ends nor resets.
- */
-export async function emitProxiedAuthorizationEvent(input: {
-  readonly emit: HarnessEmitFn;
-  readonly hookPayload: SubagentAuthorizationEventHookPayload;
-  readonly session: HarnessSessionBase;
-}): Promise<void> {
-  await input.emit(input.hookPayload.event);
-  if (input.hookPayload.event.type === "authorization.required") {
-    await input.emit(createTurnWaitingOnInputEvent(input.session));
-  }
-}
-
-/** The `turn.waiting` that parks the session's open turn while a person must act. */
-export function createTurnWaitingOnInputEvent(session: Pick<HarnessSessionBase, "state">) {
-  const turn = getHarnessEmissionState(session.state);
-  return createTurnWaitingEvent({
-    on: "input",
-    sequence: turn.sequence,
-    turnId: turn.turnId,
-    usage: getSessionUsage(session),
-  });
-}
+import { SESSION_LIMIT_STOP_OPTION_ID } from "#harness/hitl/budget-request.js";
 
 // ---------------------------------------------------------------------------
 // Downward deliver routing

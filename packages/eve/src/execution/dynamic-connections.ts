@@ -1,13 +1,12 @@
 import type { ContextContainer } from "#context/container.js";
 import { dispatchDynamicConnectionEvent } from "#context/dynamic-connection-lifecycle.js";
 import { announceConnections } from "#execution/connection-announcement.js";
-import type { HarnessEmissionState } from "#harness/emission.js";
+import type { TurnPosition } from "#harness/session-machine/view.js";
 import {
-  createSessionStartedEvent,
-  createTurnStartedEvent,
-  type RuntimeIdentity,
-  type UnstampedMessageStreamEvent,
-} from "#protocol/message.js";
+  sessionStartedForResolvers,
+  turnStartedForResolvers,
+} from "#harness/session-machine/resolver-events.js";
+import type { RuntimeIdentity, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { ResolvedAgent } from "#runtime/types.js";
 
 /** Binds dynamic connection lifecycle dispatch to one execution context. */
@@ -24,13 +23,13 @@ export function bindDynamicConnections(
   return {
     dispatch,
     async rehydrate(
-      state: HarnessEmissionState,
+      state: TurnPosition,
       runtime: RuntimeIdentity,
       turn?: { readonly sequence: number; readonly turnId: string },
     ): Promise<void> {
       if (!state.sessionStarted) return;
-      await dispatch(createSessionStartedEvent({ runtime }));
-      if (turn !== undefined) await dispatch(createTurnStartedEvent(turn));
+      await dispatch(sessionStartedForResolvers(runtime));
+      if (turn !== undefined) await dispatch(turnStartedForResolvers(turn));
     },
   };
 }

@@ -22,9 +22,14 @@ import {
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession } from "#execution/session.js";
-import { activeTurnId } from "#harness/active-turn-id.js";
-import { getHarnessEmissionState } from "#harness/emission.js";
-import type { HarnessTurnRef } from "#harness/emission-state.js";
+import { dropClosedRecords } from "#harness/session-machine/commit.js";
+import {
+  currentProjection,
+  enterSessionProjection,
+  recordPublishedEvent,
+  saveSessionProjection,
+} from "#harness/session-machine/current.js";
+import { activeTurnId, turnPosition } from "#harness/session-machine/view.js";
 import { validateHarnessModelMessages, type HarnessModelMessage } from "#harness/messages.js";
 import type { HandleEventFn, HarnessSession, HarnessSessionBase } from "#harness/types.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
@@ -35,6 +40,7 @@ import {
   type MessageStreamEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
+import { type SessionProjection } from "#protocol/session-projection.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
 const log = createLogger("execution.publish-session-events");
@@ -99,7 +105,8 @@ async function publishEventsFromStep(
   if (events.length === 0) {
     return { serializedContext: target.serializedContext, sessionState: target.sessionState };
   }
-  const { published } = await publishFromSessionStep(await restoreSessionStep(target), {
+  const restored = await restoreSessionStep(target);
+  const { published } = await publishFromSessionStep(restored, {
     origin,
     async publish(emit) {
       for (const event of events) await emit(event);
@@ -180,7 +187,12 @@ export async function publishFromSessionStep<T, R>(
   const update: SessionUpdate<R> = publication.updateSession?.(scoped.session, scoped.result) ?? {
     session: scoped.session,
   };
-  const session = reconcileSessionContinuationToken(ctx, update.session);
+  // The session saves the lifecycle it published, without the records whose owners it closed.
+  const projection = readSessionProjection(ctx);
+  const session = reconcileSessionContinuationToken(
+    ctx,
+    saveSessionProjection(dropClosedRecords(update.session, projection), ctx),
+  );
   return {
     published: {
       serializedContext: serializeContext(ctx),
@@ -201,6 +213,7 @@ async function publishInSessionScope<T>(
   publication: SessionStepPublication<T, unknown>,
 ): Promise<{ readonly result: T; readonly session: HarnessSessionBase }> {
   const { ctx } = step;
+  enterSessionProjection(ctx, step.durableSession.state);
   const effectiveAgent = resolveEffectiveAgentRuntime(ctx.require(BundleKey), ctx);
   const hydrated = hydrateDurableSession({
     compactionOverrides: { thresholdPercent: effectiveAgent.thresholdPercent },
@@ -232,7 +245,7 @@ async function publishInSessionScope<T>(
       const emit =
         instrumentation?.createHandleEvent({
           handleEvent: publisher.publish,
-          turnId: activeTurnId(getHarnessEmissionState(step.durableSession.state)),
+          turnId: activeTurnId(turnPosition(readSessionProjection(ctx))),
         }) ?? publisher.publish;
       return { result: await publication.publish(emit, enrichedSession), session: enrichedSession };
     });
@@ -306,7 +319,9 @@ export function openSessionEventPublisher(input: {
     sessionWritable: input.sessionWritable,
   });
   const emit = async (event: UnstampedMessageStreamEvent): Promise<MessageStreamEvent> => {
-    return await writer.write(await dispatcher.deliver(event));
+    const stamped = await writer.write(await dispatcher.deliver(event));
+    recordPublishedEvent(ctx, stamped);
+    return stamped;
   };
   return {
     dispatcher,
@@ -383,6 +398,11 @@ function openSessionEventWriter(input: {
   };
 }
 
+/** The session's projection as of the last event it published. */
+export function readSessionProjection(ctx: ContextContainer): SessionProjection {
+  return currentProjection(ctx);
+}
+
 type TerminalSessionEvent = Extract<
   UnstampedMessageStreamEvent,
   { type: "session.completed" | "session.failed" }
@@ -404,7 +424,7 @@ export async function publishTerminalSessionEvent(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionWritable: WritableStream<Uint8Array>;
   /** The session's last turn, for channel handlers' `ctx.session.turn`. */
-  readonly turn?: HarnessTurnRef;
+  readonly turn?: { readonly id: string; readonly sequence: number };
   /** The turn the event ends, for instrumentation. */
   readonly turnId?: string;
 }): Promise<void> {
@@ -416,6 +436,7 @@ export async function publishTerminalSessionEvent(input: {
   let publisher: SessionEventPublisher;
   try {
     ctx = await deserializeContext(input.serializedContext);
+    enterSessionProjection(ctx, undefined);
     publisher = openSessionEventPublisher({
       ctx,
       origin: "own",

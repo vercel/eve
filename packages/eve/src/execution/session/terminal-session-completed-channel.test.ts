@@ -14,7 +14,7 @@ import { SessionIdKey } from "#context/keys.js";
 import { deserializeContext } from "#context/serialize.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { finalizeSession } from "#execution/session/finalization.js";
-import { setHarnessEmissionState } from "#harness/emission-state.js";
+import { withOpenTurn } from "#internal/testing/session-machine.js";
 import { POST, defineChannel } from "#public/definitions/channel.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
@@ -43,7 +43,7 @@ it("delivers session.completed to the channel handler when a session expires bet
   vi.mocked(deserializeContext).mockResolvedValue(restored);
 
   // `turn_3` completed: its epilogue cleared the turn id and advanced the sequence to 4.
-  const session = setHarnessEmissionState(
+  const session = withOpenTurn(
     {
       agent: { modelReference: { id: "unused" }, system: "", tools: [] },
       compaction: { recentWindowSize: 10, threshold: 100_000 },
@@ -51,7 +51,7 @@ it("delivers session.completed to the channel handler when a session expires bet
       history: [],
       sessionId: SESSION_ID,
     },
-    { sessionStarted: true, sequence: 4, stepIndex: 0, turnId: "" },
+    { sequence: 3, stepIndex: 0, turnId: "turn_3" },
   );
 
   const written: string[] = [];

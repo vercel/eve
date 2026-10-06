@@ -634,6 +634,8 @@ describe("turn cancellation integration", () => {
         ).toBe(true);
         expect(filterEventsByType(cancelledTurn, "turn.started")).toHaveLength(1);
         expect(filterEventsByType(cancelledTurn, "turn.cancelled")).toHaveLength(1);
+        // v26 cancellation ends the turn without inventing a tool result.
+        expect(filterEventsByType(cancelledTurn, "action.result")).toEqual([]);
         // The superseding step attempt settles before any model work, so
         // the cancelled turn streams exactly one step.
         expect(filterEventsByType(cancelledTurn, "step.started")).toHaveLength(1);

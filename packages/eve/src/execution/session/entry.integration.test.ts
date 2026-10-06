@@ -943,6 +943,31 @@ describe("workflowEntry integration", () => {
     );
   }, 60_000);
 
+  it("reads a message in the first step after its approval turn is cancelled", async () => {
+    const executions: string[] = [];
+    await withHeldApprovalRun(
+      {
+        agent: { name: "workflow-entry-cancelled-approval-follow-up" },
+        modules: [gatedTool("approve_change", executions)],
+      },
+      async ({ commandInbox, sessionInbox, stream }) => {
+        await withTimeout(stream.nextTurn(), "approval turn");
+        await resumeHook(sessionInbox, { kind: "cancel" });
+        await withTimeout(stream.nextTurn(), "cancelled turn");
+
+        await resumeHook(commandInbox, {
+          kind: "send",
+          payload: { message: "Reply with the follow-up." },
+        });
+        const followUp = await withTimeout(stream.nextTurn(), "follow-up turn");
+        // The model reads the cancelled call's result and the message in one step.
+        expect(filterEventsByType(followUp, "step.started")).toHaveLength(1);
+        expect(filterEventsByType(followUp, "message.completed")).toHaveLength(1);
+        expect(executions).toEqual([]);
+      },
+    );
+  }, 60_000);
+
   it("exits a competing continuation owner before its first turn", async () => {
     const runtime = await createTestRuntime({ agent: { name: "workflow-entry-hook-owner" } });
     const continuationToken = "http:workflow-entry-hook-owner";

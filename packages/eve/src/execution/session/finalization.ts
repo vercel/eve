@@ -8,7 +8,7 @@ import type { TurnOutcome } from "#execution/session/turn-step-types.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-import { lastHarnessTurn } from "#harness/emission-state.js";
+import { storedProjection } from "#harness/session-machine/view.js";
 import { getSessionUsage, takeSessionUsageDelta } from "#harness/turn-tag-state.js";
 import { notifyTurnCallerStep } from "#subagents/parent-notification.js";
 
@@ -49,7 +49,7 @@ export async function finalizeSession(
     await emitTerminalSessionCompletionStep({
       sessionWritable: context.sessionWritable,
       serializedContext,
-      turn: lastHarnessTurn(session?.state),
+      turn: lastPublishedTurn(session?.state),
       usage,
     });
   } else if (outcome.kind === "failed") {
@@ -127,4 +127,13 @@ function settledResult(
     case "failed":
       return { isError: true, output: normalizeSerializableError(outcome.error), ...usage };
   }
+}
+
+function lastPublishedTurn(state: import("#harness/types.js").SessionStateMap | undefined) {
+  const turns = Object.values(storedProjection(state).turns);
+  const turn = turns.reduce<(typeof turns)[number] | undefined>(
+    (last, next) => (last === undefined || next.sequence > last.sequence ? next : last),
+    undefined,
+  );
+  return turn === undefined ? undefined : { id: turn.turnId, sequence: turn.sequence };
 }

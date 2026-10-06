@@ -1,3 +1,6 @@
+import { sessionView } from "#harness/session-machine/commit.js";
+import { routeAnswer, hold, receiveRelayedAnswer } from "#harness/session-machine/transitions.js";
+import { storedProjection } from "#harness/session-machine/view.js";
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";
@@ -26,20 +29,15 @@ import {
   resolveRemoteAgentStreamHeaders,
   respondToRemoteAgentSession,
 } from "#execution/agent-sessions/remote.js";
-import { createTurnWaitingOnInputEvent, routeDeliverPayload } from "#subagents/hitl-proxy.js";
+import { routeDeliverPayload } from "#subagents/hitl-proxy.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import {
   sendWorkflowAskAnswers,
   toToolInputResponseResponder,
 } from "#execution/tools/workflow/answer.js";
-import type { PendingInputBatchEvent } from "#harness/pending-input-batches.js";
+import type { StepCoordinates as PendingInputBatchEvent } from "#harness/session-machine/view.js";
 import type { WorkflowAskRoute } from "#harness/proxy-input-requests.js";
-import {
-  createInputResolvedEvent,
-  createMessageReceivedEvent,
-  type InputResolution,
-  type UnstampedMessageStreamEvent,
-} from "#protocol/message.js";
+import { type InputResolution, type UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { getProxyInputRequests, retireProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { InputResponse } from "#shared/input.js";
 
@@ -122,9 +120,7 @@ async function routeProxiedDeliver(
       }
       if (forChild.message !== undefined) {
         const { sequence, turnId } = forChild.resolved.event;
-        answerMessages.push(
-          createMessageReceivedEvent({ message: forChild.message, sequence, turnId }),
-        );
+        answerMessages.push(receiveRelayedAnswer({ message: forChild.message, sequence, turnId }));
         for (const metadata of sourceDelivery.deliveryMetadata ?? []) {
           if (metadata.payloadIndex === sourcePayloadIndex) {
             answerDeliveryIds.push(metadata.deliveryId);
@@ -169,7 +165,7 @@ async function routeProxiedDeliver(
   }
 
   let retired = false;
-  const resolvedEvents: UnstampedMessageStreamEvent[] = [];
+  const answered: { event: PendingInputBatchEvent; resolutions: InputResolution[] }[] = [];
   for (const child of children.values()) {
     if (child.workflowAsk !== undefined) {
       const responses = coalesceDeliverPayloads(child.payloads).inputResponses ?? [];
@@ -206,16 +202,14 @@ async function routeProxiedDeliver(
         );
       }
     }
-    if (child.resolutions.size > 0) {
-      resolvedEvents.push(
-        createInputResolvedEvent({ resolutions: [...child.resolutions.values()], ...child.event }),
-      );
-    }
+    answered.push({ event: child.event, resolutions: [...child.resolutions.values()] });
     // Successfully forwarded request IDs are retired so later deliveries
     // cannot route through stale entries.
     durableSession = retireProxyInputRequests(durableSession, [...child.resolutions.keys()]);
     retired = true;
   }
+  const view = sessionView(storedProjection(durableSession.state), durableSession.state);
+  const resolvedEvents = [...routeAnswer(view, { children: answered }).events];
   // Answers that leave requests pending, and nothing for the turn itself, keep
   // the open turn held, so it parks again as after a partial approval answer.
   if (
@@ -224,7 +218,7 @@ async function routeProxiedDeliver(
     parentAction === undefined &&
     getProxyInputRequests(durableSession.state).size > 0
   ) {
-    resolvedEvents.push(createTurnWaitingOnInputEvent(durableSession));
+    resolvedEvents.push(...hold(view, { on: "input" }).events);
   }
 
   let published: PublishedSessionEvents = {

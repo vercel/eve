@@ -14,11 +14,11 @@ import type { DurableStepResult, TurnStepPayload } from "#execution/session/turn
 import {
   getApprovalAuditState,
   markApprovalCandidateAuthorizationRequired,
-} from "#harness/approval-candidates.js";
+} from "#harness/hitl/candidates.js";
 import { CallbackBaseUrlKey, setPendingAuthorization } from "#harness/authorization.js";
 import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import { defineInteractiveAuthorization } from "#shared/connection-types.js";
-import { getPendingInputBatches } from "#harness/pending-input-batches.js";
+import { suspendedSteps } from "#harness/session-machine/view.js";
 import type { HarnessSession } from "#harness/types.js";
 import { defineOpenAPIConnection } from "#public/definitions/connections/openapi.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
@@ -380,7 +380,7 @@ describe("turn connection approval restoration", () => {
       delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's notes." }] },
     });
     const parked = await fixture.step();
-    const requests = getPendingInputBatches(readDurableSession(parked.sessionState).state).flatMap(
+    const requests = suspendedSteps(readDurableSession(parked.sessionState).state).flatMap(
       (batch) => batch.requests,
     );
     await fixture.step({
@@ -418,8 +418,7 @@ describe("turn connection approval restoration", () => {
       delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's note." }] },
     });
     const parked = await fixture.step();
-    const request = getPendingInputBatches(readDurableSession(parked.sessionState).state)[0]!
-      .requests[0]!;
+    const request = suspendedSteps(readDurableSession(parked.sessionState).state)[0]!.requests[0]!;
     fixture.removeConnection();
     await fixture.step({
       delivery: {
@@ -450,8 +449,7 @@ describe("turn connection approval restoration", () => {
       delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's note." }] },
     });
     const parked = await fixture.step();
-    const request = getPendingInputBatches(readDurableSession(parked.sessionState).state)[0]!
-      .requests[0]!;
+    const request = suspendedSteps(readDurableSession(parked.sessionState).state)[0]!.requests[0]!;
     fixture.removeConnection();
     await fixture.step({
       delivery: {
@@ -465,7 +463,7 @@ describe("turn connection approval restoration", () => {
     expect(fixture.response).not.toHaveBeenCalled();
     expect(fixture.fetch).not.toHaveBeenCalled();
     const state = readDurableSession(refused.sessionState).state;
-    expect(getPendingInputBatches(state)[0]!.requests[0]!.requestId).toBe(request.requestId);
+    expect(suspendedSteps(state)[0]!.requests[0]!.requestId).toBe(request.requestId);
     expect(getApprovalAuditState(state).candidateHistory).toEqual([
       expect.objectContaining({
         status: "rejected",
@@ -495,8 +493,7 @@ describe("turn connection approval restoration", () => {
       delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's note for Bob." }] },
     });
     const parked = await fixture.step();
-    const request = getPendingInputBatches(readDurableSession(parked.sessionState).state)[0]!
-      .requests[0]!;
+    const request = suspendedSteps(readDurableSession(parked.sessionState).state)[0]!.requests[0]!;
 
     const signInStart = fixture.events.length;
     await fixture.step({
@@ -554,7 +551,7 @@ describe("turn connection approval restoration", () => {
       delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's note for Bob." }] },
     });
     const parked = await fixture.step();
-    const batch = getPendingInputBatches(readDurableSession(parked.sessionState).state)[0]!;
+    const batch = suspendedSteps(readDurableSession(parked.sessionState).state)[0]!;
     const request = batch.requests[0]!;
     const ingested = await fixture.step({
       delivery: {
@@ -602,11 +599,10 @@ describe("turn connection approval restoration", () => {
         ],
       },
     });
-    expect(fixture.policyTurns).toEqual([batch.event!.turnId]);
+    expect(fixture.policyTurns).toEqual([batch.event.turnId]);
     expect(fixture.response).toHaveBeenCalledOnce();
     expect(fixture.fetch).toHaveBeenCalledOnce();
-    // The approval held its turn, so the responder's sign-in resumes it
-    // without starting another.
+    // The approval held its turn, so the responder's sign-in resumes it without starting another.
     const events = fixture.events.slice(start);
     expect(events.some((event) => event.type === "authorization.completed")).toBe(true);
     expect(events.filter((event) => event.type === "turn.started")).toHaveLength(0);
@@ -620,7 +616,7 @@ describe("turn connection approval restoration", () => {
         delivery: { kind: "deliver", payloads: [{ message: "Save hello in notes." }] },
       });
       const parked = await fixture.step();
-      const request = getPendingInputBatches(readDurableSession(parked.sessionState).state)[0]!
+      const request = suspendedSteps(readDurableSession(parked.sessionState).state)[0]!
         .requests[0]!;
       expect(request.action.toolName).toBe("connection_execute");
       expect(request.prompt).toBe("Approve Notes: Save note?");
@@ -652,9 +648,8 @@ describe("turn connection approval restoration", () => {
       expect(fixture.fetch).toHaveBeenCalledOnce();
       // Bob approved Alice's call, so the approved request goes out as Bob.
       expect(callerHeader(fixture.fetch.mock.calls[0])).toBe("bob");
-      expect(getPendingInputBatches(readDurableSession(resumed.sessionState).state)).toEqual([]);
+      expect(suspendedSteps(readDurableSession(resumed.sessionState).state)).toEqual([]);
       expect(resumed.serializedContext).not.toHaveProperty("eve.pendingConnectionCalls");
-      // The approval held its turn, so approving it resumes the same turn.
       expect(fixture.events.filter((event) => event.type === "turn.started")).toHaveLength(1);
       // The connection call is reported as a nested action of the approved call.
       const nestedCallId = `${request.action.callId}:1`;
@@ -699,8 +694,7 @@ describe("turn connection approval restoration", () => {
       delivery: { kind: "deliver", payloads: [{ message: "Save hello in notes." }] },
     });
     const parked = await fixture.step();
-    const request = getPendingInputBatches(readDurableSession(parked.sessionState).state)[0]!
-      .requests[0]!;
+    const request = suspendedSteps(readDurableSession(parked.sessionState).state)[0]!.requests[0]!;
     await fixture.step({
       delivery: {
         kind: "deliver",
@@ -726,8 +720,7 @@ describe("turn connection approval restoration", () => {
       delivery: { kind: "deliver", payloads: [{ message: "Save hello in notes." }] },
     });
     const parked = await fixture.step();
-    const request = getPendingInputBatches(readDurableSession(parked.sessionState).state)[0]!
-      .requests[0]!;
+    const request = suspendedSteps(readDurableSession(parked.sessionState).state)[0]!.requests[0]!;
     await fixture.step({
       delivery: {
         kind: "deliver",

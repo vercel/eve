@@ -26,7 +26,7 @@ import { isObject } from "#shared/guards.js";
  * A newer successor must always accept older checkpoints: every bump adds the
  * upgrade from the previous version in `checkpoint-migrations.ts`.
  */
-export const SESSION_CHECKPOINT_VERSION = 11;
+export const SESSION_CHECKPOINT_VERSION = 12;
 
 /** Everything a successor needs to continue an idle session. Hooks are derived from the state. */
 export interface SessionCheckpoint {

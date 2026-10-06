@@ -16,7 +16,7 @@ import { normalizeToolJsonOutput } from "#harness/tool-model-output.js";
 import { toolCallModelOutput } from "#harness/tool-call-io.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
-import { iterateAsApprover, runAsApprover } from "#harness/approved-call-callers.js";
+import { iterateAsApprover, runAsApprover } from "#harness/hitl/approved-call-callers.js";
 
 type NativeApprovalStatus = Exclude<ApprovalStatus, boolean>;
 
@@ -248,6 +248,32 @@ function buildApprovalFn(
     );
     return typeof status === "boolean" ? (status ? "user-approval" : "not-applicable") : status;
   };
+}
+
+/**
+ * Re-runs a tool's approval policy for a call a person approved, just before eve runs it, so the
+ * policy can still refuse it, as when the connection it was approved against changed.
+ */
+export async function recheckApprovedCall(
+  definition: HarnessToolDefinition,
+  call: {
+    readonly callId: string;
+    readonly input: unknown;
+    readonly abortSignal?: AbortSignal;
+    readonly approvedTools?: ReadonlySet<string>;
+  },
+): Promise<{ readonly denied: boolean; readonly reason?: string }> {
+  const status = await buildApprovalFn(definition, { approvedTools: call.approvedTools })(
+    call.input,
+    call.callId,
+    call.abortSignal,
+    true,
+  );
+  if (status === "denied") return { denied: true };
+  if (typeof status === "object" && status !== null && status.type === "denied") {
+    return { denied: true, reason: status.reason };
+  }
+  return { denied: false };
 }
 
 /** Builds the AI SDK 7 call-level approval policy for an assembled tool set. */

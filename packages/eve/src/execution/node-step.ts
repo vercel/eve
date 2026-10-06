@@ -32,6 +32,7 @@ import {
   resolveWebSearchActivityLabel,
   WEB_SEARCH_TOOL_NAME,
 } from "#harness/provider-tool-schemas.js";
+import type { ToolLoopHarnessConfig } from "#harness/types.js";
 
 const log = createLogger("execution.node-step");
 
@@ -72,6 +73,7 @@ interface CreateExecutionNodeStepInput {
     readonly sequence: number;
     readonly turnId: string;
   }) => Promise<void>;
+  readonly signInCompletions?: ToolLoopHarnessConfig["signInCompletions"];
   readonly historyProjector?: HistoryViewProjector;
   readonly historyView?: PreparedHistoryView;
   readonly instrumentation: ExecutionInstrumentation | undefined;
@@ -107,6 +109,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     historyView: input.historyView,
     instrumentation: sessionInstrumentation,
     prepareApprovalTurn: input.prepareApprovalTurn,
+    signInCompletions: input.signInCompletions,
     resolveStepDynamicTools: (resolveInput) =>
       preparePersistedStepDynamicToolMetadata({
         ...resolveInput,

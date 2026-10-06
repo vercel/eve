@@ -18,6 +18,9 @@ import {
   resolveStepAgentLimits,
 } from "#execution/agent-sessions/context.js";
 import type { TaskStartedStreamEvent } from "#protocol/message.js";
+import { sessionView } from "#harness/session-machine/commit.js";
+import { startTask } from "#harness/session-machine/transitions.js";
+import { storedProjection } from "#harness/session-machine/view.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { HarnessSessionBase } from "#harness/types.js";
 
@@ -50,7 +53,7 @@ async function dispatchCoordination(
   const { batch, session } = prepared;
   let nextSession = session;
   const results: RuntimeActionResult[] = [];
-  const started: TaskStartedStreamEvent[] = [];
+  const started: TaskStartedStreamEvent["data"][] = [];
   const agentLimits = resolveStepAgentLimits(prepared);
 
   for (const task of prepared.plan) {
@@ -82,7 +85,10 @@ async function dispatchCoordination(
           : createDurableSessionState({ session: nextSession }),
       sessionWritable: input.sessionWritable,
     },
-    started,
+    started.flatMap(
+      (task) =>
+        startTask(sessionView(storedProjection(nextSession.state), nextSession.state), task).events,
+    ),
   );
   return { results, ...published };
 }
@@ -94,7 +100,7 @@ async function dispatchCoordination(
 async function dispatchWorkflowCall(start: StartWorkflowTaskInput): Promise<{
   readonly result?: RuntimeActionResult;
   readonly session: HarnessSessionBase;
-  readonly started?: TaskStartedStreamEvent;
+  readonly started?: TaskStartedStreamEvent["data"];
 }> {
   const { entry } = start.task;
   switch (entry.entryPoint) {

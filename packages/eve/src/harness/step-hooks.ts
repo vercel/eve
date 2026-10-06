@@ -22,8 +22,7 @@ import {
   createRuntimeToolResultFromMessagePart,
   createRuntimeToolResultFromStepResult,
 } from "#harness/action-result-helpers.js";
-import type { HarnessEmissionState } from "#harness/emission.js";
-import { emitStepStarted } from "#harness/emission.js";
+import type { TurnPosition } from "#harness/session-machine/view.js";
 import { normalizeAssistantStepFinishReason } from "#harness/finish-reason.js";
 import { extractToolApprovalInputRequests } from "#harness/input-extraction.js";
 import {
@@ -86,16 +85,11 @@ export type HarnessStepResult = Pick<
 interface StepHooksInput {
   readonly auth?: import("#channel/types.js").SessionAuthContext | null;
   readonly cachePath: PromptCachePath;
-  readonly emit?: HarnessEmitFn;
-  readonly emissionState: HarnessEmissionState;
   /**
-   * When `false`, `onStepStart` skips the `step.started` emission.
-   * Used by the harness recovery path to avoid emitting `step.started`
-   * twice when retrying the same step with a degraded toolset.
-   *
-   * Defaults to `true`.
+   * Starts the model step the SDK is about to run. Omitted when the step already started, as
+   * it has for a retry of the same step.
    */
-  readonly emitStepStarted?: boolean;
+  readonly startStep?: (messages: readonly ModelMessage[]) => Promise<void>;
   readonly marker: AnthropicCacheMarker | undefined;
   readonly session: HarnessSession;
 }
@@ -107,7 +101,7 @@ interface StepHooks {
   /**
    * `ToolLoopAgent` `onStepStart` callback.
    *
-   * Emits the `step.started` event from the prepared step input.
+   * Starts the step from the prepared step input.
    */
   readonly onStepStart: GenerateTextOnStepStartCallback<ToolSet>;
 
@@ -134,7 +128,7 @@ interface StepHooks {
    * have been emitted before proceeding to post-step handling.
    *
    * Resolves once per hooks instance: a retried model call must rebuild
-   * hooks via a fresh `runOneModelCall` attempt. Re-running a call against
+   * hooks via a fresh `ModelCaller.call` attempt. Re-running a call against
    * hooks whose `stepResult` already resolved reads the previous attempt's
    * result, not the retry's.
    *
@@ -160,7 +154,6 @@ interface StepHooks {
  */
 export function buildStepHooks(input: StepHooksInput): StepHooks {
   const session = input.session;
-  const emit = input.emit;
 
   let resolveStep: (step: HarnessStepResult) => void;
   const stepResult = new Promise<HarnessStepResult>((resolve) => {
@@ -209,14 +202,7 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
   };
 
   const onStepStart: GenerateTextOnStepStartCallback<ToolSet> = async ({ messages }) => {
-    if (emit && input.emitStepStarted !== false) {
-      await emitStepStarted(
-        emit,
-        input.emissionState,
-        requireSessionModelReference(session).id,
-        messages,
-      );
-    }
+    await input.startStep?.(messages);
   };
 
   return {
@@ -250,7 +236,7 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
  */
 export async function emitStepActions(
   emitFn: HarnessEmitFn,
-  state: HarnessEmissionState,
+  state: TurnPosition,
   step: HarnessStepResult,
   options: {
     readonly emittedActionCallIds?: ReadonlySet<string>;

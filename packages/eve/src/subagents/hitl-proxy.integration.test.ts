@@ -1,3 +1,4 @@
+import { toProxyInputRequestEntries } from "#harness/proxy-input-requests.js";
 import { describe, expect, it } from "vitest";
 
 import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js";
@@ -9,7 +10,10 @@ import { ContextContainer } from "#context/container.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeContext } from "#context/serialize.js";
-import { setHarnessEmissionState } from "#harness/emission-state.js";
+import { applyTransition, sessionView } from "#harness/session-machine/commit.js";
+import { relay } from "#harness/session-machine/transitions.js";
+import { storedProjection } from "#harness/session-machine/view.js";
+import { withOpenTurn } from "#internal/testing/session-machine.js";
 import { hasProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { HarnessEmitFn, HarnessSession } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -18,7 +22,7 @@ import { createRuntimeAdapterRegistry } from "#runtime/channels/registry.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
-import { emitProxiedInputRequest, routeDeliverPayload } from "#subagents/hitl-proxy.js";
+import { routeDeliverPayload } from "#subagents/hitl-proxy.js";
 
 /**
  * Integration coverage for subagent HITL proxy emission and routing.
@@ -166,12 +170,22 @@ function buildEmptySession(continuationToken: string, sessionId: string): Harnes
 }
 
 function buildOpenTurnSession(continuationToken: string, sessionId: string): HarnessSession {
-  return setHarnessEmissionState(buildEmptySession(continuationToken, sessionId), {
-    sessionStarted: true,
+  return withOpenTurn(buildEmptySession(continuationToken, sessionId), {
     sequence: 3,
     stepIndex: 1,
     turnId: "turn_3",
   });
+}
+
+/** Relays a child's batch through the parent's machine, returning the routes it leaves. */
+async function emitProxiedInputRequest(input: {
+  readonly emit: HarnessEmitFn;
+  readonly hookPayload: Parameters<typeof toProxyInputRequestEntries>[0];
+  readonly session: HarnessSession;
+}) {
+  const view = sessionView(storedProjection(input.session.state), input.session.state);
+  await applyTransition(input.session, relay(view, { payload: input.hookPayload }), input.emit);
+  return toProxyInputRequestEntries(input.hookPayload);
 }
 
 /**

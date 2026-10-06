@@ -123,6 +123,19 @@
  *             directory removes protocol 1 without a search.
  *   rule 49 — Provided tool definitions carry a framework tool flag,
  *             so telemetry ownership survives renamed and namespaced tools.
+ *   rule 50 — The human-in-the-loop lifecycle in `harness/hitl/` is
+ *             reached only through its `index.ts`, its request vocabulary
+ *             (`approval-prompt`, `budget-request`), and the approvers that
+ *             approved calls run as (`approved-call-callers`), so replacing it
+ *             changes one seam.
+ *   rule 51 — Only the session machine (`harness/session-machine/`) and the
+ *             human-in-the-loop lifecycle it delegates to
+ *             (`harness/hitl/`) build lifecycle events and read the
+ *             machine's private state. Every change to a turn, request,
+ *             sign-in, task, or call outcome is a transition that returns its
+ *             events, so nothing changes without readers hearing it. The model
+ *             step's streamed content (its calls and their inline results) is
+ *             built where it streams.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -242,6 +255,8 @@ function isTsLike(relPath) {
  *   rule46: Violation[];
  *   rule47: Violation[];
  *   rule48: Violation[];
+ *   rule50: Violation[];
+ *   rule51: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -275,6 +290,8 @@ async function scanRepo(state) {
     checkRule46(posix, lines, state.rule46);
     checkRule47(posix, lines, state.rule47);
     checkRule48(posix, lines, state.rule48);
+    checkRule50(posix, lines, state.rule50);
+    checkRule51(posix, lines, state.rule51);
   }
 }
 
@@ -478,6 +495,85 @@ function checkRule47(posix, lines, violations) {
       message:
         "sends a caller's reply outside execution/session/program.ts and execution/session/finalization.ts. A turn replies to its caller only at its real end, which the session program owns; finalization replies when the session ends.",
     });
+  });
+}
+
+// ---------- Rule 50: the human-in-the-loop lifecycle has one seam ----------
+
+const HUMAN_INPUT_DIR = "packages/eve/src/harness/hitl/";
+const HUMAN_INPUT_PRIVATE_IMPORT_RE =
+  /["'](?:#harness\/|(?:\.\.?\/)+)hitl\/(?!(?:index|approval-prompt|approved-call-callers|budget-request)\.js["'])/;
+
+/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
+function checkRule50(posix, lines, violations) {
+  if (
+    !posix.startsWith("packages/eve/src/") ||
+    posix.startsWith(HUMAN_INPUT_DIR) ||
+    posix.startsWith("packages/eve/src/internal/testing/") ||
+    /\.(?:test|integration\.test|scenario\.test)\.ts$/.test(posix)
+  )
+    return;
+  lines.forEach((line, idx) => {
+    if (!HUMAN_INPUT_PRIVATE_IMPORT_RE.test(line)) return;
+    violations.push({
+      rule: 50,
+      file: posix,
+      line: idx + 1,
+      message:
+        "imports the human-in-the-loop lifecycle's internals. Reach it through `#harness/hitl/index.js`, the one seam the rest of eve meets it at.",
+    });
+  });
+}
+
+// ---------- Rule 51: the session machine owns lifecycle ----------
+
+const SESSION_MACHINE_DIR = "packages/eve/src/harness/session-machine/";
+const LIFECYCLE_EVENT_BUILDER_RE =
+  /\bcreate(?:Session(?:Started|Waiting|Failed|Completed)|Turn(?:Started|Completed|Failed|Cancelled|Waiting)|MessageReceived|Step(?:Started|Failed)|Input(?:Requested|Resolved)|Authorization(?:Required|Completed)|Approval(?:Candidate|Settled)|Task(?:Started|Settled)|ContextCleared|ResultCompleted)Event\b/;
+const CALL_EVENT_BUILDER_RE = /\bcreateAction(?:Result|sRequested)Event\b/;
+/** Where the model step streams its calls, their inline results, and the calls they made. */
+const STREAM_CONTENT_FILES = new Set([
+  "packages/eve/src/harness/emission.ts",
+  "packages/eve/src/harness/nested-actions.ts",
+  "packages/eve/src/harness/step-hooks.ts",
+  "packages/eve/src/harness/stream-actions.ts",
+]);
+const MACHINE_PRIVATE_IMPORT_RE = /["']#harness\/session-machine\/(?:state|events)\.js["']/;
+
+/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
+function checkRule51(posix, lines, violations) {
+  if (
+    !posix.startsWith("packages/eve/src/") ||
+    posix.startsWith(SESSION_MACHINE_DIR) ||
+    posix.startsWith(HUMAN_INPUT_DIR) ||
+    posix.startsWith("packages/eve/src/protocol/") ||
+    posix.startsWith("packages/eve/src/internal/testing/") ||
+    posix.endsWith(".test.ts") ||
+    posix.includes("/test/")
+  )
+    return;
+  lines.forEach((line, idx) => {
+    const builder = LIFECYCLE_EVENT_BUILDER_RE.exec(line)?.[0];
+    const callBuilder = STREAM_CONTENT_FILES.has(posix)
+      ? undefined
+      : CALL_EVENT_BUILDER_RE.exec(line)?.[0];
+    if (builder !== undefined || callBuilder !== undefined) {
+      violations.push({
+        rule: 51,
+        file: posix,
+        line: idx + 1,
+        message: `uses ${builder ?? callBuilder} outside harness/session-machine/. Only the session machine builds lifecycle events: return them from a transition and publish what it returns with \`applyTransition\`.`,
+      });
+    }
+    if (MACHINE_PRIVATE_IMPORT_RE.test(line)) {
+      violations.push({
+        rule: 51,
+        file: posix,
+        line: idx + 1,
+        message:
+          "imports the session machine's private state or event builders. Read execution state through `#harness/session-machine/view.js`; change it with a transition.",
+      });
+    }
   });
 }
 
@@ -1604,6 +1700,8 @@ async function main() {
     rule46: /** @type {Violation[]} */ ([]),
     rule47: /** @type {Violation[]} */ ([]),
     rule48: /** @type {Violation[]} */ ([]),
+    rule50: /** @type {Violation[]} */ ([]),
+    rule51: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1719,6 +1817,8 @@ async function main() {
   violations.push(...state.rule47);
   violations.push(...state.rule48);
   violations.push(...(await checkFrameworkActionIdentity()));
+  violations.push(...state.rule50);
+  violations.push(...state.rule51);
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

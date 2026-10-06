@@ -15,7 +15,7 @@ import {
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { runStep } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import type { HarnessEmissionState } from "#harness/emission.js";
+import { positionState } from "#internal/testing/session-machine.js";
 import type { HarnessSession } from "#harness/types.js";
 
 vi.mock("./sandbox/ensure.js", () => ({
@@ -37,13 +37,13 @@ function createStubSession(overrides: Partial<HarnessSession> = {}): HarnessSess
 }
 
 function createSessionWithEmissionState(input: {
-  readonly state: HarnessEmissionState;
+  readonly state: {
+    readonly sequence: number;
+    readonly stepIndex: number;
+    readonly turnId: string;
+  };
 }): HarnessSession {
-  return createStubSession({
-    state: {
-      "eve.harness.emission": input.state,
-    },
-  });
+  return createStubSession({ state: positionState(input.state) });
 }
 
 function createSeedContext(overrides?: {
@@ -163,7 +163,6 @@ describe("runStep with sessionProvider", () => {
       createSessionWithEmissionState({
         state: {
           sequence: 2,
-          sessionStarted: true,
           stepIndex: 0,
           turnId: "turn_2",
         },
@@ -173,7 +172,6 @@ describe("runStep with sessionProvider", () => {
       createSessionWithEmissionState({
         state: {
           sequence: 2,
-          sessionStarted: true,
           stepIndex: 1,
           turnId: "turn_2",
         },
@@ -183,7 +181,6 @@ describe("runStep with sessionProvider", () => {
       createSessionWithEmissionState({
         state: {
           sequence: 3,
-          sessionStarted: true,
           stepIndex: 0,
           turnId: "",
         },

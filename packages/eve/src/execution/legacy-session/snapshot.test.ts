@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { importConversation, normalizeHistory } from "./snapshot.js";
 import type { LegacySession } from "./snapshot.js";
+import { nextStepIndex, storedProjection, turnPosition } from "#harness/session-machine/view.js";
 describe("conversation import", () => {
   it("preserves authored state, budget, emission coordinates and storage", () => {
     const session: LegacySession = {
@@ -37,7 +38,10 @@ describe("conversation import", () => {
       "eve.runtime.pendingCoordinationBatch",
     );
     expect(result.snapshot.session.state).not.toHaveProperty("eve.agent.handles");
-    expect(result.emissionState.sequence).toBe(9);
+    const projection = storedProjection(result.snapshot.session.state);
+    expect(turnPosition(projection).sequence).toBe(9);
+    // The legacy driver kept the index its next step takes.
+    expect(nextStepIndex(projection)).toBe(3);
     expect(result.snapshot.session).not.toHaveProperty("history");
     expect(history[0]).toMatchObject({
       kind: "user",

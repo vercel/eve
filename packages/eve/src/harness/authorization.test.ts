@@ -8,10 +8,10 @@ import {
   consumeAuthorizationResult,
   getPendingAuthorization,
   getHookUrl,
-  getSupersededAuthorizationChallenges,
   PendingAuthorizationResultKey,
   resolveActiveAuthorizationChallenges,
   setPendingAuthorization,
+  supersededChallenges,
 } from "#harness/authorization.js";
 import type { ConnectionPrincipal } from "#shared/connection-types.js";
 
@@ -226,9 +226,9 @@ describe("pending authorization attempts", () => {
     expect(resolveActiveAuthorizationChallenges([listTool, createTool, bobTool, approval])).toEqual(
       [createTool, bobTool, approval],
     );
-    expect(getSupersededAuthorizationChallenges(pending, [createTool])).toEqual([
-      grant("linear", "connection"),
-    ]);
+    expect(
+      supersededChallenges(getPendingAuthorization(pending)?.challenges ?? [], [createTool]),
+    ).toEqual([grant("linear", "connection")]);
   });
 
   it("clears by exact attempt identity", () => {

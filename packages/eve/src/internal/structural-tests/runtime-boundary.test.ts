@@ -11,11 +11,6 @@ const WORKFLOW_PRIMITIVE_SPECIFIERS = new Set([
   "#compiled/@workflow/core/index.js",
   "#compiled/@workflow/core/runtime.js",
 ]);
-// Existing reachability debt through ContextKey serialization. This set should only shrink.
-const WORKFLOW_REACHABILITY_ALLOWLIST = new Set([
-  "harness/attachment-staging.ts",
-  "harness/tool-loop.ts",
-]);
 const SKIP_DIRS = new Set(["node_modules", "dist", "build", "coverage"]);
 const SOURCE_EXTENSIONS = [".ts", ".tsx", ".mts", ".cts"] as const;
 
@@ -28,11 +23,9 @@ interface SourceModule {
 describe("runtime boundary structure", () => {
   it("keeps channel and harness code transitively workflow-agnostic", async () => {
     const modules = await buildSourceGraph();
-    const { staleAllowlist, violations } = findWorkflowReachabilityViolations(modules);
+    const violations = findWorkflowReachabilityViolations(modules);
 
-    if (violations.length > 0 || staleAllowlist.length > 0) {
-      throw new Error(formatReachabilityFailure({ staleAllowlist, violations }));
-    }
+    if (violations.length > 0) throw new Error(formatReachabilityFailure(violations));
   });
 });
 
@@ -168,31 +161,14 @@ function moduleResolutionCandidates(importRoot: string): string[] {
   return candidates;
 }
 
-function findWorkflowReachabilityViolations(modules: Map<string, SourceModule>): {
-  staleAllowlist: string[];
-  violations: string[][];
-} {
+function findWorkflowReachabilityViolations(modules: Map<string, SourceModule>): string[][] {
   const violations: string[][] = [];
-  const observedAllowlist = new Set<string>();
-
   for (const file of modules.keys()) {
     if (!DISALLOWED_ENTRYPOINT_PREFIXES.some((prefix) => file.startsWith(prefix))) continue;
-
     const path = findPathToWorkflowPrimitive({ file, modules, seen: new Set() });
-    if (path !== undefined) {
-      if (WORKFLOW_REACHABILITY_ALLOWLIST.has(file)) {
-        observedAllowlist.add(file);
-      } else {
-        violations.push(path);
-      }
-    }
+    if (path !== undefined) violations.push(path);
   }
-
-  const staleAllowlist = [...WORKFLOW_REACHABILITY_ALLOWLIST].filter(
-    (file) => !observedAllowlist.has(file),
-  );
-
-  return { staleAllowlist, violations };
+  return violations;
 }
 
 function findPathToWorkflowPrimitive({
@@ -224,36 +200,15 @@ function findPathToWorkflowPrimitive({
   return undefined;
 }
 
-function formatReachabilityFailure({
-  staleAllowlist,
-  violations,
-}: {
-  staleAllowlist: string[];
-  violations: string[][];
-}): string {
-  const sections = [
+function formatReachabilityFailure(violations: string[][]): string {
+  return [
     "Channel and harness production code must stay workflow-agnostic.",
     "A channel or harness file can transitively reach vendored Workflow primitives.",
     "Move the workflow primitive call behind a runtime/execution-owned helper, then have the channel or harness depend on that eve-owned boundary instead.",
-  ];
-
-  if (violations.length > 0) {
-    sections.push(
-      "",
-      "New transitive workflow reachability paths:",
-      ...violations.map((path) => `  - ${path.join(" -> ")}`),
-    );
-  }
-
-  if (staleAllowlist.length > 0) {
-    sections.push(
-      "",
-      "Remove stale allowlist entries whose workflow reachability has been fixed:",
-      ...staleAllowlist.map((file) => `  - ${file}`),
-    );
-  }
-
-  return sections.join("\n");
+    "",
+    "Transitive workflow reachability paths:",
+    ...violations.map((path) => `  - ${path.join(" -> ")}`),
+  ].join("\n");
 }
 
 function toPosix(path: string): string {

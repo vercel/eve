@@ -13,7 +13,7 @@ import {
   InitiatorAuthKey,
   ParentSessionKey,
 } from "#context/keys.js";
-import type { HarnessEmissionState } from "#harness/emission.js";
+import type { TurnPosition } from "#harness/session-machine/view.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { RuntimeContextResolver } from "#tracing/otel-declaration.js";
 import {
@@ -34,7 +34,7 @@ export interface BuildTelemetryRuntimeContextInput {
   readonly capturesContent: boolean;
   readonly context?: InstrumentationRuntimeContextSnapshot;
   readonly eveVersion: string;
-  readonly emissionState: HarnessEmissionState;
+  readonly emissionState: TurnPosition;
   readonly environment: string;
   readonly modelInput: {
     readonly instructions: string | SystemModelMessage | undefined;

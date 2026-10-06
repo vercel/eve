@@ -45,10 +45,12 @@ describe("handleWorkflowToolRunMessage", () => {
       created.taskId,
       "reviewer-run",
     ).table;
-    const base = createTestSessionState({
-      emissionState: { sequence: 2, sessionStarted: true, stepIndex: 0, turnId: "turn_1" },
-      sessionId: "support-session",
-    });
+    const base = createTestSessionState(
+      {
+        sessionId: "support-session",
+      },
+      { sequence: 2, stepIndex: 0, turnId: "turn_1" },
+    );
     const events: MessageStreamEvent[] = [];
     const decoder = new TextDecoder();
     const cursor = new SessionStateCursor({

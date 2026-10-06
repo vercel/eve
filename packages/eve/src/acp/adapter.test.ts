@@ -535,37 +535,70 @@ describe("EveAcpAdapter", () => {
     expect(error).toMatchObject({ code: -32_002, data: { httpStatus: 401 } });
   });
 
-  it("reports rejected actions as failed tool calls", async () => {
+  it("reports a denied approval as failed, with the denial's reason", async () => {
+    const at = { sequence: 1, stepIndex: 0, turnId: "turn-1" };
+    const action = { callId: "call-1", input: {}, kind: "tool-call" as const, toolName: "write" };
+    const waiting = {
+      type: "session.waiting" as const,
+      data: { continuationToken: "session-id", wait: "next-user-message" as const },
+    };
     const { adapter } = adapterWith([
       [
+        { type: "actions.requested", data: { ...at, actions: [action] } },
         {
-          type: "action.result",
+          type: "input.requested",
           data: {
-            result: {
-              callId: "call-1",
-              kind: "tool-result",
-              output: "Denied",
-              toolName: "write",
-            },
-            sequence: 1,
-            status: "rejected",
-            stepIndex: 0,
-            turnId: "turn-1",
+            ...at,
+            requests: [
+              {
+                action,
+                display: "confirmation",
+                kind: "tool-approval",
+                options: [
+                  { id: "approve", label: "Approve" },
+                  { id: "deny", label: "Deny" },
+                ],
+                prompt: "Allow write?",
+                requestId: "req-1",
+              },
+            ],
+          },
+        },
+        waiting,
+      ],
+      // The denial resolves the request before the result that carries its reason arrives.
+      [
+        {
+          type: "input.resolved",
+          data: {
+            ...at,
+            resolutions: [{ kind: "tool-approval", outcome: "denied", requestId: "req-1" }],
           },
         },
         {
-          type: "session.waiting",
-          data: { continuationToken: "session-id", wait: "next-user-message" },
+          type: "action.result",
+          data: {
+            ...at,
+            error: { code: "TOOL_EXECUTION_DENIED", message: "Bob declined the write." },
+            result: { callId: "call-1", kind: "tool-result", output: "Denied", toolName: "write" },
+            status: "rejected",
+          },
         },
+        waiting,
       ],
     ]);
+    const request = vi.fn(async (_method: string, params: any) => ({
+      outcome: { outcome: "selected", optionId: params.options[1].optionId },
+    })) as AgentContext["request"];
+    const { client, notifications } = acpClient({ request });
     const sessionId = await createSession(adapter);
-    const { client, notifications } = acpClient();
 
     await adapter.prompt(textPrompt(sessionId), client, new AbortController().signal);
 
-    expect(notifications).toHaveLength(1);
-    expect((notifications[0]!.params as any).update.status).toBe("failed");
+    const updates = notifications
+      .map((notification) => (notification.params as any).update)
+      .filter((update) => update.sessionUpdate === "tool_call_update");
+    expect(updates.at(-1)).toMatchObject({ rawOutput: "Denied", status: "failed" });
   });
 
   it("fails unsupported authorization requests instead of ending successfully", async () => {
@@ -652,5 +685,113 @@ describe("EveAcpAdapter", () => {
 
     await expect(adapter.close()).resolves.toBeUndefined();
     expect(session.reset).toHaveBeenCalledOnce();
+  });
+
+  it.each(["completed", "cancelled"] as const)(
+    "delivers task settlement without output: %s",
+    async (status) => {
+      const at = { sequence: 0, stepIndex: 0, turnId: "turn_0" };
+      const { adapter } = adapterWith([
+        [
+          { type: "turn.started", data: { sequence: 0, turnId: "turn_0" } },
+          {
+            type: "actions.requested",
+            data: {
+              ...at,
+              actions: [{ callId: "c", input: {}, kind: "tool-call", toolName: "research" }],
+            },
+          },
+          {
+            type: "task.started",
+            data: { callId: "c", kind: "tool", name: "research", taskId: "t", turnId: "turn_0" },
+          },
+          {
+            type: "action.result",
+            data: {
+              ...at,
+              result: { callId: "c", kind: "tool-result", toolName: "research", output: "Started" },
+              status: "completed",
+            },
+          },
+          { type: "task.settled", data: { callId: "c", taskId: "t", turnId: "turn_0", status } },
+          { type: "turn.completed", data: { sequence: 0, turnId: "turn_0" } },
+          {
+            type: "session.waiting",
+            data: { continuationToken: "session-id", wait: "next-user-message" },
+          },
+        ],
+      ]);
+      const sessionId = await createSession(adapter);
+      const { client, notifications } = acpClient();
+      await adapter.prompt(textPrompt(sessionId), client, new AbortController().signal);
+      const statuses = notifications
+        .map(
+          ({ params }) => (params as { update: { status?: string; toolCallId?: string } }).update,
+        )
+        .filter((update) => update.toolCallId === "c")
+        .map((update) => update.status);
+      expect(statuses).toEqual([
+        "pending",
+        "in_progress",
+        status === "completed" ? "completed" : "failed",
+      ]);
+    },
+  );
+
+  it("ends a running task call with its failed turn", async () => {
+    const at = { sequence: 0, stepIndex: 0, turnId: "turn_0" };
+    const action = {
+      callId: "call_1",
+      input: {},
+      kind: "tool-call" as const,
+      toolName: "research",
+    };
+    // Tasks a failed turn leaves running are cancelled after its response ends.
+    const { adapter } = adapterWith([
+      [
+        { type: "turn.started", data: { sequence: 0, turnId: "turn_0" } },
+        { type: "actions.requested", data: { ...at, actions: [action] } },
+        {
+          type: "task.started",
+          data: {
+            callId: "call_1",
+            kind: "tool",
+            name: "research",
+            taskId: "task_1",
+            turnId: "turn_0",
+          },
+        },
+        {
+          type: "action.result",
+          data: {
+            ...at,
+            result: {
+              callId: "call_1",
+              kind: "tool-result",
+              output: "Started task task_1.",
+              toolName: "research",
+            },
+            status: "completed",
+          },
+        },
+        { type: "turn.failed", data: { ...at, code: "MODEL_CALL_FAILED", message: "boom" } },
+        {
+          type: "session.waiting",
+          data: { continuationToken: "session-id", wait: "next-user-message" },
+        },
+      ],
+    ]);
+    const sessionId = await createSession(adapter);
+    const { client, notifications } = acpClient();
+
+    await expect(
+      adapter.prompt(textPrompt(sessionId), client, new AbortController().signal),
+    ).rejects.toThrow("boom");
+
+    const statuses = notifications
+      .map(({ params }) => (params as { update: { status?: string; toolCallId?: string } }).update)
+      .filter((update) => update.toolCallId === "call_1")
+      .map((update) => update.status);
+    expect(statuses).toEqual(["pending", "in_progress", "failed"]);
   });
 });

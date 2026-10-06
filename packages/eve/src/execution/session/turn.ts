@@ -275,7 +275,10 @@ export class SessionExecution {
   async cancelTurnWork(): Promise<void> {
     const { cursor } = this.input;
     if (mayWaitOnWorkflowToolRuns(cursor.sessionState)) {
-      await cancelDescendantTurnsStep({ sessionState: cursor.sessionState });
+      await cancelDescendantTurnsStep({
+        serializedContext: cursor.serializedContext,
+        sessionState: cursor.sessionState,
+      });
     }
     await cancelWorkingTasks(cursor, "turn_cancelled");
   }

@@ -1,4 +1,4 @@
-import type { ContentPart, ModelMessage, ToolSet } from "ai";
+import type { ContentPart, ToolSet } from "ai";
 import { z } from "#compiled/zod/index.js";
 
 import { toolCallDisplayName } from "#execution/tools/connection-target.js";
@@ -48,7 +48,6 @@ export function extractToolApprovalInputRequests(input: {
 function extractApprovalRequests(input: {
   readonly content: readonly unknown[];
   readonly excludedCallIds?: ReadonlySet<string>;
-  readonly includedRequestIds?: ReadonlySet<string>;
 }): InputRequest[] {
   const requests: InputRequest[] = [];
   const toolCallsById = new Map<string, ToolCallDescriptor>();
@@ -66,13 +65,6 @@ function extractApprovalRequests(input: {
       continue;
     }
     const approval = parsed.data;
-
-    if (
-      input.includedRequestIds !== undefined &&
-      !input.includedRequestIds.has(approval.approvalId)
-    ) {
-      continue;
-    }
 
     // AI SDK records automatic decisions as request/response pairs for history;
     // only unresolved requests should become eve input.
@@ -103,44 +95,6 @@ function extractApprovalRequests(input: {
       prompt: `Approve ${toolCallDisplayName(toolCall.toolName, toolCall.input)}?`,
       requestId: approval.approvalId,
     });
-  }
-
-  return requests;
-}
-
-/**
- * Recovers approval request metadata for submitted input response IDs from
- * model history. The newest occurrence wins so compacted or repeated history
- * does not replace the request that is closest to the current turn.
- */
-export function extractHistoricalInputRequests(input: {
-  readonly history: readonly ModelMessage[];
-  readonly requestIds: ReadonlySet<string>;
-}): ReadonlyMap<string, InputRequest> {
-  const requests = new Map<string, InputRequest>();
-
-  for (let index = input.history.length - 1; index >= 0; index -= 1) {
-    const message = input.history[index];
-    if (message?.role !== "assistant" || !Array.isArray(message.content)) {
-      continue;
-    }
-
-    const candidates = extractApprovalRequests({
-      content: message.content,
-      includedRequestIds: input.requestIds,
-    });
-
-    for (const request of candidates) {
-      if (!input.requestIds.has(request.requestId) || requests.has(request.requestId)) {
-        continue;
-      }
-
-      requests.set(request.requestId, request);
-    }
-
-    if (requests.size === input.requestIds.size) {
-      break;
-    }
   }
 
   return requests;

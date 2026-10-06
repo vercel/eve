@@ -2,7 +2,6 @@ import { actionRequestName } from "#shared/action-request-name.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#shared/action-types.js";
 import type { InputRequest } from "#shared/input.js";
 import type {
-  EveDynamicToolPart,
   EveMessageInputRequest,
   EveMessageToolMetadata,
 } from "#client/message-reducer-types.js";
@@ -67,29 +66,6 @@ export function mergeToolMetadata(
       kind,
       name,
     },
-  };
-}
-
-/**
- * Derives the approved-approval descriptor a resolved tool result carries
- * forward, or `undefined` when the tool part never had an approval.
- */
-export function approvedApproval(part: EveDynamicToolPart | undefined):
-  | {
-      readonly id: string;
-      readonly approved: true;
-      readonly reason?: string;
-      readonly isAutomatic?: boolean;
-    }
-  | undefined {
-  if (!part?.approval?.id) {
-    return undefined;
-  }
-  return {
-    approved: true,
-    id: part.approval.id,
-    isAutomatic: part.approval.isAutomatic,
-    reason: part.approval.reason,
   };
 }
 

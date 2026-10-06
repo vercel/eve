@@ -158,6 +158,8 @@ export class ClientSession {
         "Message route did not return a delivery id. Update the server before sending with this client.",
       );
     }
+    // A message's response ends at the boundary that lists its delivery. An answer's ends at its
+    // first turn boundary: not every path that publishes an answer's events attributes them.
     return this.#messageResponse<TOutput>(
       response,
       input,
@@ -269,7 +271,8 @@ export class ClientSession {
             );
           }
           if (!started && !matches) continue;
-          if (!terminal && event.meta?.deliveryIds !== undefined && !matches) continue;
+          const attributed = event.meta?.deliveryIds !== undefined;
+          if (!terminal && attributed && !matches) continue;
           started = true;
         }
         reachedBoundary = segment.observe(event);

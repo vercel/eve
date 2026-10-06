@@ -516,6 +516,25 @@ describe("message stream protocol", () => {
     });
   });
 
+  it("preserves the failed wire status for an automatic policy denial", () => {
+    const event = createActionResultEvent({
+      result: {
+        callId: "call_1",
+        isError: true,
+        kind: "tool-result",
+        output: { code: "TOOL_EXECUTION_DENIED", message: "Tool execution was denied." },
+        toolName: "deploy",
+      },
+      sequence: 0,
+      stepIndex: 0,
+      turnId: "turn_0",
+    });
+    expect(event.data).toMatchObject({
+      error: { code: "TOOL_EXECUTION_DENIED" },
+      status: "failed",
+    });
+  });
+
   it("marks denied action results as rejected", () => {
     const event = createActionResultEvent({
       rejected: true,
