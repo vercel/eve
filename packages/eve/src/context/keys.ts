@@ -36,6 +36,7 @@ import type { HistoryViewProjector } from "#shared/history-view.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
 import type { MemoryScope, MemoryTurnContext } from "#public/memory/index.js";
+import type { SessionPredecessor } from "#protocol/message.js";
 
 // Re-export so consumers don't need a direct channel/ import.
 export type {
@@ -44,6 +45,7 @@ export type {
   SessionTraceRoot,
   SessionTurn,
 } from "#channel/types.js";
+export type { SessionPredecessor } from "#protocol/message.js";
 
 // ---------------------------------------------------------------------------
 // Session types (public API surface)
@@ -71,6 +73,7 @@ export interface SessionAuth {
 export interface Session {
   readonly auth: SessionAuth;
   readonly parent?: SessionParent;
+  readonly predecessor?: SessionPredecessor;
   readonly sessionId: string;
   readonly turn: SessionTurn;
 }
@@ -136,6 +139,8 @@ export const ChannelInstrumentationKey = new ContextKey<ChannelInstrumentationPr
   "eve.channelInstrumentation",
 );
 export const ParentSessionKey = new ContextKey<SessionParent>("eve.parentSession");
+/** Set only on a session eve started in place of one that could no longer run. */
+export const SessionPredecessorKey = new ContextKey<SessionPredecessor>("eve.sessionPredecessor");
 /** Set only when the trace root differs from `ParentSessionKey`'s root; see {@link SessionTraceRoot}. */
 export const TraceRootKey = new ContextKey<SessionTraceRoot>("eve.traceRoot");
 /** Separate from {@link ParentSessionKey} so it stays out of what extensions read. */

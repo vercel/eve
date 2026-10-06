@@ -38,7 +38,8 @@ import {
   type WorkflowFunction,
   type WorkflowMetadata,
 } from "#internal/workflow/runtime.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent, SessionPredecessor } from "#protocol/message.js";
+import { SessionPredecessorKey } from "#context/keys.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
@@ -132,7 +133,11 @@ export function createWorkflowRuntime(config: {
   readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
   readonly nodeId?: string;
 }): Runtime {
-  const startSession = async (input: RunInput): Promise<RunHandle> => {
+  /** `predecessor` is set only on a successor of a retired session that has just ended. */
+  const startSession = async (
+    input: RunInput,
+    predecessor?: SessionPredecessor,
+  ): Promise<RunHandle> => {
     const bundle = await getCompiledRuntimeAgentBundle({
       compiledArtifactsSource: config.compiledArtifactsSource,
       nodeId: config.nodeId,
@@ -145,6 +150,7 @@ export function createWorkflowRuntime(config: {
       dynamicSubagentAgentConfig: config.dynamicSubagentAgentConfig,
       run: input,
     });
+    if (predecessor !== undefined) ctx.set(SessionPredecessorKey, predecessor);
     const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
     initializeSessionInstrumentation({
       agentName: effectiveAgent.turnAgent.id,
@@ -251,8 +257,8 @@ export function createWorkflowRuntime(config: {
             "Its pending requests can no longer be answered; send a new message to start a fresh session.",
           );
         }
-        await endStrandedSession(error, continuationToken, "message");
-        const started = await startSession(successor);
+        const previousSessionId = await endStrandedSession(error, continuationToken, "message");
+        const started = await startSession(successor, { sessionId: previousSessionId });
         return {
           sessionId: started.sessionId,
           status: "accepted",

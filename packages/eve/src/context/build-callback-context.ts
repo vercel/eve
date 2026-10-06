@@ -22,6 +22,7 @@ export function buildCallbackContext(): SessionContext {
       turn: session.turn,
       parent: session.parent,
       schedule: readSessionSchedule(ctx),
+      predecessor: session.predecessor,
     },
 
     getSandbox(environment?: SandboxEnvironmentIdentity): Promise<RuntimeSandboxSession> {

@@ -92,6 +92,7 @@ export default (["direct", "waiting"] as const).map((mode) =>
               current: expectedAuth(last ? "bob" : "alice"),
               initiator: expectedAuth("alice"),
             },
+            predecessor: null,
           },
           channel: {
             kind: "channel:skill-context",

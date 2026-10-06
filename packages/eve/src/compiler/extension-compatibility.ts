@@ -22,9 +22,10 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 84,
+    current: 85,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 76, 77, 78, 80, 81, 82, 84,
+      85,
     ],
     dropped: {
       14: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
@@ -88,10 +89,10 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   dynamicTool: {
-    current: 77,
+    current: 78,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 31, 32, 33, 52, 54,
-      60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 72, 73, 75, 76, 77,
+      60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 72, 73, 75, 76, 77, 78,
     ],
     dropped: {
       21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -132,10 +133,10 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   channel: {
-    current: 57,
+    current: 58,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 29, 31, 36, 37, 38, 39, 40, 41, 42,
-      43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 54, 55, 56, 57,
+      43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 54, 55, 56, 57, 58,
     ],
     dropped: {
       12: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -158,10 +159,10 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   schedule: {
-    current: 30,
+    current: 31,
     supported: [
       1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
-      29, 30,
+      29, 30, 31,
     ],
     dropped: {
       5: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -170,9 +171,10 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   subagent: {
-    current: 33,
+    current: 34,
     supported: [
       3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33,
+      34,
     ],
     dropped: {
       1: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
@@ -186,10 +188,10 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   connection: {
-    current: 45,
+    current: 46,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 26, 32, 33, 34,
-      35, 36, 37, 38, 39, 40, 41, 43, 44, 45,
+      35, 36, 37, 38, 39, 40, 41, 43, 44, 45, 46,
     ],
     dropped: {
       9: "Dynamic connection resolvers no longer receive conversation or channel continuation data",
@@ -205,8 +207,8 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   hook: {
-    current: 43,
-    supported: [20, 21, 22, 23, 25, 27, 31, 32, 33, 34, 35, 36, 37, 38, 39, 41, 42, 43],
+    current: 44,
+    supported: [20, 21, 22, 23, 25, 27, 31, 32, 33, 34, 35, 36, 37, 38, 39, 41, 42, 43, 44],
     dropped: {
       1: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       2: "Model identity moved from session.started runtime metadata to step.started call attribution.",
@@ -237,10 +239,10 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
   },
   skill: { current: 3, supported: [1, 2, 3], dropped: {} },
   dynamicSkill: {
-    current: 35,
+    current: 36,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 21, 25, 26, 27, 28, 29, 30,
-      31, 32, 33, 34, 35,
+      31, 32, 33, 34, 35, 36,
     ],
     dropped: {
       13: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -251,10 +253,10 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
   },
   instructions: { current: 2, supported: [1, 2], dropped: {} },
   dynamicInstructions: {
-    current: 36,
+    current: 37,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 26, 27, 28, 29, 30,
-      31, 32, 33, 34, 35, 36,
+      31, 32, 33, 34, 35, 36, 37,
     ],
     dropped: {
       14: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -265,8 +267,8 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
   },
   config: { current: 1, supported: [1], dropped: {} },
   state: {
-    current: 12,
-    supported: [1, 2, 3, 4, 5, 7, 9, 10, 12],
+    current: 13,
+    supported: [1, 2, 3, 4, 5, 7, 9, 10, 12, 13],
     dropped: {
       6: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
       8: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",

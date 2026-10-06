@@ -9,6 +9,7 @@ import {
   SessionIdKey,
   InitiatorAuthKey,
   ContinuationTokenKey,
+  SessionPredecessorKey,
 } from "#context/keys.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getAdapterKind } from "#channel/adapter.js";
@@ -44,6 +45,7 @@ export function buildResolveContext(
         current: currentAuth,
         initiator: initiatorAuth,
       },
+      predecessor: ctx.get(SessionPredecessorKey),
     },
     channel: {
       kind: channelAdapter !== undefined ? getAdapterKind(channelAdapter) : undefined,

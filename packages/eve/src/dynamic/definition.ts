@@ -1,6 +1,6 @@
 import type { ModelMessage } from "ai";
 
-import type { SessionAuth } from "#context/keys.js";
+import type { SessionAuth, SessionPredecessor } from "#context/keys.js";
 import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
@@ -54,6 +54,12 @@ export interface DynamicResolveContext {
     readonly id: string;
     readonly auth: SessionAuth;
     readonly schedule?: import("#context/session-schedule.js").SessionSchedule;
+    /**
+     * Present when eve started this session in place of a stranded session,
+     * one that another eve version built. It names the earlier session, whose recorded stream
+     * `sessions.attach(predecessor.sessionId)` from `eve/server` reads.
+     */
+    readonly predecessor?: SessionPredecessor;
   };
   /** Channel metadata for the request that triggered this resolve. */
   readonly channel: {

@@ -32,6 +32,7 @@ import {
   type InputResolution,
   type RuntimeIdentity,
   type RuntimeTraceContext,
+  type SessionPredecessor,
   type TaskCancelReason,
   type TaskStartedStreamEvent,
   type UnstampedMessageStreamEvent,
@@ -97,6 +98,8 @@ export function receive(
   view: SessionView,
   input: {
     readonly message?: string | UserContent;
+    /** The session this one replaced, when eve started it in place of a stranded one. */
+    readonly predecessor?: SessionPredecessor;
     readonly runtime?: RuntimeIdentity;
     readonly trace?: RuntimeTraceContext;
   },
@@ -105,7 +108,13 @@ export function receive(
   const turnId = activeTurnId(position);
   const events: UnstampedMessageStreamEvent[] = [];
   if (!position.sessionStarted) {
-    events.push(createSessionStartedEvent({ runtime: input.runtime, trace: input.trace }));
+    events.push(
+      createSessionStartedEvent({
+        predecessor: input.predecessor,
+        runtime: input.runtime,
+        trace: input.trace,
+      }),
+    );
   }
   if (position.turnId === "") {
     events.push(

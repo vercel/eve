@@ -9,6 +9,12 @@ export { HealthResponseError } from "#client/health-response-error.js";
 export { ClientError, ClientSessionStrandedError } from "#client/client-error.js";
 export { defaultMessageReducer } from "#client/message-reducer.js";
 export { conversationReducer } from "#client/conversation-reducer.js";
+export {
+  transcriptReducer,
+  type TranscriptData,
+  type TranscriptMessage,
+  type TranscriptReducerOptions,
+} from "#client/transcript-reducer.js";
 export { openConversationInputs } from "#client/conversation-state.js";
 export { toolCallState, type ToolCallState, type ToolCallStatus } from "#client/tool-call-state.js";
 
@@ -138,6 +144,7 @@ export type {
   RuntimeTraceContext,
   SessionCompletedStreamEvent,
   SessionFailedStreamEvent,
+  SessionPredecessor,
   SessionStartedStreamEvent,
   SessionWaitingStreamEvent,
   MessageStreamEvent,

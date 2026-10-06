@@ -118,6 +118,18 @@ export interface SubagentSessionInvocationMetadata {
 }
 
 /**
+ * The session this one replaced. Present on a session eve started in place of
+ * one whose deployment was retired, when the next ordinary channel message
+ * arrived before the earlier session timed out. This session has its own id,
+ * stream, auth, and state, and starts with no history from its predecessor;
+ * read the predecessor with `sessions.attach(sessionId)` from `eve/server`.
+ */
+export interface SessionPredecessor {
+  /** Id of the session this one replaced. Its recorded history stays readable. */
+  readonly sessionId: string;
+}
+
+/**
  * Runtime identity metadata attached to the `session.started` event.
  *
  * The server populates this at run time so remote eval processes and
@@ -176,6 +188,8 @@ export type HandleMessageRequestBody =
 export interface SessionStartedStreamEvent {
   data: {
     invocation?: SubagentSessionInvocationMetadata;
+    /** Present when this session replaced one that could no longer run. */
+    predecessor?: SessionPredecessor;
     runtime?: RuntimeIdentity;
     trace?: RuntimeTraceContext;
   };
@@ -938,6 +952,7 @@ export function isTurnFailureEvent<TEvent extends UnstampedMessageStreamEvent>(
  */
 export function createSessionStartedEvent(input?: {
   readonly invocation?: SubagentSessionInvocationMetadata;
+  readonly predecessor?: SessionPredecessor;
   readonly runtime?: RuntimeIdentity;
   readonly trace?: RuntimeTraceContext;
 }): SessionStartedStreamEvent {
@@ -945,6 +960,10 @@ export function createSessionStartedEvent(input?: {
 
   if (input?.invocation !== undefined) {
     data.invocation = input.invocation;
+  }
+
+  if (input?.predecessor !== undefined) {
+    data.predecessor = input.predecessor;
   }
 
   if (input?.runtime !== undefined) {

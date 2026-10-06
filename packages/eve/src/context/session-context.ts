@@ -4,10 +4,10 @@ import type {
   RuntimeSandboxSessionFor,
   SandboxSession,
 } from "#shared/sandbox-session.js";
-import type { SessionAuth, SessionParent, SessionTurn } from "#context/keys.js";
+import type { SessionAuth, SessionParent, SessionPredecessor, SessionTurn } from "#context/keys.js";
 
 import type { SessionSchedule } from "#context/session-schedule.js";
-export type { SessionAuth, SessionParent, SessionTurn, SessionSchedule };
+export type { SessionAuth, SessionParent, SessionPredecessor, SessionSchedule, SessionTurn };
 
 /**
  * Shared runtime context available to all authored callbacks that run
@@ -28,6 +28,12 @@ export interface SessionContext {
     readonly parent?: SessionParent;
     /** Present only for scheduled work; not an application-supplied auth attribute. */
     readonly schedule?: SessionSchedule;
+    /**
+     * Present when eve started this session in place of one whose deployment
+     * was retired. It names the earlier session, whose recorded stream
+     * `sessions.attach(predecessor.sessionId)` from `eve/server` reads.
+     */
+    readonly predecessor?: SessionPredecessor;
   };
 
   /**

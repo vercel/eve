@@ -25,7 +25,19 @@ import {
   sessionCommandInboxWorkflow,
 } from "#internal/testing/session-inbox-workflow.js";
 import { startSessionOwner, waitForHook } from "#internal/testing/workflow-test-helpers.js";
-import { getWorld, start } from "#internal/workflow/runtime.js";
+import { getRun, getWorld, start } from "#internal/workflow/runtime.js";
+import {
+  createMessageCompletedEvent,
+  createMessageReceivedEvent,
+  createSessionStartedEvent,
+  encodeMessageStreamEvent,
+  stampMessageStreamEvent,
+  type SessionPredecessor,
+  type UnstampedMessageStreamEvent,
+} from "#protocol/message.js";
+import { transcriptReducer, type TranscriptData } from "#client/transcript-reducer.js";
+import { sessions } from "#public/server/index.js";
+import { defineDynamic, defineInstructions } from "#public/definitions/instructions.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 
 /** eve version recorded by the owner an earlier build left parked on the local World. */
@@ -100,6 +112,49 @@ async function waitForReceivedMessages(sessionId: string, expected: readonly str
   }
   return [...pending];
 }
+
+/** The `session.started` event a session publishes before its first turn. */
+async function readSessionStarted(sessionId: string) {
+  const reader = readSessionEventStream(sessionId).getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) throw new Error(`Session "${sessionId}" ended before it started.`);
+      if (value.type === "session.started") return value;
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+}
+
+/** Appends events to a parked session's stream, as its earlier build recorded them. */
+async function recordHistory(
+  sessionId: string,
+  events: readonly UnstampedMessageStreamEvent[],
+): Promise<void> {
+  const writer = getRun(sessionId).getWritable<Uint8Array>().getWriter();
+  try {
+    for (const event of events) {
+      await writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(event)));
+    }
+  } finally {
+    writer.releaseLock();
+  }
+}
+
+const TURN = { sequence: 0, turnId: "turn_0" };
+
+/** A short conversation the stranded session recorded before the upgrade. */
+const OFFSITE_HISTORY: readonly UnstampedMessageStreamEvent[] = [
+  createSessionStartedEvent(),
+  createMessageReceivedEvent({ ...TURN, message: "Alice asks for help planning the offsite." }),
+  createMessageCompletedEvent({
+    ...TURN,
+    finishReason: "stop",
+    message: "Here is a draft agenda for the offsite.",
+    stepIndex: 0,
+  }),
+];
 
 /** A fresh session claims its address after `createSession` returns. */
 async function waitForAliasOwner(runtime: Runtime, continuationToken: string): Promise<string> {
@@ -176,6 +231,9 @@ describe("stranded sessions", () => {
         await expect(
           waitForReceivedMessages(fresh.id, ["Alice asks for the weekly summary"]),
         ).resolves.toEqual([]);
+        // The successor names the session it replaced.
+        const started = await readSessionStarted(fresh.id);
+        expect(started.data.predecessor).toEqual({ sessionId: anchor.runId });
         // A remote job can finish after replacement. Its fixed parent inbox
         // must not route the result into the new conversation.
         const callback = await handleSessionCallbackRequest(
@@ -425,4 +483,86 @@ describe("stranded sessions", () => {
       }
     });
   });
+
+  it("lets a session.started instruction read the replaced conversation", async () => {
+    const { reads, test } = await transcriptReadingRuntime("stranded-session-transcript");
+    await test.run(async () => {
+      const stranded = await parkStrandedOwner("http:stranded-session-transcript");
+      await recordHistory(stranded.runId, OFFSITE_HISTORY);
+      const runtime = channelRuntime();
+      let freshSessionId: string | undefined;
+      try {
+        const fresh = await httpAddress(runtime, "stranded-session-transcript").send(
+          "Alice asks to move the offsite to Friday.",
+          { auth: null },
+        );
+        freshSessionId = fresh.id;
+
+        await expect(reads.wait()).resolves.toEqual([
+          {
+            messages: [
+              { role: "user", text: "Alice asks for help planning the offsite." },
+              { role: "assistant", text: "Here is a draft agenda for the offsite." },
+            ],
+            predecessor: { sessionId: stranded.runId },
+          },
+        ]);
+      } finally {
+        await cancelIfActive(stranded);
+        await resetSession(runtime, freshSessionId);
+      }
+    });
+  });
 });
+
+type TranscriptRead = TranscriptData & { readonly predecessor: SessionPredecessor };
+
+/**
+ * An app whose `session.started` instruction reads the replaced session's
+ * conversation the way the predecessor docs show.
+ */
+async function transcriptReadingRuntime(name: string) {
+  const recorded: TranscriptRead[] = [];
+  const test = await createTestRuntime({
+    agent: { name },
+    modules: [
+      {
+        logicalPath: "instructions/replaced-conversation.ts",
+        loadNamespace: async () => ({
+          default: defineDynamic({
+            events: {
+              "session.started": async (_event, ctx) => {
+                const predecessor = ctx.session.predecessor;
+                if (predecessor === undefined) return null;
+                const reducer = transcriptReducer({ maxMessages: 40 });
+                let transcript = reducer.initial();
+                for await (const event of sessions.attach(predecessor.sessionId).stream({
+                  follow: false,
+                  startIndex: -2000,
+                })) {
+                  transcript = reducer.reduce(transcript, event);
+                }
+                recorded.push({ ...transcript, predecessor });
+                return transcript.messages.length === 0
+                  ? null
+                  : defineInstructions({
+                      content: transcript.messages
+                        .map((message) => JSON.stringify(message))
+                        .join("\n"),
+                      role: "user",
+                    });
+              },
+            },
+          }),
+        }),
+      },
+    ],
+  });
+  const reads = {
+    async wait(): Promise<readonly TranscriptRead[]> {
+      await vi.waitFor(() => expect(recorded).not.toHaveLength(0), { timeout: 30_000 });
+      return recorded;
+    },
+  };
+  return { reads, test };
+}
