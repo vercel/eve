@@ -330,45 +330,48 @@ describe("compileAgentManifest source graph", () => {
     });
   });
 
-  it("preserves selected native behavior through serialization and runtime preparation", async () => {
-    const sourceRegistry = registry([
-      {
-        logicalPath: "tools/web_search.ts",
-        loadNamespace: async () => ({ default: webSearch({ provider: "parallel" }) }),
-      },
-    ]);
-    const compiled = await compileAgentManifest(manifest(), {
-      sourceRegistries: [sourceRegistry],
-    });
-    const serialized = compiledAgentManifestSchema.parse(JSON.parse(JSON.stringify(compiled)));
-    const moduleMap = await createProgrammaticCompiledModuleMap(serialized, [
-      frameworkAgentSourceRegistry,
-      sourceRegistry,
-    ]);
-    const graph = await resolveRuntimeAgentGraph({ manifest: serialized, moduleMap });
+  it.each(["parallel", "browserbase"] as const)(
+    "preserves %s search through serialization and runtime preparation",
+    async (provider) => {
+      const sourceRegistry = registry([
+        {
+          logicalPath: "tools/web_search.ts",
+          loadNamespace: async () => ({ default: webSearch({ provider }) }),
+        },
+      ]);
+      const compiled = await compileAgentManifest(manifest(), {
+        sourceRegistries: [sourceRegistry],
+      });
+      const serialized = compiledAgentManifestSchema.parse(JSON.parse(JSON.stringify(compiled)));
+      const moduleMap = await createProgrammaticCompiledModuleMap(serialized, [
+        frameworkAgentSourceRegistry,
+        sourceRegistry,
+      ]);
+      const graph = await resolveRuntimeAgentGraph({ manifest: serialized, moduleMap });
 
-    expect(serialized.tools.find((tool) => tool.name === "agent")).toMatchObject({
-      hasExecute: true,
-    });
-    expect(serialized.tools.find((tool) => tool.name === "web_search")).toMatchObject({
-      behavior: {
-        availability: [],
-        handling: { kind: "provider-tool", provider: "parallel" },
-      },
-      hasExecute: false,
-    });
-    expect(graph.root.turnAgent.tools.find((tool) => tool.name === "agent")).toMatchObject({
-      behavior: {
-        handling: { kind: "dispatch", target: { kind: "self-agent-call", nodeId: "__root__" } },
-      },
-      rootOnly: true,
-    });
-    expect(graph.root.turnAgent.tools.find((tool) => tool.name === "web_search")).toMatchObject({
-      behavior: {
-        handling: { kind: "provider-tool", provider: "parallel" },
-      },
-    });
-  });
+      expect(serialized.tools.find((tool) => tool.name === "agent")).toMatchObject({
+        hasExecute: true,
+      });
+      expect(serialized.tools.find((tool) => tool.name === "web_search")).toMatchObject({
+        behavior: {
+          availability: [],
+          handling: { kind: "provider-tool", provider },
+        },
+        hasExecute: false,
+      });
+      expect(graph.root.turnAgent.tools.find((tool) => tool.name === "agent")).toMatchObject({
+        behavior: {
+          handling: { kind: "dispatch", target: { kind: "self-agent-call", nodeId: "__root__" } },
+        },
+        rootOnly: true,
+      });
+      expect(graph.root.turnAgent.tools.find((tool) => tool.name === "web_search")).toMatchObject({
+        behavior: {
+          handling: { kind: "provider-tool", provider },
+        },
+      });
+    },
+  );
 
   it("loads the selected config before any non-config definition", async () => {
     const order: string[] = [];
