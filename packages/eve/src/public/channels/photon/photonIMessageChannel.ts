@@ -14,6 +14,10 @@ import {
   type iMessageCredentialProvider,
   type iMessageWebhookVerifier,
 } from "#compiled/@photon-ai/chat-adapter-imessage/index.js";
+import {
+  addPhotonAttachmentDownloads,
+  addPhotonAttachmentRehydration,
+} from "#public/channels/photon/attachments.js";
 import { photonInboundContent } from "#public/channels/photon/inboundContent.js";
 
 /** Photon project credentials used by {@link photonIMessageChannel}. */
@@ -85,6 +89,7 @@ export function photonIMessageChannel(config: PhotonIMessageChannelConfig): Phot
         ? { webhookSecret }
         : { webhookVerifier: vercelOidc() }),
   });
+  addPhotonAttachmentRehydration(imessage);
   const bridge = chatSdkChannel({
     adapters: { imessage },
     concurrency: "concurrent",
@@ -136,7 +141,9 @@ async function dispatchMessage(
 ): Promise<void> {
   const result = await onMessage({ thread }, message);
   if (result === null) return;
-  await markReadBestEffort(bridge.bot.getAdapter("imessage"), thread, message);
+  const adapter = bridge.bot.getAdapter("imessage");
+  await markReadBestEffort(adapter, thread, message);
+  addPhotonAttachmentDownloads(message, adapter);
   const content = photonInboundContent(message);
   if (content === undefined) return;
   await bridge.send(content, {

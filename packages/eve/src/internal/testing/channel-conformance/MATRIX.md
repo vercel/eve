@@ -85,10 +85,10 @@ pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conform
 
 | Rule | `tui` | `web chat` | `chat-sdk` | `chat-sdk-dm` | `chat-sdk-text` | `discord` | `discord-dm` | `linq` | `linq-dm` | `slack` | `slack-dm` | `teams` | `teams-dm` | `telegram` | `telegram-dm` | `github` | `linear` | `photon` | `twilio` |
 | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| an image a person sends reaches the agent with its bytes and type | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ❌<sup>[21](#note-21)</sup> | ❌<sup>[21](#note-21)</sup> | ❌<sup>[21](#note-21)</sup> | ❌<sup>[22](#note-22)</sup> | ❌<sup>[22](#note-22)</sup> | ❌<sup>[21](#note-21)</sup> | ❌<sup>[21](#note-21)</sup> | ✅ | ✅ | ❌<sup>[23](#note-23)</sup> | ❌<sup>[23](#note-23)</sup> | ❌<sup>[24](#note-24)</sup> | ❌<sup>[24](#note-24)</sup> | —<sup>[20](#note-20)</sup> | ✅ | ❌<sup>[25](#note-25)</sup> | ❌<sup>[26](#note-26)</sup> |
-| a PDF a person sends reaches the agent with its bytes and type | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ❌<sup>[21](#note-21)</sup> |  | ❌<sup>[21](#note-21)</sup> | ❌<sup>[22](#note-22)</sup> |  | ❌<sup>[21](#note-21)</sup> |  | ✅ |  | ❌<sup>[23](#note-23)</sup> |  | ❌<sup>[24](#note-24)</sup> |  | —<sup>[20](#note-20)</sup> | ❌<sup>[27](#note-27)</sup> | ❌<sup>[25](#note-25)</sup> | ❌<sup>[26](#note-26)</sup> |
-| a file that can't be downloaded reaches the agent as a note, not a link, and the next message still works | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ❌<sup>[21](#note-21)</sup> |  | ❌<sup>[21](#note-21)</sup> | ❌<sup>[22](#note-22)</sup> |  | ❌<sup>[21](#note-21)</sup> |  | ✅ |  | ❌<sup>[23](#note-23)</sup> |  | ✅ |  | —<sup>[20](#note-20)</sup> | ❌<sup>[28](#note-28)</sup> | ❌<sup>[25](#note-25)</sup> | ❌<sup>[26](#note-26)</sup> |
-| a file sent earlier in the conversation is still there on a later message | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ❌<sup>[21](#note-21)</sup> |  | ❌<sup>[21](#note-21)</sup> | —<sup>[29](#note-29)</sup> |  | ❌<sup>[21](#note-21)</sup> |  | ✅ |  | ❌<sup>[23](#note-23)</sup> |  | ❌<sup>[24](#note-24)</sup> |  | —<sup>[20](#note-20)</sup> | ✅ | ❌<sup>[25](#note-25)</sup> | ❌<sup>[26](#note-26)</sup> |
+| an image a person sends reaches the agent with its bytes and type | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ❌<sup>[21](#note-21)</sup> | ❌<sup>[21](#note-21)</sup> | ❌<sup>[21](#note-21)</sup> | ❌<sup>[22](#note-22)</sup> | ❌<sup>[22](#note-22)</sup> | ✅ | ✅ | ✅ | ✅ | ❌<sup>[23](#note-23)</sup> | ❌<sup>[23](#note-23)</sup> | ❌<sup>[24](#note-24)</sup> | ❌<sup>[24](#note-24)</sup> | —<sup>[20](#note-20)</sup> | ✅ | ✅ | ❌<sup>[25](#note-25)</sup> |
+| a PDF a person sends reaches the agent with its bytes and type | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ❌<sup>[21](#note-21)</sup> |  | ❌<sup>[21](#note-21)</sup> | ❌<sup>[22](#note-22)</sup> |  | ✅ |  | ✅ |  | ❌<sup>[23](#note-23)</sup> |  | ❌<sup>[24](#note-24)</sup> |  | —<sup>[20](#note-20)</sup> | ❌<sup>[26](#note-26)</sup> | ✅ | ❌<sup>[25](#note-25)</sup> |
+| a file that can't be downloaded reaches the agent as a note, not a link, and the next message still works | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ❌<sup>[21](#note-21)</sup> |  | ❌<sup>[21](#note-21)</sup> | ❌<sup>[22](#note-22)</sup> |  | ✅ |  | ✅ |  | ❌<sup>[23](#note-23)</sup> |  | ✅ |  | —<sup>[20](#note-20)</sup> | ❌<sup>[27](#note-27)</sup> | ✅ | ❌<sup>[25](#note-25)</sup> |
+| a file sent earlier in the conversation is still there on a later message | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ❌<sup>[21](#note-21)</sup> |  | ❌<sup>[21](#note-21)</sup> | —<sup>[28](#note-28)</sup> |  | ✅ |  | ✅ |  | ❌<sup>[23](#note-23)</sup> |  | ❌<sup>[24](#note-24)</sup> |  | —<sup>[20](#note-20)</sup> | ✅ | ✅ | ❌<sup>[25](#note-25)</sup> |
 
 ## Notes
 
@@ -116,8 +116,7 @@ pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conform
 22. <a id="note-22"></a>eve reads only the slash command's message option, not its attachment options
 23. <a id="note-23"></a>Teams drops files unless files.enabled is set and their host is allowlisted
 24. <a id="note-24"></a>#1217: Telegram serves files as application/octet-stream, which wins over their known type
-25. <a id="note-25"></a>the iMessage adapter lists each attachment's name and type but no way to download it, so eve drops it
-26. <a id="note-26"></a>the channel parses MMS media but never passes it to the agent
-27. <a id="note-27"></a>eve reads only uploaded images from Linear; other files stay links in the text
-28. <a id="note-28"></a>a Linear upload eve can't download stays a link in the text, with no note
-29. <a id="note-29"></a>each slash command starts its own session, so no later message shares one with the file
+25. <a id="note-25"></a>the channel parses MMS media but never passes it to the agent
+26. <a id="note-26"></a>eve reads only uploaded images from Linear; other files stay links in the text
+27. <a id="note-27"></a>a Linear upload eve can't download stays a link in the text, with no note
+28. <a id="note-28"></a>each slash command starts its own session, so no later message shares one with the file

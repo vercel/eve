@@ -208,7 +208,7 @@ await to(channel, { adapterName: "resend", threadId: "resend:user@example.com" }
 
 ### Attachments
 
-`send` takes plain text or an AI SDK `UserContent` array. To forward a Chat SDK message's attachments, convert it with `messageToUserContent`, which returns `message.text` when there are no attachments and a `UserContent` array (text plus one file part per attachment URL) when there are:
+`send` takes plain text or an AI SDK `UserContent` array. To forward a Chat SDK message's attachments, convert it with `messageToUserContent`. It returns `message.text` when there are no attachments, and a `UserContent` array (the text plus one part per attachment) when there are:
 
 ```ts
 import { messageToUserContent } from "eve/channels/chat-sdk";
@@ -217,6 +217,8 @@ bot.onNewMention(async (thread, message) => {
   await send(messageToUserContent(message), { thread });
 });
 ```
+
+When the adapter can download an attachment (it sets `fetchData`, as the Slack, Google Chat, WhatsApp, and Twilio adapters do), eve downloads it with the adapter's credentials when the turn runs, not in the webhook, and passes the bytes. Platform file URLs usually need those credentials, so the model provider couldn't open them. eve rebuilds the download with the adapter's `rehydrateAttachment`; an adapter without one can't download after the webhook returns, so its files reach the agent as a short note. A failed download, or a file over 25 MB, also becomes a note. An attachment with only a URL is passed as that URL.
 
 See [File uploads](./custom#file-uploads) for how eve stages remote file URLs before the model call.
 

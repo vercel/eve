@@ -19,6 +19,7 @@ import type { RouteHandlerArgs } from "#public/definitions/channel.js";
 import type {
   Adapter,
   AdapterPostableMessage,
+  Attachment,
   ChatInstance,
   FetchResult,
   FormattedContent,
@@ -916,6 +917,97 @@ describe("messageToUserContent", () => {
   });
 });
 
+describe("attachments the adapter downloads", () => {
+  function withDownload(fetchData: () => Promise<Buffer>, size?: number): Message {
+    return new Message({
+      attachments: [
+        {
+          fetchData,
+          fetchMetadata: { fileId: "F1" },
+          mimeType: "image/png",
+          name: "diagram.png",
+          size,
+          type: "image",
+          url: "https://files.test/F1",
+        },
+      ],
+      author: author(),
+      formatted: parseMarkdown(""),
+      id: "message-5",
+      isMention: true,
+      metadata: metadata(),
+      raw: {},
+      text: "",
+      threadId: THREAD_ID,
+    });
+  }
+
+  /** The channel's `fetchFile` for the one file part `messageToUserContent` made. */
+  async function fetchDeferred(adapter: TestAdapter & Adapter, inbound: Message) {
+    const bridge = chatSdkChannel({
+      adapters: { test: adapter },
+      state: memoryState(),
+      userName: "bot",
+    });
+    const [part] = messageToUserContent(inbound) as Exclude<
+      ReturnType<typeof messageToUserContent>,
+      string
+    >;
+    // Only the URL crosses the queue; the message's own fetchData doesn't.
+    const href = ((part as { data: URL }).data as URL).href;
+    return await getAdapter(bridge.channel).fetchFile!(href);
+  }
+
+  it("defers the download to the step and rebuilds it with the adapter's rehydrateAttachment", async () => {
+    const adapter = testAdapter();
+    adapter.rehydrateAttachment = (attachment) => ({
+      ...attachment,
+      fetchData: async () => Buffer.from(`bytes of ${String(attachment.fetchMetadata?.fileId)}`),
+    });
+    const fetchData = vi.fn(async () => Buffer.from("eager"));
+
+    const resolved = await fetchDeferred(adapter, withDownload(fetchData));
+
+    expect(fetchData).not.toHaveBeenCalled();
+    expect(resolved).toEqual({ bytes: Buffer.from("bytes of F1"), mediaType: "image/png" });
+  });
+
+  it("fails a download over the upload limit", async () => {
+    const adapter = testAdapter();
+    adapter.rehydrateAttachment = (attachment) => ({
+      ...attachment,
+      fetchData: async () => Buffer.alloc(25 * 1024 * 1024 + 1),
+    });
+
+    await expect(
+      fetchDeferred(
+        adapter,
+        withDownload(async () => Buffer.alloc(0)),
+      ),
+    ).rejects.toThrow("it is over the 25 MB upload limit.");
+  });
+
+  it("notes a file the adapter reports as over the limit without deferring it", () => {
+    expect(
+      messageToUserContent(withDownload(async () => Buffer.alloc(0), 25 * 1024 * 1024 + 1)),
+    ).toEqual([
+      {
+        text: "Attachment diagram.png was not retrieved: it is over the upload limit.",
+        type: "text",
+      },
+    ]);
+  });
+
+  it("fails the download when the adapter can't rebuild it after the webhook", async () => {
+    await expect(
+      fetchDeferred(
+        testAdapter(),
+        withDownload(async () => Buffer.alloc(0)),
+      ),
+    ).rejects.toThrow("the test adapter can't download it after the webhook returns.");
+  });
+});
+
 describe("isNotImplemented", () => {
   it("matches errors by name and by code", () => {
     expect(isNotImplemented(new NotImplementedError("startTyping"))).toBe(true);
@@ -953,6 +1045,7 @@ class TestAdapter {
   typingStatuses: Array<string | undefined> = [];
   startTypingError: Error | null = null;
   editError: Error | null = null;
+  rehydrateAttachment?: (attachment: Attachment) => Attachment;
 
   async initialize(chat: ChatInstance): Promise<void> {
     this.chat = chat;

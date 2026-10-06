@@ -151,10 +151,6 @@ function attachmentUrlPassedThrough(
 }
 
 const ATTACHMENT_URL_PASSED_THROUGH = attachmentUrlPassedThrough(/AI_DownloadError/u);
-// Linq posts nothing for a failed turn, so the reply never comes.
-const LINQ_ATTACHMENT_URL_PASSED_THROUGH = attachmentUrlPassedThrough(
-  /Timed out waiting for (?:the bot to show|a reply to "Alice attached)/u,
-);
 
 const SIGN_IN_NOT_SHOWN = /Timed out waiting for the bot to show/u;
 
@@ -341,34 +337,9 @@ const channelConformance = {
       },
     },
   ],
-  linq: [
-    {
-      driver: linqDriver,
-      broken: {
-        ...SIGN_IN_ONLY_IN_DMS,
-        ...LINQ_ATTACHMENT_URL_PASSED_THROUGH,
-      },
-    },
-  ],
-  "linq-dm": [
-    {
-      dm: true,
-      driver: () => linqDriver("private"),
-      broken: { ...LINQ_ATTACHMENT_URL_PASSED_THROUGH },
-    },
-  ],
-  photon: [
-    {
-      driver: photonDriver,
-      broken: filesNotSeen(
-        "the iMessage adapter lists each attachment's name and type but no way to download it, so eve drops it",
-        IMAGE_REACHES_AGENT,
-        PDF_REACHES_AGENT,
-        UNDOWNLOADABLE_FILE,
-        EARLIER_FILE,
-      ),
-    },
-  ],
+  linq: [{ driver: linqDriver, broken: SIGN_IN_ONLY_IN_DMS }],
+  "linq-dm": [{ dm: true, driver: () => linqDriver("private") }],
+  photon: [{ driver: photonDriver }],
   slack: [{ driver: slackDriver, broken: SLACK_BROKEN }],
   "slack-dm": [{ dm: true, driver: () => slackDriver("private"), broken: SLACK_BROKEN }],
   teams: [{ driver: teamsDriver, broken: { ...TEAMS_BROKEN, ...SIGN_IN_LINK_POSTED_TO_THREAD } }],

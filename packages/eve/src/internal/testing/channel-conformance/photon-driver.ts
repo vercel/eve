@@ -35,6 +35,8 @@ export function photonDriver(): ChannelDriver {
   const chatGuid = `iMessage;-;${PERSON}${nextChat}`;
   let sequence = 0;
   let restore: (() => void) | undefined;
+  /** Files a person sent, by the attachment id the webhook lists each under. */
+  const uploads = new Map<string, SentFile>();
 
   function webhook(text: string, files: readonly SentFile[] = []): Request {
     sequence += 1;
@@ -45,15 +47,19 @@ export function photonDriver(): ChannelDriver {
             // A message with files arrives as a group: its text, then one attachment per file.
             items: [
               { content: { text, type: "text" } },
-              ...files.map((file, index) => ({
-                content: {
-                  id: `photon-attachment-${sequence}-${index}`,
-                  mimeType: file.mediaType,
-                  name: file.name,
-                  size: file.bytes.length,
-                  type: "attachment",
-                },
-              })),
+              ...files.map((file, index) => {
+                const id = `photon-attachment-${sequence}-${index}`;
+                uploads.set(id, file);
+                return {
+                  content: {
+                    id,
+                    mimeType: file.mediaType,
+                    name: file.name,
+                    size: file.bytes.length,
+                    type: "attachment",
+                  },
+                };
+              }),
             ],
             type: "group",
           };
@@ -84,6 +90,18 @@ export function photonDriver(): ChannelDriver {
     });
   }
 
+  async function getUpload(_ctx: unknown, id: string) {
+    const file = uploads.get(id);
+    if (file === undefined) return undefined;
+    return {
+      async read() {
+        if (file.downloadable === false)
+          throw new Error(`Attachment ${id} could not be downloaded`);
+        return Buffer.from(file.bytes);
+      },
+    };
+  }
+
   return {
     name: "photon",
     capabilities: ["attachments", "text-replies"],
@@ -109,9 +127,31 @@ export function photonDriver(): ChannelDriver {
         startTyping: async () => {},
         stopTyping: async () => {},
       };
+      // The webhook never carries a file's bytes; eve fetches each by id through
+      // iMessage's `getAttachment`, which this app's iMessage runtime serves.
+      const app = {
+        __internal: {
+          platforms: new Map([
+            [
+              "iMessage",
+              {
+                client: null,
+                config: null,
+                store: null,
+                definition: { actions: { getAttachment: getUpload } },
+              },
+            ],
+          ]),
+        },
+      };
       // The channel builds its adapter internally, so patch the prototype's
       // private seams to spectrum-ts: building the app and looking up a Space.
-      const fakes = { ensureApp: async () => {}, resolveSpace: async () => space };
+      const fakes = {
+        async ensureApp(this: { app: unknown }) {
+          this.app = app;
+        },
+        resolveSpace: async () => space,
+      };
       const originals = Object.keys(fakes).map(
         (key) => [key, Reflect.get(iMessageAdapter.prototype, key)] as const,
       );

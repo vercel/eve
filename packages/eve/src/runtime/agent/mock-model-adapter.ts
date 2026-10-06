@@ -716,7 +716,10 @@ function listPromptAttachments(prompt: BootstrapPrompt): readonly Record<string,
     if (message.role !== "user" || typeof message.content === "string") return [];
     return message.content.flatMap((part): Record<string, unknown>[] => {
       if (typeof part === "string") return [];
-      if (part.type === "text") return ATTACHMENT_NOTE.test(part.text) ? [{ note: part.text }] : [];
+      // Single quotes, so a channel that strips Markdown escapes can't break the listing's JSON.
+      if (part.type === "text") {
+        return ATTACHMENT_NOTE.test(part.text) ? [{ note: part.text.replaceAll('"', "'") }] : [];
+      }
       if (part.type !== "file") return [];
       const name = part.filename?.split("/").at(-1) ?? null;
       const data = fileData(part.data);

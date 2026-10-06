@@ -8,8 +8,11 @@ import type {
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
+import { EveAttachmentError } from "#internal/attachments/errors.js";
+import { assertWithinLimit } from "#internal/attachments/limited-read.js";
 import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
 import type { InputResolution, UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { FetchFileResult } from "#shared/channel-definition.js";
 import type { InputRequest } from "#shared/input.js";
 import {
   type InputResponse,
@@ -26,7 +29,9 @@ import type {
 } from "#compiled/chat/index.js";
 import { Chat, Message, ThreadImpl } from "#compiled/chat/index.js";
 import { defaultAuthorizationEvents } from "#public/channels/chat-sdk/authorization.js";
+import { parseChatSdkFileRef } from "#public/channels/chat-sdk/attachment-refs.js";
 import { decodeInputAction, renderInputRequests } from "#public/channels/chat-sdk/input-actions.js";
+import { DEFAULT_UPLOAD_POLICY } from "#public/channels/upload-policy.js";
 import { isNotImplemented } from "#public/channels/chat-sdk/notImplemented.js";
 import {
   defineChannel,
@@ -298,6 +303,7 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
   >({
     kindHint: "chat-sdk",
     turnPolicy: config.turnPolicy,
+    fetchFile: (url) => fetchAttachment(bot, url),
     state: initialState(),
     ...chatSdkInstrumentation,
     context(state) {
@@ -626,6 +632,44 @@ function activeFrom(operation: "respond" | "send"): ChannelFrom<ChatSdkChannelSt
 
 function initialState(): ChatSdkChannelState {
   return { pendingAuthMessageIds: {}, thread: null };
+}
+
+/**
+ * Downloads an attachment `messageToUserContent` deferred to the step: rebuilds
+ * the download with the adapter's `rehydrateAttachment`, since the message's
+ * own `fetchData` didn't survive the queue.
+ */
+async function fetchAttachment<TAdapters extends ChatSdkAdapters>(
+  bot: Chat<TAdapters>,
+  url: string,
+): Promise<FetchFileResult | null> {
+  const ref = parseChatSdkFileRef(new URL(url));
+  if (ref === null) return null;
+  // The step may run where the webhook didn't, so the adapters may not be initialized yet.
+  await bot.initialize();
+  const rehydrated = bot.getAdapter(ref.adapter).rehydrateAttachment?.(ref.attachment);
+  if (rehydrated?.fetchData === undefined) {
+    throw new EveAttachmentError({
+      adapterKind: "chat-sdk",
+      kind: "resolver-threw",
+      message: `the ${ref.adapter} adapter can't download it after the webhook returns.`,
+    });
+  }
+  let data: Buffer | ArrayBuffer;
+  try {
+    data = await rehydrated.fetchData();
+  } catch (cause) {
+    if (cause instanceof EveAttachmentError) throw cause;
+    throw new EveAttachmentError({
+      adapterKind: "chat-sdk",
+      cause,
+      kind: "resolver-threw",
+      message: `the ${ref.adapter} download failed.`,
+    });
+  }
+  const bytes = Buffer.isBuffer(data) ? data : Buffer.from(data);
+  assertWithinLimit(bytes, DEFAULT_UPLOAD_POLICY.maxBytes, "chat-sdk");
+  return { bytes, mediaType: ref.attachment.mimeType };
 }
 
 function threadFromState<TAdapters extends ChatSdkAdapters>(

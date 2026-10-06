@@ -18,7 +18,10 @@ import {
   type LinqWebhookVerifier,
 } from "#compiled/@linqapp/chat-sdk-adapter/index.js";
 import type { Message, Thread } from "#compiled/chat/index.js";
-import { linqInboundContent } from "#public/channels/linq/inboundContent.js";
+import {
+  linqInboundContent,
+  rehydrateLinqAttachment,
+} from "#public/channels/linq/inboundContent.js";
 
 /** Context passed to {@link LinqChannelConfig.onMessage}. */
 export interface LinqInboundMessageContext {
@@ -95,6 +98,8 @@ export function linqChannel(config: LinqChannelConfig): LinqChannel {
   const adapterConfig: LinqAdapterConfig = normalizeCredentials(config.credentials);
   if (config.baseURL !== undefined) adapterConfig.baseURL = config.baseURL;
   const linq = createLinqAdapter(adapterConfig);
+  // The channel downloads attachments in the step, after the message's own fetchData is gone.
+  linq.rehydrateAttachment = rehydrateLinqAttachment;
   const bridge = chatSdkChannel({
     adapters: { linq },
     concurrency: "concurrent",
