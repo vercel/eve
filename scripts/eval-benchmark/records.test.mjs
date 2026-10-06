@@ -200,4 +200,8 @@ test("publishes raw trees and records before the manifest, idempotently and immu
     publishRun({ ...input, recordsJsonl: recordsJsonl.split("\n").slice(1).join("\n") }),
     /records.jsonl was already published with different content/,
   );
+
+  const preview = await publishRun({ ...input, store: memoryStore(), root: "preview/runs" });
+  assert.equal(preview.prefix, "preview/runs/123/1");
+  await assert.rejects(publishRun({ ...input, root: "elsewhere" }), /Blob root must be one of/);
 });
