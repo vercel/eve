@@ -377,6 +377,7 @@ describe("createExecutionNodeStep", () => {
     ctx.set(InitiatorAuthKey, null);
     ctx.set(BundleKey, {
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      resolvedAgent: { skills: [] },
       subagentRegistry: rootNode.subagentRegistry,
       toolRegistry: rootNode.toolRegistry,
     } as never);
@@ -463,6 +464,7 @@ describe("createExecutionNodeStep", () => {
     ctx.set(InitiatorAuthKey, null);
     ctx.set(BundleKey, {
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      resolvedAgent: { skills: [] },
       subagentRegistry: node.subagentRegistry,
       toolRegistry: node.toolRegistry,
     } as never);

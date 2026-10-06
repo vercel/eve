@@ -681,6 +681,7 @@ const compiledInstructionsSchema: z.ZodType<CompiledInstructionsDefinition> = z.
 
 const compiledSkillBaseFields = {
   name: z.string(),
+  deferred: z.boolean().optional(),
   description: z.string(),
   license: z.string().optional(),
   markdown: z.string(),
@@ -859,7 +860,6 @@ const compiledToolBehaviorSchema: z.ZodType<CompiledToolBehavior> = z
           .strict(),
       ])
       .optional(),
-    presentation: z.literal("load-skill").optional(),
     shape: z
       .object({
         suspend: z.enum(["none", "workflow"]),

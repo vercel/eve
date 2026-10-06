@@ -426,11 +426,18 @@ export function normalizeInstructionsDefinition(
  */
 export function normalizeSkillDefinition(value: unknown, message: string): SkillDefinition {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["description", "files", "license", "markdown", "metadata"], message);
+  expectOnlyKnownKeys(
+    record,
+    ["deferred", "description", "files", "license", "markdown", "metadata"],
+    message,
+  );
   const definition: Mutable<SkillDefinition> = {
     description: expectString(record.description, message),
     markdown: expectString(record.markdown, message),
   };
+  if (record.deferred !== undefined) {
+    definition.deferred = expectBoolean(record.deferred, message);
+  }
   const license = record.license;
   const metadata = getOptionalStringRecordProperty(record, "metadata", message);
 

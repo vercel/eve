@@ -12,7 +12,6 @@ import {
   type EveEvalToolCallMatchOptions,
 } from "#evals/match.js";
 import type { EveEvalEventMatch } from "#evals/match.js";
-import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import type { AssertionOutcome, RunAssertion } from "#evals/assertions/collector.js";
 
 /** Minimal captured scope consumed by deterministic eval assertions. */
@@ -117,16 +116,28 @@ export function calledTool(name: string, options: EveEvalToolCallMatchOptions = 
 }
 
 /**
- * Sugar over {@link calledTool} for the framework `load_skill` tool: asserts a
- * skill with id `skill` was loaded. `output`/`status`/`count` constrain the
- * matching call exactly as for `calledTool`.
+ * Asserts the skill `skill` was loaded. `output`/`status`/`count` constrain
+ * the matching load exactly as for `calledTool`.
  */
 export function loadedSkill(
   skill: string,
   options: EveEvalSkillLoadMatchOptions = {},
 ): RunAssertion {
-  const base = calledTool(LOAD_SKILL_TOOL_NAME, { ...options, input: { skill } });
-  return { ...base, name: `loadedSkill(${skill})` };
+  validateCount(options.count);
+  return {
+    name: `loadedSkill(${skill})`,
+    evaluate(result) {
+      const named = result.derived.skillLoads.filter((load) => load.skill === skill);
+      const matching = named.filter((load) => toolCallMatches(load, options));
+      if (matchesCount(options.count, matching.length)) {
+        return { score: 1, metadata: { matchingLoads: matching.length } };
+      }
+      const loaded = result.derived.skillLoads.map((load) => load.skill).join(", ");
+      return fail(
+        `expected ${describeCount(options.count)} matching load(s) of "${skill}", found ${matching.length}; observed skill loads: [${loaded}]`,
+      );
+    },
+  };
 }
 
 /**

@@ -24,7 +24,7 @@ export default defineAgent({
 
 This turns off the optional defaults described below. Add back only the tools the agent needs with the command in each tool's section. Existing files under `agent/tools/` remain available, including same-name replacements such as `agent/tools/bash.ts`.
 
-`eve__search` and `eve__execute` stay available because they reach deferred tools, deferred agents, and connection tools.
+`eve__search` and `eve__execute` stay available because they reach deferred tools, deferred agents, and connection tools, and they load skills.
 
 ### `bash`
 
@@ -262,49 +262,18 @@ import { disableTool } from "eve/tools";
 export default disableTool();
 ```
 
-### `load_skill`
-
-`load_skill` pulls an on-demand [skill](../skills)'s instructions into the current turn. It appears only when the agent declares skills and adds no execution surface by itself.
-
-```sh
-eve add tool/load_skill
-```
-
-```ts title="agent/tools/load_skill.ts"
-export { default } from "eve/tools/load_skill";
-```
-
-Override it:
-
-```ts title="agent/tools/load_skill.ts"
-import { defineTool } from "eve/tools";
-import { loadSkill } from "eve/tools/load_skill";
-
-export default defineTool({
-  ...loadSkill,
-  description: "Load instructions for an available skill.",
-});
-```
-
-Disable it:
-
-```ts title="agent/tools/load_skill.ts"
-import { disableTool } from "eve/tools";
-
-export default disableTool();
-```
-
 ### `eve__search` and `eve__execute`
 
-`eve__search` and `eve__execute` let the model reach entries that are not in its tool list: tools defined with `deferred: true`, agents defined with `tool: "deferred"`, and every tool from the agent's [connections](../connections). eve adds both to every session of every agent, even when `defaultTools` is `false`, so there is no add command.
+`eve__search` and `eve__execute` let the model reach entries that are not in its tool list: tools defined with `deferred: true`, agents defined with `tool: "deferred"`, and every tool from the agent's [connections](../connections). The model also loads every [skill](../skills) through `eve__execute`. eve adds both to every session of every agent, even when `defaultTools` is `false`, so there is no add command.
 
-- `eve__search({ query, limit? })` returns the best matches, up to `limit` (default 20, at most 50), each with its exact `tool` name, its `description`, and a TypeScript `signature` rendered from its schemas. `query` is required and must contain a word. Matches rank in tiers: an entry whose name is exactly the query, then a connection tool whose name is the query without its `<connection>__` prefix, then the tools of a connection named by the query, then entries whose names start with the query, then keyword matches in names, parameters, and descriptions. So `eve__search({ query: "linear" })` lists the `linear` connection's tools first.
+- `eve__search({ query, limit? })` returns the best matches, up to `limit` (default 20, at most 50). `query` is required and must contain a word. A tool match has its exact `tool` name, its `description`, and a TypeScript `signature` rendered from its schemas. A deferred skill's match has its `skill` name, its `description`, and the `path` of its `SKILL.md` when it has supporting files. Tools and skills rank together, in tiers: an entry whose name is exactly the query, then a connection tool whose name is the query without its `<connection>__` prefix, then the tools of a connection named by the query, then entries whose names start with the query, then keyword matches in names, parameters, and descriptions. So `eve__search({ query: "linear" })` lists the `linear` connection's tools first.
 - A query whose first word contains `__` searches one namespace: everything before its last `__`, without trailing underscores. The namespace only filters. `eve__search` keeps names under `<namespace>__` and anything named exactly the namespace, such as a connection's sign-in entry, then ranks them by the whole query, so `eve__search({ query: "linear__" })` returns only the `linear` connection's tools, or its sign-in result, and an exact name that contains `__` still ranks first. eve lists only the connections that can own names in that namespace, so other connections make no network call and don't appear in `unavailable`. A namespace that matches nothing fails with the closest connection names. Characters that can't appear in a name, such as a leading `^`, are ignored; `query` isn't a regular expression.
 - `eve__search` never asks the user to sign in. A connection whose server won't list its tools until the user signs in appears as one result named after the connection, such as `linear`; a connection whose server lists its tools without a token is searched like any other. A connection whose tools fail to load appears under `unavailable` with its `error`. Matches from everything else are still returned.
 - `eve__execute({ tool: "linear" })`, with a connection's own name, asks the user to sign in to that connection when its tools need it, and returns once they can be listed, so the next `eve__search` finds them. On a server that lists its tools without sign-in, it confirms the tools are available without asking.
 - `eve__execute({ tool, input })` calls the entry named `tool` with `input`. A connection tool's name is `<connection>__<tool>`, such as `linear__list_issues`. eve checks `input` against the entry's input schema. An invalid input fails with the entry's signature, an unknown name fails with the closest names, and a tool already in the model's tool list fails with a reminder to call it directly. When the server asks for the user's authorization, the call asks the user to sign in and parks until sign-in completes.
+- `eve__execute({ skill })` loads the named skill, deferred or not, and returns its instructions. An unknown name fails with the closest skill names. A name that matches a connection says to find its tools with `eve__search({ query: "<connection>__" })`. Pass exactly one of `tool` or `skill`; `input` goes only with `tool`.
 
-After `eve__execute` resolves its entry, the call runs exactly like a direct call to that entry. Approval policies and `approvedTools`, workflow tools and tasks, agents, `endsTurn`, `toModelOutput`, hooks, and stream events all see the entry's own name and input, such as `linear__list_issues`. Only model history records the call as `eve__execute`.
+After `eve__execute` resolves its entry, the call runs exactly like a direct call to that entry. A skill load reports a `load-skill` action named for its skill and an `execute_tool eve:load-skill` span. Approval policies and `approvedTools`, workflow tools and tasks, agents, `endsTurn`, `toModelOutput`, hooks, and stream events all see the entry's own name and input, such as `linear__list_issues`. Only model history records the call as `eve__execute`.
 
 eve tells the model what it can reach in an append-only context message rather than in the system prompt: which kinds of deferred entries exist, up to 20 namespaces (the first `__` segment of deferred names, such as `sre` for `sre__list_alerts`), and up to 20 connections with their descriptions. It never names a deferred entry, so deferred entries stay out of context until `eve__search` finds them. A later step appends the listing again only when that changes; a deferred entry added to a listed namespace, or without one, changes nothing. The definitions of `eve__search` and `eve__execute` never change, so adding a deferred entry, signing in, or resolving a dynamic connection keeps the cached prompt prefix.
 

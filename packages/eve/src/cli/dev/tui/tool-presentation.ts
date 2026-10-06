@@ -108,13 +108,6 @@ const BUILTIN_TOOL_COPY: Readonly<Record<string, BuiltinToolCopy>> = {
     singularNoun: "pattern",
     pluralNoun: "patterns",
   },
-  load_skill: {
-    verb: "Load",
-    pastVerb: "Loaded",
-    argKey: "skill",
-    singularNoun: "skill",
-    pluralNoun: "skills",
-  },
   read_file: {
     verb: "Read",
     pastVerb: "Read",

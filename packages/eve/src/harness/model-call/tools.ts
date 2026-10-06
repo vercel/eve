@@ -3,6 +3,7 @@ import type { ToolSet } from "ai";
 
 import type { StepCatalog } from "#execution/catalog/step-catalog.js";
 import { dispatchesAfterStep } from "#harness/execute-call.js";
+import { SKILL_ENTRY_NAME } from "#protocol/catalog-tools.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { buildFinalOutputTool } from "#harness/final-output.js";
 import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
@@ -82,9 +83,9 @@ export function endsTurnTools(catalog: StepCatalog, applies: boolean): EndsTurnT
 /** The names of the entries eve provides, which tracing marks as framework tools. */
 export function frameworkToolNames(catalog: StepCatalog): ReadonlySet<string> {
   return new Set(
-    [...catalog.advertised.values(), ...catalog.entries.values()]
-      .filter((definition) => definition.frameworkTool === true)
-      .map((definition) => definition.name),
+    [...catalog.advertised.values(), ...catalog.entries.values(), catalog.get(SKILL_ENTRY_NAME)]
+      .filter((definition) => definition?.frameworkTool === true)
+      .map((definition) => definition!.name),
   );
 }
 

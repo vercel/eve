@@ -226,7 +226,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       30: "Stream events gained task.started and task.settled, and input.requested, authorization events, and agent.started carry the taskId of the task they come from. The subagent.called, subagent.completed, subagent.started, and subagent.event hook events were removed; subscribe to task.started, task.settled, and agent.started.",
     },
   },
-  skill: { current: 2, supported: [1, 2], dropped: {} },
+  skill: { current: 3, supported: [1, 2, 3], dropped: {} },
   dynamicSkill: {
     current: 34,
     supported: [

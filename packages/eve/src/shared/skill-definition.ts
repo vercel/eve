@@ -9,6 +9,12 @@ export type SkillFileContent = string | Uint8Array;
  * resolvers.
  */
 export interface SkillPackageDefinition {
+  /**
+   * Keeps this skill out of the system prompt and the dynamic skill
+   * announcement. The model finds it with `search` and loads it with
+   * `execute({ skill })`. Defaults to `false`.
+   */
+  readonly deferred?: boolean;
   readonly description: string;
   readonly license?: string;
   readonly markdown: string;

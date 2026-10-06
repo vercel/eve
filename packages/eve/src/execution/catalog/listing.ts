@@ -6,6 +6,9 @@ import { compareCodeUnits } from "./rank.js";
 import type { StepCatalog } from "./step-catalog.js";
 
 const ANNOUNCEMENT_KEY = "catalog";
+
+/** Each name group's label, which both the listing and its diffs start lines with. */
+export const NAME_GROUP_LABELS = { agents: "Agents", skills: "Skills", tools: "Tools" } as const;
 const MAX_LISTED_NAMESPACES = 20;
 const MAX_LISTED_CONNECTIONS = 20;
 

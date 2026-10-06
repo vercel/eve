@@ -112,7 +112,6 @@ export const ChannelDeliveryKey = new ContextKey<ChannelDeliveryMetadata>("eve.c
 export const TurnDeliveryIdsKey = new ContextKey<readonly string[]>("eve.turnDeliveryIds");
 /** Last framework announcements recorded in the retained session history. */
 export interface HistoryState {
-  readonly availableSkills?: string;
   /** Last announced value per keyed announcement (see `#harness/announcements.js`). */
   readonly announcements?: Readonly<Record<string, string>>;
 }
@@ -326,8 +325,10 @@ export const DynamicSubagentAgentConfigKey = new ContextKey<DynamicSubagentAgent
  */
 export interface DurableDynamicSkillMetadata {
   readonly name: string;
+  /** Listed in the catalog instead of the dynamic skill announcement. */
+  readonly deferred?: true;
   readonly description: string;
-  /** `SKILL.md` content as authored; `load_skill` strips any frontmatter. */
+  /** `SKILL.md` content as authored; loading strips any frontmatter. */
   readonly markdown: string;
   /**
    * Content hash of the package files. Present only for packages with
@@ -340,8 +341,8 @@ export type DynamicSkillManifest = Readonly<Record<string, readonly DurableDynam
 
 /**
  * Durable map from resolver slug to the qualified skills it last produced.
- * Used to diff on re-resolution, serve `load_skill`, and rebuild the
- * model-visible announcement across turns without a sandbox.
+ * Used to diff on re-resolution, load skills, and rebuild the model-visible
+ * announcement across turns without a sandbox.
  */
 export const DynamicSkillManifestKey = new ContextKey<DynamicSkillManifest>(
   "eve.dynamicSkillManifest",

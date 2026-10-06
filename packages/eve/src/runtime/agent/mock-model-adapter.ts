@@ -31,14 +31,15 @@ import {
   findRelevantSkill,
   getActivatedSkillIds,
   getAvailableSkills,
+  getSkillLoads,
 } from "#runtime/agent/mock-model-skill-selection.js";
 import { createJsonSchemaSample } from "#runtime/agent/mock-structured-output.js";
 import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import { readTaskResults } from "#execution/tasks/render.js";
-import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
+import { EXECUTE_TOOL_NAME } from "#protocol/catalog-tools.js";
 
 const MOCK_RUNTIME_MODEL_PROVIDER = "eve-runtime-mock";
-const LOAD_SKILL_TOOL_CALL_ID = "call_load_skill";
+const SKILL_LOAD_CALL_ID = "call_execute_skill";
 const MOCK_AUTHORED_MODELS_ENV = "EVE_MOCK_AUTHORED_MODELS";
 type BootstrapGenerateOptions = Parameters<MockLanguageModelV3["doGenerate"]>[0];
 
@@ -204,8 +205,8 @@ function createSkillLoadResult(
     inputTokens: estimateTokenCount(getPromptText(prompt)),
     modelId,
     outputTokens: estimateTokenCount(skill.name),
-    toolCallId: LOAD_SKILL_TOOL_CALL_ID,
-    toolName: LOAD_SKILL_TOOL_NAME,
+    toolCallId: SKILL_LOAD_CALL_ID,
+    toolName: EXECUTE_TOOL_NAME,
   });
 }
 
@@ -492,6 +493,7 @@ function getAvailableTools(options: BootstrapGenerateOptions): AvailableBootstra
 }
 
 function getLastAuthoredToolResult(prompt: BootstrapPrompt): BootstrapToolResult | null {
+  const skillLoads = getSkillLoads(prompt);
   for (const message of [...prompt].reverse()) {
     if (message.role === "user") {
       const text = getPromptContentText(message.content).trim();
@@ -516,7 +518,7 @@ function getLastAuthoredToolResult(prompt: BootstrapPrompt): BootstrapToolResult
         continue;
       }
 
-      if (part.toolName === LOAD_SKILL_TOOL_NAME) {
+      if (skillLoads.has(part.toolCallId)) {
         continue;
       }
 
@@ -640,14 +642,9 @@ function findRelevantTool(
   message: string,
 ): AvailableBootstrapTool | null {
   const normalizedMessage = normalizeText(message);
-  // `load_skill` is reachable only through skill-relevance selection
-  // (createSkillLoadResult); matching it by name here would re-call it on
-  // every step, because its results are invisible to the tool-result check.
+  // Skills load through `eve__execute` only by skill-relevance selection.
   const explicitTool = tools.find(
-    (tool) =>
-      tool.name !== "agent" &&
-      tool.name !== LOAD_SKILL_TOOL_NAME &&
-      normalizedMessage.includes(normalizeText(tool.name)),
+    (tool) => tool.name !== "agent" && normalizedMessage.includes(normalizeText(tool.name)),
   );
   if (explicitTool !== undefined) {
     return explicitTool;
