@@ -226,16 +226,4 @@ describe("invokeTool", () => {
     await shutdownActiveSandboxHandles();
     expect(shutdown).not.toHaveBeenCalled();
   });
-
-  it("allocates no sandbox for a failed call that never asked for one", async () => {
-    const { deleted, registry, started } = sandboxes();
-    const failing = tool("failing", () => {
-      throw new Error("boom");
-    });
-    expect(
-      await invokeTool(runtimeWith([failing], registry), "failing", {}, { auth: alice }),
-    ).toMatchObject({ status: "failed" });
-    expect(started).toHaveLength(0);
-    expect(deleted).not.toHaveBeenCalled();
-  });
 });

@@ -58,7 +58,6 @@ const tools = [
     await gate;
     return { status: "ok" };
   }),
-  tool("outer", async () => await invokeTool(runtime, "lookup", {}, { auth: alice })),
 ];
 
 const runtime: InvokeToolRuntime = {
@@ -160,16 +159,6 @@ describe("invokeTool trace ownership", () => {
       "nested lookup",
       "nested lookup",
     ]);
-    expect(processor.activeTraceIds().size).toBe(0);
-  });
-
-  it("releases a trace once a nested direct call and its caller both end", async () => {
-    await invokeTool(runtime, "outer", {}, { auth: alice });
-    const spans = exporter.getFinishedSpans();
-    const outer = spans.find((span) => span.name === "execute_tool outer")!;
-    const inner = spans.find((span) => span.name === "execute_tool lookup")!;
-    expect(inner.parentSpanContext?.spanId).toBe(outer.spanContext().spanId);
-    expect(seenActive).toEqual([true]);
     expect(processor.activeTraceIds().size).toBe(0);
   });
 

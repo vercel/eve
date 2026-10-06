@@ -6,7 +6,7 @@ import {
 } from "@opentelemetry/sdk-trace-base";
 import { generateText, stepCountIs } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -66,6 +66,13 @@ const alice: SessionAuthContext = {
   principalId: "alice",
   principalType: "user",
 };
+/**
+ * A clock the duration test drives through a stubbed `performance.now`, so it
+ * measures time spent in each step without waiting for real time to pass.
+ */
+const clock = { now: 0 };
+const EXECUTE_MS = 25;
+
 const inputSchema = defineJsonSchema({
   additionalProperties: false,
   properties: { text: { type: "string" } },
@@ -83,12 +90,13 @@ function tool(name: string, execute: (input: { text?: string }) => unknown): Har
 
 const tools = new Map(
   [
-    tool("lookup", async ({ text }) =>
-      apiTrace.getTracer("test.tool").startActiveSpan("nested lookup", (span) => {
+    tool("lookup", async ({ text }) => {
+      clock.now += EXECUTE_MS;
+      return apiTrace.getTracer("test.tool").startActiveSpan("nested lookup", (span) => {
         span.end();
         return { echoed: text };
-      }),
-    ),
+      });
+    }),
     tool("explode", async ({ text }) => {
       throw new Error(`thrown ${text}`);
     }),
@@ -145,9 +153,7 @@ function install(
       "tool.call.failed": (event) => void events.push(event),
       "tool.call.started": async (event) => {
         events.push(event);
-        if (options.slowStartMs !== undefined) {
-          await new Promise((resolve) => setTimeout(resolve, options.slowStartMs));
-        }
+        if (options.slowStartMs !== undefined) clock.now += options.slowStartMs;
       },
     },
     name: "recorder",
@@ -333,6 +339,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await runtime?.shutdown();
   runtime = undefined;
   apiTrace.disable();
@@ -394,14 +401,13 @@ describe("invokeTool's recorded arguments", () => {
 
 describe("invokeTool's execute_tool duration", () => {
   it("counts execute only, not slow tool.call.started handlers", async () => {
-    install("record", { slowStartMs: 150 });
+    vi.spyOn(performance, "now").mockImplementation(() => clock.now);
+    install("record", { slowStartMs: 5_000 });
     const viaInvoke = await capture(direct("lookup", { text: SECRET }), "lookup");
 
-    const duration = viaInvoke.raw.attributes["gen_ai.execute_tool.duration"];
-    expect(typeof duration).toBe("number");
-    expect(duration as number).toBeLessThan(0.1);
-    const [seconds, nanos] = viaInvoke.raw.duration;
-    expect(seconds + nanos / 1e9).toBeGreaterThanOrEqual(0.14);
+    expect(viaInvoke.raw.attributes["gen_ai.execute_tool.duration"]).toBe(EXECUTE_MS / 1000);
+    const completed = events.find((event) => event.type === "tool.call.completed");
+    expect(completed).toMatchObject({ durationMs: EXECUTE_MS });
   });
 });
 

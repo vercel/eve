@@ -636,7 +636,11 @@ describe("mcpChannel tools", () => {
     const invokeTool = vi.fn<InvokeToolFn>();
     const rpc = serve({ tools: true }, invokeTool);
     const called = await rpc("tools/call", { arguments: { id: 7 }, name: "lookup" });
-    expect(called.result?.isError ?? called.error !== undefined).toBe(true);
+    expect(called.error).toBeUndefined();
+    expect(called.result).toMatchObject({
+      isError: true,
+      structuredContent: { error: { code: "invalid_input", retryable: false } },
+    });
     expect(invokeTool).not.toHaveBeenCalled();
   });
 });

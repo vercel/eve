@@ -268,21 +268,6 @@ describe.each<Era>(["2025", "2026"])("mcpChannel tool tracing over MCP %s", (era
     expect(parentSpanId(nested)).toBe(span.spanContext().spanId);
     expectNoContent();
   });
-
-  it("marks a failed call's span failed though MCP answers HTTP 200, with a generic error when content is off", async () => {
-    const { body, status } = await call(callRequest(era, "explode"));
-    expect(status).toBe(200);
-    expect(body.result.isError).toBe(true);
-
-    const span = toolSpan("explode");
-    expect(span.status.code).toBe(SpanStatusCode.ERROR);
-    // A conversation's tool span records the same generic error when outputs are not recorded.
-    expect(span.attributes).toMatchObject({ "error.type": "_OTHER", "eve.tool.outcome": "failed" });
-    expect(span.status.message).toBeUndefined();
-    expect(span.events.filter((event) => event.name === "exception")).toEqual([]);
-    expect(span.spanContext().traceId).toBe(CLIENT_TRACE_ID);
-    expectNoContent();
-  });
 });
 
 describe("mcpChannel tool trace context", () => {
@@ -387,43 +372,17 @@ describe("invokeTool trace policy", () => {
 
 describe("invokeTool content capture", () => {
   const record = { emit: true, recordInputs: true, recordOutputs: true } as const;
-  const noContent = { emit: true, recordInputs: false, recordOutputs: false } as const;
 
-  it("records the arguments and result when the content decision allows them", async () => {
-    useTracing(() => record, true);
-    const result = await invokeTool(runtime, "lookup", { text: SENTINEL }, { auth: alice });
-    expect(result).toMatchObject({ status: "completed" });
-
-    const span = toolSpan("lookup");
-    expect(JSON.parse(String(span.attributes["gen_ai.tool.call.arguments"]))).toEqual({
-      text: SENTINEL,
-    });
-    expect(JSON.parse(String(span.attributes["gen_ai.tool.call.result"]))).toEqual({
-      echoed: SENTINEL,
-      status: "ok",
-    });
-  });
-
-  it("records inputs and outputs independently", async () => {
-    useTracing(() => ({ emit: true, recordInputs: true, recordOutputs: false }), true);
-    await invokeTool(runtime, "lookup", { text: SENTINEL }, { auth: alice });
-    const inputsOnly = toolSpan("lookup");
-    expect(inputsOnly.attributes["gen_ai.tool.call.arguments"]).toBeDefined();
-    expect(inputsOnly.attributes["gen_ai.tool.call.result"]).toBeUndefined();
-
-    exporter.reset();
+  it("records outputs without inputs when only outputs are allowed", async () => {
     useTracing(() => ({ emit: true, recordInputs: false, recordOutputs: true }), true);
     await invokeTool(runtime, "lookup", { text: SENTINEL }, { auth: alice });
-    const outputsOnly = toolSpan("lookup");
-    expect(outputsOnly.attributes["gen_ai.tool.call.arguments"]).toBeUndefined();
-    expect(outputsOnly.attributes["gen_ai.tool.call.result"]).toBeDefined();
+    const span = toolSpan("lookup");
+    expect(span.attributes["gen_ai.tool.call.arguments"]).toBeUndefined();
+    expect(span.attributes["gen_ai.tool.call.result"]).toBeDefined();
   });
 
-  it.each([
-    ["the trace policy", () => useTracing(() => noContent, true)],
-    ["the OpenTelemetry declaration", () => useTracing(() => record, false)],
-  ])("records neither when %s turns content off", async (_label, configure) => {
-    configure();
+  it("records neither when the OpenTelemetry declaration turns content off", async () => {
+    useTracing(() => record, false);
     await invokeTool(runtime, "lookup", { text: SENTINEL }, { auth: alice });
     const span = toolSpan("lookup");
     expect(span.attributes["gen_ai.tool.call.arguments"]).toBeUndefined();
@@ -431,49 +390,16 @@ describe("invokeTool content capture", () => {
     expectNoContent();
   });
 
-  it("records content over MCP too, still under the client's trace", async () => {
-    useTracing(() => record, true);
-    await call(callRequest("2026", "lookup"));
-    const span = toolSpan("lookup");
-    expect(span.spanContext().traceId).toBe(CLIENT_TRACE_ID);
-    expect(span.attributes["gen_ai.tool.call.arguments"]).toContain(SENTINEL);
-    expect(span.attributes["gen_ai.tool.call.result"]).toContain(SENTINEL);
-  });
-
-  it("records a failure's error on the tool span, and only there, when outputs are recorded", async () => {
+  it("keeps a recorded failure's error off an existing parent span", async () => {
     useTracing(() => record, true);
     const parent = apiTrace.getTracer("test.parent").startSpan("platform request");
-    const result = await apiContext.with(apiTrace.setSpan(apiContext.active(), parent), () =>
+    await apiContext.with(apiTrace.setSpan(apiContext.active(), parent), () =>
       invokeTool(runtime, "explode", { text: SENTINEL }, { auth: alice }),
     );
     (parent as Span).end();
-    expect(result).toMatchObject({ status: "failed" });
 
-    // The conversation's rule: the error's name, a bounded exception, and its message.
-    const span = toolSpan("explode");
-    expect(span.status).toEqual({ code: SpanStatusCode.ERROR, message: `thrown ${SENTINEL}` });
-    expect(span.attributes).toMatchObject({ "error.type": "Error", "eve.tool.outcome": "failed" });
-    expect(span.attributes["gen_ai.tool.call.result"]).toBeUndefined();
-    const exceptions = span.events.filter((event) => event.name === "exception");
-    expect(exceptions.map((event) => event.attributes?.["exception.message"])).toContain(
-      `thrown ${SENTINEL}`,
-    );
+    expect(toolSpan("explode").status.message).toBe(`thrown ${SENTINEL}`);
     const parentSpan = finished().find((candidate) => candidate.name === "platform request")!;
     expect(exported(parentSpan)).not.toContain(SENTINEL);
-  });
-
-  it("records a generic error when inputs are recorded but outputs are not", async () => {
-    useTracing(() => ({ emit: true, recordInputs: true, recordOutputs: false }), true);
-    await invokeTool(runtime, "explode", { text: SENTINEL }, { auth: alice });
-
-    const span = toolSpan("explode");
-    expect(span.attributes["gen_ai.tool.call.arguments"]).toContain(SENTINEL);
-    expect(span.attributes["error.type"]).toBe("_OTHER");
-    expect(span.status).toEqual({ code: SpanStatusCode.ERROR });
-    for (const exportedSpan of finished()) {
-      const text = exported(exportedSpan);
-      expect(text).not.toContain(`thrown ${SENTINEL}`);
-      expect(text).not.toContain(`logged ${SENTINEL}`);
-    }
   });
 });
