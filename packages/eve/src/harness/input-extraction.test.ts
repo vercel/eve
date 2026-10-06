@@ -5,6 +5,7 @@ import { extractToolApprovalInputRequests } from "#harness/input-extraction.js";
 describe("extractToolApprovalInputRequests", () => {
   it("extracts a tool approval request from content parts", () => {
     const result = extractToolApprovalInputRequests({
+      tools: new Map(),
       content: [
         {
           approvalId: "approval-1",
@@ -42,6 +43,7 @@ describe("extractToolApprovalInputRequests", () => {
 
   it("extracts an approval request from a sibling tool call", () => {
     const result = extractToolApprovalInputRequests({
+      tools: new Map(),
       content: [
         {
           input: { command: "rm -rf /tmp" },
@@ -80,6 +82,7 @@ describe("extractToolApprovalInputRequests", () => {
 
   it("skips automatic approval decisions", () => {
     const result = extractToolApprovalInputRequests({
+      tools: new Map(),
       content: [
         {
           approvalId: "approval-1",
@@ -100,6 +103,7 @@ describe("extractToolApprovalInputRequests", () => {
 
   it("skips approval requests without matching tool-call data", () => {
     const result = extractToolApprovalInputRequests({
+      tools: new Map(),
       content: [
         {
           approvalId: "approval-1",
@@ -114,6 +118,7 @@ describe("extractToolApprovalInputRequests", () => {
 
   it("skips approval requests for excluded tool calls before parsing input", () => {
     const result = extractToolApprovalInputRequests({
+      tools: new Map(),
       content: [
         {
           input: [],
@@ -135,6 +140,7 @@ describe("extractToolApprovalInputRequests", () => {
 
   it("skips non-approval content parts", () => {
     const result = extractToolApprovalInputRequests({
+      tools: new Map(),
       content: [
         { text: "Some text.", type: "text" },
         {
@@ -150,6 +156,11 @@ describe("extractToolApprovalInputRequests", () => {
   });
 
   it("returns an empty array for empty content", () => {
-    expect(extractToolApprovalInputRequests({ content: [] })).toEqual([]);
+    expect(
+      extractToolApprovalInputRequests({
+        tools: new Map(),
+        content: [],
+      }),
+    ).toEqual([]);
   });
 });

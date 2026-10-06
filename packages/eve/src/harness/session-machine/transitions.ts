@@ -1,4 +1,4 @@
-import type { ModelMessage, UserContent } from "ai";
+import type { ModelMessage, ToolCallPart, UserContent } from "ai";
 
 import type {
   SubagentAuthorizationEventHookPayload,
@@ -370,20 +370,25 @@ function isComplete(step: SuspendedStep): boolean {
   return [...stepCallIds(step)].every((callId) => answered.has(callId));
 }
 
-/** Places a result right after the message that made its call. */
+/**
+ * Places a result right after the message that made its call, under the call's name: a call
+ * made through `execute` stays `execute` in history, whatever entry it ran.
+ */
 export function withResult(
   messages: readonly ModelMessage[],
-  part: ToolResultPart,
+  result: ToolResultPart,
 ): ModelMessage[] {
   const next = [...messages];
-  const asking = next.findIndex(
-    (message) =>
-      message.role === "assistant" &&
-      Array.isArray(message.content) &&
-      message.content.some(
-        (content) => content.type === "tool-call" && content.toolCallId === part.toolCallId,
-      ),
-  );
+  let call: ToolCallPart | undefined;
+  const asking = next.findIndex((message) => {
+    if (message.role !== "assistant" || typeof message.content === "string") return false;
+    call = message.content.find(
+      (content): content is ToolCallPart =>
+        content.type === "tool-call" && content.toolCallId === result.toolCallId,
+    );
+    return call !== undefined;
+  });
+  const part = call === undefined ? result : { ...result, toolName: call.toolName };
   const following = next[asking + 1];
   if (asking >= 0 && following?.role === "tool") {
     next[asking + 1] = { ...following, content: [...following.content, part] };

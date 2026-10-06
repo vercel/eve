@@ -1,7 +1,6 @@
 import type { ModelMessage } from "ai";
 
 import type { SessionAuthContext } from "#channel/types.js";
-import { buildResponseAuthorizationTools } from "#context/build-dynamic-tools.js";
 import { AuthKey, SessionKey } from "#context/keys.js";
 import { clearPendingAuthorization } from "#harness/authorization.js";
 import type { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
@@ -9,7 +8,7 @@ import { validateHarnessModelMessages } from "#harness/messages.js";
 import { fail } from "#harness/session-machine/transitions.js";
 import type { StepCoordinates } from "#harness/session-machine/view.js";
 import type { Step } from "#harness/step/context.js";
-import type { HarnessSessionBase, HarnessToolMap, StepResult } from "#harness/types.js";
+import type { HarnessSessionBase, HarnessToolLookup, StepResult } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { InputRequest } from "#shared/input.js";
 import { renderPendingApprovalsInstruction } from "./approval-prompt.js";
@@ -54,6 +53,8 @@ export async function parkOnApprovals(
     readonly messages: readonly ModelMessage[];
     readonly requests: readonly InputRequest[];
     readonly tasks: readonly RuntimeWorkflowTaskRequest[];
+    /** The entries the step's calls ran, whose approvals the requests ask for. */
+    readonly tools: HarnessToolLookup;
     /** The step made calls the runtime runs, so the turn waits on them instead. */
     readonly waitsOnRuntime: boolean;
   },
@@ -64,7 +65,7 @@ export async function parkOnApprovals(
     requests: input.requests,
     tasks: input.tasks,
     requester: currentRequester(step),
-    responseAuthRequiredRequestIds: responsePolicyRequestIds(step, input.requests),
+    responseAuthRequiredRequestIds: responsePolicyRequestIds(input.tools, input.requests),
   });
   await step.apply(transition, [...step.session.history, ...(transition.commit ?? [])]);
   if (input.waitsOnRuntime) return { next: null, session: step.session };
@@ -123,15 +124,17 @@ export async function enforceBudget(
 }
 
 /**
- * What a model call needs from the approvals: the keys `once()` approvals granted, and a note on
- * the calls still awaiting approval, which a message may revise.
+ * What a model call needs from the approvals: the keys `once()` approvals of `tools` granted, and
+ * a note on the calls still awaiting approval, which a message may revise.
  */
-export function humanInputContext(step: Step): {
+export function humanInputContext(
+  step: Step,
+  tools: HarnessToolLookup,
+): {
   readonly approvedTools: ReadonlySet<string>;
   readonly pendingApprovalsNote?: string;
 } {
   const view = step.view();
-  const tools = responseTools(step);
   return {
     approvedTools: grantedApprovalKeys(view, (request) =>
       tools.get(request.action.toolName)?.approvalKey?.(request.action.input),
@@ -154,19 +157,14 @@ export function discardClearedHumanInput<T extends HarnessSessionBase>(session: 
   return { ...session, state: Object.keys(state).length > 0 ? state : undefined };
 }
 
-function responseTools(step: Step): HarnessToolMap {
-  return buildResponseAuthorizationTools({ authoredTools: step.config.tools, context: step.ctx });
-}
-
 /**
  * The approvals whose tool defines a response policy. Every park records them, so no Approve or
  * Cancel of such an approval skips the policy.
  */
 function responsePolicyRequestIds(
-  step: Step,
+  tools: HarnessToolLookup,
   requests: readonly InputRequest[],
 ): readonly string[] {
-  const tools = responseTools(step);
   return requests
     .filter((request) => {
       const approval = tools.get(request.action.toolName)?.approval;

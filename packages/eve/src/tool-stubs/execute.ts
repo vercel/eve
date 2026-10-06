@@ -2,7 +2,6 @@ import { findStubTarget, stubCallId } from "#tool-stubs/target.js";
 import { contextStorage } from "#context/container.js";
 import { SessionKey, ToolStubsKey } from "#context/keys.js";
 import { ToolStubPlaybackKey, type ToolStubPlayback } from "#context/providers/tool-stubs-key.js";
-import type { StubResult } from "#tool-stubs/types.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 
@@ -36,16 +35,6 @@ async function* executeStubbedTool(
   else yield output;
 }
 
-/** The connection wrapper checks operation inputs and approvals before requesting a stub. */
-export async function connectionToolStub(
-  tool: string,
-  input: unknown,
-  callId: string,
-): Promise<StubResult> {
-  const stub = contextStubCall(tool, input, callId);
-  return stub === undefined ? { kind: "real" } : await stub.playback.call(stub.call);
-}
-
 function contextStubCall(tool: string, input: unknown, callId: string) {
   const context = contextStorage.getStore();
   if (context === undefined) return undefined;
@@ -71,8 +60,7 @@ export async function recordToolStubFailure(
   const context = contextStorage.getStore();
   const scope = context?.get(ToolStubsKey);
   if (scope === undefined || callId === undefined) return;
-  // Connection output conversion runs on the wrapper, after a qualified operation was stubbed.
-  if (tool !== "connection_execute" && findStubTarget(scope, tool) === undefined) return;
+  if (findStubTarget(scope, tool) === undefined) return;
   const session = context!.require(SessionKey);
   await context!
     .require(ToolStubPlaybackKey)

@@ -200,6 +200,8 @@ Set `CRM_API_KEY` in the consumer's environment, such as `.env.local` for local 
 
 The mount adds `crm__` to named contributions: `tools/search.ts` becomes `crm__search`, `channels/webhook.ts` becomes `crm__webhook`, `schedules/sync.ts` becomes `crm__sync`, `connections/api.ts` becomes `crm__api`, and `subagents/reviewer/` becomes `crm__reviewer`. Channels keep their declared route paths, and schedules keep their cron expressions.
 
+Do not mount an extension under the name of one of the agent's connections. A [connection owns](/docs/connections) every name that starts with `<name>__`, so the compiler rejects the mounted tools and subagents.
+
 For an extension with no configuration, mount its default export directly:
 
 ```ts title="agent/extensions/gizmo.ts"

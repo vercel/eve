@@ -41,13 +41,12 @@ import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import {
   type HarnessEmitFn,
   type HarnessSession,
+  type HarnessToolLookup,
   requireSessionModelReference,
-  type ToolLoopHarnessConfig,
 } from "#harness/types.js";
 import { contextStorage } from "#context/container.js";
 import { isAuthorizationSignal, isPendingAuthorizationToolOutput } from "#harness/authorization.js";
 import { readToolInterrupt } from "#harness/tool-interrupts.js";
-import { emitNestedToolActions } from "#harness/nested-actions.js";
 import { AuthKey } from "#context/keys.js";
 import { resolveConversationId } from "#shared/conversation-identity.js";
 
@@ -243,7 +242,7 @@ export async function emitStepActions(
     readonly excludedActionCallIds?: ReadonlySet<string>;
     readonly excludedActionToolNames: ReadonlySet<string>;
     readonly handledInlineToolResultCallIds?: ReadonlySet<string>;
-    readonly tools: ToolLoopHarnessConfig["tools"];
+    readonly tools: HarnessToolLookup;
   },
 ): Promise<void> {
   const providerExecutedCallIds = new Set(
@@ -257,6 +256,7 @@ export async function emitStepActions(
     ...extractToolApprovalInputRequests({
       content: (step.content ?? []) as ContentPart<ToolSet>[],
       excludedCallIds: options.excludedActionCallIds,
+      tools: options.tools,
     }).map((request) => request.action.callId),
     ...(step.toolCalls as TypedToolCall<ToolSet>[])
       .filter(isInvalidToolCall)
@@ -315,7 +315,6 @@ export async function emitStepActions(
       continue;
     }
 
-    await emitNestedToolActions(emitFn, state, result.callId);
     await emitFn(
       createActionResultEvent({
         result,
@@ -373,6 +372,12 @@ function reconcileToolResults(step: HarnessStepResult): readonly RuntimeToolResu
     resultsByCallId.set(part.toolCallId, createRuntimeToolResultFromToolError(part));
   }
 
+  const entryNames = new Map(
+    (step.toolCalls as TypedToolCall<ToolSet>[]).map((toolCall) => [
+      toolCall.toolCallId,
+      toolCall.toolName,
+    ]),
+  );
   for (const part of extractToolResultParts(step.response.messages)) {
     if ((part as { readonly providerExecuted?: boolean }).providerExecuted === true) {
       continue;
@@ -382,7 +387,13 @@ function reconcileToolResults(step: HarnessStepResult): readonly RuntimeToolResu
       continue;
     }
 
-    resultsByCallId.set(part.toolCallId, createRuntimeToolResultFromMessagePart(part));
+    resultsByCallId.set(
+      part.toolCallId,
+      createRuntimeToolResultFromMessagePart(
+        part,
+        entryNames.get(part.toolCallId) ?? part.toolName,
+      ),
+    );
   }
 
   return [...resultsByCallId.values()];

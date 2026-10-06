@@ -8,22 +8,16 @@ import {
   composeAgentModuleCandidates,
   type AgentSourceCandidate,
 } from "#compiler/source-graph.js";
+import { CATALOG_TOOL_NAMES } from "#protocol/catalog-tools.js";
 
-const CONNECTION_TOOLS_SLOT = "tools/connection_tools";
-/** Slots of the closed connection tools and the framework module that provides them. */
-const CONNECTION_TOOL_SLOTS = new Set([
-  CONNECTION_TOOLS_SLOT,
-  "tools/connection_search",
-  "tools/connection_execute",
-]);
+const CATALOG_TOOL_SLOTS = new Set(CATALOG_TOOL_NAMES.map((name) => `tools/${name}`));
 
-/** Rejects authored sources that would replace or disable the connection tools. */
+/** Rejects authored sources that would replace or disable the catalog tools. */
 export function assertFrameworkToolPolicy(candidate: AgentSourceCandidate): void {
-  if (candidate.layer === "framework-default") return;
   const slot = canonicalSourceSlot(candidate.logicalPath);
-  if (!CONNECTION_TOOL_SLOTS.has(slot)) return;
+  if (!CATALOG_TOOL_SLOTS.has(slot)) return;
   throw new Error(
-    `"agent/${slot}.ts" is reserved. connection_search and connection_execute are framework tools that cannot be replaced or disabled; they exist only while the agent has connections. Rename the file.`,
+    `"agent/${slot}.ts" is reserved. search and execute are framework tools that every agent has; they cannot be replaced or disabled. Rename the file.`,
   );
 }
 
@@ -73,7 +67,6 @@ export function applyDefaultToolPolicy(
       return (
         candidate.layer !== "framework-default" ||
         !slot.startsWith("tools/") ||
-        slot === CONNECTION_TOOLS_SLOT ||
         overriddenSlots.has(slot)
       );
     }),

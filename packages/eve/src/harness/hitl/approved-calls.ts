@@ -9,18 +9,19 @@ import {
 
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import { isInlineAuthorizationToolResult } from "#harness/inline-tool-authorization.js";
+import { toolCallModelOutput } from "#harness/tool-call-io.js";
 import { projectDeltaPresentation, projectResultPresentation } from "#harness/tool-presentation.js";
-import { buildToolSet, recheckApprovedCall } from "#harness/tools.js";
+import { recheckApprovedCall, wrapToolExecute } from "#harness/tools.js";
 import { TOOL_EXECUTION_DENIED_MESSAGE } from "#harness/input-request-resolution.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
-import type { HarnessToolMap } from "#harness/types.js";
-import { emitNestedToolActions } from "#harness/nested-actions.js";
+import type { HarnessToolLookup } from "#harness/types.js";
 import { createActionPartialEvent, createActionResultEvent } from "#protocol/message.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { toError } from "#shared/errors.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { InputRequest } from "#shared/input.js";
 import { parseJsonObject } from "#shared/json.js";
+import { toModelSchema } from "#tools/schema.js";
 import type { HandleEventFn } from "#harness/types.js";
 
 type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
@@ -37,7 +38,8 @@ const log = createLogger("harness.tool-loop");
  */
 export async function runApprovedCalls(input: {
   readonly requests: readonly InputRequest[];
-  readonly tools: HarnessToolMap;
+  /** The entries of the step that asked, which the approved calls run. */
+  readonly tools: HarnessToolLookup;
   readonly approvedTools?: ReadonlySet<string>;
   /** The conversation the tools read as `ctx.messages`. */
   readonly messages: readonly ModelMessage[];
@@ -54,20 +56,15 @@ export async function runApprovedCalls(input: {
   readonly settled: readonly ApprovedCallResult[];
   readonly toolResults: readonly TypedToolResult<ToolSet>[];
 }> {
-  const tools = buildToolSet({ tools: input.tools, approvedTools: input.approvedTools });
   const calls = input.requests.map((request) => {
     const definition = input.tools.get(request.action.toolName);
-    const tool = tools[request.action.toolName];
-    if (
-      definition?.execute === undefined ||
-      tool?.execute === undefined ||
-      tool.toModelOutput === undefined
-    ) {
+    const execute = definition === undefined ? undefined : wrapToolExecute(definition);
+    if (definition === undefined || execute === undefined) {
       throw new Error(
         "The approved tool is no longer available. Request a new tool call and approval.",
       );
     }
-    return { request, definition, tool };
+    return { request, definition, execute };
   });
   const at = {
     sequence: input.position.sequence,
@@ -75,7 +72,7 @@ export async function runApprovedCalls(input: {
     turnId: input.position.turnId,
   };
   const executed = await Promise.allSettled(
-    calls.map(async ({ request, definition, tool }) => {
+    calls.map(async ({ request, definition, execute }) => {
       const settled: ApprovedCallResult[] = [];
       const toolResults: TypedToolResult<ToolSet>[] = [];
       const { callId, toolName, input: args } = request.action;
@@ -83,7 +80,9 @@ export async function runApprovedCalls(input: {
         throwIfTurnAborted(input.abortSignal);
         // As in the AI SDK: the stored input revalidates against the tool's own schema and runs
         // unchanged, so the call that runs is the one the person approved.
-        const validation = await asSchema(tool.inputSchema).validate?.(args);
+        const validation = await asSchema(
+          toModelSchema(definition.inputSchema, "input"),
+        ).validate?.(args);
         if (validation?.success === false) {
           const message = `The approved input is no longer valid for tool "${toolName}". Request a new tool call and approval.`;
           await input.publish(
@@ -158,9 +157,8 @@ export async function runApprovedCalls(input: {
           await telemetry.execute(async () => {
             const startedAt = performance.now();
             try {
-              const executed = tool.execute!(args, {
+              const executed = execute(args, {
                 abortSignal: input.abortSignal,
-                context: undefined,
                 messages: [...input.messages],
                 toolCallId: callId,
               });
@@ -216,13 +214,11 @@ export async function runApprovedCalls(input: {
         } as TypedToolResult<ToolSet>;
         toolResults.push(result);
         if (isInlineAuthorizationToolResult(result)) return { settled, toolResults };
-        // Calls the tool made on the model's behalf report before its result.
-        await emitNestedToolActions(input.publish, input.position, callId);
         settled.push({
           part: {
             output: failed
               ? { type: "error-text", value: String(output) }
-              : await tool.toModelOutput!({ input: args, output, toolCallId: callId }),
+              : await toolCallModelOutput(definition, output, callId),
             toolCallId: callId,
             toolName,
             type: "tool-result",

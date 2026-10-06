@@ -12,7 +12,6 @@ import {
   validateHarnessModelMessages,
 } from "#harness/messages.js";
 import type { HarnessStepResult } from "#harness/step-hooks.js";
-import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import {
   appendMissingToolResultMessages,
   extractToolResultCallIds,
@@ -30,7 +29,7 @@ import {
   withResult,
 } from "#harness/session-machine/transitions.js";
 import { clearTurnClientContextState } from "#harness/turn-client-context.js";
-import { collectDeferredCalls } from "#harness/coordination.js";
+import { collectWorkflowCalls } from "#harness/coordination.js";
 import {
   createToolResultMessagePartFromToolError,
   isToolResultError,
@@ -41,12 +40,11 @@ import {
   parkOnApprovals,
   stopForToolSignIn,
 } from "#harness/hitl/index.js";
-import { getAdvertisedTools } from "#harness/advertised-tools.js";
 import {
   getInvalidToolCallInputError,
   isInvalidToolCall,
 } from "#harness/tool-call-input-errors.js";
-import { isTaskTool, workingTaskIds } from "#execution/tasks/model-step.js";
+import { isWorkflowTool, workingTaskIds } from "#execution/tasks/model-step.js";
 import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
 import { renderFinalOutputWhileWorkingError } from "#execution/tasks/render.js";
 import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
@@ -131,57 +129,42 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
   const approvalRequests = extractToolApprovalInputRequests({
     content: result.content ?? [],
     excludedCallIds: invalidInputToolCallIds,
-  });
-  const advertisedCoordinationTools = getAdvertisedTools({
-    session: step.session,
-    tools: input.coordinationTools,
+    tools: input.catalog,
   });
   // Only unanswered calls can dispatch: automatic denials already have results.
   const blockedCallIds = new Set([
     ...approvalRequests.map((request) => request.action.callId),
     ...extractToolResultCallIds(responseMessages),
   ]);
-  const unadvertised: TypedToolCall<ToolSet>[] = [];
-  const deferredToolCalls = ((result.toolCalls ?? []) as TypedToolCall<ToolSet>[])
+  const workflowToolCalls = ((result.toolCalls ?? []) as TypedToolCall<ToolSet>[])
     .filter((toolCall) => !invalidInputToolCallIds.has(toolCall.toolCallId))
     .filter((toolCall) => !blockedCallIds.has(toolCall.toolCallId))
-    .filter((toolCall) => isDeferredHarnessTool(input.coordinationTools.get(toolCall.toolName)))
-    .filter((toolCall) => {
-      if (isDeferredHarnessTool(advertisedCoordinationTools.get(toolCall.toolName))) {
-        return true;
-      }
-      log.warn("deferred tool call blocked because tool is not advertised", {
-        callId: toolCall.toolCallId,
-        sessionId: step.session.sessionId,
-        toolName: toolCall.toolName,
-      });
-      unadvertised.push(toolCall);
-      return false;
-    });
+    .filter((toolCall) => isWorkflowTool(input.catalog.get(toolCall.toolName)));
 
   // --- Park on approvals or runtime calls ----------------------------------
 
-  if (deferredToolCalls.length > 0 || approvalRequests.length > 0) {
+  if (workflowToolCalls.length > 0 || approvalRequests.length > 0) {
     const { sequence, stepIndex, turnId } = step.position();
-    const deferred = collectDeferredCalls({
+    const dispatched = collectWorkflowCalls({
       session: step.session,
-      toolCalls: deferredToolCalls,
-      tools: advertisedCoordinationTools,
+      toolCalls: workflowToolCalls,
+      tools: input.catalog,
       turnId,
     });
-    step.session = { ...deferred.session, history: validateHarnessModelMessages(promptMessages) };
+    step.session = { ...dispatched.session, history: validateHarnessModelMessages(promptMessages) };
     const parked = {
       event: { sequence, stepIndex, turnId },
       // A suspended response commits once every call it made has a result, so a call that will
       // never get one is answered now.
-      messages: answerCallsThatWontRun(responseMessages, result, unadvertised),
-      tasks: deferred.workflowRequests,
+      messages: answerCallsThatWontRun(responseMessages, result),
+      tasks: dispatched.workflowRequests,
     };
     if (approvalRequests.length > 0) {
       return parkOnApprovals(step, {
         ...parked,
         requests: approvalRequests,
-        waitsOnRuntime: deferredToolCalls.length > 0,
+        tools: input.catalog,
+        waitsOnRuntime: workflowToolCalls.length > 0,
       });
     }
     await step.apply(suspendStep(step.view(), parked));
@@ -247,35 +230,22 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
 
 /**
  * Answers the calls of a response that waits on others which will never get a result: a
- * `final_output` written before the results it waits beside, and a deferred call to a tool this
- * step didn't advertise.
+ * `final_output` written before the results it waits beside.
  */
 function answerCallsThatWontRun(
   messages: readonly ModelMessage[],
   result: HarnessStepResult,
-  unadvertised: readonly TypedToolCall<ToolSet>[],
 ): ModelMessage[] {
   const answered = extractToolResultCallIds(messages);
   const finalOutputs = ((result.toolCalls ?? []) as TypedToolCall<ToolSet>[]).filter(
     (call) => call.toolName === FINAL_OUTPUT_TOOL_NAME,
   );
-  const answers: ToolResultPart[] = [
-    ...finalOutputs.map((call) => ({
-      output: { type: "error-text" as const, value: FINAL_OUTPUT_BESIDE_PENDING_CALLS },
-      toolCallId: call.toolCallId,
-      toolName: call.toolName,
-      type: "tool-result" as const,
-    })),
-    ...unadvertised.map((call) => ({
-      output: {
-        type: "error-text" as const,
-        value: `The tool "${call.toolName}" isn't available in this step, so the call didn't run.`,
-      },
-      toolCallId: call.toolCallId,
-      toolName: call.toolName,
-      type: "tool-result" as const,
-    })),
-  ];
+  const answers: ToolResultPart[] = finalOutputs.map((call) => ({
+    output: { type: "error-text" as const, value: FINAL_OUTPUT_BESIDE_PENDING_CALLS },
+    toolCallId: call.toolCallId,
+    toolName: call.toolName,
+    type: "tool-result" as const,
+  }));
   return answers
     .filter((part) => !answered.has(part.toolCallId))
     .reduce<ModelMessage[]>((next, part) => withResult(next, part), [...messages]);
@@ -348,10 +318,6 @@ async function callEndsTurn(
     });
     return false;
   }
-}
-
-function isDeferredHarnessTool(tool: HarnessToolDefinition | undefined): boolean {
-  return tool?.workflowId !== undefined || isTaskTool(tool);
 }
 
 /** Answers a `final_output` call made while tasks work with an error naming them. */

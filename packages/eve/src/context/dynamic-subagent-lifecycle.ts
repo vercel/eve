@@ -1,6 +1,8 @@
 import type { ModelMessage } from "ai";
 
+import { assertNotConnectionOwned } from "#connections/ownership.js";
 import type { ContextContainer } from "#context/container.js";
+import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { buildResolveContext } from "#context/dynamic-resolve-context.js";
 import type { ContextReader } from "#context/key.js";
 import {
@@ -12,11 +14,15 @@ import {
 import { createPreparedWorkflowToolHarnessDefinition } from "#execution/tools/workflow/harness-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createLogger } from "#internal/logging.js";
+import { CATALOG_TOOL_NAMES } from "#protocol/catalog-tools.js";
 import type { SessionStartedStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { ResolvedDynamicSubagentResolver } from "#runtime/subagents/registry.js";
 import { createPreparedRuntimeSubagentTool } from "#runtime/subagents/registry.js";
 import { normalizeDynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { normalizeDynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
+import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
+import type { AgentToolExposure } from "#shared/agent-definition.js";
 import { toErrorMessage } from "#shared/errors.js";
 
 const log = createLogger("dynamic-subagents");
@@ -41,6 +47,12 @@ async function resolveSelections(input: {
       if (result === null || result === undefined) {
         return [resolver.nodeId, null] as const;
       }
+      assertNotConnectionOwned({
+        connectionNames: input.ctx.get(ConnectionRegistryKey)?.getConnectionNames() ?? [],
+        name: resolver.name,
+        remedy: "Rename the subagent directory.",
+        subject: "Dynamic subagent",
+      });
       if (isRemoteAgentDefinition(result)) {
         const remoteAgent = await normalizeDynamicRemoteAgentConfig({
           name: resolver.name,
@@ -48,6 +60,7 @@ async function resolveSelections(input: {
         });
         const effectiveRemoteAgent =
           resolver.tool === false ? { ...remoteAgent, tool: false as const } : remoteAgent;
+        assertToolNameAvailable(input.ctx, resolver, effectiveRemoteAgent.tool);
         const prepared = createPreparedRuntimeSubagentTool({
           description: effectiveRemoteAgent.description,
           kind: "remote",
@@ -77,6 +90,7 @@ async function resolveSelections(input: {
         resolver.tool === false
           ? { ...resolvedAgentConfig, tool: false as const }
           : resolvedAgentConfig;
+      assertToolNameAvailable(input.ctx, resolver, effectiveAgentConfig.tool);
       const prepared = createPreparedRuntimeSubagentTool({
         description: effectiveAgentConfig.description,
         kind: "subagent",
@@ -111,6 +125,24 @@ async function resolveSelections(input: {
   }
 
   return selections;
+}
+
+/**
+ * A dynamic subagent the model can call cannot take a tool's name. With
+ * `tool: false` it can: a same-named authored tool then wraps it.
+ */
+function assertToolNameAvailable(
+  ctx: ContextReader,
+  resolver: ResolvedDynamicSubagentResolver,
+  tool: AgentToolExposure | undefined,
+): void {
+  if (tool === false) return;
+  const authoredTools = ctx.get(BundleKey)?.toolRegistry.toolsByName.keys() ?? [];
+  const toolNames = new Set([...CATALOG_TOOL_NAMES, LOAD_SKILL_TOOL_NAME, ...authoredTools]);
+  if (!toolNames.has(resolver.name)) return;
+  throw new Error(
+    `Dynamic subagent "${resolver.name}" from "${resolver.logicalPath}" collides with the tool "${resolver.name}". Set the subagent's tool to false when that tool wraps it.`,
+  );
 }
 
 function isRemoteAgentDefinition(value: unknown): boolean {
@@ -167,18 +199,11 @@ export function buildDynamicSubagentTools(input: ContextReader): readonly Harnes
   const turn = input.get(TurnDynamicSubagentSelectionsKey) ?? {};
   const effective = { ...session, ...turn };
   const tools: HarnessToolDefinition[] = [];
-  const names = new Set<string>();
 
   for (const selection of Object.values(effective)) {
     if (selection === null) {
       continue;
     }
-    if (names.has(selection.prepared.name)) {
-      throw new Error(
-        `Found multiple active dynamic subagents named "${selection.prepared.name}". Subagent names must be unique at runtime.`,
-      );
-    }
-    names.add(selection.prepared.name);
     const modelVisible =
       selection.kind === "subagent"
         ? selection.agentConfig.tool !== false

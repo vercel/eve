@@ -150,6 +150,28 @@ export function defineJsonSchema<T = unknown>(
 /** Schemas built by {@link defineJsonSchema}, which reach the model exactly as written. */
 const plainJsonSchemas = new WeakSet<object>();
 
+/**
+ * A JSON Schema advertised exactly as written whose accepted values `refine`
+ * then checks further, rejecting them or returning the value to use.
+ */
+export function refineJsonSchema(
+  schema: JsonObject,
+  refine: (value: unknown) => Promise<StandardSchemaV1.Result<unknown>>,
+): ToolSchema {
+  const base = defineJsonSchema(schema);
+  const refined = {
+    "~standard": {
+      ...base["~standard"],
+      validate: async (value: unknown) => {
+        const result = await base["~standard"].validate(value);
+        return result.issues === undefined ? await refine(result.value) : result;
+      },
+    },
+  } as ToolSchema;
+  plainJsonSchemas.add(refined);
+  return refined;
+}
+
 /** An optional string property added to an input schema. */
 export interface OptionalStringProperty {
   readonly description: string;

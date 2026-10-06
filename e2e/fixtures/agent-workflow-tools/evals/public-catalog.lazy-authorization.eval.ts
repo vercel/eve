@@ -25,10 +25,9 @@ export default defineEval({
     const session = started.session;
     started.expectOk();
     // The public tool runs before anyone signs in.
-    started.calledTool("connection_execute", {
+    started.calledTool("public-catalog__list_items", {
       count: 1,
       status: "completed",
-      input: { connection: "public-catalog", tool: "list_items" },
       output: mentions("Lamp"),
     });
     // Only the protected tool asks for sign-in, and the turn holds on it.
@@ -64,9 +63,8 @@ export default defineEval({
       data: { candidateId: required.data.candidateId, outcome: "authorized" },
     });
     // The server answers list_orders only when the request carries the bearer.
-    completed.calledTool("connection_execute", {
+    completed.calledTool("public-catalog__list_orders", {
       count: 1,
-      input: { connection: "public-catalog", tool: "list_orders" },
       output: mentions('"signedIn":true'),
     });
     completed.messageIncludes("PUBLIC_CATALOG_DONE");

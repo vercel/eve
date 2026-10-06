@@ -7,6 +7,7 @@ import type {
 import type { JsonObject } from "#shared/json.js";
 import { serializeInputSchema } from "#tools/schema.js";
 import { SUBAGENT_TOOL_INPUT_SCHEMA } from "#tools/framework/agent-contract.js";
+import type { AgentToolExposure } from "#shared/agent-definition.js";
 
 /**
  * One runtime-owned subagent tracked by the prepared registry.
@@ -20,7 +21,7 @@ export interface ResolvedDynamicSubagentResolver extends ResolvedDynamicSubagent
   readonly kind: "subagent";
   readonly name: string;
   readonly nodeId: string;
-  readonly tool?: boolean;
+  readonly tool?: AgentToolExposure;
 }
 
 /**
@@ -85,7 +86,7 @@ export function createRuntimeSubagentRegistry(input: {
       };
       registry.register(subagentDefinition.name, registeredSubagent, {
         location,
-        duplicateMessage: `Found multiple subagents named "${subagentDefinition.name}". Subagent names must be unique at runtime.`,
+        duplicateMessage: duplicateSubagentMessage(subagentDefinition.name),
       });
       const modelVisible =
         subagentDefinition.tool !== false && !disabledToolNames.has(subagentDefinition.name);
@@ -115,6 +116,7 @@ export function createRuntimeSubagentRegistry(input: {
     }
     subagentsByNodeId.set(subagentDefinition.nodeId, registeredSubagent);
   }
+  assertUniqueDynamicSubagentNames(dynamicResolvers, registry.asMap());
 
   return {
     dynamicNodeIds,
@@ -151,6 +153,7 @@ export function createPreparedRuntimeSubagentTool(
               },
       },
     },
+    deferred: definition.tool === "deferred" || undefined,
     description: definition.description,
     inputSchema,
     kind: definition.kind,
@@ -159,4 +162,26 @@ export function createPreparedRuntimeSubagentTool(
     nodeId: definition.nodeId,
     sourceId: definition.sourceId,
   };
+}
+
+function duplicateSubagentMessage(name: string): string {
+  return `Found multiple subagents named "${name}". Subagent names must be unique at runtime.`;
+}
+
+/** Dynamic subagents resolve later, so their names are checked here, against every subagent. */
+function assertUniqueDynamicSubagentNames(
+  dynamicResolvers: readonly ResolvedDynamicSubagentResolver[],
+  subagentsByName: ReadonlyMap<string, unknown>,
+): void {
+  const names = new Set(subagentsByName.keys());
+  for (const { logicalPath, name, sourceId } of dynamicResolvers) {
+    if (names.has(name)) {
+      throw new RuntimeRegistryError("subagent", duplicateSubagentMessage(name), {
+        entryName: name,
+        logicalPath,
+        sourceId,
+      });
+    }
+    names.add(name);
+  }
 }

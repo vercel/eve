@@ -1,6 +1,7 @@
 import type { HeadersValue } from "#client/types.js";
 import type { OutboundAuthFn } from "#public/agents/auth.js";
 import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
+import type { AgentToolExposure } from "#shared/agent-definition.js";
 
 /**
  * Base URL of a remote eve deployment, either a static string or a function
@@ -48,10 +49,12 @@ export interface RemoteAgentDefinition {
    */
   readonly path: string;
   /**
-   * Whether eve exposes this remote agent to the parent model as a tool.
-   * Defaults to `true`; `false` keeps it callable from workflow tools.
+   * How eve exposes this remote agent to the parent model: `true` lists it as
+   * a tool, `"deferred"` makes it a catalog entry the model finds with
+   * `search` and calls with `execute`, and `false` keeps it callable only from
+   * workflow tools. Defaults to `true`.
    */
-  readonly tool?: boolean;
+  readonly tool?: AgentToolExposure;
   /**
    * Base URL of the remote eve deployment to call. Accepts a static string
    * (baked at compile time) or a function resolved at runtime — use the

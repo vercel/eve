@@ -58,6 +58,25 @@ export default defineTool({
 
 The option defaults to `true` and works with `defineTool` and `defineWorkflowTool`. A root copy does not receive a tool with this option, and a tool authored inside a declared subagent is unavailable because that agent runs in a delegated session. This controls tool availability only; it does not add or remove entries from a workflow's `ctx.agents` registry.
 
+### Keep a tool out of the tool list
+
+Set `deferred: true` when the model needs a tool only occasionally, or when an agent has more tools than you want in every model request:
+
+```ts title="agent/tools/export_report.ts"
+export default defineTool({
+  deferred: true,
+  description: "Export a finished report as a PDF.",
+  inputSchema: z.object({ reportId: z.string() }),
+  execute({ reportId }) {
+    return exportReport(reportId);
+  },
+});
+```
+
+A deferred tool is not in the model's tool list. eve lists its name in an append-only context message, and the model finds its description and signature with [`search`](/docs/concepts/built-in-tools#search-and-execute) and calls it with `execute({ tool: "export_report", input })`. After that, the call runs exactly like a direct call: approvals, `endsTurn`, `toModelOutput`, hooks, and stream events see `export_report`, not `execute`.
+
+The option works with `defineTool`, `defineWorkflowTool`, and dynamic tool entries. Provider tools such as `webSearch()` cannot be deferred, because the provider has to see their definition; the compiler rejects `deferred` on them. To defer an agent, set [`tool: "deferred"`](/docs/subagents#declared-subagents) on its `defineAgent` definition.
+
 Compiled tools preserve Zod schema composition, including input and output schemas imported from helper modules. Durable replay metadata stays separate from the original schema, so adding it does not mutate shared schema objects.
 
 ### End the turn after a tool call

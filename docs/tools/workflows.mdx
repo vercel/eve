@@ -408,7 +408,7 @@ async function readRepository(ctx: WorkflowStepToolContext, repository: string) 
 }
 ```
 
-Connection tools called through `connection_execute`, ordinary tools, and workflow steps use the same
+Connection tools, ordinary tools, and workflow steps use the same
 authorization machinery for requester identity, token caching, callback completion, and rejection
 after sign-in. The execution runtime owns the wait: an agent returns to its model after authorization,
 while a workflow retries the interrupted step and continues the authored body.
