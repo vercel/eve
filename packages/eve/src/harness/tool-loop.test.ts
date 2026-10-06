@@ -57,7 +57,8 @@ import {
   modelFacingAuthorizationOutput,
   requestAuthorization,
 } from "#harness/authorization.js";
-import { sessionView } from "#harness/session-machine/commit.js";
+import { applyTransition, sessionView } from "#harness/session-machine/commit.js";
+import { requireSignIn } from "#harness/hitl/approvals.js";
 import { createAuthorizationRequiredEvent } from "#protocol/message.js";
 import { ownOpenRequestIds } from "#harness/session-machine/transitions.js";
 import { runtimeWait, storedProjection } from "#harness/session-machine/view.js";
@@ -7940,6 +7941,76 @@ describe("createToolLoopHarness", () => {
         role: "tool",
       },
     ]);
+  });
+
+  // Alice's turn waits on two approvals and on Bob signing in to statuspage.
+  async function parkedOnApprovalsAndSignIn(): Promise<HarnessSession> {
+    const approval = (requestId: string, callId: string) => ({
+      action: { callId, input: {}, kind: "tool-call" as const, toolName: "guarded_echo" },
+      allowFreeform: false,
+      display: "confirmation" as const,
+      kind: "tool-approval" as const,
+      options: [
+        { id: "approve", label: "Approve" },
+        { id: "cancel", label: "Cancel" },
+      ],
+      prompt: "Approve tool call: guarded_echo",
+      requestId,
+    });
+    const parked = parkedOnApproval({
+      requests: [approval("approval-1", "call-1"), approval("approval-2", "call-2")],
+      responseMessages: [],
+      session: createTestSession(),
+    });
+    const signIn = requireSignIn(sessionView(storedProjection(parked.state), parked.state), {
+      challenges: [
+        {
+          attemptId: "attempt-statuspage",
+          challenge: { url: "https://idp.example/authorize" },
+          hookUrl: "https://app.example/eve/v1/connections/statuspage/callback",
+          name: "statuspage",
+        },
+      ],
+    });
+    return withPublished(await applyTransition(parked, signIn, async () => {}), signIn.events);
+  }
+
+  it("answers a typed approval without withdrawing the turn's pending sign-ins", async () => {
+    const session = await parkedOnApprovalsAndSignIn();
+    const { emit, events } = createEventCollector();
+
+    const result = await createToolLoopHarness(createTestConfig(emit))(session, {
+      message: "approve",
+    });
+
+    expect(events.filter((event) => event.type === "authorization.completed")).toEqual([]);
+    const view = sessionView(storedProjection(result.session.state), result.session.state);
+    expect(view.signIns.map((challenge) => challenge.name)).toEqual(["statuspage"]);
+    // The answer to the first approval waits for the second, as a press would.
+    expect(view.turn.queued?.inputResponses).toEqual([
+      { optionId: "approve", requestId: "approval-1" },
+    ]);
+  });
+
+  it("withdraws the turn's pending sign-ins when a new message steers it", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Sure.", role: "assistant" }] },
+      text: "Sure.",
+      toolCalls: [],
+      toolResults: [],
+    });
+    const { emit, events } = createEventCollector();
+
+    await createToolLoopHarness(createTestConfig(emit))(await parkedOnApprovalsAndSignIn(), {
+      message: "Actually, can you check the weather first?",
+    });
+
+    expect(
+      events
+        .filter((event) => event.type === "authorization.completed")
+        .map((event) => [event.data.name, event.data.outcome]),
+    ).toEqual([["statuspage", "declined"]]);
   });
 
   it("emits compaction.requested and compaction.completed when compaction triggers", async () => {
