@@ -26,6 +26,7 @@ import {
   sessionCommandHookToken,
 } from "#execution/session-inbox/address.js";
 import {
+  recordSessionOwnerStep,
   signalSessionOwnerActivationStep,
   stopUntrackedChildSessionsStep,
   validateSessionCheckpointStep,
@@ -265,6 +266,7 @@ async function bootHandoffOwner(
     }
     ({ checkpoint, childRunIdsToStop } = migration);
     serializedContext = stampSessionIdentity(checkpoint.serializedContext, sessionId);
+    await recordSessionOwnerStep({ sessionId });
     await inbox.claimSessionHooks(
       sessionHookTokens({ serializedContext, sessionState: checkpoint.sessionState }),
     );

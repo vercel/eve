@@ -5,6 +5,11 @@ import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { encodeLegacyCommand, resumeLegacyInbox, UnsupportedLegacySessionError } from "./inbox.js";
 const { get, resume } = vi.hoisted(() => ({ get: vi.fn(), resume: vi.fn() }));
 vi.mock("#internal/workflow/runtime.js", () => ({ getHookByToken: get, resumeHook: resume }));
+// Owner classification has its own tests; every owner here is runnable.
+vi.mock("#execution/session-inbox/owner.js", () => ({
+  lookupSessionOwnerHook: (token: string) => get(token),
+  resumeRunnableHook: (token: string, payload: unknown) => resume(token, payload),
+}));
 beforeEach(() => {
   get.mockReset();
   resume.mockReset();

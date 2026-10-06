@@ -1,6 +1,7 @@
+import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session/timeout.js";
 import { assert, describe, expect, it, vi } from "vitest";
-import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
+import { getWorld, resumeHook } from "#internal/workflow/runtime.js";
 import { hydrateStepReturnValue, hydrateWorkflowArguments } from "@workflow/core/serialization";
 import { captureTurnEvents } from "#internal/testing/events.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
@@ -28,7 +29,7 @@ describe("workflowEntry integration", () => {
         const runtime = await createTestRuntime({ agent: { name: "workflow-entry-handoff" } });
 
         await runtime.run(async () => {
-          const anchor = await start(workflowEntry, [
+          const anchor = await startSessionOwner(workflowEntry, [
             {
               kind: "initial",
               sessionTimeoutMs,
@@ -221,7 +222,7 @@ describe("workflowEntry integration", () => {
       const runtime = await createTestRuntime({ agent: { name: "workflow-entry-compaction" } });
 
       await runtime.run(async () => {
-        const anchor = await start(workflowEntry, [
+        const anchor = await startSessionOwner(workflowEntry, [
           {
             kind: "initial",
             sessionTimeoutMs: 60_000,

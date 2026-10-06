@@ -31,6 +31,10 @@
  * - `$eve.trace_id` — sampled trace seed available in the serialized context when
  *   tagging the run. This is a trace link, not a session-wide trace identity or
  *   confirmation that a destination retained the trace.
+ * - `$eve.version`      — eve version that started the run; handoff successors
+ *   and legacy importers re-record their own at boot. Ingress and the stranded
+ *   replay guard compare it to decide whether the run can still execute
+ * - `$eve.session`      — public session id a handoff successor owner serves
  */
 
 import { CHANNEL_CONTEXT_KEY_NAME } from "#context/key-names.js";
@@ -51,6 +55,21 @@ import {
 } from "#shared/conversation-context.js";
 import { isSampledTrace } from "#tracing/sampled-trace.js";
 import { resolveForwardedTraceSeed } from "#shared/forwarded-trace-policy.js";
+
+/** eve version recorded on every run eve starts; handoff successors and legacy importers re-record it at boot. */
+export const EVE_VERSION_ATTRIBUTE = "$eve.version";
+
+/** Run kind; only runs started as a session or subagent session carry it. */
+export const EVE_TYPE_ATTRIBUTE = "$eve.type";
+
+/**
+ * Public session id recorded on handoff successor owners. Initial owners omit
+ * it: their run id is the session id.
+ */
+export const EVE_SESSION_ATTRIBUTE = "$eve.session";
+
+/** Root session id of a delegated subagent session run. */
+export const EVE_ROOT_ATTRIBUTE = "$eve.root";
 
 /**
  * Active compiled graph node id for the session's agent. Returned by
@@ -282,7 +301,7 @@ export function buildSessionAttributes(input: {
     "$eve.is_otel_trace_enabled": isOtelTraceEnabled,
     "$eve.is_trace_content_visible": isTraceContentVisible,
     "$eve.trace_id": readSessionTraceId(input.serializedContext),
-    "$eve.type": "session",
+    [EVE_TYPE_ATTRIBUTE]: "session",
     "$eve.trigger": readChannelKind(input.serializedContext),
     "$eve.title": readSessionTitle(input.serializedContext),
   };
@@ -310,11 +329,11 @@ export function buildSubagentRootAttributes(input: {
     "$eve.is_otel_trace_enabled": isWorkflowOtelTraceEnabled(input.serializedContext),
     "$eve.is_trace_content_visible": isWorkflowTraceContentVisible(input.serializedContext),
     "$eve.trace_id": readSessionTraceId(input.serializedContext),
-    "$eve.type": "subagent",
+    [EVE_TYPE_ATTRIBUTE]: "subagent",
     "$eve.parent": input.parentSessionId,
     "$eve.parent_call": input.parentCallId,
     "$eve.parent_turn": input.parentTurnId,
-    "$eve.root": input.rootSessionId,
+    [EVE_ROOT_ATTRIBUTE]: input.rootSessionId,
     "$eve.subagent": input.identity.nodeId,
     "$eve.trigger": readChannelKind(input.serializedContext),
   };

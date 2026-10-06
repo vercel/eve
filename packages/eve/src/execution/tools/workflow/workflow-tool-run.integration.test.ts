@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { hydrateStepArguments } from "#compiled/@workflow/core/serialization.js";
-import { getWorld, start } from "#internal/workflow/runtime.js";
+import { getWorld } from "#internal/workflow/runtime.js";
+import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import {
   captureTurnEvents,
   containsEventSequence,
@@ -39,7 +40,7 @@ describe("workflow tools", () => {
       toolName: "deploy_service",
     });
     const output = await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -63,7 +64,7 @@ describe("workflow tools", () => {
     });
 
     const output = await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -87,7 +88,7 @@ describe("workflow tools", () => {
     });
 
     const output = await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -113,7 +114,7 @@ describe("workflow tools", () => {
     });
 
     const output = await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -145,7 +146,7 @@ describe("workflow tools", () => {
     });
 
     const output = await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -171,7 +172,7 @@ describe("workflow tools", () => {
     });
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -259,7 +260,7 @@ describe("workflow tools", () => {
     });
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -338,7 +339,7 @@ describe("workflow tools", () => {
     });
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -397,7 +398,7 @@ describe("workflow tools", () => {
     });
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -463,7 +464,7 @@ describe("workflow tools", () => {
     });
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -521,7 +522,7 @@ describe("workflow tools", () => {
     });
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -560,7 +561,7 @@ describe("workflow tools", () => {
     const earlyNote = "Alice notes that the api rollout window opens at noon.";
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",

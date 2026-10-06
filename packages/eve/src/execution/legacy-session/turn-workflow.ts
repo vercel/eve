@@ -5,6 +5,7 @@ import { createSessionInbox } from "#execution/session-inbox/inbox.js";
 import { failSession, runPreparedSession } from "#execution/session/program.js";
 import { sessionTimeoutDeadline } from "#execution/session/timeout.js";
 import { createSessionTimeoutControl } from "#execution/session/timeout-control.js";
+import { recordSessionOwnerStep } from "#execution/session/handoff-steps.js";
 import { completeLegacyDriverStep } from "./completion-step.js";
 import { interruptLegacySessionStep } from "./interrupt-step.js";
 import { prepareLegacySessionStep } from "./prepare-step.js";
@@ -20,6 +21,7 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
   "use workflow";
   const prepared = await prepareLegacySessionStep(rawInput);
   const { sessionId } = prepared.sessionState;
+  await recordSessionOwnerStep({ sessionId });
   const inbox = createSessionInbox(sessionId);
   try {
     await inbox.claimSessionHook(sessionCommandHookToken(sessionId));

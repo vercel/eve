@@ -23,6 +23,7 @@ import { serializeContext } from "#context/serialize.js";
 import {
   buildSessionAttributes,
   buildSubagentRootAttributes,
+  EVE_VERSION_ATTRIBUTE,
   readParentLineage,
 } from "#execution/eve-workflow-attributes.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
@@ -66,7 +67,9 @@ import {
   AcceptedSessionIdentityError,
   resolveSessionInbox,
   resumeSessionInbox,
+  SessionHandoffPendingError,
 } from "#execution/session-inbox/resume.js";
+import { StrandedSessionOwnerError } from "#execution/session-inbox/owner.js";
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { initializeSessionInstrumentation } from "#instrumentation/runtime.js";
@@ -279,6 +282,10 @@ export async function startSessionOwnerStep(input: SessionOwnerStartInput): Prom
     sessionWritable: getRun(anchorRunId).getWritable<Uint8Array>(),
     sessionId: anchorRunId,
   };
+  // The successor is stamped with this eve version at start, because the
+  // queue guard runs before it boots. Single-build Worlds share this version;
+  // deployment-affine Worlds bypass the guard and the successor records its
+  // own version at boot.
   await startWorkflowOnDeployment(
     workflowEntryReference,
     [workflowInput],
@@ -298,19 +305,20 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
     const resumed = await resumeSessionInbox(token, command);
     hook = { runId: resumed.ownerRunId, sessionId: await resumed.sessionId };
   } catch (error) {
+    // Each entry point decides what a stranded owner means for its caller.
+    if (error instanceof StrandedSessionOwnerError) throw error;
+    // A send by session id to a session that still exists asks the caller to
+    // retry rather than reporting the session gone.
+    const sendBySessionId = command.kind === "send" && typeof token !== "string";
+    const retryLater = { status: "session_not_active", retryable: true };
+    // The address is owned, so it must never read as absent to a channel.
+    if (error instanceof SessionHandoffPendingError) {
+      if (sendBySessionId) return retryLater as SessionCommandResult<TCommand>;
+      throw error;
+    }
     if (isInactiveCommandTarget(error)) {
-      if (command.kind === "send" && typeof token !== "string") {
-        try {
-          const status = await getRun(token.sessionId).status;
-          if (status === "pending" || status === "running") {
-            return {
-              status: "session_not_active",
-              retryable: true,
-            } as SessionCommandResult<TCommand>;
-          }
-        } catch (statusError) {
-          if (!isInactiveCommandTarget(statusError)) throw statusError;
-        }
+      if (sendBySessionId && (await isRunActive(token.sessionId))) {
+        return retryLater as SessionCommandResult<TCommand>;
       }
       return inactiveCommandResult(command);
     }
@@ -374,6 +382,16 @@ export async function requestWorkflowTurnCancellation(
   const command: { kind: "cancel"; turnId?: string } = { kind: "cancel" };
   if (input.turnId !== undefined) command.turnId = input.turnId;
   return await dispatchWorkflowCommand({ sessionId: input.sessionId }, command);
+}
+
+async function isRunActive(runId: string): Promise<boolean> {
+  try {
+    const status = await getRun(runId).status;
+    return status === "pending" || status === "running";
+  } catch (error) {
+    if (isInactiveCommandTarget(error)) return false;
+    throw error;
+  }
 }
 
 function isInactiveCommandTarget(error: unknown): boolean {
@@ -441,10 +459,10 @@ export async function startWorkflowOnCurrentDeployment<TArgs extends unknown[], 
 }
 
 /**
- * Starts on the deployment that accepted a delivery when one was stamped,
- * otherwise stays on the deployment executing this call.
+ * Starts a run on an exact deployment. Every run eve starts records the eve
+ * version that started it: ingress and the stranded replay guard read it to
+ * decide whether this build can still execute the run.
  */
-
 async function startWorkflowOnDeployment<TArgs extends unknown[], TResult>(
   workflow: WorkflowFunction<TArgs, TResult> | WorkflowMetadata,
   args: TArgs,
@@ -455,7 +473,12 @@ async function startWorkflowOnDeployment<TArgs extends unknown[], TResult>(
     if (deploymentId.length === 0 || deploymentId === "latest") {
       throw new Error("Workflow starts require an exact deployment id.");
     }
-    return await start(workflow, args, { ...options, deploymentId });
+    return await start(workflow, args, {
+      ...options,
+      allowReservedAttributes: true,
+      attributes: { ...options?.attributes, [EVE_VERSION_ATTRIBUTE]: EVE_PACKAGE_INFO.version },
+      deploymentId,
+    });
   });
 }
 

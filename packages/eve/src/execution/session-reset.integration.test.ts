@@ -6,9 +6,8 @@ import { SessionKey } from "#context/keys.js";
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
 import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.js";
 import { sessionCommandInboxWorkflow } from "#internal/testing/session-inbox-workflow.js";
-import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
+import { waitForHook, startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
-import { start } from "#internal/workflow/runtime.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { defineSandboxProvider } from "#shared/sandbox-provider.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -28,7 +27,9 @@ describe("session reset integration", () => {
       compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource,
     });
     const sandboxes = createSessionSandboxHarness();
-    const first = await start(sessionCommandInboxWorkflow, [{ token: continuationToken }]);
+    const first = await startSessionOwner(sessionCommandInboxWorkflow, [
+      { token: continuationToken },
+    ]);
 
     try {
       await waitForHook(first, { token: sessionInboxHookToken(continuationToken) });
@@ -44,7 +45,9 @@ describe("session reset integration", () => {
       await expect(first.returnValue).resolves.toBeUndefined();
       await expect(runtime.resolveContinuation(continuationToken)).resolves.toBeUndefined();
 
-      const second = await start(sessionCommandInboxWorkflow, [{ token: continuationToken }]);
+      const second = await startSessionOwner(sessionCommandInboxWorkflow, [
+        { token: continuationToken },
+      ]);
       try {
         await expect(
           waitForHook(second, { token: sessionInboxHookToken(continuationToken) }),

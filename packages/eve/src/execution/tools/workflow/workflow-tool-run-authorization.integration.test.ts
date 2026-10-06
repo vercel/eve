@@ -1,5 +1,6 @@
+import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import { describe, expect, it } from "vitest";
-import { getRun, getWorld, start } from "#internal/workflow/runtime.js";
+import { getRun, getWorld } from "#internal/workflow/runtime.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import { workflowEntry } from "#execution/session/entry.js";
 import { hydrateWorkflowReturnValue } from "@workflow/core/serialization";
@@ -18,7 +19,7 @@ describe("workflow step authorization", () => {
       toolName: "deploy_service",
     });
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -63,7 +64,7 @@ describe("workflow step authorization", () => {
         toolName: "deploy_service",
       });
       await runtime.run(async () => {
-        const run = await start(workflowEntry, [
+        const run = await startSessionOwner(workflowEntry, [
           {
             kind: "initial",
             ownerDeploymentId: "dpl_inline",

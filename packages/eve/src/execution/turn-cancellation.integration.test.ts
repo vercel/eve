@@ -1,6 +1,6 @@
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { describe, expect, it } from "vitest";
-import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
+import { getWorld, resumeHook } from "#internal/workflow/runtime.js";
 
 import { createTestRuntime, type TestRuntime } from "#internal/testing/app-harness.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
@@ -9,7 +9,7 @@ import {
   containsEventSequence,
   filterEventsByType,
 } from "#internal/testing/events.js";
-import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
+import { waitForHook, startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
@@ -345,7 +345,7 @@ describe("turn cancellation integration", () => {
     });
 
     await fixture.runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -435,7 +435,7 @@ describe("turn cancellation integration", () => {
       });
 
       await runtime.run(async () => {
-        const run = await start(workflowEntry, [
+        const run = await startSessionOwner(workflowEntry, [
           {
             kind: "initial",
             ownerDeploymentId: "dpl_inline",
@@ -489,7 +489,7 @@ describe("turn cancellation integration", () => {
     });
 
     await fixture.runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -545,7 +545,7 @@ describe("turn cancellation integration", () => {
       });
 
       await fixture.runtime.run(async () => {
-        const run = await start(workflowEntry, [
+        const run = await startSessionOwner(workflowEntry, [
           {
             kind: "initial",
             ownerDeploymentId: "dpl_inline",
@@ -597,7 +597,7 @@ describe("turn cancellation integration", () => {
     const continuationToken = "http:turn-cancel-tool";
 
     await fixture.runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -684,7 +684,7 @@ describe("turn cancellation integration", () => {
         status: "no_active_turn",
       });
 
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -778,7 +778,7 @@ describe("turn cancellation integration", () => {
         status: "no_active_turn",
       });
 
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -854,7 +854,7 @@ describe("turn cancellation integration", () => {
     const continuationToken = "http:turn-cancel-stale-guard";
 
     await fixture.runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -903,7 +903,7 @@ describe("turn cancellation integration", () => {
     const continuationToken = "http:turn-cancel-late";
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",

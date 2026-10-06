@@ -233,7 +233,14 @@ vi.mock("../../runtime/sessions/compiled-agent-cache.js", () => ({
 }));
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
+  getHookByToken: async (token: string) => {
+    const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
+    if (!token.startsWith("eve:inbox:v1:")) throw new HookNotFoundError(token);
+    return currentSessionHook(token);
+  },
   getRun: (...args: unknown[]) => getRunMock(...args),
+  // Vercel-shaped: owners run on their own deployment, so ingress resumes by token.
+  getWorld: async () => ({ capabilities: { deploymentAffinity: true } }),
   resumeHook: (...args: unknown[]) => resumeHookMock(...args),
   start: (...args: unknown[]) => startMock(...args),
 }));

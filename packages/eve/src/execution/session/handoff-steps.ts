@@ -15,6 +15,11 @@ import {
 } from "#execution/session/handoff.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { cancelRun, getWorld, resumeHook } from "#internal/workflow/runtime.js";
+import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import {
+  EVE_SESSION_ATTRIBUTE,
+  EVE_VERSION_ATTRIBUTE,
+} from "#execution/eve-workflow-attributes.js";
 import { getResolvedRuntimeAgentNode } from "#runtime/graph.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
@@ -182,6 +187,26 @@ export async function reportSessionHandoffRetainedStep(input: {
     ...input,
     checkpointVersion: SESSION_CHECKPOINT_VERSION,
   });
+}
+
+/**
+ * Records the identity of an owner that this deployment's code did not start
+ * (a handoff successor or a legacy importer) before it claims any hook:
+ * ingress reads `$eve.version` to decide whether the owner can run, so a
+ * missing value would strand a healthy session. The value comes from this
+ * step's code, not the previous owner's. Unlike observability attributes, a
+ * failed write fails the boot.
+ */
+export async function recordSessionOwnerStep(input: { readonly sessionId: string }): Promise<void> {
+  "use step";
+  const { setAttributes } = await import("#compiled/@workflow/core/index.js");
+  await setAttributes(
+    {
+      [EVE_SESSION_ATTRIBUTE]: input.sessionId,
+      [EVE_VERSION_ATTRIBUTE]: resolveInstalledPackageInfo().version,
+    },
+    { allowReservedAttributes: true },
+  );
 }
 
 export async function signalSessionOwnerActivationStep(input: {

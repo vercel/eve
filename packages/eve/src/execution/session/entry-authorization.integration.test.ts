@@ -7,10 +7,10 @@ import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { slackChannel } from "#public/channels/slack/slackChannel.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
-import { resumeHook, start } from "#internal/workflow/runtime.js";
+import { resumeHook } from "#internal/workflow/runtime.js";
 import { filterEventsByType } from "#internal/testing/events.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
-import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
+import { startSessionOwner, waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { workflowEntry } from "#execution/session/entry.js";
 import {
   sessionCommandHookToken,
@@ -139,7 +139,7 @@ describe("workflowEntry integration", () => {
     const continuationToken = "http:workflow-entry-auth-followup";
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -579,7 +579,7 @@ function userAuth(principalId: string) {
 }
 
 async function startWeatherRun(continuationToken: string) {
-  return await start(workflowEntry, [
+  return await startSessionOwner(workflowEntry, [
     {
       kind: "initial",
       ownerDeploymentId: "dpl_inline",

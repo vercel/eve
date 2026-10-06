@@ -18,7 +18,12 @@ import {
   sessionInboxHookToken,
   type SessionInboxAddress,
 } from "#execution/session-inbox/address.js";
-import { getHookByToken, resumeHook } from "#internal/workflow/runtime.js";
+import {
+  assertRunnableSessionOwner,
+  lookupSessionOwnerHook,
+  resumeRunnableHook,
+} from "#execution/session-inbox/owner.js";
+import { getHookByToken, type Hook } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
 
 /** Longest a delivery waits for a mid-handoff successor to claim its hooks. */
@@ -36,20 +41,23 @@ export interface ResumedSessionInboxHook {
  * deployment handoff the address is briefly unowned; the releasing owner
  * leaves a marker for that interval, so delivery retries instead of
  * reporting the session gone and letting a channel start a replacement.
+ * The retry window bounds this request, not the handoff: a marker that
+ * outlives it throws {@link SessionHandoffPendingError}.
  */
 export async function resumeSessionInbox(
   address: string | SessionInboxAddress,
   command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload | SessionFailurePayload,
 ): Promise<ResumedSessionInboxHook> {
-  const token = logicalToken(address);
+  const token = logicalSessionToken(address);
+  const knownSessionId = typeof address === "string" ? undefined : address.sessionId;
   const deadline = Date.now() + HANDOFF_RETRY_WINDOW_MS;
   while (true) {
-    let hook;
+    let hook: Awaited<ReturnType<typeof resumeRunnableHook>>;
     try {
-      hook = await resumeHook(sessionInboxHookToken(token), command);
+      hook = await resumeRunnableHook(sessionInboxHookToken(token), command);
     } catch (error) {
       if (!HookNotFoundError.is(error)) throw error;
-      if (await isHandoffInProgress(token, deadline)) continue;
+      if (await waitWhileHandoffInProgress(token, deadline)) continue;
       if (command.kind === "session-failure") throw error;
       return await resumeLegacyInbox(token, command).catch(rethrowUnsupportedAsNotFound);
     }
@@ -59,9 +67,7 @@ export async function resumeSessionInbox(
       get sessionId() {
         return (identity ??= (async () => {
           try {
-            return typeof address === "string"
-              ? requireSessionId(await hook.metadata)
-              : address.sessionId;
+            return knownSessionId ?? requireSessionId(await hook.metadata);
           } catch (cause) {
             // A failed identity read must never cause a second delivery.
             throw new AcceptedSessionIdentityError(cause);
@@ -69,6 +75,20 @@ export async function resumeSessionInbox(
         })());
       },
     };
+  }
+}
+
+/**
+ * The address's owner is still handing off after the request's retry window.
+ * Nothing was delivered. The address is not unowned, so callers must not start
+ * a session there; the request can be retried.
+ */
+export class SessionHandoffPendingError extends Error {
+  constructor(token: string) {
+    super(
+      `Session address "${token}" is still changing owners. Nothing was delivered; retry the request.`,
+    );
+    this.name = "SessionHandoffPendingError";
   }
 }
 
@@ -103,21 +123,30 @@ function rethrowUnsupportedAsNotFound(error: unknown): never {
   throw error;
 }
 
-function logicalToken(address: string | SessionInboxAddress): string {
+/** Logical token behind an address: the address itself, or the session's stable command token. */
+export function logicalSessionToken(address: string | SessionInboxAddress): string {
   if (typeof address === "string") return address;
   if (!isSessionInboxAddress(address))
     throw new Error("Session inbox target has an invalid address.");
   return sessionCommandHookToken(address.sessionId);
 }
 
-/** Waits one retry interval when a handoff marker exists; false once the window closes or no marker exists. */
-async function isHandoffInProgress(token: string, deadline: number): Promise<boolean> {
-  if (Date.now() >= deadline) return false;
+/**
+ * Waits one retry interval when a handoff marker exists; false when no marker
+ * exists. Throws once the window closes with the marker still in place.
+ */
+async function waitWhileHandoffInProgress(token: string, deadline: number): Promise<boolean> {
+  let marker: Hook;
   try {
-    await getHookByToken(sessionHandoffMarkerToken(token));
+    marker = await lookupSessionOwnerHook(sessionHandoffMarkerToken(token));
   } catch (error) {
     if (HookNotFoundError.is(error)) return false;
     throw error;
+  }
+  if (Date.now() >= deadline) {
+    // A releasing owner that cannot execute never finishes its handoff.
+    await assertRunnableSessionOwner(marker);
+    throw new SessionHandoffPendingError(token);
   }
   await new Promise<void>((resolve) => setTimeout(resolve, HANDOFF_RETRY_INTERVAL_MS));
   return true;

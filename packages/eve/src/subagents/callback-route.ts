@@ -1,5 +1,5 @@
 import { renameLegacyTaskCallback } from "#execution/legacy-remote-agent/protocol.js";
-import { resumeHook } from "#internal/workflow/runtime.js";
+import { resumeRunnableHook } from "#execution/session-inbox/owner.js";
 import { z } from "#compiled/zod/index.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
@@ -182,7 +182,7 @@ export async function handleSessionCallbackRequest(
   if (result instanceof Response) return result;
 
   try {
-    await resumeHook(
+    await resumeRunnableHook(
       token,
       forwarded?.success ? forwarded.data : { kind: "runtime-action-result", results: [result] },
     );
