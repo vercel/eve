@@ -17,6 +17,7 @@ import {
   resolvePendingInput,
   appendPendingInputBatch,
 } from "#harness/input-requests.js";
+import { cancelApprovalInputBatches } from "#harness/hitl/approval-input-requests.js";
 import { getDeferredStepInput } from "#harness/pending-input-batches.js";
 import { createSessionLimitContinuationRequest } from "#harness/session-limit-continuation.js";
 import { createRuntimeToolCallActionFromToolCall } from "#harness/tool-call-action.js";
@@ -187,6 +188,84 @@ describe("resolvePendingInput", () => {
       message: "Ignore that and say hi instead.",
     });
     expect(getDeferredStepInput(deferred.session)).toBeUndefined();
+  });
+
+  it("includes a new message immediately after a cancelled approval turn", () => {
+    const pending = appendPendingInputBatch({
+      requests: [
+        {
+          action: {
+            callId: "approval-call",
+            input: { command: "rm -rf /tmp/demo" },
+            kind: "tool-call",
+            toolName: "bash",
+          },
+          allowFreeform: false,
+          display: "confirmation",
+          kind: "tool-approval",
+          options: [
+            { id: "approve", label: "Yes" },
+            { id: "cancel", label: "No" },
+          ],
+          prompt: "Approve tool call: bash",
+          requestId: "approval-1",
+        } satisfies InputRequest,
+      ],
+      responseMessages: [
+        {
+          content: [
+            {
+              input: { command: "rm -rf /tmp/demo" },
+              toolCallId: "approval-call",
+              toolName: "bash",
+              type: "tool-call",
+            },
+            {
+              approvalId: "approval-1",
+              toolCallId: "approval-call",
+              type: "tool-approval-request",
+            },
+          ],
+          role: "assistant",
+        } satisfies ModelMessage,
+      ],
+      session: createHarnessSession(),
+    });
+    const session = cancelApprovalInputBatches(pending);
+
+    const result = resolvePendingInput({
+      session,
+      stepInput: { message: "Answer this in the first step." },
+    });
+
+    expect(result.outcome).toBe("continue");
+    expect(result.deferredMessage).toBeUndefined();
+    expect(getDeferredStepInput(result.session)).toBeUndefined();
+  });
+
+  it("still defers a new message after an approved response", () => {
+    const session: HarnessSession = {
+      ...createHarnessSession(),
+      history: [
+        ...createHarnessSession().history,
+        {
+          content: [
+            {
+              approvalId: "approval-1",
+              approved: true,
+              type: "tool-approval-response",
+            },
+          ],
+          role: "tool",
+        },
+      ],
+    };
+
+    const result = resolvePendingInput({ session, stepInput: { message: "Wait for the tool." } });
+
+    expect(result.outcome).toBe("resolved");
+    expect(result.deferredMessage).toBe(true);
+    expect(getDeferredStepInput(result.session)).toBeDefined();
   });
 
   it("defers channel context until after tool approvals are resolved", () => {
