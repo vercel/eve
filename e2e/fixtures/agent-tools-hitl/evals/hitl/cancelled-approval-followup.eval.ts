@@ -30,7 +30,7 @@ export default defineEval({
     cancelled.eventOrder([{ type: "turn.cancelled" }, { type: "session.waiting" }]);
     cancelled.notEvent("turn.failed");
 
-    const followup = await cancellation.session.send(`Reply with exactly ${FOLLOWUP}.`);
+    const followup = await session.send(`Reply with exactly ${FOLLOWUP}.`);
 
     followup.expectOk();
     followup.messageIncludes(FOLLOWUP);
