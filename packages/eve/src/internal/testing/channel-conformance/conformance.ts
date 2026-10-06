@@ -167,9 +167,10 @@ const SLACK_BROKEN = {
     "only the button interaction handler edits a question; a typed answer leaves it",
     ["questionText"],
   ),
-  "approving by text names who approved on the approval": {
-    reason: "the card loses its buttons after a typed approval but doesn't say who approved",
-    symptom: /the answered prompt never names who answered/,
+  "text replies answer two pending approvals one at a time, in the order shown": {
+    reason:
+      "one card shows every approval a step raises, so a typed reply can't say which it answers",
+    symptom: /were shown in one message, so a typed reply can't say which it answers/,
   },
 } satisfies Partial<Record<ContractRuleName, BrokenCell>>;
 
@@ -196,6 +197,8 @@ const TELEGRAM_BROKEN = {
 
 const TUI_TYPED_APPROVAL =
   "the approval drawer holds the keyboard; a person answers it with y or n";
+const TUI_TYPED_REPLIES =
+  "each open request has its own drawer, and typing a message dismisses them all";
 const TUI_SINGLE_PERSON = "one person answers at their own terminal; there's nobody else to tell";
 const WEB_CHAT_SINGLE_PERSON =
   "one person answers in their own browser tab; there's nobody else to tell";
@@ -270,6 +273,12 @@ const channelConformance = {
         "pressing Approve names who approved on the approval": TUI_SINGLE_PERSON,
         "pressing an option names who answered on the question": TUI_SINGLE_PERSON,
         "answering a question by text names who answered on the question": TUI_SINGLE_PERSON,
+        "text replies answer two pending questions one at a time, in the order shown":
+          TUI_TYPED_REPLIES,
+        "text replies answer two pending approvals one at a time, in the order shown":
+          TUI_TYPED_APPROVAL,
+        "text replies answer a question and an approval raised together, in the order shown":
+          TUI_TYPED_APPROVAL,
       },
     },
   ],

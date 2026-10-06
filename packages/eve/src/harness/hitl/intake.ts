@@ -30,7 +30,7 @@ import {
 import { runApprovedCalls } from "./approved-calls.js";
 import { getApprovalAuditState, retireActiveCandidates } from "./candidates.js";
 import { coordinateApprovalDelivery } from "./coordinator.js";
-import { deliver, turnInputOnly, withoutTurnInput } from "./delivery.js";
+import { deliver, resolveTypedApproval, turnInputOnly, withoutTurnInput } from "./delivery.js";
 import { approversOf, setApprovedCallCallers } from "./approved-call-callers.js";
 import type { InputRequest } from "#shared/input.js";
 import type { InstrumentationAttempt } from "#instrumentation/runtime.js";
@@ -120,7 +120,8 @@ export async function acceptHumanInput(
   const challengesAtStart = step.view().signIns;
   const coordinated = await coordinateApprovalDelivery({
     session: step.session,
-    stepInput: steered,
+    // A typed approval answers like a press, so the approval's response policy decides it.
+    stepInput: resolveTypedApproval(step.view(), steered),
     tools: config.tools,
     prepareTools: (request) => restoreTools(stepForRequest(step.view(), request.requestId)),
   });

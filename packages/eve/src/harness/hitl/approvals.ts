@@ -108,7 +108,12 @@ export function parkOnApprovals(
       ...committed,
       ...(snippet === undefined ? [] : [createFrameworkUserMessage("context.state", snippet)]),
     ],
-    events: [createInputRequestedEvent({ requests: input.requests, ...input.event })],
+    // The approvals can't settle before the step's tasks finish, so asking for them waits until
+    // then; `settle` asks once they have.
+    events:
+      input.tasks.length > 0
+        ? []
+        : [createInputRequestedEvent({ requests: input.requests, ...input.event })],
     turn,
   };
 }
@@ -251,13 +256,9 @@ export function answer(
     return done({ input: delivery, next: "continue" });
   }
 
-  const textBatch =
-    limit !== undefined
-      ? { requests: [limit.request] }
-      : answerable.length === 1
-        ? answerable[0]
-        : undefined;
-  const resolved = textBatch === undefined ? delivery : resolveTextInput(textBatch, delivery);
+  // The approval coordinator already answered a typed approval; see `resolveTypedApproval`.
+  const resolved =
+    limit === undefined ? delivery : resolveTextInput({ requests: [limit.request] }, delivery);
   const responses = canonicalize(resolved?.inputResponses ?? []);
   const byId = new Map(responses.map((response) => [response.requestId, response]));
   const answered = answerable.filter((step) =>
@@ -511,16 +512,15 @@ export function grantedApprovalKeys(
 
 /**
  * The steps a delivery approves calls of, whose tools the calls run with: those it answers in
- * full, approving at least one call, or the only pending step a plain-text answer approves.
+ * full, approving at least one call.
  */
 export function approvingSteps(
   view: SessionView,
   stepInput: StepInput | undefined,
 ): readonly SuspendedStep[] {
   const pending = view.turn.suspended.filter((step) => step.requests.length > 0);
-  const resolved = pending.length === 1 ? resolveTextInput(pending[0]!, stepInput) : stepInput;
   const options = new Map(
-    (resolved?.inputResponses ?? []).map((response) => [response.requestId, response.optionId]),
+    (stepInput?.inputResponses ?? []).map((response) => [response.requestId, response.optionId]),
   );
   return pending.filter(
     (step) =>

@@ -1,3 +1,4 @@
+import { promptQueueEvents } from "#channel/prompt-queue.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { extractErrorId, formatErrorHint } from "#internal/logging.js";
@@ -9,8 +10,10 @@ import {
 } from "#public/channels/linear/hitl.js";
 import type { LinearAgentSessionEvent, LinearUser } from "#public/channels/linear/inbound.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
+import type { InputRequest } from "#shared/input.js";
 import type {
   LinearChannelEvents,
+  LinearEventContext,
   LinearInboundResult,
   LinearSessionContext,
 } from "#public/channels/linear/linearChannel.js";
@@ -64,6 +67,15 @@ interface LinearDefaultEventOptions {
 
 /** Built-in Linear event handlers for Agent Activity progress, replies, HITL, and errors. */
 export function createDefaultEvents(options: LinearDefaultEventOptions = {}): LinearChannelEvents {
+  async function showPrompt(channel: LinearEventContext, request: InputRequest): Promise<void> {
+    await postActivity(
+      channel,
+      options,
+      { body: renderLinearInputRequests([request]), type: "elicitation" },
+      linearInputRequestSignal([request]),
+    );
+  }
+
   return {
     async "turn.started"(_event, channel, _ctx) {
       channel.state.pendingToolCallMessage = null;
@@ -131,18 +143,8 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       }
     },
 
-    async "input.requested"(event, channel, _ctx) {
-      const signal = linearInputRequestSignal(event.requests);
-      await postActivity(
-        channel,
-        options,
-        {
-          body: renderLinearInputRequests(event.requests),
-          type: "elicitation",
-        },
-        signal,
-      );
-    },
+    // A reply can only answer the elicitation it sees, so they post one at a time.
+    ...promptQueueEvents(showPrompt),
 
     async "authorization.required"(event, channel, ctx) {
       const displayName = authorizationDisplayName(event.name, event.authorization?.displayName);

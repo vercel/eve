@@ -1,11 +1,13 @@
 import type { UserContent } from "ai";
 
-import { resolveTextToResponses } from "#channel/resolve-text.js";
+import { resolveTextToResponse, resolveTextToResponses } from "#channel/resolve-text.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
 import {
   convertStaleResponsesToUserMessage,
   dropStaleSessionLimitContinuationResponses,
 } from "#harness/hitl/stale-responses.js";
+import { isApprovalRequest } from "#harness/input-request-class.js";
+import { firstOpenInput } from "#harness/open-input-request.js";
 import type { StepInput } from "#harness/types.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { readAnswerText } from "#internal/input-text.js";
@@ -61,13 +63,13 @@ export function deliver(
 export type ResolvedStepInput = StepInput & { readonly messageConsumed?: boolean };
 
 /**
- * Plain text answers the only pending batch, unless a response policy must decide it. A channel
+ * Plain text answers a budget prompt; `resolveTypedApproval` answers approvals. A channel
  * that wraps the typed text in an envelope for the model attaches the text itself to answer with.
  * The answer consumes the message and the context the channel sent about it: the model reads
  * neither.
  */
 export function resolveTextInput(
-  batch: Pick<SuspendedStep, "requests" | "responseAuthRequiredRequestIds">,
+  batch: Pick<SuspendedStep, "requests">,
   stepInput: StepInput | undefined,
 ): ResolvedStepInput | undefined {
   const text = readAnswerText(stepInput);
@@ -76,11 +78,7 @@ export function resolveTextInput(
   if (stepInput.inputResponses?.some((response) => batchRequestIds.has(response.requestId))) {
     return stepInput;
   }
-  const policyDecides = new Set(batch.responseAuthRequiredRequestIds ?? []);
-  const responses = resolveTextToResponses(
-    text,
-    batch.requests.filter((request) => !policyDecides.has(request.requestId)),
-  );
+  const responses = resolveTextToResponses(text, batch.requests);
   if (responses.length === 0) return stepInput;
   return compactInput({
     ...stepInput,
@@ -89,6 +87,40 @@ export function resolveTextInput(
     message: undefined,
     messageConsumed: true,
   });
+}
+
+/**
+ * Turns a typed reply into a response to the first open request when that request is one of
+ * this turn's approvals. The approval coordinator then settles it, or asks its response policy
+ * about the person who typed, as it does for a press. A batch's other approvals stay open for
+ * later replies.
+ */
+export function resolveTypedApproval(
+  view: Pick<SessionView, "projection" | "turn">,
+  stepInput: StepInput | undefined,
+): ResolvedStepInput | undefined {
+  const text = readAnswerText(stepInput);
+  if (stepInput === undefined || text === undefined) return stepInput;
+  const answered = new Set(
+    [
+      ...(stepInput.inputResponses ?? []),
+      ...(stepInput.attributedInputResponses ?? []).map(({ response }) => response),
+    ].map(({ requestId }) => requestId),
+  );
+  const first = firstOpenInput(view.projection, (requestId) => answered.has(requestId))?.request;
+  const parked = view.turn.suspended.some((step) =>
+    step.requests.some((request) => request.requestId === first?.requestId),
+  );
+  if (first === undefined || !parked || !isApprovalRequest(first)) return stepInput;
+  const response = resolveTextToResponse(text, first);
+  if (response === undefined) return stepInput;
+  return {
+    ...stepInput,
+    context: undefined,
+    inputResponses: [...(stepInput.inputResponses ?? []), response],
+    message: undefined,
+    messageConsumed: true,
+  };
 }
 
 export function canonicalize(responses: readonly InputResponse[]): readonly InputResponse[] {

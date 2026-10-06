@@ -941,20 +941,38 @@ describe("chatSdkChannel", () => {
       ctx,
     );
 
-    const posted = adapter.posted[0]?.message as AdapterPostableMessage;
-    expect(posted).toMatchObject({
+    expect(adapter.posted.map(({ message }) => message)).toMatchObject([
+      {
+        card: {
+          children: [
+            { content: "Which region?", type: "text" },
+            { content: "Reply with your answer.", type: "text" },
+          ],
+        },
+        fallbackText: "Which region?\n\nReply with your answer.",
+      },
+    ]);
+
+    // A reply can only answer the request it sees, so the next one waits its turn.
+    await callEvent(
+      channelAdapter,
+      makeEvent("input.resolved", {
+        resolutions: [{ kind: "question", outcome: "answered", requestId: "request-1" }],
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      ctx,
+    );
+    expect(adapter.posted.at(-1)?.message).toMatchObject({
       card: {
         children: [
-          { content: "Which region?", type: "text" },
-          { content: "Reply with your answer.", type: "text" },
           { content: "Which zone?", type: "text" },
           { type: "actions" },
           { content: "Or reply with your own answer.", type: "text" },
         ],
       },
-      fallbackText:
-        "Which region?\n\nReply with your answer.\n\n" +
-        "Which zone?\n\n1. Washington\n\nReply with a number, or with your own answer.",
+      fallbackText: "Which zone?\n\n1. Washington\n\nReply with a number, or with your own answer.",
     });
   });
 });

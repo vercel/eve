@@ -1705,8 +1705,9 @@ describe("createToolLoopHarness", () => {
     expect(runtimeWait(parked.session.state)?.tasks).toEqual([
       expect.objectContaining({ callId: "delegate-1", kind: "workflow-task" }),
     ]);
-    expect(openRequestIds(parked.session).size > 0).toBe(true);
-    expect(events.filter((event) => event.type === "input.requested")).toHaveLength(1);
+    // The approval can't settle before the workflow task finishes, so asking waits until then.
+    expect(parkedSteps(parked.session).some((step) => step.requests.length > 0)).toBe(true);
+    expect(events.filter((event) => event.type === "input.requested")).toHaveLength(0);
     expect(
       parked.session.history.flatMap((message) =>
         Array.isArray(message.content)
@@ -1735,6 +1736,7 @@ describe("createToolLoopHarness", () => {
     expect(JSON.stringify(parkedSteps(reparked.session)[0]?.messages)).toContain("delegated-done");
     expect(JSON.stringify(reparked.session.history)).not.toContain("delegated-done");
     expect(reparked.held).toEqual({ kind: "request" });
+    expect(events.filter((event) => event.type === "input.requested")).toHaveLength(1);
     expect(events.at(-1)?.type).toBe("turn.waiting");
   });
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { HarnessSession } from "#harness/types.js";
+import { withParkedStep } from "#internal/testing/session-machine.js";
 import { routeDeliverPayload } from "#subagents/hitl-proxy.js";
 
 const REQUEST_EVENT = { sequence: 0, stepIndex: 0, turnId: "turn_0" };
@@ -337,9 +338,9 @@ describe("routeDeliverPayload message resolution", () => {
     ]);
   });
 
-  it("keeps a message for the turn when several questions are pending", () => {
+  it("answers the first of several pending questions", () => {
     const routed = routeDeliverPayload({
-      payload: { message: "Actually, check the logs first." },
+      payload: { message: "production" },
       resolveMessage: true,
       state: askSession([
         ["ask-1", {}],
@@ -347,20 +348,76 @@ describe("routeDeliverPayload message resolution", () => {
       ]).state,
     });
 
+    expect(routed.forSelf).toBeUndefined();
+    expect(routed.forChildren.map((child) => child.payload.inputResponses)).toEqual([
+      [{ optionId: "2", requestId: "ask-1" }],
+    ]);
+  });
+
+  it("keeps a message for the turn when it doesn't answer the first question", () => {
+    const routed = routeDeliverPayload({
+      payload: { message: "Actually, check the logs first." },
+      resolveMessage: true,
+      state: askSession([
+        ["ask-1", {}],
+        ["ask-2", { allowFreeform: true }],
+      ]).state,
+    });
+
     expect(routed.forSelf).toEqual({ message: "Actually, check the logs first." });
     expect(routed.forChildren).toEqual([]);
   });
 
-  it("does not answer a question while a subagent question is also pending", () => {
+  it("leaves a message for the turn while one of its approvals comes first", () => {
+    const session = withParkedStep(askSession([["ask-1", { allowFreeform: true }]]), {
+      requests: [
+        {
+          action: { callId: "call-1", input: {}, kind: "tool-call", toolName: "deploy" },
+          display: "confirmation",
+          kind: "tool-approval",
+          options: [
+            { id: "approve", label: "Approve" },
+            { id: "cancel", label: "Cancel" },
+          ],
+          prompt: "Approve deploy?",
+          requestId: "approval-1",
+        },
+      ],
+    });
+    const routed = routeDeliverPayload({
+      payload: { message: "approve" },
+      resolveMessage: true,
+      state: session.state,
+    });
+
+    expect(routed.forSelf).toEqual({ message: "approve" });
+    expect(routed.forChildren).toEqual([]);
+  });
+
+  it("does not answer a question while a subagent question comes first", () => {
     const session = upsertProxyInputRequests({
       entries: [
         [
-          "child-ask",
-          { childContinuationToken: "child-token", event: REQUEST_EVENT, kind: "question" },
+          "ask-1",
+          {
+            workflowAsk: { control: "control-ask-1", question: { allowFreeform: true } },
+            childContinuationToken: "hook-ask-1",
+            event: REQUEST_EVENT,
+            kind: "question",
+          },
         ],
       ],
-      forChildContinuationToken: "child-token",
-      session: askSession([["ask-1", { allowFreeform: true }]]),
+      forChildContinuationToken: "hook-ask-1",
+      session: upsertProxyInputRequests({
+        entries: [
+          [
+            "child-ask",
+            { childContinuationToken: "child-token", event: REQUEST_EVENT, kind: "question" },
+          ],
+        ],
+        forChildContinuationToken: "child-token",
+        session: createSession(),
+      }),
     });
     const routed = routeDeliverPayload({
       payload: { message: "Use the canary pool" },

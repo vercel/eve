@@ -667,7 +667,7 @@ describe("twilioChannel() default event handlers", () => {
     });
   });
 
-  it("input.requested sends a batch of approvals as one SMS, since one reply answers them all", async () => {
+  it("sends a batch of approvals one SMS at a time, since a reply answers only the one it sees", async () => {
     const bodies: string[] = [];
     const fetchMock: typeof fetch = async (_input, init) => {
       bodies.push(new URLSearchParams(String(init?.body)).get("Body") ?? "");
@@ -685,6 +685,7 @@ describe("twilioChannel() default event handlers", () => {
       ),
       { from: "+15551234567", lastCallSid: null, lastMessageSid: "SM123", to: "+15557654321" },
     );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
 
     await callEvent(
       adapter,
@@ -719,16 +720,43 @@ describe("twilioChannel() default event handlers", () => {
         stepIndex: 0,
         turnId: "t1",
       }),
-      buildAdapterContext(adapter, stubAccessor()),
+      ctx,
+    );
+    expect(bodies).toEqual([
+      "Approve Deploy release?\n\n1. Approve\n2. Cancel\n\nReply with a number to choose.",
+    ]);
+
+    await callEvent(
+      adapter,
+      makeEvent("approval.settled", {
+        outcome: "approved",
+        requestId: "approval_1",
+        responderPrincipalId: "twilio:+15551234567",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+    expect(bodies.at(-1)).toBe(
+      "Approve Rotate keys?\n\n1. Approve\n2. Cancel\n\nReply with a number to choose.",
     );
 
-    expect(bodies).toEqual([
-      [
-        "Approve Deploy release?\n\n1. Approve\n2. Cancel",
-        "Approve Rotate keys?\n\n1. Approve\n2. Cancel",
-        "Reply with a number to choose. Your reply answers each of these.",
-      ].join("\n\n"),
-    ]);
+    // The batch resolving later reports both requests again; nothing more is sent.
+    await callEvent(
+      adapter,
+      makeEvent("input.resolved", {
+        resolutions: [
+          { kind: "tool-approval", outcome: "approved", requestId: "approval_1" },
+          { kind: "tool-approval", outcome: "approved", requestId: "approval_2" },
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+    expect(bodies).toHaveLength(2);
   });
 
   it("receive starts a phone-pair session with an explicit continuation token", async () => {

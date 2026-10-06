@@ -448,17 +448,18 @@ const questionRules = [
     },
   },
   {
-    rule: "a text reply matching an option does not answer either of two pending questions",
-    source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
+    rule: "text replies answer two pending questions one at a time, in the order shown",
+    source: "docs/tools/human-in-the-loop.md#several-requests-at-once",
     requires: ["text-replies"],
     variesByConversation: true,
     async run(conversation) {
       await conversation.say(PLAN_REVIEW);
-      await conversation.waitForRequest(DAY_PROMPT);
-      await conversation.waitForRequest(TIME_PROMPT);
-      await conversation.say("Saturday");
-      // Answering only the day question would leave the tool waiting, with no reply.
-      await conversation.waitForReplyTo("Saturday");
+      await conversation.replyToEach({ [DAY_PROMPT]: "Saturday", [TIME_PROMPT]: "Afternoon" });
+      const output = await conversation.waitForToolResult(TWO_QUESTIONS_TOOL);
+      expect(output, `${TWO_QUESTIONS_TOOL} returned ${JSON.stringify(output)}`).toEqual({
+        day: "Saturday",
+        time: "Afternoon",
+      });
     },
   },
 ] as const satisfies readonly ContractRule[];
@@ -533,6 +534,29 @@ const approvalRules = [
     async run(conversation) {
       await conversation.say(ASK_AND_DEPLOY);
       await answerEach(conversation, { [APPROVAL_PROMPT]: APPROVE_LABELS, [PROMPT]: "Saturday" });
+      // The turn replies only once both calls settle.
+      await expectDeployed(conversation);
+    },
+  },
+  {
+    rule: "text replies answer two pending approvals one at a time, in the order shown",
+    source: "docs/tools/human-in-the-loop.md#several-requests-at-once",
+    requires: ["text-replies"],
+    variesByConversation: true,
+    async run(conversation) {
+      await conversation.say(DEPLOY_AND_PUBLISH);
+      await conversation.replyToEach({ [APPROVAL_PROMPT]: "approve", [PUBLISH_PROMPT]: "cancel" });
+      await expectDeployed(conversation);
+      expect(conversation.runsOf(SECOND_GATED_TOOL)).toBe(0);
+    },
+  },
+  {
+    rule: "text replies answer a question and an approval raised together, in the order shown",
+    source: "docs/tools/human-in-the-loop.md#several-requests-at-once",
+    requires: ["text-replies"],
+    async run(conversation) {
+      await conversation.say(ASK_AND_DEPLOY);
+      await conversation.replyToEach({ [PROMPT]: "Saturday", [APPROVAL_PROMPT]: "approve" });
       // The turn replies only once both calls settle.
       await expectDeployed(conversation);
     },

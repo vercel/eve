@@ -1,6 +1,8 @@
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import type { DeliverPayload } from "#channel/types.js";
 import { resolveInputOutcome } from "#harness/input-request-resolution.js";
+import { firstOpenInput } from "#harness/open-input-request.js";
+import { storedProjection } from "#harness/session-machine/view.js";
 import type { StepCoordinates as PendingInputBatchEvent } from "#harness/session-machine/view.js";
 import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { WorkflowAskRoute, ProxyInputRequest } from "#harness/proxy-input-requests.js";
@@ -90,6 +92,7 @@ export function routeDeliverPayload(input: {
     entries,
     payload: input.payload,
     routable,
+    state: input.state,
   });
   const [textAnswer] = message.responses;
   const inputResponses = [...(input.payload.inputResponses ?? []), ...message.responses];
@@ -246,6 +249,7 @@ function resolveMessageAgainstQuestions(input: {
   readonly entries: ReadonlyMap<string, ProxyInputRequest>;
   readonly payload: DeliverPayload;
   readonly routable: (requestId: string, route: ProxyInputRequest) => boolean;
+  readonly state: SessionStateMap | undefined;
 }): {
   readonly consumed: boolean;
   readonly responses: readonly InputResponse[];
@@ -253,27 +257,26 @@ function resolveMessageAgainstQuestions(input: {
   const none = { consumed: false, responses: [] };
   // An explicit structured answer means the client already chose what to answer.
   if (!input.enabled || (input.payload.inputResponses?.length ?? 0) > 0) return none;
-  if (input.payload.message === undefined) return none;
-
-  // Task and subagent questions carry no `ctx.ask()` metadata, so plain text
-  // cannot resolve them, but they still make the message ambiguous.
-  const pending = [...input.entries].filter(
-    ([requestId, route]) => route.kind === "question" && input.routable(requestId, route),
-  );
-  const questions = pending.flatMap(([requestId, route]) => {
-    const question = route.workflowAsk?.question ?? route.question;
-    return question !== undefined ? [{ requestId, ...question }] : [];
-  });
-  if (questions.length === 0) return none;
-
-  const [only] = questions;
   const text = readAnswerText(input.payload);
+  if (text === undefined) return none;
+
+  // A request an earlier payload answered is no longer open to this one.
+  const answered = (id: string) => {
+    const route = input.entries.get(id);
+    return route !== undefined && !input.routable(id, route);
+  };
+  // A relay the session recorded without publishing it falls back to the order it was recorded.
+  const requestId =
+    firstOpenInput(storedProjection(input.state), answered)?.request.requestId ??
+    [...input.entries.keys()].find((id) => !answered(id));
+  const route = requestId === undefined ? undefined : input.entries.get(requestId);
+  if (requestId === undefined || route?.kind !== "question") return none;
+  // Task and subagent questions carry no `ctx.ask()` metadata, so plain text
+  // cannot resolve them.
+  const question = route.workflowAsk?.question ?? route.question;
   const answer =
-    pending.length === 1 && only !== undefined && text !== undefined
-      ? resolveTextToResponse(text, only)
-      : undefined;
-  if (answer !== undefined) return { consumed: true, responses: [answer] };
-  return none;
+    question === undefined ? undefined : resolveTextToResponse(text, { requestId, ...question });
+  return answer === undefined ? none : { consumed: true, responses: [answer] };
 }
 
 function batchResolves(input: {

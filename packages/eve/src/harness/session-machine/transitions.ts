@@ -54,6 +54,7 @@ import {
   activeTurnId,
   answeredCallIds,
   nextStepIndex,
+  runningTasks,
   turnPosition,
   type SessionView,
 } from "./view.js";
@@ -267,6 +268,13 @@ export function settle(view: SessionView, input: { readonly results: readonly Se
     if (result !== undefined) {
       events.push(createActionResultEvent({ result, ...step.event }));
     }
+  }
+  // A step that parked approvals beside its tasks asks for them once the tasks finish.
+  for (const step of steps) {
+    if (step.tasks.length === 0 || step.requests.length === 0) continue;
+    if (runningTasks(step).length > 0) continue;
+    if (step.requests.some((request) => request.requestId in view.projection.inputs)) continue;
+    events.push(createInputRequestedEvent({ requests: step.requests, ...step.event }));
   }
   const complete = steps.filter(isComplete);
   return {

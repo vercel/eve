@@ -1,3 +1,4 @@
+import { type PromptQueueState, promptQueueEvents } from "#channel/prompt-queue.js";
 import type { UserContent } from "ai";
 
 import type {
@@ -65,7 +66,7 @@ interface ActiveWebhookContext {
 const ActiveWebhookKey = new ContextKey<ActiveWebhookContext>("chat-sdk.active-webhook");
 
 /** Durable Chat SDK thread state plus default-handler streaming bookkeeping. */
-export interface ChatSdkChannelState extends Record<string, unknown> {
+export interface ChatSdkChannelState extends Record<string, unknown>, PromptQueueState {
   thread: SerializedThread | null;
   /** Message id of the in-flight streamed assistant post (edit fallback). */
   anchorMessageId?: string | null;
@@ -378,6 +379,60 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
 function defaultEvents<TAdapters extends ChatSdkAdapters>(
   inputActionPrefix: string,
 ): ChatSdkChannelEvents<TAdapters> {
+  type EventChannel = Parameters<
+    NonNullable<ChatSdkChannelEvents<TAdapters>["input.requested"]>
+  >[1];
+
+  async function showPrompt(channel: EventChannel, request: InputRequest) {
+    if (!channel.thread) return;
+    const posted = await channel.thread.post(renderInputRequests([request], inputActionPrefix));
+    if (!posted.id || channel.state.editSupported === false) return;
+    channel.state.pendingInputCards = {
+      ...channel.state.pendingInputCards,
+      [posted.id]: { requests: [request], resolved: {} },
+    };
+  }
+
+  async function clearAnsweredCards(
+    event: { readonly resolutions: readonly InputResolution[] },
+    channel: EventChannel,
+  ) {
+    const thread = channel.thread;
+    if (!thread) return;
+    for (const [messageId, card] of Object.entries(channel.state.pendingInputCards ?? {})) {
+      const resolutions = event.resolutions.filter((resolution) =>
+        card.requests.some((request) => request.requestId === resolution.requestId),
+      );
+      if (resolutions.length === 0) continue;
+      const resolved = {
+        ...card.resolved,
+        ...Object.fromEntries(resolutions.map((resolution) => [resolution.requestId, resolution])),
+      };
+      const { [messageId]: _, ...rest } = channel.state.pendingInputCards ?? {};
+      channel.state.pendingInputCards = card.requests.every(
+        (request) => resolved[request.requestId] !== undefined,
+      )
+        ? rest
+        : { ...rest, [messageId]: { requests: card.requests, resolved } };
+      try {
+        await thread.adapter.editMessage(
+          thread.id,
+          messageId,
+          renderInputRequests(card.requests, inputActionPrefix, resolved),
+        );
+      } catch (error) {
+        if (!isNotImplemented(error)) {
+          log.warn("answered input card edit failed", { error, messageId });
+          continue;
+        }
+        channel.state.editSupported = false;
+        channel.state.pendingInputCards = {};
+        return;
+      }
+    }
+  }
+
+  const prompts = promptQueueEvents(showPrompt);
   return {
     ...defaultAuthorizationEvents(),
     async "turn.started"(_event, channel, _ctx) {
@@ -425,54 +480,13 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
         clearStream(channel.state);
       }
     },
-    async "input.requested"(event, channel, _ctx) {
-      if (!channel.thread || event.requests.length === 0) return;
-      const posted = await channel.thread.post(
-        renderInputRequests(event.requests, inputActionPrefix),
-      );
-      if (!posted.id || channel.state.editSupported === false) return;
-      channel.state.pendingInputCards = {
-        ...channel.state.pendingInputCards,
-        [posted.id]: { requests: event.requests, resolved: {} },
-      };
-    },
+    // Some adapters show only text, where a reply can answer only the request
+    // it sees, so cards post one at a time.
+    ...prompts,
     // Covers every way a request ends: a press, a typed answer, or a withdrawal.
     async "input.resolved"(event, channel, _ctx) {
-      const thread = channel.thread;
-      if (!thread) return;
-      for (const [messageId, card] of Object.entries(channel.state.pendingInputCards ?? {})) {
-        const resolutions = event.resolutions.filter((resolution) =>
-          card.requests.some((request) => request.requestId === resolution.requestId),
-        );
-        if (resolutions.length === 0) continue;
-        const resolved = {
-          ...card.resolved,
-          ...Object.fromEntries(
-            resolutions.map((resolution) => [resolution.requestId, resolution]),
-          ),
-        };
-        const { [messageId]: _, ...rest } = channel.state.pendingInputCards ?? {};
-        channel.state.pendingInputCards = card.requests.every(
-          (request) => resolved[request.requestId] !== undefined,
-        )
-          ? rest
-          : { ...rest, [messageId]: { requests: card.requests, resolved } };
-        try {
-          await thread.adapter.editMessage(
-            thread.id,
-            messageId,
-            renderInputRequests(card.requests, inputActionPrefix, resolved),
-          );
-        } catch (error) {
-          if (!isNotImplemented(error)) {
-            log.warn("answered input card edit failed", { error, messageId });
-            continue;
-          }
-          channel.state.editSupported = false;
-          channel.state.pendingInputCards = {};
-          return;
-        }
-      }
+      await clearAnsweredCards(event, channel);
+      await prompts["input.resolved"](event, channel);
     },
     async "message.completed"(event, channel, _ctx) {
       if (event.finishReason === "tool-calls") {
