@@ -1,0 +1,15 @@
+{
+  "$comment": "Registry for the model benchmark workflow (.github/workflows/eval-benchmark.yml), separate from e2e/matrix.json so adding a benchmark model never adds a CI check. `models` run every listed fixture `attempts` times against the local world; each id must exist in the AI Gateway catalog, which pins its release. `mockWorlds` run each fixture once with mock models (`local`, or a world with a package in e2e/matrix.json). `judge` is fixed per registry revision. `concurrency.legs` caps live legs running at once (gateway load); `concurrency.evalsPerLeg` is passed to `eve eval --max-concurrency` on every leg, overriding a fixture's own maxConcurrency, so evals do not share a runner. Both change measured latency, and each run's manifest records them. See research/model-benchmark-tracking.md.",
+  "models": [
+    { "name": "openai-sol", "id": "openai/gpt-6-sol" },
+    { "name": "anthropic-opus", "id": "anthropic/claude-opus-5.5" },
+    { "name": "anthropic-sonnet", "id": "anthropic/claude-sonnet-5.5" },
+    { "name": "google-flash", "id": "google/gemini-3.8-flash" },
+    { "name": "kimi", "id": "moonshotai/kimi-k3" }
+  ],
+  "fixtures": ["agent-tools", "agent-subagents", "agent-tasks"],
+  "mockWorlds": ["local", "postgres"],
+  "attempts": 3,
+  "concurrency": { "legs": 5, "evalsPerLeg": 1 },
+  "judge": "openai/gpt-5.6-luna"
+}

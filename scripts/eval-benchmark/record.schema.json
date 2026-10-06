@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/vercel/eve/scripts/eval-benchmark/record.schema.json",
+  "title": "eve model benchmark record",
+  "description": "One attempt of one eval on one model and workflow world. The upsert key is (github_run_id, run_attempt, fixture, eval_id, model_id, world, attempt). The comparability identity is (eval_id, eval_digest, model_id, model_release, judge_model, world); sha and eve_version are the x-axis. See research/model-benchmark-tracking.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "github_run_id",
+    "run_attempt",
+    "fixture",
+    "eval_id",
+    "model_id",
+    "world",
+    "attempt",
+    "eval_digest",
+    "model_release",
+    "judge_model",
+    "sha",
+    "eve_version",
+    "runner_os",
+    "started_at",
+    "verdict",
+    "assertions",
+    "outcome",
+    "gap_reason",
+    "metrics_version",
+    "metrics",
+    "failures",
+    "bundles",
+    "artifact_path"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "github_run_id": { "type": "string", "pattern": "^[0-9]+$" },
+    "run_attempt": { "type": "integer", "minimum": 1 },
+    "fixture": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+    "eval_id": { "type": "string", "minLength": 1 },
+    "model_id": {
+      "description": "AI Gateway model id, or \"mock\" for the mock-model framework track.",
+      "type": "string",
+      "minLength": 1
+    },
+    "world": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+    "attempt": { "type": "integer", "minimum": 1 },
+    "eval_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "model_release": {
+      "description": "AI Gateway catalog release date (YYYY-MM-DD); null for mock models.",
+      "type": ["string", "null"],
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "judge_model": { "type": "string", "minLength": 1 },
+    "sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "eve_version": {
+      "description": "eve version reported by the serving runtime; null when the eval never reached it.",
+      "type": ["string", "null"]
+    },
+    "runner_os": { "type": ["string", "null"] },
+    "started_at": { "type": ["string", "null"], "format": "date-time" },
+    "verdict": {
+      "type": ["string", "null"],
+      "enum": ["passed", "failed", "scored", "skipped", null]
+    },
+    "assertions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "severity", "score", "passed"],
+        "properties": {
+          "name": { "type": "string" },
+          "severity": { "enum": ["gate", "soft"] },
+          "score": { "type": "number", "minimum": 0, "maximum": 1 },
+          "passed": { "type": "boolean" }
+        }
+      }
+    },
+    "outcome": { "enum": ["completed", "timed_out", "skipped", "parked", "gap"] },
+    "gap_reason": {
+      "description": "Present exactly when outcome is \"gap\"; one of GAP_REASONS in scripts/eval-metrics/gaps.mjs.",
+      "type": ["string", "null"],
+      "enum": [
+        "job-missing",
+        "eval-missing",
+        "provider-unavailable",
+        "stream-write-failed",
+        "timeout-before-first-step",
+        "error-before-first-step",
+        null
+      ]
+    },
+    "metrics_version": { "type": "integer", "minimum": 1 },
+    "metrics": { "$ref": "#/$defs/metrics" },
+    "failures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "code", "count"],
+        "properties": {
+          "type": { "enum": ["step.failed", "turn.failed", "session.failed"] },
+          "code": { "type": "string" },
+          "count": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "bundles": {
+      "description": "Fixture metric bundles keyed by bundle name; metric values are namespaced <bundle>.<metric> by consumers.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["version", "metrics"],
+        "properties": {
+          "version": { "type": "integer", "minimum": 1 },
+          "metrics": { "$ref": "#/$defs/metrics" }
+        }
+      }
+    },
+    "artifact_path": {
+      "description": "Path of this leg's raw artifact tree, relative to runs/<github_run_id>/<run_attempt>/; null when the leg uploaded nothing.",
+      "type": ["string", "null"]
+    }
+  },
+  "$defs": {
+    "metrics": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/measurement" }
+    },
+    "measurement": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "value"],
+          "properties": {
+            "status": { "const": "measured" },
+            "value": { "type": "number" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reason"],
+          "properties": {
+            "status": { "enum": ["unavailable", "not-applicable"] },
+            "reason": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    }
+  }
+}
