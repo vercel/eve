@@ -1,5 +1,5 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
-import { latestTaskResult } from "@eve-e2e/config/mock-script";
+import { latestTaskResult, outputOf, playScript } from "@eve-e2e/config/mock-script";
 import { defineAgent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
 
@@ -94,6 +94,28 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
     [...request.userMessages].reverse().find((entry) => entry.startsWith("WORKFLOW-")) ?? "";
   const scenario = respondToTaskScenario(request, directiveOf(message));
   if (scenario !== undefined) return scenario;
+  if (message.startsWith("WORKFLOW-CATALOG-SIGN-IN")) {
+    // A plain search reports that the catalog needs sign-in; searching it with
+    // `signIn` asks the user. Sign-in drops that interrupted call from history,
+    // so the script makes it again once the turn resumes.
+    return playScript(
+      request,
+      [
+        { id: "catalog-search", name: "search", input: () => ({ connection: "private-catalog" }) },
+        {
+          id: "catalog-sign-in",
+          name: "search",
+          input: () => ({ connection: "private-catalog", signIn: true }),
+        },
+        {
+          id: "catalog-items",
+          name: "execute",
+          input: () => ({ tool: "private-catalog__list_items" }),
+        },
+      ],
+      (finished) => outputOf(finished, "catalog-items"),
+    );
+  }
   const stepAuth = /WORKFLOW-STEP-AUTH-(IMPLICIT|EXPLICIT|REJECTED)/u.exec(message);
   if (stepAuth !== null) {
     const result = request.toolResults.find((entry) => entry.name === "authorize_service");
