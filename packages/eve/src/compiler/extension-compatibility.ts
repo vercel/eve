@@ -22,10 +22,10 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 74,
+    current: 75,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 54, 55, 63, 64, 65, 66, 67,
-      68, 69, 70, 71, 72, 73, 74,
+      68, 69, 70, 71, 72, 73, 75,
     ],
     dropped: {
       14: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
@@ -55,8 +55,8 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       44: "Background defineTool and TaskExec were removed; use defineWorkflowTool for durable background work.",
       45: "Background defineTool and TaskExec were removed; use defineWorkflowTool for durable background work.",
       46: "Background defineTool and TaskExec were removed; use defineWorkflowTool for durable background work.",
-      47: "eve/experimental/evaluate was removed; import evaluate from eve/ai",
-      48: "eve/experimental/evaluate was removed; import evaluate from eve/ai",
+      47: "eve/experimental/evaluate was removed; import decide from eve/ai",
+      48: "eve/experimental/evaluate was removed; import decide from eve/ai",
       49: "Background defineTool and TaskExec were removed; use defineWorkflowTool for durable background work.",
       50: "Background defineTool and TaskExec were removed; use defineWorkflowTool for durable background work.",
       51: "Background defineTool and TaskExec were removed; use defineWorkflowTool for durable background work.",
@@ -69,13 +69,14 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       60: "Workflow tools define exactly one of execute(input, ctx), task(input, ctx), or serve(receive, ctx): a task() call returns a receipt and runs as a task, a serve() call reaches a resumable task through receive() and its model input gains taskId, and stream events gained task.started and task.settled. Agent tools are serve() tools with taskId in place of agentId, and the subagent.* stream events were removed. ctx.interruptSignal and WorkflowTaskContext were removed: a steering message aborts the abortSignal of an execute call the turn waits on.",
       61: "Approval response policies now run for Cancel as well as Approve; a policy written for Approve only could reject every Cancel.",
       62: "Approval response policies now run for Cancel as well as Approve; a policy written for Approve only could reject every Cancel.",
+      74: "eve/ai evaluate was renamed to decide and AI SDK evaluation models became decision models; import decide from eve/ai",
     },
   },
   dynamicTool: {
-    current: 71,
+    current: 72,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 31, 32, 33, 52, 54,
-      60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71,
+      60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72,
     ],
     dropped: {
       21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",

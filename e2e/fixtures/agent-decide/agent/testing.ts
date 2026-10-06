@@ -1,21 +1,21 @@
-import type { Experimental_EvaluationModel } from "ai";
+import type { Experimental_DecisionModel } from "ai";
 import { defineDynamic } from "eve";
 import { defineState } from "eve/context";
 import { mockModel, type MockModelResponder } from "eve/evals";
 import { auto } from "eve/models";
 
-export const routing = defineState("evaluate-fixture.routing", () => ({
+export const routing = defineState("decide-fixture.routing", () => ({
   requests: 0,
   model: "unselected",
   reasoning: "unselected",
 }));
 
-export const permissionEvaluationModel: Exclude<Experimental_EvaluationModel, string> = {
+export const permissionDecisionModel: Exclude<Experimental_DecisionModel, string> = {
   specificationVersion: "v4",
   provider: "fixture",
-  modelId: "fixture-permission-evaluator",
+  modelId: "fixture-permission-decider",
   supportedQuestionTypes: ["choice"],
-  async doEvaluate({ state }) {
+  async doDecide({ state }) {
     const choice = JSON.stringify(state).includes('"effect":"malicious"') ? "caution" : "clear";
     return {
       answers: { permission: { type: "choice", choice } },
@@ -25,16 +25,16 @@ export const permissionEvaluationModel: Exclude<Experimental_EvaluationModel, st
   },
 };
 
-export const evaluationModel: Exclude<Experimental_EvaluationModel, string> = {
+export const decisionModel: Exclude<Experimental_DecisionModel, string> = {
   specificationVersion: "v4",
   provider: "fixture",
-  modelId: "fixture-evaluator",
+  modelId: "fixture-decider",
   supportedQuestionTypes: ["choice"],
-  async doEvaluate({ state, questions }) {
+  async doDecide({ state, questions }) {
     routing.update((value) => ({ ...value, requests: value.requests + 1 }));
     const serialized = JSON.stringify(state);
     if (serialized.includes("service unavailable")) {
-      throw new Error("Evaluation service unavailable.");
+      throw new Error("Decision service unavailable.");
     }
     const choice = serialized.includes("difficult") ? "openai/large" : "openai/small";
     return {
@@ -49,15 +49,15 @@ export const evaluationModel: Exclude<Experimental_EvaluationModel, string> = {
       },
       usage: { inputTokens: 42, outputTokens: 3 },
       warnings: [],
-      response: { modelId: "fixture-evaluator" },
+      response: { modelId: "fixture-decider" },
     };
   },
 };
 
-/** Run the real router with deterministic evaluation and language models. */
+/** Run the real router with deterministic decision and language models. */
 export function fixtureModel(respond: MockModelResponder) {
   const model = auto({
-    model: evaluationModel,
+    model: decisionModel,
     options: {
       "openai/large": {
         model: mockModel({ modelId: "openai/large", respond }),

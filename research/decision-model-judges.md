@@ -1,12 +1,12 @@
 ---
 issue: "TBD (maintainer-requested research; no matching issue found)"
 status: implemented
-last_updated: "2026-09-18"
+last_updated: "2026-10-06"
 ---
 
-# Evaluation models for eval judges
+# Decision models for eval judges
 
-`t.judge(...)` uses the existing `evaluate` wrapper from `eve/ai`. A criteria
+`t.judge(...)` uses the existing `decide` wrapper from `eve/ai`. A criteria
 string becomes a boolean question; an explicit question returns one assertion
 handle; `{ state?, questions }` returns named handles backed by one request.
 All calls start immediately and retain existing soft scoring, labels, thresholds,
@@ -20,8 +20,8 @@ score selected-option equality as 0 or 1; the expectation is never sent to the
 model. Batches share one state, preserve question order, and fail together if
 SDK validation or the provider fails.
 
-`judge.model` accepts an evaluation model ID or instance and defaults to the
-shared evaluator, currently `typesafe-ai/jev`. Per-call settings override the
+`judge.model` accepts a decision model ID or instance and defaults to the
+shared decider, currently `typesafe-ai/jev`. Per-call settings override the
 resolved eval/project configuration. Provider options retain their existing
 `modelOptions.providerOptions` shape. AI SDK owns adapters, authentication,
 validation, and retries. The eval signal cancels provider I/O and bounds how long
@@ -29,7 +29,7 @@ the runner waits during assertion finalization.
 
 The implementation reuses the assertion collector, diagnostics, verdicts, and
 reporters. Metadata records raw answers and normalized scores; batch token usage
-is explicitly shared. Evaluation does not promise prose rationales.
+is explicitly shared. Decision does not promise prose rationales.
 
 Remove autoevals, its adapter, and its public namespace. Migrate criteria judges
 to the callable form and use explicit state/questions for specialized rubrics.

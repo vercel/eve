@@ -159,25 +159,25 @@ describe("extension build output", () => {
   });
 
   it.each([
-    ["static re-export", 'export { evaluate as assess } from "eve/ai";'],
+    ["static re-export", 'export { decide as assess } from "eve/ai";'],
     [
       "namespace import",
-      'import * as evaluation from "eve/ai"; export const assess = evaluation.evaluate;',
+      'import * as decision from "eve/ai"; export const assess = decision.decide;',
     ],
     [
       "dynamic import",
-      'export async function assess(options: Parameters<typeof import("eve/ai").evaluate>[0]): Promise<void> { await (await import("eve/ai")).evaluate(options); }',
+      'export async function assess(options: Parameters<typeof import("eve/ai").decide>[0]): Promise<void> { await (await import("eve/ai")).decide(options); }',
     ],
   ])("stamps the tool capability for a hook-only extension using a %s", async (_name, helper) => {
     const root = await createExtensionPackage();
     await rm(join(root, "extension", "tools"), { recursive: true });
     await mkdir(join(root, "extension", "hooks"));
     await mkdir(join(root, "extension", "lib"));
-    await writeFile(join(root, "extension", "lib", "evaluation.ts"), helper);
+    await writeFile(join(root, "extension", "lib", "decision.ts"), helper);
     await writeFile(
-      join(root, "extension", "hooks", "evaluate.ts"),
+      join(root, "extension", "hooks", "decide.ts"),
       `import { defineHook } from "eve/hooks";
-import { assess } from "../lib/evaluation";
+import { assess } from "../lib/decision";
 export default defineHook({ events: { "turn.started": async () => {
   await assess({ state: { request: "Alice needs a summary." }, questions: {
     routine: { type: "boolean", instructions: "Is this routine work?" }
@@ -221,7 +221,7 @@ export default defineHook({ events: { "turn.started": async () => {
     ],
     [
       "type-only AI import",
-      'import type { evaluate } from "eve/ai"; export type Evaluate = typeof evaluate;',
+      'import type { decide } from "eve/ai"; export type Decide = typeof decide;',
       undefined,
     ],
     [
@@ -235,7 +235,7 @@ export default defineHook({ events: { "turn.started": async () => {
       const root = await createExtensionPackage();
       await rm(join(root, "extension", "tools"), { recursive: true });
       await mkdir(join(root, "extension", "lib"));
-      await writeFile(join(root, "extension", "lib", "evaluation.ts"), helper);
+      await writeFile(join(root, "extension", "lib", "decision.ts"), helper);
       const config = await tryReadExtensionBuildConfig(root);
       const outDir = await buildExtensionPackage(root, config!);
       const manifestPath = join(outDir, "extension", "_manifest.json");

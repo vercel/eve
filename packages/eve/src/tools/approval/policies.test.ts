@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const evaluate = vi.hoisted(() => vi.fn());
-vi.mock("#ai/evaluate.js", () => ({ evaluate }));
+const decide = vi.hoisted(() => vi.fn());
+vi.mock("#ai/decide.js", () => ({ decide }));
 
 import type { ApprovalContext } from "#approval/definition.js";
 import { always, auto, never, once } from "#tools/approval/policies.js";
@@ -25,7 +25,7 @@ function approvalContext(overrides: Partial<ApprovalContext> = {}): ApprovalCont
 }
 
 describe("dynamic tool approval helpers", () => {
-  beforeEach(() => evaluate.mockReset());
+  beforeEach(() => decide.mockReset());
 
   it.each([
     ["always", always(), "user-approval"],
@@ -42,11 +42,11 @@ describe("dynamic tool approval helpers", () => {
     ["clear", "approved"],
     ["caution", "user-approval"],
   ] as const)("maps the automatic review's %s decision to %s", async (choice, expected) => {
-    evaluate.mockResolvedValueOnce({ answers: { permission: { choice } } });
+    decide.mockResolvedValueOnce({ answers: { permission: { choice } } });
     const context = approvalContext();
 
     await expect(auto()(context)).resolves.toBe(expected);
-    expect(evaluate).toHaveBeenCalledWith(
+    expect(decide).toHaveBeenCalledWith(
       expect.objectContaining({
         abortSignal: expect.any(AbortSignal),
         maxRetries: 0,
@@ -57,11 +57,11 @@ describe("dynamic tool approval helpers", () => {
   });
 
   it("allows classifier instructions and outcome descriptions to be overridden", async () => {
-    evaluate.mockResolvedValueOnce({ answers: { permission: { choice: "clear" } } });
+    decide.mockResolvedValueOnce({ answers: { permission: { choice: "clear" } } });
     const context = approvalContext();
 
     await auto({
-      model: "custom-evaluator",
+      model: "custom-decider",
       instructions: "Classify this action for my application.",
       criteria: {
         clear: "The action is within policy.",
@@ -69,9 +69,9 @@ describe("dynamic tool approval helpers", () => {
       },
     })(context);
 
-    expect(evaluate).toHaveBeenCalledWith(
+    expect(decide).toHaveBeenCalledWith(
       expect.objectContaining({
-        model: "custom-evaluator",
+        model: "custom-decider",
         questions: {
           permission: {
             type: "choice",
@@ -86,40 +86,40 @@ describe("dynamic tool approval helpers", () => {
     );
   });
 
-  it("accepts another evaluation model", async () => {
-    evaluate.mockResolvedValueOnce({ answers: { permission: { choice: "clear" } } });
+  it("accepts another decision model", async () => {
+    decide.mockResolvedValueOnce({ answers: { permission: { choice: "clear" } } });
     const model = { modelId: "custom", provider: "test", specificationVersion: "v4" } as never;
     const context = approvalContext();
 
     await expect(auto({ model })(context)).resolves.toBe("approved");
-    expect(evaluate).toHaveBeenCalledWith(expect.objectContaining({ model }));
+    expect(decide).toHaveBeenCalledWith(expect.objectContaining({ model }));
   });
 
   it.each([new Date(), new Map([["kind", "delete"]]), new Set(["delete"]), Number.NaN])(
-    "requires approval without evaluating lossy input %#",
+    "requires approval without deciding lossy input %#",
     async (toolInput) => {
       await expect(auto()(approvalContext({ toolInput: { value: toolInput } }))).resolves.toBe(
         "user-approval",
       );
-      expect(evaluate).not.toHaveBeenCalled();
+      expect(decide).not.toHaveBeenCalled();
     },
   );
 
-  it("requires approval without evaluating oversized input", async () => {
+  it("requires approval without deciding oversized input", async () => {
     const context = approvalContext({ toolInput: { value: "x".repeat(64 * 1024) } });
 
     await expect(auto()(context)).resolves.toBe("user-approval");
-    expect(evaluate).not.toHaveBeenCalled();
+    expect(decide).not.toHaveBeenCalled();
   });
 
   it("fails closed when the automatic review is unavailable", async () => {
-    evaluate.mockRejectedValueOnce(new Error("unavailable"));
+    decide.mockRejectedValueOnce(new Error("unavailable"));
     await expect(auto()(approvalContext())).resolves.toBe("user-approval");
   });
 
   it("propagates cancellation instead of requesting approval", async () => {
     const reason = new Error("cancelled");
-    evaluate.mockRejectedValueOnce(reason);
+    decide.mockRejectedValueOnce(reason);
     const context = approvalContext({ abortSignal: AbortSignal.abort(reason) });
 
     await expect(auto()(context)).rejects.toBe(reason);

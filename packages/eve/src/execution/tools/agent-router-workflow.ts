@@ -1,4 +1,4 @@
-import { evaluate } from "#ai/evaluate.js";
+import { decide } from "#ai/decide.js";
 import type { JsonValue } from "#shared/json.js";
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 import type { AgentRouterInput } from "#execution/tools/agent-router.js";
@@ -32,7 +32,7 @@ async function chooseTarget(
   }
   if (names.length === 1) return names[0]!;
 
-  const result = await evaluate({
+  const result = await decide({
     abortSignal,
     state: { message },
     questions: {

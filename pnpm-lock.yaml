@@ -165,29 +165,29 @@ settings:
 catalogs:
   default:
     '@ai-sdk/anthropic':
-      specifier: ^4.0.49
-      version: 4.0.56
+      specifier: ^4.0.72
+      version: 4.0.72
     '@ai-sdk/code-mode':
-      specifier: ^1.0.62
-      version: 1.0.62
+      specifier: ^1.0.85
+      version: 1.0.85
     '@ai-sdk/google':
-      specifier: ^4.0.64
-      version: 4.0.74
+      specifier: ^4.0.88
+      version: 4.0.88
     '@ai-sdk/mcp':
-      specifier: ^2.0.45
-      version: 2.0.52
+      specifier: ^2.0.67
+      version: 2.0.67
     '@ai-sdk/openai':
-      specifier: ^4.0.60
-      version: 4.0.69
+      specifier: ^4.0.84
+      version: 4.0.84
     '@ai-sdk/otel':
-      specifier: ^1.0.93
-      version: 1.0.105
+      specifier: ^1.0.128
+      version: 1.0.128
     '@ai-sdk/provider':
-      specifier: ^4.0.10
-      version: 4.0.17
+      specifier: ^4.0.22
+      version: 4.0.22
     '@ai-sdk/provider-utils':
-      specifier: ^5.0.36
-      version: 5.0.43
+      specifier: ^5.0.54
+      version: 5.0.54
     '@opentelemetry/context-async-hooks':
       specifier: 2.6.1
       version: 2.6.1
@@ -219,8 +219,8 @@ catalogs:
       specifier: 5.0.1
       version: 5.0.1
     ai:
-      specifier: ^7.0.105
-      version: 7.0.105
+      specifier: ^7.0.128
+      version: 7.0.128
     marked:
       specifier: 17.0.6
       version: 17.0.6
@@ -392,10 +392,10 @@ importers:
         version: 0.33.2(@vercel/sandbox@3.3.0)(eve@packages+eve)
       '@agentphone/chat-sdk-adapter':
         specifier: 0.1.0
-        version: 0.1.0(ai@7.0.105(zod@4.5.4))(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+        version: 0.1.0(ai@7.0.128(zod@4.5.4))(chat@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       '@beeper/chat-adapter-matrix':
         specifier: 0.2.0
-        version: 0.2.0(@opentelemetry/api@1.9.1)(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+        version: 0.2.0(@opentelemetry/api@1.9.1)(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       '@blitzreels/eve':
         specifier: ^0.2.1
         version: 0.2.1(eve@packages+eve)
@@ -404,55 +404,55 @@ importers:
         version: 0.1.0(@cfworker/json-schema@4.1.1)(eve@packages+eve)(playwright-core@1.63.0)(supports-color@10.2.2)
       '@chat-adapter/gchat':
         specifier: 4.41.0
-        version: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+        version: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       '@chat-adapter/gmail':
         specifier: 4.41.0
-        version: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)
+        version: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)
       '@chat-adapter/messenger':
         specifier: 4.41.0
-        version: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+        version: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       '@chat-adapter/state-memory':
         specifier: 4.41.0
-        version: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+        version: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       '@chat-adapter/state-redis':
         specifier: 4.41.0
-        version: 4.41.0(@opentelemetry/api@1.9.1)(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+        version: 4.41.0(@opentelemetry/api@1.9.1)(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       '@chat-adapter/whatsapp':
         specifier: 4.41.0
-        version: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+        version: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       '@chat-adapter/x':
         specifier: 4.41.0
-        version: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+        version: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       '@getdial/chat-sdk-adapter':
         specifier: 0.2.0
-        version: 0.2.0(ai@7.0.105(zod@4.5.4))(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(react-native@0.87.1(@babel/core@7.29.7(supports-color@10.2.2))(@types/react@19.2.15)(bufferutil@4.1.0)(react@19.2.6)(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4)
+        version: 0.2.0(ai@7.0.128(zod@4.5.4))(chat@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(react-native@0.87.1(@babel/core@7.29.7(supports-color@10.2.2))(@types/react@19.2.15)(bufferutil@4.1.0)(react@19.2.6)(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4)
       '@github-tools/eve-extension':
         specifier: ^0.1.0
-        version: 0.1.0(@vercel/connect@2.2.0(@ai-sdk/mcp@2.0.52(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.105(zod@4.5.4))(eve@packages+eve))(ai@7.0.105(zod@4.5.4))(eve@packages+eve)
+        version: 0.1.0(@vercel/connect@2.2.0(@ai-sdk/mcp@2.0.67(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.128(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.128(zod@4.5.4))(eve@packages+eve))(ai@7.0.128(zod@4.5.4))(eve@packages+eve)
       '@jetty/eve':
         specifier: ^0.3.0
         version: 0.3.1(eve@packages+eve)
       '@kapso/chat-adapter':
         specifier: 0.1.1
-        version: 0.1.1(ai@7.0.105(zod@4.5.4))(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+        version: 0.1.1(ai@7.0.128(zod@4.5.4))(chat@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       '@kybernesis/arcana':
         specifier: 0.4.1
         version: 0.4.1(eve@packages+eve)
       '@larksuite/vercel-chat-adapter':
         specifier: 0.1.2
-        version: 0.1.2(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4)
+        version: 0.1.2(ai@7.0.128(zod@4.5.4))(bufferutil@4.1.0)(chat@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4)
       '@liveblocks/chat-sdk-adapter':
         specifier: 3.23.0
-        version: 3.23.0(@types/json-schema@7.0.15)(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))
+        version: 3.23.0(@types/json-schema@7.0.15)(chat@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))
       '@mdx-js/mdx':
         specifier: 3.1.1
         version: 3.1.1(supports-color@10.2.2)
       '@novu/chat-sdk-adapter':
         specifier: 0.1.0
-        version: 0.1.0(ai@7.0.105(zod@4.5.4))(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(react@19.2.6)(supports-color@10.2.2)(zod@4.5.4)
+        version: 0.1.0(ai@7.0.128(zod@4.5.4))(chat@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(react@19.2.6)(supports-color@10.2.2)(zod@4.5.4)
       '@onkernel/eve-extension':
         specifier: ^0.1.3
-        version: 0.1.4(@ai-sdk/mcp@2.0.52(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.105(zod@4.5.4))(eve@packages+eve)
+        version: 0.1.4(@ai-sdk/mcp@2.0.67(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.128(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.128(zod@4.5.4))(eve@packages+eve)
       '@opentelemetry/api':
         specifier: 1.9.1
         version: 1.9.1
@@ -467,7 +467,7 @@ importers:
         version: 7.19.6(@ai-sdk/provider@3.0.16)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.4.3))(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-http@0.221.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))(@smithy/signature-v4@5.7.3)(bufferutil@4.1.0)(posthog-node@5.52.4)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))
       '@resend/chat-sdk-adapter':
         specifier: 0.2.2
-        version: 0.2.2(@chat-adapter/shared@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(@react-email/render@2.1.0(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(bufferutil@4.1.0)(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(supports-color@10.2.2)
+        version: 0.2.2(@chat-adapter/shared@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(@react-email/render@2.1.0(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(bufferutil@4.1.0)(chat@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(supports-color@10.2.2)
       '@stripe/link-integrations-eve':
         specifier: ^0.2.0
         version: 0.2.0(eve@packages+eve)
@@ -497,7 +497,7 @@ importers:
         version: 0.184.1
       '@upstash/agentkit-eve':
         specifier: 0.9.0
-        version: 0.9.0(@upstash/redis@1.38.4)(ai@7.0.105(zod@4.5.4))(eve@packages+eve)
+        version: 0.9.0(@upstash/redis@1.38.4)(ai@7.0.128(zod@4.5.4))(eve@packages+eve)
       '@upstash/redis':
         specifier: ^1.38.4
         version: 1.38.4
@@ -506,10 +506,10 @@ importers:
         version: 0.2.1(eve@packages+eve)
       '@veltdev/chat-sdk-adapter':
         specifier: 0.2.4
-        version: 0.2.4(ai@7.0.105(zod@4.5.4))(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+        version: 0.2.4(ai@7.0.128(zod@4.5.4))(chat@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       '@vercel/connect':
         specifier: 2.2.0
-        version: 2.2.0(@ai-sdk/mcp@2.0.52(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.105(zod@4.5.4))(eve@packages+eve)
+        version: 2.2.0(@ai-sdk/mcp@2.0.67(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.128(zod@4.5.4))(bufferutil@4.1.0)(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.128(zod@4.5.4))(eve@packages+eve)
       '@vercel/otel':
         specifier: 'catalog:'
         version: 2.1.3(@opentelemetry/api-logs@0.222.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.219.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.11.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.221.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.11.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
@@ -521,22 +521,22 @@ importers:
         version: 0.1.72
       '@zernio/chat-sdk-adapter':
         specifier: 0.5.0
-        version: 0.5.0(ai@7.0.105(zod@4.5.4))(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+        version: 0.5.0(ai@7.0.128(zod@4.5.4))(chat@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       braintrust:
         specifier: 3.29.0
         version: 3.29.0(@aws-sdk/credential-provider-web-identity@3.972.49)(supports-color@10.2.2)(zod@4.5.4)
       chat:
         specifier: 4.41.0
-        version: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+        version: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       chat-adapter-sendblue:
         specifier: 0.2.0
-        version: 0.2.0(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))
+        version: 0.2.0(chat@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))
       eve:
         specifier: workspace:*
         version: link:../../packages/eve
       eve-channel-blooio:
         specifier: 0.2.0
-        version: 0.2.0(ai@7.0.105(zod@4.5.4))(eve@packages+eve)
+        version: 0.2.0(ai@7.0.128(zod@4.5.4))(eve@packages+eve)
       mdast-util-mdx-jsx:
         specifier: 3.2.0
         version: 3.2.0(supports-color@10.2.2)
@@ -612,10 +612,10 @@ importers:
         version: 0.41.2
       '@vercel/connect':
         specifier: 2.2.0
-        version: 2.2.0(@ai-sdk/mcp@2.0.52(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.105(zod@4.5.4))(eve@packages+eve)
+        version: 2.2.0(@ai-sdk/mcp@2.0.67(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.128(zod@4.5.4))(bufferutil@4.1.0)(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.128(zod@4.5.4))(eve@packages+eve)
       ai:
         specifier: 'catalog:'
-        version: 7.0.105(zod@4.5.4)
+        version: 7.0.128(zod@4.5.4)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -664,7 +664,7 @@ importers:
     dependencies:
       ai:
         specifier: 'catalog:'
-        version: 7.0.105(zod@4.5.4)
+        version: 7.0.128(zod@4.5.4)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -930,6 +930,28 @@ importers:
         specifier: 'catalog:'
         version: 7.0.2
 
+  e2e/fixtures/agent-decide:
+    dependencies:
+      '@eve-e2e/config':
+        specifier: workspace:*
+        version: link:../e2e-config
+      '@workflow/world-postgres':
+        specifier: 'catalog:'
+        version: 5.0.1(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(@upstash/redis@1.38.4)(sql.js@1.14.2)(supports-color@10.2.2)(typescript@7.0.2)
+      ai:
+        specifier: 'catalog:'
+        version: 7.0.128(zod@4.6.5)
+      eve:
+        specifier: workspace:*
+        version: link:../../../packages/eve
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.13.3
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+
   e2e/fixtures/agent-dynamic-model-session:
     dependencies:
       '@eve-e2e/config':
@@ -944,28 +966,6 @@ importers:
       zod:
         specifier: 'catalog:'
         version: 4.5.4
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.13.3
-      typescript:
-        specifier: 'catalog:'
-        version: 7.0.2
-
-  e2e/fixtures/agent-evaluate:
-    dependencies:
-      '@eve-e2e/config':
-        specifier: workspace:*
-        version: link:../e2e-config
-      '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.1(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(@upstash/redis@1.38.4)(sql.js@1.14.2)(supports-color@10.2.2)(typescript@7.0.2)
-      ai:
-        specifier: 'catalog:'
-        version: 7.0.105(zod@4.6.5)
-      eve:
-        specifier: workspace:*
-        version: link:../../../packages/eve
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1173,7 +1173,7 @@ importers:
         version: link:../e2e-config
       '@vercel/connect':
         specifier: 2.2.0
-        version: 2.2.0(@ai-sdk/mcp@2.0.52(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.105(zod@4.5.4))(eve@packages+eve)
+        version: 2.2.0(@ai-sdk/mcp@2.0.67(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.128(zod@4.5.4))(bufferutil@4.1.0)(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.128(zod@4.5.4))(eve@packages+eve)
       '@workflow/world-postgres':
         specifier: 'catalog:'
         version: 5.0.1(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(@upstash/redis@1.38.4)(sql.js@1.14.2)(supports-color@10.2.2)(typescript@7.0.2)
@@ -1484,7 +1484,7 @@ importers:
     dependencies:
       '@ai-sdk/openai':
         specifier: 'catalog:'
-        version: 4.0.69(zod@4.6.5)
+        version: 4.0.84(zod@4.6.5)
       '@opentelemetry/sdk-trace-base':
         specifier: 'catalog:'
         version: 2.6.1(@opentelemetry/api@1.9.1)
@@ -1620,40 +1620,40 @@ importers:
         version: 1.3.0(zod@4.5.4)
       '@ai-sdk/anthropic':
         specifier: 'catalog:'
-        version: 4.0.56(zod@4.5.4)
+        version: 4.0.72(zod@4.5.4)
       '@ai-sdk/code-mode':
         specifier: 'catalog:'
-        version: 1.0.62(ai@7.0.105(zod@4.5.4))(typescript@7.0.2)
+        version: 1.0.85(ai@7.0.128(zod@4.5.4))(typescript@7.0.2)
       '@ai-sdk/google':
         specifier: 'catalog:'
-        version: 4.0.74(zod@4.5.4)
+        version: 4.0.88(zod@4.5.4)
       '@ai-sdk/mcp':
         specifier: 'catalog:'
-        version: 2.0.52(zod@4.5.4)
+        version: 2.0.67(zod@4.5.4)
       '@ai-sdk/openai':
         specifier: 'catalog:'
-        version: 4.0.69(zod@4.5.4)
+        version: 4.0.84(zod@4.5.4)
       '@ai-sdk/otel':
         specifier: 'catalog:'
-        version: 1.0.105(zod@4.5.4)
+        version: 1.0.128(zod@4.5.4)
       '@ai-sdk/provider':
         specifier: 'catalog:'
-        version: 4.0.17
+        version: 4.0.22
       '@ai-sdk/provider-utils':
         specifier: 'catalog:'
-        version: 5.0.43(zod@4.5.4)
+        version: 5.0.54(zod@4.5.4)
       '@cfworker/json-schema':
         specifier: 4.1.1
         version: 4.1.1
       '@chat-adapter/slack':
         specifier: 4.41.0
-        version: 4.41.0(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4)
+        version: 4.41.0(ai@7.0.128(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4)
       '@chat-adapter/state-memory':
         specifier: 4.41.0
-        version: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+        version: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       '@chat-adapter/twilio':
         specifier: 4.41.0
-        version: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+        version: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       '@clack/core':
         specifier: 1.3.1
         version: 1.3.1
@@ -1662,7 +1662,7 @@ importers:
         version: link:../eve-catalog
       '@linqapp/chat-sdk-adapter':
         specifier: ^0.5.1
-        version: 0.5.1(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))
+        version: 0.5.1(chat@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))
       '@modelcontextprotocol/server':
         specifier: 2.0.0
         version: 2.0.0
@@ -1686,7 +1686,7 @@ importers:
         version: 2.6.1(@opentelemetry/api@1.9.1)
       '@photon-ai/chat-adapter-imessage':
         specifier: 3.2.0
-        version: 3.2.0(ai@7.0.105(zod@4.5.4))(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(supports-color@10.2.2)(typescript@7.0.2)(zod@4.5.4)
+        version: 3.2.0(ai@7.0.128(zod@4.5.4))(chat@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(supports-color@10.2.2)(typescript@7.0.2)(zod@4.5.4)
       '@slack/web-api':
         specifier: 7.19.0
         version: 7.19.0(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)
@@ -1710,7 +1710,7 @@ importers:
         version: 2.8.0
       '@vercel/connect':
         specifier: 'catalog:'
-        version: 2.3.3(@ai-sdk/mcp@2.0.52(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.41.0(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4))(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.105(zod@4.5.4))(eve@0.65.0(@opentelemetry/api@1.9.1)(ai@7.0.105(zod@4.5.4))(braintrust@3.29.0(@aws-sdk/credential-provider-web-identity@3.972.49)(supports-color@10.2.2)(zod@4.5.4))(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(dd-trace@6.13.0)(just-bash@3.1.0(supports-color@10.2.2))(microsandbox@0.5.5))
+        version: 2.3.3(@ai-sdk/mcp@2.0.67(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.41.0(ai@7.0.128(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4))(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.128(zod@4.5.4))(eve@0.65.0(@opentelemetry/api@1.9.1)(ai@7.0.128(zod@4.5.4))(braintrust@3.29.0(@aws-sdk/credential-provider-web-identity@3.972.49)(supports-color@10.2.2)(zod@4.5.4))(chat@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(dd-trace@6.13.0)(just-bash@3.1.0(supports-color@10.2.2))(microsandbox@0.5.5))
       '@vercel/detect-agent':
         specifier: 1.2.3
         version: 1.2.3
@@ -1746,10 +1746,10 @@ importers:
         version: 5.0.1(@aws-sdk/credential-provider-web-identity@3.972.49)(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)
       ai:
         specifier: 'catalog:'
-        version: 7.0.105(zod@4.5.4)
+        version: 7.0.128(zod@4.5.4)
       chat:
         specifier: 4.41.0
-        version: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+        version: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       chokidar:
         specifier: 5.0.0
         version: 5.0.0
@@ -1855,7 +1855,7 @@ importers:
     dependencies:
       '@vercel/connect':
         specifier: 'catalog:'
-        version: 2.3.3(@ai-sdk/mcp@2.0.52(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(supports-color@10.2.2)(zod@4.5.4))(@modelcontextprotocol/sdk@1.30.0(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.105(zod@4.5.4))(eve@packages+eve)
+        version: 2.3.3(@ai-sdk/mcp@2.0.67(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.128(zod@4.5.4))(bufferutil@4.1.0)(supports-color@10.2.2)(zod@4.5.4))(@modelcontextprotocol/sdk@1.30.0(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.128(zod@4.5.4))(eve@packages+eve)
       eve:
         specifier: workspace:*
         version: link:../eve
@@ -1947,8 +1947,8 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/anthropic@4.0.56':
-    resolution: {integrity: sha512-rpz9LepVvjCs0YXWN/I5DLNAK/SbaA8g2sMTS1iyWQyH7Vsjqeonc3A7WbZiM6bfhNtrGO6irhvkDjL/xWpE1w==}
+  '@ai-sdk/anthropic@4.0.72':
+    resolution: {integrity: sha512-dN5ShH8f6MWlSBSx4BdL+/cfPvByFYMo2Hr9UB6XeHY7/9tbcYU/ZukptBcyWJzqMsQOl3gSfg99iWdyNuH3kg==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -1965,11 +1965,11 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/code-mode@1.0.62':
-    resolution: {integrity: sha512-Pk6lZIJgq5n6O8hrPFm0XLFPGvA8f1Yew9d7+GSXgn1ajlXy/Uqn/8j3o5JuelstFCS2OJmgG4vtiZrsBTKE1Q==}
+  '@ai-sdk/code-mode@1.0.85':
+    resolution: {integrity: sha512-GBX2uumgOLsA4OeDYSoiN3ET4R0Y5KvzlIEUr0ampZRLqpsPyPhFv+YjVJSIcyw9i7+t2Vlieg9AmjuYfuVV4Q==}
     engines: {node: '>=22.13.0'}
     peerDependencies:
-      ai: 7.0.105
+      ai: 7.0.128
 
   '@ai-sdk/deepseek@1.0.57':
     resolution: {integrity: sha512-sF+t6MnK1PTNN1oqmJpnWCm/4reVOpKryR1EcIl17O5Bu+AFstD/DpFZueRtzFk1dEZ0+uPX6gZXndjrNPAxLQ==}
@@ -1977,8 +1977,8 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/gateway@2.0.153':
-    resolution: {integrity: sha512-USFJ7MIRxR6+PrXT06Q7V+cJf/rJIOmH/KdY84OWCb6+9bhg4xg1pUNxKD28N4F8+VFnX42wfWtqbM3+ZhK+yQ==}
+  '@ai-sdk/gateway@2.0.163':
+    resolution: {integrity: sha512-fPkB0RKy2ZD9yxC/3XeZR/9d7J/qijsix8reBPgEtiUCnukr0XQ/3TaH+UGa0U9CJyhrJENquRGyi83f+FGwiA==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -1989,8 +1989,14 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/gateway@4.0.85':
-    resolution: {integrity: sha512-c8ztST/CslupqO3p7izsAuG3TlKg9mhE6mGJ42iUADsSMJIV5IOKd9AsLG33QCAY7SWs6NDO2giM/rq7bUTNlQ==}
+  '@ai-sdk/gateway@3.0.210':
+    resolution: {integrity: sha512-XUC2HGvDLhpfHKT7yXirZELHWIHzPJLtE3CE3FO6fjcQHcKR5nrsHxOp00THk1SivDo3IZB1yS6Un4+kAQ8eJg==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/gateway@4.0.104':
+    resolution: {integrity: sha512-4lTyt8a4BMfVz4QGo+VO5odakmYMX5kq+xiRgdQGGY7o/jP2WSasp6LvIvYvt/lHzz1MfE+xKTOJhz7mMwjynA==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -2007,8 +2013,8 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/google@4.0.74':
-    resolution: {integrity: sha512-MoWPhC+kwqiAsFF21iPDCxZPXW6lQYY1ImjohQ0q7VHgY4e8I/mfgKeeessYFI/mh0e7vSxG0/P767PSsTdngg==}
+  '@ai-sdk/google@4.0.88':
+    resolution: {integrity: sha512-5wfpAcnXrR2o1kUZURXhl6ErOGDmdayCi+GsfsB3vJHeITpm1t9aVqrw9/wUhpUmZTvvC5/+vDRtdo5QU9XYJA==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -2019,8 +2025,8 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/mcp@2.0.52':
-    resolution: {integrity: sha512-01JlPlhpORspKA2xAh11qQ6KNieodbBEIJqMTzjmlV3mx6Y3JhBR4Uk8a7SsAv5ijphAUNZNYh50F2EhEEJ7fA==}
+  '@ai-sdk/mcp@2.0.67':
+    resolution: {integrity: sha512-cMEif3Lbvh+FozPpBM5UPy6QQhH8v8L/u1kcR2UXp+86EfIDXIaIeOaH+wYCk2CfloFccUn1K8LJuPXqZMZsfw==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -2043,14 +2049,14 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/openai@4.0.69':
-    resolution: {integrity: sha512-HAKua/QVNjwsBpJE3SUGLEPCSRThOLiiOy92gsUOkX4ZnEJHubkR6REHvi4RGGIn97lYBma+mq3BjBqgyNuhwQ==}
+  '@ai-sdk/openai@4.0.84':
+    resolution: {integrity: sha512-RsHz+jqstQ+wnMex1BLzIlwseDRzJAruT7ZW1X1azCEI9cVkSQVn17JS6qVntdi+DKkAMPg4rP1APixDEZFKiw==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/otel@1.0.105':
-    resolution: {integrity: sha512-n73OvB0nDgPXx9+3JwFO+/+WlBOQTIJBKD+vYTsmPoacyxjjQgaA2kqG4YUmdTkg+c/aXoeo07LLTayBLpz3KA==}
+  '@ai-sdk/otel@1.0.128':
+    resolution: {integrity: sha512-WighejgfttBLk6VoI4Te2hOJmssvOGMCpKyVPrg4GVa08PYEuLZDBetDC+1OXt8mvodVYPm6CNEZ5FA+fJN7bA==}
     engines: {node: '>=22'}
 
   '@ai-sdk/perplexity@2.0.43':
@@ -2071,14 +2077,26 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
+  '@ai-sdk/provider-utils@3.0.41':
+    resolution: {integrity: sha512-xpURVGQud+AEOZ/uRZTBU0eVy2+dt/y/dUEp9ewjW3eTM6yu0vThzTvduhOSabpn6AExewg8WJW04P4D6USVXw==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
   '@ai-sdk/provider-utils@4.0.51':
     resolution: {integrity: sha512-ukLTs9x1Xm6lxSIwbJIxYQxbZHmVeIczNntARZrBcOa6pjdBhqeZnATNnJMHa7M9dZ8Ji5NJbpKpvz7o5XyBtg==}
     engines: {node: '>=18.17'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/provider-utils@5.0.43':
-    resolution: {integrity: sha512-gw/bcNseOGSs59TMtV4H1KwqXXe24NHgx+uBYr98pa4Fg6Uvp8hPPxjuckVnfFFyIxHCDew8so0ujpvcSuyMZA==}
+  '@ai-sdk/provider-utils@4.0.57':
+    resolution: {integrity: sha512-89a7sPvZqXsP3PigcAQLWntu/duIVEcN/RyChAB+j6p3C7NwW767sVttvL8r0+BetTg63uAXQoYHCZZueQKBSw==}
+    engines: {node: '>=18.17'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/provider-utils@5.0.54':
+    resolution: {integrity: sha512-amqDxFnw9+dpVrDACRDGmExUUNOH9C1D2bhg/DqWJnamEOieDTXBBXLHujSby/0MqHdAFksnpE8Pzfqx6ABMBw==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -2091,12 +2109,20 @@ packages:
     resolution: {integrity: sha512-B0M50w0W43jTzZGyZrNwwaK1M79aKPw6PD/dQhkBR7vkR68yCINWBo2CbBLJrbrqYc46TaiSfsTiT+S9EmVl0w==}
     engines: {node: '>=18'}
 
+  '@ai-sdk/provider@2.0.5':
+    resolution: {integrity: sha512-cmG40u10QFEUrYXWYom6Lo6DLR+pND3wWABTTT9Nf7zg9F7BD46KNj+STekndp9Kg5ZAIPA0WxmTI0IwRvKvvQ==}
+    engines: {node: '>=18'}
+
   '@ai-sdk/provider@3.0.16':
     resolution: {integrity: sha512-9Av6kg0t/IN/dcYAAmEJ4B9OPhcEJqwSR+GfHEA8olRkindXpUHadc3p3cyvgFUQFTVm1G5thtsmgZ9yVb2w3A==}
     engines: {node: '>=18'}
 
-  '@ai-sdk/provider@4.0.17':
-    resolution: {integrity: sha512-VYMBxIQdcHqbIf1j+YZlI9Ati6LZ4wJe0GGd4z4a5H/KxTggjeOiyaVYTnfF7LHZK5jMQ+rofmzz4QPqf++NUw==}
+  '@ai-sdk/provider@3.0.18':
+    resolution: {integrity: sha512-IpefF5ssZVOZCD4Wu7zxt6PwZoGT2HLVjxpJ10Bjx6EAmRfLYJPjyrfxb0RYDlwvXnDb9nkQ7Do/oJVDuRFzew==}
+    engines: {node: '>=18'}
+
+  '@ai-sdk/provider@4.0.22':
+    resolution: {integrity: sha512-1Jtmn36VNMOBo9CMUQrPqsR744qtqRloEiXpWCYS8ffPlhS2CrSNmoho5lPjp3R7EnkzBsGI6p51TA7fQJQZdA==}
     engines: {node: '>=22'}
 
   '@ai-sdk/react@3.0.288':
@@ -7841,8 +7867,8 @@ packages:
     resolution: {integrity: sha512-kja8j7PjmncONqaTsB8fQ+wE2mSU2DJ9D4XKoJ5PFWIdRMa6SLSN1ff4mOr4jCbfRSsxR4keIiySJU0N9T5hIQ==}
     engines: {node: '>= 8.0.0'}
 
-  ai@5.0.259:
-    resolution: {integrity: sha512-Er9lVNxOmW3dwWg+s6/OZXyNZr36hA+SXbr/5p+OJtVVaNOkXrPEeX0rYWVpyMLsteefXrTcwFYQ0NvRjI3nlA==}
+  ai@5.0.272:
+    resolution: {integrity: sha512-MsutXPJ3G/mljr9pTb5xh3Ren8ZjRCm7EgqZoEHKfN7mOfzFOvac00hBnx5u/wDZg29P9mVoNN9Ro5C6DR4hKA==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -7853,8 +7879,14 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  ai@7.0.105:
-    resolution: {integrity: sha512-gkV3W+tTtWwQ41KNV/KjV8wabBrk+bnbnZ3f0AWp/T9LLyljose8uhFViKleVy7tIdEiR2PiS4BpbNdcExf7rQ==}
+  ai@6.0.301:
+    resolution: {integrity: sha512-pb7vIIBXKw4VGpbLmXvD+u5qbUe+2Mm7hEEkHs6Z2XBiifxAUEB38gl5JbaRi3BWsFqN13GP25/NHhf/DvPjgg==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  ai@7.0.128:
+    resolution: {integrity: sha512-WMKN83DodYtH52ETPHq0jrSwj3wU0aHkhLHXMrwMRabC/aMpIqeWsXJgjkUwrOqkaKHWONdupk/2ttPRvAyFcg==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -14924,10 +14956,10 @@ snapshots:
     dependencies:
       zod: 4.5.4
 
-  '@agentphone/chat-sdk-adapter@0.1.0(ai@7.0.105(zod@4.5.4))(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)':
+  '@agentphone/chat-sdk-adapter@0.1.0(ai@7.0.128(zod@4.5.4))(chat@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)':
     dependencies:
-      '@chat-adapter/shared': 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
-      chat: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      '@chat-adapter/shared': 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      chat: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
     transitivePeerDependencies:
       - ai
       - supports-color
@@ -14958,10 +14990,10 @@ snapshots:
       zod: 4.4.3
     optional: true
 
-  '@ai-sdk/anthropic@4.0.56(zod@4.5.4)':
+  '@ai-sdk/anthropic@4.0.72(zod@4.5.4)':
     dependencies:
-      '@ai-sdk/provider': 4.0.17
-      '@ai-sdk/provider-utils': 5.0.43(zod@4.5.4)
+      '@ai-sdk/provider': 4.0.22
+      '@ai-sdk/provider-utils': 5.0.54(zod@4.5.4)
       zod: 4.5.4
 
   '@ai-sdk/azure@2.0.134(zod@4.4.3)':
@@ -14981,9 +15013,9 @@ snapshots:
       zod: 4.4.3
     optional: true
 
-  '@ai-sdk/code-mode@1.0.62(ai@7.0.105(zod@4.5.4))(typescript@7.0.2)':
+  '@ai-sdk/code-mode@1.0.85(ai@7.0.128(zod@4.5.4))(typescript@7.0.2)':
     dependencies:
-      ai: 7.0.105(zod@4.5.4)
+      ai: 7.0.128(zod@4.5.4)
       run: 2.1.2(typescript@7.0.2)
     transitivePeerDependencies:
       - typescript
@@ -14995,17 +15027,17 @@ snapshots:
       zod: 4.4.3
     optional: true
 
-  '@ai-sdk/gateway@2.0.153(zod@3.25.76)':
+  '@ai-sdk/gateway@2.0.163(zod@3.25.76)':
     dependencies:
-      '@ai-sdk/provider': 2.0.4
-      '@ai-sdk/provider-utils': 3.0.37(zod@3.25.76)
+      '@ai-sdk/provider': 2.0.5
+      '@ai-sdk/provider-utils': 3.0.41(zod@3.25.76)
       '@vercel/oidc': 3.1.0
       zod: 3.25.76
 
-  '@ai-sdk/gateway@2.0.153(zod@4.4.3)':
+  '@ai-sdk/gateway@2.0.163(zod@4.4.3)':
     dependencies:
-      '@ai-sdk/provider': 2.0.4
-      '@ai-sdk/provider-utils': 3.0.37(zod@4.4.3)
+      '@ai-sdk/provider': 2.0.5
+      '@ai-sdk/provider-utils': 3.0.41(zod@4.4.3)
       '@vercel/oidc': 3.1.0
       zod: 4.4.3
 
@@ -15016,17 +15048,24 @@ snapshots:
       '@vercel/oidc': 3.2.0
       zod: 4.6.5
 
-  '@ai-sdk/gateway@4.0.85(zod@4.5.4)':
+  '@ai-sdk/gateway@3.0.210(zod@4.6.5)':
     dependencies:
-      '@ai-sdk/provider': 4.0.17
-      '@ai-sdk/provider-utils': 5.0.43(zod@4.5.4)
+      '@ai-sdk/provider': 3.0.18
+      '@ai-sdk/provider-utils': 4.0.57(zod@4.6.5)
+      '@vercel/oidc': 3.2.0
+      zod: 4.6.5
+
+  '@ai-sdk/gateway@4.0.104(zod@4.5.4)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.22
+      '@ai-sdk/provider-utils': 5.0.54(zod@4.5.4)
       '@vercel/oidc': 3.2.0
       zod: 4.5.4
 
-  '@ai-sdk/gateway@4.0.85(zod@4.6.5)':
+  '@ai-sdk/gateway@4.0.104(zod@4.6.5)':
     dependencies:
-      '@ai-sdk/provider': 4.0.17
-      '@ai-sdk/provider-utils': 5.0.43(zod@4.6.5)
+      '@ai-sdk/provider': 4.0.22
+      '@ai-sdk/provider-utils': 5.0.54(zod@4.6.5)
       '@vercel/oidc': 3.2.0
       zod: 4.6.5
 
@@ -15050,10 +15089,10 @@ snapshots:
       zod: 4.4.3
     optional: true
 
-  '@ai-sdk/google@4.0.74(zod@4.5.4)':
+  '@ai-sdk/google@4.0.88(zod@4.5.4)':
     dependencies:
-      '@ai-sdk/provider': 4.0.17
-      '@ai-sdk/provider-utils': 5.0.43(zod@4.5.4)
+      '@ai-sdk/provider': 4.0.22
+      '@ai-sdk/provider-utils': 5.0.54(zod@4.5.4)
       zod: 4.5.4
 
   '@ai-sdk/groq@2.0.53(zod@4.4.3)':
@@ -15063,10 +15102,10 @@ snapshots:
       zod: 4.4.3
     optional: true
 
-  '@ai-sdk/mcp@2.0.52(zod@4.5.4)':
+  '@ai-sdk/mcp@2.0.67(zod@4.5.4)':
     dependencies:
-      '@ai-sdk/provider': 4.0.17
-      '@ai-sdk/provider-utils': 5.0.43(zod@4.5.4)
+      '@ai-sdk/provider': 4.0.22
+      '@ai-sdk/provider-utils': 5.0.54(zod@4.5.4)
       cross-spawn: 7.0.6
       pkce-challenge: 5.0.1
       zod: 4.5.4
@@ -15092,23 +15131,23 @@ snapshots:
       zod: 4.4.3
     optional: true
 
-  '@ai-sdk/openai@4.0.69(zod@4.5.4)':
+  '@ai-sdk/openai@4.0.84(zod@4.5.4)':
     dependencies:
-      '@ai-sdk/provider': 4.0.17
-      '@ai-sdk/provider-utils': 5.0.43(zod@4.5.4)
+      '@ai-sdk/provider': 4.0.22
+      '@ai-sdk/provider-utils': 5.0.54(zod@4.5.4)
       zod: 4.5.4
 
-  '@ai-sdk/openai@4.0.69(zod@4.6.5)':
+  '@ai-sdk/openai@4.0.84(zod@4.6.5)':
     dependencies:
-      '@ai-sdk/provider': 4.0.17
-      '@ai-sdk/provider-utils': 5.0.43(zod@4.6.5)
+      '@ai-sdk/provider': 4.0.22
+      '@ai-sdk/provider-utils': 5.0.54(zod@4.6.5)
       zod: 4.6.5
 
-  '@ai-sdk/otel@1.0.105(zod@4.5.4)':
+  '@ai-sdk/otel@1.0.128(zod@4.5.4)':
     dependencies:
-      '@ai-sdk/provider': 4.0.17
+      '@ai-sdk/provider': 4.0.22
       '@opentelemetry/api': 1.9.1
-      ai: 7.0.105(zod@4.5.4)
+      ai: 7.0.128(zod@4.5.4)
     transitivePeerDependencies:
       - zod
 
@@ -15126,17 +15165,26 @@ snapshots:
       secure-json-parse: 2.7.0
       zod: 3.25.76
 
-  '@ai-sdk/provider-utils@3.0.37(zod@3.25.76)':
+  '@ai-sdk/provider-utils@3.0.37(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 2.0.4
       '@standard-schema/spec': 1.1.0
       eventsource-parser: 3.1.0
       undici: 5.29.0
+      zod: 4.4.3
+    optional: true
+
+  '@ai-sdk/provider-utils@3.0.41(zod@3.25.76)':
+    dependencies:
+      '@ai-sdk/provider': 2.0.5
+      '@standard-schema/spec': 1.1.0
+      eventsource-parser: 3.1.0
+      undici: 5.29.0
       zod: 3.25.76
 
-  '@ai-sdk/provider-utils@3.0.37(zod@4.4.3)':
+  '@ai-sdk/provider-utils@3.0.41(zod@4.4.3)':
     dependencies:
-      '@ai-sdk/provider': 2.0.4
+      '@ai-sdk/provider': 2.0.5
       '@standard-schema/spec': 1.1.0
       eventsource-parser: 3.1.0
       undici: 5.29.0
@@ -15150,18 +15198,26 @@ snapshots:
       undici: 6.28.1
       zod: 4.6.5
 
-  '@ai-sdk/provider-utils@5.0.43(zod@4.5.4)':
+  '@ai-sdk/provider-utils@4.0.57(zod@4.6.5)':
     dependencies:
-      '@ai-sdk/provider': 4.0.17
+      '@ai-sdk/provider': 3.0.18
+      '@standard-schema/spec': 1.1.0
+      eventsource-parser: 3.1.0
+      undici: 6.28.1
+      zod: 4.6.5
+
+  '@ai-sdk/provider-utils@5.0.54(zod@4.5.4)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.22
       '@standard-schema/spec': 1.1.0
       '@workflow/serde': 4.1.0
       eventsource-parser: 3.1.0
       undici: 7.30.0
       zod: 4.5.4
 
-  '@ai-sdk/provider-utils@5.0.43(zod@4.6.5)':
+  '@ai-sdk/provider-utils@5.0.54(zod@4.6.5)':
     dependencies:
-      '@ai-sdk/provider': 4.0.17
+      '@ai-sdk/provider': 4.0.22
       '@standard-schema/spec': 1.1.0
       '@workflow/serde': 4.1.0
       eventsource-parser: 3.1.0
@@ -15175,12 +15231,21 @@ snapshots:
   '@ai-sdk/provider@2.0.4':
     dependencies:
       json-schema: 0.4.0
+    optional: true
+
+  '@ai-sdk/provider@2.0.5':
+    dependencies:
+      json-schema: 0.4.0
 
   '@ai-sdk/provider@3.0.16':
     dependencies:
       json-schema: 0.4.0
 
-  '@ai-sdk/provider@4.0.17':
+  '@ai-sdk/provider@3.0.18':
+    dependencies:
+      json-schema: 0.4.0
+
+  '@ai-sdk/provider@4.0.22':
     dependencies:
       json-schema: 0.4.0
 
@@ -15505,11 +15570,11 @@ snapshots:
 
   '@balena/dockerignore@1.0.2': {}
 
-  '@beeper/chat-adapter-matrix@0.2.0(@opentelemetry/api@1.9.1)(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)':
+  '@beeper/chat-adapter-matrix@0.2.0(@opentelemetry/api@1.9.1)(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)':
     dependencies:
-      '@chat-adapter/state-memory': 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
-      '@chat-adapter/state-redis': 4.41.0(@opentelemetry/api@1.9.1)(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
-      chat: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      '@chat-adapter/state-memory': 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      '@chat-adapter/state-redis': 4.41.0(@opentelemetry/api@1.9.1)(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      chat: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       marked: 15.0.12
       matrix-js-sdk: 41.9.0
       node-html-parser: 7.1.0
@@ -15573,12 +15638,12 @@ snapshots:
 
   '@browserbasehq/stagehand@3.7.0(@cfworker/json-schema@4.1.1)(playwright-core@1.63.0)(supports-color@10.2.2)(zod@4.4.3)':
     dependencies:
-      '@ai-sdk/provider': 2.0.4
+      '@ai-sdk/provider': 2.0.5
       '@anthropic-ai/sdk': 0.39.0
       '@browserbasehq/sdk': 2.16.0
       '@google/genai': 1.52.0(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.4.3))(bufferutil@4.1.0)(supports-color@10.2.2)
       '@modelcontextprotocol/sdk': 1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.4.3)
-      ai: 5.0.259(zod@4.4.3)
+      ai: 5.0.272(zod@4.4.3)
       devtools-protocol: 0.0.1642743
       fetch-cookie: 3.2.0
       openai: 4.104.0(ws@8.21.3(bufferutil@4.1.0))(zod@4.4.3)
@@ -15720,22 +15785,22 @@ snapshots:
       '@changesets/types': 7.0.0
       human-id: 4.2.1
 
-  '@chat-adapter/gchat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)':
+  '@chat-adapter/gchat@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)':
     dependencies:
-      '@chat-adapter/shared': 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      '@chat-adapter/shared': 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       '@googleapis/chat': 44.7.0(supports-color@10.2.2)
       '@googleapis/workspaceevents': 9.2.0(supports-color@10.2.2)
-      chat: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      chat: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
     transitivePeerDependencies:
       - ai
       - supports-color
       - workflow
       - zod
 
-  '@chat-adapter/gmail@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)':
+  '@chat-adapter/gmail@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)':
     dependencies:
-      '@chat-adapter/shared': 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
-      chat: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      '@chat-adapter/shared': 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      chat: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       html-to-text: 9.0.5
       jose: 6.2.3
       mimetext: 3.0.28
@@ -15746,48 +15811,48 @@ snapshots:
       - supports-color
       - workflow
 
-  '@chat-adapter/messenger@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)':
+  '@chat-adapter/messenger@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)':
     dependencies:
-      '@chat-adapter/shared': 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
-      chat: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      '@chat-adapter/shared': 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      chat: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
     transitivePeerDependencies:
       - ai
       - supports-color
       - workflow
       - zod
 
-  '@chat-adapter/shared@4.30.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)':
+  '@chat-adapter/shared@4.30.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)':
     dependencies:
-      chat: 4.30.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      chat: 4.30.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
     transitivePeerDependencies:
       - ai
       - supports-color
       - zod
 
-  '@chat-adapter/shared@4.34.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)':
+  '@chat-adapter/shared@4.34.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)':
     dependencies:
-      chat: 4.34.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      chat: 4.34.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
     transitivePeerDependencies:
       - ai
       - supports-color
       - zod
     optional: true
 
-  '@chat-adapter/shared@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)':
+  '@chat-adapter/shared@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)':
     dependencies:
-      chat: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      chat: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
     transitivePeerDependencies:
       - ai
       - supports-color
       - workflow
       - zod
 
-  '@chat-adapter/slack@4.34.0(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4)':
+  '@chat-adapter/slack@4.34.0(ai@7.0.128(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4)':
     dependencies:
-      '@chat-adapter/shared': 4.34.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      '@chat-adapter/shared': 4.34.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       '@slack/socket-mode': 2.0.7(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)
       '@slack/web-api': 7.19.0(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)
-      chat: 4.34.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      chat: 4.34.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
     transitivePeerDependencies:
       - ai
       - bufferutil
@@ -15797,12 +15862,12 @@ snapshots:
       - zod
     optional: true
 
-  '@chat-adapter/slack@4.41.0(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4)':
+  '@chat-adapter/slack@4.41.0(ai@7.0.128(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4)':
     dependencies:
-      '@chat-adapter/shared': 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      '@chat-adapter/shared': 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       '@slack/socket-mode': 2.0.7(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)
       '@slack/web-api': 7.19.0(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)
-      chat: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      chat: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
     transitivePeerDependencies:
       - ai
       - bufferutil
@@ -15812,18 +15877,18 @@ snapshots:
       - workflow
       - zod
 
-  '@chat-adapter/state-memory@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)':
+  '@chat-adapter/state-memory@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)':
     dependencies:
-      chat: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      chat: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
     transitivePeerDependencies:
       - ai
       - supports-color
       - workflow
       - zod
 
-  '@chat-adapter/state-redis@4.41.0(@opentelemetry/api@1.9.1)(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)':
+  '@chat-adapter/state-redis@4.41.0(@opentelemetry/api@1.9.1)(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)':
     dependencies:
-      chat: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      chat: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       redis: 5.12.1(@opentelemetry/api@1.9.1)
     transitivePeerDependencies:
       - '@node-rs/xxhash'
@@ -15833,30 +15898,30 @@ snapshots:
       - workflow
       - zod
 
-  '@chat-adapter/twilio@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)':
+  '@chat-adapter/twilio@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)':
     dependencies:
-      '@chat-adapter/shared': 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
-      chat: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      '@chat-adapter/shared': 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      chat: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
     transitivePeerDependencies:
       - ai
       - supports-color
       - workflow
       - zod
 
-  '@chat-adapter/whatsapp@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)':
+  '@chat-adapter/whatsapp@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)':
     dependencies:
-      '@chat-adapter/shared': 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
-      chat: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      '@chat-adapter/shared': 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      chat: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
     transitivePeerDependencies:
       - ai
       - supports-color
       - workflow
       - zod
 
-  '@chat-adapter/x@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)':
+  '@chat-adapter/x@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)':
     dependencies:
-      '@chat-adapter/shared': 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
-      chat: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      '@chat-adapter/shared': 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      chat: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
     transitivePeerDependencies:
       - ai
       - supports-color
@@ -16306,11 +16371,11 @@ snapshots:
     dependencies:
       tslib: 2.8.1
 
-  '@getdial/chat-sdk-adapter@0.2.0(ai@7.0.105(zod@4.5.4))(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(react-native@0.87.1(@babel/core@7.29.7(supports-color@10.2.2))(@types/react@19.2.15)(bufferutil@4.1.0)(react@19.2.6)(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4)':
+  '@getdial/chat-sdk-adapter@0.2.0(ai@7.0.128(zod@4.5.4))(chat@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(react-native@0.87.1(@babel/core@7.29.7(supports-color@10.2.2))(@types/react@19.2.15)(bufferutil@4.1.0)(react@19.2.6)(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4)':
     dependencies:
-      '@chat-adapter/shared': 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      '@chat-adapter/shared': 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       '@getdial/sdk': 0.19.1(react-native@0.87.1(@babel/core@7.29.7(supports-color@10.2.2))(@types/react@19.2.15)(bufferutil@4.1.0)(react@19.2.6)(supports-color@10.2.2))(supports-color@10.2.2)
-      chat: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      chat: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
     transitivePeerDependencies:
       - ai
       - encoding
@@ -16328,26 +16393,26 @@ snapshots:
       - react-native
       - supports-color
 
-  '@github-tools/eve-extension@0.1.0(@vercel/connect@2.2.0(@ai-sdk/mcp@2.0.52(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.105(zod@4.5.4))(eve@packages+eve))(ai@7.0.105(zod@4.5.4))(eve@packages+eve)':
+  '@github-tools/eve-extension@0.1.0(@vercel/connect@2.2.0(@ai-sdk/mcp@2.0.67(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.128(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.128(zod@4.5.4))(eve@packages+eve))(ai@7.0.128(zod@4.5.4))(eve@packages+eve)':
     dependencies:
-      '@github-tools/sdk': 1.8.2(@vercel/connect@2.2.0(@ai-sdk/mcp@2.0.52(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.105(zod@4.5.4))(eve@packages+eve))(ai@7.0.105(zod@4.5.4))(eve@packages+eve)(zod@4.5.4)
+      '@github-tools/sdk': 1.8.2(@vercel/connect@2.2.0(@ai-sdk/mcp@2.0.67(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.128(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.128(zod@4.5.4))(eve@packages+eve))(ai@7.0.128(zod@4.5.4))(eve@packages+eve)(zod@4.5.4)
       eve: link:packages/eve
       zod: 4.5.4
     optionalDependencies:
-      '@vercel/connect': 2.2.0(@ai-sdk/mcp@2.0.52(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.105(zod@4.5.4))(eve@packages+eve)
+      '@vercel/connect': 2.2.0(@ai-sdk/mcp@2.0.67(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.128(zod@4.5.4))(bufferutil@4.1.0)(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.128(zod@4.5.4))(eve@packages+eve)
     transitivePeerDependencies:
       - '@ai-sdk/workflow'
       - '@workflow/ai'
       - ai
       - workflow
 
-  '@github-tools/sdk@1.8.2(@vercel/connect@2.2.0(@ai-sdk/mcp@2.0.52(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.105(zod@4.5.4))(eve@packages+eve))(ai@7.0.105(zod@4.5.4))(eve@packages+eve)(zod@4.5.4)':
+  '@github-tools/sdk@1.8.2(@vercel/connect@2.2.0(@ai-sdk/mcp@2.0.67(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.128(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.128(zod@4.5.4))(eve@packages+eve))(ai@7.0.128(zod@4.5.4))(eve@packages+eve)(zod@4.5.4)':
     dependencies:
-      ai: 7.0.105(zod@4.5.4)
+      ai: 7.0.128(zod@4.5.4)
       octokit: 5.0.5
       zod: 4.5.4
     optionalDependencies:
-      '@vercel/connect': 2.2.0(@ai-sdk/mcp@2.0.52(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.105(zod@4.5.4))(eve@packages+eve)
+      '@vercel/connect': 2.2.0(@ai-sdk/mcp@2.0.67(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.128(zod@4.5.4))(bufferutil@4.1.0)(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.128(zod@4.5.4))(eve@packages+eve)
       eve: link:packages/eve
 
   '@google/genai@1.52.0(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.4.3))(bufferutil@4.1.0)(supports-color@10.2.2)':
@@ -16619,11 +16684,11 @@ snapshots:
 
   '@js-sdsl/ordered-map@4.4.2': {}
 
-  '@kapso/chat-adapter@0.1.1(ai@7.0.105(zod@4.5.4))(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)':
+  '@kapso/chat-adapter@0.1.1(ai@7.0.128(zod@4.5.4))(chat@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)':
     dependencies:
-      '@chat-adapter/shared': 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      '@chat-adapter/shared': 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       '@kapso/whatsapp-cloud-api': 0.2.3
-      chat: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      chat: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
     transitivePeerDependencies:
       - ai
       - supports-color
@@ -16692,11 +16757,11 @@ snapshots:
 
   '@langchain/protocol@0.0.19': {}
 
-  '@larksuite/vercel-chat-adapter@0.1.2(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4)':
+  '@larksuite/vercel-chat-adapter@0.1.2(ai@7.0.128(zod@4.5.4))(bufferutil@4.1.0)(chat@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4)':
     dependencies:
-      '@chat-adapter/shared': 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      '@chat-adapter/shared': 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       '@larksuiteoapi/node-sdk': 1.63.1(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))
-      chat: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      chat: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
     transitivePeerDependencies:
       - ai
       - bufferutil
@@ -16720,21 +16785,21 @@ snapshots:
       - debug
       - utf-8-validate
 
-  '@linqapp/chat-sdk-adapter@0.5.1(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))':
+  '@linqapp/chat-sdk-adapter@0.5.1(chat@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))':
     dependencies:
       '@linqapp/sdk': 0.47.1
-      chat: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      chat: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       standardwebhooks: 1.1.1
 
   '@linqapp/sdk@0.47.1':
     dependencies:
       standardwebhooks: 1.1.1
 
-  '@liveblocks/chat-sdk-adapter@3.23.0(@types/json-schema@7.0.15)(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))':
+  '@liveblocks/chat-sdk-adapter@3.23.0(@types/json-schema@7.0.15)(chat@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))':
     dependencies:
       '@liveblocks/core': 3.23.0(@types/json-schema@7.0.15)
       '@liveblocks/node': 3.23.0(@types/json-schema@7.0.15)
-      chat: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      chat: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
     transitivePeerDependencies:
       - '@types/json-schema'
       - encoding
@@ -17038,10 +17103,10 @@ snapshots:
 
   '@nolyfill/is-core-module@1.0.39': {}
 
-  '@novu/chat-sdk-adapter@0.1.0(ai@7.0.105(zod@4.5.4))(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(react@19.2.6)(supports-color@10.2.2)(zod@4.5.4)':
+  '@novu/chat-sdk-adapter@0.1.0(ai@7.0.128(zod@4.5.4))(chat@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(react@19.2.6)(supports-color@10.2.2)(zod@4.5.4)':
     dependencies:
-      '@chat-adapter/shared': 4.30.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
-      chat: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      '@chat-adapter/shared': 4.30.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      chat: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
     optionalDependencies:
       react: 19.2.6
     transitivePeerDependencies:
@@ -17768,9 +17833,9 @@ snapshots:
       '@octokit/request-error': 7.1.2
       '@octokit/webhooks-methods': 6.0.0
 
-  '@onkernel/eve-extension@0.1.4(@ai-sdk/mcp@2.0.52(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.105(zod@4.5.4))(eve@packages+eve)':
+  '@onkernel/eve-extension@0.1.4(@ai-sdk/mcp@2.0.67(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.128(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.128(zod@4.5.4))(eve@packages+eve)':
     dependencies:
-      '@vercel/connect': 0.4.3(@ai-sdk/mcp@2.0.52(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.105(zod@4.5.4))(eve@packages+eve)
+      '@vercel/connect': 0.4.3(@ai-sdk/mcp@2.0.67(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.128(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.128(zod@4.5.4))(eve@packages+eve)
       eve: link:packages/eve
       zod: 4.4.3
     transitivePeerDependencies:
@@ -18241,12 +18306,12 @@ snapshots:
       nice-grpc: 2.1.17
       nice-grpc-common: 2.0.4
 
-  '@photon-ai/chat-adapter-imessage@3.2.0(ai@7.0.105(zod@4.5.4))(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(supports-color@10.2.2)(typescript@7.0.2)(zod@4.5.4)':
+  '@photon-ai/chat-adapter-imessage@3.2.0(ai@7.0.128(zod@4.5.4))(chat@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(supports-color@10.2.2)(typescript@7.0.2)(zod@4.5.4)':
     dependencies:
-      '@chat-adapter/shared': 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      '@chat-adapter/shared': 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       '@spectrum-ts/core': 10.0.0(supports-color@10.2.2)(typescript@7.0.2)
       '@spectrum-ts/imessage': 10.0.0(@spectrum-ts/core@10.0.0(supports-color@10.2.2)(typescript@7.0.2))(supports-color@10.2.2)(typescript@7.0.2)
-      chat: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      chat: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       mime-types: 3.0.2
     transitivePeerDependencies:
       - ai
@@ -19562,10 +19627,10 @@ snapshots:
 
   '@repeaterjs/repeater@3.1.0': {}
 
-  '@resend/chat-sdk-adapter@0.2.2(@chat-adapter/shared@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(@react-email/render@2.1.0(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(bufferutil@4.1.0)(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(supports-color@10.2.2)':
+  '@resend/chat-sdk-adapter@0.2.2(@chat-adapter/shared@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(@react-email/render@2.1.0(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(bufferutil@4.1.0)(chat@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(supports-color@10.2.2)':
     dependencies:
-      '@chat-adapter/shared': 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
-      chat: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      '@chat-adapter/shared': 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      chat: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       hast-util-to-html: 9.0.5
       mdast-util-to-hast: 13.2.1
       react-email: 6.9.5(bufferutil@4.1.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(supports-color@10.2.2)
@@ -20851,16 +20916,16 @@ snapshots:
       d3-selection: 3.0.0
       d3-transition: 3.0.1(d3-selection@3.0.0)
 
-  '@upstash/agentkit-ai-sdk@0.9.0(ai@7.0.105(zod@4.5.4))':
+  '@upstash/agentkit-ai-sdk@0.9.0(ai@7.0.128(zod@4.5.4))':
     dependencies:
       '@upstash/agentkit-sdk': 0.9.0(@upstash/redis@1.38.4)
       '@upstash/redis': 1.38.4
-      ai: 7.0.105(zod@4.5.4)
+      ai: 7.0.128(zod@4.5.4)
       zod: 4.5.4
 
-  '@upstash/agentkit-eve@0.9.0(@upstash/redis@1.38.4)(ai@7.0.105(zod@4.5.4))(eve@packages+eve)':
+  '@upstash/agentkit-eve@0.9.0(@upstash/redis@1.38.4)(ai@7.0.128(zod@4.5.4))(eve@packages+eve)':
     dependencies:
-      '@upstash/agentkit-ai-sdk': 0.9.0(ai@7.0.105(zod@4.5.4))
+      '@upstash/agentkit-ai-sdk': 0.9.0(ai@7.0.128(zod@4.5.4))
       '@upstash/agentkit-sdk': 0.9.0(@upstash/redis@1.38.4)
       '@upstash/redis': 1.38.4
       eve: link:packages/eve
@@ -20891,10 +20956,10 @@ snapshots:
     dependencies:
       eve: link:packages/eve
 
-  '@veltdev/chat-sdk-adapter@0.2.4(ai@7.0.105(zod@4.5.4))(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)':
+  '@veltdev/chat-sdk-adapter@0.2.4(ai@7.0.128(zod@4.5.4))(chat@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)':
     dependencies:
-      '@chat-adapter/shared': 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
-      chat: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      '@chat-adapter/shared': 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      chat: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       hast-util-from-html: 2.0.3
       hast-util-to-html: 9.0.5
       hast-util-to-mdast: 10.1.2
@@ -20910,7 +20975,7 @@ snapshots:
     dependencies:
       '@ai-sdk/anthropic': 1.2.12(zod@3.25.76)
       '@vercel/sandbox': 1.10.2
-      ai: 5.0.259(zod@3.25.76)
+      ai: 5.0.272(zod@3.25.76)
       chalk: 5.6.2
       commander: 12.1.0
       dockerode: 4.0.12(supports-color@10.2.2)
@@ -20989,47 +21054,47 @@ snapshots:
     dependencies:
       execa: 5.1.1
 
-  '@vercel/connect@0.4.3(@ai-sdk/mcp@2.0.52(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.105(zod@4.5.4))(eve@packages+eve)':
+  '@vercel/connect@0.4.3(@ai-sdk/mcp@2.0.67(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.128(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.128(zod@4.5.4))(eve@packages+eve)':
     dependencies:
       '@vercel/oidc': 3.8.1
     optionalDependencies:
-      '@ai-sdk/mcp': 2.0.52(zod@4.5.4)
+      '@ai-sdk/mcp': 2.0.67(zod@4.5.4)
       '@auth/core': 0.41.2
-      '@chat-adapter/slack': 4.34.0(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4)
-      ai: 7.0.105(zod@4.5.4)
+      '@chat-adapter/slack': 4.34.0(ai@7.0.128(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4)
+      ai: 7.0.128(zod@4.5.4)
       eve: link:packages/eve
 
-  '@vercel/connect@2.2.0(@ai-sdk/mcp@2.0.52(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.105(zod@4.5.4))(eve@packages+eve)':
+  '@vercel/connect@2.2.0(@ai-sdk/mcp@2.0.67(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.128(zod@4.5.4))(bufferutil@4.1.0)(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.128(zod@4.5.4))(eve@packages+eve)':
     dependencies:
       '@vercel/oidc': 3.8.8
     optionalDependencies:
-      '@ai-sdk/mcp': 2.0.52(zod@4.5.4)
+      '@ai-sdk/mcp': 2.0.67(zod@4.5.4)
       '@auth/core': 0.41.2
-      '@chat-adapter/slack': 4.34.0(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4)
-      ai: 7.0.105(zod@4.5.4)
+      '@chat-adapter/slack': 4.34.0(ai@7.0.128(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4)
+      ai: 7.0.128(zod@4.5.4)
       eve: link:packages/eve
 
-  '@vercel/connect@2.3.3(@ai-sdk/mcp@2.0.52(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(supports-color@10.2.2)(zod@4.5.4))(@modelcontextprotocol/sdk@1.30.0(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.105(zod@4.5.4))(eve@packages+eve)':
+  '@vercel/connect@2.3.3(@ai-sdk/mcp@2.0.67(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.128(zod@4.5.4))(bufferutil@4.1.0)(supports-color@10.2.2)(zod@4.5.4))(@modelcontextprotocol/sdk@1.30.0(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.128(zod@4.5.4))(eve@packages+eve)':
     dependencies:
       '@vercel/oidc': 3.8.9
     optionalDependencies:
-      '@ai-sdk/mcp': 2.0.52(zod@4.5.4)
+      '@ai-sdk/mcp': 2.0.67(zod@4.5.4)
       '@auth/core': 0.41.2
-      '@chat-adapter/slack': 4.34.0(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4)
+      '@chat-adapter/slack': 4.34.0(ai@7.0.128(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4)
       '@modelcontextprotocol/sdk': 1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.5.4)
-      ai: 7.0.105(zod@4.5.4)
+      ai: 7.0.128(zod@4.5.4)
       eve: link:packages/eve
 
-  '@vercel/connect@2.3.3(@ai-sdk/mcp@2.0.52(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.41.0(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4))(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.105(zod@4.5.4))(eve@0.65.0(@opentelemetry/api@1.9.1)(ai@7.0.105(zod@4.5.4))(braintrust@3.29.0(@aws-sdk/credential-provider-web-identity@3.972.49)(supports-color@10.2.2)(zod@4.5.4))(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(dd-trace@6.13.0)(just-bash@3.1.0(supports-color@10.2.2))(microsandbox@0.5.5))':
+  '@vercel/connect@2.3.3(@ai-sdk/mcp@2.0.67(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.41.0(ai@7.0.128(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4))(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.128(zod@4.5.4))(eve@0.65.0(@opentelemetry/api@1.9.1)(ai@7.0.128(zod@4.5.4))(braintrust@3.29.0(@aws-sdk/credential-provider-web-identity@3.972.49)(supports-color@10.2.2)(zod@4.5.4))(chat@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(dd-trace@6.13.0)(just-bash@3.1.0(supports-color@10.2.2))(microsandbox@0.5.5))':
     dependencies:
       '@vercel/oidc': 3.8.9
     optionalDependencies:
-      '@ai-sdk/mcp': 2.0.52(zod@4.5.4)
+      '@ai-sdk/mcp': 2.0.67(zod@4.5.4)
       '@auth/core': 0.41.2
-      '@chat-adapter/slack': 4.41.0(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4)
+      '@chat-adapter/slack': 4.41.0(ai@7.0.128(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4)
       '@modelcontextprotocol/sdk': 1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.5.4)
-      ai: 7.0.105(zod@4.5.4)
-      eve: 0.65.0(@opentelemetry/api@1.9.1)(ai@7.0.105(zod@4.5.4))(braintrust@3.29.0(@aws-sdk/credential-provider-web-identity@3.972.49)(supports-color@10.2.2)(zod@4.5.4))(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(dd-trace@6.13.0)(just-bash@3.1.0(supports-color@10.2.2))(microsandbox@0.5.5)
+      ai: 7.0.128(zod@4.5.4)
+      eve: 0.65.0(@opentelemetry/api@1.9.1)(ai@7.0.128(zod@4.5.4))(braintrust@3.29.0(@aws-sdk/credential-provider-web-identity@3.972.49)(supports-color@10.2.2)(zod@4.5.4))(chat@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(dd-trace@6.13.0)(just-bash@3.1.0(supports-color@10.2.2))(microsandbox@0.5.5)
 
   '@vercel/detect-agent@1.2.3': {}
 
@@ -21056,7 +21121,7 @@ snapshots:
       '@types/react': 19.2.15
       '@vercel/agent-readability': 0.7.0(@sveltejs/kit@2.70.3(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@7.3.0(svelte@5.57.0(@typescript-eslint/types@8.70.0))(vite@8.3.1(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.1)))(svelte@5.57.0(@typescript-eslint/types@8.70.0))(typescript@6.0.3)(vite@8.3.1(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.1)))(@vercel/functions@3.9.8(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.3(bufferutil@4.1.0)))(h3@1.15.11)(next@16.3.4(@babel/core@7.29.7(supports-color@10.2.2))(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))
       '@vercel/oidc': 3.8.0
-      ai: 6.0.285(zod@4.6.5)
+      ai: 6.0.301(zod@4.6.5)
       class-variance-authority: 0.7.1
       clsx: 2.1.1
       commander: 14.0.3
@@ -21552,10 +21617,10 @@ snapshots:
       ulid: 3.0.2
       zod: 4.5.4
 
-  '@zernio/chat-sdk-adapter@0.5.0(ai@7.0.105(zod@4.5.4))(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)':
+  '@zernio/chat-sdk-adapter@0.5.0(ai@7.0.128(zod@4.5.4))(chat@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)':
     dependencies:
-      '@chat-adapter/shared': 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
-      chat: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      '@chat-adapter/shared': 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      chat: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
     transitivePeerDependencies:
       - ai
       - supports-color
@@ -21608,19 +21673,19 @@ snapshots:
     dependencies:
       humanize-ms: 1.2.1
 
-  ai@5.0.259(zod@3.25.76):
+  ai@5.0.272(zod@3.25.76):
     dependencies:
-      '@ai-sdk/gateway': 2.0.153(zod@3.25.76)
-      '@ai-sdk/provider': 2.0.4
-      '@ai-sdk/provider-utils': 3.0.37(zod@3.25.76)
+      '@ai-sdk/gateway': 2.0.163(zod@3.25.76)
+      '@ai-sdk/provider': 2.0.5
+      '@ai-sdk/provider-utils': 3.0.41(zod@3.25.76)
       '@opentelemetry/api': 1.9.0
       zod: 3.25.76
 
-  ai@5.0.259(zod@4.4.3):
+  ai@5.0.272(zod@4.4.3):
     dependencies:
-      '@ai-sdk/gateway': 2.0.153(zod@4.4.3)
-      '@ai-sdk/provider': 2.0.4
-      '@ai-sdk/provider-utils': 3.0.37(zod@4.4.3)
+      '@ai-sdk/gateway': 2.0.163(zod@4.4.3)
+      '@ai-sdk/provider': 2.0.5
+      '@ai-sdk/provider-utils': 3.0.41(zod@4.4.3)
       '@opentelemetry/api': 1.9.0
       zod: 4.4.3
 
@@ -21632,18 +21697,26 @@ snapshots:
       '@opentelemetry/api': 1.9.1
       zod: 4.6.5
 
-  ai@7.0.105(zod@4.5.4):
+  ai@6.0.301(zod@4.6.5):
     dependencies:
-      '@ai-sdk/gateway': 4.0.85(zod@4.5.4)
-      '@ai-sdk/provider': 4.0.17
-      '@ai-sdk/provider-utils': 5.0.43(zod@4.5.4)
+      '@ai-sdk/gateway': 3.0.210(zod@4.6.5)
+      '@ai-sdk/provider': 3.0.18
+      '@ai-sdk/provider-utils': 4.0.57(zod@4.6.5)
+      '@opentelemetry/api': 1.9.1
+      zod: 4.6.5
+
+  ai@7.0.128(zod@4.5.4):
+    dependencies:
+      '@ai-sdk/gateway': 4.0.104(zod@4.5.4)
+      '@ai-sdk/provider': 4.0.22
+      '@ai-sdk/provider-utils': 5.0.54(zod@4.5.4)
       zod: 4.5.4
 
-  ai@7.0.105(zod@4.6.5):
+  ai@7.0.128(zod@4.6.5):
     dependencies:
-      '@ai-sdk/gateway': 4.0.85(zod@4.6.5)
-      '@ai-sdk/provider': 4.0.17
-      '@ai-sdk/provider-utils': 5.0.43(zod@4.6.5)
+      '@ai-sdk/gateway': 4.0.104(zod@4.6.5)
+      '@ai-sdk/provider': 4.0.22
+      '@ai-sdk/provider-utils': 5.0.54(zod@4.6.5)
       zod: 4.6.5
 
   ajv-draft-04@1.0.0(ajv@8.20.0):
@@ -22184,12 +22257,12 @@ snapshots:
 
   chardet@2.2.0: {}
 
-  chat-adapter-sendblue@0.2.0(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)):
+  chat-adapter-sendblue@0.2.0(chat@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)):
     dependencies:
-      chat: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      chat: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       sendblue: 3.16.1
 
-  chat@4.30.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4):
+  chat@4.30.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4):
     dependencies:
       '@workflow/serde': 4.1.0-beta.2
       mdast-util-to-string: 4.0.0
@@ -22199,12 +22272,12 @@ snapshots:
       remend: 1.3.1
       unified: 11.0.5
     optionalDependencies:
-      ai: 7.0.105(zod@4.5.4)
+      ai: 7.0.128(zod@4.5.4)
       zod: 4.5.4
     transitivePeerDependencies:
       - supports-color
 
-  chat@4.34.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4):
+  chat@4.34.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4):
     dependencies:
       '@workflow/serde': 4.1.0-beta.2
       mdast-util-to-string: 4.0.0
@@ -22214,13 +22287,13 @@ snapshots:
       remend: 1.3.1
       unified: 11.0.5
     optionalDependencies:
-      ai: 7.0.105(zod@4.5.4)
+      ai: 7.0.128(zod@4.5.4)
       zod: 4.5.4
     transitivePeerDependencies:
       - supports-color
     optional: true
 
-  chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4):
+  chat@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4):
     dependencies:
       '@workflow/serde': 4.1.0-beta.2
       mdast-util-to-string: 4.0.0
@@ -22230,7 +22303,7 @@ snapshots:
       remend: 1.3.1
       unified: 11.0.5
     optionalDependencies:
-      ai: 7.0.105(zod@4.5.4)
+      ai: 7.0.128(zod@4.5.4)
       zod: 4.5.4
     transitivePeerDependencies:
       - supports-color
@@ -23663,20 +23736,20 @@ snapshots:
 
   etag@1.8.1: {}
 
-  eve-channel-blooio@0.2.0(ai@7.0.105(zod@4.5.4))(eve@packages+eve):
+  eve-channel-blooio@0.2.0(ai@7.0.128(zod@4.5.4))(eve@packages+eve):
     dependencies:
-      ai: 7.0.105(zod@4.5.4)
+      ai: 7.0.128(zod@4.5.4)
       eve: link:packages/eve
 
-  eve@0.65.0(@opentelemetry/api@1.9.1)(ai@7.0.105(zod@4.5.4))(braintrust@3.29.0(@aws-sdk/credential-provider-web-identity@3.972.49)(supports-color@10.2.2)(zod@4.5.4))(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(dd-trace@6.13.0)(just-bash@3.1.0(supports-color@10.2.2))(microsandbox@0.5.5):
+  eve@0.65.0(@opentelemetry/api@1.9.1)(ai@7.0.128(zod@4.5.4))(braintrust@3.29.0(@aws-sdk/credential-provider-web-identity@3.972.49)(supports-color@10.2.2)(zod@4.5.4))(chat@4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(dd-trace@6.13.0)(just-bash@3.1.0(supports-color@10.2.2))(microsandbox@0.5.5):
     dependencies:
-      ai: 7.0.105(zod@4.5.4)
+      ai: 7.0.128(zod@4.5.4)
       nitro: 3.0.260903-beta
       undici: 8.9.0
     optionalDependencies:
       '@opentelemetry/api': 1.9.1
       braintrust: 3.29.0(@aws-sdk/credential-provider-web-identity@3.972.49)(supports-color@10.2.2)(zod@4.5.4)
-      chat: 4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      chat: 4.41.0(ai@7.0.128(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       dd-trace: 6.13.0
       just-bash: 3.1.0(supports-color@10.2.2)
       microsandbox: 0.5.5
@@ -27185,8 +27258,8 @@ snapshots:
 
   ollama-ai-provider-v2@1.5.5(zod@4.4.3):
     dependencies:
-      '@ai-sdk/provider': 2.0.4
-      '@ai-sdk/provider-utils': 3.0.37(zod@4.4.3)
+      '@ai-sdk/provider': 2.0.5
+      '@ai-sdk/provider-utils': 3.0.41(zod@4.4.3)
       zod: 4.4.3
     optional: true
 

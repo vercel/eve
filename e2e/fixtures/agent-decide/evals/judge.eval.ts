@@ -1,12 +1,12 @@
-import type { Experimental_EvaluationModel } from "ai";
+import type { Experimental_DecisionModel } from "ai";
 import { defineEval } from "eve/evals";
 
-const model: Exclude<Experimental_EvaluationModel, string> = {
+const model: Exclude<Experimental_DecisionModel, string> = {
   specificationVersion: "v4",
   provider: "fixture",
   modelId: "fixture-judge",
   supportedQuestionTypes: ["boolean", "score", "choice"],
-  async doEvaluate({ state, questions }) {
+  async doDecide({ state, questions }) {
     const routine = JSON.stringify(state).includes("openai/small");
     return {
       answers: Object.fromEntries(
@@ -24,7 +24,7 @@ const model: Exclude<Experimental_EvaluationModel, string> = {
 };
 
 export default defineEval({
-  description: "Single and batched judges score a fixture response through an evaluation model.",
+  description: "Single and batched judges score a fixture response through an decision model.",
   judge: { model },
   async test(t) {
     const turn = await t.send("Alice needs a routine summary of the selected model.");

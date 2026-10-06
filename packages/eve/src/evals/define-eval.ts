@@ -17,7 +17,7 @@ import type {
  * infer the setup context available as `t.context`.
  *
  * A `judge` is optional: `t.judge(...)` assertions fall back to the `judge`
- * declared in `evals.config.ts`, then the shared evaluation default. The judge model
+ * declared in `evals.config.ts`, then the shared decision default. The judge model
  * is used solely for scoring, never for the agent under test. Eval identity is
  * derived from the `evals/<path>.eval.ts` file path by the discovery layer, so
  * authoring `id` or `name` throws.
