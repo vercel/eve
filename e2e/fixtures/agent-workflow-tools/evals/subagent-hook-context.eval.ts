@@ -47,6 +47,10 @@ export default (["direct", "background"] as const).map((mode) =>
 
       const audit = await initial.session.send(scenario.audit);
       audit.expectOk();
+      // The parent's dynamic skill stays loadable after delegation.
+      for (const turn of [initial, audit]) {
+        turn.loadedSkill("delegation-policy", { count: 1, output: /DELEGATION-POLICY:/u });
+      }
       audit.calledTool("read_subagent_hooks", { count: 1, status: "completed" });
       const records = readHookAudit(audit);
       t.eventsSatisfy(

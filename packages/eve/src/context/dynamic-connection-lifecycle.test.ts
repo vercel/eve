@@ -13,6 +13,7 @@ import type {
   ResolvedDynamicConnectionResolver,
 } from "#runtime/types.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
+import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 
 describe("dynamic connection lifecycle", () => {
   it("resolves a mixed connection map with bare map-key names", async () => {
@@ -301,6 +302,57 @@ describe("dynamic connection lifecycle", () => {
     ).rejects.toThrow(
       'Dynamic connection "shared" from resolver "second" collides with dynamic resolver "first".',
     );
+  });
+
+  it("fails when a dynamic connection would own an existing tool's name", async () => {
+    const { ctx, registry } = createContext();
+    ctx.set(BundleKey, {
+      subagentRegistry: { subagentsByName: new Map() },
+      toolRegistry: { toolsByName: new Map([["billing__refund", {}]]) },
+    } as never);
+    const resolver = createResolver({
+      handler: () => ({
+        billing: defineMcpClientConnection({
+          description: "Billing.",
+          url: "https://mcp.example.com/billing",
+        }),
+      }),
+    });
+
+    await expect(
+      dispatchDynamicConnectionEvent({
+        ctx,
+        event: createSessionStartedEvent(),
+        resolvers: [resolver],
+      }),
+    ).rejects.toThrow(
+      'Tool or subagent "billing__refund" starts with "billing__", which belongs to connection "billing". Rename it, or the dynamic connection that "connections/accounts.ts" returned.',
+    );
+    expect(registry.getConnectionNames()).toEqual([]);
+  });
+
+  it("fails when a dynamic connection nests under another connection's name", async () => {
+    const { ctx, registry } = createContext([createStaticConnection("cloud")]);
+    const resolver = createResolver({
+      extensionNamespace: "cloud",
+      handler: () => ({
+        production: defineMcpClientConnection({
+          description: "Production account.",
+          url: "https://mcp.example.com/production",
+        }),
+      }),
+    });
+
+    await expect(
+      dispatchDynamicConnectionEvent({
+        ctx,
+        event: createSessionStartedEvent(),
+        resolvers: [resolver],
+      }),
+    ).rejects.toThrow(
+      'Connection "cloud__production" starts with "cloud__", which belongs to connection "cloud". Rename the dynamic connection "cloud__production".',
+    );
+    expect(registry.getConnectionNames()).toEqual(["cloud"]);
   });
 
   it("fails closed when a handler returns an unbranded connection", async () => {

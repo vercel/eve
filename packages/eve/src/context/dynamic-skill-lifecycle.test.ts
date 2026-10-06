@@ -10,6 +10,7 @@ import {
   SandboxKey,
 } from "#context/keys.js";
 import { deserializeContext } from "#context/serialize.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { defineSkill } from "#public/definitions/skill.js";
@@ -139,6 +140,33 @@ describe("dispatchDynamicSkillEvent", () => {
     expect(ctx.get(DynamicSkillManifestKey)).toEqual({
       custom: [{ description: "Talk like a dog", markdown: "Woof.", name: "talk-like-a-dog" }],
     });
+  });
+
+  it("skips a resolver that returns an illegal skill name", async () => {
+    const logs = captureLogRecords();
+    const { ctx } = createCtx();
+    await dispatch(
+      ctx,
+      createResolver("tenant", () => ({
+        "release notes": makeSkill("Release notes"),
+        policy: makeSkill("Tenant policy"),
+      })),
+      createResolver("support", () => makeSkill("Support policy")),
+    );
+
+    expect(ctx.get(DynamicSkillManifestKey)).toEqual({
+      support: [{ description: "Support policy", markdown: "Support policy", name: "support" }],
+    });
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        fields: {
+          error: expect.stringContaining(
+            'Dynamic skill resolver "skills/tenant.ts" returned illegal skill name "release notes".',
+          ),
+        },
+        level: "error",
+      }),
+    );
   });
 
   it("prefixes map entries with the mount namespace for an extension resolver", async () => {

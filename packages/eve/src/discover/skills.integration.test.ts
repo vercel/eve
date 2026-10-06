@@ -9,6 +9,7 @@ import {
   DISCOVER_SKILL_ENTRY_NOT_DIRECTORY,
   DISCOVER_SKILL_FRONTMATTER_INVALID,
   DISCOVER_SKILL_MARKDOWN_MISSING,
+  DISCOVER_SKILL_NAME_INVALID,
   discoverSkills,
 } from "#discover/skills.js";
 
@@ -238,6 +239,33 @@ describe("discoverSkills (memory)", () => {
     expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
       DISCOVER_SKILL_COLLISION,
       DISCOVER_SKILL_COLLISION,
+    ]);
+  });
+
+  it("rejects a skill whose name is not a legal entry name", async () => {
+    const project = buildMemoryAgentProject({
+      agentFiles: {
+        "skills/2fa-reset.md": ["---", "description: Reset two-factor auth.", "---", "Reset."].join(
+          "\n",
+        ),
+        "skills/pdf-forms/SKILL.md": ["---", "description: Fill PDF forms.", "---", "Fill."].join(
+          "\n",
+        ),
+      },
+    });
+
+    const result = await discoverSkills({ agentRoot: project.agentRoot, source: project.source });
+
+    expect(
+      result.skills.map((skill) => ("skillId" in skill ? skill.skillId : skill.logicalPath)),
+    ).toEqual(["pdf-forms"]);
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({
+        code: DISCOVER_SKILL_NAME_INVALID,
+        message: expect.stringContaining(
+          'Skill "skills/2fa-reset.md" has an illegal name "2fa-reset".',
+        ),
+      }),
     ]);
   });
 });

@@ -16,7 +16,10 @@ import { defineAgent } from "#public/definitions/agent.js";
 import { defineRemoteAgent } from "#public/definitions/remote-agent.js";
 import { createSessionStartedEvent, createTurnStartedEvent } from "#protocol/message.js";
 import type { ResolvedDynamicSubagentResolver } from "#runtime/subagents/registry.js";
+import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
+import { connectionRegistry, fakeConnection } from "#internal/testing/catalog-fixtures.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
+import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 
 describe("dynamic subagent lifecycle", () => {
   it("omits a subagent when its resolver returns null", async () => {
@@ -449,6 +452,85 @@ describe("dynamic subagent lifecycle", () => {
     expect(handler).toHaveBeenCalledOnce();
     expect(ctx.get(SessionDynamicSubagentRuntimeRevisionKey)).toBe("deployment:one");
     expect(buildDynamicSubagentTools(ctx)).toHaveLength(1);
+  });
+});
+
+describe("dynamic subagent names", () => {
+  /** Resolves a dynamic subagent beside an authored `researcher` tool and a `linear` connection. */
+  async function resolveResearcher(input: {
+    readonly name?: string;
+    readonly tool?: boolean | "deferred";
+  }) {
+    const logs = captureLogRecords();
+    const ctx = createContext();
+    ctx.set(BundleKey, {
+      toolRegistry: { toolsByName: new Map([["researcher", {}]]) },
+    } as never);
+    ctx.set(
+      ConnectionRegistryKey,
+      connectionRegistry([fakeConnection({ name: "linear", tools: [] })]),
+    );
+    const created = createResolver();
+    const resolver: ResolvedDynamicSubagentResolver = {
+      ...created.resolver,
+      events: {
+        "session.started": () =>
+          defineAgent({
+            description: "Research the request.",
+            model: "openai/gpt-5.5",
+            modelContextWindowTokens: 200_000,
+            tool: input.tool,
+          }),
+      },
+      name: input.name ?? created.resolver.name,
+    };
+    await dispatchDynamicSubagentEvent({
+      ctx,
+      event: createSessionStartedEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+    return {
+      errors: logs.records.flatMap((record) =>
+        record.level === "error" ? [String(record.fields?.error)] : [],
+      ),
+      selected: getDynamicSubagentSelection(ctx, resolver.nodeId) !== undefined,
+      tools: buildDynamicSubagentTools(ctx).map((tool) => tool.name),
+    };
+  }
+
+  it.each([true, "deferred"] as const)(
+    "omits a subagent with tool %s that takes an authored tool's name",
+    async (tool) => {
+      expect(await resolveResearcher({ tool })).toEqual({
+        errors: [
+          'Dynamic subagent "researcher" from "agent.ts" collides with the tool "researcher". Set the subagent\'s tool to false when that tool wraps it.',
+        ],
+        selected: false,
+        tools: [],
+      });
+    },
+  );
+
+  it("keeps a tool: false subagent that a same-named authored tool wraps", async () => {
+    expect(await resolveResearcher({ tool: false })).toEqual({
+      errors: [],
+      selected: true,
+      tools: [],
+    });
+  });
+
+  it.each([
+    ["search", 'Dynamic subagent "search" from "agent.ts" collides with the tool "search".'],
+    [
+      "linear__triage",
+      'Dynamic subagent "linear__triage" starts with "linear__", which belongs to connection "linear". Rename the subagent directory.',
+    ],
+  ])("omits a subagent named %s", async (name, error) => {
+    const resolved = await resolveResearcher({ name });
+
+    expect(resolved.selected).toBe(false);
+    expect(resolved.errors).toEqual([expect.stringContaining(error)]);
   });
 });
 
