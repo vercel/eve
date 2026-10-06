@@ -711,21 +711,107 @@ Connections:
    approval, park, sign-in, child session, or resume never adds a definition. That is exactly
    where AI SDK `toolSearch()` and pi's activation path lose the cache.
 
-## Removed
+## Implementation
 
-- `connection_search` and `connection_execute`, their framework module
-  (`tools/framework/connection-tools.ts`), and their reserved slots, which
-  `search` and `execute` take over.
-- `load_skill`: its default tool slot, the `eve/tools/load_skill` export, and
-  the `frameworkAction: "load-skill"` marker. `execute({ skill })` replaces
-  it. An authored `agent/tools/load_skill.ts` becomes an ordinary tool.
-- Nested actions for connection calls, and the nested-action helper.
-- The `connections` announcement, replaced by `catalog`.
-- References in `load_skill`'s not-found error, the skill section's load
-  instructions, the dev TUI's `connection_execute` rendering, and the channel
-  task card.
+### Principles
+
+The result must read as if eve had been designed around the catalog from the
+start.
+
+1. **Expect a net deletion.** This work replaces three model surfaces
+   (`connection_search`, `connection_execute`, `load_skill`) and the special
+   cases each one grew. It should remove more code than it adds.
+2. **One path per job.** Each job in the table below has exactly one
+   implementation. A direct call and an `execute` call share everything after
+   name resolution. No adapter, fallback, or second branch does the same work
+   another way.
+3. **No compatibility layer.** There are no aliases for removed tools, no
+   flags that restore old behavior, and no code or comments that mention the
+   old surface. Pre-1.0, eve prefers the breaking change.
+4. **Old tests are deleted, not ported.** A test that covers a removed path
+   is deleted along with the path. Tests for the new design are written fresh
+   in the testing PR, against the new surface. Old assertions are never
+   adjusted to fit.
+5. **Generalize, then delete the original.** Code that survives, such as the
+   ranker, the signature renderer, connection approval, and instance pinning,
+   moves to where the unified path needs it. No copy stays behind under its
+   old name.
+
+### One path per job
+
+| Job                       | Today                                                                                                                                       | After                                                                                                                 |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Find a capability by name | Authored tool map, dynamic tool list, dynamic subagent merge, presentation map (`prepareModelTools`), and `connection_execute`'s own lookup | One table of the step's entries, built once per step and used both to advertise direct tools and to resolve `execute` |
+| Run a call                | AI SDK `execute`, workflow dispatch, subagent dispatch, the `load_skill` `frameworkAction`, and the `connection_execute` closure            | Resolve the entry, then dispatch on its handling, the same for direct and `execute` calls                             |
+| Approve a call            | Per-tool approval functions on AI SDK tool objects, plus connection approval delegated through `connection_execute`                         | The resolved entry's approval, for every call                                                                         |
+| Announce state            | A dedicated `availableSkills` field and the keyed announcements (`harness/current-messages.ts`)                                             | Keyed announcements only: `catalog`, plus skills that aren't deferred                                                 |
+| Load a skill              | `load_skill`, the `frameworkAction` marker, and reserved-name handling in the subagent registry                                             | `execute({ skill })` to the `load-skill` action                                                                       |
+| Report a call             | An action, plus nested actions for connection calls                                                                                         | One action per call, named for the entry                                                                              |
+| Label a call              | Entry labels, plus `connection_execute` special cases in `toolCallDisplayName`, the dev TUI, and the channel task card                      | Entry labels                                                                                                          |
+| Mock model                | Special handling and skill selection for `load_skill` (`runtime/agent/mock-model-*`)                                                        | The mock model calls `search` and `execute` like a real one                                                           |
+
+### Deletion inventory
+
+- **Connection tools.** `execution/tools/connection-tools.ts`,
+  `execution/tools/connection-target.ts`, `tools/framework/connection-tools.ts`,
+  `execution/connection-announcement.ts`, and the connection slots in
+  `compiler/default-tool-policy.ts`.
+  - `connection-search-rank.ts` and `runtime/connections/tool-signature.ts`
+    move to the catalog.
+  - `connection-approval.ts` moves behind the connection entry's definition.
+- **Nested actions.** `harness/nested-actions.ts` and its callers in
+  `harness/emission.ts` and `harness/step-hooks.ts`, plus their rendering in
+  the dev TUI trace view and the channel task card. The `parentCallId`
+  protocol field stays for code mode.
+- **`load_skill`.** `execution/tools/load-skill.ts`,
+  `tools/provided/load-skill.ts`, `public/tools/load-skill.ts`, the
+  `eve/tools/load_skill` export, its framework source registration, the
+  `load-skill` value of `frameworkAction`, `LOAD_SKILL_TOOL_NAME`, and its
+  reserved-name entry in `runtime/resolve-agent-graph.ts`. An authored
+  `agent/tools/load_skill.ts` becomes an ordinary tool. The `load-skill`
+  action kind stays, because the protocol, traces, and `t.loadedSkill` report
+  skill loads with it.
+- **Skill announcement channel.** `PendingSkillAnnouncementKey`, the
+  `availableSkills` announcement field, and its history state. Dynamic skills
+  use a keyed announcement instead.
+- **Special cases.** Every branch that names `connection_search`,
+  `connection_execute`, or `load_skill`, including the TUI tool
+  presentation, the channel task card, `load_skill`'s connection hint (which
+  moves to `execute`), and the mock model.
+- **Internal naming.** The harness's "deferred tool" for workflow-backed
+  tools becomes "workflow tool".
+- **Tests.** Every unit, integration, and e2e test for the paths above,
+  deleted in the PR that removes the path. That is 18 unit and integration
+  test files and 23 tracked e2e files today, led by
+  `execution/tools/connection-tools.test.ts`,
+  `execution/tools/load-skill.test.ts`,
+  `execution/connection-announcement.test.ts`, the connection evals in
+  `agent-openapi-swagger` and `agent-workflow-tools`, and the `load_skill`
+  evals in `agent-skills` and `extensions`. A test file that also covers
+  surviving behavior loses only the removed cases.
+
+### Pull requests
+
+Three stacked PRs. The first two hold all of the implementation and add no
+tests. The third holds all of the new tests.
+
+| PR            | Scope                                                                                                                                                                                                                                                                                                                                                                            |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [1/3] Catalog | Naming groundwork (connection prefix ownership, key and name validation, recorded owners, the internal rename); `deferred` on tools and workflow tools; `tool: "deferred"` on subagents; dynamic entries; `search` and `execute`; the step entry table and call resolution; the catalog listing; connection tools as entries; removal of the connection tools and nested actions |
+| [2/3] Skills  | `deferred` in frontmatter and `defineSkill`, static and dynamic; skill results in `search`; `execute({ skill })`; removal of `load_skill` and the skill announcement channel                                                                                                                                                                                                     |
+| [3/3] Tests   | Every new test, listed below. Fixes the tests surface go back into [1/3] or [2/3] before the stack merges.                                                                                                                                                                                                                                                                       |
+
+- **The stack merges together.** [1/3] and [2/3] delete the old e2e evals
+  with the paths they cover, and [3/3] adds the new ones. So [1/3] and [2/3]
+  pass unit tests on their own, but the e2e suites are only meaningful with
+  [3/3] stacked on top.
+- **Docs and changesets go with the implementation.** [1/3] and [2/3] each
+  update the docs for the behavior they change and carry a `minor`
+  changeset.
 
 ## Tests and rollout
+
+Everything in this section lands in [3/3].
 
 - **Captured-request unit test.** It drives one session through each entry:
   - a `search`, then `execute` of an inline tool;
@@ -757,8 +843,12 @@ Connections:
     and a misspelled name corrected from the suggestion.
   - Real-model suite: cache reads on the steps after discovery, following
     `agent-prompt-cache`.
-  - Migrate `agent-openapi-swagger` and `agent-workflow-tools` from the
-    connection tools, and `agent-skills` from `load_skill`.
+- **New evals in the existing fixtures.** `agent-openapi-swagger`,
+  `agent-workflow-tools`, `agent-skills`, and `extensions` get new evals
+  written against `search` and `execute`. They cover what the deleted evals
+  covered: connection approval, sign-in, dynamic connections, MCP result
+  content, input validation, dynamic skills, skill overrides, and extension
+  skills. They are written from the behavior, not ported from the old files.
 - **Measurements.** Run one task set three ways:
   1. all tools and skills direct,
   2. long-tail tools and skills deferred,
@@ -779,7 +869,7 @@ Connections:
   - No cache regression after discovery.
 - **Later, gated by evals.** Descriptions or signatures in the listing, up to
   a token budget, as opencode v2 does.
-- **Docs.**
+- **Docs,** updated in [1/3] and [2/3]:
   - `tools/overview`: deferring a tool, and which tools to defer (keep
     frequently used tools direct and defer the long tail).
   - `tools/workflows`, `subagents/*` (`tool: "deferred"`), and
@@ -791,32 +881,33 @@ Connections:
   - `connections/overview`, `connections/mcp`, `guides/dynamic-capabilities`
     (bare map keys, and the connection prefix rule), and `extensions` (the
     reserved names and how mount prefixes nest with connections).
-- **Changeset.** `minor`, because it:
-  - removes `connection_search`, `connection_execute`, and `load_skill`;
-  - reserves `search` and `execute` in every agent;
-  - rejects names that start with a connection's prefix, which an existing
+- **Changesets,** one `minor` in each of [1/3] and [2/3]. Together they:
+  - remove `connection_search`, `connection_execute`, and `load_skill`;
+  - reserve `search` and `execute` in every agent;
+  - reject names that start with a connection's prefix, which an existing
     agent may already have, such as connection `linear` beside a tool named
     `linear__sync`.
 
 ## Decisions and alternatives considered
 
-| Decision            | Chosen                                                                                | Rejected                                                                                                                                                                                                                     |
-| ------------------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Tool names          | `search` and `execute`                                                                | `tool_search` and `tool_execute` (no collision risk, but the names don't match the functions inside a code-mode program)                                                                                                     |
-| Search surface      | One `search` over every entry, connections included                                   | Keeping `connection_search` next to it (two places to look, two listings); a separate `skill_search`                                                                                                                         |
-| Variants            | A key per variant: `tool` and `skill` now, `code` later                               | One name space with markers such as `skill:pdf`; a `kind` field the model must echo                                                                                                                                          |
-| Presence            | Always, in every session of every agent                                               | Only while the catalog is non-empty (flips `tools` when a dynamic entry appears); an agent-level flag                                                                                                                        |
-| Dynamic entries     | Deferrable, like static ones                                                          | Static only (rules out per-tenant catalogs)                                                                                                                                                                                  |
-| Opt-in              | `deferred: true` on tools and skills; `tool: "deferred"` on agents                    | An agent-level list of names; `deferLoading` (eve never loads the definition); pi's `exposure` enum                                                                                                                          |
-| Discovery mechanism | Two fixed tools                                                                       | AI SDK `toolSearch()` or activation (grows `tools`); provider-native search (one provider at a time, partly beta)                                                                                                            |
-| Dispatch            | Resolve to an entry, then dispatch it like a direct call                              | A `defineTool` proxy (can't reach workflow tools or subagents; duplicates approval)                                                                                                                                          |
-| Entry names         | One flat name, `__` as the only namespace separator, and connections own their prefix | `<connection>.<tool>` (a second separator for one owner, and it renames connection tools); dots everywhere, encoded as `__` for providers (deferring would rename a tool); a separate `connection` argument (a two-part key) |
-| Owners              | Recorded on each entry as data                                                        | Recovered by splitting names at `__` (can't tell an owner from a convention prefix)                                                                                                                                          |
-| Search output       | TypeScript `signature`                                                                | Raw JSON Schema (larger, and code mode needs the signature anyway)                                                                                                                                                           |
-| Protocol shape      | Actions carry the entry's name; only history says `execute`                           | An outer `execute` action with a nested entry action                                                                                                                                                                         |
-| Search state        | Stateless; any entry can be executed                                                  | A durable discovered set that execution checks                                                                                                                                                                               |
-| Listing             | One append-only listing: names, plus connection descriptions                          | Nothing (the model can't tell when to search); full signatures (eval-gated)                                                                                                                                                  |
-| Loading skills      | `execute({ skill })` for every skill; `load_skill` is removed                         | Keeping `load_skill` beside `execute` (two ways to load); `load_skill` only for skills that aren't deferred (the model must know which kind it has)                                                                          |
+| Decision            | Chosen                                                                                       | Rejected                                                                                                                                                                                                                     |
+| ------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tool names          | `search` and `execute`                                                                       | `tool_search` and `tool_execute` (no collision risk, but the names don't match the functions inside a code-mode program)                                                                                                     |
+| Search surface      | One `search` over every entry, connections included                                          | Keeping `connection_search` next to it (two places to look, two listings); a separate `skill_search`                                                                                                                         |
+| Variants            | A key per variant: `tool` and `skill` now, `code` later                                      | One name space with markers such as `skill:pdf`; a `kind` field the model must echo                                                                                                                                          |
+| Presence            | Always, in every session of every agent                                                      | Only while the catalog is non-empty (flips `tools` when a dynamic entry appears); an agent-level flag                                                                                                                        |
+| Dynamic entries     | Deferrable, like static ones                                                                 | Static only (rules out per-tenant catalogs)                                                                                                                                                                                  |
+| Opt-in              | `deferred: true` on tools and skills; `tool: "deferred"` on agents                           | An agent-level list of names; `deferLoading` (eve never loads the definition); pi's `exposure` enum                                                                                                                          |
+| Discovery mechanism | Two fixed tools                                                                              | AI SDK `toolSearch()` or activation (grows `tools`); provider-native search (one provider at a time, partly beta)                                                                                                            |
+| Dispatch            | Resolve to an entry, then dispatch it like a direct call                                     | A `defineTool` proxy (can't reach workflow tools or subagents; duplicates approval)                                                                                                                                          |
+| Entry names         | One flat name, `__` as the only namespace separator, and connections own their prefix        | `<connection>.<tool>` (a second separator for one owner, and it renames connection tools); dots everywhere, encoded as `__` for providers (deferring would rename a tool); a separate `connection` argument (a two-part key) |
+| Owners              | Recorded on each entry as data                                                               | Recovered by splitting names at `__` (can't tell an owner from a convention prefix)                                                                                                                                          |
+| Search output       | TypeScript `signature`                                                                       | Raw JSON Schema (larger, and code mode needs the signature anyway)                                                                                                                                                           |
+| Protocol shape      | Actions carry the entry's name; only history says `execute`                                  | An outer `execute` action with a nested entry action                                                                                                                                                                         |
+| Search state        | Stateless; any entry can be executed                                                         | A durable discovered set that execution checks                                                                                                                                                                               |
+| Listing             | One append-only listing: names, plus connection descriptions                                 | Nothing (the model can't tell when to search); full signatures (eval-gated)                                                                                                                                                  |
+| Old paths and tests | Deleted with no compatibility layer; old tests deleted, and new tests written fresh in [3/3] | Aliases or flags for removed tools; porting old tests to the new surface; tests spread across the implementation PRs                                                                                                         |
+| Loading skills      | `execute({ skill })` for every skill; `load_skill` is removed                                | Keeping `load_skill` beside `execute` (two ways to load); `load_skill` only for skills that aren't deferred (the model must know which kind it has)                                                                          |
 
 ## Later: code mode
 
