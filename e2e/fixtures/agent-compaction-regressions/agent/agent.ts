@@ -16,11 +16,13 @@ import { assistantHasReport } from "../report-evidence";
 import { HANDOFF_REFERENCE, REVIEW_REFERENCE } from "../release-reports";
 
 const TEST_CONTEXT_WINDOW_TOKENS = 32_000;
-// The compiled fixture's instructions, task system block, and 13 advertised
-// tools occupy ~2,406 tokens, including `read_file`'s image guidance and the
-// `search` and `execute` tools every agent has. Reserve them in addition to
-// the summarizer's history budget.
-const TEST_REQUEST_ENVELOPE_TOKENS = 2_406;
+// eve estimates this fixture's request envelope (instructions, task system
+// block, and 13 advertised tools including `search` and `execute`) at 2,841
+// tokens. This allowance sits 230 tokens below that estimate, the offset the
+// cases have always run with, so the threshold leaves them a ~670-token history
+// budget. When eve's fixed instructions or tools change, move it by the change
+// in the measured envelope.
+const TEST_REQUEST_ENVELOPE_TOKENS = 2_611;
 // Fit the capped file-output exchange, while forcing the larger review and
 // handoff reports into the assistant checkpoint consumed by the script.
 const TEST_HISTORY_BUDGET_TOKENS = 900;
