@@ -418,7 +418,9 @@ export function formatAuthorization(
     const description = stripTerminalControls(part.description);
     if (description.length > 0) lines.push(description);
     const challenge = part.authorization;
-    if (challenge?.url) lines.push(`URL: ${stripTerminalControls(challenge.url)}`);
+    // The URL gets a row of its own: the renderer hard-wraps it and links
+    // every wrapped row to the full href (see `authorizationUrl`).
+    if (challenge?.url) lines.push("Open to authorize:", stripTerminalControls(challenge.url));
     if (challenge?.userCode) lines.push(`Code: ${stripTerminalControls(challenge.userCode)}`);
     if (challenge?.expiresAt) lines.push(`Expires: ${stripTerminalControls(challenge.expiresAt)}`);
     if (challenge?.instructions) lines.push(stripTerminalControls(challenge.instructions));

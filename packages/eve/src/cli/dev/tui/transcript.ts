@@ -552,6 +552,9 @@ export class ConversationTranscript {
         kind: "connection-auth",
         title: `${stripTerminalControls(part.displayName)} · authorization · ${state}`,
         body: formatAuthorization(part, terminalMessage),
+        ...(terminalMessage === undefined && part.authorization?.url
+          ? { link: stripTerminalControls(part.authorization.url) }
+          : {}),
         preformatted: true,
         live: terminalMessage === undefined,
       };

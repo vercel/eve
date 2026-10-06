@@ -13,6 +13,29 @@ function render(block: DisplayBlock, width = 60): string[] {
 }
 
 describe("renderBlockLines", () => {
+  it("links every wrapped row of a connection-auth URL to the full URL", () => {
+    const url = `https://auth.example.com/authorize?client_id=abc&redirect_uri=${"x".repeat(160)}`;
+    const raw = renderBlockLines(
+      {
+        kind: "connection-auth",
+        title: "Catalog · authorization · required",
+        body: `Sign in to Catalog\nOpen to authorize:\n${url}`,
+        link: url,
+        preformatted: true,
+      },
+      100,
+      theme,
+      ctx,
+    );
+    const urlRows = raw.filter((row) => row.includes("\x1b]8;;"));
+    expect(urlRows.length).toBeGreaterThan(1);
+    for (const row of urlRows) {
+      expect(row).toContain(`\x1b]8;;${url}\x1b\\`);
+      expect(visibleLength(row)).toBeLessThanOrEqual(100);
+    }
+    expect(urlRows.map((row) => stripAnsi(row).trim()).join("")).toBe(url);
+    expect(raw.map(stripAnsi)).toContain("  Open to authorize:");
+  });
   it("colors only classified failures red, warnings yellow, and raw stderr neutral", () => {
     const colored = createTheme({ color: true, unicode: true });
     const body = (logLevel?: "error" | "warn") =>
