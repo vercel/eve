@@ -1,6 +1,5 @@
+import { requireMockModel } from "@eve-e2e/config/mock-script";
 import { defineEval } from "eve/evals";
-
-import { requireMockModel } from "./mock-only";
 
 export default defineEval({
   description:

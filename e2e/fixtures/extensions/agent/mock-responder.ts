@@ -1,4 +1,4 @@
-import { outputOf, playScript } from "@eve-e2e/config/mock-script";
+import { loadSkills } from "@eve-e2e/config/mock-script";
 import type { MockModelRequest, MockModelResponse } from "eve/evals";
 
 const GIZMO_INSTRUCTIONS_TOKEN = "gizmo-instructions-ok-7K2M";
@@ -6,19 +6,6 @@ const JAVASCRIPT_INSTRUCTIONS_TOKEN = "javascript-instructions-ok-9P4R";
 const LAYOUT_TOOL = "gizmo__gizmo_layout";
 
 const SKILL_LOAD_DIRECTIVE = "SKILL-LOAD";
-
-/** Loads each named skill with execute({ skill }), then replies with each skill's last line. */
-function loadSkills(
-  request: MockModelRequest,
-  names: readonly string[],
-): MockModelResponse | string {
-  return playScript(
-    request,
-    names.map((skill) => ({ id: `load-${skill}`, input: () => ({ skill }), name: "execute" })),
-    (finished) =>
-      names.map((skill) => outputOf(finished, `load-${skill}`).trim().split("\n").at(-1)).join(" "),
-  );
-}
 
 export function respond(request: MockModelRequest): MockModelResponse | string {
   const message = request.lastUserMessage ?? "";

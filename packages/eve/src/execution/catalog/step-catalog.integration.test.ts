@@ -1,19 +1,14 @@
-import type { LanguageModelV3CallOptions, LanguageModelV3Prompt } from "@ai-sdk/provider";
-import type { MockLanguageModelV3 } from "ai/test";
+import type { LanguageModelV4CallOptions, LanguageModelV4Prompt } from "@ai-sdk/provider";
+import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
+import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
 import { dispatchDynamicSubagentEvent } from "#context/dynamic-subagent-lifecycle.js";
-import {
-  AuthKey,
-  DynamicSkillManifestKey,
-  SessionDynamicToolMetadataKey,
-  SessionIdKey,
-  SessionKey,
-  StaticModelReferenceKey,
-} from "#context/keys.js";
+import { dispatchDynamicToolEvent } from "#context/dynamic-tool-lifecycle.js";
+import { SessionIdKey, StaticModelReferenceKey } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
-import { mockModel, type MockModelResponse, type MockModelToolCall } from "#evals/mock-model.js";
+import { mockModel } from "#evals/mock-model.js";
 import {
   CallbackBaseUrlKey,
   clearPendingAuthorization,
@@ -25,6 +20,11 @@ import { getPendingInputBatches } from "#harness/pending-input-batches.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession, HarnessToolMap, StepInput, StepResult } from "#harness/types.js";
 import {
+  createApprovalContext,
+  textStreamResult,
+  toolCallsStreamResult,
+} from "#internal/testing/approval-resume.js";
+import {
   catalogBundle,
   connectionRegistry,
   connectionTool,
@@ -34,60 +34,36 @@ import {
   toolMap,
   workflowTool,
 } from "#internal/testing/catalog-fixtures.js";
-import { createSessionStartedEvent, type UnstampedMessageStreamEvent } from "#protocol/message.js";
+import {
+  createSessionStartedEvent,
+  createTurnStartedEvent,
+  type UnstampedMessageStreamEvent,
+} from "#protocol/message.js";
 import { defineAgent } from "#public/definitions/agent.js";
+import { defineSkill } from "#public/definitions/skill.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { always } from "#tools/approval/policies.js";
-import { registerDurableDynamicCallback } from "#tools/durable-callbacks.js";
+import { defineTool } from "#tools/definition.js";
+import { stampDurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
 
 // The harness runs outside a workflow body here, where run attributes cannot
 // be written; the attribute contract is covered by emit.test.ts.
 vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
 
-const SESSION_ID = "catalog-session";
 const LISTING_HEADER = "More tools and skills are available than your context shows.";
 
-function call(id: string, name: string, input: unknown): MockModelToolCall {
-  return { id, input, name };
+type Reply = ReturnType<typeof textStreamResult>;
+
+function call(toolCallId: string, toolName: string, input: unknown) {
+  return { input: JSON.stringify(input), toolCallId, toolName };
 }
 
-const text = (value: string): MockModelResponse => ({ text: value });
-const calls = (...toolCalls: MockModelToolCall[]): MockModelResponse => ({ toolCalls });
+const text = textStreamResult;
+const calls = (...entries: ReturnType<typeof call>[]) => toolCallsStreamResult(entries);
 
-/** A model that plays scripted replies in order and keeps every request it receives. */
-function scriptedModel() {
-  const replies: MockModelResponse[] = [];
-  const model = mockModel({
-    modelId: "catalog-model",
-    respond: () => {
-      const reply = replies.shift();
-      if (reply === undefined) throw new Error("The model script ran out of replies.");
-      return reply;
-    },
-  }) as MockLanguageModelV3;
-  return {
-    model,
-    reply: (...next: MockModelResponse[]) => replies.push(...next),
-    requests: () => model.doStreamCalls,
-  };
-}
-
+/** Alice's session context, with what sign-in and dynamic subagents read. */
 function createSessionContext(): ContextContainer {
-  const responder = {
-    attributes: {},
-    authenticator: "test",
-    issuer: "test",
-    principalId: "alice",
-    principalType: "user" as const,
-  };
-  const ctx = new ContextContainer();
-  ctx.set(AuthKey, responder);
-  ctx.set(SessionIdKey, SESSION_ID);
-  ctx.set(SessionKey, {
-    auth: { current: responder, initiator: null },
-    sessionId: SESSION_ID,
-    turn: { id: "turn-1", sequence: 1 },
-  });
+  const ctx = createApprovalContext();
   ctx.set(CallbackBaseUrlKey, "https://agent.example.com");
   ctx.set(StaticModelReferenceKey, { id: "catalog-model" });
   return ctx;
@@ -95,7 +71,16 @@ function createSessionContext(): ContextContainer {
 
 /** One session on one harness; `drive` runs a step and every continuation it asks for. */
 function createDriver(ctx: ContextContainer, tools: HarnessToolMap) {
-  const main = scriptedModel();
+  const replies: Reply[] = [];
+  const model = new MockLanguageModelV4({
+    doStream: async () => {
+      const reply = replies.shift();
+      if (reply === undefined) throw new Error("The model script ran out of replies.");
+      return reply;
+    },
+    modelId: "catalog-model",
+    provider: "eve-integration-mock",
+  });
   const summary = mockModel("Alice and Bob handled refunds, credits, deploys, and lookups.");
   const events: UnstampedMessageStreamEvent[] = [];
   const harness = createToolLoopHarness({
@@ -103,12 +88,14 @@ function createDriver(ctx: ContextContainer, tools: HarnessToolMap) {
     handleEvent: async (event) => {
       events.push(event);
     },
-    resolveModel: async (reference) => (reference.id === "summary" ? summary : main.model),
+    resolveModel: async (reference) => (reference.id === "summary" ? summary : model),
     tools,
   });
+  const sessionId = ctx.require(SessionIdKey);
   const driver = {
     events,
-    main,
+    reply: (...next: Reply[]) => replies.push(...next),
+    requests: () => model.doStreamCalls as LanguageModelV4CallOptions[],
     session: {
       agent: {
         compactionModelReference: { id: "summary" },
@@ -117,9 +104,9 @@ function createDriver(ctx: ContextContainer, tools: HarnessToolMap) {
         tools: [],
       },
       compaction: { recentWindowSize: 2, threshold: 1_000_000 },
-      continuationToken: `http:${SESSION_ID}`,
+      continuationToken: `http:${sessionId}`,
       history: [],
-      sessionId: SESSION_ID,
+      sessionId,
     } as HarnessSession,
     async drive(input?: StepInput): Promise<StepResult> {
       const step = (stepInput?: StepInput) =>
@@ -137,32 +124,55 @@ function createDriver(ctx: ContextContainer, tools: HarnessToolMap) {
 }
 
 /** A message as the provider receives it, without per-request provider options. */
-function messageKey(message: LanguageModelV3Prompt[number]): string {
+function messageKey(message: LanguageModelV4Prompt[number]): string {
   return JSON.stringify({ content: message.content, role: message.role });
 }
 
-function messageText(message: LanguageModelV3Prompt[number]): string {
+function messageText(message: LanguageModelV4Prompt[number]): string {
   if (typeof message.content === "string") return message.content;
   return message.content
     .map((part) => ("text" in part ? part.text : JSON.stringify(part)))
     .join("\n");
 }
 
-const systemText = (request: LanguageModelV3CallOptions) =>
+const systemText = (request: LanguageModelV4CallOptions) =>
   request.prompt.filter((message) => message.role === "system").map(messageText);
-const conversation = (request: LanguageModelV3CallOptions) =>
+const conversation = (request: LanguageModelV4CallOptions) =>
   request.prompt.filter((message) => message.role !== "system").map(messageKey);
 
 /** The catalog listing and diffs a request carries, in order. */
-function catalogMessages(request: LanguageModelV3CallOptions): string[] {
+function catalogMessages(request: LanguageModelV4CallOptions): string[] {
   return request.prompt
     .filter((message) => message.role === "user")
     .map(messageText)
     .filter((entry) => entry.startsWith(LISTING_HEADER) || entry.startsWith("The catalog changed"));
 }
 
-function expectPrefix(earlier: readonly string[], later: readonly string[], label: string) {
-  expect(later.slice(0, earlier.length), label).toEqual(earlier);
+/** What the model read back for `callId`: a JSON value or error text. */
+function toolResult(request: LanguageModelV4CallOptions, callId: string): unknown {
+  for (const message of request.prompt) {
+    if (message.role !== "tool") continue;
+    for (const part of message.content) {
+      if (part.type === "tool-result" && part.toolCallId === callId && "value" in part.output) {
+        return part.output.value;
+      }
+    }
+  }
+  throw new Error(`No result for ${callId} in the request.`);
+}
+
+/** A dynamic tool, stamped with the durable callback the bundler adds to authored resolvers. */
+function dynamicTool(description: string) {
+  const entry = defineTool({
+    deferred: true,
+    description,
+    execute: async () => ({ synced: true }),
+    inputSchema: { type: "object" },
+  });
+  stampDurableDynamicToolCallbacks(entry, {
+    execute: { callback: () => ({ synced: true }), closure: {} },
+  });
+  return entry;
 }
 
 describe("step catalog in the harness (real AI SDK)", () => {
@@ -208,11 +218,31 @@ describe("step catalog in the harness (real AI SDK)", () => {
       subagentTool("billing_specialist", { deferred: true }),
     );
     const driver = createDriver(ctx, tools);
-    const { drive, main } = driver;
-    const mark = () => main.requests().length;
+    const { drive, reply } = driver;
+    const mark = () => driver.requests().length;
+    let tenantSyncAvailable = true;
+    const resolveTenantTools = () =>
+      dispatchDynamicToolEvent({
+        ctx,
+        event: createSessionStartedEvent(),
+        messages: [],
+        resolvers: [
+          {
+            eventNames: ["session.started"],
+            events: {
+              "session.started": () =>
+                tenantSyncAvailable ? { tenant__sync: dynamicTool("Sync the tenant.") } : null,
+            },
+            logicalPath: "agent/tools/tenant.ts",
+            slug: "tenant",
+            sourceId: "tools/tenant.ts",
+            sourceKind: "module",
+          },
+        ],
+      });
 
     // A search, then an inline tool through execute.
-    main.reply(
+    reply(
       calls(call("search-refund", "search", { query: "refund" })),
       calls(call("refund", "execute", { input: { invoiceId: "in_1" }, tool: "refund_invoice" })),
       text("Refunded in_1."),
@@ -221,50 +251,27 @@ describe("step catalog in the harness (real AI SDK)", () => {
 
     // An approval, during which a dynamic deferred tool appears. The approval
     // response must stay the last message, so its step announces nothing.
-    main.reply(calls(call("credit", "execute", { tool: "issue_credit" })));
+    reply(calls(call("credit", "execute", { tool: "issue_credit" })));
     const awaitingApproval = await drive({ message: "Alice asks for a credit for Bob." });
     const [approval] = getPendingInputBatches(awaitingApproval.session.state).flatMap(
       (batch) => batch.requests,
     );
     expect(approval?.action.toolName).toBe("issue_credit");
-    registerDurableDynamicCallback({
-      callback: () => ({ synced: true }),
-      owner: {
-        entryKey: "tenant__sync",
-        name: "tenant__sync",
-        resolverSlug: "tenant",
-        scope: "session",
-        sessionId: SESSION_ID,
-      },
-      phase: "execute",
-    });
-    ctx.set(SessionDynamicToolMetadataKey, [
-      {
-        callbacks: { execute: { closure: {} } },
-        deferred: true,
-        description: "Sync the tenant.",
-        entryKey: "tenant__sync",
-        inputSchema: { type: "object" },
-        name: "tenant__sync",
-        resolverSlug: "tenant",
-      },
-    ]);
+    await resolveTenantTools();
     const approvalStep = mark();
-    main.reply(
+    reply(
       calls(call("search-sync", "search", { query: "sync" })),
       text("Credited Bob and found the sync tool."),
     );
     await drive({ inputResponses: [{ optionId: "approve", requestId: approval!.requestId }] });
 
     // A foreground workflow tool parks the turn and resumes with its result.
-    main.reply(
-      calls(call("deploy", "execute", { input: { service: "api" }, tool: "deploy_service" })),
-    );
+    reply(calls(call("deploy", "execute", { input: { service: "api" }, tool: "deploy_service" })));
     const deploying = await drive({ message: "Alice asks to deploy the api service." });
     expect(
       getPendingCoordinationBatch(deploying.session.state)?.tasks.map((task) => task.toolName),
     ).toEqual(["deploy_service"]);
-    main.reply(text("Deployed api."));
+    reply(text("Deployed api."));
     await drive({
       runtimeActionResults: [
         {
@@ -277,7 +284,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
     });
 
     // A background workflow tool and a deferred subagent each start a task.
-    main.reply(
+    reply(
       calls(
         call("research", "execute", { input: { topic: "refunds" }, tool: "research" }),
         call("delegate", "execute", {
@@ -290,7 +297,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
     expect(
       getPendingCoordinationBatch(delegating.session.state)?.tasks.map((task) => task.toolName),
     ).toEqual(["research", "billing_specialist"]);
-    main.reply(text("Both are underway."));
+    reply(text("Both are underway."));
     await drive({
       runtimeActionResults: [
         {
@@ -309,7 +316,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
     });
 
     // A connection tool parks the turn for sign-in, then runs once the user signs in.
-    main.reply(calls(call("items", "execute", { tool: "private__list_items" })));
+    reply(calls(call("items", "execute", { tool: "private__list_items" })));
     const signingIn = await drive({ message: "Alice wants the items in the private catalog." });
     const [challenge] = getPendingAuthorization(signingIn.session.state)?.challenges ?? [];
     expect(challenge?.name).toBe("private");
@@ -328,7 +335,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
       ...driver.session,
       state: clearPendingAuthorization(driver.session.state, [challenge!.attemptId!]),
     };
-    main.reply(
+    reply(
       calls(call("items-after-sign-in", "execute", { tool: "private__list_items" })),
       text("The private catalog has Alice's lamp."),
     );
@@ -344,7 +351,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
       }),
     );
     const connectionStep = mark();
-    main.reply(
+    reply(
       calls(call("status", "execute", { tool: "catalog__get_status" })),
       text("The product catalog is up."),
     );
@@ -376,30 +383,47 @@ describe("step catalog in the harness (real AI SDK)", () => {
         },
       ],
     });
-    ctx.set(SessionDynamicToolMetadataKey, []);
+    tenantSyncAvailable = false;
+    await resolveTenantTools();
     const changedStep = mark();
-    main.reply(
+    reply(
       calls(call("sync-again", "execute", { tool: "tenant__sync" })),
       text("The sync tool is gone."),
     );
     await drive({ message: "Alice asks to sync the tenant again." });
     // An entry the resolver no longer returns can't be called.
-    expect(JSON.stringify(main.requests().at(-1)!.prompt)).toContain("No tool named");
+    expect(toolResult(driver.requests().at(-1)!, "sync-again")).toContain(
+      'No tool named \\"tenant__sync\\". Closest tools: plan_advisor.',
+    );
 
     // A tool and a skill share a name; skills load deferred or not, including
     // a dynamic deferred skill that appears when the turn starts.
-    ctx.set(DynamicSkillManifestKey, {
-      playbooks: [
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: createTurnStartedEvent({ sequence: 9, turnId: "turn_9" }),
+      messages: [],
+      resolvers: [
         {
-          deferred: true,
-          description: "The tenant's escalation playbook.",
-          markdown: "# Tenant playbook",
-          name: "tenant-playbook",
+          eventNames: ["turn.started"],
+          events: {
+            "turn.started": () => ({
+              "tenant-playbook": defineSkill({
+                deferred: true,
+                description: "The tenant's escalation playbook.",
+                markdown: "# Tenant playbook",
+              }),
+            }),
+          },
+          exportName: "default",
+          logicalPath: "skills/playbooks.ts",
+          slug: "playbooks",
+          sourceId: "skills/playbooks.ts",
+          sourceKind: "module",
         },
       ],
     });
     const skillStep = mark();
-    main.reply(
+    reply(
       calls(call("search-notes", "search", { query: "release notes" })),
       calls(
         call("notes", "execute", { skill: "release_notes" }),
@@ -410,13 +434,17 @@ describe("step catalog in the harness (real AI SDK)", () => {
       text("Loaded the skills."),
     );
     await drive({ message: "Alice asks how to publish release notes and escalate." });
-    const loaded = JSON.stringify(main.requests().at(-1)!.prompt);
-    expect(JSON.stringify(main.requests()[skillStep + 1]!.prompt)).toContain(
-      '{"description":"How to write release notes.","path":"$HOME/.agents/skills/release_notes/SKILL.md","skill":"release_notes"}',
-    );
-    expect(JSON.stringify(main.requests()[skillStep + 1]!.prompt)).toContain(
-      '"tool":"release_notes"',
-    );
+    expect(toolResult(driver.requests()[skillStep + 1]!, "search-notes")).toMatchObject({
+      results: expect.arrayContaining([
+        expect.objectContaining({ tool: "release_notes" }),
+        {
+          description: "How to write release notes.",
+          path: "$HOME/.agents/skills/release_notes/SKILL.md",
+          skill: "release_notes",
+        },
+      ]),
+    });
+    const loaded = JSON.stringify(driver.requests().at(-1)!.prompt);
     for (const markdown of [
       "# release_notes",
       "# pdf-forms",
@@ -429,15 +457,16 @@ describe("step catalog in the harness (real AI SDK)", () => {
     const historyBeforeCompaction = driver.session.history;
 
     // Compaction replaces history; the next request starts a fresh baseline.
+    // Any real history exceeds a threshold of 1, so the next step compacts.
     const compactionStep = mark();
     driver.session = {
       ...driver.session,
-      compaction: { ...driver.session.compaction, threshold: 500 },
+      compaction: { ...driver.session.compaction, threshold: 1 },
     };
-    main.reply(text("Ready for the next request."));
+    reply(text("Ready for the next request."));
     await drive({ message: "Alice asks what is next." });
 
-    const requests = main.requests();
+    const requests = driver.requests();
     const listingFor = (index: number) => catalogMessages(requests[index]!);
 
     // 1. Fixed tools: the same names, descriptions, schemas, and order on every request.
@@ -473,50 +502,29 @@ describe("step catalog in the harness (real AI SDK)", () => {
     // 3. Append-only history: each request extends the one before it, until compaction.
     for (let index = 1; index < requests.length; index += 1) {
       if (index === compactionStep) continue;
-      expectPrefix(
-        conversation(requests[index - 1]!),
-        conversation(requests[index]!),
-        `request ${index}`,
+      const previous = conversation(requests[index - 1]!);
+      expect(conversation(requests[index]!).slice(0, previous.length), `request ${index}`).toEqual(
+        previous,
       );
     }
 
     // 4. No system-message fallback: the dynamic tool that appeared during the
     // approval is announced on the step after the approval response.
     expect(listingFor(approvalStep)).toHaveLength(1);
-    expect(listingFor(approvalStep + 1).at(-1)).toBe(
-      "The catalog changed.\nTools added: tenant__sync",
-    );
+    expect(listingFor(approvalStep + 1).at(-1)).toContain("Tools added: tenant__sync");
 
-    // 5. Deterministic rendering: the baseline is sorted, and later changes are diffs.
-    expect(listingFor(0)).toEqual([
-      [
-        `${LISTING_HEADER} Find them with search, call tools with execute({ tool, input }), and load skills with execute({ skill }).`,
-        "Tools: deploy_service, issue_credit, refund_invoice, release_notes, research",
-        "Agents: billing_specialist",
-        "Skills: pdf-forms, release_notes",
-        "Connections:",
-        "- private: Private catalog that needs sign-in.",
-      ].join("\n"),
-    ]);
-    expect(listingFor(connectionStep).at(-1)).toBe(
-      "The catalog changed.\nConnections added or updated:\n- catalog: Caller-specific product catalog.",
+    // 5. Deterministic rendering is owned by listing.test.ts; here each change
+    // lands as one diff, and compaction starts a fresh baseline.
+    expect(listingFor(0)).toEqual([expect.stringContaining("Agents: billing_specialist")]);
+    expect(listingFor(connectionStep).at(-1)).toContain(
+      "- catalog: Caller-specific product catalog.",
     );
-    expect(listingFor(changedStep).at(-1)).toBe(
-      "The catalog changed.\nAgents added: plan_advisor\nNo longer available, do not call or load: tenant__sync",
+    expect(listingFor(changedStep).at(-1)).toContain(
+      "No longer available, do not call or load: tenant__sync",
     );
-    expect(listingFor(skillStep).at(-1)).toBe(
-      "The catalog changed.\nSkills added: tenant-playbook",
-    );
+    expect(listingFor(skillStep).at(-1)).toContain("Skills added: tenant-playbook");
     expect(listingFor(compactionStep)).toEqual([
-      [
-        `${LISTING_HEADER} Find them with search, call tools with execute({ tool, input }), and load skills with execute({ skill }).`,
-        "Tools: deploy_service, issue_credit, refund_invoice, release_notes, research",
-        "Agents: billing_specialist, plan_advisor",
-        "Skills: pdf-forms, release_notes, tenant-playbook",
-        "Connections:",
-        "- catalog: Caller-specific product catalog.",
-        "- private: Private catalog that needs sign-in.",
-      ].join("\n"),
+      expect.stringContaining("Agents: billing_specialist, plan_advisor"),
     ]);
 
     // 6. Calling an entry adds nothing: only catalog changes append listing messages.
@@ -524,6 +532,19 @@ describe("step catalog in the harness (real AI SDK)", () => {
       index > 0 && listingFor(index).length > listingFor(index - 1).length ? [index] : [],
     );
     expect(announcedAt).toEqual([approvalStep + 1, connectionStep, changedStep, skillStep]);
+
+    // The stand-in result for calls the harness dispatches after the step never
+    // reaches the model or the protocol.
+    for (const request of requests) {
+      expect(JSON.stringify(request.prompt)).not.toContain("dispatched");
+    }
+    for (const callId of ["deploy", "research", "delegate"]) {
+      const results = driver.events.filter(
+        (event) => event.type === "action.result" && event.data.result.callId === callId,
+      );
+      expect(results, callId).toHaveLength(1);
+      expect(JSON.stringify(results), callId).not.toContain("dispatched");
+    }
 
     // History keeps the model's own execute calls; actions carry each entry's name.
     const historyCalls = historyBeforeCompaction.flatMap((message) =>
@@ -564,7 +585,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
     const ctx = createSessionContext();
     ctx.set(BundleKey, catalogBundle({ skills: [{ name: "house-rules" }] }));
     const driver = createDriver(ctx, toolMap(inlineTool("add")));
-    driver.main.reply(
+    driver.reply(
       calls(call("search-empty", "search", { query: "refund" })),
       calls(call("add", "add", {})),
       text("Nothing else is available."),
@@ -572,13 +593,13 @@ describe("step catalog in the harness (real AI SDK)", () => {
 
     await driver.drive({ message: "Alice asks what else the desk can do." });
 
-    const requests = driver.main.requests();
+    const requests = driver.requests();
     expect(requests).toHaveLength(3);
     for (const request of requests) {
       expect(request.tools?.map((tool) => tool.name)).toEqual(["add", "search", "execute"]);
       expect(catalogMessages(request)).toEqual([]);
     }
-    expect(JSON.stringify(requests[1]!.prompt)).toContain('{"results":[],"total":0}');
+    expect(toolResult(requests[1]!, "search-empty")).toEqual({ results: [], total: 0 });
   });
 
   it("validates a connection tool's input before asking anyone to approve the call", async () => {
@@ -597,7 +618,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
     ctx.set(ConnectionRegistryKey, connectionRegistry([crm]));
     ctx.set(BundleKey, catalogBundle());
     const driver = createDriver(ctx, toolMap(inlineTool("add")));
-    driver.main.reply(
+    driver.reply(
       calls(call("archive-unnamed", "execute", { input: {}, tool: "crm__archive_account" })),
       calls(
         call("archive", "execute", {
@@ -615,10 +636,12 @@ describe("step catalog in the harness (real AI SDK)", () => {
     expect(requests.map((request) => request.action)).toEqual([
       expect.objectContaining({ callId: "archive", toolName: "crm__archive_account" }),
     ]);
-    expect(JSON.stringify(driver.main.requests()[1]!.prompt)).toContain("accountId");
+    expect(toolResult(driver.requests()[1]!, "archive-unnamed")).toContain(
+      "Signature: crm__archive_account(input: { accountId: string })",
+    );
     expect(crm.calls).toEqual([]);
 
-    driver.main.reply(text("Archived Bob's account."));
+    driver.reply(text("Archived Bob's account."));
     await driver.drive({
       inputResponses: [{ optionId: "approve", requestId: requests[0]!.requestId }],
     });

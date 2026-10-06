@@ -1,3 +1,4 @@
+import { requireMockModel } from "@eve-e2e/config/mock-script";
 import { defineEval } from "eve/evals";
 
 import { DYNAMIC_MULTI_ALPHA_TOKEN } from "../../agent/skills/dynamic-multi";
@@ -12,9 +13,7 @@ import { HOUSE_RULES_OVERRIDE_TOKEN } from "../../agent/skills/house-rules-overr
 export default defineEval({
   description: "execute({ skill }) loads dynamic skills, map entries, and dynamic overrides.",
   async test(t) {
-    if (process.env.EVE_E2E_MODEL !== "mock") {
-      t.skip("Requires the deterministic mock model to load the exact skills.");
-    }
+    requireMockModel(t);
 
     const turn = await t.send("SKILL-LOAD dynamic-tenant-policy alpha house-rules");
 

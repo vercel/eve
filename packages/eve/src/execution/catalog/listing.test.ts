@@ -1,21 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { ContextContainer } from "#context/container.js";
-import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import {
-  catalogBundle,
-  connectionRegistry,
+  catalogContext,
   fakeConnection,
   inlineTool,
   subagentTool,
-  toolMap,
   type CatalogSkillSource,
 } from "#internal/testing/catalog-fixtures.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 
 import { catalogAnnouncements } from "./listing.js";
-import { buildStepCatalog } from "./step-catalog.js";
 
 interface CatalogState {
   readonly connections?: readonly { readonly description?: string; readonly name: string }[];
@@ -24,19 +18,12 @@ interface CatalogState {
 }
 
 function announce(state: CatalogState, announced?: Readonly<Record<string, string>>) {
-  const ctx = new ContextContainer();
-  ctx.set(BundleKey, catalogBundle({ skills: state.skills }));
-  ctx.set(
-    ConnectionRegistryKey,
-    connectionRegistry(
-      (state.connections ?? []).map((connection) => fakeConnection({ ...connection, tools: [] })),
+  const { catalog } = catalogContext({
+    connections: (state.connections ?? []).map((connection) =>
+      fakeConnection({ ...connection, tools: [] }),
     ),
-  );
-  const catalog = buildStepCatalog({
-    agentTools: toolMap(...(state.tools ?? [])),
-    ctx,
-    endsTurn: true,
-    session: {},
+    skills: state.skills,
+    tools: state.tools,
   });
   return catalogAnnouncements(catalog, announced);
 }

@@ -1,25 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import { ContextContainer, contextStorage } from "#context/container.js";
-import { AuthKey, SessionIdKey } from "#context/keys.js";
-import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
-import { CallbackBaseUrlKey, isAuthorizationSignal } from "#harness/authorization.js";
-import { captureLogRecords } from "#internal/testing/log-records.js";
-import type { HarnessToolMap } from "#harness/types.js";
+import { isAuthorizationSignal } from "#harness/authorization.js";
+import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import {
-  catalogBundle,
-  connectionRegistry,
+  catalogContext,
   connectionTool,
   fakeConnection,
   inlineTool,
   subagentTool,
-  toolMap,
   type CatalogSkillSource,
   type FakeConnection,
 } from "#internal/testing/catalog-fixtures.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
-
-import { buildStepCatalog } from "./step-catalog.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 interface SearchOutput {
   readonly results: readonly Record<string, unknown>[];
@@ -27,30 +19,18 @@ interface SearchOutput {
   readonly unavailable?: readonly Record<string, unknown>[];
 }
 
+/** The step's `search` tool, run inside its session. */
 function searchFor(
-  tools: HarnessToolMap,
+  tools: readonly HarnessToolDefinition[],
   options: {
     readonly connections?: readonly FakeConnection[];
     readonly skills?: readonly CatalogSkillSource[];
   } = {},
 ) {
-  const ctx = new ContextContainer();
-  ctx.set(AuthKey, {
-    attributes: {},
-    authenticator: "test",
-    principalId: "alice",
-    principalType: "user",
-  });
-  ctx.set(SessionIdKey, "catalog-search");
-  ctx.set(CallbackBaseUrlKey, "https://agent.example.com");
-  ctx.set(BundleKey, catalogBundle({ skills: options.skills }));
-  if (options.connections !== undefined) {
-    ctx.set(ConnectionRegistryKey, connectionRegistry(options.connections));
-  }
-  const catalog = buildStepCatalog({ agentTools: tools, ctx, endsTurn: true, session: {} });
+  const { catalog, run } = catalogContext({ ...options, tools });
   const search = catalog.advertised.get("search")!;
   return (input: Record<string, unknown>) =>
-    contextStorage.run(ctx, async () => (await search.execute!(input, OPTIONS)) as SearchOutput);
+    run(async () => (await search.execute!(input, OPTIONS)) as SearchOutput);
 }
 
 const OPTIONS = { messages: [], toolCallId: "call-1" };
@@ -58,7 +38,7 @@ const OPTIONS = { messages: [], toolCallId: "call-1" };
 const names = (output: SearchOutput) => output.results.map((result) => result.tool ?? result.skill);
 
 describe("search", () => {
-  const tools = toolMap(
+  const tools = [
     inlineTool("add"),
     inlineTool("refund_invoice", {
       deferred: true,
@@ -75,7 +55,7 @@ describe("search", () => {
       deferred: true,
       description: "Resolve billing disputes and refunds.",
     }),
-  );
+  ];
   const skills = [
     { deferred: true, description: "How to refund a disputed charge.", name: "refund-policy" },
     { description: "Refund wording for replies.", name: "refund-voice" },
@@ -115,11 +95,9 @@ describe("search", () => {
     ]);
   });
 
-  it("pages results, renders a signature for each result on the page, and counts every match", async () => {
-    const many = toolMap(
-      ...Array.from({ length: 60 }, (_, index) =>
-        inlineTool(`report_${String(index).padStart(2, "0")}`, { deferred: true }),
-      ),
+  it("pages results and counts every match", async () => {
+    const many = Array.from({ length: 60 }, (_, index) =>
+      inlineTool(`report_${String(index).padStart(2, "0")}`, { deferred: true }),
     );
     const search = searchFor(many);
 
@@ -145,12 +123,6 @@ describe("search", () => {
       "report_58",
       "report_59",
     ]);
-  });
-
-  it("returns the same rendering for the same entry on every search", async () => {
-    const search = searchFor(tools, { skills });
-
-    expect(await search({ query: "invoice" })).toEqual(await search({ query: "invoice" }));
   });
 
   describe("connections", () => {

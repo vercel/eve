@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { defineEval, type EveEvalContext, type EveEvalTurn } from "eve/evals";
 import { z } from "zod";
-import { expectCacheReuse, expectHealthyTurn } from "../cache-checks";
+import { expectCacheReuse, expectHealthyTurn } from "@eve-e2e/config/cache-checks";
 import { EVENT_OVERVIEW } from "../event-overview";
 import { purchasingSheets } from "../purchasing-sheets";
 
