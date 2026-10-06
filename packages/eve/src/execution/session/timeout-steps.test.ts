@@ -86,6 +86,20 @@ describe("session timeout steps", () => {
     });
   });
 
+  it("drops a signal to a stranded owner without delivering it", async () => {
+    getWorldMock.mockResolvedValue(singleDeploymentWorld("0.0.1"));
+    // Runnable owners are remembered per process, so the stranded owner needs its own run.
+    getHookByTokenMock.mockImplementation(async (token: string) => {
+      if (!token.startsWith(sessionInboxHookToken(""))) throw new HookNotFoundError(token);
+      return { runId: "stranded-owner", specVersion: 6, token };
+    });
+
+    await expect(
+      signalSessionTimeoutStep({ ownerRunId: "session-1", token: "session-1:session-timeout" }),
+    ).resolves.toBeUndefined();
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
   it("ignores a signal after the owning session is gone", async () => {
     const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
     resumeHookMock.mockRejectedValue(new HookNotFoundError("session-1:session-timeout"));

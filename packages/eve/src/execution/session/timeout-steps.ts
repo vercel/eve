@@ -11,6 +11,8 @@ import {
 } from "#execution/workflow-runtime.js";
 import type { SessionTimeoutWorkflowInput } from "#execution/session/timeout-workflow.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
+import { endStrandedSession } from "#execution/session-inbox/end-stranded-session.js";
+import { StrandedSessionOwnerError } from "#execution/session-inbox/owner.js";
 import { cancelRun, getWorld } from "#internal/workflow/runtime.js";
 import { walkCauseChain } from "#shared/errors.js";
 
@@ -37,6 +39,17 @@ export async function signalSessionTimeoutStep(input: {
       ownerRunId: input.ownerRunId,
     });
   } catch (error) {
+    if (error instanceof StrandedSessionOwnerError) {
+      // A stranded owner another timer armed is that timer's to end.
+      if (error.ownerRunId !== input.ownerRunId) return;
+      // An owner whose deployment was retired cannot finish itself, so the
+      // timer ends it instead. This bounds a retired session's lifetime: the
+      // timer is its own run, which the stranded replay guard does not skip,
+      // and a timer still sleeping has recorded no step, so it replays on this
+      // build and runs this step.
+      await endStrandedSession(error, input.token, "timeout");
+      return;
+    }
     if (!isInactiveTimeoutTarget(error)) {
       throw error;
     }

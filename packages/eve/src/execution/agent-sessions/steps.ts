@@ -1,4 +1,5 @@
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
+import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import type { SessionAuth } from "#context/session-context.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
@@ -159,6 +160,11 @@ export async function sendAgentSessionMessageStep(
       payload: { message: input.message, outputSchema: input.outputSchema },
     },
     sessionId: address.sessionId,
+  }).catch((error: unknown) => {
+    if (!SessionStrandedError.is(error)) throw error;
+    throw new Error(`Agent "${address.name}" can no longer receive messages: ${error.message}`, {
+      cause: error,
+    });
   });
   if (result.status !== "accepted") {
     throw new Error(`Agent "${address.name}" can no longer receive messages; its session ended.`);

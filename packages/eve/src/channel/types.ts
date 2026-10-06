@@ -43,7 +43,10 @@ export type CompactSessionResult =
   | { readonly status: "accepted"; readonly sessionId: string }
   | { readonly status: "no_active_session" };
 
-/** Result of queueing a manual context clear for a session. */
+/**
+ * Result of queueing a manual context clear for a session. A stranded session
+ * cannot run the clear, so it throws `SessionStrandedError` instead.
+ */
 export type ClearSessionResult =
   | { readonly status: "accepted"; readonly sessionId: string }
   | { readonly status: "no_active_session" };
@@ -233,6 +236,11 @@ export type SessionCommandResult<TCommand extends SessionCommand = SessionComman
 export interface DispatchContinuationInput<TCommand extends SessionCommand = SessionCommand> {
   readonly command: TCommand;
   readonly continuationToken: string;
+  /**
+   * Fresh creation inputs for a send. Used only when the address's owner is
+   * stranded: the runtime ends it and starts this successor in its place.
+   */
+  readonly successor?: RunInput;
 }
 
 export interface DispatchSessionInput<TCommand extends SessionCommand = SessionCommand> {
@@ -596,10 +604,20 @@ export interface Runtime {
    */
   createSession(input: RunInput): Promise<RunHandle>;
 
+  /**
+   * Sends a command to whichever session owns a continuation address. When
+   * that owner is stranded, a send with a `successor` ends it and is accepted
+   * by the successor; a send without one, or a `clear`, throws
+   * `SessionStrandedError`, and a `reset` ends it.
+   */
   dispatchContinuation<TCommand extends SessionCommand>(
     input: DispatchContinuationInput<TCommand>,
   ): Promise<SessionCommandResult<TCommand>>;
 
+  /**
+   * Sends a command to one exact session. A send or `clear` to a stranded
+   * session throws `SessionStrandedError`; a `reset` ends it.
+   */
   dispatchSession<TCommand extends SessionCommand>(
     input: DispatchSessionInput<TCommand>,
   ): Promise<SessionCommandResult<TCommand>>;
@@ -622,6 +640,9 @@ export interface Runtime {
    * first event to yield. Negative values read relative to the current tail.
    * The framework HTTP session-stream route forwards the `startIndex` query
    * parameter unchanged.
+   *
+   * Throws `SessionStrandedError` when the session's owner cannot execute
+   * here.
    */
   getEventStream(
     sessionId: string,
