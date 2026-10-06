@@ -594,6 +594,57 @@ describe("buildToolSet", () => {
     expect(getOutputJsonSchema(result.web_search)).toEqual(WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA);
   });
 
+  it("injects Browserbase search with its Gateway schemas and respects availability", async () => {
+    const tools: HarnessToolMap = new Map([
+      [
+        "web_search",
+        {
+          behavior: {
+            availability: [],
+            handling: { kind: "provider-tool", provider: "browserbase" },
+          },
+          description: "Search.",
+          inputSchema: jsonSchema({}),
+          name: "web_search",
+        },
+      ],
+    ]);
+    const result = await buildToolSetWithProviderTools({
+      modelReference: { id: "openai/gpt-5.4" },
+      modelProvider: "gateway.chat",
+      tools,
+    });
+    const search = result.web_search!;
+    expect(search).toMatchObject({ type: "provider", id: "gateway.browserbase_search" });
+    expect(search.execute).toBeUndefined();
+    expect(search.outputSchema).toBeDefined();
+    await expect(
+      asSchema(search.outputSchema!).validate?.({ error: "rate_limit", message: "Try again." }),
+    ).resolves.toMatchObject({ success: true });
+    await expect(
+      asSchema(search.outputSchema!).validate?.({
+        query: "example",
+        requestId: "search-1",
+        results: [{ id: "one", title: "Example Domain", url: "https://example.com" }],
+      }),
+    ).resolves.toMatchObject({ success: true });
+
+    const disabled = await buildToolSetWithProviderTools({
+      modelReference: { id: "openai/gpt-5.4" },
+      modelProvider: "gateway.chat",
+      tools,
+      disabledProviderTools: new Set(["web_search"]),
+    });
+    expect(disabled.web_search).toBeUndefined();
+
+    const direct = await buildToolSetWithProviderTools({
+      modelReference: { id: "gpt-5.4" },
+      modelProvider: "openai.chat",
+      tools,
+    });
+    expect(direct.web_search).toMatchObject({ id: "openai.web_search" });
+  });
+
   it("omits provider-managed web_search when no provider backend is available", async () => {
     const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
       [
