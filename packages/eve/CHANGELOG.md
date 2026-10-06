@@ -1,5 +1,19 @@
 # eve
 
+## 0.72.0
+
+### Minor Changes
+
+- 28136be: Tool calls now export one `execute_tool` span instead of an `agent.action` wrapper and a tool child. Durable outcomes, approvals, execution metadata, and subagent trace correlation stay on the tool span; the trace schema remains version 4.
+  
+  `defineInstrumentation` no longer supports `action.*` handlers or `InstrumentationAction*` types; use `tool.call.*`, `InstrumentationToolCall*`, and `InstrumentationToolOutput` instead. Tool events now describe one durable call lifecycle, and start handlers read `event.toolName` instead of `event.name`.
+
+### Patch Changes
+
+- 9d42f05: Approvals without a `response` policy can now be approved or cancelled only by the principal whose turn requested the call, so a shared thread no longer lets another person run a tool under the requester's turn. Calls requested by unauthenticated or anonymous callers are unchanged. Tools that need other approvers define `approval.response`, which replaces the default.
+- dd902e2: Mark eve-provided tools on tool execution spans, and emit tool execution spans for task controls and deferred workflow calls. Local and remote agent tool calls retain their dispatch kind, including background tasks.
+- a2c2687: `mcpChannel` can now publish the agent's own tools next to the `agent_*` tools. Set `tools: true` to list every tool the agent can run outside a conversation, with its JSON schemas, and run each `tools/call` as the route-authenticated caller. Set `agent: false` to stop serving the `agent_*` tools. Both default to what the channel served before, so existing channels do not change.
+
 ## 0.71.3
 
 ### Patch Changes
