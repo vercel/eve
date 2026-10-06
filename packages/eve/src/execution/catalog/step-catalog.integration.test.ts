@@ -248,7 +248,8 @@ describe("step catalog in the harness (real AI SDK)", () => {
     );
     await drive({ message: "Alice asks for a refund of invoice in_1." });
 
-    // An approval, during which a dynamic deferred tool appears.
+    // An approval, during which a dynamic deferred tool appears. The catalog
+    // changes on the step that runs the approved call.
     reply(calls(call("credit", "execute", { tool: "issue_credit" })));
     const awaitingApproval = await drive({ message: "Alice asks for a credit for Bob." });
     const [approval] = parkedSteps(awaitingApproval.session).flatMap((step) => step.requests);
@@ -504,10 +505,17 @@ describe("step catalog in the harness (real AI SDK)", () => {
       );
     }
 
-    // 4. No system-message fallback: the dynamic tool that appeared during the
-    // approval joins history as a diff on the approval's own step.
+    // 4. No system-message fallback, including on the step that runs approved
+    // calls: the approved call's result, then the diff as an appended message.
+    const approvedStep = requests[approvalStep]!;
+    expect(toolResult(approvedStep, "credit")).toEqual({ input: {}, ran: "issue_credit" });
+    expect(approvedStep.prompt.at(-2)?.role).toBe("tool");
+    expect(approvedStep.prompt.at(-1)).toEqual({
+      content: [{ text: "The catalog changed.\nTools added: tenant__sync", type: "text" }],
+      role: "user",
+    });
+    expect(systemText(approvedStep).join("\n")).not.toContain("tenant__sync");
     expect(listingFor(approvalStep)).toHaveLength(2);
-    expect(listingFor(approvalStep).at(-1)).toContain("Tools added: tenant__sync");
 
     // 5. Deterministic rendering is owned by listing.test.ts; here each change
     // lands as one diff, and compaction starts a fresh baseline.
