@@ -1,0 +1,354 @@
+name: Eval Benchmark
+
+# Tracks correctness, latency, and cost of fixture evals across models and eve
+# versions; see research/model-benchmark-tracking.md. Runs only on trusted
+# `main` revisions and never on pull requests. Run legs hold model credentials
+# only; the publish job is the only one that holds the Blob token.
+on:
+  schedule:
+    # Nightly; skipped when main has not moved since the last successful run.
+    - cron: "23 7 * * *"
+  # Also dispatched by release.yml after an eve release publishes.
+  workflow_dispatch:
+    inputs:
+      models:
+        description: Comma-separated e2e/benchmark.json model names (empty for all, "none" for mock legs only)
+        type: string
+        default: ""
+      fixtures:
+        description: Comma-separated e2e/benchmark.json fixture names (empty for all)
+        type: string
+        default: ""
+      attempts:
+        description: Attempts per fixture and model (empty for the registry default)
+        type: string
+        default: ""
+
+concurrency:
+  group: eval-benchmark-main
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      run: ${{ steps.skip.outputs.run }}
+      sha: ${{ steps.skip.outputs.sha }}
+      live_matrix: ${{ steps.plan.outputs.live_matrix }}
+      mock_matrix: ${{ steps.plan.outputs.mock_matrix }}
+      judge: ${{ steps.plan.outputs.judge }}
+      max_parallel: ${{ steps.plan.outputs.max_parallel }}
+      evals_per_leg: ${{ steps.plan.outputs.evals_per_leg }}
+    steps:
+      - name: Require main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Benchmark results publish only from refs/heads/main (got ${GITHUB_REF})."
+          exit 1
+
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Skip an unchanged nightly run
+        id: skip
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          echo "sha=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT_NAME" = "schedule" ]; then
+            last_sha="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow eval-benchmark.yml \
+              --branch main --status success --limit 1 --json headSha --jq '.[0].headSha // ""')"
+            if [ "$last_sha" = "$GITHUB_SHA" ]; then
+              echo "main is still at the last benchmarked commit ${GITHUB_SHA}; skipping."
+              echo "run=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          echo "run=true" >> "$GITHUB_OUTPUT"
+
+      - name: Plan legs
+        id: plan
+        if: steps.skip.outputs.run == 'true'
+        env:
+          BENCHMARK_MODELS: ${{ inputs.models }}
+          BENCHMARK_FIXTURES: ${{ inputs.fixtures }}
+          BENCHMARK_ATTEMPTS: ${{ inputs.attempts }}
+        run: node scripts/eval-benchmark/plan.mjs "$RUNNER_TEMP/plan.json" "$GITHUB_SHA"
+
+      - name: Upload plan
+        if: steps.skip.outputs.run == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: benchmark-plan
+          path: ${{ runner.temp }}/plan.json
+          if-no-files-found: error
+          retention-days: 1
+
+  # Live-model legs: fixture × model × attempt on the local world. Eval
+  # failures are data, so neither the eval run nor the job fails the workflow.
+  # e2e/benchmark.json `concurrency` caps legs (gateway load) and evals per
+  # leg (runner contention, which skews latency).
+  run-live:
+    name: run-live (${{ matrix.fixture }}, ${{ matrix.model_id }}, ${{ matrix.attempt }})
+    needs: plan
+    if: needs.plan.outputs.run == 'true' && needs.plan.outputs.live_matrix != '[]'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJSON(needs.plan.outputs.max_parallel) }}
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.live_matrix) }}
+    env:
+      AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+      EVE_E2E_MODEL: ${{ matrix.model_id }}
+      EVE_E2E_JUDGE_MODEL: ${{ needs.plan.outputs.judge }}
+      EVALS_PER_LEG: ${{ needs.plan.outputs.evals_per_leg }}
+      EVE_SANDBOX_IMAGE_TAG: latest
+    steps:
+      - name: Checkout planned commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build eve package
+        run: pnpm --filter eve run build
+
+      - name: Build extension fixtures
+        # Mirrors e2e-local: extension fixtures ship no committed dist/.
+        run: |
+          pnpm --filter "./e2e/fixtures/*-extension" run --if-present build
+          pnpm --filter dist-extensions update gizmo-extension gadget-extension
+
+      - name: Run fixture evals
+        working-directory: ${{ matrix.dir }}
+        run: |
+          pnpm run --if-present e2e:prepare
+          pnpm exec eve eval --list --json > "$RUNNER_TEMP/expected.json"
+          if ! pnpm exec eve eval --verbose --max-concurrency "$EVALS_PER_LEG"; then
+            echo "::warning::Some evals failed; failures are recorded as benchmark data."
+          fi
+
+      - name: Stage leg artifact
+        if: always()
+        env:
+          LEG_ID: ${{ matrix.leg_id }}
+          FIXTURE_DIR: ${{ matrix.dir }}
+          PLANNED_SHA: ${{ needs.plan.outputs.sha }}
+          MODEL_ID: ${{ matrix.model_id }}
+          WORLD: ${{ matrix.world }}
+          ATTEMPT: ${{ matrix.attempt }}
+          RUNNER_OS_NAME: ${{ runner.os }}
+        run: bash .github/scripts/stage-benchmark-leg.sh
+
+      - name: Upload leg artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: benchmark-leg-${{ matrix.leg_id }}
+          path: ${{ runner.temp }}/leg
+          if-no-files-found: error
+          retention-days: 1
+
+  # Mock-model legs: one per fixture and workflow world. With no model latency
+  # or cost, their timings are close to pure eve overhead.
+  run-mock:
+    name: run-mock (${{ matrix.fixture }}, ${{ matrix.world }})
+    needs: plan
+    if: needs.plan.outputs.run == 'true' && needs.plan.outputs.mock_matrix != '[]'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.mock_matrix) }}
+    # Unused by local-world legs; a service container cannot vary per leg.
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: world
+          POSTGRES_PASSWORD: world
+          POSTGRES_USER: world
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready --username=world --dbname=world"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      # Mock models never reach the gateway.
+      AI_GATEWAY_API_KEY: invalid-e2e-world-suite-key
+      EVE_E2E_MODEL: mock
+      EVALS_PER_LEG: ${{ needs.plan.outputs.evals_per_leg }}
+      EVE_SANDBOX_IMAGE_TAG: latest
+      WORKFLOW_POSTGRES_MAX_POOL_SIZE: "52"
+      WORKFLOW_POSTGRES_URL: postgres://world:world@127.0.0.1:5432/world
+      WORKFLOW_POSTGRES_WORKER_CONCURRENCY: "50"
+    steps:
+      - name: Checkout planned commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build eve package
+        run: pnpm --filter eve run build
+
+      - name: Build extension fixtures
+        run: |
+          pnpm --filter "./e2e/fixtures/*-extension" run --if-present build
+          pnpm --filter dist-extensions update gizmo-extension gadget-extension
+
+      - name: Run fixture evals on the local world
+        if: matrix.world == 'local'
+        working-directory: ${{ matrix.dir }}
+        run: |
+          pnpm run --if-present e2e:prepare
+          pnpm exec eve eval --list --json --exclude-tag real-model > "$RUNNER_TEMP/expected.json"
+          if ! pnpm exec eve eval --verbose --exclude-tag real-model --max-concurrency "$EVALS_PER_LEG"; then
+            echo "::warning::Some evals failed; failures are recorded as benchmark data."
+          fi
+
+      - name: Run fixture evals on a production server
+        if: matrix.world != 'local'
+        working-directory: ${{ matrix.dir }}
+        run: |
+          set -euo pipefail
+          pnpm run --if-present e2e:prepare
+          pnpm exec eve eval --list --json --exclude-tag real-model > "$RUNNER_TEMP/expected.json"
+          if [ "$WORLD" = "postgres" ]; then pnpm exec bootstrap; fi
+          pnpm exec eve build
+          server_log="$RUNNER_TEMP/server.log"
+          EVE_DEV=1 pnpm exec eve start --host 127.0.0.1 --port 3000 >"$server_log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null; wait "$server_pid" 2>/dev/null || true' EXIT
+          for _ in {1..120}; do
+            if curl --fail --silent http://127.0.0.1:3000/eve/v1/health >/dev/null; then break; fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then cat "$server_log"; exit 1; fi
+            sleep 0.5
+          done
+          if ! pnpm exec eve eval --verbose --exclude-tag real-model --max-concurrency "$EVALS_PER_LEG" \
+            --url http://127.0.0.1:3000; then
+            echo "::warning::Some evals failed; failures are recorded as benchmark data."
+          fi
+        env:
+          WORLD: ${{ matrix.world }}
+          # Only non-local legs select a world; fixtures read an empty value
+          # as a package name, so local legs must leave it unset.
+          EVE_E2E_WORKFLOW_WORLD: ${{ matrix.world_package }}
+
+      - name: Stage leg artifact
+        if: always()
+        env:
+          LEG_ID: ${{ matrix.leg_id }}
+          FIXTURE_DIR: ${{ matrix.dir }}
+          PLANNED_SHA: ${{ needs.plan.outputs.sha }}
+          MODEL_ID: ${{ matrix.model_id }}
+          WORLD: ${{ matrix.world }}
+          ATTEMPT: ${{ matrix.attempt }}
+          RUNNER_OS_NAME: ${{ runner.os }}
+        run: bash .github/scripts/stage-benchmark-leg.sh
+
+      - name: Upload leg artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: benchmark-leg-${{ matrix.leg_id }}
+          path: ${{ runner.temp }}/leg
+          if-no-files-found: error
+          retention-days: 1
+
+  # Runs trusted code from the planned main commit, never code a leg uploaded.
+  # Planned legs without an artifact become `gap` records.
+  publish:
+    name: publish
+    needs: [plan, run-live, run-mock]
+    if: always() && needs.plan.result == 'success' && needs.plan.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout planned commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download plan
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: benchmark-plan
+          path: ${{ runner.temp }}/plan
+
+      - name: Prepare leg directory
+        run: mkdir -p "$RUNNER_TEMP/legs"
+
+      - name: Download leg artifacts
+        # No match is valid (every leg failed to upload); records turn that into gaps.
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: benchmark-leg-*
+          path: ${{ runner.temp }}/legs
+
+      - name: Derive records
+        run: node scripts/eval-benchmark/records.mjs "$RUNNER_TEMP/plan/plan.json" "$RUNNER_TEMP/legs" "$RUNNER_TEMP/records.jsonl"
+
+      - name: Publish to Blob
+        env:
+          EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN: ${{ secrets.EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN }}
+        run: node scripts/eval-benchmark/publish.mjs "$RUNNER_TEMP/plan/plan.json" "$RUNNER_TEMP/legs" "$RUNNER_TEMP/records.jsonl"

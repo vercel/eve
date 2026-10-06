@@ -1,0 +1,372 @@
+{
+  "id": "delegated-usage-limit-tool",
+  "verdict": "passed",
+  "assertions": [
+    { "name": "requireInputRequest", "severity": "gate", "score": 1, "passed": true },
+    {
+      "name": "satisfies(the parent's input limit prompt counts the worker's tokens)",
+      "severity": "gate",
+      "score": 1,
+      "passed": true
+    },
+    {
+      "name": "messageIncludes(SURVEY-REPLY Alice's tide survey has 12 stations.)",
+      "severity": "gate",
+      "score": 1,
+      "passed": true
+    },
+    {
+      "name": "eventsSatisfy(the parent's session.waiting usage counts the worker's tokens)",
+      "severity": "gate",
+      "score": 1,
+      "passed": true
+    },
+    { "name": "calledTool(survey-through-tool)", "severity": "gate", "score": 1, "passed": true }
+  ],
+  "startedAt": "2026-10-05T23:37:22.604Z",
+  "completedAt": "2026-10-05T23:37:22.924Z",
+  "result": {
+    "sessionId": "wrun_01M476VPDME7704DBMKWJTEA74",
+    "status": "waiting",
+    "runtimeIdentity": {
+      "agentId": "agent-subagents",
+      "agentName": "agent-subagents",
+      "eveVersion": "0.71.2"
+    },
+    "sessions": [
+      {
+        "sessionId": "wrun_01M476VPDME7704DBMKWJTEA74",
+        "primary": true,
+        "events": [
+          {
+            "data": {
+              "runtime": {
+                "agentId": "agent-subagents",
+                "agentName": "agent-subagents",
+                "eveVersion": "0.71.2"
+              }
+            },
+            "type": "session.started",
+            "meta": {
+              "at": "2026-10-05T23:37:22.656Z",
+              "id": "evt_01M476VPF0V4TY13GCYYZZR7KD",
+              "deliveryIds": ["70b43cc0-b9b1-45c6-ac8f-0128cf507d99"]
+            }
+          },
+          {
+            "data": { "sequence": 0, "turnId": "turn_0" },
+            "type": "turn.started",
+            "meta": {
+              "at": "2026-10-05T23:37:22.656Z",
+              "id": "evt_01M476VPF0V4TY13GCYYZZR7KE",
+              "deliveryIds": ["70b43cc0-b9b1-45c6-ac8f-0128cf507d99"]
+            }
+          },
+          {
+            "data": {
+              "message": "SURVEY-TOOL Alice asks for the tide station survey.",
+              "sequence": 0,
+              "turnId": "turn_0"
+            },
+            "type": "message.received",
+            "meta": {
+              "at": "2026-10-05T23:37:22.656Z",
+              "id": "evt_01M476VPF0V4TY13GCYYZZR7KF",
+              "deliveryIds": ["70b43cc0-b9b1-45c6-ac8f-0128cf507d99"]
+            }
+          },
+          {
+            "data": {
+              "modelId": "eve-mock/survey-tool-parent",
+              "sequence": 0,
+              "stepIndex": 0,
+              "turnId": "turn_0"
+            },
+            "type": "step.started",
+            "meta": {
+              "at": "2026-10-05T23:37:22.656Z",
+              "id": "evt_01M476VPF0V4TY13GCYYZZR7KG",
+              "deliveryIds": ["70b43cc0-b9b1-45c6-ac8f-0128cf507d99"]
+            }
+          },
+          {
+            "data": {
+              "actions": [
+                {
+                  "callId": "survey-tool",
+                  "input": {},
+                  "kind": "tool-call",
+                  "toolName": "survey-through-tool"
+                }
+              ],
+              "sequence": 0,
+              "stepIndex": 0,
+              "turnId": "turn_0"
+            },
+            "type": "actions.requested",
+            "meta": {
+              "at": "2026-10-05T23:37:22.657Z",
+              "id": "evt_01M476VPF1PXQM1A0S8RNM5V38",
+              "deliveryIds": ["70b43cc0-b9b1-45c6-ac8f-0128cf507d99"]
+            }
+          },
+          {
+            "data": {
+              "finishReason": "tool-calls",
+              "sequence": 0,
+              "stepIndex": 0,
+              "turnId": "turn_0",
+              "usage": {
+                "inputTokens": 328,
+                "outputTokens": 1,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              }
+            },
+            "type": "step.completed",
+            "meta": {
+              "at": "2026-10-05T23:37:22.658Z",
+              "id": "evt_01M476VPF2X2MGNHE9XETH9JG1",
+              "deliveryIds": ["70b43cc0-b9b1-45c6-ac8f-0128cf507d99"]
+            }
+          },
+          {
+            "data": {
+              "callId": "survey-tool",
+              "turnId": "turn_0",
+              "name": "survey-worker",
+              "sessionId": "wrun_01M476VPGF63NH2CJXWZ452QV2"
+            },
+            "type": "agent.started",
+            "meta": {
+              "at": "2026-10-05T23:37:22.809Z",
+              "id": "evt_01M476VPKSR2CZ277J0MQ5SGQD",
+              "deliveryIds": ["70b43cc0-b9b1-45c6-ac8f-0128cf507d99"]
+            }
+          },
+          {
+            "data": {
+              "result": {
+                "callId": "survey-tool",
+                "kind": "tool-result",
+                "output": { "survey": "Alice's tide survey has 12 stations." },
+                "toolName": "survey-through-tool"
+              },
+              "sequence": 0,
+              "status": "completed",
+              "stepIndex": 0,
+              "turnId": "turn_0"
+            },
+            "type": "action.result",
+            "meta": {
+              "at": "2026-10-05T23:37:22.875Z",
+              "id": "evt_01M476VPNVZKF29Z9DHZXT08FZ",
+              "deliveryIds": ["70b43cc0-b9b1-45c6-ac8f-0128cf507d99"]
+            }
+          },
+          {
+            "data": {
+              "modelId": "eve-mock/survey-tool-parent",
+              "sequence": 0,
+              "stepIndex": 1,
+              "turnId": "turn_0"
+            },
+            "type": "step.started",
+            "meta": {
+              "at": "2026-10-05T23:37:22.875Z",
+              "id": "evt_01M476VPNVZKF29Z9DHZXT08G0",
+              "deliveryIds": ["70b43cc0-b9b1-45c6-ac8f-0128cf507d99"]
+            }
+          },
+          {
+            "data": {
+              "requests": [
+                {
+                  "action": {
+                    "callId": "wrun_01M476VPDME7704DBMKWJTEA74:limit:input:50000328",
+                    "input": { "kind": "input", "limit": 40000000, "usedTokens": 50000328 },
+                    "kind": "tool-call",
+                    "toolName": "session_limit_continuation"
+                  },
+                  "allowFreeform": false,
+                  "display": "confirmation",
+                  "kind": "session-limit",
+                  "options": [
+                    {
+                      "description": "Grant a fresh token budget",
+                      "id": "continue",
+                      "label": "Approve",
+                      "style": "primary"
+                    },
+                    { "description": "Stop now", "id": "stop", "label": "Stop", "style": "danger" }
+                  ],
+                  "prompt": "This session has hit the input-token limit (40M) per sess...",
+                  "requestId": "wrun_01M476VPDME7704DBMKWJTEA74:limit:input:50000328"
+                }
+              ],
+              "sequence": 0,
+              "stepIndex": 1,
+              "turnId": "turn_0"
+            },
+            "type": "input.requested",
+            "meta": {
+              "at": "2026-10-05T23:37:22.875Z",
+              "id": "evt_01M476VPNVZKF29Z9DHZXT08G1",
+              "deliveryIds": ["70b43cc0-b9b1-45c6-ac8f-0128cf507d99"]
+            }
+          },
+          {
+            "data": { "sequence": 0, "turnId": "turn_0" },
+            "type": "turn.completed",
+            "meta": {
+              "at": "2026-10-05T23:37:22.875Z",
+              "id": "evt_01M476VPNVZKF29Z9DHZXT08G2",
+              "deliveryIds": ["70b43cc0-b9b1-45c6-ac8f-0128cf507d99"]
+            }
+          },
+          {
+            "data": {
+              "continuationToken": "wrun_01M476VPDME7704DBMKWJTEA74",
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 50000328,
+                "outputTokens": 21
+              },
+              "wait": "next-user-message"
+            },
+            "type": "session.waiting",
+            "meta": {
+              "at": "2026-10-05T23:37:22.876Z",
+              "id": "evt_01M476VPNWX6ZJ0VPX71CK56SZ",
+              "deliveryIds": ["70b43cc0-b9b1-45c6-ac8f-0128cf507d99"]
+            }
+          },
+          {
+            "data": {
+              "resolutions": [
+                {
+                  "kind": "session-limit",
+                  "outcome": "answered",
+                  "requestId": "wrun_01M476VPDME7704DBMKWJTEA74:limit:input:50000328",
+                  "response": {
+                    "optionId": "continue",
+                    "requestId": "wrun_01M476VPDME7704DBMKWJTEA74:limit:input:50000328"
+                  }
+                }
+              ],
+              "sequence": 0,
+              "stepIndex": 1,
+              "turnId": "turn_0"
+            },
+            "type": "input.resolved",
+            "meta": {
+              "at": "2026-10-05T23:37:22.914Z",
+              "id": "evt_01M476VPQ29R903C8GSYRQF456",
+              "deliveryIds": ["70b43cc0-b9b1-45c6-ac8f-0128cf507d99"]
+            }
+          },
+          {
+            "data": { "sequence": 1, "turnId": "turn_1" },
+            "type": "turn.started",
+            "meta": {
+              "at": "2026-10-05T23:37:22.914Z",
+              "id": "evt_01M476VPQ29R903C8GSYRQF457",
+              "deliveryIds": ["70b43cc0-b9b1-45c6-ac8f-0128cf507d99"]
+            }
+          },
+          {
+            "data": {
+              "modelId": "eve-mock/survey-tool-parent",
+              "sequence": 1,
+              "stepIndex": 0,
+              "turnId": "turn_1"
+            },
+            "type": "step.started",
+            "meta": {
+              "at": "2026-10-05T23:37:22.915Z",
+              "id": "evt_01M476VPQ3NDV9YAQK95HMSN45",
+              "deliveryIds": ["70b43cc0-b9b1-45c6-ac8f-0128cf507d99"]
+            }
+          },
+          {
+            "data": {
+              "messageDelta": "SURVEY-REPLY Alice's tide survey has 12 stations.",
+              "sequence": 1,
+              "stepIndex": 0,
+              "turnId": "turn_1"
+            },
+            "type": "message.appended",
+            "meta": {
+              "at": "2026-10-05T23:37:22.916Z",
+              "id": "evt_01M476VPQ4W836SYTV426TM8BM",
+              "deliveryIds": ["70b43cc0-b9b1-45c6-ac8f-0128cf507d99"]
+            }
+          },
+          {
+            "data": {
+              "finishReason": "stop",
+              "message": "SURVEY-REPLY Alice's tide survey has 12 stations.",
+              "sequence": 1,
+              "stepIndex": 0,
+              "turnId": "turn_1"
+            },
+            "type": "message.completed",
+            "meta": {
+              "at": "2026-10-05T23:37:22.916Z",
+              "id": "evt_01M476VPQ4W836SYTV426TM8BN",
+              "deliveryIds": ["70b43cc0-b9b1-45c6-ac8f-0128cf507d99"]
+            }
+          },
+          {
+            "data": {
+              "finishReason": "stop",
+              "sequence": 1,
+              "stepIndex": 0,
+              "turnId": "turn_1",
+              "usage": {
+                "inputTokens": 341,
+                "outputTokens": 13,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              }
+            },
+            "type": "step.completed",
+            "meta": {
+              "at": "2026-10-05T23:37:22.916Z",
+              "id": "evt_01M476VPQ4W836SYTV426TM8BP",
+              "deliveryIds": ["70b43cc0-b9b1-45c6-ac8f-0128cf507d99"]
+            }
+          },
+          {
+            "data": { "sequence": 1, "turnId": "turn_1" },
+            "type": "turn.completed",
+            "meta": {
+              "at": "2026-10-05T23:37:22.919Z",
+              "id": "evt_01M476VPQ78AV8D3VPRGJ5XW9K",
+              "deliveryIds": ["70b43cc0-b9b1-45c6-ac8f-0128cf507d99"]
+            }
+          },
+          {
+            "data": {
+              "continuationToken": "wrun_01M476VPDME7704DBMKWJTEA74",
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 50000669,
+                "outputTokens": 34
+              },
+              "wait": "next-user-message"
+            },
+            "type": "session.waiting",
+            "meta": {
+              "at": "2026-10-05T23:37:22.919Z",
+              "id": "evt_01M476VPQ78AV8D3VPRGJ5XW9M",
+              "deliveryIds": ["70b43cc0-b9b1-45c6-ac8f-0128cf507d99"]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "$comment": "Registry for the model benchmark workflow (.github/workflows/eval-benchmark.yml), separate from e2e/matrix.json so adding a benchmark model never adds a CI check. `models` are slots: a stable `name` (`<lab>-high`, `-mid`, and `-low` tiers per major lab where the lab offers a current model for the tier, plus each open-weight family's main model; `openai-low` is eve's default model) and the gateway `id` that currently fills it. Bump a slot's `id` when its lab ships a successor; records keep both, and the pinned release marks the change. Leave out service-tier variants (`-fast`) unless they are eve's default. Each slot runs every listed fixture `attempts` times against the local world; each id must exist in the AI Gateway catalog, which pins its release. `mockWorlds` run each fixture once with mock models (`local`, or a world with a package in e2e/matrix.json). `judge` is fixed per registry revision. `concurrency.legs` caps live legs running at once (gateway load); `concurrency.evalsPerLeg` is passed to `eve eval --max-concurrency` on every leg, overriding a fixture's own maxConcurrency, so evals do not share a runner. Both change measured latency, and each run's manifest records them. See research/model-benchmark-tracking.md.",
+  "models": [
+    { "name": "openai-high", "id": "openai/gpt-6.1-sol" },
+    { "name": "openai-low", "id": "openai/gpt-6-luna-fast" },
+    { "name": "anthropic-high", "id": "anthropic/claude-opus-5.5" },
+    { "name": "anthropic-mid", "id": "anthropic/claude-sonnet-5.5" },
+    { "name": "anthropic-low", "id": "anthropic/claude-haiku-5.5" },
+    { "name": "google-mid", "id": "google/gemini-3.8-flash" },
+    { "name": "google-low", "id": "google/gemini-3.5-flash-lite" },
+    { "name": "open-kimi", "id": "moonshotai/kimi-k3" },
+    { "name": "open-glm", "id": "zai/glm-5.3" },
+    { "name": "open-minimax", "id": "minimax/minimax-m3" }
+  ],
+  "fixtures": ["agent-tools", "agent-subagents", "agent-tasks"],
+  "mockWorlds": ["local", "postgres"],
+  "attempts": 3,
+  "concurrency": { "legs": 8, "evalsPerLeg": 1 },
+  "judge": "openai/gpt-5.6-luna"
+}

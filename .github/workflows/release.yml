@@ -19,6 +19,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     permissions:
+      actions: write
       contents: write
       packages: write
       pull-requests: write
@@ -187,3 +188,12 @@ jobs:
           if [[ -n "$version" ]]; then
             gh release edit "eve@$version" --latest
           fi
+
+      # A workflow_run trigger cannot see whether changesets actually
+      # published, so dispatch the benchmark here to give every release a
+      # data point. GITHUB_TOKEN may trigger workflow_dispatch.
+      - name: Benchmark the released eve version
+        if: steps.changesets.outputs.published == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run eval-benchmark.yml --repo "$GITHUB_REPOSITORY" --ref main

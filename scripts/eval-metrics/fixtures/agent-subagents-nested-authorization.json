@@ -1,0 +1,412 @@
+{
+  "id": "remote-nested-authorization",
+  "verdict": "passed",
+  "assertions": [
+    { "name": "event(turn.waiting)", "severity": "gate", "score": 1, "passed": true },
+    { "name": "event(authorization.required)", "severity": "gate", "score": 1, "passed": true },
+    { "name": "notEvent(turn.started)", "severity": "gate", "score": 1, "passed": true },
+    { "name": "event(authorization.completed)", "severity": "gate", "score": 1, "passed": true },
+    { "name": "noFailedActions", "severity": "gate", "score": 1, "passed": true }
+  ],
+  "startedAt": "2026-10-05T23:37:26.612Z",
+  "completedAt": "2026-10-05T23:37:27.684Z",
+  "result": {
+    "sessionId": "wrun_01M476VTAVQCMJKEREDWHYKNMN",
+    "status": "waiting",
+    "runtimeIdentity": {
+      "agentId": "agent-subagents",
+      "agentName": "agent-subagents",
+      "eveVersion": "0.71.2"
+    },
+    "sessions": [
+      {
+        "sessionId": "wrun_01M476VTAVQCMJKEREDWHYKNMN",
+        "primary": true,
+        "events": [
+          {
+            "data": {
+              "runtime": {
+                "agentId": "agent-subagents",
+                "agentName": "agent-subagents",
+                "eveVersion": "0.71.2"
+              }
+            },
+            "type": "session.started",
+            "meta": {
+              "at": "2026-10-05T23:37:26.974Z",
+              "id": "evt_01M476VTNYX4EAXSPBQTK7HB7Q",
+              "deliveryIds": ["543cda7a-1dd3-4e07-ade1-bf60d757e191"]
+            }
+          },
+          {
+            "data": { "sequence": 0, "turnId": "turn_0" },
+            "type": "turn.started",
+            "meta": {
+              "at": "2026-10-05T23:37:26.974Z",
+              "id": "evt_01M476VTNYX4EAXSPBQTK7HB7R",
+              "deliveryIds": ["543cda7a-1dd3-4e07-ade1-bf60d757e191"]
+            }
+          },
+          {
+            "data": {
+              "message": "REMOTE-NESTED-AUTHORIZATION-8H4N: Alice asks the remote a...",
+              "sequence": 0,
+              "turnId": "turn_0"
+            },
+            "type": "message.received",
+            "meta": {
+              "at": "2026-10-05T23:37:26.974Z",
+              "id": "evt_01M476VTNYX4EAXSPBQTK7HB7S",
+              "deliveryIds": ["543cda7a-1dd3-4e07-ade1-bf60d757e191"]
+            }
+          },
+          {
+            "data": {
+              "modelId": "eve-mock/remote-nested",
+              "sequence": 0,
+              "stepIndex": 0,
+              "turnId": "turn_0"
+            },
+            "type": "step.started",
+            "meta": {
+              "at": "2026-10-05T23:37:26.974Z",
+              "id": "evt_01M476VTNYX4EAXSPBQTK7HB7T",
+              "deliveryIds": ["543cda7a-1dd3-4e07-ade1-bf60d757e191"]
+            }
+          },
+          {
+            "data": {
+              "actions": [
+                {
+                  "callId": "nested-remote",
+                  "input": { "message": "CHILD-REMOTE-NESTED-AUTHORIZATION-8H4N" },
+                  "kind": "tool-call",
+                  "toolName": "remote-loopback"
+                }
+              ],
+              "sequence": 0,
+              "stepIndex": 0,
+              "turnId": "turn_0"
+            },
+            "type": "actions.requested",
+            "meta": {
+              "at": "2026-10-05T23:37:26.976Z",
+              "id": "evt_01M476VTP0NSZRSADYBR1QQM1S",
+              "deliveryIds": ["543cda7a-1dd3-4e07-ade1-bf60d757e191"]
+            }
+          },
+          {
+            "data": {
+              "finishReason": "tool-calls",
+              "sequence": 0,
+              "stepIndex": 0,
+              "turnId": "turn_0",
+              "usage": {
+                "inputTokens": 340,
+                "outputTokens": 13,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              }
+            },
+            "type": "step.completed",
+            "meta": {
+              "at": "2026-10-05T23:37:26.976Z",
+              "id": "evt_01M476VTP0NSZRSADYBR1QQM1T",
+              "deliveryIds": ["543cda7a-1dd3-4e07-ade1-bf60d757e191"]
+            }
+          },
+          {
+            "data": {
+              "callId": "nested-remote",
+              "kind": "agent",
+              "name": "remote-loopback",
+              "taskId": "remote-loopback-tf85b0",
+              "turnId": "turn_0"
+            },
+            "type": "task.started",
+            "meta": {
+              "at": "2026-10-05T23:37:26.998Z",
+              "id": "evt_01M476VTPPADEK17TAEKPG84HC",
+              "deliveryIds": ["543cda7a-1dd3-4e07-ade1-bf60d757e191"]
+            }
+          },
+          {
+            "data": {
+              "result": {
+                "callId": "nested-remote",
+                "kind": "tool-result",
+                "output": "Started task remote-loopback-tf85b0. Its result will arri...",
+                "toolName": "remote-loopback"
+              },
+              "sequence": 0,
+              "status": "completed",
+              "stepIndex": 0,
+              "turnId": "turn_0"
+            },
+            "type": "action.result",
+            "meta": {
+              "at": "2026-10-05T23:37:27.013Z",
+              "id": "evt_01M476VTQ546GARN336V0EN9TD",
+              "deliveryIds": ["543cda7a-1dd3-4e07-ade1-bf60d757e191"]
+            }
+          },
+          {
+            "data": {
+              "modelId": "eve-mock/remote-nested",
+              "sequence": 0,
+              "stepIndex": 1,
+              "turnId": "turn_0"
+            },
+            "type": "step.started",
+            "meta": {
+              "at": "2026-10-05T23:37:27.013Z",
+              "id": "evt_01M476VTQ546GARN336V0EN9TE",
+              "deliveryIds": ["543cda7a-1dd3-4e07-ade1-bf60d757e191"]
+            }
+          },
+          {
+            "data": {
+              "messageDelta": "The remote release checklist is underway.",
+              "sequence": 0,
+              "stepIndex": 1,
+              "turnId": "turn_0"
+            },
+            "type": "message.appended",
+            "meta": {
+              "at": "2026-10-05T23:37:27.015Z",
+              "id": "evt_01M476VTQ7QQ1K4WPTMZYGG7SN",
+              "deliveryIds": ["543cda7a-1dd3-4e07-ade1-bf60d757e191"]
+            }
+          },
+          {
+            "data": {
+              "finishReason": "stop",
+              "message": "The remote release checklist is underway.",
+              "sequence": 0,
+              "stepIndex": 1,
+              "turnId": "turn_0"
+            },
+            "type": "message.completed",
+            "meta": {
+              "at": "2026-10-05T23:37:27.015Z",
+              "id": "evt_01M476VTQ7QQ1K4WPTMZYGG7SP",
+              "deliveryIds": ["543cda7a-1dd3-4e07-ade1-bf60d757e191"]
+            }
+          },
+          {
+            "data": {
+              "finishReason": "stop",
+              "sequence": 0,
+              "stepIndex": 1,
+              "turnId": "turn_0",
+              "usage": {
+                "inputTokens": 410,
+                "outputTokens": 11,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              }
+            },
+            "type": "step.completed",
+            "meta": {
+              "at": "2026-10-05T23:37:27.015Z",
+              "id": "evt_01M476VTQ7QQ1K4WPTMZYGG7SQ",
+              "deliveryIds": ["543cda7a-1dd3-4e07-ade1-bf60d757e191"]
+            }
+          },
+          {
+            "data": {
+              "on": "tasks",
+              "sequence": 0,
+              "turnId": "turn_0",
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 750,
+                "outputTokens": 24
+              }
+            },
+            "type": "turn.waiting",
+            "meta": {
+              "at": "2026-10-05T23:37:27.017Z",
+              "id": "evt_01M476VTQ9PX49TSEF22101FJX",
+              "deliveryIds": ["543cda7a-1dd3-4e07-ade1-bf60d757e191"]
+            }
+          },
+          {
+            "data": {
+              "callId": "nested-remote",
+              "turnId": "turn_0",
+              "name": "remote-loopback",
+              "sessionId": "wrun_01M476VTS5RJVZWYPNG596274F",
+              "taskId": "remote-loopback-tf85b0",
+              "remote": {
+                "url": "http://127.0.0.1:65071",
+                "resolverId": "eve:dynamic-remote-agent//__eve_dynamic_remote_credential..."
+              }
+            },
+            "type": "agent.started",
+            "meta": {
+              "at": "2026-10-05T23:37:27.153Z",
+              "id": "evt_01M476VTVHHMQ5BPM0HXVKHKNP",
+              "deliveryIds": ["543cda7a-1dd3-4e07-ade1-bf60d757e191"]
+            }
+          },
+          {
+            "type": "authorization.required",
+            "data": {
+              "description": "Authorization required for nested-release-authorization",
+              "name": "nested-release-authorization",
+              "sequence": 0,
+              "stepIndex": 0,
+              "turnId": "turn_0",
+              "attemptId": "01M476VTZCX1ZYFR346YX7BZ6S",
+              "principalId": "e2e-user"
+            },
+            "meta": { "at": "2026-10-05T23:37:27.415Z", "id": "evt_01M476VV3QPGXK4EKS47R0E0MW" }
+          },
+          {
+            "data": {
+              "on": "input",
+              "sequence": 0,
+              "turnId": "turn_0",
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 750,
+                "outputTokens": 24
+              }
+            },
+            "type": "turn.waiting",
+            "meta": { "at": "2026-10-05T23:37:27.415Z", "id": "evt_01M476VV3QPGXK4EKS47R0E0MX" }
+          }
+        ]
+      },
+      {
+        "sessionId": "wrun_01M476VTAVQCMJKEREDWHYKNMN",
+        "primary": false,
+        "events": [
+          {
+            "type": "authorization.completed",
+            "data": {
+              "name": "nested-release-authorization",
+              "outcome": "authorized",
+              "sequence": 0,
+              "stepIndex": 1,
+              "turnId": "turn_0",
+              "attemptId": "01M476VTZCX1ZYFR346YX7BZ6S",
+              "principalId": "e2e-user"
+            },
+            "meta": { "at": "2026-10-05T23:37:27.589Z", "id": "evt_01M476VV951QJZPK3A32H7X6WQ" }
+          },
+          {
+            "data": {
+              "callId": "nested-remote",
+              "kind": "agent",
+              "name": "remote-loopback",
+              "status": "completed",
+              "taskId": "remote-loopback-tf85b0",
+              "turnId": "turn_0",
+              "output": "CHILD-NESTED-AUTHORIZATION-COMPLETE"
+            },
+            "type": "task.settled",
+            "meta": {
+              "at": "2026-10-05T23:37:27.665Z",
+              "id": "evt_01M476VVBHRAW2QXHG7VJR7Z22",
+              "deliveryIds": ["543cda7a-1dd3-4e07-ade1-bf60d757e191"]
+            }
+          },
+          {
+            "data": {
+              "modelId": "eve-mock/remote-nested",
+              "sequence": 0,
+              "stepIndex": 2,
+              "turnId": "turn_0"
+            },
+            "type": "step.started",
+            "meta": {
+              "at": "2026-10-05T23:37:27.676Z",
+              "id": "evt_01M476VVBW4M2EZC8NRBW4YV53",
+              "deliveryIds": ["543cda7a-1dd3-4e07-ade1-bf60d757e191"]
+            }
+          },
+          {
+            "data": {
+              "messageDelta": "PARENT-NESTED-COMPLETE: CHILD-NESTED-AUTHORIZATION-COMPLETE",
+              "sequence": 0,
+              "stepIndex": 2,
+              "turnId": "turn_0"
+            },
+            "type": "message.appended",
+            "meta": {
+              "at": "2026-10-05T23:37:27.677Z",
+              "id": "evt_01M476VVBXRABSG9ZMFS9V8DM8",
+              "deliveryIds": ["543cda7a-1dd3-4e07-ade1-bf60d757e191"]
+            }
+          },
+          {
+            "data": {
+              "finishReason": "stop",
+              "message": "PARENT-NESTED-COMPLETE: CHILD-NESTED-AUTHORIZATION-COMPLETE",
+              "sequence": 0,
+              "stepIndex": 2,
+              "turnId": "turn_0"
+            },
+            "type": "message.completed",
+            "meta": {
+              "at": "2026-10-05T23:37:27.677Z",
+              "id": "evt_01M476VVBXRABSG9ZMFS9V8DM9",
+              "deliveryIds": ["543cda7a-1dd3-4e07-ade1-bf60d757e191"]
+            }
+          },
+          {
+            "data": {
+              "finishReason": "stop",
+              "sequence": 0,
+              "stepIndex": 2,
+              "turnId": "turn_0",
+              "usage": {
+                "inputTokens": 478,
+                "outputTokens": 15,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              }
+            },
+            "type": "step.completed",
+            "meta": {
+              "at": "2026-10-05T23:37:27.677Z",
+              "id": "evt_01M476VVBXRABSG9ZMFS9V8DMA",
+              "deliveryIds": ["543cda7a-1dd3-4e07-ade1-bf60d757e191"]
+            }
+          },
+          {
+            "data": { "sequence": 0, "turnId": "turn_0" },
+            "type": "turn.completed",
+            "meta": {
+              "at": "2026-10-05T23:37:27.679Z",
+              "id": "evt_01M476VVBZRVSVX2FPBCRAFXE7",
+              "deliveryIds": ["543cda7a-1dd3-4e07-ade1-bf60d757e191"]
+            }
+          },
+          {
+            "data": {
+              "continuationToken": "wrun_01M476VTAVQCMJKEREDWHYKNMN",
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 2927,
+                "outputTokens": 79
+              },
+              "wait": "next-user-message"
+            },
+            "type": "session.waiting",
+            "meta": {
+              "at": "2026-10-05T23:37:27.679Z",
+              "id": "evt_01M476VVBZRVSVX2FPBCRAFXE8",
+              "deliveryIds": ["543cda7a-1dd3-4e07-ade1-bf60d757e191"]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

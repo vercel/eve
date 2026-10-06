@@ -1,0 +1,1264 @@
+{
+  "id": "agent-continuation-local",
+  "verdict": "passed",
+  "assertions": [
+    {
+      "name": "messageIncludes(NOTEBOOK-REPLY NOTEBOOK-SAVED)",
+      "severity": "gate",
+      "score": 1,
+      "passed": true
+    },
+    { "name": "calledTool(task_cancel)", "severity": "gate", "score": 1, "passed": true },
+    { "name": "event(task.settled)", "severity": "gate", "score": 1, "passed": true },
+    { "name": "event(turn.cancelled)", "severity": "gate", "score": 1, "passed": true },
+    { "name": "event(task.settled)", "severity": "gate", "score": 1, "passed": true },
+    {
+      "name": "messageIncludes(NOTEBOOK-REPLY NOTEBOOK-NAME=Harbor Lumen 4482)",
+      "severity": "gate",
+      "score": 1,
+      "passed": true
+    },
+    { "name": "event(agent.started)", "severity": "gate", "score": 1, "passed": true },
+    {
+      "name": "eventsSatisfy(each turn's call reaches the one task the first call started)",
+      "severity": "gate",
+      "score": 1,
+      "passed": true
+    },
+    { "name": "noFailedActions", "severity": "gate", "score": 1, "passed": true }
+  ],
+  "startedAt": "2026-10-05T23:37:05.534Z",
+  "completedAt": "2026-10-05T23:37:08.653Z",
+  "result": {
+    "sessionId": "wrun_01M476V5RJPATF4WMMJD3PAX09",
+    "status": "waiting",
+    "runtimeIdentity": {
+      "agentId": "agent-subagents",
+      "agentName": "agent-subagents",
+      "eveVersion": "0.71.2"
+    },
+    "sessions": [
+      {
+        "sessionId": "wrun_01M476V5RJPATF4WMMJD3PAX09",
+        "primary": true,
+        "events": [
+          {
+            "data": {
+              "runtime": {
+                "agentId": "agent-subagents",
+                "agentName": "agent-subagents",
+                "eveVersion": "0.71.2"
+              }
+            },
+            "type": "session.started",
+            "meta": {
+              "at": "2026-10-05T23:37:05.857Z",
+              "id": "evt_01M476V621XG7SCYF1G0HF57SR",
+              "deliveryIds": ["52cd0222-f807-46ed-8cc1-f0adcd3f93fb"]
+            }
+          },
+          {
+            "data": { "sequence": 0, "turnId": "turn_0" },
+            "type": "turn.started",
+            "meta": {
+              "at": "2026-10-05T23:37:05.858Z",
+              "id": "evt_01M476V6228BYTWHV7MKWND209",
+              "deliveryIds": ["52cd0222-f807-46ed-8cc1-f0adcd3f93fb"]
+            }
+          },
+          {
+            "data": {
+              "message": "NOTEBOOK-REMEMBER notebook-keeper Alice shares the notebo...",
+              "sequence": 0,
+              "turnId": "turn_0"
+            },
+            "type": "message.received",
+            "meta": {
+              "at": "2026-10-05T23:37:05.859Z",
+              "id": "evt_01M476V6233AEN19P97Z73SW8X",
+              "deliveryIds": ["52cd0222-f807-46ed-8cc1-f0adcd3f93fb"]
+            }
+          },
+          {
+            "data": {
+              "modelId": "eve-mock/notebook-parent",
+              "sequence": 0,
+              "stepIndex": 0,
+              "turnId": "turn_0"
+            },
+            "type": "step.started",
+            "meta": {
+              "at": "2026-10-05T23:37:05.859Z",
+              "id": "evt_01M476V6233AEN19P97Z73SW8Y",
+              "deliveryIds": ["52cd0222-f807-46ed-8cc1-f0adcd3f93fb"]
+            }
+          },
+          {
+            "data": {
+              "actions": [
+                {
+                  "callId": "notebook-remember",
+                  "input": {
+                    "message": "NOTEBOOK-ENTRY Alice named the tide station notebook Harb..."
+                  },
+                  "kind": "tool-call",
+                  "toolName": "notebook-keeper"
+                }
+              ],
+              "sequence": 0,
+              "stepIndex": 0,
+              "turnId": "turn_0"
+            },
+            "type": "actions.requested",
+            "meta": {
+              "at": "2026-10-05T23:37:05.868Z",
+              "id": "evt_01M476V62C7GS0XB8YSMBRD14H",
+              "deliveryIds": ["52cd0222-f807-46ed-8cc1-f0adcd3f93fb"]
+            }
+          },
+          {
+            "data": {
+              "finishReason": "tool-calls",
+              "sequence": 0,
+              "stepIndex": 0,
+              "turnId": "turn_0",
+              "usage": {
+                "inputTokens": 332,
+                "outputTokens": 27,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              }
+            },
+            "type": "step.completed",
+            "meta": {
+              "at": "2026-10-05T23:37:05.871Z",
+              "id": "evt_01M476V62FPZP28T46PNM7S065",
+              "deliveryIds": ["52cd0222-f807-46ed-8cc1-f0adcd3f93fb"]
+            }
+          },
+          {
+            "data": {
+              "callId": "notebook-remember",
+              "kind": "agent",
+              "name": "notebook-keeper",
+              "taskId": "notebook-keeper-eqtna6",
+              "turnId": "turn_0"
+            },
+            "type": "task.started",
+            "meta": {
+              "at": "2026-10-05T23:37:05.906Z",
+              "id": "evt_01M476V63J65W3D9RW1NNBY17K",
+              "deliveryIds": ["52cd0222-f807-46ed-8cc1-f0adcd3f93fb"]
+            }
+          },
+          {
+            "data": {
+              "result": {
+                "callId": "notebook-remember",
+                "kind": "tool-result",
+                "output": "Started task notebook-keeper-eqtna6. Its result will arri...",
+                "toolName": "notebook-keeper"
+              },
+              "sequence": 0,
+              "status": "completed",
+              "stepIndex": 0,
+              "turnId": "turn_0"
+            },
+            "type": "action.result",
+            "meta": {
+              "at": "2026-10-05T23:37:05.921Z",
+              "id": "evt_01M476V641X0H8BK1KC4JV92AZ",
+              "deliveryIds": ["52cd0222-f807-46ed-8cc1-f0adcd3f93fb"]
+            }
+          },
+          {
+            "data": {
+              "modelId": "eve-mock/notebook-parent",
+              "sequence": 0,
+              "stepIndex": 1,
+              "turnId": "turn_0"
+            },
+            "type": "step.started",
+            "meta": {
+              "at": "2026-10-05T23:37:05.922Z",
+              "id": "evt_01M476V642AZR2058TEEM9X5EE",
+              "deliveryIds": ["52cd0222-f807-46ed-8cc1-f0adcd3f93fb"]
+            }
+          },
+          {
+            "data": {
+              "actions": [
+                {
+                  "callId": "notebook-remember-wait",
+                  "input": {},
+                  "kind": "tool-call",
+                  "toolName": "task_wait"
+                }
+              ],
+              "sequence": 0,
+              "stepIndex": 1,
+              "turnId": "turn_0"
+            },
+            "type": "actions.requested",
+            "meta": {
+              "at": "2026-10-05T23:37:05.925Z",
+              "id": "evt_01M476V645XV19K4368X5VK1B6",
+              "deliveryIds": ["52cd0222-f807-46ed-8cc1-f0adcd3f93fb"]
+            }
+          },
+          {
+            "data": {
+              "finishReason": "tool-calls",
+              "sequence": 0,
+              "stepIndex": 1,
+              "turnId": "turn_0",
+              "usage": {
+                "inputTokens": 402,
+                "outputTokens": 1,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              }
+            },
+            "type": "step.completed",
+            "meta": {
+              "at": "2026-10-05T23:37:05.926Z",
+              "id": "evt_01M476V646ZCXJ0YY0CE8DSFT3",
+              "deliveryIds": ["52cd0222-f807-46ed-8cc1-f0adcd3f93fb"]
+            }
+          },
+          {
+            "data": {
+              "on": "tasks",
+              "sequence": 0,
+              "turnId": "turn_0",
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 734,
+                "outputTokens": 28
+              }
+            },
+            "type": "turn.waiting",
+            "meta": {
+              "at": "2026-10-05T23:37:05.953Z",
+              "id": "evt_01M476V6513WBWDSX7YNC2RDDV",
+              "deliveryIds": ["52cd0222-f807-46ed-8cc1-f0adcd3f93fb"]
+            }
+          },
+          {
+            "data": {
+              "callId": "notebook-remember",
+              "turnId": "turn_0",
+              "name": "notebook-keeper",
+              "sessionId": "wrun_01M476V658DK2JBTYGB4XWHDZ0",
+              "taskId": "notebook-keeper-eqtna6"
+            },
+            "type": "agent.started",
+            "meta": {
+              "at": "2026-10-05T23:37:06.057Z",
+              "id": "evt_01M476V6898SRG54ZSBFDFWJZH",
+              "deliveryIds": ["52cd0222-f807-46ed-8cc1-f0adcd3f93fb"]
+            }
+          },
+          {
+            "data": {
+              "callId": "notebook-remember",
+              "kind": "agent",
+              "name": "notebook-keeper",
+              "status": "completed",
+              "taskId": "notebook-keeper-eqtna6",
+              "turnId": "turn_0",
+              "output": "NOTEBOOK-SAVED"
+            },
+            "type": "task.settled",
+            "meta": {
+              "at": "2026-10-05T23:37:06.114Z",
+              "id": "evt_01M476V6A2Z1SG7X142798JF05",
+              "deliveryIds": ["52cd0222-f807-46ed-8cc1-f0adcd3f93fb"]
+            }
+          },
+          {
+            "data": {
+              "result": {
+                "callId": "notebook-remember-wait",
+                "kind": "tool-result",
+                "output": "notebook-keeper-eqtna6 completed; its result follows.",
+                "toolName": "task_wait"
+              },
+              "sequence": 0,
+              "status": "completed",
+              "stepIndex": 1,
+              "turnId": "turn_0"
+            },
+            "type": "action.result",
+            "meta": {
+              "at": "2026-10-05T23:37:06.127Z",
+              "id": "evt_01M476V6AF87ZGQAP6CT77QW5G",
+              "deliveryIds": ["52cd0222-f807-46ed-8cc1-f0adcd3f93fb"]
+            }
+          },
+          {
+            "data": {
+              "modelId": "eve-mock/notebook-parent",
+              "sequence": 0,
+              "stepIndex": 2,
+              "turnId": "turn_0"
+            },
+            "type": "step.started",
+            "meta": {
+              "at": "2026-10-05T23:37:06.127Z",
+              "id": "evt_01M476V6AF87ZGQAP6CT77QW5H",
+              "deliveryIds": ["52cd0222-f807-46ed-8cc1-f0adcd3f93fb"]
+            }
+          },
+          {
+            "data": {
+              "messageDelta": "NOTEBOOK-REPLY NOTEBOOK-SAVED",
+              "sequence": 0,
+              "stepIndex": 2,
+              "turnId": "turn_0"
+            },
+            "type": "message.appended",
+            "meta": {
+              "at": "2026-10-05T23:37:06.130Z",
+              "id": "evt_01M476V6AJFFZPR5418NZFPRTZ",
+              "deliveryIds": ["52cd0222-f807-46ed-8cc1-f0adcd3f93fb"]
+            }
+          },
+          {
+            "data": {
+              "finishReason": "stop",
+              "message": "NOTEBOOK-REPLY NOTEBOOK-SAVED",
+              "sequence": 0,
+              "stepIndex": 2,
+              "turnId": "turn_0"
+            },
+            "type": "message.completed",
+            "meta": {
+              "at": "2026-10-05T23:37:06.130Z",
+              "id": "evt_01M476V6AJFFZPR5418NZFPRV0",
+              "deliveryIds": ["52cd0222-f807-46ed-8cc1-f0adcd3f93fb"]
+            }
+          },
+          {
+            "data": {
+              "finishReason": "stop",
+              "sequence": 0,
+              "stepIndex": 2,
+              "turnId": "turn_0",
+              "usage": {
+                "inputTokens": 468,
+                "outputTokens": 8,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              }
+            },
+            "type": "step.completed",
+            "meta": {
+              "at": "2026-10-05T23:37:06.130Z",
+              "id": "evt_01M476V6AJFFZPR5418NZFPRV1",
+              "deliveryIds": ["52cd0222-f807-46ed-8cc1-f0adcd3f93fb"]
+            }
+          },
+          {
+            "data": { "sequence": 0, "turnId": "turn_0" },
+            "type": "turn.completed",
+            "meta": {
+              "at": "2026-10-05T23:37:06.133Z",
+              "id": "evt_01M476V6AN6BYGDG7F56X57112",
+              "deliveryIds": ["52cd0222-f807-46ed-8cc1-f0adcd3f93fb"]
+            }
+          },
+          {
+            "data": {
+              "continuationToken": "wrun_01M476V5RJPATF4WMMJD3PAX09",
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 1332,
+                "outputTokens": 40
+              },
+              "wait": "next-user-message"
+            },
+            "type": "session.waiting",
+            "meta": {
+              "at": "2026-10-05T23:37:06.133Z",
+              "id": "evt_01M476V6AN6BYGDG7F56X57113",
+              "deliveryIds": ["52cd0222-f807-46ed-8cc1-f0adcd3f93fb"]
+            }
+          },
+          {
+            "data": { "sequence": 1, "turnId": "turn_1" },
+            "type": "turn.started",
+            "meta": {
+              "at": "2026-10-05T23:37:06.185Z",
+              "id": "evt_01M476V6C9MRXR1GD56EV73ZQF",
+              "deliveryIds": ["524d7c94-9c42-4d20-9d90-8f32a965ffa2"]
+            }
+          },
+          {
+            "data": {
+              "message": "NOTEBOOK-REVIEW notebook-keeper Alice asks for a review, ...",
+              "sequence": 1,
+              "turnId": "turn_1"
+            },
+            "type": "message.received",
+            "meta": {
+              "at": "2026-10-05T23:37:06.185Z",
+              "id": "evt_01M476V6C9MRXR1GD56EV73ZQG",
+              "deliveryIds": ["524d7c94-9c42-4d20-9d90-8f32a965ffa2"]
+            }
+          },
+          {
+            "data": {
+              "modelId": "eve-mock/notebook-parent",
+              "sequence": 1,
+              "stepIndex": 0,
+              "turnId": "turn_1"
+            },
+            "type": "step.started",
+            "meta": {
+              "at": "2026-10-05T23:37:06.185Z",
+              "id": "evt_01M476V6C9MRXR1GD56EV73ZQH",
+              "deliveryIds": ["524d7c94-9c42-4d20-9d90-8f32a965ffa2"]
+            }
+          },
+          {
+            "data": {
+              "actions": [
+                {
+                  "callId": "notebook-review",
+                  "input": {
+                    "message": "NOTEBOOK-ENTRY Please review the notebook pages before Al...",
+                    "taskId": "notebook-keeper-eqtna6"
+                  },
+                  "kind": "tool-call",
+                  "toolName": "notebook-keeper"
+                }
+              ],
+              "sequence": 1,
+              "stepIndex": 0,
+              "turnId": "turn_1"
+            },
+            "type": "actions.requested",
+            "meta": {
+              "at": "2026-10-05T23:37:06.188Z",
+              "id": "evt_01M476V6CC7A5R3Q13GNTS1WV3",
+              "deliveryIds": ["524d7c94-9c42-4d20-9d90-8f32a965ffa2"]
+            }
+          },
+          {
+            "data": {
+              "finishReason": "tool-calls",
+              "sequence": 1,
+              "stepIndex": 0,
+              "turnId": "turn_1",
+              "usage": {
+                "inputTokens": 496,
+                "outputTokens": 32,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              }
+            },
+            "type": "step.completed",
+            "meta": {
+              "at": "2026-10-05T23:37:06.188Z",
+              "id": "evt_01M476V6CC7A5R3Q13GNTS1WV4",
+              "deliveryIds": ["524d7c94-9c42-4d20-9d90-8f32a965ffa2"]
+            }
+          },
+          {
+            "data": {
+              "callId": "notebook-review",
+              "kind": "agent",
+              "name": "notebook-keeper",
+              "taskId": "notebook-keeper-eqtna6",
+              "turnId": "turn_1"
+            },
+            "type": "task.started",
+            "meta": {
+              "at": "2026-10-05T23:37:06.215Z",
+              "id": "evt_01M476V6D7X4DPT801AKTD751Q",
+              "deliveryIds": ["524d7c94-9c42-4d20-9d90-8f32a965ffa2"]
+            }
+          },
+          {
+            "data": {
+              "result": {
+                "callId": "notebook-review",
+                "kind": "tool-result",
+                "output": "Sent to task notebook-keeper-eqtna6. Its reply will arriv...",
+                "toolName": "notebook-keeper"
+              },
+              "sequence": 1,
+              "status": "completed",
+              "stepIndex": 0,
+              "turnId": "turn_1"
+            },
+            "type": "action.result",
+            "meta": {
+              "at": "2026-10-05T23:37:06.232Z",
+              "id": "evt_01M476V6DRHF4FYDKZ1NVPXHE3",
+              "deliveryIds": ["524d7c94-9c42-4d20-9d90-8f32a965ffa2"]
+            }
+          },
+          {
+            "data": {
+              "modelId": "eve-mock/notebook-parent",
+              "sequence": 1,
+              "stepIndex": 1,
+              "turnId": "turn_1"
+            },
+            "type": "step.started",
+            "meta": {
+              "at": "2026-10-05T23:37:06.233Z",
+              "id": "evt_01M476V6DSJ0SD80XPPPRQZZBH",
+              "deliveryIds": ["524d7c94-9c42-4d20-9d90-8f32a965ffa2"]
+            }
+          },
+          {
+            "data": {
+              "actions": [
+                {
+                  "callId": "notebook-review-wait",
+                  "input": { "timeoutSeconds": 2 },
+                  "kind": "tool-call",
+                  "toolName": "task_wait"
+                }
+              ],
+              "sequence": 1,
+              "stepIndex": 1,
+              "turnId": "turn_1"
+            },
+            "type": "actions.requested",
+            "meta": {
+              "at": "2026-10-05T23:37:06.235Z",
+              "id": "evt_01M476V6DV5APK6YK4ARJ56BAJ",
+              "deliveryIds": ["524d7c94-9c42-4d20-9d90-8f32a965ffa2"]
+            }
+          },
+          {
+            "data": {
+              "finishReason": "tool-calls",
+              "sequence": 1,
+              "stepIndex": 1,
+              "turnId": "turn_1",
+              "usage": {
+                "inputTokens": 543,
+                "outputTokens": 5,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              }
+            },
+            "type": "step.completed",
+            "meta": {
+              "at": "2026-10-05T23:37:06.235Z",
+              "id": "evt_01M476V6DV5APK6YK4ARJ56BAK",
+              "deliveryIds": ["524d7c94-9c42-4d20-9d90-8f32a965ffa2"]
+            }
+          },
+          {
+            "data": {
+              "on": "tasks",
+              "sequence": 1,
+              "turnId": "turn_1",
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 2371,
+                "outputTokens": 77
+              }
+            },
+            "type": "turn.waiting",
+            "meta": {
+              "at": "2026-10-05T23:37:06.258Z",
+              "id": "evt_01M476V6EJ9HJZ2FQTP0S52TPM",
+              "deliveryIds": ["524d7c94-9c42-4d20-9d90-8f32a965ffa2"]
+            }
+          },
+          {
+            "data": {
+              "result": {
+                "callId": "notebook-review-wait",
+                "kind": "tool-result",
+                "output": "Stopped waiting after 2s; 1 task is still working. Its re...",
+                "toolName": "task_wait"
+              },
+              "sequence": 1,
+              "status": "completed",
+              "stepIndex": 1,
+              "turnId": "turn_1"
+            },
+            "type": "action.result",
+            "meta": {
+              "at": "2026-10-05T23:37:08.294Z",
+              "id": "evt_01M476V8E667SBF93W9HCSJ4VD",
+              "deliveryIds": ["524d7c94-9c42-4d20-9d90-8f32a965ffa2"]
+            }
+          },
+          {
+            "data": {
+              "modelId": "eve-mock/notebook-parent",
+              "sequence": 1,
+              "stepIndex": 2,
+              "turnId": "turn_1"
+            },
+            "type": "step.started",
+            "meta": {
+              "at": "2026-10-05T23:37:08.295Z",
+              "id": "evt_01M476V8E7S6HBJVCYS5FSH3SW",
+              "deliveryIds": ["524d7c94-9c42-4d20-9d90-8f32a965ffa2"]
+            }
+          },
+          {
+            "data": {
+              "actions": [
+                {
+                  "callId": "notebook-cancel",
+                  "input": { "taskId": "notebook-keeper-eqtna6" },
+                  "kind": "tool-call",
+                  "toolName": "task_cancel"
+                }
+              ],
+              "sequence": 1,
+              "stepIndex": 2,
+              "turnId": "turn_1"
+            },
+            "type": "actions.requested",
+            "meta": {
+              "at": "2026-10-05T23:37:08.298Z",
+              "id": "evt_01M476V8EAWVYYB5H2Q699KMG6",
+              "deliveryIds": ["524d7c94-9c42-4d20-9d90-8f32a965ffa2"]
+            }
+          },
+          {
+            "data": {
+              "finishReason": "tool-calls",
+              "sequence": 1,
+              "stepIndex": 2,
+              "turnId": "turn_1",
+              "usage": {
+                "inputTokens": 576,
+                "outputTokens": 9,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              }
+            },
+            "type": "step.completed",
+            "meta": {
+              "at": "2026-10-05T23:37:08.299Z",
+              "id": "evt_01M476V8EBTW72T7YGSZTNMA8T",
+              "deliveryIds": ["524d7c94-9c42-4d20-9d90-8f32a965ffa2"]
+            }
+          },
+          {
+            "data": {
+              "callId": "notebook-review",
+              "kind": "agent",
+              "name": "notebook-keeper",
+              "status": "cancelled",
+              "taskId": "notebook-keeper-eqtna6",
+              "turnId": "turn_1",
+              "cancel": { "reason": "task_cancel" }
+            },
+            "type": "task.settled",
+            "meta": {
+              "at": "2026-10-05T23:37:08.328Z",
+              "id": "evt_01M476V8F8Z1FX7TZSZ7ZHDJRX",
+              "deliveryIds": ["524d7c94-9c42-4d20-9d90-8f32a965ffa2"]
+            }
+          },
+          {
+            "data": {
+              "result": {
+                "callId": "notebook-cancel",
+                "kind": "tool-result",
+                "output": "Stopped notebook-keeper-eqtna6's current work; it won't r...",
+                "toolName": "task_cancel"
+              },
+              "sequence": 1,
+              "status": "completed",
+              "stepIndex": 2,
+              "turnId": "turn_1"
+            },
+            "type": "action.result",
+            "meta": {
+              "at": "2026-10-05T23:37:08.346Z",
+              "id": "evt_01M476V8FTN14FSP3KYHVCYTRZ",
+              "deliveryIds": ["524d7c94-9c42-4d20-9d90-8f32a965ffa2"]
+            }
+          },
+          {
+            "data": {
+              "modelId": "eve-mock/notebook-parent",
+              "sequence": 1,
+              "stepIndex": 3,
+              "turnId": "turn_1"
+            },
+            "type": "step.started",
+            "meta": {
+              "at": "2026-10-05T23:37:08.346Z",
+              "id": "evt_01M476V8FTN14FSP3KYHVCYTS0",
+              "deliveryIds": ["524d7c94-9c42-4d20-9d90-8f32a965ffa2"]
+            }
+          },
+          {
+            "data": {
+              "messageDelta": "NOTEBOOK-REPLY Stopped notebook-keeper-eqtna6's current w...",
+              "sequence": 1,
+              "stepIndex": 3,
+              "turnId": "turn_1"
+            },
+            "type": "message.appended",
+            "meta": {
+              "at": "2026-10-05T23:37:08.349Z",
+              "id": "evt_01M476V8FXZHQQ4Y9YX9JK4MDH",
+              "deliveryIds": ["524d7c94-9c42-4d20-9d90-8f32a965ffa2"]
+            }
+          },
+          {
+            "data": {
+              "finishReason": "stop",
+              "message": "NOTEBOOK-REPLY Stopped notebook-keeper-eqtna6's current w...",
+              "sequence": 1,
+              "stepIndex": 3,
+              "turnId": "turn_1"
+            },
+            "type": "message.completed",
+            "meta": {
+              "at": "2026-10-05T23:37:08.349Z",
+              "id": "evt_01M476V8FXZHQQ4Y9YX9JK4MDJ",
+              "deliveryIds": ["524d7c94-9c42-4d20-9d90-8f32a965ffa2"]
+            }
+          },
+          {
+            "data": {
+              "finishReason": "stop",
+              "sequence": 1,
+              "stepIndex": 3,
+              "turnId": "turn_1",
+              "usage": {
+                "inputTokens": 639,
+                "outputTokens": 42,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              }
+            },
+            "type": "step.completed",
+            "meta": {
+              "at": "2026-10-05T23:37:08.349Z",
+              "id": "evt_01M476V8FXZHQQ4Y9YX9JK4MDK",
+              "deliveryIds": ["524d7c94-9c42-4d20-9d90-8f32a965ffa2"]
+            }
+          },
+          {
+            "data": { "sequence": 1, "turnId": "turn_1" },
+            "type": "turn.completed",
+            "meta": {
+              "at": "2026-10-05T23:37:08.353Z",
+              "id": "evt_01M476V8G10T9NCS0BYG14C6P5",
+              "deliveryIds": ["524d7c94-9c42-4d20-9d90-8f32a965ffa2"]
+            }
+          },
+          {
+            "data": {
+              "continuationToken": "wrun_01M476V5RJPATF4WMMJD3PAX09",
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 3586,
+                "outputTokens": 128
+              },
+              "wait": "next-user-message"
+            },
+            "type": "session.waiting",
+            "meta": {
+              "at": "2026-10-05T23:37:08.353Z",
+              "id": "evt_01M476V8G10T9NCS0BYG14C6P6",
+              "deliveryIds": ["524d7c94-9c42-4d20-9d90-8f32a965ffa2"]
+            }
+          },
+          {
+            "data": { "sequence": 2, "turnId": "turn_2" },
+            "type": "turn.started",
+            "meta": {
+              "at": "2026-10-05T23:37:08.457Z",
+              "id": "evt_01M476V8K9NZ8YZ6QQKNAH92TD",
+              "deliveryIds": ["82094b34-d148-4bfe-8b70-5e105267e99b"]
+            }
+          },
+          {
+            "data": {
+              "message": "NOTEBOOK-RECALL notebook-keeper Alice asks for the name.",
+              "sequence": 2,
+              "turnId": "turn_2"
+            },
+            "type": "message.received",
+            "meta": {
+              "at": "2026-10-05T23:37:08.458Z",
+              "id": "evt_01M476V8KA3WS00AS63TKXAKKB",
+              "deliveryIds": ["82094b34-d148-4bfe-8b70-5e105267e99b"]
+            }
+          },
+          {
+            "data": {
+              "modelId": "eve-mock/notebook-parent",
+              "sequence": 2,
+              "stepIndex": 0,
+              "turnId": "turn_2"
+            },
+            "type": "step.started",
+            "meta": {
+              "at": "2026-10-05T23:37:08.458Z",
+              "id": "evt_01M476V8KA3WS00AS63TKXAKKC",
+              "deliveryIds": ["82094b34-d148-4bfe-8b70-5e105267e99b"]
+            }
+          },
+          {
+            "data": {
+              "actions": [
+                {
+                  "callId": "notebook-recall",
+                  "input": {
+                    "message": "NOTEBOOK-ENTRY What name did Alice give the tide station ...",
+                    "taskId": "notebook-keeper-eqtna6"
+                  },
+                  "kind": "tool-call",
+                  "toolName": "notebook-keeper"
+                }
+              ],
+              "sequence": 2,
+              "stepIndex": 0,
+              "turnId": "turn_2"
+            },
+            "type": "actions.requested",
+            "meta": {
+              "at": "2026-10-05T23:37:08.460Z",
+              "id": "evt_01M476V8KCQ4RPNX1HD3Y1C7N8",
+              "deliveryIds": ["82094b34-d148-4bfe-8b70-5e105267e99b"]
+            }
+          },
+          {
+            "data": {
+              "finishReason": "tool-calls",
+              "sequence": 2,
+              "stepIndex": 0,
+              "turnId": "turn_2",
+              "usage": {
+                "inputTokens": 695,
+                "outputTokens": 29,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              }
+            },
+            "type": "step.completed",
+            "meta": {
+              "at": "2026-10-05T23:37:08.460Z",
+              "id": "evt_01M476V8KCQ4RPNX1HD3Y1C7N9",
+              "deliveryIds": ["82094b34-d148-4bfe-8b70-5e105267e99b"]
+            }
+          },
+          {
+            "data": {
+              "callId": "notebook-recall",
+              "kind": "agent",
+              "name": "notebook-keeper",
+              "taskId": "notebook-keeper-eqtna6",
+              "turnId": "turn_2"
+            },
+            "type": "task.started",
+            "meta": {
+              "at": "2026-10-05T23:37:08.486Z",
+              "id": "evt_01M476V8M6Z762FW3TK0BPFPDC",
+              "deliveryIds": ["82094b34-d148-4bfe-8b70-5e105267e99b"]
+            }
+          },
+          {
+            "data": {
+              "result": {
+                "callId": "notebook-recall",
+                "kind": "tool-result",
+                "output": "Sent to task notebook-keeper-eqtna6. Its reply will arriv...",
+                "toolName": "notebook-keeper"
+              },
+              "sequence": 2,
+              "status": "completed",
+              "stepIndex": 0,
+              "turnId": "turn_2"
+            },
+            "type": "action.result",
+            "meta": {
+              "at": "2026-10-05T23:37:08.501Z",
+              "id": "evt_01M476V8MNP1SETGP49BVH3SB6",
+              "deliveryIds": ["82094b34-d148-4bfe-8b70-5e105267e99b"]
+            }
+          },
+          {
+            "data": {
+              "modelId": "eve-mock/notebook-parent",
+              "sequence": 2,
+              "stepIndex": 1,
+              "turnId": "turn_2"
+            },
+            "type": "step.started",
+            "meta": {
+              "at": "2026-10-05T23:37:08.502Z",
+              "id": "evt_01M476V8MPWG53PDJJX23ZGY1K",
+              "deliveryIds": ["82094b34-d148-4bfe-8b70-5e105267e99b"]
+            }
+          },
+          {
+            "data": {
+              "actions": [
+                {
+                  "callId": "notebook-recall-wait",
+                  "input": {},
+                  "kind": "tool-call",
+                  "toolName": "task_wait"
+                }
+              ],
+              "sequence": 2,
+              "stepIndex": 1,
+              "turnId": "turn_2"
+            },
+            "type": "actions.requested",
+            "meta": {
+              "at": "2026-10-05T23:37:08.504Z",
+              "id": "evt_01M476V8MRFEP96D0MWRXSBG3S",
+              "deliveryIds": ["82094b34-d148-4bfe-8b70-5e105267e99b"]
+            }
+          },
+          {
+            "data": {
+              "finishReason": "tool-calls",
+              "sequence": 2,
+              "stepIndex": 1,
+              "turnId": "turn_2",
+              "usage": {
+                "inputTokens": 742,
+                "outputTokens": 1,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              }
+            },
+            "type": "step.completed",
+            "meta": {
+              "at": "2026-10-05T23:37:08.504Z",
+              "id": "evt_01M476V8MRFEP96D0MWRXSBG3T",
+              "deliveryIds": ["82094b34-d148-4bfe-8b70-5e105267e99b"]
+            }
+          },
+          {
+            "data": {
+              "on": "tasks",
+              "sequence": 2,
+              "turnId": "turn_2",
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 5023,
+                "outputTokens": 158
+              }
+            },
+            "type": "turn.waiting",
+            "meta": {
+              "at": "2026-10-05T23:37:08.520Z",
+              "id": "evt_01M476V8N872NAGQT8QGWX81SH",
+              "deliveryIds": ["82094b34-d148-4bfe-8b70-5e105267e99b"]
+            }
+          },
+          {
+            "data": {
+              "callId": "notebook-recall",
+              "kind": "agent",
+              "name": "notebook-keeper",
+              "status": "completed",
+              "taskId": "notebook-keeper-eqtna6",
+              "turnId": "turn_2",
+              "output": "NOTEBOOK-NAME=Harbor Lumen 4482"
+            },
+            "type": "task.settled",
+            "meta": {
+              "at": "2026-10-05T23:37:08.630Z",
+              "id": "evt_01M476V8RPXJGVVE5F24WJ79AF",
+              "deliveryIds": ["82094b34-d148-4bfe-8b70-5e105267e99b"]
+            }
+          },
+          {
+            "data": {
+              "result": {
+                "callId": "notebook-recall-wait",
+                "kind": "tool-result",
+                "output": "notebook-keeper-eqtna6 completed; its result follows.",
+                "toolName": "task_wait"
+              },
+              "sequence": 2,
+              "status": "completed",
+              "stepIndex": 1,
+              "turnId": "turn_2"
+            },
+            "type": "action.result",
+            "meta": {
+              "at": "2026-10-05T23:37:08.641Z",
+              "id": "evt_01M476V8S10A6Z1Y50ERZCD2A9",
+              "deliveryIds": ["82094b34-d148-4bfe-8b70-5e105267e99b"]
+            }
+          },
+          {
+            "data": {
+              "modelId": "eve-mock/notebook-parent",
+              "sequence": 2,
+              "stepIndex": 2,
+              "turnId": "turn_2"
+            },
+            "type": "step.started",
+            "meta": {
+              "at": "2026-10-05T23:37:08.642Z",
+              "id": "evt_01M476V8S2RMQRM83HM2NQ6N86",
+              "deliveryIds": ["82094b34-d148-4bfe-8b70-5e105267e99b"]
+            }
+          },
+          {
+            "data": {
+              "messageDelta": "NOTEBOOK-REPLY NOTEBOOK-NAME=Harbor Lumen 4482",
+              "sequence": 2,
+              "stepIndex": 2,
+              "turnId": "turn_2"
+            },
+            "type": "message.appended",
+            "meta": {
+              "at": "2026-10-05T23:37:08.643Z",
+              "id": "evt_01M476V8S3ZK1JPMHQEJ5WW503",
+              "deliveryIds": ["82094b34-d148-4bfe-8b70-5e105267e99b"]
+            }
+          },
+          {
+            "data": {
+              "finishReason": "stop",
+              "message": "NOTEBOOK-REPLY NOTEBOOK-NAME=Harbor Lumen 4482",
+              "sequence": 2,
+              "stepIndex": 2,
+              "turnId": "turn_2"
+            },
+            "type": "message.completed",
+            "meta": {
+              "at": "2026-10-05T23:37:08.644Z",
+              "id": "evt_01M476V8S40C4W83AANGJFAY22",
+              "deliveryIds": ["82094b34-d148-4bfe-8b70-5e105267e99b"]
+            }
+          },
+          {
+            "data": {
+              "finishReason": "stop",
+              "sequence": 2,
+              "stepIndex": 2,
+              "turnId": "turn_2",
+              "usage": {
+                "inputTokens": 813,
+                "outputTokens": 12,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              }
+            },
+            "type": "step.completed",
+            "meta": {
+              "at": "2026-10-05T23:37:08.644Z",
+              "id": "evt_01M476V8S40C4W83AANGJFAY23",
+              "deliveryIds": ["82094b34-d148-4bfe-8b70-5e105267e99b"]
+            }
+          },
+          {
+            "data": { "sequence": 2, "turnId": "turn_2" },
+            "type": "turn.completed",
+            "meta": {
+              "at": "2026-10-05T23:37:08.648Z",
+              "id": "evt_01M476V8S8M483PXMJW7TCF6A5",
+              "deliveryIds": ["82094b34-d148-4bfe-8b70-5e105267e99b"]
+            }
+          },
+          {
+            "data": {
+              "continuationToken": "wrun_01M476V5RJPATF4WMMJD3PAX09",
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 6006,
+                "outputTokens": 178
+              },
+              "wait": "next-user-message"
+            },
+            "type": "session.waiting",
+            "meta": {
+              "at": "2026-10-05T23:37:08.648Z",
+              "id": "evt_01M476V8S8M483PXMJW7TCF6A6",
+              "deliveryIds": ["82094b34-d148-4bfe-8b70-5e105267e99b"]
+            }
+          }
+        ]
+      },
+      {
+        "sessionId": "wrun_01M476V658DK2JBTYGB4XWHDZ0",
+        "primary": false,
+        "events": [
+          {
+            "data": {
+              "runtime": {
+                "agentId": "notebook-keeper",
+                "agentName": "notebook-keeper",
+                "eveVersion": "0.71.2"
+              }
+            },
+            "type": "session.started",
+            "meta": { "at": "2026-10-05T23:37:06.009Z", "id": "evt_01M476V66SMTJ5E0FTNQ3KTBAE" }
+          },
+          {
+            "data": { "sequence": 0, "turnId": "turn_0" },
+            "type": "turn.started",
+            "meta": { "at": "2026-10-05T23:37:06.009Z", "id": "evt_01M476V66SMTJ5E0FTNQ3KTBAF" }
+          },
+          {
+            "data": {
+              "message": "You are the subagent \"notebook-keeper\".\nDescription: Test...",
+              "sequence": 0,
+              "turnId": "turn_0"
+            },
+            "type": "message.received",
+            "meta": { "at": "2026-10-05T23:37:06.009Z", "id": "evt_01M476V66SMTJ5E0FTNQ3KTBAG" }
+          },
+          {
+            "data": {
+              "modelId": "eve-mock/notebook-keeper",
+              "sequence": 0,
+              "stepIndex": 0,
+              "turnId": "turn_0"
+            },
+            "type": "step.started",
+            "meta": { "at": "2026-10-05T23:37:06.009Z", "id": "evt_01M476V66SMTJ5E0FTNQ3KTBAH" }
+          },
+          {
+            "data": {
+              "messageDelta": "NOTEBOOK-SAVED",
+              "sequence": 0,
+              "stepIndex": 0,
+              "turnId": "turn_0"
+            },
+            "type": "message.appended",
+            "meta": { "at": "2026-10-05T23:37:06.011Z", "id": "evt_01M476V66VDRJ4S2TSRXESVFGN" }
+          },
+          {
+            "data": {
+              "finishReason": "stop",
+              "message": "NOTEBOOK-SAVED",
+              "sequence": 0,
+              "stepIndex": 0,
+              "turnId": "turn_0"
+            },
+            "type": "message.completed",
+            "meta": { "at": "2026-10-05T23:37:06.011Z", "id": "evt_01M476V66VDRJ4S2TSRXESVFGP" }
+          },
+          {
+            "data": {
+              "finishReason": "stop",
+              "sequence": 0,
+              "stepIndex": 0,
+              "turnId": "turn_0",
+              "usage": {
+                "inputTokens": 130,
+                "outputTokens": 4,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              }
+            },
+            "type": "step.completed",
+            "meta": { "at": "2026-10-05T23:37:06.011Z", "id": "evt_01M476V66VDRJ4S2TSRXESVFGQ" }
+          },
+          {
+            "data": { "sequence": 0, "turnId": "turn_0" },
+            "type": "turn.completed",
+            "meta": { "at": "2026-10-05T23:37:06.017Z", "id": "evt_01M476V671EP9FBHHQBZNAD0CT" }
+          },
+          {
+            "data": {
+              "continuationToken": "wrun_01M476V63AHSYGJX1PKPSDJ14K:0",
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 130,
+                "outputTokens": 4
+              },
+              "wait": "next-user-message"
+            },
+            "type": "session.waiting",
+            "meta": { "at": "2026-10-05T23:37:06.017Z", "id": "evt_01M476V671EP9FBHHQBZNAD0CV" }
+          }
+        ]
+      },
+      {
+        "sessionId": "wrun_01M476V658DK2JBTYGB4XWHDZ0",
+        "primary": false,
+        "events": [
+          {
+            "data": { "sequence": 1, "turnId": "turn_1" },
+            "type": "turn.started",
+            "meta": { "at": "2026-10-05T23:37:06.281Z", "id": "evt_01M476V6F9EBD55ZG238NQ1ZJW" }
+          },
+          {
+            "data": {
+              "message": "NOTEBOOK-ENTRY Please review the notebook pages before Al...",
+              "sequence": 1,
+              "turnId": "turn_1"
+            },
+            "type": "message.received",
+            "meta": { "at": "2026-10-05T23:37:06.281Z", "id": "evt_01M476V6F9EBD55ZG238NQ1ZJX" }
+          },
+          {
+            "data": {
+              "modelId": "eve-mock/notebook-keeper",
+              "sequence": 1,
+              "stepIndex": 0,
+              "turnId": "turn_1"
+            },
+            "type": "step.started",
+            "meta": { "at": "2026-10-05T23:37:06.281Z", "id": "evt_01M476V6F9EBD55ZG238NQ1ZJY" }
+          },
+          {
+            "data": {
+              "actions": [
+                {
+                  "callId": "notebook-review-2",
+                  "input": {},
+                  "kind": "tool-call",
+                  "toolName": "notebook-review"
+                }
+              ],
+              "sequence": 1,
+              "stepIndex": 0,
+              "turnId": "turn_1"
+            },
+            "type": "actions.requested",
+            "meta": { "at": "2026-10-05T23:37:06.283Z", "id": "evt_01M476V6FBET7W3ABD5M66T5ZH" }
+          },
+          {
+            "data": { "sequence": 1, "turnId": "turn_1" },
+            "type": "turn.cancelled",
+            "meta": { "at": "2026-10-05T23:37:08.407Z", "id": "evt_01M476V8HQR8KWGGH1VA5BHRGS" }
+          },
+          {
+            "data": {
+              "continuationToken": "wrun_01M476V63AHSYGJX1PKPSDJ14K:0",
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 130,
+                "outputTokens": 4
+              },
+              "wait": "next-user-message"
+            },
+            "type": "session.waiting",
+            "meta": { "at": "2026-10-05T23:37:08.407Z", "id": "evt_01M476V8HQR8KWGGH1VA5BHRGT" }
+          }
+        ]
+      }
+    ]
+  }
+}
