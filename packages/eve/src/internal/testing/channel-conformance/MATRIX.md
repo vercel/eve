@@ -75,20 +75,20 @@ pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conform
 | completing a sign-in tells the person it succeeded | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[12](#note-12)</sup> | ❌<sup>[12](#note-12)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[12](#note-12)</sup> | ✅ | ✅ | ✅ |
 | message after ignored sign-in gets an answer, signing in late doesn't run | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | message after ignored sign-in tells user it was cancelled | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[12](#note-12)</sup> | ✅ | ✅ | ✅ |
-| the requester pressing Approve on a requester-only approval runs the tool | ✅ | ✅ | ✅ |  | —<sup>[1](#note-1)</sup> | ❌<sup>[17](#note-17)</sup> |  | —<sup>[1](#note-1)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
-| another person pressing Approve on a requester-only approval leaves it pending | —<sup>[18](#note-18)</sup> | —<sup>[18](#note-18)</sup> | ✅ |  | —<sup>[19](#note-19)</sup> | ❌<sup>[17](#note-17)</sup> |  | —<sup>[19](#note-19)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[19](#note-19)</sup> | —<sup>[19](#note-19)</sup> | —<sup>[19](#note-19)</sup> | —<sup>[19](#note-19)</sup> |
-| another person pressing Cancel on a requester-only approval leaves it pending | —<sup>[18](#note-18)</sup> | —<sup>[18](#note-18)</sup> | ✅ |  | —<sup>[19](#note-19)</sup> | ❌<sup>[17](#note-17)</sup> |  | —<sup>[19](#note-19)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[19](#note-19)</sup> | —<sup>[19](#note-19)</sup> | —<sup>[19](#note-19)</sup> | —<sup>[19](#note-19)</sup> |
-| another person's rejected press leaves the approval's buttons in place | —<sup>[18](#note-18)</sup> | —<sup>[18](#note-18)</sup> | ✅ |  | —<sup>[19](#note-19)</sup> | ✅ |  | —<sup>[19](#note-19)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[19](#note-19)</sup> | —<sup>[19](#note-19)</sup> | —<sup>[19](#note-19)</sup> | —<sup>[19](#note-19)</sup> |
-| another person pressing Approve on an open approval runs the tool | —<sup>[18](#note-18)</sup> | —<sup>[18](#note-18)</sup> | ✅ |  | —<sup>[19](#note-19)</sup> | ❌<sup>[17](#note-17)</sup> |  | —<sup>[19](#note-19)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[19](#note-19)</sup> | —<sup>[19](#note-19)</sup> | —<sup>[19](#note-19)</sup> | —<sup>[19](#note-19)</sup> |
+| the requester pressing Approve on a requester-only approval runs the tool | ✅ | ✅ | ✅ |  | —<sup>[1](#note-1)</sup> | ✅ |  | —<sup>[1](#note-1)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
+| another person pressing Approve on a requester-only approval leaves it pending | —<sup>[17](#note-17)</sup> | —<sup>[17](#note-17)</sup> | ✅ |  | —<sup>[18](#note-18)</sup> | ✅ |  | —<sup>[18](#note-18)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[18](#note-18)</sup> | —<sup>[18](#note-18)</sup> | —<sup>[18](#note-18)</sup> | —<sup>[18](#note-18)</sup> |
+| another person pressing Cancel on a requester-only approval leaves it pending | —<sup>[17](#note-17)</sup> | —<sup>[17](#note-17)</sup> | ✅ |  | —<sup>[18](#note-18)</sup> | ✅ |  | —<sup>[18](#note-18)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[18](#note-18)</sup> | —<sup>[18](#note-18)</sup> | —<sup>[18](#note-18)</sup> | —<sup>[18](#note-18)</sup> |
+| another person's rejected press leaves the approval's buttons in place | —<sup>[17](#note-17)</sup> | —<sup>[17](#note-17)</sup> | ✅ |  | —<sup>[18](#note-18)</sup> | ✅ |  | —<sup>[18](#note-18)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[18](#note-18)</sup> | —<sup>[18](#note-18)</sup> | —<sup>[18](#note-18)</sup> | —<sup>[18](#note-18)</sup> |
+| another person pressing Approve on an open approval runs the tool | —<sup>[17](#note-17)</sup> | —<sup>[17](#note-17)</sup> | ✅ |  | —<sup>[18](#note-18)</sup> | ✅ |  | —<sup>[18](#note-18)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[18](#note-18)</sup> | —<sup>[18](#note-18)</sup> | —<sup>[18](#note-18)</sup> | —<sup>[18](#note-18)</sup> |
 
 ## Attachments
 
 | Rule | `tui` | `web chat` | `chat-sdk` | `chat-sdk-dm` | `chat-sdk-text` | `discord` | `discord-dm` | `linq` | `linq-dm` | `slack` | `slack-dm` | `teams` | `teams-dm` | `telegram` | `telegram-dm` | `github` | `linear` | `photon` | `twilio` |
 | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| an image a person sends reaches the agent with its bytes and type | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[20](#note-20)</sup> | ✅ | ✅ | ✅ |
-| a PDF a person sends reaches the agent with its bytes and type | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ✅ |  | ✅ | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[20](#note-20)</sup> | ✅ | ✅ | ✅ |
-| a file that can't be downloaded reaches the agent as a note, not a link, and the next message still works | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ✅ |  | ✅ | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[20](#note-20)</sup> | ✅ | ✅ | ✅ |
-| a file sent earlier in the conversation is still there on a later message | —<sup>[20](#note-20)</sup> | —<sup>[20](#note-20)</sup> | ✅ |  | ✅ | —<sup>[21](#note-21)</sup> |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[20](#note-20)</sup> | ✅ | ✅ | ✅ |
+| an image a person sends reaches the agent with its bytes and type | —<sup>[19](#note-19)</sup> | —<sup>[19](#note-19)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[19](#note-19)</sup> | ✅ | ✅ | ✅ |
+| a PDF a person sends reaches the agent with its bytes and type | —<sup>[19](#note-19)</sup> | —<sup>[19](#note-19)</sup> | ✅ |  | ✅ | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[19](#note-19)</sup> | ✅ | ✅ | ✅ |
+| a file that can't be downloaded reaches the agent as a note, not a link, and the next message still works | —<sup>[19](#note-19)</sup> | —<sup>[19](#note-19)</sup> | ✅ |  | ✅ | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[19](#note-19)</sup> | ✅ | ✅ | ✅ |
+| a file sent earlier in the conversation is still there on a later message | —<sup>[19](#note-19)</sup> | —<sup>[19](#note-19)</sup> | ✅ |  | ✅ | —<sup>[20](#note-20)</sup> |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[19](#note-19)</sup> | ✅ | ✅ | ✅ |
 
 ## Notes
 
@@ -108,8 +108,7 @@ pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conform
 14. <a id="note-14"></a>the rule applies only where the conversation is public or shared, and this one is private
 15. <a id="note-15"></a>the sign-in prompt, link included, is posted to the whole thread
 16. <a id="note-16"></a>the code is in the elicitation body the whole issue sees; who sees the auth signal's link is unverified
-17. <a id="note-17"></a>a button press responds with `auth: null`, so no one can satisfy a response policy
-18. <a id="note-18"></a>the platform has no second person who can act
-19. <a id="note-19"></a>the platform has no second person who can act or buttons a person can press
-20. <a id="note-20"></a>the platform has no files a person can send
-21. <a id="note-21"></a>each slash command starts its own session, so no later message shares one with the file
+17. <a id="note-17"></a>the platform has no second person who can act
+18. <a id="note-18"></a>the platform has no second person who can act or buttons a person can press
+19. <a id="note-19"></a>the platform has no files a person can send
+20. <a id="note-20"></a>each slash command starts its own session, so no later message shares one with the file

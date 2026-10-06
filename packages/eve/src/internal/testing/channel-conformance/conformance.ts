@@ -90,19 +90,6 @@ function unnamedAnsweredPrompts(
   );
 }
 
-/** Presses reach a response policy without the presser's identity, so eve refuses them all. */
-function anonymousPresses(
-  reason: string,
-  rules: readonly ContractRuleName[],
-): Partial<Record<ContractRuleName, BrokenCell>> {
-  return Object.fromEntries(
-    rules.map((rule) => [
-      rule,
-      { reason, symptom: /Authentication is required to respond to this approval/ },
-    ]),
-  );
-}
-
 interface ConformanceChannel {
   readonly driver: () => ChannelDriver | ClientDriver;
   /**
@@ -158,15 +145,6 @@ const CHAT_SDK_BROKEN = {
 
 const DISCORD_BROKEN = {
   ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, ["approvalPress", "questionPress"]),
-  ...anonymousPresses(
-    "a button press responds with `auth: null`, so no one can satisfy a response policy",
-    [
-      "the requester pressing Approve on a requester-only approval runs the tool",
-      "another person pressing Approve on a requester-only approval leaves it pending",
-      "another person pressing Cancel on a requester-only approval leaves it pending",
-      "another person pressing Approve on an open approval runs the tool",
-    ],
-  ),
   ...noSignInRenderer(
     "a sign-in names the service and shows its sign-in link",
     "a sign-in shows its confirmation code",

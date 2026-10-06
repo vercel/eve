@@ -29,6 +29,8 @@ export {
   type DiscordContext,
   type DiscordEventContext,
   type DiscordHandle,
+  type DiscordInputResponseInteraction,
+  type DiscordInputResponseResult,
   type DiscordReceiveTarget,
   type DiscordRequestOptions,
 } from "#public/channels/discord/discordChannel.js";

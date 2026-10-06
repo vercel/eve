@@ -291,7 +291,7 @@ describe("discordChannel() inbound route", () => {
     );
   });
 
-  it("acknowledges HITL button clicks with a deferred update", async () => {
+  it("answers a HITL button click as the user who pressed it", async () => {
     const { privateKey, publicKeyHex } = testKeys();
     const components = renderInputRequestComponents({
       action: { callId: "call_1", input: {}, kind: "tool-call", toolName: "ask_question" },
@@ -315,10 +315,68 @@ describe("discordChannel() inbound route", () => {
     });
     const channel = discordChannel({ credentials: { publicKey: publicKeyHex } });
 
-    const { response } = await firePost(channel, signedRequest({ body, privateKey }));
+    const { response, send } = await firePost(channel, signedRequest({ body, privateKey }));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ type: 6 });
+    expect(send).toHaveBeenCalledWith(
+      "C01:M01",
+      expect.objectContaining({
+        auth: expect.objectContaining({ principalId: "discord:U01" }),
+        inputResponses: [{ optionId: "approve", requestId: "call_1" }],
+      }),
+    );
+  });
+
+  it("lets onInputResponse choose a click's auth or drop it", async () => {
+    const { privateKey, publicKeyHex } = testKeys();
+    const components = renderInputRequestComponents({
+      action: { callId: "call_1", input: {}, kind: "tool-call", toolName: "ask_question" },
+      kind: "question",
+      options: [{ id: "approve", label: "Approve" }],
+      prompt: "Approve?",
+      requestId: "call_1",
+    });
+    const customId = (components[0] as { components: Array<{ custom_id: string }> }).components[0]!
+      .custom_id;
+    const click = (userId: string) =>
+      signedRequest({
+        body: JSON.stringify({
+          application_id: "APP1",
+          channel_id: "C01",
+          data: { component_type: 2, custom_id: customId },
+          id: `I-${userId}`,
+          message: { id: "M01" },
+          token: "tok2",
+          type: 3,
+          user: { id: userId, username: userId },
+          version: 1,
+        }),
+        privateKey,
+      });
+    const channel = discordChannel({
+      credentials: { publicKey: publicKeyHex },
+      onInputResponse: (_ctx, interaction) =>
+        interaction.user.id === "U01"
+          ? {
+              auth: {
+                attributes: {},
+                authenticator: "app",
+                principalId: `user:${interaction.user.id}`,
+                principalType: "user",
+              },
+            }
+          : null,
+    });
+
+    const accepted = await firePost(channel, click("U01"));
+    const dropped = await firePost(channel, click("U02"));
+
+    expect(accepted.send).toHaveBeenCalledWith(
+      "C01:M01",
+      expect.objectContaining({ auth: expect.objectContaining({ principalId: "user:U01" }) }),
+    );
+    expect(dropped.send).not.toHaveBeenCalled();
   });
 
   it("opens and resolves freeform HITL modals", async () => {
@@ -583,15 +641,11 @@ describe("defaultDiscordAuth", () => {
   it("derives guild-scoped user auth", () => {
     const auth = defaultDiscordAuth({
       applicationId: "APP1",
-      attachments: [],
       channelId: "C01",
-      commandName: "ask",
       guildId: "G01",
       id: "I01",
-      options: [],
       raw: {},
       token: "tok",
-      type: 2,
       user: { id: "U01", isBot: false, username: "ada" },
     });
 
