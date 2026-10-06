@@ -251,6 +251,7 @@ export default withEve(nextConfig);
     await writeAuth();
     await deps.installScaffoldDependencies({
       changed: true,
+      required: true,
       log: context.presenter.log,
       projectPath: project.environmentRoot,
       signal: context.signal,

@@ -73,6 +73,10 @@ and credentials are reused; conflicting app settings or credentials stop setup
 with an error. Authored channel or UI files are preserved unless you explicitly
 pass `--overwrite`.
 
+If authentication dependency installation fails, setup stops without reporting
+success. Run the printed package-manager install command before starting or
+deploying the app.
+
 If the team has reached its Vercel App limit, remove an unused app in team
 settings and retry. If a generated app name or slug is taken by an incompatible
 app, rename the Vercel project in its settings and retry. Compatible apps from a

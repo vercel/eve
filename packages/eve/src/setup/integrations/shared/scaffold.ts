@@ -13,13 +13,14 @@ interface IntegrationScaffoldDeps {
 
 const defaultDeps: IntegrationScaffoldDeps = { detectPackageManager, runPackageManagerInstall };
 
-/** Installs dependencies added by an integration scaffold without failing setup if installation fails. */
+/** Installs scaffold dependencies; required installs must succeed before setup completes. */
 export async function installScaffoldDependencies(input: {
   changed: boolean;
   log: ChannelSetupLog;
   projectPath: string;
   signal?: AbortSignal;
   skip?: boolean;
+  required?: boolean;
   deps?: IntegrationScaffoldDeps;
 }): Promise<void> {
   if (!input.changed || input.skip) return;
@@ -35,6 +36,11 @@ export async function installScaffoldDependencies(input: {
       }),
   );
   if (packageManagerInstallSucceeded(installResult)) return;
+  if (input.required) {
+    throw new Error(
+      `Dependency installation failed. Run \`${packageManager.kind} install\` in ${input.projectPath} before starting or deploying the app.`,
+    );
+  }
   input.log.warning(
     `Dependency installation failed. The integration stays unloadable until \`${packageManager.kind} install\` or a deploy succeeds.`,
   );

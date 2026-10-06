@@ -295,7 +295,7 @@ describe("Web setup", () => {
       writeAuth.mock.invocationCallOrder[0]!,
     );
     expect(effects.installScaffoldDependencies).toHaveBeenCalledWith(
-      expect.objectContaining({ projectPath: "/project" }),
+      expect.objectContaining({ projectPath: "/project", required: true }),
     );
   });
 
