@@ -363,13 +363,13 @@ describe("step catalog in the harness (real AI SDK)", () => {
     connections.push(
       fakeConnection({
         description: "Caller-specific product catalog.",
-        name: "catalog",
+        name: "products",
         tools: [connectionTool("get_status")],
       }),
     );
     const connectionStep = mark();
     reply(
-      calls(call("status", "execute", { tool: "catalog__get_status" })),
+      calls(call("status", "execute", { tool: "products__get_status" })),
       text("The product catalog is up."),
     );
     await drive({ message: "Alice asks whether the product catalog is up." });
@@ -510,7 +510,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
       "pdf-forms",
       "tenant-playbook",
       "private",
-      "catalog",
+      "products",
     ]) {
       expect(fixedText).not.toContain(name);
     }
@@ -541,7 +541,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
     // lands as one diff, and compaction starts a fresh baseline.
     expect(listingFor(0)).toEqual([expect.stringContaining("Agents: billing_specialist")]);
     expect(listingFor(connectionStep).at(-1)).toContain(
-      "- catalog: Caller-specific product catalog.",
+      "- products: Caller-specific product catalog.",
     );
     expect(listingFor(changedStep).at(-1)).toContain(
       "No longer available, do not call or load: tenant__sync",
@@ -606,7 +606,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
       // The call that parked for sign-in, then the model's call after it.
       "private__list_items",
       "private__list_items",
-      "catalog__get_status",
+      "products__get_status",
       "search",
       "load-skill",
       "load-skill",
