@@ -15,7 +15,7 @@ import {
   sessionView,
   type Transition,
 } from "#harness/session-machine/commit.js";
-import type { StepProjection } from "#harness/session-machine/current.js";
+import { recordAppliedSession, type StepProjection } from "#harness/session-machine/current.js";
 import { fail, receive } from "#harness/session-machine/transitions.js";
 import {
   activeTurnId,
@@ -96,6 +96,7 @@ export function createStep(input: {
     position: () => turnPosition(live.read()),
     async apply(transition, messages) {
       step.session = await applyTransition(step.session, transition, input.publish, messages);
+      if (ctx !== undefined) recordAppliedSession(ctx, step.session);
     },
     projectHistory: (messages, state = step.session.state) =>
       input.prepareHistory(messages, state).messages,

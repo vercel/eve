@@ -6,7 +6,7 @@ import { preserveCancelledTurnMessage } from "#execution/cancelled-turn-message.
 import { createDurableSessionValues } from "#execution/durable-session-store.js";
 import type { DurableStepResult } from "#execution/session/turn-step-types.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
-import { saveSessionProjection } from "#harness/session-machine/current.js";
+import { appliedSession, saveSessionProjection } from "#harness/session-machine/current.js";
 import { preserveSerializedInstrumentationState } from "#instrumentation/state.js";
 import { preserveSerializedAgentTraceState } from "#tracing/agent-trace-context-store.js";
 
@@ -24,7 +24,12 @@ export async function createCancelledModelCallBatchResult(input: {
   readonly stepInput: StepInput | undefined;
 }): Promise<DurableStepResult> {
   const interruptedContext = serializeContext(input.ctx);
-  const checkpointSession = input.checkpoint?.result.session ?? input.initialSession;
+  // Without a completed call, the batch keeps what its last call applied before the cut, such as
+  // answers it resolved and published, so the session never rolls back past its own events.
+  const checkpointSession =
+    input.checkpoint?.result.session ??
+    appliedSession<HarnessSession>(input.ctx) ??
+    input.initialSession;
   const cancelledSession =
     input.checkpoint === undefined
       ? await contextStorage.run(input.ctx, () =>
