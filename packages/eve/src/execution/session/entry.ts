@@ -11,6 +11,10 @@ import { isHookConflictError } from "#execution/hook-ownership.js";
 import { createSessionInbox, type SessionInboxHandle } from "#execution/session-inbox/inbox.js";
 import { sessionHookTokens } from "#execution/session/hook-tokens.js";
 import { DEFAULT_SESSION_TIMEOUT_MS, sessionTimeoutDeadline } from "#execution/session/timeout.js";
+import {
+  createSessionTimeoutControl,
+  type SessionTimeoutControl,
+} from "#execution/session/timeout-control.js";
 import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
@@ -76,8 +80,37 @@ function stampSessionIdentity(
   };
 }
 
+type InitialOwnership = { readonly kind: "owned" } | { readonly kind: "alias-conflict" };
+
+async function claimInitialOwnership(
+  inbox: SessionInboxHandle,
+  input: { readonly continuationToken: string; readonly sessionId: string },
+): Promise<InitialOwnership> {
+  await inbox.claimSessionHook(sessionCommandHookToken(input.sessionId));
+  if (input.continuationToken === "") return { kind: "owned" };
+  try {
+    await inbox.claimSessionHook(input.continuationToken);
+    return { kind: "owned" };
+  } catch (error) {
+    if (isHookConflictError(error)) return { kind: "alias-conflict" };
+    throw error;
+  }
+}
+
+async function disposeInitialBoot(
+  inbox: SessionInboxHandle,
+  sessionTimeoutControl: SessionTimeoutControl | undefined,
+): Promise<void> {
+  const [timeoutDisposal, inboxDisposal] = await Promise.allSettled([
+    sessionTimeoutControl?.dispose(),
+    inbox.dispose(),
+  ]);
+  if (timeoutDisposal.status === "rejected") throw timeoutDisposal.reason;
+  if (inboxDisposal.status === "rejected") throw inboxDisposal.reason;
+}
+
 /** Returns `undefined` when a competing continuation owner already exists. */
-async function bootInitialOwner(
+export async function bootInitialOwner(
   input: InitialWorkflowEntryInput,
   sessionId: string,
 ): Promise<BootOutcome | undefined> {
@@ -86,45 +119,55 @@ async function bootInitialOwner(
   const inbox = createSessionInbox(sessionId);
   const { workflowStartedAt } = getWorkflowMetadata();
   const sessionTimeoutMs = input.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS;
+  const deadline = sessionTimeoutDeadline(sessionTimeoutMs, workflowStartedAt.getTime());
   const continuationToken = (serializedContext["eve.continuationToken"] as string) || "";
   const serializedBundle = serializedContext["eve.bundle"] as {
     source: DurableCompiledArtifactsSource;
     nodeId?: string;
   };
+  let sessionTimeoutControl: SessionTimeoutControl | undefined;
   try {
-    const [sessionCreation, stableClaim, aliasClaim, callerResolution] = await Promise.allSettled([
-      createSessionStep({
-        compiledArtifactsSource: serializedBundle.source,
-        continuationToken,
-        dynamicSubagentAgentConfig: serializedContext["eve.dynamicSubagentAgentConfig"] as
-          | DynamicSubagentAgentConfig
-          | undefined,
-        inheritedLimits: input.limits,
-        nodeId: serializedBundle.nodeId,
-        outputSchema: input.input.outputSchema,
-        rootSessionId: readRootSessionId(serializedContext),
-        sessionId,
-      }),
-      inbox.claimSessionHook(sessionCommandHookToken(sessionId)),
-      continuationToken === "" ? Promise.resolve() : inbox.claimSessionHook(continuationToken),
-      hasDelegatedSessionContext(serializedContext)
-        ? resolveInitialTurnCallerStep({ serializedContext })
-        : Promise.resolve(undefined),
+    sessionTimeoutControl =
+      deadline === undefined ? undefined : createSessionTimeoutControl({ deadline, sessionId });
+    const sessionCreationPromise = createSessionStep({
+      compiledArtifactsSource: serializedBundle.source,
+      continuationToken,
+      dynamicSubagentAgentConfig: serializedContext["eve.dynamicSubagentAgentConfig"] as
+        | DynamicSubagentAgentConfig
+        | undefined,
+      inheritedLimits: input.limits,
+      nodeId: serializedBundle.nodeId,
+      outputSchema: input.input.outputSchema,
+      rootSessionId: readRootSessionId(serializedContext),
+      sessionId,
+    });
+    const ownershipPromise = claimInitialOwnership(inbox, { continuationToken, sessionId });
+    const callerResolutionPromise = hasDelegatedSessionContext(serializedContext)
+      ? resolveInitialTurnCallerStep({ serializedContext })
+      : Promise.resolve(undefined);
+    const timeoutStartPromise = ownershipPromise.then(async (ownership) => {
+      if (ownership.kind === "owned") await sessionTimeoutControl?.start();
+    });
+    const [sessionCreation, ownership, callerResolution, timeoutStart] = await Promise.allSettled([
+      sessionCreationPromise,
+      ownershipPromise,
+      callerResolutionPromise,
+      timeoutStartPromise,
     ]);
     if (sessionCreation.status === "rejected") throw sessionCreation.reason;
-    if (stableClaim.status === "rejected") throw stableClaim.reason;
-    if (aliasClaim.status === "rejected") {
-      if (!isHookConflictError(aliasClaim.reason)) throw aliasClaim.reason;
+    if (ownership.status === "rejected") throw ownership.reason;
+    if (ownership.value.kind === "alias-conflict") {
       if (input.continuationConflictCommand !== undefined) {
         await settleContinuationConflictStep({
           command: input.continuationConflictCommand,
           continuationToken,
         });
       }
-      await inbox.dispose();
+      await disposeInitialBoot(inbox, sessionTimeoutControl);
       return undefined;
     }
     if (callerResolution.status === "rejected") throw callerResolution.reason;
+    if (timeoutStart.status === "rejected") throw timeoutStart.reason;
     return {
       inbox,
       session: {
@@ -141,16 +184,14 @@ async function bootInitialOwner(
         serializedContext,
         sessionId,
         sessionState: sessionCreation.value.state,
+        sessionTimeoutControl,
         sessionTimeoutMs,
-        sessionTimeoutDeadline: sessionTimeoutDeadline(
-          sessionTimeoutMs,
-          workflowStartedAt.getTime(),
-        ),
+        sessionTimeoutDeadline: deadline,
         sessionWritable,
       },
     };
   } catch (error) {
-    await inbox.dispose();
+    await disposeInitialBoot(inbox, sessionTimeoutControl);
     return await failSession({
       error,
       serializedContext,

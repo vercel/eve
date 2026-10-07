@@ -17,7 +17,10 @@ import type { TurnOutcome, TurnStepPayload } from "#execution/session/turn-step-
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
 import { finalizeSession, type SessionTerminalOutcome } from "#execution/session/finalization.js";
 import { type SessionInboxHandle } from "#execution/session-inbox/inbox.js";
-import { createSessionTimeoutControl } from "#execution/session/timeout-control.js";
+import {
+  createSessionTimeoutControl,
+  type SessionTimeoutControl,
+} from "#execution/session/timeout-control.js";
 import {
   type CompactionHandoff,
   SessionHandoff,
@@ -66,6 +69,7 @@ export interface SessionBoot {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionId: string;
   readonly sessionState: DurableSessionState;
+  readonly sessionTimeoutControl?: SessionTimeoutControl;
   readonly sessionTimeoutDeadline?: Date;
   readonly sessionTimeoutMs: number | false;
   readonly sessionWritable: WritableStream<Uint8Array>;
@@ -213,12 +217,13 @@ async function runSessionLoop(
     sessionId: boot.sessionId,
   });
   const sessionTimeout =
-    boot.sessionTimeoutDeadline === undefined
+    boot.sessionTimeoutControl ??
+    (boot.sessionTimeoutDeadline === undefined
       ? undefined
       : createSessionTimeoutControl({
           deadline: boot.sessionTimeoutDeadline,
           sessionId: boot.sessionId,
-        });
+        }));
 
   const nextParkedActivity = async (): Promise<
     Exclude<NextTurnInstruction, { kind: "workflow" | "cancel-working-tasks" }>
