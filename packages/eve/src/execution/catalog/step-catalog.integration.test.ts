@@ -58,7 +58,7 @@ vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async ()
 const NAMESPACES_OPS_TENANT = /^Namespaces, .*: ops, tenant$/mu;
 
 /** Every catalog listing says this, whatever kinds it names. */
-const LISTING_MARKER = "They aren't listed; find them with search";
+const LISTING_MARKER = "names aren't listed; find them with search";
 
 type Reply = ReturnType<typeof textStreamResult>;
 

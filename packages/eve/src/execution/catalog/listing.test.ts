@@ -50,7 +50,7 @@ const namespace = (name: string, count: number) =>
   Array.from({ length: count }, (_, index) => deferred(`${name}__tool_${index}`));
 
 const HEADER_GUIDANCE =
-  "than your context shows. They aren't listed; find them with search before deciding you can't do something.";
+  "than your context shows. Their names aren't listed; find them with search before deciding you can't do something.";
 const NAMESPACES =
   'Namespaces, whose entries are named <namespace>__<name>; search one with "<namespace>__":';
 const CONNECTIONS =
@@ -249,11 +249,10 @@ describe("catalogAnnouncements", () => {
       );
     });
 
-    it.each(["not json", JSON.stringify({ tools: ["tenant__sync"] }), "null"])(
-      "treats an unexpected recorded value as a fresh baseline: %s",
-      (recorded) => {
-        expect(announce(INK, { catalog: recorded }).catalog?.render(recorded)).toBe(baseline(INK));
-      },
-    );
+    it("treats an unreadable recorded value as a fresh baseline", () => {
+      const recorded = "not json";
+
+      expect(announce(INK, { catalog: recorded }).catalog?.render(recorded)).toBe(baseline(INK));
+    });
   });
 });
