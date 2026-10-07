@@ -105,13 +105,6 @@ function option(
 const ASIDE = "Alice also wants the changelog summarized.";
 const FOLLOW_UP = "Alice asks what is still left to do.";
 
-/** Alice asks for a gated call, then talks about something else while its approval is pending. */
-async function steerPastApproval(conversation: ChannelConversation) {
-  await askToDeploy(conversation);
-  await conversation.say(ASIDE);
-  await conversation.waitForReplyTo(ASIDE);
-}
-
 const HOTFIX = `Use ${REQUESTER_GATED_TOOL} to ship the fix.`;
 const HOTFIX_PROMPT = "Approve Release hotfix?";
 
@@ -626,27 +619,15 @@ const approvalRules = [
     },
   },
   {
-    rule: "a message while an approval is pending gets a reply without running the tool, and so does the next one",
-    source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
-    requires: ["text-replies"],
-    variesByConversation: true,
-    async run(conversation) {
-      await steerPastApproval(conversation);
-      // A turn left broken by the steer (#2874) would fail the message after it.
-      await conversation.say(FOLLOW_UP);
-      await conversation.waitForReplyTo(FOLLOW_UP);
-      await conversation.waitForRest();
-      expect(conversation.runsOf(GATED_TOOL), `${GATED_TOOL} ran without an Approve`).toBe(0);
-    },
-  },
-  {
-    rule: "a message while an approval is pending cancels it, so approving afterwards runs nothing",
+    rule: "a message while an approval is pending cancels it, so approving afterwards runs nothing and the next message gets a reply",
     // Policy since #4135. #4051 proposes keeping the approval open instead, which flips this rule.
     source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
     requires: ["text-replies"],
     variesByConversation: true,
     async run(conversation) {
-      await steerPastApproval(conversation);
+      await askToDeploy(conversation);
+      await conversation.say(ASIDE);
+      await conversation.waitForReplyTo(ASIDE);
       // Approve however the channel still offers it: a button left on the card, or typing.
       const approve = (await conversation.shownOptions()).find((candidate) =>
         APPROVE_LABELS.includes(candidate.label),
@@ -658,6 +639,8 @@ const approvalRules = [
         conversation.runsOf(GATED_TOOL),
         `${GATED_TOOL} ran on an approval the aside cancelled`,
       ).toBe(0);
+      await conversation.say(FOLLOW_UP);
+      await conversation.waitForReplyTo(FOLLOW_UP);
     },
   },
 ] as const satisfies readonly ContractRule[];
