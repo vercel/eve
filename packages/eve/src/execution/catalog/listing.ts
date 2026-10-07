@@ -112,7 +112,10 @@ function renderListing(listing: CatalogListing): string {
     if (listing[key].length > 0) lines.push(`${label}: ${listing[key].join(", ")}`);
   }
   if (listing.connections.length > 0) {
-    lines.push("Connections:", ...listing.connections.map(formatConnection));
+    lines.push(
+      'Connections, whose tools are named <connection>__<tool>; search one connection\'s tools with "<connection>__":',
+      ...listing.connections.map(formatConnection),
+    );
   }
   return lines.join("\n");
 }

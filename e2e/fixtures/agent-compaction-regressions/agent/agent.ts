@@ -22,7 +22,7 @@ const TEST_CONTEXT_WINDOW_TOKENS = 32_000;
 // cases have always run with, so the threshold leaves them a ~670-token history
 // budget. When eve's fixed instructions or tools change, move it by the change
 // in the measured envelope.
-const TEST_REQUEST_ENVELOPE_TOKENS = 2_611;
+const TEST_REQUEST_ENVELOPE_TOKENS = 2_553;
 // Fit the capped file-output exchange, while forcing the larger review and
 // handoff reports into the assistant checkpoint consumed by the script.
 const TEST_HISTORY_BUDGET_TOKENS = 900;

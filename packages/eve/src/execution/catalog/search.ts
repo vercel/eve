@@ -12,7 +12,6 @@ import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import type { ConnectionToolMetadata } from "#shared/connection-types.js";
-import { isObject } from "#shared/guards.js";
 import { serializeInputSchema, toInputSchema, type ToolSchemaSource } from "#tools/schema.js";
 
 import {
@@ -22,15 +21,16 @@ import {
   type ConnectionListing,
 } from "./connection-auth.js";
 import { connectionSignInEntry } from "./connection-entry.js";
-import { rankCandidates, type RankCandidate } from "./rank.js";
+import { isEmptyQuery, rankCandidates, type RankCandidate } from "./rank.js";
 import { connectionToolSignature, entrySignature } from "./signatures.js";
 
-const DEFAULT_LIMIT = 10;
+const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
 
 const SEARCH_DESCRIPTION = [
   "Find your own tools, agents, and connected services by keyword; this searches what you can do, not the web.",
   "Returns each match's exact tool name, description, and TypeScript signature, to call with execute.",
+  'When you already know a name or connection, from the catalog listing, an earlier result, or an error, search it directly: the exact name, or "<connection>__" for one connection\'s tools, which is faster and returns only that connection.',
   "A connection that needs sign-in appears as a tool named after the connection: executing it asks the user to sign in.",
 ].join(" ");
 
@@ -39,8 +39,9 @@ const SEARCH_INPUT_SCHEMA = toInputSchema({
   properties: {
     query: {
       type: "string",
+      minLength: 1,
       description:
-        "Words describing the capability, such as 'list open issues', or a name or name prefix, such as 'linear'. Without a query, returns entries up to limit; narrow the query or raise limit to find more.",
+        "Words describing the capability, such as 'list open issues'; an exact name; or a namespace prefix such as 'linear__', which searches only that connection's tools.",
     },
     limit: {
       type: "integer",
@@ -49,12 +50,13 @@ const SEARCH_INPUT_SCHEMA = toInputSchema({
       description: `Maximum results, best matches first. Defaults to ${DEFAULT_LIMIT}.`,
     },
   },
+  required: ["query"],
   additionalProperties: false,
 });
 
 interface SearchInput {
   readonly limit?: number;
-  readonly query?: string;
+  readonly query: string;
 }
 
 interface SearchResult {
@@ -73,8 +75,14 @@ interface SearchOutput {
   readonly unavailable?: readonly UnavailableConnection[];
 }
 
-/** `result` renders only for the results returned, since signatures cost a render. */
-type SearchCandidate = RankCandidate & { readonly result: () => SearchResult };
+/**
+ * `fullName` is the name `execute` takes and a namespace query scopes. `result`
+ * renders only for the results returned, since signatures cost a render.
+ */
+type SearchCandidate = RankCandidate & {
+  readonly fullName: string;
+  readonly result: () => SearchResult;
+};
 
 /**
  * Builds `search` over one step's deferred entries and the connections in
@@ -88,8 +96,8 @@ export function createSearchTool(input: {
 }): HarnessToolDefinition {
   return {
     description: SEARCH_DESCRIPTION,
-    execute: (rawInput: unknown) =>
-      search(input, (isObject(rawInput) ? rawInput : {}) as SearchInput),
+    // The SDK validates input against the schema before execute runs.
+    execute: (rawInput: unknown) => search(input, rawInput as SearchInput),
     frameworkTool: true,
     inputSchema: SEARCH_INPUT_SCHEMA,
     label: { start: () => "Search tools" },
@@ -101,26 +109,81 @@ async function search(
   catalog: Parameters<typeof createSearchTool>[0],
   input: SearchInput,
 ): Promise<SearchOutput> {
-  const candidates = catalog.deferred.map((definition) =>
-    entryCandidate(definition, catalog.describe),
-  );
+  const { namespace, words } = parseQuery(input.query);
+  if (namespace === undefined && isEmptyQuery(words)) {
+    throw new Error(
+      'search needs at least one word in query, such as a capability ("list open issues") or a name or connection prefix ("linear__").',
+    );
+  }
+  const inScope = (name: string) => namespace === undefined || inNamespace(name, namespace);
+
+  const candidates = catalog.deferred
+    .map((definition) => entryCandidate(definition, catalog.describe))
+    .filter((candidate) => inScope(candidate.fullName));
   const unavailable: UnavailableConnection[] = [];
   const { registry } = catalog;
   if (registry !== undefined) {
+    const connections = registry
+      .getConnections()
+      .filter(
+        ({ connectionName }) =>
+          namespace === undefined || mayOwnNamespace(connectionName, namespace),
+      );
     const found = await Promise.all(
-      registry.getConnections().map((connection) => searchConnection(registry, connection)),
+      connections.map((connection) => searchConnection(registry, connection)),
     );
     for (const connection of found) {
       if ("unavailable" in connection) unavailable.push(connection.unavailable);
-      else candidates.push(...connection.candidates);
+      else
+        candidates.push(
+          ...connection.candidates.filter((candidate) => inScope(candidate.fullName)),
+        );
     }
   }
 
   const limit = clampInteger(input.limit, 1, MAX_LIMIT, DEFAULT_LIMIT);
-  const results = rankCandidates(input.query ?? "", candidates)
+  const results = rankCandidates(words, candidates)
     .slice(0, limit)
     .map((candidate) => candidate.result());
   return unavailable.length > 0 ? { results, unavailable } : { results };
+}
+
+/**
+ * Splits off a namespace: when the query's first word contains `__`,
+ * everything before its last `__` scopes the search, and the rest of the
+ * query is ranked within it. Characters that can't appear in a name, such as
+ * a leading `^`, are ignored; regex isn't supported.
+ */
+function parseQuery(query: string): { readonly namespace?: string; readonly words: string } {
+  const [first = "", ...rest] = query.trim().split(/\s+/u);
+  const word = first.replace(/^[^A-Za-z0-9_-]+/u, "");
+  const separator = word.lastIndexOf("__");
+  if (separator <= 0) return { words: query };
+  return {
+    namespace: word.slice(0, separator),
+    words: [word.slice(separator + 2), ...rest].join(" "),
+  };
+}
+
+/**
+ * Whether `name` is in `namespace`: under its `<namespace>__` prefix, or the
+ * namespace itself. A connection owns its name and every name under its
+ * prefix, so when the namespace is a connection, the one entry named exactly
+ * the namespace is that connection's sign-in entry.
+ */
+function inNamespace(name: string, namespace: string): boolean {
+  return name === namespace || name.startsWith(`${namespace}__`);
+}
+
+/**
+ * Whether a connection can own names in `namespace`. Its names are its own
+ * and those under its prefix, so only a connection that is the namespace,
+ * contains it, or sits under it (an extension's connection, such as
+ * `crm__api` under `crm`) can; every other connection is skipped without
+ * listing its tools.
+ */
+function mayOwnNamespace(connectionName: string, namespace: string): boolean {
+  return inNamespace(connectionName, namespace) || namespace.startsWith(`${connectionName}__`);
 }
 
 /** A connection's tools, or its sign-in entry while listing them needs sign-in. */
@@ -161,6 +224,7 @@ function entryCandidate(
       signature: entrySignature(definition, inputSchema),
       tool: definition.name,
     }),
+    fullName: definition.name,
   };
 }
 
@@ -168,6 +232,7 @@ function toolCandidate(
   connection: ResolvedConnectionDefinition,
   tool: ConnectionToolMetadata,
 ): SearchCandidate {
+  const name = connectionToolName(connection.connectionName, tool.name);
   return {
     connection: { description: connection.description, name: connection.connectionName },
     description: tool.description,
@@ -176,8 +241,9 @@ function toolCandidate(
     result: () => ({
       description: tool.description,
       signature: connectionToolSignature(connection, tool),
-      tool: connectionToolName(connection.connectionName, tool.name),
+      tool: name,
     }),
+    fullName: name,
   };
 }
 
@@ -195,6 +261,7 @@ function signInCandidate(
       signature: entrySignature(entry),
       tool: entry.name,
     }),
+    fullName: entry.name,
   };
 }
 

@@ -127,7 +127,7 @@ async function connect(
     return await session.auth.handleError(listing.error, listing.authorization);
   }
   const displayName = displayProperName(connection.connectionName);
-  const search = `search({ query: "${connection.connectionName}" })`;
+  const search = `search({ query: "${connection.connectionName}__" })`;
   // A listable connection may not need sign-in at all, so only a sign-in this call completed counts.
   return session.scoped !== undefined && session.auth.isJustAuthorized(session.scoped)
     ? `Signed in to ${displayName}. Find the ${displayName} tools with ${search}.`
@@ -239,7 +239,7 @@ function unknownToolMessage(
   const hint =
     suggestions.length > 0
       ? ` Closest tools: ${suggestions.join(", ")}.`
-      : ` Find its tools with search({ query: "${connectionName}" }).`;
+      : ` Find its tools with search({ query: "${connectionName}__" }).`;
   return `Connection "${connectionName}" has no tool named "${toolName}".${hint}`;
 }
 
