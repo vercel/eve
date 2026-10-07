@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Update eve's bundled Workflow SDK to fix leaked stream-writer WebSockets when a released writable is left open. Public writable aborts now also dispose their underlying session.
+Enable Workflow stream-writer WebSockets for eve's Vercel world. The upgraded SDK disposes released and aborted writer sessions, and falls back to HTTP when the server declines a WebSocket upgrade.

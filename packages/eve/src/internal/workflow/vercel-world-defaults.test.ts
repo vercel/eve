@@ -17,15 +17,16 @@ describe("applyVercelWorkflowWorldDefaults", () => {
     expect(world.streamFlushIntervalMs).toBe(streamFlushIntervalMs);
   });
 
-  it.each([undefined, ""])("defaults the events transport to ws when unset (%j)", (value) => {
-    const env: Record<string, string | undefined> = { WORKFLOW_EVENTS_TRANSPORT: value };
+  it.each([undefined, ""])("defaults the stream transport to ws when unset (%j)", (value) => {
+    const env: Record<string, string | undefined> = { WORKFLOW_STREAMS_TRANSPORT: value };
     applyVercelWorkflowWorldDefaults({}, env);
-    expect(env.WORKFLOW_EVENTS_TRANSPORT).toBe("ws");
+    expect(env.WORKFLOW_STREAMS_TRANSPORT).toBe("ws");
   });
 
-  it("preserves an operator-supplied events transport", () => {
-    const env = { WORKFLOW_EVENTS_TRANSPORT: "http" };
+  it("preserves operator-supplied stream and event transports", () => {
+    const env = { WORKFLOW_STREAMS_TRANSPORT: "http", WORKFLOW_EVENTS_TRANSPORT: "http" };
     applyVercelWorkflowWorldDefaults({}, env);
+    expect(env.WORKFLOW_STREAMS_TRANSPORT).toBe("http");
     expect(env.WORKFLOW_EVENTS_TRANSPORT).toBe("http");
   });
 });
