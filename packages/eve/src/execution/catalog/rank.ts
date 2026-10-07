@@ -1,14 +1,17 @@
 /**
  * Ranking for `search` and for `execute`'s suggestions when a name is unknown.
- * Query and text split into lowercase words (camelCase and punctuation are
- * boundaries), so `create issue`, `createIssue`, and `create_issue` are the
- * same words. Matches rank in tiers:
+ * Query and text split into lowercase words (camelCase, acronyms, and
+ * punctuation are boundaries), so `create issue`, `createIssue`, and
+ * `create_issue` are the same words. Matches rank in tiers:
  *
- * 1. Exact: the query's words are the name's words. A connection tool's full
- *    name ranks just above its name without the connection prefix.
- * 2. Prefix: the name's words start with the query's words, the last of which
- *    may be partial, so `linear` and `create_iss` find `linear__create_issue`.
- * 3. Keyword: any other match. A query word matches a word when either is a
+ * 1. Exact: the query's words are the full name's words.
+ * 2. Exact without prefix: they are a connection tool's name without its
+ *    connection prefix, so `create_issue` finds `linear__create_issue`.
+ * 3. Connection: they start the connection's name, so `linear` lists the
+ *    `linear` connection's tools.
+ * 4. Name prefix: the name's words start with the query's words, the last of
+ *    which may be partial, so `create_iss` finds `create_issue`.
+ * 5. Keyword: any other match. A query word matches a word when either is a
  *    prefix of the other, so `repo` finds `repositories` and `issues` finds
  *    `issue`, and each query word adds the weight of every field it matches.
  *
@@ -40,8 +43,8 @@ export function rankCandidates<T extends RankCandidate>(
       (a, b) =>
         a.tier - b.tier ||
         b.score - a.score ||
-        (a.candidate.connection?.name ?? "").localeCompare(b.candidate.connection?.name ?? "") ||
-        a.candidate.name.localeCompare(b.candidate.name),
+        compareCodeUnits(a.candidate.connection?.name ?? "", b.candidate.connection?.name ?? "") ||
+        compareCodeUnits(a.candidate.name, b.candidate.name),
     )
     .map((entry) => entry.candidate);
 }
@@ -58,7 +61,7 @@ export function closestNames(
     .map((candidate) => candidate.name);
 }
 
-const Tier = { exact: 0, exactWithoutPrefix: 1, prefix: 2, keyword: 3 } as const;
+const Tier = { exact: 0, exactWithoutPrefix: 1, connection: 2, namePrefix: 3, keyword: 4 } as const;
 
 function rankCandidate(
   terms: readonly string[],
@@ -74,9 +77,12 @@ function rankCandidate(
     ? Tier.exact
     : sameWords(ownName, terms)
       ? Tier.exactWithoutPrefix
-      : startsWithWords(fullName, terms) || startsWithWords(ownName, terms)
-        ? Tier.prefix
-        : Tier.keyword;
+      : candidate.connection !== undefined &&
+          startsWithWords(tokenize(candidate.connection.name), terms)
+        ? Tier.connection
+        : startsWithWords(fullName, terms) || startsWithWords(ownName, terms)
+          ? Tier.namePrefix
+          : Tier.keyword;
   return { score: scoreFields(terms, candidateFields(candidate)), tier };
 }
 
@@ -107,9 +113,9 @@ function candidateFields(candidate: RankCandidate): Field[] {
     [tokenize(candidate.name), 6],
     [tokenize(candidate.connection?.name ?? ""), 4],
     [properties.flatMap(([key]) => tokenize(key)), 3],
-    [tokenize(candidate.description), 2],
-    [propertyDescriptions.flatMap(tokenize), 1],
-    [tokenize(candidate.connection?.description ?? ""), 1],
+    [proseWords(candidate.description), 2],
+    [propertyDescriptions.flatMap(proseWords), 1],
+    [proseWords(candidate.connection?.description ?? ""), 1],
   ];
 }
 
@@ -127,10 +133,21 @@ function matchesWord(word: string, term: string): boolean {
   return word.startsWith(term) || (word.length >= 3 && term.startsWith(word));
 }
 
+/** Every word of a name or query, so a one-letter name can still be searched by name. */
 function tokenize(text: string): string[] {
   return text
+    .replaceAll(/([A-Z]+)([A-Z][a-z])/gu, "$1 $2")
     .replaceAll(/([a-z0-9])([A-Z])/gu, "$1 $2")
     .toLowerCase()
     .split(/[^a-z0-9]+/u)
-    .filter((word) => word.length > 1);
+    .filter((word) => word !== "");
+}
+
+/** A description's words, without one-letter words such as `a`. */
+function proseWords(text: string): string[] {
+  return tokenize(text).filter((word) => word.length > 1);
+}
+
+function compareCodeUnits(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
 }

@@ -1,7 +1,7 @@
 import { getAdapterKind } from "#channel/adapter.js";
 import type { ContextContainer } from "#context/container.js";
 import { AuthKey, InitiatorAuthKey, SessionIdKey } from "#context/keys.js";
-import { assertNotConnectionOwned } from "#connections/ownership.js";
+import { assertNotConnectionOwned, RUNTIME_TOOL_NAMES } from "#connections/ownership.js";
 import { dynamicToolNames } from "#context/build-dynamic-tools.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { ALLOWED_DYNAMIC_CONNECTION_EVENTS } from "#dynamic/definition.js";
@@ -134,6 +134,7 @@ export async function dispatchDynamicConnectionEvent(input: {
       }
       continue;
     }
+    assertNoRuntimeToolNames(outcome.value.connections, resolver);
     assertOwnsNoEntries(outcome.value.connections, resolver, entryNames);
     updates.set(outcome.value.resolver.slug, outcome.value.connections);
   }
@@ -160,6 +161,18 @@ function agentEntryNames(ctx: ContextContainer): readonly string[] {
     ...(bundle?.subagentRegistry.subagentsByName.keys() ?? []),
     ...dynamicToolNames(ctx),
   ];
+}
+
+function assertNoRuntimeToolNames(
+  connections: readonly ResolvedConnectionDefinition[],
+  resolver: ResolvedDynamicConnectionResolver,
+): void {
+  for (const { connectionName } of connections) {
+    if (!RUNTIME_TOOL_NAMES.includes(connectionName)) continue;
+    throw new Error(
+      `Dynamic connection resolver "${resolver.logicalPath}" returned the reserved connection name "${connectionName}". eve reserves "${connectionName}" for its built-in tool; rename the connection.`,
+    );
+  }
 }
 
 function assertOwnsNoEntries(
