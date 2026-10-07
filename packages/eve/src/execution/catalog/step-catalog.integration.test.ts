@@ -664,7 +664,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
       expect(request.tools?.map((tool) => tool.name)).toEqual(["add", "search", "execute"]);
       expect(catalogMessages(request)).toEqual([]);
     }
-    expect(toolResult(requests[1]!, "search-empty")).toEqual({ results: [], total: 0 });
+    expect(toolResult(requests[1]!, "search-empty")).toEqual({ results: [] });
   });
 
   it("validates a connection tool's input before asking anyone to approve the call", async () => {
