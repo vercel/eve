@@ -30,8 +30,10 @@ function crmMount(sourceId: string): CompiledExtensionMount {
     mountSourceId: sourceId,
     namespace: "crm",
     packageName: "@acme/crm",
-    packageNamespace: "@acme/crm",
+    specifier: "@acme/crm",
+    mountId: "agent/extensions/crm.ts",
     sourceRoot: "/node_modules/@acme/crm/extension",
+    mountSourcePath: "/app/agent/extensions/crm.ts",
   };
 }
 
