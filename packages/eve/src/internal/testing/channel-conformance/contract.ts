@@ -23,7 +23,7 @@ import {
   DAY_PROMPT,
   RETRO_PROMPT,
   TIME_PROMPT,
-} from "#internal/testing/channel-conformance/two-questions-workflow.js";
+} from "#internal/testing/channel-conformance/question-workflows.js";
 
 /**
  * One behavior every first-party channel owes a person, stated once and run
@@ -619,7 +619,7 @@ const approvalRules = [
     },
   },
   {
-    rule: "a message while an approval is pending cancels it, so approving afterwards runs nothing and the next message gets a reply",
+    rule: "a message while an approval is pending cancels it, so typing approve afterwards runs nothing and the next message gets a reply",
     // Policy since #4135. #4051 proposes keeping the approval open instead, which flips this rule.
     source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
     requires: ["text-replies"],
@@ -628,12 +628,7 @@ const approvalRules = [
       await askToDeploy(conversation);
       await conversation.say(ASIDE);
       await conversation.waitForReplyTo(ASIDE);
-      // Approve however the channel still offers it: a button left on the card, or typing.
-      const approve = (await conversation.shownOptions()).find((candidate) =>
-        APPROVE_LABELS.includes(candidate.label),
-      );
-      if (approve === undefined) await conversation.say("approve");
-      else await conversation.press(approve);
+      await conversation.say("approve");
       await conversation.waitForRest();
       expect(
         conversation.runsOf(GATED_TOOL),
@@ -641,6 +636,24 @@ const approvalRules = [
       ).toBe(0);
       await conversation.say(FOLLOW_UP);
       await conversation.waitForReplyTo(FOLLOW_UP);
+    },
+  },
+  {
+    rule: "pressing Approve on an approval a message cancelled runs nothing",
+    source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
+    requires: ["buttons", "text-replies"],
+    variesByConversation: true,
+    async run(conversation) {
+      const options = await askToDeploy(conversation);
+      await conversation.say(ASIDE);
+      await conversation.waitForReplyTo(ASIDE);
+      // The card's original button, as a client that hasn't refreshed still shows it.
+      await conversation.press(option(options, APPROVE_LABELS));
+      await conversation.waitForRest();
+      expect(
+        conversation.runsOf(GATED_TOOL),
+        `${GATED_TOOL} ran on an approval the aside cancelled`,
+      ).toBe(0);
     },
   },
 ] as const satisfies readonly ContractRule[];

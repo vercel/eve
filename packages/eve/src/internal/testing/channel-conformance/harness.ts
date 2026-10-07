@@ -19,7 +19,7 @@ import { defineWorkflowTool } from "#public/tools/index.js";
 import {
   askDayAndTimeWorkflow,
   askRetroDayWorkflow,
-} from "#internal/testing/channel-conformance/two-questions-workflow.js";
+} from "#internal/testing/channel-conformance/question-workflows.js";
 import { getWorld } from "#internal/workflow/runtime.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import {
