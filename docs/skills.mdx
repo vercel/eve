@@ -30,7 +30,7 @@ deferred: true
 ---
 ```
 
-A deferred skill is listed by name only, in the same append-only context message as deferred tools. The model finds its description with `search`, which ranks skills and tools together, and loads it with `execute({ skill })`. Its markdown, supporting files, and eval assertions work as they do for any other skill. Dynamic skills accept `deferred` too; see [Dynamic capabilities](./guides/dynamic-capabilities#dynamic-skills).
+A deferred skill isn't named in context; the catalog listing only says that deferred skills exist, and their namespaces. The model finds a deferred skill with `search`, which ranks skills and tools together, and loads it with `execute({ skill })`. Its markdown, supporting files, and eval assertions work as they do for any other skill. Dynamic skills accept `deferred` too; see [Dynamic capabilities](./guides/dynamic-capabilities#dynamic-skills).
 
 ## Markdown vs `defineSkill`
 
