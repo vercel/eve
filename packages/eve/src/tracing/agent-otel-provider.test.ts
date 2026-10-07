@@ -107,6 +107,8 @@ function createRuntime(
   const agentOtelInput: Omit<AgentOtelInstrumentationInput, "tracePolicy"> & {
     tracePolicy?: TraceCapturePolicy;
   } = {
+    // Pin the environment so an inherited EVE_DEV/VERCEL_ENV cannot relax audience ceilings.
+    environment: "production",
     frameworkVersion: "test",
     idGenerator,
     recordInputs: true,
