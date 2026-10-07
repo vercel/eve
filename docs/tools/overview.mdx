@@ -73,7 +73,7 @@ export default defineTool({
 });
 ```
 
-A deferred tool is not in the model's tool list. eve lists its name in an append-only context message, and the model finds its description and signature with [`search`](/docs/concepts/built-in-tools#search-and-execute) and calls it with `execute({ tool: "export_report", input })`. After that, the call runs exactly like a direct call: approvals, `endsTurn`, `toModelOutput`, hooks, and stream events see `export_report`, not `execute`.
+A deferred tool is not in the model's tool list, and eve doesn't name it in context. The model finds its name, description, and signature with [`search`](/docs/concepts/built-in-tools#search-and-execute) and calls it with `execute({ tool: "export_report", input })`. After that, the call runs exactly like a direct call: approvals, `endsTurn`, `toModelOutput`, hooks, and stream events see `export_report`, not `execute`.
 
 The option works with `defineTool`, `defineWorkflowTool`, and dynamic tool entries. Provider tools such as `webSearch()` cannot be deferred, because the provider has to see their definition; the compiler rejects `deferred` on them. To defer an agent, set [`tool: "deferred"`](/docs/subagents#declared-subagents) on its `defineAgent` definition.
 
