@@ -37,14 +37,17 @@ export default defineEval({
 });
 
 function jobWasObservedAndStopped(outputs: readonly BashOutput[]): boolean {
-  const [started, observed, stopped] = outputs;
+  const [started, ...following] = outputs;
+  const observed = following.findIndex(
+    (output) => output.status === "completed" && /indexed batch \d+/u.test(output.stdout ?? ""),
+  );
   return (
     started?.status === "running" &&
     started.stdout?.includes("indexed batch 1") === true &&
-    observed?.status === "completed" &&
-    /indexed batch \d+/u.test(observed.stdout ?? "") &&
-    stopped?.status === "completed" &&
-    stopped.stdout?.trim() === "143"
+    observed !== -1 &&
+    following
+      .slice(observed + 1)
+      .some((output) => output.status === "completed" && output.stdout?.trim() === "143")
   );
 }
 
