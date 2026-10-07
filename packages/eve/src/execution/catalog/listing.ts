@@ -1,6 +1,5 @@
 import { isAgentTool } from "#execution/tasks/tool-entry-point.js";
 import type { Announcement } from "#harness/announcements.js";
-import { isObject } from "#shared/guards.js";
 
 import { compareCodeUnits } from "./rank.js";
 import type { StepCatalog } from "./step-catalog.js";
@@ -48,10 +47,11 @@ export function catalogAnnouncements(
   const current = listCatalog(catalog);
   // An empty catalog the model never heard of has nothing to announce.
   if (announced?.[ANNOUNCEMENT_KEY] === undefined && isEmpty(current)) return {};
+  const reachable = reachableNames(catalog);
   return {
     [ANNOUNCEMENT_KEY]: {
       value: JSON.stringify(current),
-      render: (previous) => renderCatalogAnnouncement(parseListing(previous), current, catalog),
+      render: (previous) => renderCatalogAnnouncement(parseListing(previous), current, reachable),
     },
   };
 }
@@ -79,20 +79,31 @@ function listCatalog(catalog: StepCatalog): CatalogListing {
   };
 }
 
-/**
- * How many deferred entries each namespace holds: the first `__` segment of
- * their names. A connection's name is listed as the connection instead.
- */
+/** How many deferred entries each namespace holds. */
 function namespaceCounts(catalog: StepCatalog): ReadonlyMap<string, number> {
-  const connections = new Set(catalog.connections.map(({ connectionName }) => connectionName));
   const counts = new Map<string, number>();
   for (const { name } of catalog.deferred.values()) {
-    const namespace = name.slice(0, Math.max(0, name.indexOf("__")));
-    if (namespace !== "" && !connections.has(namespace)) {
-      counts.set(namespace, (counts.get(namespace) ?? 0) + 1);
-    }
+    const namespace = namespaceOf(name);
+    if (namespace !== "") counts.set(namespace, (counts.get(namespace) ?? 0) + 1);
   }
   return counts;
+}
+
+/**
+ * The namespaces and connections the session can still reach, deferred or
+ * not: a namespace past the cap, or whose entries stopped being deferred, is
+ * not gone.
+ */
+function reachableNames(catalog: StepCatalog): ReadonlySet<string> {
+  return new Set([
+    ...[...catalog.entries.keys()].map(namespaceOf),
+    ...catalog.connections.map(({ connectionName }) => connectionName),
+  ]);
+}
+
+/** A name's first `__` segment, or "" when it has none. */
+function namespaceOf(name: string): string {
+  return name.slice(0, Math.max(0, name.indexOf("__")));
 }
 
 function capped<T>(items: readonly T[], max: number): Capped<T> {
@@ -102,19 +113,14 @@ function capped<T>(items: readonly T[], max: number): Capped<T> {
 function renderCatalogAnnouncement(
   previous: CatalogListing | undefined,
   current: CatalogListing,
-  catalog: StepCatalog,
+  reachable: ReadonlySet<string>,
 ): string {
-  if (previous === undefined || isEmpty(previous)) return renderListing(current);
   if (isEmpty(current)) return "The catalog changed. It is empty now; do not call execute.";
-  // Gone means gone from the catalog, not just past a cap.
-  const present = new Set([
-    ...namespaceCounts(catalog).keys(),
-    ...catalog.connections.map(({ connectionName }) => connectionName),
-  ]);
+  if (previous === undefined || isEmpty(previous)) return renderListing(current);
   const gone = [
     ...previous.namespaces.items,
     ...previous.connections.items.map(({ name }) => name),
-  ].filter((name) => !present.has(name));
+  ].filter((name) => !reachable.has(name));
   return [
     "The catalog changed.",
     renderListing(current),
@@ -128,7 +134,7 @@ function renderListing({ connections, kinds, namespaces }: CatalogListing): stri
       ? "Your connections have more tools"
       : `More ${kinds.join(" and ")} are available`;
   const lines = [
-    `${subject} than your context shows. They aren't listed; find them with search before deciding you can't do something. Call them with execute({ tool, input }).`,
+    `${subject} than your context shows. Their names aren't listed; find them with search before deciding you can't do something. Call them with execute({ tool, input }).`,
   ];
   if (namespaces.items.length > 0) {
     const listed = [...namespaces.items, ...(namespaces.more ? ["and more"] : [])];
@@ -156,25 +162,12 @@ function isEmpty(listing: CatalogListing): boolean {
   return listing.kinds.length === 0 && listing.connections.items.length === 0;
 }
 
-/** The recorded listing, or undefined when there is none or it has another shape. */
+/** The recorded listing; a value that isn't JSON counts as none. */
 function parseListing(value: string | undefined): CatalogListing | undefined {
+  if (value === undefined) return undefined;
   try {
-    const parsed: unknown = JSON.parse(value ?? "null");
-    return isListing(parsed) ? parsed : undefined;
+    return JSON.parse(value) as CatalogListing;
   } catch {
     return undefined;
   }
-}
-
-function isListing(value: unknown): value is CatalogListing {
-  return (
-    isObject(value) &&
-    Array.isArray(value.kinds) &&
-    isCapped(value.namespaces) &&
-    isCapped(value.connections)
-  );
-}
-
-function isCapped(value: unknown): boolean {
-  return isObject(value) && Array.isArray(value.items) && typeof value.more === "boolean";
 }
