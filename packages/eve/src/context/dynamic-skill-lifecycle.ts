@@ -1,6 +1,6 @@
 import type { ModelMessage } from "ai";
 
-import { TOOL_SLUG_PATTERN, TOOL_SLUG_RULE } from "#discover/grammar.js";
+import { SKILL_NAME_PATTERN, SKILL_NAME_RULE } from "#discover/grammar.js";
 import { ALLOWED_DYNAMIC_SKILL_EVENTS } from "#dynamic/definition.js";
 import { isBrandedSkillEntry, type SkillPackageDefinition } from "#shared/skill-definition.js";
 import {
@@ -52,9 +52,9 @@ function qualifyDynamicSkillNames(
         `Dynamic skill resolver "${resolver.logicalPath}" returned the reserved skill name "${name}". ${reservation}; rename the skill.`,
       );
     }
-    if (!TOOL_SLUG_PATTERN.test(name)) {
+    if (!SKILL_NAME_PATTERN.test(name)) {
       throw new Error(
-        `Dynamic skill resolver "${resolver.logicalPath}" returned illegal skill name "${name}". ${TOOL_SLUG_RULE}`,
+        `Dynamic skill resolver "${resolver.logicalPath}" returned illegal skill name "${name}". ${SKILL_NAME_RULE}`,
       );
     }
   }
