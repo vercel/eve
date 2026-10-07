@@ -17,7 +17,7 @@ import { HANDOFF_REFERENCE, REVIEW_REFERENCE } from "../release-reports";
 
 const TEST_CONTEXT_WINDOW_TOKENS = 32_000;
 // eve estimates this fixture's request envelope (instructions, task system
-// block, and 13 advertised tools including `search` and `execute`) at 2,841
+// block, and 13 advertised tools including `search` and `execute`) at 2,783
 // tokens. This allowance sits 230 tokens below that estimate, the offset the
 // cases have always run with, so the threshold leaves them a ~670-token history
 // budget. When eve's fixed instructions or tools change, move it by the change

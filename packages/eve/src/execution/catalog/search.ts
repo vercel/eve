@@ -56,7 +56,8 @@ const SEARCH_INPUT_SCHEMA = toInputSchema({
 
 interface SearchInput {
   readonly limit?: number;
-  readonly query: string;
+  /** Required by the schema; a call that skips validation fails like a query with no words. */
+  readonly query?: string;
 }
 
 interface SearchResult {
@@ -96,7 +97,6 @@ export function createSearchTool(input: {
 }): HarnessToolDefinition {
   return {
     description: SEARCH_DESCRIPTION,
-    // The SDK validates input against the schema before execute runs.
     execute: (rawInput: unknown) => search(input, rawInput as SearchInput),
     frameworkTool: true,
     inputSchema: SEARCH_INPUT_SCHEMA,
@@ -109,7 +109,7 @@ async function search(
   catalog: Parameters<typeof createSearchTool>[0],
   input: SearchInput,
 ): Promise<SearchOutput> {
-  const { namespace, words } = parseQuery(input.query);
+  const { namespace, words } = parseQuery(input.query ?? "");
   if (namespace === undefined && isEmptyQuery(words)) {
     throw new Error(
       'search needs at least one word in query, such as a capability ("list open issues") or a name or connection prefix ("linear__").',
