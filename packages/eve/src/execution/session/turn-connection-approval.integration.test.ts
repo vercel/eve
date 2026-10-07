@@ -57,6 +57,8 @@ const usage = {
   outputTokens: { reasoning: undefined, text: 1, total: 1 },
 };
 const sessionId = "turn-connection-approval";
+const TOOL_GONE_RESULT =
+  'The approved tool "notes__saveNote" is no longer available, so the call didn\'t run. If the task still needs it, find an available tool with search and make a new call, which needs approval again.';
 
 /** A model step that saves notes through `execute`, or replies when `callId` is omitted. */
 function modelResponse(callId?: string | readonly string[], connection = "notes") {
@@ -106,9 +108,10 @@ function setup(
       : { status: "allowed" as const };
   });
   const policyTurns: string[] = [];
-  let removed = false;
+  let connection: "available" | "failing" | "removed" = "available";
   const resolver = vi.fn((event: unknown) => {
-    if (removed) return {};
+    if (connection === "failing") throw new Error("The notes directory is unreachable.");
+    if (connection === "removed") return {};
     const sequence = (event as { data: { sequence?: number } }).data.sequence ?? 0;
     return {
       [(variation === "name" || variation === "unapproved-name") && sequence > 0
@@ -286,8 +289,13 @@ function setup(
     response,
     step,
     policyTurns,
-    removeConnection() {
-      removed = true;
+    /** The session state as last committed. */
+    state() {
+      return readDurableSession(snapshot.sessionState).state;
+    },
+    /** What the connection's resolver does from now on. */
+    setConnection(state: typeof connection) {
+      connection = state;
     },
     updateSession(update: (session: HarnessSession) => HarnessSession) {
       snapshot = {
@@ -399,7 +407,7 @@ describe("turn connection approval restoration", () => {
     });
     const parked = await fixture.step();
     const request = suspendedSteps(readDurableSession(parked.sessionState).state)[0]!.requests[0]!;
-    fixture.removeConnection();
+    fixture.setConnection("removed");
     const resumed = await fixture.step({
       delivery: {
         kind: "deliver",
@@ -415,10 +423,7 @@ describe("turn connection approval restoration", () => {
         event.data.status === "failed" &&
         (event.data.result as { callId: string }).callId === request.action.callId,
     );
-    expect(fixture.events[failed]?.data.result).toMatchObject({
-      output:
-        'The approved tool "notes__saveNote" is no longer available, so the call didn\'t run. If the task still needs it, find an available tool with search and make a new call, which needs approval again.',
-    });
+    expect(fixture.events[failed]?.data.result).toMatchObject({ output: TOOL_GONE_RESULT });
     // The model reads the failure as the call's result, and the turn completes.
     expect(JSON.stringify(fixture.doStream.mock.calls.at(-1)![0])).toContain(
       "is no longer available, so the call didn't run",
@@ -427,34 +432,98 @@ describe("turn connection approval restoration", () => {
     expect(suspendedSteps(readDurableSession(resumed.sessionState).state)).toEqual([]);
   });
 
-  it("leaves the request pending when its connection can no longer be reconstructed", async () => {
-    const fixture = setup();
-    await fixture.step({
-      delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's note." }] },
+  describe("a connection with a response policy, while its request waits", () => {
+    /** Parks Alice's note for approval and returns its request. */
+    async function parkNote(fixture: ReturnType<typeof setup>) {
+      await fixture.step({
+        delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's note." }] },
+      });
+      const parked = await fixture.step();
+      return suspendedSteps(readDurableSession(parked.sessionState).state)[0]!.requests[0]!;
+    }
+
+    /** Delivers Bob's approval, then runs until the session waits again. */
+    async function approveAsBob(fixture: ReturnType<typeof setup>, requestId: string) {
+      let result = await fixture.step({
+        delivery: {
+          kind: "deliver",
+          auth: bob,
+          payloads: [{ inputResponses: [{ requestId, optionId: "approve" }] }],
+        },
+      });
+      while (result.action === "continue") result = await fixture.step();
+      return readDurableSession(result.sessionState).state;
+    }
+
+    it("settles the request as unavailable when the connection is gone", async () => {
+      const fixture = setup();
+      const request = await parkNote(fixture);
+      fixture.setConnection("removed");
+
+      const state = await approveAsBob(fixture, request.requestId);
+
+      expect(fixture.response).not.toHaveBeenCalled();
+      expect(fixture.fetch).not.toHaveBeenCalled();
+      expect(fixture.events).toContainEqual(
+        expect.objectContaining({
+          type: "approval.candidate",
+          data: expect.objectContaining({
+            outcome: "failed",
+            reason: "The tool this approval was for is no longer available, so the call won't run.",
+            requestId: request.requestId,
+            responderPrincipalId: "bob",
+          }),
+        }),
+      );
+      expect(fixture.events).toContainEqual(
+        expect.objectContaining({
+          type: "input.resolved",
+          data: expect.objectContaining({
+            resolutions: [
+              expect.objectContaining({ outcome: "denied", requestId: request.requestId }),
+            ],
+          }),
+        }),
+      );
+      // The model reads the failure under its own execute call.
+      expect(modelToolResult(fixture, request.action.callId)).toEqual(
+        expect.objectContaining({
+          output: { type: "error-text", value: TOOL_GONE_RESULT },
+          toolName: "execute",
+        }),
+      );
+      expect(suspendedSteps(state)).toEqual([]);
+      expect(fixture.events.at(-1)?.type).toBe("session.waiting");
+      expect(fixture.events.map((event) => event.type)).toContain("turn.completed");
     });
-    const parked = await fixture.step();
-    const request = suspendedSteps(readDurableSession(parked.sessionState).state)[0]!.requests[0]!;
-    fixture.removeConnection();
-    await fixture.step({
-      delivery: {
-        kind: "deliver",
-        auth: bob,
-        payloads: [{ inputResponses: [{ requestId: request.requestId, optionId: "approve" }] }],
-      },
+
+    it("keeps the request pending while the connection's resolver fails, and a retried approval runs it", async () => {
+      const fixture = setup();
+      const request = await parkNote(fixture);
+      fixture.setConnection("failing");
+      const before = fixture.events.length;
+
+      // The step restores its connections before it reads the approval, so the
+      // failure fails the turn, parks the session, and commits nothing.
+      await approveAsBob(fixture, request.requestId);
+
+      expect(fixture.events.slice(before).map((event) => event.type)).toEqual([
+        "step.failed",
+        "turn.failed",
+        "session.waiting",
+      ]);
+      expect(suspendedSteps(fixture.state())[0]!.requests[0]!.requestId).toBe(request.requestId);
+      expect(getApprovalAuditState(fixture.state()).candidateHistory).toEqual([]);
+      expect(fixture.response).not.toHaveBeenCalled();
+      expect(fixture.fetch).not.toHaveBeenCalled();
+
+      fixture.setConnection("available");
+      const approved = await approveAsBob(fixture, request.requestId);
+
+      expect(fixture.response).toHaveBeenCalledOnce();
+      expect(fixture.fetch).toHaveBeenCalledOnce();
+      expect(suspendedSteps(approved)).toEqual([]);
     });
-    clearDurableDynamicCallbacks(sessionId);
-    const refused = await fixture.step();
-    expect(fixture.response).not.toHaveBeenCalled();
-    expect(fixture.fetch).not.toHaveBeenCalled();
-    const state = readDurableSession(refused.sessionState).state;
-    expect(suspendedSteps(state)[0]!.requests[0]!.requestId).toBe(request.requestId);
-    expect(getApprovalAuditState(state).candidateHistory).toEqual([
-      // Its response policy went with the connection, so it can't authorize Bob's approval.
-      expect.objectContaining({
-        status: "failed",
-        reason: "Approval authorization is temporarily unavailable. Please try again.",
-      }),
-    ]);
   });
 
   it("names the responder, not the requester, on a candidate's sign-in events", async () => {
@@ -698,6 +767,18 @@ describe("turn connection approval restoration", () => {
     expect(fixture.fetch).toHaveBeenCalledOnce();
   });
 });
+
+/** The result the model read back for `callId` on its latest request. */
+function modelToolResult(fixture: ReturnType<typeof setup>, callId: string): unknown {
+  const [options] = fixture.doStream.mock.calls.at(-1)! as [
+    { prompt: { content: unknown; role: string }[] },
+  ];
+  return options.prompt
+    .flatMap((message) =>
+      message.role === "tool" ? (message.content as { toolCallId: string }[]) : [],
+    )
+    .find((part) => part.toolCallId === callId);
+}
 
 function callerHeader(call: readonly unknown[] | undefined): string | null {
   const [input, init] = (call ?? []) as [Request | string | URL, RequestInit | undefined];
