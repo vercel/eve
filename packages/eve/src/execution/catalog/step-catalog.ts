@@ -290,7 +290,9 @@ async function resolveExecuteInput(
 ): Promise<StandardSchemaV1.Result<ExecuteInput>> {
   if (skill !== undefined) {
     if (tool !== undefined) return failure("skill", "Pass either `tool` or `skill`, not both.");
-    if (input !== undefined) return failure("input", "`input` goes only with `tool`.");
+    if (!isEmptyInput(input)) {
+      return failure("input", "A skill takes no `input`; pass `input` only with `tool`.");
+    }
     if (catalog.skills.has(skill)) return { value: { skill } };
     const connections = catalog.connections.map((connection) => connection.connectionName);
     return failure("skill", unknownSkillMessage(skill, catalog.skills, connections));
@@ -323,6 +325,11 @@ function isConnectionTool(
   return connections.some(({ connectionName }) =>
     name.startsWith(connectionToolName(connectionName, "")),
   );
+}
+
+/** `input` defaults to {}, so an empty object is the same as no input. */
+function isEmptyInput(input: unknown): boolean {
+  return input === undefined || (isObject(input) && Object.keys(input).length === 0);
 }
 
 function failure(path: keyof ExecuteInput, message: string): StandardSchemaV1.FailureResult {
