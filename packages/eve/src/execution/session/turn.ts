@@ -38,6 +38,7 @@ import type {
 } from "#execution/session/turn-step-types.js";
 import { turnStep } from "#execution/session/turn-step.js";
 import { ActiveTurn } from "#execution/session/active-turn.js";
+import type { PreparedTurnControl } from "#execution/session/turn-control.js";
 import {
   findBlockingWorkflowToolRun,
   getBlockingWorkflowToolRuns,
@@ -96,12 +97,23 @@ export class SessionExecution {
        * input carries no caller. The turn's first step binds it into the context.
        */
       readonly caller?: TurnCaller;
+      readonly control?: PreparedTurnControl;
     } = {},
   ): Promise<TurnOutcome> {
-    const turn = new ActiveTurn(this.input, {
-      caller: options.caller,
-      principal: resolveTurnPrincipal(delivery, this.input.cursor.serializedContext),
-    });
+    let turn: ActiveTurn;
+    try {
+      turn = new ActiveTurn(
+        this.input,
+        {
+          caller: options.caller,
+          principal: resolveTurnPrincipal(delivery, this.input.cursor.serializedContext),
+        },
+        options.control,
+      );
+    } catch (error) {
+      options.control?.dispose();
+      throw error;
+    }
     try {
       const outcome = await this.runTurnSteps(turn, delivery);
       // Tasks run beside the turn, and a run can open a session after its call

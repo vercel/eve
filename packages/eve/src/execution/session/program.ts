@@ -10,6 +10,10 @@ import type { HarnessModelMessage } from "#harness/messages.js";
 import { nextTurnDelivery, type NextTurnInstruction } from "#execution/session/next-input.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { SessionExecution } from "#execution/session/turn.js";
+import {
+  createPreparedTurnControl,
+  type PreparedTurnControl,
+} from "#execution/session/turn-control.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { cancelWorkingTasks, sessionTaskTable } from "#execution/tasks/session.js";
 import { workingTasks } from "#execution/tasks/table.js";
@@ -247,14 +251,18 @@ async function runSessionLoop(
     }
   };
 
+  let preparedTurnControl: PreparedTurnControl | undefined =
+    boot.anchor.kind === "self" ? createPreparedTurnControl() : undefined;
   let turnIndex = 0;
   // Set when a turn compacts and kept until the session moves to a fresh run,
   // so this run's event log does not keep growing.
   let compactionHandoffDue = false;
   const runTurn = async (payload: TurnStepPayload | undefined): Promise<TurnOutcome> => {
     const caller = progress.caller;
+    const control = preparedTurnControl;
+    preparedTurnControl = undefined;
     progress.turnId = `turn_${String(turnIndex++)}`;
-    const outcome = await execution.runTurn(payload, { caller });
+    const outcome = await execution.runTurn(payload, { caller, control });
     if (outcome.caller !== undefined) progress.caller = outcome.caller;
     if (outcome.compacted === true) compactionHandoffDue = true;
     return outcome;
@@ -396,6 +404,7 @@ async function runSessionLoop(
       }
     }
   } finally {
+    preparedTurnControl?.dispose();
     await sessionTimeout?.dispose();
   }
 }

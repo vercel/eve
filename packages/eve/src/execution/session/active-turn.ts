@@ -10,6 +10,10 @@ import {
 } from "#execution/session/input-queue.js";
 import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
 import type { SessionExecutionInput } from "#execution/session/turn.js";
+import {
+  createPreparedTurnControl,
+  type PreparedTurnControl,
+} from "#execution/session/turn-control.js";
 import type { SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { decodeSessionInboxPayload } from "#execution/session-inbox/protocol.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
@@ -45,14 +49,14 @@ export class ActiveTurn {
   private readonly routedToChildren = new Set<number>();
   private readonly mappedForHeldRequest = new Set<number>();
   private readonly runtimeResults: RuntimeEvent[] = [];
-  private readonly controller = new AbortController();
+  private readonly controller: AbortController;
   private readonly expectedTurnId: string;
   private readonly input: SessionExecutionInput;
   /** Who alone steers the turn: its principal, or its delegated caller. */
   private readonly identity: SteeringTurn;
   private readonly unsubscribe: () => void;
   private unsubscribeDelivery: () => void;
-  private steeringController = new AbortController();
+  private steeringController: AbortController;
   /** The delegated caller of the latest message the turn read. */
   caller: TurnCaller | undefined;
   /** A step of this turn compacted the history. */
@@ -61,7 +65,10 @@ export class ActiveTurn {
   constructor(
     input: SessionExecutionInput,
     owner: { readonly caller: TurnCaller | undefined; readonly principal: string },
+    control: PreparedTurnControl = createPreparedTurnControl(),
   ) {
+    this.controller = control.cancellation;
+    this.steeringController = control.steering;
     this.input = input;
     this.caller = owner.caller;
     this.identity = { callerCallId: owner.caller?.callId, principal: owner.principal };

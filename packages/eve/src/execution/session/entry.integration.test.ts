@@ -43,6 +43,54 @@ afterEach(() => {
 });
 
 describe("workflowEntry integration", () => {
+  it("registers first-turn abort hooks before a prewarmed session receives a message", async () => {
+    const runtime = await createTestRuntime({ agent: { name: "workflow-entry-turn-prewarm" } });
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: {},
+          serializedContext: buildSerializedContext({ channelKind: "http" }),
+          sessionTimeoutMs: false,
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      try {
+        await waitForHook(
+          { runId: run.runId },
+          { token: sessionInboxHookToken(sessionCommandHookToken(run.runId)) },
+        );
+        let abortTokensBeforeMessage: string[] = [];
+        await vi.waitFor(async () => {
+          abortTokensBeforeMessage = (
+            await (await getWorld()).hooks.list({ runId: run.runId })
+          ).data
+            .map((hook) => hook.token)
+            .filter((token) => token.startsWith("abrt_"));
+          expect(abortTokensBeforeMessage).toHaveLength(2);
+        });
+
+        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+          kind: "send",
+          payload: { message: "Say hello." },
+        });
+        await stream.nextTurn();
+
+        const abortTokensAfterTurn = (
+          await (await getWorld()).hooks.list({ runId: run.runId })
+        ).data
+          .map((hook) => hook.token)
+          .filter((token) => token.startsWith("abrt_"));
+        expect(abortTokensAfterTurn).toEqual(abortTokensBeforeMessage);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
   it("parks before initialization and initializes with the first message identity and title", async () => {
     let initializedSessions = 0;
     let initializedAuth: unknown;
@@ -86,8 +134,8 @@ describe("workflowEntry integration", () => {
           { runId: run.runId },
           { token: sessionInboxHookToken(sessionCommandHookToken(run.runId)) },
         );
-        await expectHookClaims(run.runId, [sessionCommandHookToken(run.runId)], {
-          turnStarted: false,
+        await vi.waitFor(async () => {
+          await expectHookClaims(run.runId, [sessionCommandHookToken(run.runId)]);
         });
 
         const sessionRuntime = createWorkflowRuntime({
