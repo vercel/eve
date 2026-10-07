@@ -1,0 +1,63 @@
+{
+  "name": "@eve/tracing",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Framework-neutral tracing for durable AI agents. Vendored into eve; not published.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "eve-source": "./src/index.ts",
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./delegation": {
+      "eve-source": "./src/delegation.ts",
+      "types": "./src/delegation.ts",
+      "default": "./src/delegation.ts"
+    },
+    "./otel": {
+      "eve-source": "./src/otel.ts",
+      "types": "./src/otel.ts",
+      "default": "./src/otel.ts"
+    },
+    "./ai-sdk": {
+      "eve-source": "./src/ai-sdk.ts",
+      "types": "./src/ai-sdk.ts",
+      "default": "./src/ai-sdk.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build:types": "tsc -p tsconfig.build.json --emitDeclarationOnly",
+    "test:unit": "vitest run --config vitest.unit.config.ts",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@ai-sdk/harness": "1.0.148",
+    "@ai-sdk/provider-utils": "catalog:",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/context-async-hooks": "catalog:",
+    "@opentelemetry/sdk-trace-base": "catalog:",
+    "@types/node": "catalog:",
+    "ai": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "zod": "catalog:"
+  },
+  "peerDependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "ai": "catalog:"
+  },
+  "peerDependenciesMeta": {
+    "ai": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

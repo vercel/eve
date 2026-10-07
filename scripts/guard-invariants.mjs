@@ -135,6 +135,10 @@
  *             events, so nothing changes without readers hearing it. The model
  *             step's streamed content (its calls and their inline results) is
  *             built where it streams.
+ *   rule 52 — The tracing library in `packages/tracing/src/` imports only
+ *             itself and external packages. eve reaches it only through the
+ *             vendored root, delegation, otel, and ai-sdk entrypoints under
+ *             `#compiled/@eve/tracing/`, never the workspace package itself.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -256,6 +260,7 @@ function isTsLike(relPath) {
  *   rule48: Violation[];
  *   rule50: Violation[];
  *   rule51: Violation[];
+ *   rule52: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -291,6 +296,50 @@ async function scanRepo(state) {
     checkRule48(posix, lines, state.rule48);
     checkRule50(posix, lines, state.rule50);
     checkRule51(posix, lines, state.rule51);
+    if (posix.startsWith("packages/tracing/src/")) {
+      for (const [index, line] of lines.entries()) {
+        const imports = [...line.matchAll(/(?:from\s+|import\s*\()(["'])([^"']+)\1/g)];
+        for (const match of imports) {
+          const specifier = match[2];
+          const escapes =
+            specifier.startsWith("#") ||
+            (specifier.startsWith(".") &&
+              !toPosix(relative(REPO_ROOT, resolve(dirname(absPath), specifier))).startsWith(
+                "packages/tracing/src/",
+              ));
+          if (escapes)
+            state.rule52.push({
+              rule: 52,
+              file: posix,
+              line: index + 1,
+              message:
+                "Tracing library imports must stay inside the library or use an external package. Host integration belongs in the host.",
+            });
+        }
+      }
+    }
+    if (posix.startsWith("packages/eve/")) {
+      lines.forEach((line, index) => {
+        const privateImport =
+          /['"]#compiled\/@eve\/tracing\/(?!(?:index|delegation|otel|ai-sdk)\.js['"])/.test(line) ||
+          /(?:from\s+|import\s*\()['"]@eve\/tracing(?:\/[^'"]*)?['"]/.test(line) ||
+          [...line.matchAll(/(?:from\s+|import\s*\()(["'])([^"']+)\1/g)].some(
+            (match) =>
+              match[2].startsWith(".") &&
+              toPosix(relative(REPO_ROOT, resolve(dirname(absPath), match[2]))).startsWith(
+                "packages/tracing/",
+              ),
+          );
+        if (privateImport)
+          state.rule52.push({
+            rule: 52,
+            file: posix,
+            line: index + 1,
+            message:
+              "Import the tracing library from #compiled/@eve/tracing/{index,delegation,otel,ai-sdk}.js, not the workspace package or its private modules.",
+          });
+      });
+    }
   }
 }
 
@@ -1697,6 +1746,7 @@ async function main() {
     rule48: /** @type {Violation[]} */ ([]),
     rule50: /** @type {Violation[]} */ ([]),
     rule51: /** @type {Violation[]} */ ([]),
+    rule52: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1814,6 +1864,7 @@ async function main() {
   violations.push(...(await checkFrameworkActionIdentity()));
   violations.push(...state.rule50);
   violations.push(...state.rule51);
+  violations.push(...state.rule52);
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");
