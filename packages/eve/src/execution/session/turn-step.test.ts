@@ -49,7 +49,7 @@ import {
   withParkedStep,
   withQueuedInput,
 } from "#internal/testing/session-machine.js";
-import type { HarnessSession, StepFn, StepResult } from "#harness/types.js";
+import type { HarnessSession, StepFn, StepInput, StepResult } from "#harness/types.js";
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import {
   createInputRequestedEvent,
@@ -1102,9 +1102,15 @@ describe("turnStep", () => {
      */
     async function answerThenCancel(
       optionId: "approve" | "cancel",
-      options: { readonly cutTool?: boolean; readonly message?: string } = {},
+      options: {
+        readonly cutTool?: boolean;
+        readonly message?: string;
+        /** The answer, or earlier input, waits in the queue instead of arriving with the delivery. */
+        readonly queued?: StepInput;
+      } = {},
     ) {
-      const { cutTool = false, message } = options;
+      const { cutTool = false, message, queued } = options;
+      const answered = queued?.inputResponses !== undefined;
       const parked = withParkedStep(
         createStubSession({ history: [{ content: "Run pwd.", kind: "user", role: "user" }] }),
         {
@@ -1130,6 +1136,7 @@ describe("turnStep", () => {
           requests: [approvalRequest],
         },
       );
+      const start = queued === undefined ? parked : withQueuedInput(parked, queued);
       const controller = new AbortController();
       const events: UnstampedMessageStreamEvent[] = [];
       const execute = vi.fn(async () => {
@@ -1188,14 +1195,19 @@ describe("turnStep", () => {
       ctx.set(ChannelKey, adapter);
       ctx.set(ContinuationTokenKey, "answers");
       ctx.set(SessionIdKey, "sess-test");
-      installSessionStoreMocks([parked]);
+      installSessionStoreMocks([start]);
 
       const cancelled = await turnStep({
         abortSignal: controller.signal,
         history: parked.history,
         input: {
           kind: "deliver",
-          payloads: [{ inputResponses: [{ optionId, requestId: "approval-1" }], message }],
+          payloads: [
+            {
+              inputResponses: answered ? [] : [{ optionId, requestId: "approval-1" }],
+              message,
+            },
+          ],
         },
         sessionWritable: createTestWritable(),
         serializedContext: serializeContext(ctx),
@@ -1257,6 +1269,36 @@ describe("turnStep", () => {
       expect(next.history).toContainEqual(
         expect.objectContaining({ content: "next", role: "user" }),
       );
+    });
+
+    it("doesn't restore a queued answer the cancelled step consumed", async () => {
+      const { cancelled, next, nextEvents, session } = await answerThenCancel("cancel", {
+        queued: { inputResponses: [{ optionId: "cancel", requestId: "approval-1" }] },
+      });
+
+      expect(cancelled.action).toBe("cancelled");
+      expect(queuedInput(session.state)).toBeUndefined();
+      expect(parkedSteps(session)).toEqual([]);
+      // The next message doesn't carry the answer again as a response to an earlier prompt.
+      expect(resolutions(nextEvents)).toEqual([]);
+      expect(JSON.stringify(next.history)).not.toContain("earlier interactive prompt");
+    });
+
+    it("keeps earlier queued input once, with the denial's message", async () => {
+      const { cancelled, next, session } = await answerThenCancel("cancel", {
+        message: "and this",
+        queued: { message: "earlier" },
+      });
+      const userText = (history: readonly ModelMessage[]) =>
+        JSON.stringify(history.filter((entry) => entry.role === "user"));
+      const count = (text: string, value: string) => text.split(value).length - 1;
+
+      expect(cancelled.action).toBe("cancelled");
+      expect(queuedInput(session.state)).toBeUndefined();
+      expect(count(userText(cancelled.history), "earlier")).toBe(1);
+      expect(count(userText(cancelled.history), "and this")).toBe(1);
+      expect(count(userText(next.history), "earlier")).toBe(1);
+      expect(count(userText(next.history), "and this")).toBe(1);
     });
 
     it("doesn't run an approved call again after the cancellation cut it short", async () => {
