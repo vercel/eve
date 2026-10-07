@@ -2,7 +2,13 @@ import { jsonSchema } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
-import { foldingHandler, positionOf, withOpenTurn } from "#internal/testing/session-machine.js";
+import { subagentTool, toolMap, workflowTool } from "#internal/testing/catalog-fixtures.js";
+import {
+  foldingHandler,
+  parkedSteps,
+  positionOf,
+  withOpenTurn,
+} from "#internal/testing/session-machine.js";
 import {
   createFrameworkUserMessage,
   createUserMessage,
@@ -472,4 +478,56 @@ describe("generation steering with the real AI SDK", () => {
     expect(providerSignal?.aborted).toBe(false);
     expect(events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
   });
+
+  it.each([
+    ["a workflow tool directly", workflowTool("deploy_service"), "deploy_service", {}],
+    [
+      "a workflow tool through execute",
+      workflowTool("deploy_service", "execute", { deferred: true }),
+      "execute",
+      { tool: "deploy_service" },
+    ],
+    [
+      "an agent through execute",
+      subagentTool("billing_specialist", { deferred: true }),
+      "execute",
+      { input: { message: "Review Bob's dispute." }, tool: "billing_specialist" },
+    ],
+  ] as const)(
+    "interrupts a step that calls %s, since it runs only after the step",
+    async (_case, entry, toolName, input) => {
+      const steering = new AbortController();
+      const model = new MockLanguageModelV3({
+        doStream: async () => ({
+          stream: new ReadableStream<Part>({
+            start(controller) {
+              controller.enqueue({
+                type: "tool-call",
+                toolCallId: "call-1",
+                toolName,
+                input: JSON.stringify(input),
+              });
+              controller.enqueue({
+                type: "finish",
+                finishReason: { unified: "tool-calls", raw: undefined },
+                usage,
+              });
+              controller.close();
+            },
+          }),
+        }),
+      });
+      const result = await createToolLoopHarness({
+        steeringSignal: steering.signal,
+        tools: toolMap(entry),
+        resolveModel: async () => model,
+        handleEvent: async (event) => {
+          if (event.type === "actions.requested") steering.abort();
+        },
+      })(session(), { message: "Alice asks for the work to start" });
+
+      expect(result.steered).toBe(true);
+      expect(parkedSteps(result.session)).toEqual([]);
+    },
+  );
 });

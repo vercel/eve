@@ -142,6 +142,18 @@ describe("dispatchDynamicSkillEvent", () => {
     });
   });
 
+  it("accepts a skill name that starts with a digit", async () => {
+    const { ctx } = createCtx();
+    await dispatch(
+      ctx,
+      createResolver("tenant", () => ({ "3d-modeling": makeSkill("Model in 3D", "Model.") })),
+    );
+
+    expect(ctx.get(DynamicSkillManifestKey)?.tenant?.map((skill) => skill.name)).toEqual([
+      "3d-modeling",
+    ]);
+  });
+
   it("skips a resolver that returns an illegal skill name", async () => {
     const logs = captureLogRecords();
     const { ctx } = createCtx();

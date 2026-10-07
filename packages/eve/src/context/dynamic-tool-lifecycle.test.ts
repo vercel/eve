@@ -51,6 +51,7 @@ import {
   registerDurableDynamicCallback,
   stampDurableDynamicToolCallbacks,
 } from "#tools/durable-callbacks.js";
+import { RUNTIME_TOOL_NAMES } from "#protocol/runtime-tools.js";
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
 import {
   createSessionStartedEvent,
@@ -155,10 +156,6 @@ describe("dynamic tool names", () => {
       'Dynamic tool "researcher" from resolver "agent/tools/tenant.ts" collides with the workflow tool or agent "researcher". Rename the map key.',
     ],
     [
-      "execute",
-      'Dynamic tool resolver "agent/tools/tenant.ts" returned the reserved tool name "execute".',
-    ],
-    [
       "sync now",
       'Dynamic tool resolver "agent/tools/tenant.ts" returned illegal tool name "sync now".',
     ],
@@ -166,6 +163,30 @@ describe("dynamic tool names", () => {
     expect(
       await resolveTools({ [name]: createReplayableTool(), sync: createReplayableTool() }),
     ).toEqual({ errors: [expect.stringContaining(error)], tools: [] });
+  });
+
+  // Every runtime name, each with the role its error names.
+  const RESERVED: readonly (readonly [string, string])[] = [
+    ["search", "catalog tool"],
+    ["execute", "catalog tool"],
+    ["task_wait", "task tool"],
+    ["task_cancel", "task tool"],
+    ["final_output", "final output tool"],
+  ];
+
+  it("covers every runtime tool name", () => {
+    expect(RESERVED.map(([name]) => name).sort()).toEqual([...RUNTIME_TOOL_NAMES].sort());
+  });
+
+  it.each(RESERVED)("skips a resolver that returns %s, the built-in %s", async (name, role) => {
+    expect(
+      await resolveTools({ [name]: createReplayableTool(), sync: createReplayableTool() }),
+    ).toEqual({
+      errors: [
+        `Dynamic tool resolver "agent/tools/tenant.ts" returned the reserved tool name "${name}". eve reserves "${name}" for its built-in ${role}; rename the map key.`,
+      ],
+      tools: [],
+    });
   });
 
   it("lets a dynamic tool wrap a subagent hidden with tool: false", async () => {

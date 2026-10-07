@@ -147,11 +147,26 @@ describe("catalogAnnouncements", () => {
     );
   });
 
+  it("calls a skill gone only when it can no longer be loaded, not when it stops being deferred", () => {
+    const tools = [deferred("tenant__sync")];
+    const before = announce({ skills: [{ deferred: true, name: "pdf-forms" }], tools }).catalog!
+      .value;
+
+    const listed = announce({ skills: [{ name: "pdf-forms" }], tools }, { catalog: before });
+    expect(listed.catalog?.render(before)).not.toContain("No longer available");
+    const dropped = announce({ tools }, { catalog: before });
+    expect(dropped.catalog?.render(before)).toBe(
+      "The catalog changed.\nNo longer available, do not call or load: pdf-forms",
+    );
+  });
+
   it("says when an announced catalog becomes empty, and lists it in full when entries return", () => {
     const synced = announce({ tools: [deferred("tenant__sync")] }).catalog!.value;
     const empty = announce({ tools: [inlineTool("add")] }, { catalog: synced }).catalog!;
 
-    expect(empty.render(synced)).toBe("The catalog changed. It is empty now; do not call execute.");
+    expect(empty.render(synced)).toBe(
+      "The catalog changed. It is empty now: search finds nothing, and execute has no tools to call.",
+    );
     const returned = announce({ tools: [deferred("tenant__export")] }, { catalog: empty.value });
     expect(returned.catalog?.render(empty.value)).toBe(
       [
