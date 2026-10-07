@@ -23,21 +23,19 @@ through two fixed tools, `search` and `execute`:
 search(opts: {
   query?: string;
   limit?: number;
-  offset?: number;
-}): {
+}): Promise<{
   results: Array<
     | { tool: string; description: string; signature: string }
     | { skill: string; description: string; path?: string }
   >;
-  total: number;
   unavailable?: Array<{ connection: string; error: string }>;
-};
+}>;
 
 execute(
   | { tool: string; input?: object }
   | { skill: string }
   | { code: string }, // code mode, later
-);
+): Promise<unknown>;
 ```
 
 - **One opt-in.**
@@ -502,13 +500,19 @@ today.
 
 **`search`**
 
-- **Input:** `{ query?, limit?, offset? }`.
+- **Input:** `{ query?, limit? }`.
   - `limit` defaults to 10 and is capped at 50.
-  - Leaving out `query` lists every entry. A connection's name as the query,
-    such as `linear`, lists that connection's tools first.
+  - Leaving out `query` lists entries up to `limit`. A connection's name as
+    the query, such as `linear`, lists that connection's tools first.
   - There is no connection filter and no sign-in flag. The query already
     selects a connection, and sign-in is an `execute` call.
-- **Result:** `{ results, total, unavailable? }`.
+  - There is no paging and no match count. `search` returns the best matches
+    up to `limit`, and the model narrows the query or raises `limit` for more.
+    Paging and counts assume a fixed, countable match list, which a future
+    search that asks a model to choose entries wouldn't have.
+- **Async.** `search` returns a promise, so the way it picks results can
+  change, for example to a decision model, without changing its signature.
+- **Result:** `{ results, unavailable? }`.
   - A tool entry is `{ tool, description, signature }`. `tool` is the exact
     name to pass to `execute`.
   - `signature` is TypeScript rendered from the input and output schemas by
@@ -601,7 +605,7 @@ today.
   flip the array the first time a resolver returns a deferred entry.
 - **Cost of an empty catalog.** Two fixed definitions, about the size of
   today's two connection tools, cached with the rest of the prefix. No
-  listing is appended, and `search` returns `{ results: [], total: 0 }`.
+  listing is appended, and `search` returns `{ results: [] }`.
 - **Closed and reserved.** `agent/tools/search.ts`,
   `agent/tools/execute.ts`, and the framework module that provides them are
   compile errors in every agent, as the connection tool slots are today. The
@@ -742,7 +746,7 @@ Connections:
    on the step that runs approved calls.
 5. **Deterministic rendering.** Listings are sorted, and a signature is a
    pure function of its schema, so the same entry always renders the same
-   text. `search` renders signatures only for the page it returns.
+   text. `search` renders signatures only for the results it returns.
 6. **Calling an entry adds nothing.** An `execute` call, skill load,
    approval, park, sign-in, child session, or resume never adds a definition. That is exactly
    where AI SDK `toolSearch()` and pi's activation path lose the cache.
