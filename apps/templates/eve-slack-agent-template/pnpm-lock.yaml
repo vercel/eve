@@ -10,13 +10,13 @@ importers:
     dependencies:
       '@vercel/connect':
         specifier: ^2.4.0
-        version: 2.4.0(ai@7.0.128(zod@4.4.3))(eve@0.66.3(ai@7.0.128(zod@4.4.3)))
+        version: 2.4.0(ai@7.0.128(zod@4.4.3))(eve@0.73.0(ai@7.0.128(zod@4.4.3))(microsandbox@0.5.10))
       ai:
         specifier: 7.0.128
         version: 7.0.128(zod@4.4.3)
       eve:
-        specifier: ^0.66.3
-        version: 0.66.3(ai@7.0.128(zod@4.4.3))
+        specifier: ^0.73.0
+        version: 0.73.0(ai@7.0.128(zod@4.4.3))(microsandbox@0.5.10)
       zod:
         specifier: 4.4.3
         version: 4.4.3
@@ -24,6 +24,9 @@ importers:
       '@types/node':
         specifier: ^25.9.3
         version: 25.9.5
+      microsandbox:
+        specifier: ^0.5.10
+        version: 0.5.10
       typescript:
         specifier: 7.0.2
         version: 7.0.2
@@ -150,6 +153,26 @@ packages:
 
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
+
+  '@superradcompany/microsandbox-darwin-arm64@0.5.10':
+    resolution: {integrity: sha512-MGEV2SuLzSg3SiQJy2TXRE9SoWnmIUEhCAQno5y0hJ6dsMe7FbaRDFZtHpKiK4XExAstL5WhT1XF+JJWTEfSqg==}
+    engines: {node: '>= 22'}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@superradcompany/microsandbox-linux-arm64-gnu@0.5.10':
+    resolution: {integrity: sha512-4FYoAURc1qbNxIbBFK9shMQ9MxklgPRGEsY7tQog8beqvc3U91W34aZyOu90OTRJm0TNsdoLIg3lxKP4LKIJYQ==}
+    engines: {node: '>= 22'}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
+  '@superradcompany/microsandbox-linux-x64-gnu@0.5.10':
+    resolution: {integrity: sha512-M9FjBAQ36dxhfs5S62uVxCTNAZzxjUgprNh41dIG6H6eF+tAEHYMY1lUEf/w1rkQw8SUsVRrtS+wfVyIM4z9fA==}
+    engines: {node: '>= 22'}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
 
   '@types/node@25.9.5':
     resolution: {integrity: sha512-OScDchr2fwuUmWdf4kZ9h7PcJiYDVInhJizG/biAq3cAvqwYktuy/TYGGdZNMtNTFUP7rnb0NU4TUdm82kt4Rg==}
@@ -347,13 +370,13 @@ packages:
     resolution: {integrity: sha512-2iDP2DfheAMMAKeXBggEuFmpSq+1Xs6wQoHba1g65pZFXlC3VHD1O6/tgVzS6GQLv+P2koPKZPKgKhXkigNBdg==}
     hasBin: true
 
-  eve@0.66.3:
-    resolution: {integrity: sha512-oJkQdVrlmb1GFeaSUNY6IF71ttXjQdFnkKQP+84Qlvs/M+fUqMjGTqnwevQ+qFvc8KCswo3cbBohKOCGdgZPFg==}
+  eve@0.73.0:
+    resolution: {integrity: sha512-MvavT0wp31lprBeSzkzxLO0omPYD1143WxBlnCcN4s2yON1j6LrZ3spl7fpjy/NLHE3je45C+QChiDzcH2vkOA==}
     engines: {node: '>=24'}
     hasBin: true
     peerDependencies:
       '@opentelemetry/api': ^1.0.0
-      ai: ^7.0.105
+      ai: ^7.0.128
       braintrust: ^3.0.0
       chat: ^4.41.0
       dd-trace: ^6.13.0
@@ -426,6 +449,11 @@ packages:
 
   merge-stream@2.0.0:
     resolution: {integrity: sha512-abv/qOcuPfk3URPfDzmZU1LKmuw8kT+0nIHvKrKgFrwifol/doWcdA4ZqsWQ8ENrFKkd67Mfpo/LovbIUsbt3w==}
+
+  microsandbox@0.5.10:
+    resolution: {integrity: sha512-0NVFu8DohPq/hrG76CJ5x2x8wckNQq8KSN/VXxyVLns8WfDyBzfSSYXHUSV2evjdRB3dkA9FUJjnGujb2XRD1Q==}
+    engines: {node: '>= 22'}
+    hasBin: true
 
   mimic-fn@2.1.0:
     resolution: {integrity: sha512-OqbOk5oEQeAZ8WXWydlu9HJjz9WVdEIvamMCcXmuqUYjTknH/sqsWvhQ3vgwKFRR1HpjvNBKQ37nbJgYzGqGcg==}
@@ -501,8 +529,8 @@ packages:
     resolution: {integrity: sha512-IDxfleLmmbSskfWSUATiN1nfn2rDuvnMOqb5CWR92iIfojA0Ud+ulOAAEQ57LPr9rWmsreUyf5lwyao+7GNNVw==}
     engines: {node: '>=20.18.1'}
 
-  undici@8.9.0:
-    resolution: {integrity: sha512-aWZpUj7XoGonMClx4gdDRfgBjqeA+F473aDmROQQbM9n6PRfK/u1q/a0X4wMTgcHfT8H6fpbt98PFuDUwFg2YA==}
+  undici@8.10.2:
+    resolution: {integrity: sha512-/y4/bH9YNU5hi9NIrpOuvGXFcxrj3CMrV+/AYpowAYTpHn8gX/XPFjNy766FPoYY0miQhdW977JFWKGNhBdwyQ==}
     engines: {node: '>=22.19.0'}
 
   unenv@2.0.0-rc.24:
@@ -603,6 +631,15 @@ snapshots:
 
   '@standard-schema/spec@1.1.0': {}
 
+  '@superradcompany/microsandbox-darwin-arm64@0.5.10':
+    optional: true
+
+  '@superradcompany/microsandbox-linux-arm64-gnu@0.5.10':
+    optional: true
+
+  '@superradcompany/microsandbox-linux-x64-gnu@0.5.10':
+    optional: true
+
   '@types/node@25.9.5':
     dependencies:
       undici-types: 7.24.6
@@ -676,12 +713,12 @@ snapshots:
     dependencies:
       execa: 5.1.1
 
-  '@vercel/connect@2.4.0(ai@7.0.128(zod@4.4.3))(eve@0.66.3(ai@7.0.128(zod@4.4.3)))':
+  '@vercel/connect@2.4.0(ai@7.0.128(zod@4.4.3))(eve@0.73.0(ai@7.0.128(zod@4.4.3))(microsandbox@0.5.10))':
     dependencies:
       '@vercel/oidc': 4.0.0
     optionalDependencies:
       ai: 7.0.128(zod@4.4.3)
-      eve: 0.66.3(ai@7.0.128(zod@4.4.3))
+      eve: 0.73.0(ai@7.0.128(zod@4.4.3))(microsandbox@0.5.10)
 
   '@vercel/oidc@3.2.0': {}
 
@@ -721,11 +758,13 @@ snapshots:
       httpxy: 0.5.5
       srvx: 1.0.4
 
-  eve@0.66.3(ai@7.0.128(zod@4.4.3)):
+  eve@0.73.0(ai@7.0.128(zod@4.4.3))(microsandbox@0.5.10):
     dependencies:
       ai: 7.0.128(zod@4.4.3)
       nitro: 3.0.260903-beta
-      undici: 8.9.0
+      undici: 8.10.2
+    optionalDependencies:
+      microsandbox: 0.5.10
 
   eventsource-parser@3.1.1: {}
 
@@ -768,6 +807,12 @@ snapshots:
   json-schema@0.4.0: {}
 
   merge-stream@2.0.0: {}
+
+  microsandbox@0.5.10:
+    optionalDependencies:
+      '@superradcompany/microsandbox-darwin-arm64': 0.5.10
+      '@superradcompany/microsandbox-linux-arm64-gnu': 0.5.10
+      '@superradcompany/microsandbox-linux-x64-gnu': 0.5.10
 
   mimic-fn@2.1.0: {}
 
@@ -867,7 +912,7 @@ snapshots:
 
   undici@7.29.0: {}
 
-  undici@8.9.0: {}
+  undici@8.10.2: {}
 
   unenv@2.0.0-rc.24:
     dependencies:
