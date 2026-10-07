@@ -10,6 +10,7 @@ import type { HarnessModelMessage } from "#harness/messages.js";
 import { nextTurnDelivery, type NextTurnInstruction } from "#execution/session/next-input.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { SessionExecution } from "#execution/session/turn.js";
+import { createTurnControl, type TurnControl } from "#execution/session/turn-control.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { cancelWorkingTasks, sessionTaskTable } from "#execution/tasks/session.js";
 import { workingTasks } from "#execution/tasks/table.js";
@@ -17,7 +18,7 @@ import type { TurnOutcome, TurnStepPayload } from "#execution/session/turn-step-
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
 import { finalizeSession, type SessionTerminalOutcome } from "#execution/session/finalization.js";
 import { type SessionInboxHandle } from "#execution/session-inbox/inbox.js";
-import { createSessionTimeoutControl } from "#execution/session/timeout-control.js";
+import type { SessionTimeoutControl } from "#execution/session/timeout-control.js";
 import {
   type CompactionHandoff,
   SessionHandoff,
@@ -61,11 +62,13 @@ export interface SessionBoot {
   readonly capabilities?: SessionCapabilities;
   readonly deploymentId: string;
   readonly history: HarnessModelMessage[];
+  readonly initialTurnControl?: TurnControl;
   readonly start: SessionStart;
   readonly retention?: AgentWorkflowRetentionDefinition;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionId: string;
   readonly sessionState: DurableSessionState;
+  readonly sessionTimeoutControl?: SessionTimeoutControl;
   readonly sessionTimeoutDeadline?: Date;
   readonly sessionTimeoutMs: number | false;
   readonly sessionWritable: WritableStream<Uint8Array>;
@@ -212,13 +215,7 @@ async function runSessionLoop(
     queue,
     sessionId: boot.sessionId,
   });
-  const sessionTimeout =
-    boot.sessionTimeoutDeadline === undefined
-      ? undefined
-      : createSessionTimeoutControl({
-          deadline: boot.sessionTimeoutDeadline,
-          sessionId: boot.sessionId,
-        });
+  const sessionTimeout = boot.sessionTimeoutControl;
 
   const nextParkedActivity = async (): Promise<
     Exclude<NextTurnInstruction, { kind: "workflow" | "cancel-working-tasks" }>
@@ -242,14 +239,18 @@ async function runSessionLoop(
     }
   };
 
+  let turnControl =
+    boot.initialTurnControl ?? (boot.anchor.kind === "self" ? createTurnControl() : undefined);
   let turnIndex = 0;
   // Set when a turn compacts and kept until the session moves to a fresh run,
   // so this run's event log does not keep growing.
   let compactionHandoffDue = false;
   const runTurn = async (payload: TurnStepPayload | undefined): Promise<TurnOutcome> => {
     const caller = progress.caller;
+    const control = turnControl;
+    turnControl = undefined;
     progress.turnId = `turn_${String(turnIndex++)}`;
-    const outcome = await execution.runTurn(payload, { caller });
+    const outcome = await execution.runTurn(payload, { caller, control });
     if (outcome.caller !== undefined) progress.caller = outcome.caller;
     if (outcome.compacted === true) compactionHandoffDue = true;
     return outcome;
@@ -391,6 +392,7 @@ async function runSessionLoop(
       }
     }
   } finally {
+    turnControl?.dispose();
     await sessionTimeout?.dispose();
   }
 }
