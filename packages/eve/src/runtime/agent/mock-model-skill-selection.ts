@@ -88,7 +88,7 @@ export function getActivatedSkillIds(prompt: BootstrapPrompt): string[] {
   return [...fromSystemLabels, ...getSkillLoads(prompt).values()];
 }
 
-/** Skill loads in the history: each `execute({ skill })` call's id and skill. */
+/** Skill loads in the history: each `eve__execute({ skill })` call's id and skill. */
 export function getSkillLoads(prompt: BootstrapPrompt): ReadonlyMap<string, string> {
   const loads = new Map<string, string>();
 

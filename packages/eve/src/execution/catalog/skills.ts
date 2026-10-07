@@ -1,6 +1,6 @@
 /**
  * Skills in the catalog. Every skill the session can see loads through
- * `execute({ skill })`, deferred or not. The call resolves to one loader entry
+ * `eve__execute({ skill })`, deferred or not. The call resolves to one loader entry
  * whose name sits outside the tool namespace, because skills and tools have
  * separate names.
  */
@@ -9,7 +9,7 @@ import type { ContextReader } from "#context/key.js";
 import { DynamicSkillManifestKey } from "#context/keys.js";
 import { skillFilePath } from "#execution/skills/instructions.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { SKILL_ENTRY_NAME } from "#protocol/catalog-tools.js";
+import { SEARCH_TOOL_NAME, SKILL_ENTRY_NAME } from "#protocol/catalog-tools.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { displayTitle } from "#shared/display-name.js";
 import { skillTarget } from "#shared/action-request-name.js";
@@ -53,7 +53,7 @@ export function sessionSkills(ctx: ContextReader | undefined): ReadonlyMap<strin
   return skills;
 }
 
-/** The entry every `execute({ skill })` call resolves to. */
+/** The entry every `eve__execute({ skill })` call resolves to. */
 export function createSkillLoader(
   skills: ReadonlyMap<string, CatalogSkill>,
 ): HarnessToolDefinition {
@@ -61,7 +61,7 @@ export function createSkillLoader(
     description: "Loads a skill's instructions.",
     execute: (input: { readonly skill: string }) => {
       const skill = skills.get(input.skill);
-      // `execute` validation resolves every skill before the call runs.
+      // `eve__execute` validation resolves every skill before the call runs.
       if (skill === undefined) throw new Error(`No skill named "${input.skill}".`);
       return skill.markdown;
     },
@@ -77,7 +77,7 @@ function skillLoadLabel(input: unknown): string {
   return skill === undefined ? "Load skill" : `Load skill: ${displayTitle(skill)}`;
 }
 
-/** Why `execute` can't load `name`: the closest skills, or the connection it names. */
+/** Why `eve__execute` can't load `name`: the closest skills, or the connection it names. */
 export function unknownSkillMessage(
   name: string,
   skills: ReadonlyMap<string, CatalogSkill>,
@@ -87,14 +87,14 @@ export function unknownSkillMessage(
   const hint =
     suggestions.length > 0
       ? ` Closest skills: ${suggestions.join(", ")}.`
-      : " Find skills with search.";
+      : ` Find skills with ${SEARCH_TOOL_NAME}.`;
   const connection = connections.find(
     (connectionName) => connectionName.toLowerCase() === name.toLowerCase(),
   );
   const connectionHint =
     connection === undefined
       ? ""
-      : ` "${connection}" is a connection, not a skill. Find its tools with search({ query: "${connection}__" }).`;
+      : ` "${connection}" is a connection, not a skill. Find its tools with ${SEARCH_TOOL_NAME}({ query: "${connection}__" }).`;
   return `No skill named "${name}".${hint}${connectionHint}`;
 }
 
