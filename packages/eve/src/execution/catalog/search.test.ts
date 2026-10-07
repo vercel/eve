@@ -361,6 +361,7 @@ describe("search", () => {
         name: "jira",
         tools: [],
       });
+      const empty = fakeConnection({ name: "archive", tools: [] });
       const outside = [linear, broken].map((connection) =>
         vi.spyOn(connection.client, "getToolMetadata"),
       );
@@ -373,7 +374,7 @@ describe("search", () => {
             description: "Export the ledger to the crm.",
           }),
         ],
-        { connections: [crmApi, notion, linear, broken] },
+        { connections: [crmApi, notion, linear, broken, empty] },
       );
       return { notion, outside, search };
     }
@@ -432,8 +433,9 @@ describe("search", () => {
       ["Linear__", 'No entries are named "Linear__…". Closest connections: linear.'],
       [
         "nope__x",
-        'No entries are named "nope__…". Find names in the catalog listing, or search with plain words.',
+        'No entries are named "nope__…". Find names in the catalog listing or your tool list, or search with plain words.',
       ],
+      ["archive__", 'Connection "archive" has no tools.'],
     ])("fails for %s, a namespace with no entries", async (query, message) => {
       const { outside, search } = namespaced();
 
