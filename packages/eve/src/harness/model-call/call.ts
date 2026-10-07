@@ -374,7 +374,8 @@ export class ModelCaller {
           usage: event.usage,
         });
       },
-      onToolExecutionEnd: logToolExecutionError,
+      onToolExecutionEnd: (event: Parameters<typeof logToolExecutionError>[0]) =>
+        logToolExecutionError(event, catalog.resolve),
       // Replaces the AI SDK's default `console.error`; the harness reports failures as events.
       onError(event: { error: unknown }) {
         if (generation.interrupted) return;

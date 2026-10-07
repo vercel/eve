@@ -352,7 +352,7 @@ A recovery rebind is not a new lifecycle event, but it can run resolver code aga
 
 A single return produces one tool named after the file slug, identical to a static tool. A map names each entry by its **bare key** — there is no automatic slug prefix. If a bare name might collide, namespace the key yourself by including the prefix in the key (e.g. return `{ "tenant__export": … }` to get `tenant__export`).
 
-A map key must be a legal tool name: ASCII letters, digits, underscores, and dashes, starting with a letter, up to 64 characters. `search` and `execute` are reserved for the [built-in tools](../concepts/built-in-tools#search-and-execute), and a key cannot be a connection's name or start with its `<name>__` prefix. eve rejects such a key when the resolver returns it.
+A map key must be a legal tool name: ASCII letters, digits, underscores, and dashes, starting with a letter, up to 64 characters. The names of the tools eve adds itself, `search`, `execute`, `task_wait`, `task_cancel`, and `final_output`, are [reserved](../concepts/built-in-tools#search-and-execute), and a key cannot be a connection's name or start with its `<name>__` prefix. eve rejects such a key when the resolver returns it.
 
 ### Conflicts
 

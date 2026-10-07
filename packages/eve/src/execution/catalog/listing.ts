@@ -1,6 +1,7 @@
 import { isAgentTool } from "#execution/tasks/tool-entry-point.js";
 import type { Announcement } from "#harness/announcements.js";
 
+import { compareCodeUnits } from "./rank.js";
 import type { StepCatalog } from "./step-catalog.js";
 
 interface ListedConnection {
@@ -57,7 +58,7 @@ function listCatalog(catalog: StepCatalog): CatalogListing {
         description: connection.description,
         name: connection.connectionName,
       }))
-      .sort((a, b) => a.name.localeCompare(b.name)),
+      .sort((a, b) => compareCodeUnits(a.name, b.name)),
     tools: names(false),
   };
 }
