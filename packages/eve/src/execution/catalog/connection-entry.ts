@@ -44,8 +44,6 @@ import {
 import { closestNames } from "./rank.js";
 import { connectionToolSignature } from "./signatures.js";
 
-const MAX_SUGGESTIONS = 5;
-
 /** Bounds approval pins; an evicted pin rejects its call rather than letting it run. */
 const MAX_APPROVAL_PINS = 50;
 
@@ -233,7 +231,7 @@ function unknownToolMessage(
   tools: readonly ConnectionToolMetadata[],
 ): string {
   const { connectionName } = connection;
-  const suggestions = closestNames(toolName, tools, MAX_SUGGESTIONS).map((name) =>
+  const suggestions = closestNames(toolName, tools).map((name) =>
     connectionToolName(connectionName, name),
   );
   const hint =

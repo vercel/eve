@@ -38,8 +38,6 @@ import { closestNames } from "./rank.js";
 import { createSearchTool } from "./search.js";
 import { entrySignature } from "./signatures.js";
 
-const MAX_SUGGESTIONS = 5;
-
 /** Appended to the model-facing description of every tool with `endsTurn: true`. */
 const ENDS_TURN_TOOL_NOTE =
   "Calling this tool ends your turn once it succeeds: do not write a reply or call other tools in the same step. If it fails, you will see the error and can continue.";
@@ -291,7 +289,7 @@ function unknownEntryMessage(name: string, catalog: StepCatalog): string {
     description,
     name,
   }));
-  const suggestions = closestNames(name, candidates, MAX_SUGGESTIONS);
+  const suggestions = closestNames(name, candidates);
   const hint =
     suggestions.length > 0
       ? ` Closest tools: ${suggestions.join(", ")}.`
