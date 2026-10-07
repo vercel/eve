@@ -10,10 +10,10 @@ import { EvalSessionManager } from "#evals/session-manager.js";
 import { createEvalTargetHandle } from "#evals/target.js";
 import { stampTestEvents } from "#internal/testing/events.js";
 
-const mocks = vi.hoisted(() => ({ evaluate: vi.fn() }));
+const mocks = vi.hoisted(() => ({ decide: vi.fn() }));
 
 vi.mock("node:fs/promises", () => ({ readFile: vi.fn() }));
-vi.mock("#ai/evaluate.js", () => ({ evaluate: mocks.evaluate }));
+vi.mock("#ai/decide.js", () => ({ decide: mocks.decide }));
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -38,7 +38,7 @@ describe("eval judge input", () => {
       }
 
       context.judge("answers the user's request");
-      expect(mocks.evaluate).toHaveBeenCalledWith(
+      expect(mocks.decide).toHaveBeenCalledWith(
         expect.objectContaining({
           state: expect.objectContaining({ input: "Find Bob's order status instead." }),
         }),
@@ -53,7 +53,7 @@ describe("eval judge input", () => {
     await session.sendFile("Summarize Alice's invoice.", "/invoice.txt", "text/plain");
     context.judge("summarizes the invoice");
 
-    expect(mocks.evaluate).toHaveBeenCalledWith(
+    expect(mocks.decide).toHaveBeenCalledWith(
       expect.objectContaining({
         state: expect.objectContaining({ input: "Summarize Alice's invoice." }),
       }),
@@ -74,7 +74,7 @@ describe("eval judge input", () => {
       { type: "text", text: "List the line items." },
     ]);
     context.judge("lists the line items");
-    expect(mocks.evaluate).toHaveBeenLastCalledWith(
+    expect(mocks.decide).toHaveBeenLastCalledWith(
       expect.objectContaining({
         state: expect.objectContaining({ input: "Review Alice's invoice.\nList the line items." }),
       }),
@@ -82,7 +82,7 @@ describe("eval judge input", () => {
 
     await session.send([file]);
     context.judge("describes the attachment");
-    expect(mocks.evaluate).toHaveBeenLastCalledWith(
+    expect(mocks.decide).toHaveBeenLastCalledWith(
       expect.objectContaining({ state: expect.objectContaining({ input: "" }) }),
     );
   });
@@ -119,7 +119,7 @@ describe("eval session compact", () => {
 });
 
 async function setup() {
-  mocks.evaluate.mockResolvedValue({
+  mocks.decide.mockResolvedValue({
     answers: { judgment: { type: "boolean", probability: 1 } },
     response: { modelId: "test" },
   });

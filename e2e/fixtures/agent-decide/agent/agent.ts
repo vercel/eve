@@ -44,14 +44,14 @@ export default defineAgent({
         ],
       };
     }
-    if (request.userMessages.some((text) => text.includes("evaluate-request"))) {
-      const result = request.toolResults.find((result) => result.name === "evaluate-request");
+    if (request.userMessages.some((text) => text.includes("decide-request"))) {
+      const result = request.toolResults.find((result) => result.name === "decide-request");
       if (result) return JSON.stringify({ isError: result.isError, output: result.output });
       return {
         toolCalls: [
           {
-            id: "evaluate-request-1",
-            name: "evaluate-request",
+            id: "decide-request-1",
+            name: "decide-request",
             input: {
               missingAnswer: request.userMessages.some((text) => text.includes("missing answer")),
             },

@@ -1,5 +1,5 @@
 import type { TokenUsage } from "#shared/token-usage.js";
-import type { Experimental_EvaluationModel as EvaluationModel } from "ai";
+import type { Experimental_DecisionModel as DecisionModel } from "ai";
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { ClientAgentSession } from "#client/agent-session.js";
@@ -392,14 +392,14 @@ export interface EveEvalTurn extends EveEvalAssertions, EveEvalOutputAssertions 
 // Judge (LLM-as-judge)
 // ---------------------------------------------------------------------------
 
-/** Evaluation settings used only for scoring, independently of the agent under test. */
+/** Decision settings used only for scoring, independently of the agent under test. */
 export interface EveEvalJudgeConfig {
-  /** Evaluation model ID or instance. Defaults to the model used by `eve/ai` evaluate. */
-  readonly model?: EvaluationModel;
+  /** Decision model ID or instance. Defaults to the model used by `eve/ai` decide. */
+  readonly model?: DecisionModel;
   readonly modelOptions?: AgentModelOptionsDefinition;
 }
 
-/** JSON content accepted as evaluation state, instructions, or rubric descriptions. */
+/** JSON content accepted as decision state, instructions, or rubric descriptions. */
 export type JudgeInput = string | JsonObject | readonly JsonValue[];
 
 /** A boolean judgment, ordered rubric, or categorical judgment with an expected option. */
@@ -426,7 +426,7 @@ export type JudgeQuestionConstraint<Q extends JudgeQuestion> = Q extends { type:
   ? { readonly expected: NoInfer<Extract<keyof Q["criteria"], string>> }
   : unknown;
 
-/** Named judgments evaluated together against one shared state. */
+/** Named judgments decided together against one shared state. */
 export interface JudgeBatch<Questions extends Record<string, JudgeQuestion>> {
   /** Replaces the default `{ input, output }` state when supplied. */
   readonly state?: JudgeInput;
@@ -557,7 +557,7 @@ interface EveEvalBase {
   /**
    * Judge model for this eval's `t.judge(...)` assertions. Optional: when
    * omitted, judge assertions fall back to the `judge` declared in
-   * `evals.config.ts`, then the shared evaluation default. Only used for
+   * `evals.config.ts`, then the shared decision default. Only used for
    * scoring; never changes the agent under test.
    */
   readonly judge?: EveEvalJudgeConfig;
@@ -684,7 +684,7 @@ export interface EveEvalConfigInput<TContext = unknown> {
   teardown?(context: TContext | undefined): void | Promise<void>;
   /**
    * Default judge model for `t.judge(...)` assertions across every eval.
-   * Optional: omission uses the shared evaluation default. Individual evals
+   * Optional: omission uses the shared decision default. Individual evals
    * may override it with their own `judge`. Only ever used for scoring.
    */
   readonly judge?: EveEvalJudgeConfig;

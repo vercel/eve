@@ -82,7 +82,7 @@ describe("defineEvalConfig", () => {
     expect(config.judge).toBeUndefined();
   });
 
-  it("allows judge settings to use the default evaluation model", () => {
+  it("allows judge settings to use the default decision model", () => {
     expect(defineEvalConfig({ judge: {} }).judge).toEqual({});
   });
 

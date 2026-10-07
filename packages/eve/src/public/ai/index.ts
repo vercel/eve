@@ -1,1 +1,1 @@
-export { evaluate } from "#ai/evaluate.js";
+export { decide } from "#ai/decide.js";

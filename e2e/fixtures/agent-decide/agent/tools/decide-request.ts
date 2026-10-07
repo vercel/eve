@@ -1,10 +1,10 @@
-import { evaluate } from "eve/ai";
+import { decide } from "eve/ai";
 import { defineTool } from "eve/tools";
 
-import { evaluationModel } from "../testing";
+import { decisionModel } from "../testing";
 
 export default defineTool({
-  description: "Evaluate Alice's request with the fixture evaluation provider.",
+  description: "Decide Alice's request with the fixture decision provider.",
   inputSchema: {
     type: "object",
     properties: { missingAnswer: { type: "boolean" } },
@@ -12,10 +12,10 @@ export default defineTool({
     additionalProperties: false,
   },
   async execute({ missingAnswer }, ctx) {
-    const result = await evaluate({
+    const result = await decide({
       model: missingAnswer
-        ? { ...evaluationModel, doEvaluate: async () => ({ answers: {}, warnings: [] }) }
-        : evaluationModel,
+        ? { ...decisionModel, doDecide: async () => ({ answers: {}, warnings: [] }) }
+        : decisionModel,
       state: { request: "Alice needs a routine summary." },
       questions: {
         route: {

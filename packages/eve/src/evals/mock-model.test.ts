@@ -190,6 +190,43 @@ describe("mockModel", () => {
     expect(requests[0]!.toolResults[0]!.output).toEqual(content);
   });
 
+  it("gives responders tool-result files in the tagged file shape", async () => {
+    const png = Buffer.from("\x89PNG\r\n\x1a\n", "latin1").toString("base64");
+    const requests: MockModelRequest[] = [];
+    const model = mockModel((request) => {
+      requests.push(request);
+      return request.toolResults.length === 0 ? { toolCalls: [{ name: "screenshot" }] } : "Seen.";
+    });
+
+    await generateText({
+      model,
+      prompt: "Take a screenshot.",
+      stopWhen: stepCountIs(2),
+      tools: {
+        screenshot: tool({
+          execute: async () => ({ png }),
+          inputSchema: jsonSchema({ type: "object" }),
+          toModelOutput: ({ output }) => ({
+            type: "content",
+            value: [
+              { text: "Screenshot:", type: "text" },
+              { data: { data: output.png, type: "data" }, mediaType: "image/png", type: "file" },
+            ],
+          }),
+        }),
+      },
+    });
+
+    expect(requests[1]!.toolResults[0]!.output).toEqual([
+      { text: "Screenshot:", type: "text" },
+      expect.objectContaining({
+        data: { data: png, type: "data" },
+        mediaType: "image/png",
+        type: "file",
+      }),
+    ]);
+  });
+
   it("rejects empty advanced responses", async () => {
     await expect(
       generateText({

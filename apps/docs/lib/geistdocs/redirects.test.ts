@@ -131,6 +131,8 @@ describe("docsRedirects", () => {
     ["/docs/guides/ucp", "/docs/protocols/ucp"],
     ["/docs/guides/ucp.mdx", "/docs/protocols/ucp.mdx"],
     ["/docs/evals", "/docs/evals/overview"],
+    ["/docs/guides/evaluate", "/docs/guides/decide"],
+    ["/docs/guides/evaluate.md", "/docs/guides/decide.md"],
   ])("redirects %s to %s", (source, destination) => {
     expect(docsRedirects).toContainEqual({ source, destination, permanent: true });
   });

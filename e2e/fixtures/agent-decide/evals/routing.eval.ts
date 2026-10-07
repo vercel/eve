@@ -1,7 +1,7 @@
 import { defineEval } from "eve/evals";
 
 export default defineEval({
-  description: "An evaluation model routes each turn once without model tool calls.",
+  description: "A decision model routes each turn once without model tool calls.",
   async test(t) {
     const first = await t.send("Alice needs a routine summary of the incident evidence.");
     first.expectOk();

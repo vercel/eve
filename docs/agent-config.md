@@ -69,8 +69,8 @@ takes precedence; AI Gateway hashes IDs longer than 256 characters.
 
 ### Choose the model dynamically
 
-To select a model from the incoming prompt with an AI SDK evaluation model, use
-[`auto` from `eve/models`](./guides/evaluate).
+To select a model from the incoming prompt with an AI SDK decision model, use
+[`auto` from `eve/models`](./guides/decide).
 
 `model` also accepts `defineDynamic({ events })`. Each matching handler must
 return the concrete model for its scope; a dynamic model has no compiled

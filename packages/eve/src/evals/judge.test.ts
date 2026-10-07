@@ -4,8 +4,8 @@ import { buildJudgeContext } from "#evals/judge.js";
 import { createEmptyDerivedFacts } from "#evals/runner/derive-run-facts.js";
 import type { AssertionHandle, EveEvalTaskResult, JudgeContext } from "#evals/types.js";
 
-const evaluate = vi.hoisted(() => vi.fn());
-vi.mock("#ai/evaluate.js", () => ({ evaluate }));
+const decide = vi.hoisted(() => vi.fn());
+vi.mock("#ai/decide.js", () => ({ decide }));
 afterEach(() => vi.resetAllMocks());
 
 function setup() {
@@ -23,7 +23,7 @@ function setup() {
 function result(answers: Record<string, unknown>) {
   return {
     answers,
-    response: { modelId: "test-evaluator", timestamp: new Date(0) },
+    response: { modelId: "test-decider", timestamp: new Date(0) },
     usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
     warnings: [],
   };
@@ -41,11 +41,11 @@ function emptyTaskResult(): EveEvalTaskResult {
 
 describe("judge", () => {
   it("expands criteria and retains assertion handles and diagnostics", async () => {
-    evaluate.mockResolvedValue(result({ judgment: { type: "boolean", probability: 0.7 } }));
+    decide.mockResolvedValue(result({ judgment: { type: "boolean", probability: 0.7 } }));
     const { judge, collector, controller } = setup();
     const handle = judge("cites a source").label("citation").atLeast(0.8);
     expect(handle).not.toHaveProperty("then");
-    expect(evaluate).toHaveBeenCalledWith(
+    expect(decide).toHaveBeenCalledWith(
       expect.objectContaining({
         model: undefined,
         abortSignal: controller.signal,
@@ -60,13 +60,13 @@ describe("judge", () => {
       severity: "soft",
       threshold: 0.8,
       passed: false,
-      metadata: { judge: "test-evaluator", answer: { probability: 0.7 }, usageScope: "assertion" },
+      metadata: { judge: "test-decider", answer: { probability: 0.7 }, usageScope: "assertion" },
     });
     expect(assertion?.message).toContain('"cites a source"');
   });
 
   it("shares a batch request, normalizes rubrics, and keeps expectations local", async () => {
-    evaluate.mockResolvedValue(
+    decide.mockResolvedValue(
       result({
         accurate: { type: "boolean", probability: 0.2 },
         clarity: { type: "score", score: 1.5 },
@@ -93,8 +93,8 @@ describe("judge", () => {
     });
     handles.clarity.atLeast(0.8);
     handles.outcome.gate();
-    expect(evaluate).toHaveBeenCalledOnce();
-    expect(evaluate.mock.calls[0]?.[0].questions.outcome).not.toHaveProperty("expected");
+    expect(decide).toHaveBeenCalledOnce();
+    expect(decide.mock.calls[0]?.[0].questions.outcome).not.toHaveProperty("expected");
     const assertions = await collector.finalize(emptyTaskResult());
     expect(assertions.map(({ name, score, passed }) => ({ name, score, passed }))).toEqual([
       { name: "judge.boolean.accurate", score: 0.2, passed: true },
@@ -105,7 +105,7 @@ describe("judge", () => {
   });
 
   it("scores a different selected choice as zero", async () => {
-    evaluate.mockResolvedValue(result({ judgment: { type: "choice", choice: "declined" } }));
+    decide.mockResolvedValue(result({ judgment: { type: "choice", choice: "declined" } }));
     const { judge, collector } = setup();
     judge({
       type: "choice",
@@ -120,7 +120,7 @@ describe("judge", () => {
   });
 
   it("captures JSON state and questions before later mutations", async () => {
-    evaluate.mockResolvedValue(result({ judgment: { type: "boolean", probability: 1 } }));
+    decide.mockResolvedValue(result({ judgment: { type: "boolean", probability: 1 } }));
     const { judge, collector } = setup();
     const on = { values: [1] };
     const question = { type: "boolean" as const, instructions: "Original" };
@@ -128,19 +128,19 @@ describe("judge", () => {
     on.values.push(2);
     question.instructions = "Changed";
     await collector.finalize(emptyTaskResult());
-    expect(evaluate.mock.calls[0]?.[0]).toMatchObject({
+    expect(decide.mock.calls[0]?.[0]).toMatchObject({
       state: { output: { values: [1] } },
       questions: { judgment: { instructions: "Original" } },
     });
   });
 
   it("preserves explicit null and transcript values", async () => {
-    evaluate.mockResolvedValue(result({ judgment: { type: "boolean", probability: 1 } }));
+    decide.mockResolvedValue(result({ judgment: { type: "boolean", probability: 1 } }));
     const { judge, collector } = setup();
     judge("check", { on: null });
     judge("check", { on: "user: Hello\nassistant: Hi" });
     await collector.finalize(emptyTaskResult());
-    expect(evaluate.mock.calls.map(([request]) => request.state.output)).toEqual([
+    expect(decide.mock.calls.map(([request]) => request.state.output)).toEqual([
       null,
       "user: Hello\nassistant: Hi",
     ]);
@@ -154,11 +154,11 @@ describe("judge", () => {
       severity: "gate",
       passed: false,
     });
-    expect(evaluate).not.toHaveBeenCalled();
+    expect(decide).not.toHaveBeenCalled();
   });
 
   it("turns shared request errors into failed gates for every question", async () => {
-    evaluate.mockRejectedValue(new Error("Evaluation unavailable"));
+    decide.mockRejectedValue(new Error("Decision unavailable"));
     const { judge, collector } = setup();
     const handles = judge({
       questions: {
@@ -172,18 +172,18 @@ describe("judge", () => {
       expect.objectContaining({
         severity: "gate",
         passed: false,
-        message: "Evaluation unavailable",
+        message: "Decision unavailable",
       }),
       expect.objectContaining({
         severity: "gate",
         passed: false,
-        message: "Evaluation unavailable",
+        message: "Decision unavailable",
       }),
     ]);
   });
 
   it("does not hang when a provider ignores cancellation", async () => {
-    evaluate.mockReturnValue(new Promise(() => {}));
+    decide.mockReturnValue(new Promise(() => {}));
     const { judge, collector, controller } = setup();
     judge("check");
     controller.abort(new Error("Deadline reached"));
@@ -196,7 +196,7 @@ describe("judge", () => {
 
   it("rejects empty batches", () => {
     expect(() => setup().judge({ questions: {} })).toThrow("non-empty");
-    expect(evaluate).not.toHaveBeenCalled();
+    expect(decide).not.toHaveBeenCalled();
   });
 });
 
