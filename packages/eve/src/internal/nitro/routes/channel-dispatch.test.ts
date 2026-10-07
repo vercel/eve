@@ -1,3 +1,4 @@
+import { AgentSpanIdGenerator } from "#compiled/@eve/tracing/index.js";
 import type { H3Event } from "nitro";
 import {
   context as apiContext,
@@ -94,6 +95,7 @@ function createDeferred<T>() {
 function registerChannelRequestTracing(enabled: boolean): void {
   registerInstrumentationRuntime({
     forceFlush: async () => undefined,
+    idGenerator: new AgentSpanIdGenerator(),
     hooks: createInstrumentationHooks([]),
     otelSettings: {
       functionId: undefined,

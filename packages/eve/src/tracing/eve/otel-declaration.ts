@@ -13,6 +13,9 @@ import type { JsonObject } from "#shared/json.js";
 import { batchSpanProcessor } from "#tracing/eve/batch-span-processor.js";
 import { contentFilteringProcessor } from "#tracing/eve/content-span-processor.js";
 import { vercelRuntimeSpanProcessor } from "#tracing/eve/vercel-runtime-span-exporter.js";
+import type { OtelConfiguration } from "#tracing/eve/otel-configuration.js";
+import { createLogger, formatError } from "#internal/logging.js";
+const log = createLogger("tracing.export");
 import type { TraceCapturePolicy } from "#shared/trace-policy.js";
 export type {
   TraceCaptureContext,
@@ -178,7 +181,16 @@ function createOtelIntegration(options: OtelIntegrationOptions): OtelIntegration
   const spanProcessors =
     options.traceExporter === undefined
       ? declared
-      : [...declared, batchSpanProcessor(options.traceExporter)];
+      : [
+          ...declared,
+          batchSpanProcessor(options.traceExporter, {
+            diagnostic: (message, details) =>
+              log.warn(message, {
+                ...details,
+                error: details.error === undefined ? undefined : formatError(details.error),
+              }),
+          }),
+        ];
 
   return {
     [OTEL_INTEGRATION]: true,
@@ -226,14 +238,6 @@ export function isOtelIntegration(value: unknown): value is OtelIntegration {
 }
 
 /** The one pipeline a process can register. @internal */
-export interface OtelPipeline {
-  readonly instrumentations?: readonly unknown[];
-  readonly metricReaders?: readonly MetricReader[];
-  readonly propagators?: readonly PropagatorOrName[];
-  readonly resource?: Readonly<Record<string, unknown>>;
-  readonly sampler?: SamplerOrName;
-  readonly spanProcessors: readonly SpanProcessorOrName[];
-}
 
 /** What the harness reads at turn time, as opposed to at registration. @internal */
 export interface OtelHarnessSettings {
@@ -258,7 +262,7 @@ export interface CollectedOtel {
    * global tracer provider slot alone rather than register an empty pipeline.
    */
   readonly declared: boolean;
-  readonly pipeline: OtelPipeline;
+  readonly configuration: OtelConfiguration;
   readonly runtimeContextResolvers: readonly RuntimeContextResolver[];
   readonly settings: OtelHarnessSettings;
 }
@@ -314,7 +318,7 @@ export function collectOtelPipeline(values: readonly unknown[]): CollectedOtel {
   }
   return {
     declared,
-    pipeline: {
+    configuration: {
       instrumentations: options.instrumentations,
       metricReaders: metricReaders.length > 0 ? metricReaders : undefined,
       propagators: options.propagators,

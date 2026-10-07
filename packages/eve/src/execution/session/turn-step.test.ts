@@ -1,3 +1,4 @@
+import { AgentSpanIdGenerator } from "#compiled/@eve/tracing/index.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { jsonSchema, type ModelMessage } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
@@ -2229,6 +2230,7 @@ describe("turnStep", () => {
     });
     instrumentationRuntimeOverride.current = {
       forceFlush: async () => undefined,
+      idGenerator: new AgentSpanIdGenerator(),
       hooks: {
         capturesContent: false,
         publish: async (event) => {

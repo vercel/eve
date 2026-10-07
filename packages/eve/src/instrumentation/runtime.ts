@@ -43,7 +43,7 @@ import {
 } from "#instrumentation/prepare-trace-context.js";
 import type { RuntimeTraceContext } from "#protocol/message.js";
 import type { OtelHarnessSettings, RuntimeContextResolver } from "#tracing/eve/otel-declaration.js";
-import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
+import { AgentSpanIdGenerator } from "#compiled/@eve/tracing/index.js";
 import { contextStorage, type ContextContainer } from "#context/container.js";
 import {
   createMemoryInstrumentation,
@@ -51,15 +51,15 @@ import {
 } from "#instrumentation/memory.js";
 import { ConversationIdKey, ParentSessionKey } from "#context/keys.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
-import { withErrorContent } from "#tracing/error-content-context.js";
-import type { AgentSamplingOperation } from "#tracing/agent-span-contract.js";
+import { withCapture } from "#compiled/@eve/tracing/otel.js";
+import type { SamplingOperation as AgentSamplingOperation } from "#tracing/eve/otel-registration.js";
 import {
   isSampledTrace,
   resolveTracePolicy,
   resolveTracePolicyDecision,
-} from "#tracing/sampled-trace.js";
+} from "#shared/trace-policy.js";
 import { readInstrumentationSessionContext } from "#instrumentation/session-context.js";
-import { readSessionTraceDecision } from "#tracing/agent-trace-context-store.js";
+import { readSessionTraceDecision } from "#tracing/eve/agent-trace-context-store.js";
 import { readInstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { applyLiveDeliveryAudienceCeiling } from "#shared/forwarded-trace-policy.js";
 import { readConversationId } from "#shared/conversation-identity.js";
@@ -498,7 +498,11 @@ export function bindInstrumentationRuntime(
           });
         try {
           return await otelContext.with(
-            withErrorContent(parentContext ?? otelContext.active(), content.recordOutputs),
+            withCapture(parentContext ?? otelContext.active(), {
+              emit: true,
+              recordInputs: content.recordInputs,
+              recordOutputs: content.recordOutputs,
+            }),
             run,
           );
         } finally {

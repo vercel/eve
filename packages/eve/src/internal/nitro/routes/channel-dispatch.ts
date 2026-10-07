@@ -65,7 +65,7 @@ export async function dispatchChannelRequest(
     // Correlation does not require an eve-owned request span. Preserve any
     // active platform request or function span before route resolution.
     const requestTraceContext =
-      span?.spanContext() ?? otelTrace.getSpan(otelContext.active())?.spanContext();
+      span?.reference ?? otelTrace.getSpan(otelContext.active())?.spanContext();
     const bundle = await resolveNitroChannelRuntimeBundle(config);
 
     const matchedChannel = bundle.channels.find(
@@ -85,11 +85,11 @@ export async function dispatchChannelRequest(
     // (`channel:<name>`) over the raw adapter kind — behaviorless authored
     // channels keep adapter kind `"http"`, so the adapter alone would report
     // `"http"` where the rest of the trace reports `channel:<name>`.
-    span?.setAttribute("eve.channel.name", matchedChannel.name);
+    span?.channel({ channelName: matchedChannel.name });
     const channelKind =
       getChannelInstrumentationKind(matchedChannel.definition) ?? matchedChannel.adapter?.kind;
     if (channelKind !== undefined) {
-      span?.setAttribute("eve.channel.kind", channelKind);
+      span?.channel({ channelKind });
     }
 
     const routeArgs = await buildRouteArgs(

@@ -10,7 +10,7 @@ import {
 import {
   readActionTraceContext,
   readTurnTraceContext,
-} from "#tracing/agent-trace-context-store.js";
+} from "#tracing/eve/agent-trace-context-store.js";
 
 export interface AgentChildTraceDispatch {
   readonly conversationId?: string;
@@ -31,22 +31,9 @@ export function resolveToolCallAgentTrace(input: {
   readonly turnId: string;
 }): AgentChildTraceDispatch {
   const { serializedContext, sessionId, turnId } = input;
-  return toChildTraceDispatch({
-    conversation: input.conversation,
-    conversationId: readConversationId(serializedContext[ConversationIdKey.name]),
-    stored:
-      readActionTraceContext(serializedContext, sessionId, turnId, input.callId) ??
-      readTurnTraceContext(serializedContext, sessionId, turnId),
-  });
-}
-
-/** Caps a stored parent trace context to the live delivery audience. */
-function toChildTraceDispatch(input: {
-  readonly conversation?: ConversationContext;
-  readonly conversationId?: string;
-  readonly stored?: SessionTraceContext;
-}): AgentChildTraceDispatch {
-  const { stored } = input;
+  const stored =
+    readActionTraceContext(serializedContext, sessionId, turnId, input.callId) ??
+    readTurnTraceContext(serializedContext, sessionId, turnId);
   const liveAudience = input.conversation?.audience ?? "unknown";
   const environment = input.conversation?.environment ?? "production";
   const forwardedTracePolicy = readForwardedTraceAssertion(stored?.forwardedTracePolicy);
@@ -63,7 +50,7 @@ function toChildTraceDispatch(input: {
           ),
         };
   return {
-    conversationId: input.conversationId,
+    conversationId: readConversationId(serializedContext[ConversationIdKey.name]),
     originAudience: forwardedTracePolicy?.originAudience ?? liveAudience,
     parentTraceContext,
   };

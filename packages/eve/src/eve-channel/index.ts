@@ -1,6 +1,7 @@
 import { InvalidToolStubTargetError } from "#tool-stubs/validate-targets.js";
 import { readStubFailure, readMatchedStubRules } from "#execution/tool-stubs/steps.js";
 import { getRun } from "#internal/workflow/runtime.js";
+import { proxyStreamHeaders } from "#eve-channel/stream-headers.js";
 import { handleExpiredLegacyAuthorization } from "#execution/legacy-session/authorization.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import type { SessionAuthContext, SessionParent, SessionTraceContext } from "#channel/types.js";
@@ -18,13 +19,7 @@ import {
   readRemoteAgentStreamHeadersResolver,
   readRouteSessionCreator,
 } from "#internal/nitro/routes/channel-route-context.js";
-import {
-  EVE_SESSION_ID_HEADER,
-  EVE_STREAM_CONTROL_VERSION_QUERY,
-  EVE_STREAM_FORMAT_HEADER,
-  EVE_STREAM_TAIL_INDEX_HEADER,
-  EVE_STREAM_VERSION_HEADER,
-} from "#protocol/message.js";
+import { EVE_SESSION_ID_HEADER, EVE_STREAM_CONTROL_VERSION_QUERY } from "#protocol/message.js";
 import { legacyTaskInputRoute } from "#execution/legacy-remote-agent/protocol.js";
 import {
   EVE_CALLBACK_ROUTE_PATTERN,
@@ -52,7 +47,7 @@ import {
   readForwardedAudienceBaggage,
   readForwardedParentSessionBaggage,
 } from "#protocol/baggage.js";
-import { readConversationBaggage } from "#tracing/eve/conversation-context.js";
+import { agentDelegation } from "#tracing/eve/delegation.js";
 import {
   FAIL_CLOSED_FORWARDED_TRACE_ASSERTION,
   formatTraceContentCeiling,
@@ -336,40 +331,49 @@ export function eveChannel(input: EveChannelInput): EveChannel {
 
         let handle: Awaited<ReturnType<typeof createSession>>;
         try {
-          handle = await createSession({
-            audienceAuth: auth,
-            toolStubs:
-              body.stubs === undefined
-                ? undefined
-                : {
-                    rules: body.stubs,
-                    token: crypto.randomUUID(),
+          handle = await agentDelegation.receive(
+            {
+              headers: req.headers,
+              delegated: body.callback !== undefined,
+              trusted: forwarded.accepted,
+              parent,
+              callerTrace: parsedParentTraceContext,
+              parentTraceContext,
+            },
+            ({ conversationId, parentTraceContext: inheritedTrace }) => {
+              return createSession({
+                audienceAuth: auth,
+                toolStubs:
+                  body.stubs === undefined
+                    ? undefined
+                    : {
+                        rules: body.stubs,
+                        token: crypto.randomUUID(),
+                      },
+                auth: messageResult.auth,
+                capabilities: body.capabilities ?? { requestInput: true },
+                callback: body.callback,
+                legacyRemoteAgentCaller: body.legacyRemoteAgentCaller,
+                continuationToken: operationToken,
+                initiatorAuth: forwarded.accepted ? forwarded.initiatorAuth : undefined,
+                input: attachClientContext(
+                  {
+                    message: body.message,
+                    context: messageResult.context,
+                    outputSchema: body.outputSchema,
                   },
-            auth: messageResult.auth,
-            capabilities: body.capabilities ?? { requestInput: true },
-            callback: body.callback,
-            legacyRemoteAgentCaller: body.legacyRemoteAgentCaller,
-            continuationToken: operationToken,
-            initiatorAuth: forwarded.accepted ? forwarded.initiatorAuth : undefined,
-            input: attachClientContext(
-              {
-                message: body.message,
-                context: messageResult.context,
-                outputSchema: body.outputSchema,
-              },
-              body.context,
-            ),
-            conversationId:
-              body.callback === undefined
-                ? undefined
-                : readConversationBaggage(req.headers.get("baggage")),
-            parent,
-            parentTraceContext,
-            // A remote agent's spans form their own session in this
-            // deployment; its lineage still names the caller's root.
-            traceRoot: parent === undefined ? undefined : { kind: "own" },
-            title: messageResult.title,
-          });
+                  body.context,
+                ),
+                conversationId,
+                parent,
+                parentTraceContext: inheritedTrace,
+                // A remote agent's spans form their own session in this
+                // deployment; its lineage still names the caller's root.
+                traceRoot: parent === undefined ? undefined : { kind: "own" },
+                title: messageResult.title,
+              });
+            },
+          );
         } catch (error) {
           if (error instanceof InvalidToolStubTargetError) {
             return Response.json({ error: error.message, ok: false }, { status: 400 });
@@ -723,19 +727,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           redirect: "manual",
           signal: req.signal,
         });
-        const responseHeaders = new Headers();
-        for (const name of [
-          "cache-control",
-          "content-type",
-          "x-accel-buffering",
-          EVE_SESSION_ID_HEADER,
-          EVE_STREAM_FORMAT_HEADER,
-          EVE_STREAM_TAIL_INDEX_HEADER,
-          EVE_STREAM_VERSION_HEADER,
-        ]) {
-          const value = upstream.headers.get(name);
-          if (value !== null) responseHeaders.set(name, value);
-        }
+        const responseHeaders = proxyStreamHeaders(upstream.headers);
         return new Response(upstream.body, {
           headers: responseHeaders,
           status: upstream.status,

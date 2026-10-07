@@ -59,10 +59,7 @@ export type InstrumentationMemoryOperationTerminalEvent =
   | InstrumentationMemoryOperationCompletedEvent
   | InstrumentationMemoryOperationFailedEvent;
 
-export interface InstrumentationMemoryExecutionOperation {
-  readonly idempotencyKey: string;
-  readonly sessionId: string;
-  readonly turnId?: string;
+export interface InstrumentationMemoryExecutionOperation extends InstrumentationMemoryOperationEvent {
   readonly type: "memory.operation";
 }
 
@@ -98,9 +95,7 @@ export function createMemoryInstrumentation(input: {
       try {
         const result = await input.runInContext(
           {
-            idempotencyKey: operation.idempotencyKey,
-            sessionId: input.sessionId,
-            turnId: operation.turnId,
+            ...event,
             type: "memory.operation",
           },
           execute,

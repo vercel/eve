@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { vercelRuntimeSpanExporter } from "#tracing/eve/vercel-runtime-span-exporter.js";
+import { vercelRuntimeSpanExporter } from "./vercel-runtime-span-exporter.js";
 
 const { serializeRequest } = vi.hoisted(() => ({
   serializeRequest: vi.fn(() => new TextEncoder().encode('{"resourceSpans":[]}')),
@@ -17,7 +17,7 @@ afterEach(() => {
   serializeRequest.mockClear();
 });
 
-describe("vercelRuntimeSpanExporter", () => {
+describe("Vercel runtime span export", () => {
   it("reports through the current Vercel request context", () => {
     const reportSpans = vi.fn();
     (globalThis as Record<symbol, unknown>)[REQUEST_CONTEXT] = {

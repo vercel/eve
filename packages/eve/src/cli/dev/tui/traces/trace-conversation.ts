@@ -10,7 +10,7 @@ import { formatElapsed } from "#cli/format-elapsed.js";
 import { clipVisible, stripTerminalControls, visibleLength } from "#cli/ui/terminal-text.js";
 import type { LocalTrace, LocalTraceSpan } from "#tracing/local/trace-reader.js";
 import { compareLocalTraceSpans, isAgentTurnSpan } from "#tracing/local/trace-reader.js";
-import { agentTurnIdentity } from "#tracing/agent-span-contract.js";
+import { agentTurnIdentity } from "#tracing/local/inspection.js";
 import { localTraceSpanCostUsd } from "#tracing/local/trace-summary.js";
 import { traceStringAttribute } from "#tracing/local/trace-operations.js";
 

@@ -5,7 +5,6 @@ import {
   agentRunsIntegration,
   collectOtelPipeline,
   isOtelDeclaration,
-  isOtelIntegration,
   managedOtelIntegration,
   otel,
   otelIntegration,
@@ -47,16 +46,6 @@ describe("otel", () => {
 });
 
 describe("otelIntegration", () => {
-  it("passes declared processors through untouched", () => {
-    const first = processor();
-    const integration = otelIntegration({
-      spanProcessors: [first],
-    });
-
-    expect(isOtelIntegration(integration)).toBe(true);
-    expect(integration.spanProcessors).toStrictEqual([first]);
-  });
-
   it("wraps an exporter in a batching processor, after any declared ones", () => {
     const first = processor();
     const integration = otelIntegration({
@@ -78,15 +67,6 @@ describe("otelIntegration", () => {
     expect(() => agentRunsIntegration({ recordInputs: false } as never)).toThrow(
       /use an `exportPolicy` span decision/iu,
     );
-  });
-});
-
-describe("agentRunsIntegration", () => {
-  it("declares the Agent Runs runtime processor", () => {
-    const integration = agentRunsIntegration();
-
-    expect(integration.spanProcessors).toHaveLength(1);
-    expect(integration.spanProcessors[0]).not.toBe("auto");
   });
 });
 
@@ -163,7 +143,7 @@ describe("collectOtelPipeline", () => {
     ]);
 
     expect(collected.declared).toBe(true);
-    expect(collected.pipeline.spanProcessors).toStrictEqual([first, second, third]);
+    expect(collected.configuration.spanProcessors).toStrictEqual([first, second, third]);
   });
 
   it("is declared by a destination alone, with no otel() beside it", () => {
@@ -189,7 +169,7 @@ describe("collectOtelPipeline", () => {
       }),
     ]);
 
-    expect(collected.pipeline).toMatchObject({
+    expect(collected.configuration).toMatchObject({
       propagators: ["tracecontext"],
       resource: { "service.version": "abc" },
       sampler: "always_on",
@@ -201,12 +181,6 @@ describe("collectOtelPipeline", () => {
       recordOutputs: false,
       traceChannelRequests: true,
     });
-  });
-
-  it("captures complete spans whenever a destination is declared", () => {
-    const collected = collectOtelPipeline([otelIntegration()]);
-
-    expect(collected.settings).toMatchObject({ recordInputs: true, recordOutputs: true });
   });
 
   // A process has one tracer provider, so letting the first declaration win
@@ -221,12 +195,6 @@ describe("collectOtelPipeline", () => {
     const instrumentation = { name: "test-instrumentation" };
     const collected = collectOtelPipeline([otel({ instrumentations: [instrumentation] })]);
 
-    expect(collected.pipeline.instrumentations).toStrictEqual([instrumentation]);
-  });
-
-  it("defaults to undefined instrumentations when none are declared", () => {
-    const collected = collectOtelPipeline([otel()]);
-
-    expect(collected.pipeline.instrumentations).toBeUndefined();
+    expect(collected.configuration.instrumentations).toStrictEqual([instrumentation]);
   });
 });

@@ -39,6 +39,7 @@ import {
 import { buildSubagentRunInput } from "#subagents/tool.js";
 import { resolveConversationId } from "#shared/conversation-identity.js";
 import { stubToolPath } from "#tool-stubs/target.js";
+import { agentDelegation } from "#tracing/eve/delegation.js";
 
 const log = createLogger("execution.agent-sessions");
 
@@ -115,10 +116,11 @@ export async function openAgentSessionStep(
     isRootSession: context.parent.rootSessionId === context.parent.sessionId,
   });
   const start = { auth: input.auth, bundle, context, key: input.key, replyTo: input.replyTo };
-  if (target.kind === "remote") {
-    return await startRemoteSession({ ...start, target });
-  }
-  return await startLocalSession({ ...start, target });
+  const execute = () =>
+    target.kind === "remote"
+      ? startRemoteSession({ ...start, target })
+      : startLocalSession({ ...start, target });
+  return await agentDelegation.resume({ context, agentName: action.name }, execute);
 }
 
 /**

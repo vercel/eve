@@ -12,22 +12,20 @@ const { forceFlush, internalTerminalState, shutdown } = vi.hoisted(() => ({
   shutdown: vi.fn(async () => undefined),
 }));
 
-vi.mock("#tracing/eve/otel-registration.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("#tracing/eve/otel-registration.js")>();
-  return {
-    ...actual,
-    registerOtelPipeline: () => ({
-      forceFlush,
-      idGenerator: {
-        allocateSpanId: () => "1".repeat(16),
-        withSpanId: (_spanId: string, run: () => unknown) => run(),
-      },
-      shutdown,
-    }),
-  };
-});
+vi.mock("#tracing/eve/otel-registration.js", () => ({
+  registerOtel: () => ({
+    forceFlush,
+    shutdown,
+    provider: { getTracer: () => ({}) },
+    idGenerator: {
+      allocateSpanId: () => "1".repeat(16),
+      withSpanId: (_spanId: string, run: () => unknown) => run(),
+    },
+    samplesTrace: () => true,
+  }),
+}));
 
-vi.mock("#tracing/agent-otel-provider.js", () => ({
+vi.mock("#tracing/eve/agent-otel-provider.js", () => ({
   createAgentOtelInstrumentation: () => ({
     hook: {
       events: {

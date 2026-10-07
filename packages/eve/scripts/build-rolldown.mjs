@@ -162,7 +162,6 @@ const EXCLUDED_DIRECTORIES = new Set([join("internal", "testing")]);
  */
 const EXTERNAL_PACKAGES = new Set([
   "@nuxt/kit",
-  "@opentelemetry/api",
   "@sveltejs/kit",
   "ai",
   "braintrust",
@@ -259,6 +258,20 @@ function createVendoredConnectPlugin() {
   };
 }
 
+function createVendoredTelemetryPlugin() {
+  const packages = new Set([
+    "@opentelemetry/api",
+    "@opentelemetry/otlp-transformer",
+    "@vercel/otel",
+  ]);
+  return {
+    name: "eve:vendored-telemetry",
+    resolveId(source) {
+      return packages.has(source) ? { id: `#compiled/${source}/index.js`, external: true } : null;
+    },
+  };
+}
+
 async function collectSourceFiles(directory, relativeRoot = "") {
   const entries = await readdir(directory, { withFileTypes: true });
   const sourceFiles = [];
@@ -315,6 +328,7 @@ await buildWithNitroRolldown({
   plugins: [
     createVendoredZodPlugin(),
     createVendoredConnectPlugin(),
+    createVendoredTelemetryPlugin(),
     createStripUnusedRolldownRuntimeImportPlugin(),
     createDynamicToolTransformPlugin(),
     createWorkflowMetadataTransformPlugin(),

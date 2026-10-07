@@ -10,8 +10,8 @@ import { inspect } from "node:util";
 
 import { isNonEmptyString, isObject } from "#shared/guards.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
-import { capturesErrorContent } from "#tracing/error-content-context.js";
-import { truncateTelemetryText } from "#tracing/telemetry-budget.js";
+import { currentCapture } from "#compiled/@eve/tracing/index.js";
+import { truncateTelemetryText } from "#compiled/@eve/tracing/otel.js";
 
 const MAX_INSPECT_STRING_LENGTH = 8 * 1024;
 const MAX_DETAIL_BYTES = 16 * 1024;
@@ -230,7 +230,7 @@ function truncateForDisplay(value: string, maxChars = 160): string {
  * non-active span should be annotated.
  */
 export function recordErrorOnSpan(span: Span, error: unknown): void {
-  if (!capturesErrorContent()) {
+  if (currentCapture()?.recordOutputs === false) {
     span.setStatus({ code: SpanStatusCode.ERROR });
     return;
   }
@@ -365,7 +365,7 @@ function recordOnActiveSpan(message: string, fields?: LogFields): void {
   }
 
   const error = fields?.error;
-  if (!capturesErrorContent()) {
+  if (currentCapture()?.recordOutputs === false) {
     if (error instanceof Error || isFormattedError(error)) {
       span.setStatus({ code: SpanStatusCode.ERROR });
     }

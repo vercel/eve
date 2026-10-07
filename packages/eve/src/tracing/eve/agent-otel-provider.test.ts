@@ -1,4 +1,10 @@
-import { SpanKind, SpanStatusCode, trace as apiTrace } from "@opentelemetry/api";
+import {
+  SpanKind,
+  SpanStatusCode,
+  context as apiContext,
+  trace as apiTrace,
+} from "@opentelemetry/api";
+import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import {
   BasicTracerProvider,
   InMemorySpanExporter,
@@ -25,10 +31,12 @@ import { createActionResultEvent, createActionsRequestedEvent } from "#protocol/
 import {
   createAgentOtelInstrumentation,
   type AgentOtelInstrumentationInput,
-} from "#tracing/agent-otel-provider.js";
-import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
-import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
-import type { AgentTraceStateStore } from "#tracing/agent-trace-state.js";
+} from "#tracing/eve/agent-otel-provider.js";
+import { AgentSpanIdGenerator } from "#compiled/@eve/tracing/index.js";
+import { otelTelemetry } from "#compiled/@eve/tracing/index.js";
+import { eveOutputMapping } from "#tracing/eve/profile.js";
+import { ContextAgentTraceStateStore } from "#tracing/eve/agent-trace-context-store.js";
+import type { AgentTraceStateStore } from "#tracing/eve/agent-trace-state.js";
 import { InMemoryAgentTraceStateStore } from "#internal/testing/in-memory-agent-trace-state-store.js";
 import {
   createInstrumentationHooks,
@@ -44,14 +52,10 @@ import {
 } from "#instrumentation/lifecycle.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import { channelAudienceFromContext } from "#tracing/eve/channel-audience-context.js";
-import {
-  agentToolContentPolicy,
-  agentToolSpanContext,
-  annotateAgentToolSpan,
-} from "#tracing/agent-tool-span-context.js";
+import { activeTraceOperation } from "#compiled/@eve/tracing/otel.js";
 import { contentFilteringProcessor } from "#tracing/eve/content-span-processor.js";
 import { parseLocalTraceSegment } from "#tracing/local/trace-reader.js";
-import { CONTENT_ATTRIBUTE_LIMIT } from "#tracing/agent-otel-content.js";
+import { CONTENT_ATTRIBUTE_LIMIT } from "#compiled/@eve/tracing/otel.js";
 import type { TraceCapturePolicy } from "#tracing/eve/otel-declaration.js";
 import type { TraceCaptureContext } from "#shared/trace-policy.js";
 import {
@@ -95,7 +99,7 @@ function createRuntime(
     recordOutputs: true,
   }),
   extraSpanProcessors: readonly SpanProcessor[] = [],
-  samplesTrace?: AgentOtelInstrumentationInput["samplesTrace"],
+  samplesTrace?: import("#tracing/eve/otel-registration.js").RegisteredOtelPipeline["samplesTrace"],
 ): TestRuntime {
   const exporter = new InMemorySpanExporter();
   const idGenerator = new AgentSpanIdGenerator();
@@ -110,12 +114,17 @@ function createRuntime(
     // Pin the environment so an inherited EVE_DEV/VERCEL_ENV cannot relax audience ceilings.
     environment: "production",
     frameworkVersion: "test",
-    idGenerator,
     recordInputs: true,
     recordOutputs: true,
-    samplesTrace,
     stateStore,
-    tracer,
+    telemetry: otelTelemetry({
+      provider,
+      tracerName: "eve.agent",
+      idGenerator,
+      samplesTrace: samplesTrace ?? (() => true),
+      mapping: eveOutputMapping(),
+    }),
+    idGenerator,
   };
   if (tracePolicy !== null) agentOtelInput.tracePolicy = tracePolicy;
   const agentOtel = createAgentOtelInstrumentation(agentOtelInput);
@@ -493,54 +502,6 @@ describe("createAgentOtelInstrumentation", () => {
     },
   );
 
-  it.each(["completed", "failed", "cancelled"] as const)(
-    "exports the %s turn outcome after content redaction and event removal",
-    async (outcome) => {
-      const metadata = new InMemorySpanExporter();
-      const runtime = createRuntime(undefined, undefined, [
-        contentFilteringProcessor(new SimpleSpanProcessor(metadata), {
-          span: () => ({ redact: true, inputs: true, outputs: true }),
-        }),
-      ]);
-      await publishTurnStarted({
-        hooks: runtime.hooks,
-        sessionId: "session-1",
-        turnId: "turn_0",
-        turnSequence: 0,
-      });
-      const identity = {
-        idempotencyKey: turnIdempotencyKey("session-1", "turn_0"),
-        sessionId: "session-1",
-        turnId: "turn_0",
-      };
-      await runtime.hooks.publish(
-        outcome === "failed"
-          ? { ...identity, type: "turn.failed", error: new Error("private failure") }
-          : { ...identity, type: outcome === "completed" ? "turn.completed" : "turn.cancelled" },
-      );
-      await runtime.hooks.publish({
-        idempotencyKey: sessionIdempotencyKey("session-1"),
-        sessionId: "session-1",
-        turnId: "turn_0",
-        type: "session.waiting",
-      });
-      await runtime.provider.forceFlush();
-      const spans = metadata.getFinishedSpans();
-      const serialized = new TextDecoder().decode(
-        JsonTraceSerializer.serializeRequest(
-          spans.map((span) => ({ ...span, events: [], spanContext: () => span.spanContext() })),
-        )!,
-      );
-      const turn = parseLocalTraceSegment(serialized, spans[0]!.spanContext().traceId).find(
-        (span) => span.name === "invoke_agent weather",
-      )!;
-      expect(turn.attributes["agent.turn.outcome"]).toBe(outcome);
-      expect(turn.statusCode).toBe(outcome === "failed" ? 2 : 0);
-      expect(serialized).not.toContain("private failure");
-      await runtime.provider.shutdown();
-    },
-  );
-
   it("prepares a stable stream trace before lifecycle hooks observe the turn", async () => {
     const runtime = createRuntime();
     const sessionEvent = {
@@ -612,7 +573,7 @@ describe("createAgentOtelInstrumentation", () => {
           turnId: "turn-1",
           type: "turn.started",
         });
-        const turn = await store.getTurn("session-1", "turn-1");
+        const turn = await store.get("turn", JSON.stringify(["session-1", "turn-1"]));
         expect(turn?.currentPrincipal).toStrictEqual(
           includesId ? { id: "current-secret", type: "service" } : { type: "service" },
         );
@@ -662,12 +623,14 @@ describe("createAgentOtelInstrumentation", () => {
     const contextWith = vi.spyOn(context, "with");
     await runtime.runInContext(
       {
-        idempotencyKey: operation.idempotencyKey,
-        sessionId: operation.sessionId,
-        turnId: operation.turnId,
+        ...operation,
         type: "memory.operation",
       },
-      async () => undefined,
+      async () => ({
+        value: undefined,
+        recordCount: 1,
+        outputRecords: [{ content: "The user prefers dark mode.", id: "preference" }],
+      }),
     );
     const memoryContext = contextWith.mock.calls[0]?.[0];
     contextWith.mockRestore();
@@ -847,7 +810,6 @@ describe("createAgentOtelInstrumentation", () => {
       [],
       samplesTrace,
     );
-    const setSession = vi.spyOn(store, "setSession");
     const sessionId = "session-early";
     await runtime.prepareSessionTrace({
       agentName: "weather",
@@ -900,7 +862,6 @@ describe("createAgentOtelInstrumentation", () => {
       "agent.session.origin": "schedule",
       "agent.session.title": "Prepared before sampling",
     });
-    expect(setSession).toHaveBeenCalledTimes(1);
   });
 
   it("falls back to fresh ids when no trace seed is present", async () => {
@@ -1089,104 +1050,109 @@ describe("createAgentOtelInstrumentation", () => {
     },
   );
 
-  it("maps one channel delivery onto its activation with an HTTP request link", async () => {
-    const runtime = createRuntime();
-    const ctx = new ContextContainer();
-    const requestTraceContext = {
-      spanId: "2222222222222222",
-      traceFlags: 1,
-      traceId: "22222222222222222222222222222222",
-    };
-    const started = {
-      agentName: "support",
-      delivery: {
+  it.each(["private", "x".repeat(CONTENT_ATTRIBUTE_LIMIT * 2)])(
+    "maps a channel delivery onto its activation despite bounded content (case %#)",
+    async (message) => {
+      const runtime = createRuntime();
+      const ctx = new ContextContainer();
+      const requestTraceContext = {
+        spanId: "2222222222222222",
+        traceFlags: 1,
+        traceId: "22222222222222222222222222222222",
+      };
+      const started = {
+        agentName: "support",
+        delivery: {
+          channelAudience: "public" as const,
+          channelKind: "channel:slack",
+          channelName: "slack",
+          deliveryId: "delivery-1",
+          requestId: "iad1::request-1",
+          requestTraceContext,
+        },
+        idempotencyKey: "channel-delivery:session-1:delivery-1",
+        input: { message },
+        rootSessionId: "session-1",
+        sequence: 0,
+        sessionId: "session-1",
+        turnId: "turn_0",
+        type: "channel.delivery.started" as const,
+      };
+      const completed = {
+        agentName: started.agentName,
+        delivery: started.delivery,
+        idempotencyKey: started.idempotencyKey,
+        outcome: "completed" as const,
+        rootSessionId: started.rootSessionId,
+        sequence: 0,
+        sessionId: started.sessionId,
+        turnId: "turn_0",
+        type: "channel.delivery.completed" as const,
+      };
+      const sessionEvent = {
+        agentName: "support",
         channelAudience: "public" as const,
         channelKind: "channel:slack",
-        channelName: "slack",
-        deliveryId: "delivery-1",
-        requestId: "iad1::request-1",
-        requestTraceContext,
-      },
-      idempotencyKey: "channel-delivery:session-1:delivery-1",
-      input: { message: "private" },
-      rootSessionId: "session-1",
-      sequence: 0,
-      sessionId: "session-1",
-      turnId: "turn_0",
-      type: "channel.delivery.started" as const,
-    };
-    const completed = {
-      agentName: started.agentName,
-      delivery: started.delivery,
-      idempotencyKey: started.idempotencyKey,
-      outcome: "completed" as const,
-      rootSessionId: started.rootSessionId,
-      sequence: 0,
-      sessionId: started.sessionId,
-      turnId: "turn_0",
-      type: "channel.delivery.completed" as const,
-    };
-    const sessionEvent = {
-      agentName: "support",
-      channelAudience: "public" as const,
-      channelKind: "channel:slack",
-      idempotencyKey: sessionIdempotencyKey("session-1"),
-      rootSessionId: "session-1",
-      sessionId: "session-1",
-      type: "session.started" as const,
-    };
-    const turnEvent = {
-      idempotencyKey: turnIdempotencyKey("session-1", "turn_0"),
-      rootSessionId: "session-1",
-      sequence: 0,
-      sessionId: "session-1",
-      turnId: "turn_0",
-      type: "turn.started" as const,
-    };
+        idempotencyKey: sessionIdempotencyKey("session-1"),
+        rootSessionId: "session-1",
+        sessionId: "session-1",
+        type: "session.started" as const,
+      };
+      const turnEvent = {
+        idempotencyKey: turnIdempotencyKey("session-1", "turn_0"),
+        rootSessionId: "session-1",
+        sequence: 0,
+        sessionId: "session-1",
+        turnId: "turn_0",
+        type: "turn.started" as const,
+      };
 
-    await contextStorage.run(ctx, async () => {
-      await runtime.prepareSessionTrace(sessionEvent);
-      await runtime.prepareTurnTrace(turnEvent);
-      await runtime.hooks.publish(started);
-      await runtime.hooks.publish(sessionEvent);
-      await runtime.hooks.publish(turnEvent);
-      ctx.set(ActiveChannelDeliveriesKey, [
-        {
-          agentName: started.agentName,
-          delivery: started.delivery,
-          policyAgentName: started.agentName,
-          rootSessionId: started.rootSessionId,
-          traceSessionId: started.rootSessionId,
-          sequence: 0,
-          sessionId: started.sessionId,
-          turnId: "turn_0",
-        },
+      await contextStorage.run(ctx, async () => {
+        await runtime.prepareSessionTrace(sessionEvent);
+        await runtime.prepareTurnTrace(turnEvent);
+        await runtime.hooks.publish(started);
+        await runtime.hooks.publish(sessionEvent);
+        await runtime.hooks.publish(turnEvent);
+        ctx.set(ActiveChannelDeliveriesKey, [
+          {
+            agentName: started.agentName,
+            delivery: started.delivery,
+            policyAgentName: started.agentName,
+            rootSessionId: started.rootSessionId,
+            traceSessionId: started.rootSessionId,
+            sequence: 0,
+            sessionId: started.sessionId,
+            turnId: "turn_0",
+          },
+        ]);
+        await runtime.hooks.publish(completed);
+        await completeTurn(runtime.hooks, "session-1", "turn_0");
+      });
+
+      const spans = runtime.exporter.getFinishedSpans();
+      const turn = spans.find((span) => span.name === "invoke_agent support")!;
+      expect(byName(spans, "agent.channel.delivery")).toHaveLength(0);
+      expect(turn.parentSpanContext).toBeUndefined();
+      expect(turn.links).toEqual([
+        expect.objectContaining({
+          attributes: { "eve.link.type": "channel.request" },
+          context: expect.objectContaining(requestTraceContext),
+        }),
       ]);
-      await runtime.hooks.publish(completed);
-      await completeTurn(runtime.hooks, "session-1", "turn_0");
-    });
-
-    const spans = runtime.exporter.getFinishedSpans();
-    const turn = spans.find((span) => span.name === "invoke_agent support")!;
-    expect(byName(spans, "agent.channel.delivery")).toHaveLength(0);
-    expect(turn.parentSpanContext).toBeUndefined();
-    expect(turn.links).toEqual([
-      expect.objectContaining({
-        attributes: { "eve.link.type": "channel.request" },
-        context: expect.objectContaining(requestTraceContext),
-      }),
-    ]);
-    expect(turn.attributes).toMatchObject({
-      "agent.channel.delivery.id": "delivery-1",
-      "agent.channel.delivery.input": JSON.stringify({ message: "private" }),
-      "agent.channel.kind": "channel:slack",
-      "agent.channel.name": "slack",
-      "agent.channel.request.id": "iad1::request-1",
-      "agent.turn.id": "turn_0",
-      "agent.turn.sequence": 0,
-      "gen_ai.conversation.id": "session-1",
-    });
-  });
+      expect(turn.attributes).toMatchObject({
+        "agent.channel.delivery.id": "delivery-1",
+        "agent.channel.kind": "channel:slack",
+        "agent.channel.name": "slack",
+        "agent.channel.request.id": "iad1::request-1",
+        "agent.turn.id": "turn_0",
+        "agent.turn.sequence": 0,
+        "gen_ai.conversation.id": "session-1",
+      });
+      if (message === "private")
+        expect(turn.attributes["agent.channel.delivery.input"]).toBe(JSON.stringify({ message }));
+      else expect(turn.attributes["agent.channel.delivery.input"]).toBeUndefined();
+    },
+  );
 
   it("does not emit delivery spans when remote deliveries fan in before the session event", async () => {
     const runtime = createRuntime();
@@ -1333,11 +1299,11 @@ describe("createAgentOtelInstrumentation", () => {
         turnId: "turn_0",
         type: "channel.delivery.started",
       });
-      expect(stateStore.getSession(sessionId)).toBeUndefined();
+      expect(stateStore.get("session", sessionId)).toBeUndefined();
 
       await runtime.prepareSessionTrace(sessionEvent);
       await runtime.prepareTurnTrace(turnEvent);
-      expect(stateStore.getSession(sessionId)).toMatchObject({
+      expect(stateStore.get("session", sessionId)).toMatchObject({
         channelType: "http",
         scheduleId: "sched-1",
         title: "Investigate the incident",
@@ -1392,12 +1358,12 @@ describe("createAgentOtelInstrumentation", () => {
       turnId: "turn_0",
       type: "channel.delivery.started",
     });
-    expect(stateStore.getSession(sessionId)).toBeUndefined();
+    expect(stateStore.get("session", sessionId)).toBeUndefined();
 
     await runtime.prepareSessionTrace(sessionEvent);
     await runtime.hooks.publish(sessionEvent);
 
-    expect(stateStore.getSession(sessionId)).toMatchObject({
+    expect(stateStore.get("session", sessionId)).toMatchObject({
       channelType: "http",
       parentLineage,
     });
@@ -1673,7 +1639,7 @@ describe("createAgentOtelInstrumentation", () => {
 
   it("uses the stored session decision when no event or context seed exists", async () => {
     const stateStore = new InMemoryAgentTraceStateStore();
-    stateStore.setSession("session-policy", {
+    stateStore.set("session", "session-policy", {
       channelAudience: "public",
       context: spanContext("1", "2"),
       decision: { action: "record", recordInputs: false, recordOutputs: true },
@@ -1689,7 +1655,7 @@ describe("createAgentOtelInstrumentation", () => {
 
   it("preserves a private decision already intersected with a forwarded ceiling", async () => {
     const stateStore = new InMemoryAgentTraceStateStore();
-    stateStore.setSession("session-forwarded-private", {
+    stateStore.set("session", "session-forwarded-private", {
       channelAudience: "private",
       context: spanContext("1", "2"),
       decision: { action: "record", recordInputs: true, recordOutputs: false },
@@ -1811,7 +1777,7 @@ describe("createAgentOtelInstrumentation", () => {
 
   it("reconstructs a sampled public session decision when persisted policy is absent", async () => {
     const stateStore = new InMemoryAgentTraceStateStore();
-    stateStore.setSession("session-sampled", {
+    stateStore.set("session", "session-sampled", {
       channelAudience: "public",
       context: spanContext("1", "2"),
       rootSessionId: "session-sampled",
@@ -1828,7 +1794,7 @@ describe("createAgentOtelInstrumentation", () => {
 
   it("reconstructs an unsampled session as content-redacted", async () => {
     const stateStore = new InMemoryAgentTraceStateStore();
-    stateStore.setSession("session-unsampled", {
+    stateStore.set("session", "session-unsampled", {
       channelAudience: "public",
       context: { ...spanContext("1", "2"), traceFlags: 0 },
       rootSessionId: "session-unsampled",
@@ -2423,6 +2389,45 @@ describe("createAgentOtelInstrumentation", () => {
     withSpy.mockRestore();
   });
 
+  it("records no third-party spans from a tool call in a dropped turn", async () => {
+    const runtime = createRuntime(undefined, () => false);
+    const scope: InstrumentationAttemptScope = {
+      attemptId: "session-dropped:turn-1:0:0",
+      attemptIndex: 0,
+      channelAudience: "private",
+      functionId: "weather",
+      sessionId: "session-dropped",
+      stepIndex: 0,
+      turnId: "turn-1",
+    };
+    apiContext.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
+    try {
+      await publishTurnStarted({
+        channelAudience: "private",
+        hooks: runtime.hooks,
+        sessionId: scope.sessionId,
+        turnId: scope.turnId,
+        turnSequence: 0,
+      });
+      // An MCP client span started while Alice's dropped turn calls a tool.
+      await runtime.runInContext(
+        {
+          idempotencyKey: "tool:session-dropped:turn-1:tool-1",
+          scope,
+          type: "tool.call",
+          callId: "tool-1",
+          toolName: "linear__get_issue",
+          input: { issue: "ISSUE-1" },
+        },
+        async () => runtime.tracer.startSpan("mcp tools/call").end(),
+      );
+      await runtime.provider.forceFlush();
+      expect(runtime.exporter.getFinishedSpans()).toHaveLength(0);
+    } finally {
+      apiContext.disable();
+    }
+  });
+
   it("enriches the existing tool span with MCP attributes under its content policy", async () => {
     const runtime = createRuntime(new InMemoryAgentTraceStateStore(), () => ({
       emit: true,
@@ -2476,20 +2481,16 @@ describe("createAgentOtelInstrumentation", () => {
       async () => {
         const active = withSpy.mock.calls[0]?.[0];
         expect(active).toBeDefined();
-        expect(agentToolContentPolicy(active!)).toEqual({
+        expect(activeTraceOperation(active!)?.capture).toMatchObject({
           recordInputs: false,
           recordOutputs: false,
         });
-        annotateAgentToolSpan(
-          {
-            "eve.connection.name": "linear",
-            "gen_ai.operation.name": "execute_tool",
-            "gen_ai.tool.name": "get_issue",
-            "jsonrpc.request.id": "7",
-            "mcp.method.name": "tools/call",
-          },
-          active!,
-        );
+        activeTraceOperation(active!)?.mcp?.update({
+          connectionName: "linear",
+          method: "tools/call",
+          toolName: "get_issue",
+          requestId: "7",
+        });
       },
     );
     withSpy.mockRestore();
@@ -2917,9 +2918,14 @@ describe("createAgentOtelInstrumentation", () => {
     });
     const agentOtel = createAgentOtelInstrumentation({
       frameworkVersion: "test",
-      idGenerator,
       stateStore: new InMemoryAgentTraceStateStore(),
-      tracer: provider.getTracer("eve.agent"),
+      telemetry: otelTelemetry({
+        provider,
+        tracerName: "eve.agent",
+        idGenerator,
+        mapping: eveOutputMapping(),
+      }),
+      idGenerator,
     });
     const hooks = createInstrumentationHooks([agentOtel.hook]).forTrace!(traceContext("public"));
     await emitAttempt({
@@ -2988,7 +2994,7 @@ describe("createAgentOtelInstrumentation", () => {
     expect(withSpy).toHaveBeenCalledOnce();
     const active = withSpy.mock.calls[0]?.[0];
     expect(active).toBeDefined();
-    expect(agentToolSpanContext(active!)).toBeUndefined();
+    expect(activeTraceOperation(active!)?.type).toBe("model");
     withSpy.mockRestore();
   });
 
@@ -3251,22 +3257,22 @@ describe("createAgentOtelInstrumentation", () => {
       input: undefined,
       kind: "subagent-call",
     });
-    const action = (await store.getAction(key))!;
+    const action = (await store.get("action", key))!;
     await publishTurnStarted({
       hooks: runtime.hooks,
       sessionId: "child",
       rootSessionId: "parent",
       turnId: "turn_0",
       turnSequence: 0,
-      parentTraceContext: { ...action.parent, spanId: action.spanId },
+      parentTraceContext: action.context,
     });
     await completeTurn(runtime.hooks, "child", "turn_0");
     await runtime.provider.forceFlush();
     const spans = runtime.exporter.getFinishedSpans();
     expect(byName(spans, "agent.action")).toHaveLength(0);
     const child = byName(spans, "invoke_agent weather")[0]!;
-    expect(child.parentSpanContext?.spanId).toBe(action.spanId);
-    expect(child.spanContext().traceId).toBe(action.parent.traceId);
+    expect(child.parentSpanContext?.spanId).toBe(action.context.spanId);
+    expect(child.spanContext().traceId).toBe(action.context.traceId);
   });
 
   it("starts a remote root with a dispatch link and receiver sampling", async () => {
@@ -3459,31 +3465,3 @@ function modelStartedEvent(
     type: "model.call.started",
   };
 }
-
-describe("AgentSpanIdGenerator.withTraceId", () => {
-  it("primes the next generateTraceId call", () => {
-    const gen = new AgentSpanIdGenerator();
-    const primed = "e".repeat(32);
-    const result = gen.withTraceId(primed, () => gen.generateTraceId());
-    expect(result).toBe(primed);
-    // After the callback, a fresh call should produce a different id.
-    const next = gen.generateTraceId();
-    expect(next).not.toBe(primed);
-  });
-
-  it("nests inside withSpanId to prime both ids", () => {
-    const gen = new AgentSpanIdGenerator();
-    const primedTraceId = "f".repeat(32);
-    const primedSpanId = "a".repeat(16);
-    let capturedTraceId: string | undefined;
-    let capturedSpanId: string | undefined;
-    gen.withSpanId(primedSpanId, () =>
-      gen.withTraceId(primedTraceId, () => {
-        capturedTraceId = gen.generateTraceId();
-        capturedSpanId = gen.generateSpanId();
-      }),
-    );
-    expect(capturedTraceId).toBe(primedTraceId);
-    expect(capturedSpanId).toBe(primedSpanId);
-  });
-});

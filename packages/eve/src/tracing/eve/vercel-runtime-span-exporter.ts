@@ -1,6 +1,6 @@
 import { JsonTraceSerializer } from "#compiled/@opentelemetry/otlp-transformer/index.js";
 import { TraceFlags } from "#compiled/@opentelemetry/api/index.js";
-import type { SpanExporter, SpanProcessor } from "#compiled/@vercel/otel/index.js";
+import type { SpanExporter, SpanProcessor } from "./otel-configuration.js";
 
 import { createLogger, formatError } from "#internal/logging.js";
 
@@ -29,7 +29,9 @@ export function vercelRuntimeSpanExporter(): SpanExporter {
       }
 
       try {
-        const serialized = JsonTraceSerializer.serializeRequest([...spans]);
+        const serialized = JsonTraceSerializer.serializeRequest([...spans] as Parameters<
+          typeof JsonTraceSerializer.serializeRequest
+        >[0]);
         if (serialized === undefined) throw new Error("Failed to serialize spans.");
         telemetry.reportSpans(JSON.parse(new TextDecoder().decode(serialized)) as unknown);
         resultCallback({ code: 0 });

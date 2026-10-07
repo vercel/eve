@@ -11,7 +11,7 @@ import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import { appliedSession, saveSessionProjection } from "#harness/session-machine/current.js";
 import { takeDeferredMessage } from "#harness/hitl/index.js";
 import { preserveSerializedInstrumentationState } from "#instrumentation/state.js";
-import { preserveSerializedAgentTraceState } from "#tracing/agent-trace-context-store.js";
+import { preserveSerializedAgentTraceState } from "#tracing/eve/agent-trace-context-store.js";
 
 const log = createLogger("execution.cancelled-turn");
 

@@ -7,21 +7,18 @@ import {
   trace,
   SpanKind,
   type Context,
+  type TracerProvider,
 } from "#compiled/@opentelemetry/api/index.js";
-import {
-  registerOTel,
-  type Configuration,
-  type SpanProcessor,
-  type SpanProcessorOrName,
-} from "#compiled/@vercel/otel/index.js";
+import { registerOTel } from "#compiled/@vercel/otel/index.js";
+import type { Configuration, SpanProcessor, SpanProcessorOrName } from "./otel-configuration.js";
 
-import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
+import { AgentSpanIdGenerator } from "#compiled/@eve/tracing/index.js";
+import type { OtelConfiguration } from "./otel-configuration.js";
+import { type Attributes } from "#compiled/@eve/tracing/index.js";
+import { invocationName } from "#compiled/@eve/tracing/otel.js";
+export type SamplingOperation = { readonly name: string; readonly attributes?: Attributes };
+
 import { conversationIdFromContext } from "#tracing/eve/conversation-context.js";
-import type { OtelPipeline } from "#tracing/eve/otel-declaration.js";
-import {
-  agentInvocationSpanName,
-  type AgentSamplingOperation,
-} from "#tracing/agent-span-contract.js";
 
 const REGISTRATION_SPAN_NAME = "eve.otel.registration";
 const REPLAY_DEDUPLICATION_LIMIT = 100_000;
@@ -163,10 +160,10 @@ class PrivateSpanFilteringProcessor implements SpanProcessor {
  * propagator, then verifies both through the global APIs.
  */
 export function registerOtelPipeline(input: {
-  readonly pipeline: OtelPipeline;
+  readonly otel: OtelConfiguration;
   readonly serviceName: string;
 }): RegisteredOtelPipeline {
-  const { pipeline } = input;
+  const pipeline = input.otel;
   // A tracer cached before registration retains this private proxy even after
   // the vendored API takes the global slot. Delegate it only after ownership is proven.
   const optionalPeerTracerProxy = captureOptionalPeerTracerProxy();
@@ -218,6 +215,7 @@ export function registerOtelPipeline(input: {
   // global is a no-op provider with no lifecycle methods.
   const meterProvider = runtimeMeterProvider();
   return {
+    provider: trace.getTracerProvider() as TracerProvider,
     forceFlush: async () => {
       await Promise.all([provider.forceFlush!(), meterProvider.forceFlush?.()]);
     },
@@ -260,17 +258,19 @@ function replayDeduplicationRegistry(): Set<string> {
 
 /** Lifecycle retained from the providers that own every destination. */
 export interface RegisteredOtelPipeline {
+  readonly provider: TracerProvider;
   readonly forceFlush: () => Promise<void>;
   readonly idGenerator: AgentSpanIdGenerator;
   /** Whether the installed sampler would record a trace with this id. */
-  readonly samplesTrace: (traceId: string, operation?: AgentSamplingOperation) => boolean;
+  readonly samplesTrace: (traceId: string, operation?: SamplingOperation) => boolean;
   readonly shutdown: () => Promise<void>;
 }
+export const registerOtel = registerOtelPipeline;
 
 function samplerAdmitsTrace(
   idGenerator: AgentSpanIdGenerator,
   traceId: string,
-  operation: AgentSamplingOperation = { name: agentInvocationSpanName(undefined) },
+  operation: SamplingOperation = { name: invocationName(undefined) },
 ): boolean {
   const probe = idGenerator.withTraceId(traceId, () =>
     trace.getTracer("eve.registration").startSpan(operation.name, {
@@ -294,20 +294,6 @@ interface RuntimeMeterProvider {
 
 interface ProxyTracerProvider {
   getDelegate(): unknown;
-}
-
-interface OptionalPeerTracerProxy {
-  setDelegate(delegate: unknown): void;
-}
-
-function captureOptionalPeerTracerProxy(): OptionalPeerTracerProxy | undefined {
-  try {
-    const api = require("@opentelemetry/api") as typeof import("@opentelemetry/api");
-    const provider = api.trace.getTracerProvider();
-    return provider instanceof api.ProxyTracerProvider ? provider : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function rollbackRegistration(input: {
@@ -416,4 +402,18 @@ function addBounded(values: Set<string>, value: string): void {
 
 function isSpanProcessor(processor: SpanProcessorOrName): processor is SpanProcessor {
   return processor !== "auto";
+}
+
+interface OptionalPeerTracerProxy {
+  setDelegate(delegate: unknown): void;
+}
+
+function captureOptionalPeerTracerProxy(): OptionalPeerTracerProxy | undefined {
+  try {
+    const api = require("@opentelemetry/api") as typeof import("@opentelemetry/api");
+    const provider = api.trace.getTracerProvider();
+    return provider instanceof api.ProxyTracerProvider ? provider : undefined;
+  } catch {
+    return undefined;
+  }
 }

@@ -1,5 +1,5 @@
 import type { SpanProcessor } from "#compiled/@vercel/otel/index.js";
-import { isAgentActivationSpan, isDirectToolCallSpan } from "#tracing/agent-span-contract.js";
+import { isAgentActivationSpan, isDirectToolCallSpan } from "#tracing/local/inspection.js";
 
 const REMEMBERED_TRACE_LIMIT = 2048;
 

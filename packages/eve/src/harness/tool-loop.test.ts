@@ -1,3 +1,4 @@
+import { AgentSpanIdGenerator } from "#compiled/@eve/tracing/index.js";
 import { context as otelContext, trace } from "#compiled/@opentelemetry/api/index.js";
 import {
   type FilePart,
@@ -195,6 +196,7 @@ function declareTelemetry(
       ? undefined
       : {
           forceFlush: async () => undefined,
+          idGenerator: new AgentSpanIdGenerator(),
           hooks: createInstrumentationHooks([]),
           otelSettings: {
             ...config,
@@ -226,6 +228,7 @@ function bindHookInstrumentation(
   return bindInstrumentationRuntime(
     {
       forceFlush: async () => undefined,
+      idGenerator: new AgentSpanIdGenerator(),
       hooks,
       otelSettings: useDeclaredRuntime ? declaredRuntime?.otelSettings : undefined,
       runtimeContextResolvers: useDeclaredRuntime
@@ -10176,6 +10179,7 @@ describe("createToolLoopHarness", () => {
       };
       const authoredSpan = trace.wrapSpanContext(authoredTrace);
       const getTracerSpy = vi.spyOn(trace, "getTracer").mockReturnValue({
+        startActiveSpan: vi.fn(),
         startSpan: vi.fn(() => authoredSpan),
       } as ReturnType<typeof trace.getTracer>);
       setupMockAgent({
