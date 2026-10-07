@@ -23,8 +23,7 @@ without running a turn. The stream publishes added entries in `history.imported`
 applies where it is passed: nothing is conditional on whether a session already exists.
 
 Requests that converge here: #91 (external transcripts), #3524 (branching from settled history,
-closed as a duplicate), the channel-side rehydration workaround in #3022, and Slack
-`threadContext`.
+closed as a duplicate), and Slack `threadContext`.
 
 ## Authoring API
 
@@ -55,7 +54,7 @@ POST("/conversations/:id/session", async (req, { from, params }) => {
 ```
 
 `send()` takes the same option. That covers channel code that must add history and answer in
-one call, such as rehydrating a stranded session or seeding from a platform thread:
+one call, such as seeding from a platform thread:
 
 ```ts
 await from(token).send(text, { auth, history: transcript });
@@ -141,27 +140,26 @@ approximate it.
 - Channel-level history hooks. Most requests create sessions explicitly rather than per thread.
 - Tool calls and results, files and images, reasoning, and provider-specific message parts.
 - Separate display text and model text.
-- Automatic rehydration of stranded sessions (#3022) and carrying pending approvals.
+- Workarounds for stranded sessions (#3022). Those belong in deployment handoff, not in history.
 - Appending history without a turn. #3023's `observe` is that operation.
 
 ## Requests and coverage
 
-| Request                                       | Source             | Coverage         | Notes                                                               |
-| --------------------------------------------- | ------------------ | ---------------- | ------------------------------------------------------------------- |
-| Continue a migrated transcript                | #91                | Covered for text | `create()` per conversation. Tool calls, reasoning, and files drop. |
-| App-owned persistence                         | #91                | Covered          | Server route calls `create()`; the client resumes by session id.    |
-| Clients display imported history              | #91, #3524         | Covered          | `history.imported` renders on live and replayed streams.            |
-| Client-supplied history                       | #91                | Non-goal         | Server-only.                                                        |
-| Real roles instead of a transcript blob       | #91, #75, #3022    | Covered          |                                                                     |
-| Text recovery of a stranded session           | #91 comment, #3022 | Covered          | `send({ history })` after resetting; detection stays app-owned.     |
-| Initialize without execution                  | #3524              | Covered          | `create()` runs no model or tool.                                   |
-| Empty history                                 | #3524              | Covered          |                                                                     |
-| Map imported ids                              | #3524              | Covered          | App ids become message ids.                                         |
-| Preserve tool calls and results               | #3524              | Follow-up        |                                                                     |
-| Clear errors for invalid history              | #3524              | Covered          |                                                                     |
-| Settled-history export, fork, or rewind       | #3524, #75         | Not covered      | Userland can build history from the event stream.                   |
-| Mid-thread Slack mentions see earlier replies | `threadContext`    | Improved         | First message adds them as roles; later messages unchanged.         |
-| Follow a thread without mentions              | #223, #874, #3023  | Out of scope     |                                                                     |
+| Request                                       | Source            | Coverage         | Notes                                                               |
+| --------------------------------------------- | ----------------- | ---------------- | ------------------------------------------------------------------- |
+| Continue a migrated transcript                | #91               | Covered for text | `create()` per conversation. Tool calls, reasoning, and files drop. |
+| App-owned persistence                         | #91               | Covered          | Server route calls `create()`; the client resumes by session id.    |
+| Clients display imported history              | #91, #3524        | Covered          | `history.imported` renders on live and replayed streams.            |
+| Client-supplied history                       | #91               | Non-goal         | Server-only.                                                        |
+| Real roles instead of a transcript blob       | #91, #75          | Covered          |                                                                     |
+| Initialize without execution                  | #3524             | Covered          | `create()` runs no model or tool.                                   |
+| Empty history                                 | #3524             | Covered          |                                                                     |
+| Map imported ids                              | #3524             | Covered          | App ids become message ids.                                         |
+| Preserve tool calls and results               | #3524             | Follow-up        |                                                                     |
+| Clear errors for invalid history              | #3524             | Covered          |                                                                     |
+| Settled-history export, fork, or rewind       | #3524, #75        | Not covered      | Userland can build history from the event stream.                   |
+| Mid-thread Slack mentions see earlier replies | `threadContext`   | Improved         | First message adds them as roles; later messages unchanged.         |
+| Follow a thread without mentions              | #223, #874, #3023 | Out of scope     |                                                                     |
 
 ## Validation
 
