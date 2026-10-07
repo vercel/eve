@@ -15,7 +15,7 @@ import {
 } from "#context/keys.js";
 import type { TurnPosition } from "#harness/session-machine/view.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { RuntimeContextResolver } from "#tracing/otel-declaration.js";
+import type { RuntimeContextResolver } from "#tracing/eve/otel-declaration.js";
 import {
   normalizeInstrumentationChannelKind,
   resolveInstrumentationProjection,

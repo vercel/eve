@@ -8,7 +8,7 @@ import {
 import { defineInstrumentation } from "#public/instrumentation/index.js";
 import { otel, type TracePolicyDecision } from "#public/instrumentation/otel.js";
 
-vi.mock("#tracing/otel-registration.js", () => ({
+vi.mock("#tracing/eve/otel-registration.js", () => ({
   registerOtelPipeline: () => ({
     forceFlush: async () => undefined,
     idGenerator: {

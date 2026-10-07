@@ -1,0 +1,419 @@
+import { createRequire } from "node:module";
+
+import {
+  context,
+  metrics,
+  propagation,
+  trace,
+  SpanKind,
+  type Context,
+} from "#compiled/@opentelemetry/api/index.js";
+import {
+  registerOTel,
+  type Configuration,
+  type SpanProcessor,
+  type SpanProcessorOrName,
+} from "#compiled/@vercel/otel/index.js";
+
+import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
+import { conversationIdFromContext } from "#tracing/eve/conversation-context.js";
+import type { OtelPipeline } from "#tracing/eve/otel-declaration.js";
+import {
+  agentInvocationSpanName,
+  type AgentSamplingOperation,
+} from "#tracing/agent-span-contract.js";
+
+const REGISTRATION_SPAN_NAME = "eve.otel.registration";
+const REPLAY_DEDUPLICATION_LIMIT = 100_000;
+const PENDING_CHILD_SPAN_LIMIT = 10_000;
+const REPLAY_DEDUPLICATION_KEY = Symbol.for("eve.otel.replay-deduplication");
+const require = createRequire(import.meta.url);
+
+interface ReplayDeduplicationGlobal {
+  [REPLAY_DEDUPLICATION_KEY]?: Set<string>;
+}
+
+const replayDeduplicationGlobal = globalThis as typeof globalThis & ReplayDeduplicationGlobal;
+
+class RegistrationMarkerPropagator {
+  #injected = false;
+
+  extract(carrierContext: Context): Context {
+    return carrierContext;
+  }
+
+  fields(): string[] {
+    return [];
+  }
+
+  inject(): void {
+    this.#injected = true;
+  }
+
+  isInstalled(): boolean {
+    this.#injected = false;
+    propagation.inject(context.active(), {}, { set: () => {} });
+    return this.#injected;
+  }
+}
+
+/** Keeps eve's ownership check out of every authored destination. */
+class PrivateSpanFilteringProcessor implements SpanProcessor {
+  private readonly endedSpans: Set<string>;
+  private readonly forwardedSpans = new Set<string>();
+  private readonly pendingByParent = new Map<string, unknown[]>();
+  private pendingSpanCount = 0;
+  private readonly processors: readonly SpanProcessor[];
+  private readonly startedSpans = new Set<string>();
+
+  constructor(processors: readonly SpanProcessor[], endedSpans: Set<string>) {
+    this.processors = processors;
+    this.endedSpans = endedSpans;
+  }
+
+  async forceFlush(): Promise<void> {
+    this.drainPendingSpans();
+    await Promise.all(this.processors.map((processor) => processor.forceFlush()));
+  }
+
+  onEnd(span: unknown): void {
+    if (isRegistrationSpan(span)) return;
+    const identity = spanIdentity(span);
+    if (identity !== undefined) {
+      if (this.endedSpans.has(identity)) return;
+      if (this.endedSpans.size >= REPLAY_DEDUPLICATION_LIMIT) {
+        const oldest = this.endedSpans.values().next().value;
+        if (oldest !== undefined) this.endedSpans.delete(oldest);
+      }
+      this.endedSpans.add(identity);
+    }
+    const parent = parentIdentity(span);
+    if (parent !== undefined && this.startedSpans.has(parent) && !this.forwardedSpans.has(parent)) {
+      const pending = this.pendingByParent.get(parent) ?? [];
+      pending.push(span);
+      this.pendingByParent.set(parent, pending);
+      this.pendingSpanCount += 1;
+      if (this.pendingSpanCount > PENDING_CHILD_SPAN_LIMIT) this.releaseOldestPendingParent();
+      return;
+    }
+    this.forward(span, identity);
+  }
+
+  onStart(span: unknown, parentContext: unknown): void {
+    if (isRegistrationSpan(span)) return;
+    const conversationId = conversationIdFromContext(parentContext);
+    if (
+      conversationId !== undefined &&
+      (span as { attributes?: Record<string, unknown> }).attributes?.["gen_ai.conversation.id"] ===
+        undefined
+    ) {
+      (span as { setAttribute(key: string, value: string): void }).setAttribute(
+        "gen_ai.conversation.id",
+        conversationId,
+      );
+    }
+    const identity = spanIdentity(span);
+    if (identity !== undefined) addBounded(this.startedSpans, identity);
+    for (const processor of this.processors) processor.onStart(span, parentContext);
+  }
+
+  async shutdown(): Promise<void> {
+    this.drainPendingSpans();
+    await Promise.all(this.processors.map((processor) => processor.shutdown()));
+  }
+
+  // A parent that never ends (lost worker, abandoned attempt) must not hold
+  // its ended children forever: flush and shutdown are the last chance to
+  // export them, and the cap bounds what one stuck parent can buffer. Spans
+  // released here precede their parent; an ordinary flush drains nothing
+  // because parents end before the per-step flush runs.
+  private drainPendingSpans(): void {
+    while (this.pendingByParent.size > 0) this.releaseOldestPendingParent();
+  }
+
+  private releaseOldestPendingParent(): void {
+    const parent = this.pendingByParent.keys().next().value;
+    if (parent === undefined) return;
+    this.releaseChildren(parent);
+  }
+
+  private releaseChildren(parent: string): void {
+    const children = this.pendingByParent.get(parent);
+    if (children === undefined) return;
+    this.pendingByParent.delete(parent);
+    this.pendingSpanCount -= children.length;
+    for (const child of children) this.forward(child, spanIdentity(child));
+  }
+
+  private forward(span: unknown, identity: string | undefined): void {
+    for (const processor of this.processors) processor.onEnd(span);
+    if (identity === undefined) return;
+    addBounded(this.forwardedSpans, identity);
+    this.releaseChildren(identity);
+  }
+}
+
+/**
+ * Builds the process's one OpenTelemetry tracer provider from a merged
+ * declaration, then proves it took the global slot.
+ *
+ * `registerOTel` reports a refused registration only through `diag`, which
+ * goes nowhere unless `OTEL_LOG_LEVEL` is set, so a second caller would export
+ * nothing and say nothing. eve primes its id generator and installs a private
+ * propagator, then verifies both through the global APIs.
+ */
+export function registerOtelPipeline(input: {
+  readonly pipeline: OtelPipeline;
+  readonly serviceName: string;
+}): RegisteredOtelPipeline {
+  const { pipeline } = input;
+  // A tracer cached before registration retains this private proxy even after
+  // the vendored API takes the global slot. Delegate it only after ownership is proven.
+  const optionalPeerTracerProxy = captureOptionalPeerTracerProxy();
+  const idGenerator = new AgentSpanIdGenerator();
+  const markerPropagator = new RegistrationMarkerPropagator();
+  const spanProcessors = privateSpanProcessors(pipeline.spanProcessors);
+  const configuration: Configuration = {
+    attributes: pipeline.resource,
+    autoDetectResources: false,
+    idGenerator,
+    instrumentations: pipeline.instrumentations ?? [],
+    metricReaders: pipeline.metricReaders,
+    propagators: [...(pipeline.propagators ?? ["auto"]), markerPropagator],
+    serviceName: input.serviceName,
+    spanProcessors,
+  };
+  registerOTel(
+    // Absent means "let `@vercel/otel` decide", which is not the same as
+    // passing an explicit `undefined` sampler.
+    pipeline.sampler === undefined
+      ? configuration
+      : { ...configuration, traceSampler: pipeline.sampler },
+  );
+
+  const ownsTracer = globalTracerUses(idGenerator);
+  const ownsPropagator = markerPropagator.isInstalled();
+  if (!ownsTracer || !ownsPropagator) {
+    rollbackRegistration({ ownsPropagator, ownsTracer });
+  }
+  if (!ownsTracer) {
+    throw new Error(
+      "eve could not register OpenTelemetry because another runtime already owns the global tracer provider. Remove the other `registerOTel` call, or move its exporters into eve's `otelIntegration({ spanProcessors: [...] })`.",
+    );
+  }
+  if (!ownsPropagator) {
+    throw new Error(
+      "eve could not register OpenTelemetry because another runtime already owns the global propagator. Remove the other global propagator registration and declare propagators through eve's `otel()` instead.",
+    );
+  }
+  const provider = runtimeTracerProvider();
+  if (typeof provider.forceFlush !== "function" || typeof provider.shutdown !== "function") {
+    rollbackRegistration({ ownsPropagator, ownsTracer });
+    throw new Error("The registered OpenTelemetry tracer provider has no lifecycle methods.");
+  }
+  optionalPeerTracerProxy?.setDelegate(provider);
+  // `registerOTel` also registers a global meter provider when metric readers
+  // are declared, but returns no handle to it. Capture it now so metrics get
+  // the same flush and shutdown coverage as spans; without metric readers the
+  // global is a no-op provider with no lifecycle methods.
+  const meterProvider = runtimeMeterProvider();
+  return {
+    forceFlush: async () => {
+      await Promise.all([provider.forceFlush!(), meterProvider.forceFlush?.()]);
+    },
+    idGenerator,
+    samplesTrace: (traceId, operation) => samplerAdmitsTrace(idGenerator, traceId, operation),
+    shutdown: async () => {
+      // Stop auto-instrumentations first so nothing records into providers
+      // that are about to shut down.
+      disableInstrumentations(pipeline.instrumentations);
+      await Promise.all([provider.shutdown!(), meterProvider.shutdown?.()]);
+    },
+  };
+}
+
+function privateSpanProcessors(processors: readonly SpanProcessorOrName[]): SpanProcessorOrName[] {
+  const concrete = processors.filter(isSpanProcessor);
+  if (concrete.length === 0) return [...processors];
+  const filtering = new PrivateSpanFilteringProcessor(concrete, replayDeduplicationRegistry());
+  const result: SpanProcessorOrName[] = [];
+  let inserted = false;
+  for (const processor of processors) {
+    if (!isSpanProcessor(processor)) {
+      result.push(processor);
+      continue;
+    }
+    if (inserted) continue;
+    inserted = true;
+    result.push(filtering);
+  }
+  return result;
+}
+
+function replayDeduplicationRegistry(): Set<string> {
+  const existing = replayDeduplicationGlobal[REPLAY_DEDUPLICATION_KEY];
+  if (existing !== undefined) return existing;
+  const created = new Set<string>();
+  replayDeduplicationGlobal[REPLAY_DEDUPLICATION_KEY] = created;
+  return created;
+}
+
+/** Lifecycle retained from the providers that own every destination. */
+export interface RegisteredOtelPipeline {
+  readonly forceFlush: () => Promise<void>;
+  readonly idGenerator: AgentSpanIdGenerator;
+  /** Whether the installed sampler would record a trace with this id. */
+  readonly samplesTrace: (traceId: string, operation?: AgentSamplingOperation) => boolean;
+  readonly shutdown: () => Promise<void>;
+}
+
+function samplerAdmitsTrace(
+  idGenerator: AgentSpanIdGenerator,
+  traceId: string,
+  operation: AgentSamplingOperation = { name: agentInvocationSpanName(undefined) },
+): boolean {
+  const probe = idGenerator.withTraceId(traceId, () =>
+    trace.getTracer("eve.registration").startSpan(operation.name, {
+      attributes: operation.attributes,
+      kind: SpanKind.INTERNAL,
+      root: true,
+    }),
+  );
+  return (probe.spanContext().traceFlags & 1) === 1;
+}
+
+interface RuntimeTracerProvider {
+  forceFlush(): Promise<void>;
+  shutdown(): Promise<void>;
+}
+
+interface RuntimeMeterProvider {
+  forceFlush(): Promise<void>;
+  shutdown(): Promise<void>;
+}
+
+interface ProxyTracerProvider {
+  getDelegate(): unknown;
+}
+
+interface OptionalPeerTracerProxy {
+  setDelegate(delegate: unknown): void;
+}
+
+function captureOptionalPeerTracerProxy(): OptionalPeerTracerProxy | undefined {
+  try {
+    const api = require("@opentelemetry/api") as typeof import("@opentelemetry/api");
+    const provider = api.trace.getTracerProvider();
+    return provider instanceof api.ProxyTracerProvider ? provider : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function rollbackRegistration(input: {
+  readonly ownsPropagator: boolean;
+  readonly ownsTracer: boolean;
+}): void {
+  if (input.ownsPropagator) {
+    (propagation as typeof propagation & { disable(): void }).disable();
+  }
+  if (!input.ownsTracer) return;
+  const provider = runtimeTracerProvider();
+  if (typeof provider.shutdown === "function") {
+    try {
+      void provider.shutdown().catch(() => {});
+    } catch {}
+  }
+  (trace as typeof trace & { disable(): void }).disable();
+}
+
+function runtimeTracerProvider(): Partial<RuntimeTracerProvider> {
+  const globalProvider = trace.getTracerProvider() as Partial<ProxyTracerProvider>;
+  return (globalProvider.getDelegate?.() ?? globalProvider) as Partial<RuntimeTracerProvider>;
+}
+
+function runtimeMeterProvider(): Partial<RuntimeMeterProvider> {
+  const globalProvider = metrics.getMeterProvider() as {
+    forceFlush?: unknown;
+    shutdown?: unknown;
+  } | null;
+  return {
+    forceFlush:
+      typeof globalProvider?.forceFlush === "function"
+        ? () => (globalProvider as RuntimeMeterProvider).forceFlush()
+        : undefined,
+    shutdown:
+      typeof globalProvider?.shutdown === "function"
+        ? () => (globalProvider as RuntimeMeterProvider).shutdown()
+        : undefined,
+  };
+}
+
+function disableInstrumentations(instrumentations: readonly unknown[] | undefined): void {
+  for (const instrumentation of instrumentations ?? []) {
+    const disable = (instrumentation as { disable?: unknown } | null)?.disable;
+    if (typeof disable !== "function") continue;
+    try {
+      disable.call(instrumentation);
+    } catch {}
+  }
+}
+
+function globalTracerUses(idGenerator: AgentSpanIdGenerator): boolean {
+  const spanId = idGenerator.allocateSpanId();
+  const probe = idGenerator.withSpanId(spanId, () =>
+    trace.getTracer("eve.registration").startSpan(REGISTRATION_SPAN_NAME),
+  );
+  // Deliberately not ended: named processors are resolved inside @vercel/otel
+  // and cannot be wrapped, while an unended span is never exported.
+  return probe.spanContext().spanId === spanId;
+}
+
+function isRegistrationSpan(span: unknown): boolean {
+  return (
+    typeof span === "object" &&
+    span !== null &&
+    (("name" in span && span.name === REGISTRATION_SPAN_NAME) ||
+      ("instrumentationScope" in span &&
+        (span.instrumentationScope as { name?: string } | undefined)?.name === "eve.registration"))
+  );
+}
+
+function spanIdentity(span: unknown): string | undefined {
+  if (
+    typeof span !== "object" ||
+    span === null ||
+    !("spanContext" in span) ||
+    typeof span.spanContext !== "function"
+  ) {
+    return undefined;
+  }
+  const context = span.spanContext() as { readonly spanId?: unknown; readonly traceId?: unknown };
+  return typeof context.traceId === "string" && typeof context.spanId === "string"
+    ? `${context.traceId}:${context.spanId}`
+    : undefined;
+}
+
+function parentIdentity(span: unknown): string | undefined {
+  if (typeof span !== "object" || span === null || !("parentSpanContext" in span)) {
+    return undefined;
+  }
+  const parent = span.parentSpanContext as
+    | { readonly spanId?: unknown; readonly traceId?: unknown }
+    | undefined;
+  return typeof parent?.traceId === "string" && typeof parent.spanId === "string"
+    ? `${parent.traceId}:${parent.spanId}`
+    : undefined;
+}
+
+function addBounded(values: Set<string>, value: string): void {
+  if (values.size >= REPLAY_DEDUPLICATION_LIMIT) {
+    const oldest = values.values().next().value;
+    if (oldest !== undefined) values.delete(oldest);
+  }
+  values.add(value);
+}
+
+function isSpanProcessor(processor: SpanProcessorOrName): processor is SpanProcessor {
+  return processor !== "auto";
+}

@@ -31,7 +31,7 @@ import { readVercelProjectLink } from "#internal/vercel/project-link.js";
 import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
 import { resolveVercelOidcCurrentProject } from "#channel/auth/vercel-oidc-project.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
-import { isAgentTraceContext } from "#tracing/agent-trace-context.js";
+import { isAgentTraceContext } from "#tracing/eve/agent-trace-context.js";
 import {
   dispatchChannelRequest,
   dispatchChannelWebSocketRequest,

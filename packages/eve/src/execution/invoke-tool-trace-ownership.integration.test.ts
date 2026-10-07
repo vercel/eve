@@ -16,7 +16,7 @@ import { createInstrumentationHooks } from "#instrumentation/lifecycle.js";
 import { registerInstrumentationRuntime } from "#instrumentation/runtime.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { defineJsonSchema } from "#tools/schema.js";
-import { AgentTraceSpanProcessor } from "#tracing/agent-trace-span-processor.js";
+import { AgentTraceSpanProcessor } from "#tracing/local/agent-trace-span-processor.js";
 
 const CLIENT_TRACE_ID = "4bf92f3577b34da6a3ce929d0e0e4736";
 const alice: SessionAuthContext = {

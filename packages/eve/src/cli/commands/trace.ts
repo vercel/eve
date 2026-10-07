@@ -6,15 +6,15 @@ import {
   renderSpanDetailTree,
   spanMetricChips,
 } from "#cli/commands/trace-detail.js";
-import { summarizeLocalTrace } from "#tracing/local-trace-summary.js";
+import { summarizeLocalTrace } from "#tracing/local/trace-summary.js";
 import { formatElapsed } from "#cli/format-elapsed.js";
 import { createCliTheme, renderCliSection, sanitizeForTerminal } from "#cli/ui/output.js";
-import type { LocalTrace, LocalTraceSpan } from "#tracing/local-trace-reader.js";
+import type { LocalTrace, LocalTraceSpan } from "#tracing/local/trace-reader.js";
 import {
   compareLocalTraceSpans,
   describeLocalTraceSpan,
   listLocalTraces,
-} from "#tracing/local-trace-reader.js";
+} from "#tracing/local/trace-reader.js";
 
 const TRACE_DISPLAY_DIRECTORY = ".eve/traces/v1";
 

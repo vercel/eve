@@ -8,11 +8,11 @@
 import { formatCostUsd } from "#cli/commands/trace-detail.js";
 import { formatElapsed } from "#cli/format-elapsed.js";
 import { clipVisible, stripTerminalControls, visibleLength } from "#cli/ui/terminal-text.js";
-import type { LocalTrace, LocalTraceSpan } from "#tracing/local-trace-reader.js";
-import { compareLocalTraceSpans, isAgentTurnSpan } from "#tracing/local-trace-reader.js";
+import type { LocalTrace, LocalTraceSpan } from "#tracing/local/trace-reader.js";
+import { compareLocalTraceSpans, isAgentTurnSpan } from "#tracing/local/trace-reader.js";
 import { agentTurnIdentity } from "#tracing/agent-span-contract.js";
-import { localTraceSpanCostUsd } from "#tracing/local-trace-summary.js";
-import { traceStringAttribute } from "#tracing/local-trace-operations.js";
+import { localTraceSpanCostUsd } from "#tracing/local/trace-summary.js";
+import { traceStringAttribute } from "#tracing/local/trace-operations.js";
 
 import { formatCompactTokenCount } from "../stream-format.js";
 import type { Theme } from "../theme.js";

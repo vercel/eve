@@ -8,8 +8,8 @@ import { formatCompactTokenCount } from "#cli/dev/tui/stream-format.js";
 import { formatAttributeContent } from "#cli/dev/tui/traces/trace-content.js";
 import { formatElapsed } from "#cli/format-elapsed.js";
 import { sanitizeForTerminal } from "#cli/ui/output.js";
-import type { LocalTraceSpan } from "#tracing/local-trace-reader.js";
-import { localTraceSpanCostUsd, type LocalTraceSummary } from "#tracing/local-trace-summary.js";
+import type { LocalTraceSpan } from "#tracing/local/trace-reader.js";
+import { localTraceSpanCostUsd, type LocalTraceSummary } from "#tracing/local/trace-summary.js";
 
 /**
  * Compact metrics for one tree row: token chips (`↑1.4K`/`↓213`), cost

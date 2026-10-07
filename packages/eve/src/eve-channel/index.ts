@@ -52,7 +52,7 @@ import {
   readForwardedAudienceBaggage,
   readForwardedParentSessionBaggage,
 } from "#protocol/baggage.js";
-import { readConversationBaggage } from "#tracing/conversation-context.js";
+import { readConversationBaggage } from "#tracing/eve/conversation-context.js";
 import {
   FAIL_CLOSED_FORWARDED_TRACE_ASSERTION,
   formatTraceContentCeiling,

@@ -9,7 +9,7 @@ import {
   trace,
 } from "#compiled/@opentelemetry/api/index.js";
 import { getInstrumentationRuntime } from "#instrumentation/runtime.js";
-import { markAgentTraceContext } from "#tracing/agent-trace-context.js";
+import { markAgentTraceContext } from "#tracing/eve/agent-trace-context.js";
 import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
 import { AGENT_SPAN_NAMES } from "#tracing/agent-span-contract.js";
 import { withErrorContent } from "#tracing/error-content-context.js";

@@ -19,7 +19,7 @@ import { actionIdempotencyKey, attemptIdempotencyKey } from "#instrumentation/li
 import { contentAttribute, textContentAttribute } from "#tracing/agent-otel-content.js";
 import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
 import { agentTraceIdentityAttributes, traceSessionIdOf } from "#tracing/agent-otel-attributes.js";
-import { withChannelAudience } from "#tracing/channel-audience-context.js";
+import { withChannelAudience } from "#tracing/eve/channel-audience-context.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import type { AgentActionTraceState, AgentTraceStateStore } from "#tracing/agent-trace-state.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";

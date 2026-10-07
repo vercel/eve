@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { LocalTraceSpan } from "#tracing/local-trace-reader.js";
+import type { LocalTraceSpan } from "#tracing/local/trace-reader.js";
 
 import {
   formatCostUsd,

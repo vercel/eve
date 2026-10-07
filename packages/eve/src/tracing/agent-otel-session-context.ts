@@ -9,7 +9,7 @@ import {
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
-import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
+import type { TraceCapturePolicy } from "#tracing/eve/otel-declaration.js";
 import {
   isSampledTrace,
   resolveTracePolicy,

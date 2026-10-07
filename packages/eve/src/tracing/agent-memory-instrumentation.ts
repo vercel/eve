@@ -24,15 +24,15 @@ import {
 } from "#shared/forwarded-trace-policy.js";
 import { genAiMemoryRecordsAttribute } from "#tracing/agent-otel-content.js";
 import { agentTraceIdentityAttributes, traceSessionIdOf } from "#tracing/agent-otel-attributes.js";
-import { isAgentTraceContext, markAgentTraceContext } from "#tracing/agent-trace-context.js";
+import { isAgentTraceContext, markAgentTraceContext } from "#tracing/eve/agent-trace-context.js";
 import { recordAgentSpanError } from "#tracing/agent-span-error.js";
 import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
 import type { AgentTraceStateStore } from "#tracing/agent-trace-state.js";
-import { withChannelAudience } from "#tracing/channel-audience-context.js";
+import { withChannelAudience } from "#tracing/eve/channel-audience-context.js";
 import { withErrorContent } from "#tracing/error-content-context.js";
 import { isSampledTrace } from "#tracing/sampled-trace.js";
 import { suppressTracing } from "#tracing/suppress-tracing.js";
-import { withOperationConversation } from "#tracing/conversation-context.js";
+import { withOperationConversation } from "#tracing/eve/conversation-context.js";
 import type { ConversationEnvironment } from "#shared/conversation-context.js";
 
 type SpanState = { readonly context: Context; readonly span: Span };

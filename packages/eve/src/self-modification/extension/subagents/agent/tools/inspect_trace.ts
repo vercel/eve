@@ -1,6 +1,6 @@
 import { defineTool } from "eve/tools";
 
-import { analyzeLocalTrace } from "#tracing/local-trace-analysis.js";
+import { analyzeLocalTrace } from "#tracing/local/trace-analysis.js";
 
 import type { ResolvedSelfModificationConfig } from "../../../../config.js";
 import { defineLocalOnlyDynamic, resolveLocalOnly } from "../../../local-only.js";

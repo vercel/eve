@@ -1,4 +1,4 @@
-import { operationConversationId } from "#tracing/conversation-context.js";
+import { operationConversationId } from "#tracing/eve/conversation-context.js";
 import { AGENT_TRACE_SCHEMA_VERSION } from "#tracing/agent-span-contract.js";
 
 export function traceSessionIdOf(scope: {
