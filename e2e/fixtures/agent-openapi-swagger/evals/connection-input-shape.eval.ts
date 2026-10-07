@@ -1,4 +1,7 @@
 import { defineEval } from "eve/evals";
+import { satisfies } from "eve/evals/expect";
+
+import { noCallRejectedWholesale } from "./first-try";
 
 const ADD_PET_TOOL = "petstore__addPet";
 
@@ -19,14 +22,24 @@ export default defineEval({
     );
 
     turn.expectOk();
-    t.calledTool("search");
+    t.toolOrder(["search", ADD_PET_TOOL]);
     t.calledTool(ADD_PET_TOOL, { output: isStoredBiscuit });
     t.messageIncludes("4217");
+
+    // Tracked, not gated: how often the model had the right input shape on its first try.
+    t.check(
+      noCallRejectedWholesale(turn),
+      satisfies(
+        (firstTry: boolean) => firstTry,
+        "no addPet attempt was rejected for its input shape",
+      ).soft(),
+    );
   },
 });
 
 function isStoredBiscuit(value: unknown): boolean {
-  const { status, body } = (value ?? {}) as { status?: unknown; body?: Record<string, unknown> };
+  if (typeof value !== "object" || value === null) return false;
+  const { status, body } = value as { status?: unknown; body?: Record<string, unknown> };
   const category = body?.category as { name?: unknown } | undefined;
   return (
     status === 200 &&
@@ -35,6 +48,8 @@ function isStoredBiscuit(value: unknown): boolean {
     body.name === "Biscuit" &&
     body.status === "available" &&
     typeof category?.name === "string" &&
-    /dog/iu.test(category.name)
+    /dog/iu.test(category.name) &&
+    Array.isArray(body.photoUrls) &&
+    body.photoUrls.includes("https://example.com/photos/biscuit.jpg")
   );
 }

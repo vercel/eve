@@ -225,13 +225,19 @@ describe("buildStepCatalog", () => {
       ],
       [
         "input with a skill",
-        { input: {}, skill: "release_notes" },
+        { input: { page: 2 }, skill: "release_notes" },
         "input",
-        "`input` goes only with `tool`.",
+        "A skill takes no `input`; pass `input` only with `tool`.",
       ],
     ])("rejects %s", async (_case, input, path, message) => {
       expect(await validateExecute(catalog, input)).toEqual({
         issues: [{ message, path: [path] }],
+      });
+    });
+
+    it("accepts an empty input with a skill, since input defaults to {}", async () => {
+      expect(await validateExecute(catalog, { input: {}, skill: "release_notes" })).toEqual({
+        value: { skill: "release_notes" },
       });
     });
 
