@@ -1,12 +1,22 @@
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
+import type { SessionSchedule } from "#context/session-schedule.js";
 import type { SessionAuth } from "#context/keys.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { ScheduleHandlerArgs } from "#public/definitions/schedule.js";
 import type { ExactDefinition } from "#public/definitions/exact.js";
-import type { Approval } from "#public/definitions/approval.js";
+import type {
+  Approval,
+  ApprovalContext,
+  ApprovalStatus,
+  ApprovalResponseContext,
+  ApprovalResponseDecision,
+} from "#approval/definition.js";
+import type { UserContent } from "ai";
+import type { ChannelReference } from "#channel/compiled-channel.js";
+import type { InferReceiveTarget } from "#channel/receive-target.js";
+import type { Session } from "#channel/session.js";
 import { SCHEDULE_COLLECTION_DEFINITION_BRAND } from "#shared/schedule-collection-definition.js";
 import type { ScheduleProviderContext } from "#runtime/schedules/provider-types.js";
-import { vercelScheduleProvider } from "#public/schedules/providers/vercel.js";
 
 /** A provider namespace scope, represented by one key or a hierarchical key path. */
 export type ScheduleScopeValue = string | readonly string[];
@@ -26,7 +36,11 @@ export interface ScheduleScopeContext {
   readonly abortSignal: AbortSignal;
   readonly operation?: ScheduleOperation;
   readonly name?: string;
-  readonly session: { readonly id: string; readonly auth: SessionAuth };
+  readonly session: {
+    readonly id: string;
+    readonly auth: SessionAuth;
+    readonly schedule?: SessionSchedule;
+  };
   readonly channel: {
     readonly kind?: string;
     readonly continuationToken?: string;
@@ -162,11 +176,36 @@ export interface ScheduleClient<TPayload> {
   list(input?: ScheduleList): Promise<SchedulePageResult>;
 }
 
+/** Starts fresh unattended work bound to the resolved creator; callers cannot choose another identity. */
+export type ScheduleSubscriptionToFn = <TChannel extends ChannelReference<unknown>>(
+  channel: TChannel,
+  target: InferReceiveTarget<TChannel>,
+) => { send(message: string | UserContent): Promise<Session> };
+
+export type ScheduleCreateApproval<TPrepared> =
+  | ((
+      context: ApprovalContext & { readonly payload: TPrepared },
+    ) => ApprovalStatus | Promise<ApprovalStatus>)
+  | {
+      readonly request: (
+        context: ApprovalContext & { readonly payload: TPrepared },
+      ) => ApprovalStatus | Promise<ApprovalStatus>;
+      readonly response?: (
+        context: ApprovalResponseContext & { readonly payload: TPrepared },
+      ) => ApprovalResponseDecision | Promise<ApprovalResponseDecision>;
+    };
+export type ScheduleApprovals<TPrepared> = Partial<
+  Record<Exclude<ScheduleOperation, "create">, Approval>
+> & {
+  readonly create?: ScheduleCreateApproval<TPrepared>;
+};
+
 /** Execution context; `to` starts fresh, unattended sessions as the resolved creator. */
 export interface ScheduleSubscriptionRunArgs<TPayload> extends Pick<
   ScheduleHandlerArgs,
-  "to" | "waitUntil"
+  "waitUntil"
 > {
+  readonly to: ScheduleSubscriptionToFn;
   readonly payload: TPayload;
   readonly occurrence: ScheduleOccurrenceIdentity;
   readonly auth: SessionAuthContext;
@@ -181,7 +220,7 @@ export interface ScheduleSubscriptionDefinition<
   readonly description?: string;
   /** Model-facing payload schema. Destination intent may be resolved by `run`. */
   readonly schema: TSchema;
-  /** Resolved backend. defineScheduleSubscription defaults omitted providers to Vercel Schedules. */
+  /** Backend used to store schedules and deliver occurrences. */
   readonly provider: ScheduleProvider;
   /**
    * Validates application policy and enriches a creation payload before the provider write.
@@ -195,8 +234,9 @@ export interface ScheduleSubscriptionDefinition<
    * return them with the task. Keep captured fields out of the input schema.
    * Channel-less or delegated callers may lack that context; reject those cases explicitly.
    *
-   * Runs only on creation, for both included tools (after approval) and authenticated
-   * clients. Reads, enable/disable operations, and occurrence execution do not call it. Omission
+   * Runs only on creation. Model calls prepare before approval, then prepare again before
+   * writing; execution fails if the prepared result differs from the approved snapshot.
+   * Authenticated clients prepare once before writing without model approval. Reads, enable/disable operations, and occurrence execution do not call it. Omission
    * stores validated input unchanged. Creation retries may call it again, so avoid
    * irreversible side effects; state changes never recapture a different destination.
    * `auth`, `run`, and occurrence events receive the inferred return type. Declare `prepare`
@@ -226,8 +266,10 @@ export interface ScheduleSubscriptionDefinition<
     /** On a permanent provider failure or after its retry budget is exhausted. */
     readonly "occurrence.failed"?: ScheduleOccurrenceEventHandler<NoInfer<TPrepared>>;
   };
-  /** One generated manage tool routes approval by operation: reads need no approval, mutations do. */
-  readonly tools?: false | { readonly approval?: Partial<Record<ScheduleOperation, Approval>> };
+  /** Expose operation tools directly (default true), or false for code-only scheduling. */
+  readonly tool?: boolean;
+  /** Model-call policies keyed by operation. Create receives the validated prepared payload. */
+  readonly approval?: ScheduleApprovals<NoInfer<TPrepared>>;
 }
 
 export type DefinedScheduleSubscription<
@@ -242,18 +284,22 @@ type ScheduleSubscriptionOptions<
   TInput,
   TSchema extends StandardSchemaV1<unknown, TInput>,
   TPrepared = TInput,
-> = Omit<ScheduleSubscriptionDefinition<TInput, TSchema, TPrepared>, "provider"> & {
-  /** Defaults to vercelScheduleProvider(): hosted production scheduling, process-local storage in eve dev. */
-  readonly provider?: ScheduleProvider;
-};
+> = Omit<
+  ScheduleSubscriptionDefinition<TInput, TSchema, TPrepared>,
+  "provider" | "tool" | "approval"
+> & {
+  /** Backend used by this definition. */
+  readonly provider: ScheduleProvider;
+} & (
+    | { readonly tool: false; readonly approval?: never }
+    | { readonly tool?: true; readonly approval?: ScheduleApprovals<NoInfer<TPrepared>> }
+  );
 
 /**
  * Defines a dynamic schedule subscription. Export it from `agent/schedules/`;
  * identity comes from the module path. The schema validates model-authored payload,
  * while eve captures creator identity separately and re-resolves it on every attempt.
  * `run` chooses destinations and starts work; no creation conversation is implicitly captured.
- * Provider defaults to vercelScheduleProvider(); pass provider explicitly to select another backend.
- * The default supports Vercel production and eve dev, not preview or self-hosted scheduling.
  */
 export function defineScheduleSubscription<TInput, TPrepared>(
   definition: Omit<
@@ -273,10 +319,13 @@ export function defineScheduleSubscription<TSchema extends StandardSchemaV1<unkn
   >,
 ): DefinedScheduleSubscription<StandardSchemaV1.InferOutput<TSchema>, TSchema>;
 export function defineScheduleSubscription(
-  definition: ScheduleSubscriptionOptions<any, any, any>,
+  definition: Omit<ScheduleSubscriptionDefinition<any, any, any>, "provider"> & {
+    readonly provider: ScheduleProvider;
+  },
 ): DefinedScheduleSubscription<any, any, any> {
   Object.assign(definition, {
-    provider: definition.provider ?? vercelScheduleProvider(),
+    provider: definition.provider,
+    tool: definition.tool ?? true,
     [SCHEDULE_COLLECTION_DEFINITION_BRAND]: true,
   });
   return definition as DefinedScheduleSubscription<any, any, any>;

@@ -1,6 +1,9 @@
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import { createHash, randomUUID } from "node:crypto";
-import { loadContext } from "#context/container.js";
+import { isDeepStrictEqual } from "node:util";
+import { readSessionSchedule } from "#context/session-schedule.js";
+import { loadContext, contextStorage } from "#context/container.js";
+import type { SessionSchedule } from "#context/session-schedule.js";
 import { dispatchScheduledOccurrence } from "#runtime/schedules/dispatch-occurrence.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import type {
@@ -33,6 +36,23 @@ export interface ScheduleBoundCallContext extends ScheduleScopeContext {
   readonly operationId?: () => string;
 }
 
+export interface PreparedScheduleCreate<TPrepared = unknown> {
+  readonly displayName: string;
+  readonly expression: import("#public/schedules/subscription.js").ScheduleTiming;
+  readonly envelope: ScheduleEnvelope<TPrepared>;
+}
+
+/** Internal capabilities used by generated create approval; authored clients expose only create. */
+export interface ScheduleCollectionClient<TInput, TPrepared> extends ScheduleClient<TInput> {
+  prepareCreate(
+    input: ScheduleClientCreate<TInput>,
+  ): Promise<PreparedScheduleCreate<TInput | TPrepared>>;
+  create(
+    input: ScheduleClientCreate<TInput>,
+    approved?: PreparedScheduleCreate,
+  ): Promise<import("#public/schedules/subscription.js").ScheduleRecord>;
+}
+
 export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
   definition: ScheduleSubscriptionDefinition<
     TPayload,
@@ -40,7 +60,7 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
     TPrepared
   >,
   callContext: ScheduleBoundCallContext,
-): ScheduleClient<TPayload> {
+): ScheduleCollectionClient<TPayload, TPrepared> {
   const nextOperationId = callContext.operationId ?? randomUUID;
 
   const contextFor = (
@@ -60,7 +80,7 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
     operation: NonNullable<ScheduleScopeContext["operation"]>,
     name?: string,
   ): Promise<{ scope: ScheduleScopeValue; provider: ScheduleProviderContext }> => {
-    assertScheduleManagementAllowed(callContext.session.auth.current);
+    assertScheduleManagementAllowed(callContext.session.schedule);
     const context = contextFor(operation, name);
     const scope =
       definition.scope === undefined
@@ -89,34 +109,64 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
     return { scope, provider };
   };
 
+  const prepareCreation = async (input: ScheduleClientCreate<TPayload>) => {
+    const displayName = validateScheduleName(input.name);
+    // Validate timing before preparation; relative delays are resolved again at the write boundary.
+    resolveScheduleTiming(input.expression);
+    const { scope, provider } = await resolveNamespace("create", displayName);
+    const creator = principalReference(callContext.session.auth.current);
+    if (creator === null)
+      throw new Error("Creating a schedule requires an authenticated principal.");
+    const validated = await validateSchedulePayload<TPayload>(definition.schema, input.payload);
+    const preparedPayload =
+      definition.prepare === undefined
+        ? validated
+        : await definition.prepare(validated, {
+            ...contextFor("create", displayName),
+            operation: "create",
+            name: displayName,
+          });
+    const envelope: ScheduleEnvelope<TPayload | TPrepared> = {
+      version: 3,
+      payload: preparedPayload,
+      scope,
+      principal: creator,
+    };
+    const payload = createScheduleCollectionPayload({
+      application: callContext.application,
+      collection: callContext.collection,
+      envelope,
+    });
+    const prepared = {
+      displayName,
+      expression: JSON.parse(
+        JSON.stringify(input.expression),
+      ) as import("#public/schedules/subscription.js").ScheduleTiming,
+      envelope: payload.envelope,
+    };
+    if (Buffer.byteLength(JSON.stringify(prepared)) > 64 * 1024)
+      throw new Error(
+        "Prepared schedule creation exceeds the 64 KB limit, including timing and payload.",
+      );
+    return { prepared, provider };
+  };
+
   return {
-    async create(input: ScheduleClientCreate<TPayload>) {
-      const displayName = validateScheduleName(input.name);
-      const name = `${displayName.slice(0, 219)}--${randomUUID()}`;
+    async prepareCreate(input) {
+      return (await prepareCreation(input)).prepared;
+    },
+    async create(input, approved) {
+      const { prepared, provider } = await prepareCreation(input);
+      if (approved !== undefined && !isDeepStrictEqual(prepared, approved))
+        throw new Error(
+          "Schedule creation changed after approval. Request a new creation approval; no schedule was written.",
+        );
+      const name = `${prepared.displayName.slice(0, 218)}--${randomUUID()}`;
       const expression = resolveScheduleTiming(input.expression);
-      const { scope, provider } = await resolveNamespace("create", displayName);
-      const creator = principalReference(callContext.session.auth.current);
-      if (creator === null)
-        throw new Error("Creating a schedule requires an authenticated principal.");
-      const validated = await validateSchedulePayload<TPayload>(definition.schema, input.payload);
-      const prepared =
-        definition.prepare === undefined
-          ? validated
-          : await definition.prepare(validated, {
-              ...contextFor("create", displayName),
-              operation: "create",
-              name: displayName,
-            });
-      const envelope: ScheduleEnvelope<TPayload | TPrepared> = {
-        version: 3,
-        payload: prepared,
-        scope,
-        principal: creator,
-      };
       const payload = createScheduleCollectionPayload({
         application: callContext.application,
         collection: callContext.collection,
-        envelope,
+        envelope: prepared.envelope,
       });
       return projectScheduleRecord(
         await definition.provider.create(provider, { expression, name, payload }),
@@ -160,11 +210,12 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
   };
 }
 
-export function assertScheduleManagementAllowed(
-  auth: { readonly attributes: Readonly<Record<string, string | readonly string[]>> } | null,
-): void {
-  const value = auth?.attributes["eve.scheduled_run"];
-  if (value === "true" || (Array.isArray(value) && value.includes("true")))
+export function assertScheduleManagementAllowed(schedule?: SessionSchedule): void {
+  const context = contextStorage.getStore();
+  if (
+    schedule !== undefined ||
+    (context !== undefined && readSessionSchedule(context) !== undefined)
+  )
     throw new Error("Schedule management is unavailable during scheduled execution.");
 }
 

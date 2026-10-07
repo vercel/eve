@@ -4,9 +4,9 @@ import type { ChannelAdapter } from "#channel/adapter.js";
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 import { createCrossChannelToFn, toCrossChannelTargets } from "#channel/cross-channel-receive.js";
 import { createSession, type Session } from "#channel/session.js";
-import type { Runtime, SessionAuthContext } from "#channel/types.js";
+import type { Runtime } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { AuthKey, OccurrenceIdKey, ScheduleIdKey } from "#context/keys.js";
+import { AuthKey, OccurrenceIdKey, ScheduleIdKey, ScheduleInstanceKey } from "#context/keys.js";
 import { expectFunction } from "#internal/authored-module.js";
 import type {
   ScheduleDefinition,
@@ -127,14 +127,12 @@ export class ScheduleDispatcher {
       resolvedAuth.subject !== envelope.principal.subject
     )
       throw new Error("Scheduled execution auth must resolve the schedule creator.");
-    const auth: SessionAuthContext = {
-      ...resolvedAuth,
-      attributes: { ...resolvedAuth.attributes, "eve.scheduled_run": "true" },
-    };
+    const auth = resolvedAuth;
     const scope = new ContextContainer();
     scope.set(ScheduleIdKey, input.collectionId);
     scope.set(AuthKey, auth);
     scope.set(OccurrenceIdKey, occurrence.executionId);
+    scope.set(ScheduleInstanceKey, occurrence.name);
     return await contextStorage.run(scope, async () => {
       const runtime: Runtime = {
         ...this.runtime,
@@ -164,7 +162,9 @@ export class ScheduleDispatcher {
         payload,
         occurrence,
         auth,
-        to: args.to,
+        to: (channel, target) => ({
+          send: (message) => args.to(channel, target).send(message, { auth }),
+        }),
         waitUntil: args.waitUntil,
       });
       await Promise.all(waitUntilTasks);

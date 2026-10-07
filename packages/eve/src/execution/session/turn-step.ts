@@ -13,6 +13,9 @@ import {
 } from "#context/dynamic-tool-lifecycle.js";
 import {
   AuthKey,
+  ScheduleIdKey,
+  ScheduleInstanceKey,
+  OccurrenceIdKey,
   InitiatorAuthKey,
   SessionTitleKey,
   ParentSessionKey,
@@ -169,6 +172,20 @@ async function runSessionStepBody(
     }
   }
 
+  // A new inbound message is a new caller action, not a scheduled occurrence.
+  // Approval/input responses alone keep the parked turn's provenance.
+  if (delivery?.payloads.some((payload) => payload.message !== undefined)) {
+    ctx.delete(ScheduleIdKey);
+    ctx.delete(ScheduleInstanceKey);
+    ctx.delete(OccurrenceIdKey);
+    if (delivery.schedule !== undefined) {
+      ctx.set(ScheduleIdKey, delivery.schedule.definition);
+      if (delivery.schedule.instance !== undefined)
+        ctx.set(ScheduleInstanceKey, delivery.schedule.instance);
+      if (delivery.schedule.occurrenceId !== undefined)
+        ctx.set(OccurrenceIdKey, delivery.schedule.occurrenceId);
+    }
+  }
   const previousAuth = ctx.get(AuthKey);
   const hadInitiator = ctx.has(InitiatorAuthKey);
 

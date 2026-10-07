@@ -37,7 +37,8 @@ const DEFINITION_KEYS = [
   "run",
   "auth",
   "events",
-  "tools",
+  "tool",
+  "approval",
 ] as const;
 
 export function normalizeScheduleCollectionDefinition(
@@ -90,29 +91,28 @@ export function normalizeScheduleCollectionDefinition(
   for (const method of PROVIDER_METHODS)
     if (typeof provider[method] !== "function")
       throw new Error(`${message} provider.${method} must be a function.`);
-  if (record.tools !== undefined && record.tools !== false) {
-    const tools = expectObjectRecord(
-      record.tools,
-      `${message} "tools" must be an object or false.`,
+  if (record.tool !== undefined && typeof record.tool !== "boolean")
+    throw new Error(
+      `${message} "tool" must be true or false; deferred tools are not supported yet.`,
     );
-    expectOnlyKnownKeys(tools, ["approval"], `${message} "tools"`);
-    if (tools.approval !== undefined) {
-      const approval = expectObjectRecord(
-        tools.approval,
-        `${message} "tools.approval" must be an object.`,
-      );
-      expectOnlyKnownKeys(approval, SCHEDULE_OPERATIONS, `${message} "tools.approval"`);
-      for (const [operation, policy] of Object.entries(approval)) {
-        if (
-          typeof policy !== "function" &&
-          (typeof policy !== "object" ||
-            policy === null ||
-            typeof Reflect.get(policy, "request") !== "function" ||
-            (Reflect.get(policy, "response") !== undefined &&
-              typeof Reflect.get(policy, "response") !== "function"))
-        )
-          throw new Error(`${message} "tools.approval.${operation}" must be an approval policy.`);
-      }
+  if (record.tool === false && record.approval !== undefined)
+    throw new Error(`${message} "approval" cannot be configured when tool is false.`);
+  if (record.approval !== undefined) {
+    const approval = expectObjectRecord(
+      record.approval,
+      `${message} "approval" must be an object.`,
+    );
+    expectOnlyKnownKeys(approval, SCHEDULE_OPERATIONS, `${message} "approval"`);
+    for (const [operation, policy] of Object.entries(approval)) {
+      if (
+        typeof policy !== "function" &&
+        (typeof policy !== "object" ||
+          policy === null ||
+          typeof Reflect.get(policy, "request") !== "function" ||
+          (Reflect.get(policy, "response") !== undefined &&
+            typeof Reflect.get(policy, "response") !== "function"))
+      )
+        throw new Error(`${message} "approval.${operation}" must be an approval policy.`);
     }
   }
   return value as ScheduleSubscriptionDefinition;

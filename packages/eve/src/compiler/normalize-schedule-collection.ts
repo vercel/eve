@@ -23,6 +23,6 @@ export function compileScheduleCollectionDefinition(
     sourceKind: "module",
   };
   if (definition.description !== undefined) compiled.description = definition.description;
-  if (definition.tools !== undefined) compiled.tools = definition.tools !== false;
+  if (definition.tool !== undefined) compiled.tools = definition.tool;
   return compiled;
 }
