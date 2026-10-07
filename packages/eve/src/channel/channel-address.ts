@@ -23,6 +23,18 @@ import type {
 } from "#channel/types.js";
 import { DEFAULT_TURN_POLICY } from "#channel/types.js";
 import { isReservedSessionCommandToken } from "#execution/session-inbox/address.js";
+import { validateSessionHistory } from "#shared/session-history.js";
+
+interface BaseChannelAddressCreateOptions {
+  readonly auth: SessionAuthContext | null;
+  readonly history?: SendPayload["history"];
+  readonly initiatorAuth?: SessionAuthContext | null;
+  readonly title?: string;
+}
+
+type ChannelAddressCreateOptions<TState = undefined> = [TState] extends [undefined]
+  ? BaseChannelAddressCreateOptions
+  : BaseChannelAddressCreateOptions & { readonly state?: Partial<TState> };
 
 interface BaseChannelAddressDeliveryOptions {
   readonly auth: SessionAuthContext | null;
@@ -47,6 +59,7 @@ export type ChannelAddressDeliveryOptions<TState = undefined> = [TState] extends
 interface ChannelAddress<TState = undefined> {
   readonly continuationToken: string;
   deliver(input: SendPayload, options: ChannelAddressDeliveryOptions<TState>): Promise<Session>;
+  create(options: ChannelAddressCreateOptions<TState>): Promise<Session>;
   send(
     message: string | UserContent,
     options: ChannelAddressDeliveryOptions<TState>,
@@ -87,7 +100,7 @@ export function createChannelAddress<TState = undefined>(input: {
         metadata.channelKind !== undefined && metadata.channelName !== undefined
           ? createChannelDeliveryMetadata(metadata as ChannelDeliverySource)
           : undefined;
-      const payload = normalizeSendInput(sendInput);
+      const payload = withValidatedHistory(normalizeSendInput(sendInput));
       const caller = sessionCallbackToTurnCaller(options.callback);
       const commandWithoutCaller = {
         auth: options.auth,
@@ -125,6 +138,7 @@ export function createChannelAddress<TState = undefined>(input: {
         initiatorAuth: options.initiatorAuth,
         input: {
           context: payload.context,
+          history: payload.history,
           message: serializeFilePartsInMessage(payload.message) ?? "",
           outputSchema: payload.outputSchema,
           state: payload.state,
@@ -145,6 +159,42 @@ export function createChannelAddress<TState = undefined>(input: {
         throw new SessionNotActiveError();
       }
       return toSession((await input.runtime.createSession(runInput)).sessionId);
+    },
+    async create(options) {
+      const history = validateSessionHistory(options.history);
+      const owner = await input.runtime.resolveContinuation(namespacedToken);
+      if (owner !== undefined) {
+        return createSession(owner.sessionId, input.runtime, {
+          ...metadata,
+          turnPolicy: input.turnPolicy,
+        });
+      }
+      const state = (options as { readonly state?: TState }).state;
+      await input.runtime.createSession({
+        adapter:
+          state === undefined
+            ? input.adapter
+            : {
+                ...input.adapter,
+                state: { ...input.adapter.state, ...(state as Record<string, unknown>) },
+              },
+        auth: options.auth,
+        capabilities: { requestInput: true },
+        channelName: input.channelName,
+        continuationToken: namespacedToken,
+        initiatorAuth: options.initiatorAuth,
+        input: history === undefined ? {} : { history },
+        requestId: metadata.requestId,
+        title: options.title,
+      });
+      // The new run claims the address asynchronously. Returning its owner, rather than the run
+      // just started, lets an immediate `send()` find it and settles concurrent creates on the
+      // winner.
+      const claimed = await waitForContinuationOwner(input.runtime, namespacedToken);
+      return createSession(claimed.sessionId, input.runtime, {
+        ...metadata,
+        turnPolicy: input.turnPolicy,
+      });
     },
     async send(message, options) {
       return await this.deliver({ message }, options);
@@ -200,4 +250,29 @@ export function createChannelAddressFn<TState = undefined>(input: {
   readonly turnPolicy?: TurnPolicy;
 }): ChannelAddressFn<TState> {
   return (continuationToken) => createChannelAddress({ ...input, continuationToken });
+}
+
+function withValidatedHistory(payload: SendPayload): SendPayload {
+  const { history, ...rest } = payload;
+  const validated = validateSessionHistory(history);
+  return validated === undefined ? rest : { ...rest, history: validated };
+}
+
+const CREATE_CLAIM_TIMEOUT_MS = 15_000;
+
+async function waitForContinuationOwner(
+  runtime: Runtime,
+  continuationToken: string,
+): Promise<{ readonly sessionId: string }> {
+  const deadline = Date.now() + CREATE_CLAIM_TIMEOUT_MS;
+  for (let delayMs = 25; ; delayMs = Math.min(delayMs * 2, 500)) {
+    const owner = await runtime.resolveContinuation(continuationToken);
+    if (owner !== undefined) return owner;
+    if (Date.now() + delayMs > deadline) {
+      throw new Error(
+        `create() started a session for "${continuationToken}", but it did not claim the address within ${CREATE_CLAIM_TIMEOUT_MS / 1000}s.`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
 }

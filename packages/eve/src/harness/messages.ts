@@ -10,6 +10,7 @@ import type { InputResponse } from "#shared/input.js";
 import type { StepInput } from "#harness/types.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { attachInputText, readInputText } from "#internal/input-text.js";
+import type { SessionHistoryMessage } from "#shared/session-history.js";
 
 /** Reason a framework-authored user-role message was added to model history. */
 export type FrameworkMessageKind =
@@ -57,6 +58,20 @@ export function createUserMessage(
 ): UserModelMessage {
   const message: UserModelMessage = { content, kind, role: "user" };
   return metadata === undefined ? message : { ...message, metadata };
+}
+
+/** Metadata key marking a user message seeded from `history` rather than typed in a turn. */
+export const IMPORTED_MESSAGE_METADATA_KEY = "eve.imported";
+
+/** Maps seeded history to model messages: plain user and assistant text, nothing else. */
+export function createImportedHistoryMessages(
+  history: readonly SessionHistoryMessage[],
+): HarnessModelMessage[] {
+  return history.map((message) =>
+    message.role === "user"
+      ? createUserMessage("user", message.content, { [IMPORTED_MESSAGE_METADATA_KEY]: true })
+      : { content: message.content, role: "assistant" },
+  );
 }
 
 /** Builds a framework-authored user-role message for model history. */
@@ -153,6 +168,7 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
     a: a.context,
     b: b.context,
   });
+  const history = [...(a.history ?? []), ...(b.history ?? [])];
   const frameworkMessageKind = coalesceFrameworkMessageKind({ a, b });
   const ephemeralContext = coalesceContext({
     a: readClientContext(a),
@@ -170,6 +186,7 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
     inputResponses?: readonly InputResponse[];
     message?: string | UserContent;
     context?: readonly string[];
+    history?: StepInput["history"];
     outputSchema?: StepInput["outputSchema"];
   } = {};
 
@@ -187,6 +204,10 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
 
   if (context !== undefined) {
     result.context = context;
+  }
+
+  if (history.length > 0) {
+    result.history = history;
   }
 
   if (outputSchema !== undefined) {
