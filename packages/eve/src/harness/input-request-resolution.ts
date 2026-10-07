@@ -1,6 +1,7 @@
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import type { SettledCall } from "#harness/session-machine/transitions.js";
 import type { StepCoordinates as PendingInputBatchEvent } from "#harness/session-machine/view.js";
+import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 
 const IGNORED_INPUT_REASON = "Ignored because the user continued without responding.";
@@ -69,7 +70,7 @@ export function resolveApprovalOutcome(response: InputResponse | undefined): {
 
 /** What the model reads when a call's tool went away before the call could run. */
 export function unavailableToolMessage(toolName: string): string {
-  return `The tool "${toolName}" is no longer available, so the call didn't run. If the task still needs it, find an available tool with search and make a new call.`;
+  return `The tool "${toolName}" is no longer available, so the call didn't run. If the task still needs it, find an available tool with ${SEARCH_TOOL_NAME} and make a new call.`;
 }
 
 /**
