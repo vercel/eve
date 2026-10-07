@@ -147,7 +147,7 @@ function setup(mode: ServerMode) {
   return {
     seen,
     startAuthorization,
-    search: (query?: string) =>
+    search: (query: string) =>
       contextStorage.run(ctx, () => catalog.advertised.get("search")!.execute!({ query }, options)),
     /** Runs `execute({ tool, input })` the way the harness runs a resolved call. */
     execute: (tool: string, input: object = {}) => {
@@ -234,7 +234,7 @@ describe("MCP connections sign in only when the server asks", () => {
   it("finds a server that rejects anonymous listing as its sign-in result, which signs in", async () => {
     const kennel = setup("token-everywhere");
 
-    expect(await kennel.search()).toEqual({
+    expect(await kennel.search("kennel__")).toEqual({
       results: [
         {
           description: "Sign in to use the Kennel tools: Pet boarding.",
@@ -248,9 +248,9 @@ describe("MCP connections sign in only when the server asks", () => {
     expect(isAuthorizationSignal(await kennel.execute("kennel"))).toBe(true);
     kennel.finishSignIn();
     expect(await kennel.execute("kennel")).toBe(
-      'Signed in to Kennel. Find the Kennel tools with search({ query: "kennel" }).',
+      'Signed in to Kennel. Find the Kennel tools with search({ query: "kennel__" }).',
     );
-    expect(await kennel.search("kennel")).toMatchObject({
+    expect(await kennel.search("kennel__")).toMatchObject({
       results: [{ tool: "kennel__find_pet" }, { tool: "kennel__pet_invoice" }],
     });
   });

@@ -111,7 +111,7 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
       [
         { id: "catalog-search", name: "search", input: () => ({ query: "private-catalog" }) },
         { id: "catalog-sign-in", name: "execute", input: () => ({ tool: "private-catalog" }) },
-        { id: "catalog-tools", name: "search", input: () => ({ query: "private-catalog" }) },
+        { id: "catalog-tools", name: "search", input: () => ({ query: "private-catalog__" }) },
         {
           id: "catalog-items",
           name: "execute",

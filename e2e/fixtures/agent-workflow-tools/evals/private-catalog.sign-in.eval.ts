@@ -16,7 +16,7 @@ const found = (value: unknown) => results.safeParse(value).data?.results ?? [];
 
 export default defineEval({
   description:
-    "A plain search finds private-catalog as its sign-in entry without prompting; executing it holds the turn for sign-in, and the resumed turn signs in, then searches and calls its tool over authenticated HTTP.",
+    "A plain search finds private-catalog as its sign-in entry without prompting; executing it holds the turn for sign-in, and the resumed turn signs in, then searches the private-catalog__ namespace and calls its tool over authenticated HTTP.",
   timeoutMs: 90_000,
 
   async test(t) {
@@ -72,7 +72,7 @@ export default defineEval({
     });
     completed.calledTool("search", {
       count: 1,
-      input: { query: CATALOG },
+      input: { query: `${CATALOG}__` },
       output: (value) => found(value).some((entry) => entry.tool === ITEMS_TOOL),
     });
     completed.calledTool(ITEMS_TOOL, {

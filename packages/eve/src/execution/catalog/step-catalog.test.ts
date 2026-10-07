@@ -214,7 +214,7 @@ describe("buildStepCatalog", () => {
         "a skill named like a connection",
         { skill: "Linear" },
         "skill",
-        'No skill named "Linear". Find skills with search. "linear" is a connection, not a skill. Find its tools with search({ query: "linear" }).',
+        'No skill named "Linear". Find skills with search. "linear" is a connection, not a skill. Find its tools with search({ query: "linear__" }).',
       ],
       ["neither tool nor skill", {}, "tool", "Pass `tool`, or `skill` to load a skill."],
       [
@@ -395,12 +395,14 @@ describe("buildStepCatalog", () => {
 
       finishSignIn();
       expect(await connect()).toBe(
-        'Signed in to Notion. Find the Notion tools with search({ query: "notion" }).',
+        'Signed in to Notion. Find the Notion tools with search({ query: "notion__" }).',
       );
       expect(notion.signIns).toHaveLength(1);
       const search = catalog.advertised.get("search")!;
       expect(
-        await run(() => search.execute!({ query: "notion" }, { messages: [], toolCallId: "find" })),
+        await run(() =>
+          search.execute!({ query: "notion__" }, { messages: [], toolCallId: "find" }),
+        ),
       ).toMatchObject({ results: [{ tool: "notion__search_pages" }] });
     });
 
@@ -408,7 +410,7 @@ describe("buildStepCatalog", () => {
       const { connect, notion } = notionCatalog({ listing: "listed" });
 
       expect(await connect()).toBe(
-        'The Notion tools are available. Find them with search({ query: "notion" }).',
+        'The Notion tools are available. Find them with search({ query: "notion__" }).',
       );
       expect(notion.signIns).toEqual([]);
     });
