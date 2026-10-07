@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
+import { isAuthorizationSignal, PendingAuthorizationResultKey } from "#harness/authorization.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import {
   catalogContext,
@@ -10,6 +11,7 @@ import {
   subagentTool,
   workflowTool,
 } from "#internal/testing/catalog-fixtures.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 import type { StepCatalog } from "./step-catalog.js";
 
@@ -206,13 +208,13 @@ describe("buildStepCatalog", () => {
         "an unknown skill, with the closest names",
         { skill: "release" },
         "skill",
-        'No skill named "release". Closest skills: release_notes, release-checklist.',
+        'No skill named "release". Closest skills: release-checklist, release_notes.',
       ],
       [
         "a skill named like a connection",
         { skill: "Linear" },
         "skill",
-        'No skill named "Linear". Find skills with search. "linear" is a connection, not a skill. Find its tools with search({ connection: "linear" }).',
+        'No skill named "Linear". Find skills with search. "linear" is a connection, not a skill. Find its tools with search({ query: "linear" }).',
       ],
       ["neither tool nor skill", {}, "tool", "Pass `tool`, or `skill` to load a skill."],
       [
@@ -334,6 +336,103 @@ describe("buildStepCatalog", () => {
       expect(
         await validateExecute(catalog, { input: { team: 7 }, tool: "linear__list_issues" }),
       ).toEqual({ value: { input: { team: 7 }, tool: "linear__list_issues" } });
+    });
+  });
+
+  describe("connection sign-in", () => {
+    function notionCatalog(
+      options: Pick<
+        Parameters<typeof fakeConnection>[0],
+        "listing" | "rejectsToken" | "signIn"
+      > = {},
+    ) {
+      const notion = fakeConnection({
+        description: "Notion pages",
+        listing: "sign-in",
+        name: "notion",
+        signIn: true,
+        ...options,
+        tools: [connectionTool("search_pages")],
+      });
+      const context = catalogContext({ connections: [notion] });
+      const signIn = context.catalog.resolve({ input: { tool: "notion" }, toolName: "execute" })!;
+      return {
+        ...context,
+        notion,
+        signIn,
+        connect: () =>
+          context.run(() =>
+            signIn.definition.execute!(signIn.call.input, { messages: [], toolCallId: "connect" }),
+          ),
+        /** Delivers the finished sign-in, as the turn step does when its callback arrives. */
+        finishSignIn: () =>
+          context.ctx.set(PendingAuthorizationResultKey, [
+            {
+              callback: { method: "GET", params: { code: "ok" } },
+              hookUrl: "https://agent.example.com/callback",
+              name: "notion",
+            },
+          ]),
+      };
+    }
+
+    it("parks execute({ tool: <connection> }) for sign-in, then reports the sign-in and lists the tools", async () => {
+      const { catalog, connect, finishSignIn, notion, run, signIn } = notionCatalog();
+
+      expect(signIn.call.toolName).toBe("notion");
+      expect(signIn.definition.label?.start?.({})).toBe("Connect Notion");
+      expect(signIn.definition.approval).toBeUndefined();
+      const parked = await connect();
+      expect(isAuthorizationSignal(parked)).toBe(true);
+      expect(parked).toMatchObject({ challenges: [{ name: "notion" }] });
+      expect(notion.signIns).toHaveLength(1);
+
+      finishSignIn();
+      expect(await connect()).toBe(
+        'Signed in to Notion. Find the Notion tools with search({ query: "notion" }).',
+      );
+      expect(notion.signIns).toHaveLength(1);
+      const search = catalog.advertised.get("search")!;
+      expect(
+        await run(() => search.execute!({ query: "notion" }, { messages: [], toolCallId: "find" })),
+      ).toMatchObject({ results: [{ tool: "notion__search_pages" }] });
+    });
+
+    it("confirms a connection whose tools are already listable, without prompting", async () => {
+      const { connect, notion } = notionCatalog({ listing: "listed" });
+
+      expect(await connect()).toBe(
+        'The Notion tools are available. Find them with search({ query: "notion" }).',
+      );
+      expect(notion.signIns).toEqual([]);
+    });
+
+    it("fails rather than asking again when the service rejects the token it just issued", async () => {
+      const { connect, finishSignIn, notion } = notionCatalog({ rejectsToken: true });
+
+      await connect();
+      finishSignIn();
+
+      await expect(connect()).rejects.toThrow(
+        'Authorization failed for "notion": the service rejected the token immediately after authorization.',
+      );
+      expect(notion.signIns).toHaveLength(1);
+    });
+
+    it.each([
+      [
+        "a connection that cannot start sign-in",
+        { signIn: false },
+        '"notion" requires authorization and cannot start interactive sign-in.',
+      ],
+      [
+        "a listing failure",
+        { listing: new Error("upstream returned 502") },
+        'Failed to load tools for "notion": upstream returned 502',
+      ],
+    ])("fails for %s", async (_case, options, message) => {
+      captureLogRecords();
+      await expect(notionCatalog(options).connect()).rejects.toThrow(message);
     });
   });
 });

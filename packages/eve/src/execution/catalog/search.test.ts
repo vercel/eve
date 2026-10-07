@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import { isAuthorizationSignal } from "#harness/authorization.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import {
   catalogContext,
@@ -64,19 +63,20 @@ describe("search", () => {
   it("ranks tools and skills together by name before description", async () => {
     const output = await searchFor(tools, { skills })({ query: "refund" });
 
+    // Equal matches sort by name, compared by code unit: `-` before `_`.
     expect(names(output)).toEqual([
-      "refund_invoice",
       "refund-policy",
+      "refund_invoice",
       "billing_specialist",
       "list_invoices",
     ]);
     expect(output.total).toBe(4);
-    expect(output.results[1]).toEqual({
+    expect(output.results[0]).toEqual({
       description: "How to refund a disputed charge.",
       path: "$HOME/.agents/skills/refund-policy/SKILL.md",
       skill: "refund-policy",
     });
-    expect(output.results[0]).toEqual({
+    expect(output.results[1]).toEqual({
       description: "Refund a paid invoice.",
       signature: "refund_invoice(input: { invoiceId: string }): Promise<unknown>",
       tool: "refund_invoice",
@@ -90,8 +90,8 @@ describe("search", () => {
       "billing_specialist",
       "export_ledger",
       "list_invoices",
-      "refund_invoice",
       "refund-policy",
+      "refund_invoice",
     ]);
   });
 
@@ -158,20 +158,9 @@ describe("search", () => {
       ]);
     });
 
-    it("lists one connection's tools when searching it", async () => {
-      const output = await searchFor(tools, { connections: [linear()] })({ connection: "linear" });
-
-      expect(names(output)).toEqual(["linear__create_project", "linear__list_issues"]);
-    });
-
-    it("rejects a connection that is not available", async () => {
-      await expect(
-        searchFor(tools, { connections: [linear()] })({ connection: "jira" }),
-      ).rejects.toThrow('Connection "jira" is not available. Available connections: linear.');
-    });
-
-    it("reports a connection that needs sign-in without prompting, and prompts only with signIn", async () => {
+    it("lists a connection whose tools need sign-in as one result named after it, and never prompts", async () => {
       const notion = fakeConnection({
+        description: "Notion pages and databases",
         listing: "sign-in",
         name: "notion",
         signIn: true,
@@ -179,67 +168,149 @@ describe("search", () => {
       });
       const search = searchFor(tools, { connections: [linear(), notion] });
 
-      const plain = await search({ query: "pages" });
-      expect(plain).toEqual({
-        results: [],
-        total: 0,
-        unavailable: [
-          {
-            connection: "notion",
-            error:
-              'Sign-in required: the user has not signed in to "notion", so its tools cannot be listed. If the request needs "notion", call search with connection "notion" and signIn: true to ask the user to sign in.',
-            requiresSignIn: true,
-          },
-        ],
-      });
-      expect(await search({ connection: "notion" })).toMatchObject({
-        unavailable: [{ connection: "notion", requiresSignIn: true }],
-      });
+      const signIn = {
+        description: "Sign in to use the Notion tools: Notion pages and databases",
+        signature: "notion(input: {}): Promise<unknown>",
+        tool: "notion",
+      };
+      expect(await search({ query: "notion" })).toEqual({ results: [signIn], total: 1 });
+      // Found by the connection's description too, while its tools can't be listed.
+      expect((await search({ query: "pages" })).results).toEqual([signIn]);
+      expect(names(await search({}))).toEqual(
+        expect.arrayContaining(["notion", "linear__list_issues"]),
+      );
       expect(notion.signIns).toEqual([]);
-
-      await expect(search({ signIn: true })).rejects.toThrow(
-        "search with signIn: true requires `connection`.",
-      );
-      const signIn = await search({ connection: "notion", signIn: true });
-      expect(isAuthorizationSignal(signIn)).toBe(true);
-      expect(notion.signIns).toHaveLength(1);
     });
 
-    it("reports a connection that cannot start sign-in as unavailable, without requiresSignIn", async () => {
-      const vault = fakeConnection({ listing: "sign-in", name: "vault", tools: [] });
-      const search = searchFor(tools, { connections: [vault] });
-
-      expect((await search({})).unavailable).toEqual([
-        {
-          connection: "vault",
-          error: '"vault" requires authorization and cannot start interactive sign-in.',
-        },
-      ]);
-      await expect(search({ connection: "vault", signIn: true })).rejects.toThrow(
-        '"vault" requires authorization and cannot start interactive sign-in.',
-      );
-    });
-
-    it("lists a connection whose tools fail to load for another reason, and fails a search of it alone", async () => {
+    it("reports a connection that cannot start sign-in, and one whose tools fail to load, as unavailable", async () => {
       const logs = captureLogRecords();
-      const broken = fakeConnection({
+      const vault = fakeConnection({ listing: "sign-in", name: "vault", tools: [] });
+      const crm = fakeConnection({
         listing: new Error("upstream returned 502"),
         name: "crm",
         tools: [],
       });
-      const search = searchFor(tools, { connections: [linear(), broken] });
 
-      const output = await search({});
+      const output = await searchFor(tools, { connections: [linear(), vault, crm] })({});
+
       expect(names(output)).toContain("linear__list_issues");
+      expect(names(output)).not.toContain("vault");
       expect(output.unavailable).toEqual([
+        {
+          connection: "vault",
+          error: '"vault" requires authorization and cannot start interactive sign-in.',
+        },
         { connection: "crm", error: 'Failed to load tools for "crm": upstream returned 502' },
       ]);
-      await expect(search({ connection: "crm" })).rejects.toThrow(
-        'Failed to load tools for "crm": upstream returned 502',
-      );
       expect(logs.records).toContainEqual(
         expect.objectContaining({ level: "warn", message: "failed to load connection tools" }),
       );
+    });
+  });
+
+  describe("ranking", () => {
+    const search = searchFor(
+      [
+        inlineTool("pdf", { deferred: true, description: "Open a document." }),
+        inlineTool("pdf_fill", {
+          deferred: true,
+          description: "Fill a PDF form from pdf fields.",
+          schema: {
+            type: "object",
+            properties: { pdf: { type: "string", description: "The pdf to fill." } },
+          },
+        }),
+        inlineTool("create_issue", { deferred: true, description: "File a local ticket." }),
+        inlineTool("linear_report", { deferred: true, description: "Summarize Linear usage." }),
+      ],
+      {
+        connections: [
+          fakeConnection({
+            description: "Linear issues and projects",
+            name: "linear",
+            tools: [
+              connectionTool("create_issue"),
+              connectionTool("create_project"),
+              connectionTool("list_issues"),
+            ],
+          }),
+          fakeConnection({
+            description: "Jira issues",
+            name: "jira",
+            tools: [connectionTool("create_issue")],
+          }),
+          fakeConnection({
+            description: "Service health",
+            name: "ops",
+            tools: [connectionTool("getHTTPServerStatus")],
+          }),
+          fakeConnection({ description: "Posts", name: "x", tools: [connectionTool("post")] }),
+        ],
+        skills: [{ deferred: true, description: "Fill PDF forms.", name: "pdf-forms" }],
+      },
+    );
+    const ranked = async (query: string) => names(await search({ limit: 50, query }));
+
+    it("ranks an exact name first, above an entry that mentions it in more places", async () => {
+      expect((await ranked("pdf")).slice(0, 2)).toEqual(["pdf", "pdf_fill"]);
+    });
+
+    it("ranks an exact full name above the same name under a connection's prefix", async () => {
+      const results = await ranked("create_issue");
+
+      expect(results[0]).toBe("create_issue");
+      expect(results.slice(1, 3).sort()).toEqual(["jira__create_issue", "linear__create_issue"]);
+      expect((await ranked("linear__create_issue"))[0]).toBe("linear__create_issue");
+    });
+
+    it("lists a connection's tools for its name, before an entry whose name starts with it", async () => {
+      const results = await ranked("linear");
+
+      expect(results.slice(0, 3).sort()).toEqual([
+        "linear__create_issue",
+        "linear__create_project",
+        "linear__list_issues",
+      ]);
+      expect(results[3]).toBe("linear_report");
+    });
+
+    it("matches a name prefix whose last word is partial", async () => {
+      expect((await ranked("create_iss")).slice(0, 3).sort()).toEqual([
+        "create_issue",
+        "jira__create_issue",
+        "linear__create_issue",
+      ]);
+      expect((await ranked("linear__cre")).slice(0, 2).sort()).toEqual([
+        "linear__create_issue",
+        "linear__create_project",
+      ]);
+    });
+
+    it("finds a one-letter connection by its name", async () => {
+      expect((await ranked("x"))[0]).toBe("x__post");
+    });
+
+    it.each(["http server", "getHttpServer", "get_http_server_status"])(
+      "splits camelCase and acronyms into words, so %s finds getHTTPServerStatus",
+      async (query) => {
+        expect((await ranked(query))[0]).toBe("ops__getHTTPServerStatus");
+      },
+    );
+
+    it("lists every entry for an empty query, by connection and then name in code-unit order", async () => {
+      expect(await ranked("")).toEqual([
+        "create_issue",
+        "linear_report",
+        "pdf",
+        "pdf-forms",
+        "pdf_fill",
+        "jira__create_issue",
+        "linear__create_issue",
+        "linear__create_project",
+        "linear__list_issues",
+        "ops__getHTTPServerStatus",
+        "x__post",
+      ]);
     });
   });
 });

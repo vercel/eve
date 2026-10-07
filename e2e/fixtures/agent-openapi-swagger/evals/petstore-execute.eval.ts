@@ -17,7 +17,7 @@ export default defineEval({
     t.toolOrder(["search", INVENTORY_TOOL]);
     turn.calledTool("search", {
       count: 1,
-      input: { connection: "petstore" },
+      input: { query: "petstore" },
       output: (value) => JSON.stringify(value).includes(`"tool":"${INVENTORY_TOOL}"`),
     });
     // The call is reported under the entry's name, never as a nested execute action.

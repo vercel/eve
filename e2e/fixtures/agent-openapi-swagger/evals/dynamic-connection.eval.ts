@@ -16,7 +16,7 @@ export default defineEval({
     turn.expectOk();
     turn.calledTool("search", {
       count: 1,
-      input: { connection: "dynamic-catalog" },
+      input: { query: "dynamic-catalog" },
       output: (value) => JSON.stringify(value).includes('"tool":"dynamic-catalog__getStatus"'),
     });
     t.messageIncludes("DYNAMIC_CONNECTION_FOUND");
