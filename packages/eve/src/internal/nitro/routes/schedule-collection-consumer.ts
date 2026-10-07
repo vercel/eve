@@ -11,7 +11,7 @@ import {
   type VerifiedScheduleMessage,
 } from "#internal/schedules/verify-delivery.js";
 import type {
-  ScheduleSubscriptionDefinition,
+  DynamicSchedulesDefinition,
   ScheduleOccurrenceIdentity,
 } from "#public/schedules/subscription.js";
 import { readVercelScheduleClientOptions } from "#public/schedules/providers/vercel.js";
@@ -47,7 +47,7 @@ export async function handleScheduleCollectionConsumer(
         metadata.topicName !== deriveEveScheduleQueueTopic(application)
       )
         throw new PermanentScheduleMessageError("Schedule delivery does not match this agent.");
-      let definition: ScheduleSubscriptionDefinition<unknown>;
+      let definition: DynamicSchedulesDefinition<unknown>;
       try {
         definition = await loadScheduleCollectionDefinition(bundle, collection, {
           manifest,
@@ -122,7 +122,7 @@ export async function handleScheduleCollectionConsumer(
 
 /** Reads the delivered schedule with the collection provider's own client options. */
 async function getSchedule(
-  definition: ScheduleSubscriptionDefinition<unknown>,
+  definition: DynamicSchedulesDefinition<unknown>,
   queue: VerifiedScheduleMessage,
 ) {
   try {
