@@ -22,6 +22,12 @@ const childModel = mockModel({
 
 const config = e2eAgentConfig({
   mock: ({ lastUserMessage, toolResults, userMessages }) => {
+    if (lastUserMessage?.includes("inspect_trace")) {
+      const result = toolResults.find((entry) => entry.name === "inspect_trace");
+      return result === undefined
+        ? { toolCalls: [{ name: "inspect_trace", input: {} }] }
+        : JSON.stringify(result.output);
+    }
     if (lastUserMessage?.includes("favorite word") && lastUserMessage.includes("?")) {
       const remembered = userMessages
         .map((message) => /My favorite word is (\w+)/u.exec(message)?.[1])
