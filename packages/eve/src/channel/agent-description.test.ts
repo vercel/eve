@@ -7,10 +7,11 @@ import {
 } from "#channel/agent-description.js";
 import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { withBundledCompiledArtifacts } from "#runtime/loaders/bundled-artifacts.js";
 import {
-  installBundledCompiledArtifacts,
-  withBundledCompiledArtifacts,
-} from "#runtime/loaders/bundled-artifacts.js";
+  getActiveRuntimeSession,
+  setRuntimeSessionCompiledArtifacts,
+} from "#runtime/sessions/runtime-session.js";
 
 it("describes only the tools invokeTool can run, sorted by name", () => {
   const tool = (name: string, extra: Record<string, unknown> = {}) => ({
@@ -126,7 +127,8 @@ describe("loadDescribedAgent", () => {
       });
       expect(await loadDescribedAgent(source)).toBe(described);
 
-      installBundledCompiledArtifacts(third);
+      // Replace the snapshot inside this scoped session, as a redeploy would.
+      setRuntimeSessionCompiledArtifacts(getActiveRuntimeSession(), third);
       expect((await loadDescribedAgent(source)).description.name).toBe("third");
     });
   });
