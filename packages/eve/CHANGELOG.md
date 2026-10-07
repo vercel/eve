@@ -1,5 +1,42 @@
 # eve
 
+## 0.72.1
+
+### Patch Changes
+
+- c230e94: MCP connections now ask the user to sign in only when the server asks for it. When a connection has `auth` but no token yet, eve connects without an `Authorization` header, so servers that allow anonymous `initialize` and `tools/list` have their tools listed by `connection_search` and run by `connection_execute` with no prompt. Sign-in starts when a call returns HTTP `401` or an error result with a `_meta["mcp/www_authenticate"]` challenge, and the call runs again with the token once the user signs in. Servers that reject every request without a token behave as before, and connections that already have a token are unchanged.
+- e3c509f: `mockModel` responders see tool-result files again as `{ type: "file", data: { type: "data", data } }` parts in `toolResults[].output`. Since `ai@7.0.116`, they had received legacy `file-data` parts, so a scripted model that looked for an image from `toModelOutput` could miss it and keep calling the tool.
+
+## 0.72.0
+
+### Minor Changes
+
+- 198d6f5: Breaking: follows the AI SDK rename from evaluation to decisions and updates to `ai@7.0.128`. `evaluate` from `eve/ai` is now `decide`, and `auto` and `t.judge(...)` accept `Experimental_DecisionModel` instances such as `provider.decisionModel(...)`. Replace `evaluate` imports with `decide` and `evaluationModel(...)` calls with `decisionModel(...)`. Extensions built against the previous `tool` or `dynamicTool` capability must be rebuilt against this release.
+- 28136be: Tool calls now export one `execute_tool` span instead of an `agent.action` wrapper and a tool child. Durable outcomes, approvals, execution metadata, and subagent trace correlation stay on the tool span; the trace schema remains version 4.
+  
+  `defineInstrumentation` no longer supports `action.*` handlers or `InstrumentationAction*` types; use `tool.call.*`, `InstrumentationToolCall*`, and `InstrumentationToolOutput` instead. Tool events now describe one durable call lifecycle, and start handlers read `event.toolName` instead of `event.name`.
+
+### Patch Changes
+
+- 9d42f05: Approvals without a `response` policy can now be approved or cancelled only by the principal whose turn requested the call, so a shared thread no longer lets another person run a tool under the requester's turn. Calls requested by unauthenticated or anonymous callers are unchanged. Tools that need other approvers define `approval.response`, which replaces the default.
+- 8f7001b: Add Browserbase web search through AI Gateway, using existing Gateway credentials.
+- 1921221: Files people send now reach the agent on more channels. Telegram keeps a file's real type instead of `application/octet-stream`, Linear reads uploaded files linked in a prompt (not only images) and leaves a note for one it can't download, and Twilio passes MMS media to the agent. Slack, Telegram, Twilio, and Linear stop a file download at the upload limit instead of reading the whole file into memory.
+- bc45ddf: Files people send over Chat SDK adapters that download attachments, such as Slack, Google Chat, WhatsApp, and Twilio, now reach the agent instead of a URL the model provider can't open. eve downloads each one in the step with the adapter's credentials, rebuilt through the adapter's `rehydrateAttachment`; a failed download, or a file over 25 MB, reaches the agent as a short note.
+- cebbc9b: Discord and Teams now pass files people send to the agent. Discord reads files from slash-command attachment options, and guided setup registers an optional `file` option. Teams accepts files by default from Bot Connector and SharePoint hosts; set `files: { enabled: false }` to opt out, and `allowedHosts` now adds hosts instead of replacing them. Downloads on both stop at the upload limit.
+- dfdb685: Fix a TypeScript build error caused by a duplicate duration field in direct tool-call tracing. Direct tool spans now include the same non-framework classification as conversation tool spans.
+- dd902e2: Mark eve-provided tools on tool execution spans, and emit tool execution spans for task controls and deferred workflow calls. Local and remote agent tool calls retain their dispatch kind, including background tasks.
+- 4bef05e: The harness step is now a short pipeline over focused modules: the model call, its recovery, and the human-in-the-loop lifecycle each live in their own module. Behavior is unchanged.
+- 4bef05e: Restoring a session no longer loads the workflow runtime up front. It now loads when a subagent forwards an approval, sign-in, or question to its parent.
+- a2c2687: `mcpChannel` can now publish the agent's own tools next to the `agent_*` tools. Set `tools: true` to list every tool the agent can run outside a conversation, with its JSON schemas, and run each `tools/call` as the route-authenticated caller. Set `agent: false` to stop serving the `agent_*` tools. Both default to what the channel served before, so existing channels do not change.
+- bc45ddf: Photon iMessage now passes files people send to the agent. eve downloads each attachment from Photon by its id, since the webhook carries no bytes; a failed download reaches the agent as a short note instead of being dropped.
+- 4bef05e: Approved local tools execute through eve's tool wrappers instead of AI SDK approval-history replay. Execution retains schema and authorization rechecks, concurrent siblings, the originating tool bindings, and the AI SDK's tool telemetry in the step's first attempt; approval markers are replaced by ordinary tool results before the next model call.
+- 4bef05e: Pending input is withdrawn when cancellation, context clearing, or a finished workflow removes its owner. Messages behind a session-limit prompt enter a held turn once and resume after a grant without duplicate receipt, and a typed approval or budget answer no longer passes the channel context of its consumed message to the model.
+- 4bef05e: The `input.requested` stream event type gains an optional `callId`. On a request relayed from a subagent or workflow tool run, it names the call in the receiving session that the request serves; the request keeps its original turn and step coordinates, and the stream stays on version 26.
+- 2359e23: Remove duplicate tool call IDs, error codes, and model provider attributes from agent traces. Runtime context no longer repeats structural channel, session, step, turn, and framework identifiers; trace schema remains version 4.
+  Model and activation spans now emit token counts only under `gen_ai.usage.*`; step and tool usage and cost values remain unchanged.
+- 4bef05e: Added `toolCallState(conversation, callId, { streaming })` to the client and frontend bindings. Tool parts and ACP tool calls follow task outcomes rather than start receipts (an ACP task call still running when its turn fails ends as failed), withdrawn approvals render as denied, and results marked `isError` render as errors; public conversation fields and eval policy remain unchanged.
+- ed98150: Add a Sign in with Vercel option to `eve add channel/web` and the terminal UI's channel picker. Setup offers eligible teams, provisions team-only authentication with production and preview credentials, and explains app limits and name conflicts.
+
 ## 0.71.3
 
 ### Patch Changes

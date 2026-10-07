@@ -84,6 +84,7 @@ export const docsRedirects: DocsRedirect[] = [
   ...createDocsRedirects("/getting-started/multiple-root-agents", "/concepts/project-structure"),
   ...createDocsRedirects("/multi-agent-projects", "/concepts/project-structure"),
   ...createDocsRedirects("/getting-started/first-agent", "/tutorial/first-agent"),
+  ...createDocsRedirects("/guides/evaluate", "/guides/decide"),
 ];
 
 export const rootMarkdownRedirects: DocsRedirect[] = [

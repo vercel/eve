@@ -588,7 +588,7 @@ export default defineAgent({
 Define the model-visible router under `agent/tools/`. Build the Jev criteria from the subagents' effective descriptions, then pass its typed choice directly to `ctx.agent()`:
 
 ```ts title="agent/tools/agent-router.ts"
-import { evaluate } from "eve/ai";
+import { decide } from "eve/ai";
 import { defineWorkflowTool } from "eve/tools";
 import { z } from "zod";
 
@@ -599,7 +599,7 @@ async function chooseTarget(
 ) {
   "use step";
 
-  const result = await evaluate({
+  const result = await decide({
     abortSignal,
     state: { task },
     questions: {
@@ -637,7 +637,7 @@ export default defineWorkflowTool({
 });
 ```
 
-The evaluation runs in a step so workflow replay records its result instead of making the routing request again. The parent model receives `agent-router`, but not `researcher` or `operator`. Jev returns the typed `"researcher" | "operator"` choice, and the selected subagent's reply becomes the `agent-router` tool result.
+The decision runs in a step so workflow replay records its result instead of making the routing request again. The parent model receives `agent-router`, but not `researcher` or `operator`. Jev returns the typed `"researcher" | "operator"` choice, and the selected subagent's reply becomes the `agent-router` tool result.
 
 `ctx.agents` is a replay-stable metadata snapshot taken when the session admits the call. In a `serve` task, it follows the call being served. In a top-level root workflow, `ctx.agents.agent` always represents the root-copy target and carries the root's authored `description` when provided. The snapshot also includes declared agents hidden from the parent model with `tool: false` or `disableTool()`, but exposes no model definitions, credentials, or callbacks. A delegated root copy omits `agent`, so `agentRouter()` cannot select another root copy recursively. Invocation still checks each target's availability through `ctx.agent()`.
 
@@ -651,7 +651,7 @@ import { agentRouter } from "eve/tools/agent-router";
 export default agentRouter();
 ```
 
-Its input is `{ message: string }`. `agentRouter()` ignores entries without a non-empty description. With two or more described targets, it sends the message and effective descriptions to Jev, then sends the message to a new session with the selected agent through `ctx.agent()` and returns its reply. It invokes a sole target without evaluation. Each call
+Its input is `{ message: string }`. `agentRouter()` ignores entries without a non-empty description. With two or more described targets, it sends the message and effective descriptions to Jev, then sends the message to a new session with the selected agent through `ctx.agent()` and returns its reply. It invokes a sole target without decision. Each call
 runs as a [task](#run-calls-as-tasks-task), so the reply reaches the model as the task's result. In a top-level root session, the candidates include the root-copy `agent`; delegated root copies and declared subagent contexts include only their declared targets.
 
 When an authored tool accepts a JSON Schema supplied by the model, represent that input with a permissive object such as `z.looseObject({})`. Avoid `z.record(z.string(), z.json())`: its generated JSON Schema uses `propertyNames`, which OpenAI does not support. Validate the supplied value at the point where your tool consumes it.

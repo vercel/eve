@@ -1,9 +1,9 @@
 ---
 title: "Judge"
-description: "Grade evals with evaluation models using criteria, typed questions, or batches, and set thresholds on each assertion."
+description: "Grade evals with decision models using criteria, typed questions, or batches, and set thresholds on each assertion."
 ---
 
-Use `t.judge(...)` when a deterministic [assertion](./assertions) cannot capture what a good response looks like. It calls [`evaluate` from `eve/ai`](../guides/evaluate#evaluate-inside-a-tool) and defaults to `typesafe-ai/jev`, TypeSafe AI's [Jev evaluation model](https://vercel.com/i/what-is-jev). The judge is separate from the agent under test and is used only for scoring.
+Use `t.judge(...)` when a deterministic [assertion](./assertions) cannot capture what a good response looks like. It calls [`decide` from `eve/ai`](../guides/decide#decide-inside-a-tool) and defaults to `typesafe-ai/jev`, TypeSafe AI's [Jev decision model](https://vercel.com/i/what-is-jev). The judge is separate from the agent under test and is used only for scoring.
 
 ```ts
 import { defineEval } from "eve/evals";
@@ -17,7 +17,7 @@ export default defineEval({
 });
 ```
 
-No judge configuration is required. Configure credentials for the evaluator as described under [Configuring the judge model](#configuring-the-judge-model).
+No judge configuration is required. Configure credentials for the decider as described under [Configuring the judge model](#configuring-the-judge-model).
 
 ## The graders
 
@@ -41,11 +41,11 @@ t.judge({
   .atLeast(0.75);
 ```
 
-Choice questions require an `expected` option key. eve uses that expectation locally for scoring; it does not send it to the evaluator. Instructions and rubric descriptions accept strings, JSON objects, or JSON arrays. Descriptions can also be `null`.
+Choice questions require an `expected` option key. eve uses that expectation locally for scoring; it does not send it to the decider. Instructions and rubric descriptions accept strings, JSON objects, or JSON arrays. Descriptions can also be `null`.
 
 ## Choose the value to grade
 
-By default, the evaluator receives `{ input, output }`: the latest prompt and assistant message from the session whose turn most recently settled. Approval responses and stream reads preserve that prompt. For multipart messages, including `session.sendFile()`, the prompt contains the text parts.
+By default, the decider receives `{ input, output }`: the latest prompt and assistant message from the session whose turn most recently settled. Approval responses and stream reads preserve that prompt. For multipart messages, including `session.sendFile()`, the prompt contains the text parts.
 
 Pass `on` to replace the output. JSON values stay structured rather than being converted to strings:
 
@@ -66,9 +66,9 @@ t.judge("The assistant remembers the user's favorite word across turns.", {
 
 The transcript contains user and assistant messages in turn order, excluding reasoning, tool calls, and tool results. See [Multi-turn evals](./cases#multi-turn-evals).
 
-## Evaluate several questions together
+## Decide several questions together
 
-A batch makes one evaluation request against one shared state. Pass `state` to replace the default `{ input, output }` completely. Batch calls use `state` instead of `on`.
+A batch makes one decision request against one shared state. Pass `state` to replace the default `{ input, output }` completely. Batch calls use `state` instead of `on`.
 
 ```ts
 const judgments = t.judge({
@@ -120,9 +120,9 @@ Model settings resolve in this order:
 1. Per-call: `t.judge("…", { model, modelOptions })`.
 2. Per-eval: `defineEval({ judge: { model, modelOptions }, test })`.
 3. Project default: `defineEvalConfig({ judge: { model, modelOptions } })`.
-4. The default model used by `evaluate`, currently `typesafe-ai/jev`.
+4. The default model used by `decide`, currently `typesafe-ai/jev`.
 
-A per-eval `judge` replaces the project's judge configuration. Per-call fields override the resolved configuration. `judge` and its `model` are optional; deterministic evals make no evaluation requests.
+A per-eval `judge` replaces the project's judge configuration. Per-call fields override the resolved configuration. `judge` and its `model` are optional; deterministic evals make no decision requests.
 
 ```ts title="evals/evals.config.ts"
 import { defineEvalConfig } from "eve/evals";
@@ -132,30 +132,30 @@ export default defineEvalConfig({
 });
 ```
 
-String IDs resolve through the AI SDK default provider, or Vercel AI Gateway when none is configured. Gateway uses `AI_GATEWAY_API_KEY` or Vercel OIDC credentials; eve's existing local Gateway connection is also honored by `evaluate`. An explicit provider evaluation model uses that provider's credentials:
+String IDs resolve through the AI SDK default provider, or Vercel AI Gateway when none is configured. Gateway uses `AI_GATEWAY_API_KEY` or Vercel OIDC credentials; eve's existing local Gateway connection is also honored by `decide`. An explicit provider decision model uses that provider's credentials:
 
 ```ts
 import { openai } from "@ai-sdk/openai";
 
 t.judge("The response addresses the request.", {
-  model: openai.evaluationModel("gpt-6-luna"),
+  model: openai.decisionModel("gpt-6-luna"),
   modelOptions: { providerOptions: { openai: { reasoningEffort: "high" } } },
 });
 ```
 
-Use the provider's `evaluationModel` factory, not a language model instance. AI SDK supplies evaluation adapters for supported language models. Provider support and the evaluation contract are experimental; see [AI SDK evaluation](https://ai-sdk.dev/docs/ai-sdk-core/evaluation).
+Use the provider's `decisionModel` factory, not a language model instance. AI SDK supplies decision adapters for supported language models. Provider support and the decision contract are experimental; see [AI SDK decision](https://ai-sdk.dev/docs/ai-sdk-core/decisions).
 
-String model IDs resolve through the default provider's evaluation API. Gateway accepts native evaluation models such as `typesafe-ai/jev`; passing a language model ID such as `openai/gpt-6-luna` does not automatically select the OpenAI adapter. Use an evaluation-model instance as shown above for language models.
+String model IDs resolve through the default provider's decision API. Gateway accepts native decision models such as `typesafe-ai/jev`; passing a language model ID such as `openai/gpt-6-luna` does not automatically select the OpenAI adapter. Use a decision-model instance as shown above for language models.
 
-Missing credentials, invalid answers, unsupported question types, and provider errors become failed gates even for tracked-only judgments. They do not silently skip the eval or select another model. Validation, authentication, and retries use the shared `evaluate` implementation.
+Missing credentials, invalid answers, unsupported question types, and provider errors become failed gates even for tracked-only judgments. They do not silently skip the eval or select another model. Validation, authentication, and retries use the shared `decide` implementation.
 
 ## Diagnostics and migration
 
-Reports use `judge.boolean`, `judge.score`, and `judge.choice`; batch assertion names also include their question key. Diagnostics include the captured state, question, and raw answer. Assertion metadata retains the normalized score, model identity, token usage, warnings, and available provider and response metadata. Usage for a batch is marked as shared across its assertions, not a separate charge for each question. Evaluation models do not promise a prose rationale.
+Reports use `judge.boolean`, `judge.score`, and `judge.choice`; batch assertion names also include their question key. Diagnostics include the captured state, question, and raw answer. Assertion metadata retains the normalized score, model identity, token usage, warnings, and available provider and response metadata. Usage for a batch is marked as shared across its assertions, not a separate charge for each question. Decision models do not promise a prose rationale.
 
 The autoevals graders have been removed. Replace `t.judge.autoevals.closedQA(criteria, options)` with `t.judge(criteria, options)`. Scores now represent a probability rather than a binary yes/no answer, so review thresholds against your examples. For factuality, summaries, or SQL equivalence, write an explicit question and include the reference in shared state. No old grader buckets are preserved.
 
-Change configured language model instances to evaluation model instances. `modelOptions.providerOptions`, assertion labels, and threshold methods remain available. [Braintrust reporting](./reporters) continues to accept judge scores independently of the grader implementation.
+Change configured language model instances to decision model instances. `modelOptions.providerOptions`, assertion labels, and threshold methods remain available. [Braintrust reporting](./reporters) continues to accept judge scores independently of the grader implementation.
 
 ## What to read next
 
