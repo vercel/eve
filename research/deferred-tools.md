@@ -1,7 +1,7 @@
 ---
 issue: TBD
 status: proposed
-last_updated: "2026-10-06"
+last_updated: "2026-10-07"
 ---
 
 # Deferred tools and skills
@@ -748,7 +748,7 @@ One announcement under the key `catalog` replaces the connection listing.
 - **Empty catalog,** no message.
 
 ```text
-More tools, agents, and skills are available than your context shows. They aren't listed; find them with search before deciding you can't do something. Call tools with execute({ tool, input }) and load skills with execute({ skill }).
+More tools, agents, and skills are available than your context shows. Their names aren't listed; find them with search before deciding you can't do something. Call tools with execute({ tool, input }) and load skills with execute({ skill }).
 Namespaces, whose entries are named <namespace>__<name>; search one with "<namespace>__": d0, index, sre, support
 Connections, whose tools are named <connection>__<tool>; search one connection's tools with "<connection>__":
 - linear: Linear issues and projects
