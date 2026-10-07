@@ -274,6 +274,28 @@ describe("search", () => {
       expect(results[3]).toBe("linear_report");
     });
 
+    it("lists a connection's tools first only for its whole name, not a partial one", async () => {
+      const search = searchFor([inlineTool("git_status", { deferred: true })], {
+        connections: [
+          fakeConnection({
+            name: "github",
+            tools: [connectionTool("create_issue"), connectionTool("list_pulls")],
+          }),
+        ],
+      });
+      const ranked = async (query: string) => names(await search({ query }));
+
+      expect(await ranked("git")).toEqual([
+        "git_status",
+        "github__create_issue",
+        "github__list_pulls",
+      ]);
+      expect((await ranked("github")).slice(0, 2)).toEqual([
+        "github__create_issue",
+        "github__list_pulls",
+      ]);
+    });
+
     it("matches a name prefix whose last word is partial", async () => {
       expect((await ranked("create_iss")).slice(0, 3).sort()).toEqual([
         "create_issue",

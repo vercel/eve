@@ -18,8 +18,9 @@ const HOOK_SCENARIO_CALLS = {
 } as const;
 
 /**
- * public-catalog lists its tools without sign-in: run its public tool, then its
- * protected one, which asks the user to sign in and resumes once they have.
+ * public-catalog lists its tools without sign-in: connect it, which needs no
+ * sign-in, run its public tool, then its protected one, which asks the user to
+ * sign in and resumes once they have.
  */
 function respondToPublicCatalog(request: MockModelRequest): MockModelResponse | string {
   const call = (id: string, tool: string) => ({
@@ -28,6 +29,13 @@ function respondToPublicCatalog(request: MockModelRequest): MockModelResponse | 
     input: { tool: `public-catalog__${tool}`, input: {} },
   });
   const byId = new Map(request.toolResults.map((entry) => [entry.id, entry]));
+  if (!byId.has("public-catalog-connect")) {
+    return {
+      toolCalls: [
+        { id: "public-catalog-connect", name: "execute", input: { tool: "public-catalog" } },
+      ],
+    };
+  }
   if (!byId.has("public-catalog-items")) {
     return { toolCalls: [call("public-catalog-items", "list_items")] };
   }
