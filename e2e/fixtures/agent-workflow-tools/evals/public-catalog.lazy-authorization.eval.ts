@@ -6,7 +6,7 @@ const mentions = (text: string) => (value: unknown) => JSON.stringify(value).inc
 
 export default defineEval({
   description:
-    "An MCP server that lists its tools without a token runs its public tool with no sign-in; its protected tool asks the user to sign in, then resumes over authenticated HTTP.",
+    "An MCP server that lists its tools without a token connects and runs its public tool with no sign-in; its protected tool asks the user to sign in, then resumes over authenticated HTTP.",
   timeoutMs: 90_000,
 
   async test(t) {
@@ -24,6 +24,26 @@ export default defineEval({
     );
     const session = started.session;
     started.expectOk();
+    // Connecting a server that lists its tools anonymously needs no sign-in.
+    started.calledTool("public-catalog", {
+      count: 1,
+      status: "completed",
+      output: (value) =>
+        value ===
+        'The Public catalog tools are available. Find them with search({ query: "public-catalog" }).',
+    });
+    started.eventsSatisfy("no sign-in is requested before the protected call", (events) => {
+      const protectedCall = events.findIndex(
+        (event) =>
+          event.type === "actions.requested" &&
+          event.data.actions.some(
+            (action) =>
+              action.kind === "tool-call" && action.toolName === "public-catalog__list_orders",
+          ),
+      );
+      const signIn = events.findIndex((event) => event.type === "authorization.required");
+      return protectedCall >= 0 && signIn > protectedCall;
+    });
     // The public tool runs before anyone signs in.
     started.calledTool("public-catalog__list_items", {
       count: 1,
