@@ -943,6 +943,9 @@ const signInRules = [
       await conversation.waitForShown(/\b(?:cancel|declin)/iu);
     },
   },
+] as const satisfies readonly ContractRule[];
+
+const approvalPermissionRules = [
   {
     rule: "the requester pressing Approve on a requester-only approval runs the tool",
     source: "docs/tools/human-in-the-loop.md#authorizing-approval-responses",
@@ -950,6 +953,16 @@ const signInRules = [
     async run(conversation) {
       const options = await askToReleaseHotfix(conversation);
       await conversation.press(option(options, APPROVE_LABELS));
+      await expectReleased(conversation);
+    },
+  },
+  {
+    rule: "the requester typing approve on a requester-only approval runs the tool",
+    source: "docs/tools/human-in-the-loop.md#authorizing-approval-responses",
+    requires: ["text-replies"],
+    async run(conversation) {
+      await askToReleaseHotfix(conversation);
+      await conversation.say("approve");
       await expectReleased(conversation);
     },
   },
@@ -980,6 +993,17 @@ const signInRules = [
     },
   },
   {
+    rule: "another person typing cancel and approve leaves a requester-only approval pending",
+    source: "docs/tools/human-in-the-loop.md#authorizing-approval-responses",
+    requires: ["another-person", "text-replies"],
+    async run(conversation) {
+      await askToReleaseHotfix(conversation);
+      await conversation.say("cancel", "bob");
+      await conversation.say("approve", "bob");
+      await expectStillPending(conversation);
+    },
+  },
+  {
     rule: "another person's rejected press leaves the approval's buttons in place",
     source: "docs/tools/human-in-the-loop.md#authorizing-approval-responses",
     requires: ["another-person", "buttons"],
@@ -1000,27 +1024,9 @@ const signInRules = [
       await expectRan(conversation, OPEN_GATED_TOOL, { rolledBack: true });
     },
   },
-  {
-    rule: "another person typing cancel and approve leaves a requester-only approval pending",
-    source: "docs/tools/human-in-the-loop.md#authorizing-approval-responses",
-    requires: ["another-person", "text-replies"],
-    async run(conversation) {
-      await askToReleaseHotfix(conversation);
-      await conversation.say("cancel", "bob");
-      await conversation.say("approve", "bob");
-      await expectStillPending(conversation);
-    },
-  },
-  {
-    rule: "the requester typing approve on a requester-only approval runs the tool",
-    source: "docs/tools/human-in-the-loop.md#authorizing-approval-responses",
-    requires: ["text-replies"],
-    async run(conversation) {
-      await askToReleaseHotfix(conversation);
-      await conversation.say("approve");
-      await expectReleased(conversation);
-    },
-  },
+] as const satisfies readonly ContractRule[];
+
+const callerRules = [
   {
     rule: "a tool sees the person who sent the message as its caller",
     source: "docs/tools/overview.mdx",
@@ -1101,9 +1107,11 @@ const attachmentRules = [
 export const channelContractSections = [
   { title: "Questions", rules: questionRules },
   { title: "Tool approvals", rules: approvalRules },
+  { title: "Approval permissions", rules: approvalPermissionRules },
   { title: "Answered prompts", rules: answeredPromptRules },
   { title: "Budget prompts", rules: budgetRules },
   { title: "Sign-ins", rules: signInRules },
+  { title: "Tool callers", rules: callerRules },
   { title: "Attachments", rules: attachmentRules },
 ] as const;
 
