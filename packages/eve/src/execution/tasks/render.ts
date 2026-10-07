@@ -1,10 +1,11 @@
 import type { TaskCancelResult, TaskWaitResult } from "#execution/tasks/calls.js";
+import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
+import { TASK_CANCEL_TOOL_NAME, TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 import { formatDuration } from "#shared/format-duration.js";
 
 // Every string the model reads about tasks lives in this file.
 
-export const TASK_WAIT_DESCRIPTION =
-  "Call task_wait sparingly, only when you deliberately want to withhold a message from the user while waiting for a task result. Tasks keep running and their results reach you without calling task_wait. If the user should hear from you now, reply instead. Wait silently until any of your tasks has a result, a new message arrives, or timeoutSeconds pass. It returns after the first result, which follows in a <task_result> message; wait again only if you still want to withhold a reply until another result arrives. Waiting never stops a task.";
+export const TASK_WAIT_DESCRIPTION = `Call ${TASK_WAIT_TOOL_NAME} sparingly, only when you deliberately want to withhold a message from the user while waiting for a task result. Tasks keep running and their results reach you without calling ${TASK_WAIT_TOOL_NAME}. If the user should hear from you now, reply instead. Wait silently until any of your tasks has a result, a new message arrives, or timeoutSeconds pass. It returns after the first result, which follows in a <task_result> message; wait again only if you still want to withhold a reply until another result arrives. Waiting never stops a task.`;
 
 export const TASK_WAIT_TIMEOUT_DESCRIPTION =
   "Optional. Seconds to wait before returning without a result. Omit it to wait for a result or a new message, which is almost always right. Don't use short timeouts to check on tasks: results reach you without checking.";
@@ -25,13 +26,13 @@ const TASK_SYSTEM_BLOCK_OPENING = [
 
 const TASK_SYSTEM_BLOCK_CLOSING = [
   "- Don't redo work you delegated. Never use sleep or shell commands to wait for a task.",
-  "- To correct or continue an agent, or any task that accepts more input, call its tool again with its taskId. A new message never stops your tasks: answer it if it asks you something, decide whether it changes the work, then keep each task, correct an agent by taskId, or stop a task with task_cancel.",
+  `- To correct or continue an agent, or any task that accepts more input, call its tool again with its taskId. A new message never stops your tasks: answer it if it asks you something, decide whether it changes the work, then keep each task, correct an agent by taskId, or stop a task with ${TASK_CANCEL_TOOL_NAME}.`,
 ];
 
 /** The task block for a session a person reads, where a reply before a result is posted. */
 export const TASK_SYSTEM_BLOCK = [
   ...TASK_SYSTEM_BLOCK_OPENING,
-  "- If you have nothing to tell the person until a result arrives, call task_wait. Start every independent task first, then wait.",
+  `- If you have nothing to tell the person until a result arrives, call ${TASK_WAIT_TOOL_NAME}. Start every independent task first, then wait.`,
   "- If the person should hear from you now, for example to confirm work is underway when they don't need the result yet, reply. When results arrive, report them without repeating yourself.",
   ...TASK_SYSTEM_BLOCK_CLOSING,
 ].join("\n");
@@ -39,7 +40,7 @@ export const TASK_SYSTEM_BLOCK = [
 /** The task block for a child or schedule session, whose caller reads only the final reply. */
 export const FINAL_REPLY_TASK_SYSTEM_BLOCK = [
   ...TASK_SYSTEM_BLOCK_OPENING,
-  "- Only your final reply reaches your caller. While tasks work, call task_wait instead of replying. Start every independent task first, then wait.",
+  `- Only your final reply reaches your caller. While tasks work, call ${TASK_WAIT_TOOL_NAME} instead of replying. Start every independent task first, then wait.`,
   ...TASK_SYSTEM_BLOCK_CLOSING,
 ].join("\n");
 
@@ -91,7 +92,7 @@ export function renderUnknownCancelTaskError(taskId: string): string {
   return `No task "${taskId}" is in this session. Copy an id from a "Started task" receipt or the [Tasks] note.`;
 }
 
-/** What the model reads when `task_cancel` answers. */
+/** What the model reads when `eve__task_cancel` answers. */
 export function renderTaskCancelResult(taskId: string, result: TaskCancelResult): string {
   if (result.status === "already_finished") return `${taskId} had no work to stop.`;
   if (!result.resumable) return `Stopped ${taskId}; it won't report back.`;
@@ -99,14 +100,14 @@ export function renderTaskCancelResult(taskId: string, result: TaskCancelResult)
 }
 
 export function renderTooManyTasksError(max: number, workingIds: readonly string[]): string {
-  return `${String(max)} tasks are already working (${workingIds.join(", ")}). Wait with task_wait or stop one with task_cancel, then try again.`;
+  return `${String(max)} tasks are already working (${workingIds.join(", ")}). Wait with ${TASK_WAIT_TOOL_NAME} or stop one with ${TASK_CANCEL_TOOL_NAME}, then try again.`;
 }
 
 export function renderFinalOutputWhileWorkingError(workingIds: readonly string[]): string {
-  return `You can't give your final output while tasks you started are working (${workingIds.join(", ")}). Wait for their results with task_wait, or stop a task with task_cancel, then call final_output.`;
+  return `You can't give your final reply while tasks you started are working (${workingIds.join(", ")}). Wait for their results with ${TASK_WAIT_TOOL_NAME}, or stop a task with ${TASK_CANCEL_TOOL_NAME}, then call ${REPLY_TOOL_NAME}.`;
 }
 
-/** What the model reads when `task_wait` returns after waiting `waitedMs`. */
+/** What the model reads when `eve__task_wait` returns after waiting `waitedMs`. */
 export function renderTaskWaitResult(result: TaskWaitResult, waitedMs: number): string {
   switch (result.status) {
     case "settled":
@@ -149,7 +150,7 @@ function resultsArriveLater(workingCount: number): string {
 
 function interruptChoices(workingCount: number): string {
   const keep = workingCount === 1 ? "keep the task" : "keep the tasks";
-  return `${keep}, call an agent again with its taskId to correct it, or stop a task with task_cancel.`;
+  return `${keep}, call an agent again with its taskId to correct it, or stop a task with ${TASK_CANCEL_TOOL_NAME}.`;
 }
 
 /** One `<task_result>` block of a `task.result` message. */

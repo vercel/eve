@@ -978,13 +978,17 @@ describe("slackChannel() default event handlers", () => {
         turnId: "t1",
       });
 
-    await callEvent(adapter, requested(["task_wait"], 0), ctx);
+    await callEvent(adapter, requested(["eve__task_wait"], 0), ctx);
     expect(fetchMock).not.toHaveBeenCalled();
 
-    await callEvent(adapter, requested(["task_cancel", "search", "ops__deploy_preview"], 0), ctx);
+    await callEvent(
+      adapter,
+      requested(["eve__task_cancel", "search", "ops__deploy_preview"], 0),
+      ctx,
+    );
     // Streamed calls arrive one at a time; the step keeps its first label.
     await callEvent(adapter, requested(["lookup"], 0), ctx);
-    await callEvent(adapter, requested(["task_cancel", "ops__deploy_preview"], 1), ctx);
+    await callEvent(adapter, requested(["eve__task_cancel", "ops__deploy_preview"], 1), ctx);
     expect(slackStatuses(fetchMock)).toEqual([
       "Search checkout incidents +1 more",
       "Search checkout incidents +2 more",

@@ -43,7 +43,7 @@ export default (["direct", "background"] as const).map((mode) =>
           count: 1,
           data: { message: RESEARCH_INTERIM_MESSAGE },
         });
-        initial.notCalledTool("task_wait");
+        initial.notCalledTool("eve__task_wait");
       }
 
       const audit = await initial.session.send(scenario.audit);

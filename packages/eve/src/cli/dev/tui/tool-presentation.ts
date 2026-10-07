@@ -1,6 +1,7 @@
 import { diffWriteDetail, type ToolDetailLine } from "./line-diff.js";
 import { stripTerminalControls } from "#cli/ui/terminal-text.js";
 import { displayName, displayTitle } from "#shared/display-name.js";
+import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import { summarizeToolArgs, summarizeToolResult } from "./tool-format.js";
 
 /** Renderer-ready copy derived from a tool call without owning its lifecycle. */
@@ -225,7 +226,7 @@ export function presentTool(
       summarizeResult: () => undefined,
     };
   }
-  if (baseName === "final_output") {
+  if (baseName === REPLY_TOOL_NAME) {
     // Structured-output terminal signal: its input is the
     // structured result itself, kept behind the expanded `--tools full` view.
     return { title: FINAL_OUTPUT_TITLE, subtitle: "", summarizeResult: () => undefined };
@@ -332,7 +333,7 @@ export function presentPreparingTool(
   context?: ToolPresentationContext,
 ): ToolPresentation {
   const baseName = toolBaseName(toolName);
-  if (baseName === "final_output") {
+  if (baseName === REPLY_TOOL_NAME) {
     return { title: FINAL_OUTPUT_TITLE, subtitle: "", summarizeResult: () => undefined };
   }
   if (context?.isSubagent === true) {

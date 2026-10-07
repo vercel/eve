@@ -195,7 +195,7 @@ arguments, and approval options as static [MCP](../connections/mcp) and
 [OpenAPI](../connections/openapi) connections. Each resolved connection joins
 the per-step connection registry. eve announces it to the model in an
 append-only context message, and the model reaches its tools through
-`search` and `execute`, so the tool list never changes.
+`eve__search` and `eve__execute`, so the tool list never changes.
 
 Set `instanceKey` on every authenticated dynamic connection. Use a stable,
 non-secret account or tenant identifier, and change it whenever the endpoint,
@@ -359,7 +359,7 @@ A recovery rebind is not a new lifecycle event, but it can run resolver code aga
 
 A single return produces one tool named after the file slug, identical to a static tool. A map names each entry by its **bare key** — there is no automatic slug prefix. If a bare name might collide, namespace the key yourself by including the prefix in the key (e.g. return `{ "tenant__export": … }` to get `tenant__export`).
 
-A map key must be a legal tool name: ASCII letters, digits, underscores, and dashes, starting with a letter, up to 64 characters. The names of the tools eve adds itself, `search`, `execute`, `task_wait`, `task_cancel`, and `final_output`, are [reserved](../concepts/built-in-tools#search-and-execute), and a key cannot be a connection's name or start with its `<name>__` prefix. eve rejects such a key when the resolver returns it.
+A map key must be a legal tool name: ASCII letters, digits, underscores, and dashes, starting with a letter, up to 64 characters. A key cannot be `eve` or start with `eve__`, which eve [reserves](../concepts/built-in-tools#eve__search-and-eve__execute) for its built-in tools, and cannot be a connection's name or start with its `<name>__` prefix. eve rejects such a key when the resolver returns it.
 
 ### Conflicts
 

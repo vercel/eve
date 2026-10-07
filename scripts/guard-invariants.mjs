@@ -393,7 +393,7 @@ const PROVIDED_TOOL_EXTRA_IMPORTS = new Set([
   "#tools/schema.js",
 ]);
 
-// `task_wait` and `task_cancel` belong to the session, not to authors: they
+// `eve__task_wait` and `eve__task_cancel` belong to the session, not to authors: they
 // take their model text from execution/tasks/render.ts directly.
 const PROVIDED_TASK_TOOL_FILES = new Set([
   "packages/eve/src/tools/provided/task-cancel.ts",

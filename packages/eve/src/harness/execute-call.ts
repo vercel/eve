@@ -1,6 +1,6 @@
 /**
- * `execute` calls in the harness. Once a step's calls enter the harness, every
- * seam reads a call through `execute` as the call to the entry it names. Model
+ * `eve__execute` calls in the harness. Once a step's calls enter the harness, every
+ * seam reads a call through `eve__execute` as the call to the entry it names. Model
  * history keeps the model's own calls.
  */
 
@@ -16,7 +16,7 @@ import type { ToolExecuteOptions } from "#tools/definition.js";
 
 /**
  * The name each tool call has in model history, by call id. A result written
- * to history carries its call's name there, which is `execute` for a call
+ * to history carries its call's name there, which is `eve__execute` for a call
  * made through it.
  */
 export function historyCallNames(messages: readonly ModelMessage[]): ReadonlyMap<string, string> {
@@ -32,8 +32,8 @@ export function historyCallNames(messages: readonly ModelMessage[]): ReadonlyMap
 
 /**
  * The AI SDK decides per tool name whether to run a call, and it runs every
- * `execute` call. A direct call to a workflow tool or agent never runs in the
- * SDK: the harness dispatches it after the step. Through `execute`, such a
+ * `eve__execute` call. A direct call to a workflow tool or agent never runs in the
+ * SDK: the harness dispatches it after the step. Through `eve__execute`, such a
  * call returns this stand-in instead, which never leaves this module: it is
  * dropped from the stream, the step, and telemetry, and the harness then
  * dispatches the call as it does a direct one.
@@ -45,7 +45,7 @@ export function dispatchesAfterStep(resolved: ResolvedCall<ToolCallLike> | undef
   return resolved !== undefined && isWorkflowTool(resolved.definition);
 }
 
-/** Runs a resolved `execute` call, or stands in for one the harness dispatches. */
+/** Runs a resolved `eve__execute` call, or stands in for one the harness dispatches. */
 export function runEntryCall(
   resolved: ResolvedCall<ToolCallLike>,
   options: ToolExecuteOptions,
@@ -85,7 +85,7 @@ export function entryModelOutput(
 type StepFields = { readonly [K in keyof Required<HarnessStepResult>]: HarnessStepResult[K] };
 
 /**
- * The step as the harness reads it: calls through `execute` become calls to
+ * The step as the harness reads it: calls through `eve__execute` become calls to
  * their entries and stand-in results are dropped. The response messages, which
  * become history, keep the model's own calls.
  */
@@ -120,7 +120,7 @@ export function toEntryStep<T extends ModelMessage>(
 
 /**
  * The stream as the harness reads it, as {@link toEntryStep} reads the step.
- * An `execute` call's input stream is dropped: its entry is known only once
+ * An `eve__execute` call's input stream is dropped: its entry is known only once
  * the input is complete.
  */
 export async function* toEntryStream(
@@ -142,7 +142,7 @@ export async function* toEntryStream(
 
 /**
  * Telemetry as the harness reports it. Integrations see each call through
- * `execute` as the call to its entry, and never see a stand-in run: a direct
+ * `eve__execute` as the call to its entry, and never see a stand-in run: a direct
  * call to the same entry never runs in the SDK.
  */
 export function toEntryTelemetry(

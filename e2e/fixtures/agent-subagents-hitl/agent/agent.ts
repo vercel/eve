@@ -98,7 +98,7 @@ function hasReceipt(request: MockModelRequest, tool: string): boolean {
 }
 
 function waitForTasks(): MockModelResponse {
-  return { toolCalls: [{ input: {}, name: "task_wait" }] };
+  return { toolCalls: [{ input: {}, name: "eve__task_wait" }] };
 }
 
 export default defineAgent({

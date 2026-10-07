@@ -1,9 +1,9 @@
 /**
  * The step's catalog: one table of every entry a model step can reach. Direct
- * entries go into the model's tool list next to `search` and `execute`;
- * deferred entries and connection tools are reached through `execute`. A call
+ * entries go into the model's tool list next to `eve__search` and `eve__execute`;
+ * deferred entries and connection tools are reached through `eve__execute`. A call
  * resolves to its entry here and then runs exactly as a direct call would, so
- * only model history ever says `execute`.
+ * only model history ever says `eve__execute`.
  */
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
@@ -24,7 +24,7 @@ import type {
   HarnessToolMap,
   ToolCallLike,
 } from "#harness/types.js";
-import { EXECUTE_TOOL_NAME } from "#protocol/catalog-tools.js";
+import { EXECUTE_TOOL_NAME, SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
@@ -43,7 +43,7 @@ const ENDS_TURN_TOOL_NOTE =
   "Calling this tool ends your turn once it succeeds: do not write a reply or call other tools in the same step. If it fails, you will see the error and can continue.";
 
 const EXECUTE_DESCRIPTION = [
-  "Call a tool that is not in your tool list, using the exact name search returns",
+  `Call a tool that is not in your tool list, using the exact name ${SEARCH_TOOL_NAME} returns`,
   "and `input` matching its signature.",
   "Prefer connected services over web search or general knowledge when a request relates to them.",
 ].join(" ");
@@ -51,7 +51,10 @@ const EXECUTE_DESCRIPTION = [
 const EXECUTE_INPUT_SCHEMA: JsonObject = {
   type: "object",
   properties: {
-    tool: { type: "string", description: "The tool's exact name, as search returns it." },
+    tool: {
+      type: "string",
+      description: `The tool's exact name, as ${SEARCH_TOOL_NAME} returns it.`,
+    },
     input: {
       type: "object",
       description: "Arguments matching the tool's signature. Defaults to {}.",
@@ -62,10 +65,10 @@ const EXECUTE_INPUT_SCHEMA: JsonObject = {
 };
 
 export interface StepCatalog extends HarnessToolLookup {
-  /** The model's tool list: direct entries, then `search` and `execute`. */
+  /** The model's tool list: direct entries, then `eve__search` and `eve__execute`. */
   readonly advertised: HarnessToolMap;
   readonly connections: readonly ResolvedConnectionDefinition[];
-  /** Entries reached only through `execute`, connection tools aside. */
+  /** Entries reached only through `eve__execute`, connection tools aside. */
   readonly deferred: HarnessToolMap;
   /** Every direct and deferred entry the session sees, connection tools aside. */
   readonly entries: HarnessToolMap;
@@ -78,7 +81,7 @@ export interface StepCatalog extends HarnessToolLookup {
   /** An entry's description as the model reads it, with the notes eve appends. */
   describe(definition: HarnessToolDefinition): string;
   /**
-   * Resolves a model tool call to the entry it runs. An `execute` call that
+   * Resolves a model tool call to the entry it runs. An `eve__execute` call that
    * names a deferred entry becomes the call to that entry; any other call runs
    * the listed tool it names. A call that reaches neither resolves to nothing.
    */
@@ -114,7 +117,7 @@ export function buildStepCatalog(input: {
   const registry = input.ctx?.get(ConnectionRegistryKey);
   const connections = registry?.getConnections() ?? [];
   const advertised = new Map(direct);
-  // Listed tools include `search` and `execute`, so `execute` naming one of
+  // Listed tools include `eve__search` and `eve__execute`, so `eve__execute` naming one of
   // them says to call it directly rather than that it does not exist.
   const get = (name: string): HarnessToolDefinition | undefined =>
     entries.get(name) ??
@@ -149,12 +152,12 @@ export function buildStepCatalog(input: {
   return catalog;
 }
 
-/** The entry an `execute` input names, if it names one. */
+/** The entry an `eve__execute` input names, if it names one. */
 function executeTarget(input: unknown): string | undefined {
   return isObject(input) && typeof input.tool === "string" ? input.tool : undefined;
 }
 
-/** `execute({ tool, input })` as the call to `tool` with `input`. */
+/** `eve__execute({ tool, input })` as the call to `tool` with `input`. */
 function asEntryCall<T extends ToolCallLike>(toolCall: T, toolName: string): T {
   const input = (toolCall.input as { readonly input?: unknown }).input;
   return { ...toolCall, input: input ?? {}, toolName };
@@ -222,7 +225,7 @@ function connectionEntryNamed(
 /**
  * The model sees one fixed schema. Validation resolves the named entry and
  * checks `input` against that entry's own schema, so a call that reaches
- * `execute` always names a catalog entry with valid input, as a direct call
+ * `eve__execute` always names a catalog entry with valid input, as a direct call
  * names a listed tool.
  */
 function createExecuteTool(catalog: StepCatalog): HarnessToolDefinition {
@@ -231,7 +234,9 @@ function createExecuteTool(catalog: StepCatalog): HarnessToolDefinition {
     execute: (input: unknown, options: ToolExecuteOptions) => {
       const resolved = catalog.resolve({ input, toolName: EXECUTE_TOOL_NAME });
       // Input validation resolves every call before the SDK runs it.
-      if (resolved === undefined) throw new Error("An execute call ran without a resolved entry.");
+      if (resolved === undefined) {
+        throw new Error(`An ${EXECUTE_TOOL_NAME} call ran without a resolved entry.`);
+      }
       return runEntryCall(resolved, options);
     },
     frameworkTool: true,
@@ -293,6 +298,6 @@ function unknownEntryMessage(name: string, catalog: StepCatalog): string {
   const hint =
     suggestions.length > 0
       ? ` Closest tools: ${suggestions.join(", ")}.`
-      : " Find tools with search.";
+      : ` Find tools with ${SEARCH_TOOL_NAME}.`;
   return `No tool named "${name}".${hint}`;
 }

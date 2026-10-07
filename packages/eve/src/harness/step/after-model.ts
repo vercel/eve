@@ -3,7 +3,7 @@ import type { ModelMessage, ToolSet, TypedToolCall, TypedToolError } from "ai";
 
 import type { CompactionConfig, StepResult } from "#harness/types.js";
 import { FINAL_OUTPUT_BESIDE_PENDING_CALLS } from "#harness/final-output.js";
-import { FINAL_OUTPUT_TOOL_NAME } from "#protocol/final-output-tool.js";
+import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import {
   type HarnessModelMessage,
   resolveAssistantStepText,
@@ -57,7 +57,7 @@ function getInvalidToolCallInputErrors(input: {
   const errors: TypedToolError<ToolSet>[] = [];
 
   for (const toolCall of input.toolCalls) {
-    if (toolCall.toolName === FINAL_OUTPUT_TOOL_NAME) {
+    if (toolCall.toolName === REPLY_TOOL_NAME) {
       continue;
     }
 
@@ -188,7 +188,7 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
     history: validateHarnessModelMessages([...promptMessages, ...responseMessages]),
   };
 
-  // A `final_output` call is terminal even when the model emits it alongside
+  // An `eve__reply` call is terminal even when the model emits it alongside
   // executing tools: continuing the loop would leave the no-execute call as a
   // dangling tool_use the next provider call rejects, and drop the result.
   const calledFinalOutput =
@@ -228,7 +228,7 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
 
 /**
  * Answers the calls of a response that waits on others which will never get a result: a
- * `final_output` written before the results it waits beside.
+ * `eve__reply` written before the results it waits beside.
  */
 function answerCallsThatWontRun(
   messages: readonly ModelMessage[],
@@ -236,7 +236,7 @@ function answerCallsThatWontRun(
 ): ModelMessage[] {
   const answered = extractToolResultCallIds(messages);
   const finalOutputs = ((result.toolCalls ?? []) as TypedToolCall<ToolSet>[]).filter(
-    (call) => call.toolName === FINAL_OUTPUT_TOOL_NAME,
+    (call) => call.toolName === REPLY_TOOL_NAME,
   );
   const answers: ToolResultPart[] = finalOutputs.map((call) => ({
     output: { type: "error-text" as const, value: FINAL_OUTPUT_BESIDE_PENDING_CALLS },
@@ -318,20 +318,18 @@ async function callEndsTurn(
   }
 }
 
-/** Answers a `final_output` call made while tasks work with an error naming them. */
+/** Answers an `eve__reply` call made while tasks work with an error naming them. */
 function rejectFinalOutput(
   responseMessages: readonly ModelMessage[],
   result: HarnessStepResult,
   workingTasks: readonly string[],
 ): ModelMessage[] {
-  const call = (result.toolCalls ?? []).find(
-    (toolCall) => toolCall.toolName === FINAL_OUTPUT_TOOL_NAME,
-  );
+  const call = (result.toolCalls ?? []).find((toolCall) => toolCall.toolName === REPLY_TOOL_NAME);
   if (call === undefined) return [...responseMessages];
   const rejection: ToolResultPart = {
     output: { type: "error-text", value: renderFinalOutputWhileWorkingError(workingTasks) },
     toolCallId: call.toolCallId,
-    toolName: FINAL_OUTPUT_TOOL_NAME,
+    toolName: REPLY_TOOL_NAME,
     type: "tool-result",
   };
   return [...responseMessages, { content: [rejection], role: "tool" }];
@@ -344,11 +342,11 @@ const OUTPUT_SCHEMA_NOT_FULFILLED = {
 
 /**
  * The structured value the model delivered by calling the framework
- * `final_output` tool, or `undefined` when the terminal turn ended in prose.
+ * `eve__reply` tool, or `undefined` when the terminal turn ended in prose.
  */
 function extractFinalOutput(result: HarnessStepResult): JsonValue | undefined {
   return (result.toolCalls ?? []).find(
-    (call) => call.toolName === FINAL_OUTPUT_TOOL_NAME && !isInvalidToolCall(call),
+    (call) => call.toolName === REPLY_TOOL_NAME && !isInvalidToolCall(call),
   )?.input as JsonValue | undefined;
 }
 
@@ -356,7 +354,7 @@ function extractFinalOutput(result: HarnessStepResult): JsonValue | undefined {
  * Closes a terminal turn. An unmet output schema fails the turn recoverably;
  * otherwise the structured value (or prose) ends the turn and the session
  * waits for the next message. The structured value replaces the un-executed
- * `final_output` call, which would be a dangling tool_use on the next turn,
+ * `eve__reply` call, which would be a dangling tool_use on the next turn,
  * and the schema, scoped to the turn, clears.
  */
 async function settleTurn(

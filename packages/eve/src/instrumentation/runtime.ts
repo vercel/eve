@@ -75,6 +75,7 @@ export { getInstrumentationRuntime, registerInstrumentationRuntime };
 export { initializeSessionInstrumentation };
 const TURN_TRACE_STATE_KEY = "eve.harness.turnTrace";
 import type { SessionTraceSeed } from "#context/keys.js";
+import type { TASK_CANCEL_TOOL_NAME, TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 
 interface InstrumentedStepSession {
   readonly sessionId: string;
@@ -177,7 +178,7 @@ export interface SessionInstrumentation {
 export interface ExecutionInstrumentation {
   readonly instrumentTaskToolCall: (input: {
     readonly callId: string;
-    readonly toolName: "task_wait" | "task_cancel";
+    readonly toolName: typeof TASK_WAIT_TOOL_NAME | typeof TASK_CANCEL_TOOL_NAME;
     readonly startedAtMs: number;
     readonly completedAtMs: number;
     readonly input: unknown;

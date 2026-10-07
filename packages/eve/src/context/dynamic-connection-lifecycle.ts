@@ -8,7 +8,7 @@ import { ALLOWED_DYNAMIC_CONNECTION_EVENTS } from "#dynamic/definition.js";
 import { CONNECTION_SLUG_PATTERN } from "#discover/grammar.js";
 import { createLogger } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import { runtimeToolReservation } from "#protocol/runtime-tools.js";
+import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
 import { readStampedConnectionProtocol } from "#public/definitions/connections/protocol.js";
 import type { DynamicConnectionResolveContext } from "#public/definitions/connections/dynamic.js";
 import { ConnectionRegistryImpl } from "#runtime/connections/registry.js";
@@ -135,7 +135,7 @@ export async function dispatchDynamicConnectionEvent(input: {
       }
       continue;
     }
-    assertNoRuntimeToolNames(outcome.value.connections, resolver);
+    assertNoReservedNames(outcome.value.connections, resolver);
     assertOwnsNoEntries(outcome.value.connections, resolver, entryNames);
     updates.set(outcome.value.resolver.slug, outcome.value.connections);
   }
@@ -168,12 +168,12 @@ function agentEntryNames(ctx: ContextContainer): readonly string[] {
   ];
 }
 
-function assertNoRuntimeToolNames(
+function assertNoReservedNames(
   connections: readonly ResolvedConnectionDefinition[],
   resolver: ResolvedDynamicConnectionResolver,
 ): void {
   for (const { connectionName } of connections) {
-    const reservation = runtimeToolReservation(connectionName);
+    const reservation = eveNamespaceReservation(connectionName);
     if (reservation === undefined) continue;
     throw new Error(
       `Dynamic connection resolver "${resolver.logicalPath}" returned the reserved connection name "${connectionName}". ${reservation}; rename the connection.`,

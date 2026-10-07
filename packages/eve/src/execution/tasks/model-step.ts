@@ -47,7 +47,7 @@ export function isWorkflowTool(definition: HarnessToolDefinition | undefined): b
   return definition?.workflowId !== undefined || isTaskTool(definition);
 }
 
-/** Adds `task_wait` and `task_cancel` to the tools of a session that offers tasks. */
+/** Adds `eve__task_wait` and `eve__task_cancel` to the tools of a session that offers tasks. */
 export function withTaskTools(tools: HarnessToolMap): HarnessToolMap {
   return new Map([
     ...tools,

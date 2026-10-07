@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import type { InstructionsDefinition } from "#public/definitions/instructions.js";
 import { lowerInstructionsMarkdown } from "#internal/helpers/markdown.js";
+import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
 import {
   createDiscoverErrorDiagnostic,
   createDiscoverWarningDiagnostic,
@@ -519,6 +520,14 @@ export function createExtensionNameDiagnostic(
   slotName: string,
   sourcePath: string,
 ): DiscoverDiagnostic | null {
+  const reservation = eveNamespaceReservation(slotName);
+  if (reservation !== undefined) {
+    return createDiscoverErrorDiagnostic({
+      code: DISCOVER_EXTENSION_NAME_INVALID,
+      message: `Extension mount "${slotName}" uses the reserved name "${slotName}". Rename it; ${reservation}.`,
+      sourcePath,
+    });
+  }
   if (EXTENSION_SLUG_PATTERN.test(slotName)) {
     return null;
   }

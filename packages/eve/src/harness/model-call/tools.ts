@@ -5,7 +5,7 @@ import type { StepCatalog } from "#execution/catalog/step-catalog.js";
 import { dispatchesAfterStep } from "#harness/execute-call.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { buildFinalOutputTool } from "#harness/final-output.js";
-import { FINAL_OUTPUT_TOOL_NAME } from "#protocol/final-output-tool.js";
+import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import type { GenerationSteering } from "#harness/generation-steering.js";
 import { type AnthropicCacheMarker, applyLastToolCacheBreakpoint } from "#harness/prompt-cache.js";
 import type { Step } from "#harness/step/context.js";
@@ -19,7 +19,7 @@ const log = createLogger("harness.tool-loop");
 
 /**
  * Assembles the tools one model call offers: the catalog's listed entries with provider tools in
- * place, and `final_output` when the turn asks for a structured result.
+ * place, and `eve__reply` when the turn asks for a structured result.
  */
 export async function prepareModelTools(
   step: Step,
@@ -41,7 +41,7 @@ export async function prepareModelTools(
     tools: catalog.advertised,
   });
   if (step.session.outputSchema !== undefined) {
-    modelTools[FINAL_OUTPUT_TOOL_NAME] = buildFinalOutputTool(step.session.outputSchema);
+    modelTools[REPLY_TOOL_NAME] = buildFinalOutputTool(step.session.outputSchema);
   }
 
   const effectiveTools = marker ? applyLastToolCacheBreakpoint(modelTools, marker) : modelTools;

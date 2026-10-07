@@ -53,7 +53,9 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
       return { toolCalls: [{ input: { message: subagent[2] }, name: subagent[1] }] };
     }
     // The agent call returned a receipt; its result arrives in a <task_result> message.
-    return taskResultOf(request, subagent[1]) ?? { toolCalls: [{ input: {}, name: "task_wait" }] };
+    return (
+      taskResultOf(request, subagent[1]) ?? { toolCalls: [{ input: {}, name: "eve__task_wait" }] }
+    );
   }
 
   const bash = BASH_DIRECTIVE.exec(message);

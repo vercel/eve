@@ -1,5 +1,5 @@
 /**
- * `search`: finds catalog entries, the agent's deferred tools and every
+ * `eve__search`: finds catalog entries, the agent's deferred tools and every
  * connection tool, by keyword. It never prompts: a connection whose tools need
  * sign-in is found as its sign-in entry instead. Its definition is fixed for
  * each eve version, so the catalog can change without changing the model's
@@ -8,7 +8,7 @@
 
 import { connectionToolName } from "#connections/ownership.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
+import { EXECUTE_TOOL_NAME, SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import type { ConnectionToolMetadata } from "#shared/connection-types.js";
@@ -29,9 +29,9 @@ const MAX_LIMIT = 50;
 
 const SEARCH_DESCRIPTION = [
   "Find your own tools, agents, and connected services by keyword; this searches what you can do, not the web.",
-  "Returns each match's exact tool name, description, and TypeScript signature, to call with execute.",
+  `Returns each match's exact tool name, description, and TypeScript signature, to call with ${EXECUTE_TOOL_NAME}.`,
   'When you already know a name or connection, from the catalog listing, an earlier result, or an error, search it directly: the exact name, or "<connection>__", which is faster and returns only that connection\'s tools.',
-  "A connection that needs sign-in appears as a tool named after the connection: executing it asks the user to sign in.",
+  `A connection that needs sign-in appears as a tool named after the connection: calling it with ${EXECUTE_TOOL_NAME} asks the user to sign in.`,
 ].join(" ");
 
 const SEARCH_INPUT_SCHEMA = toInputSchema({
@@ -77,7 +77,7 @@ interface SearchOutput {
 }
 
 /**
- * `fullName` is the name `execute` takes and a namespace query scopes. `result`
+ * `fullName` is the name `eve__execute` takes and a namespace query scopes. `result`
  * renders only for the results returned, since signatures cost a render.
  */
 type SearchCandidate = RankCandidate & {
@@ -86,7 +86,7 @@ type SearchCandidate = RankCandidate & {
 };
 
 /**
- * Builds `search` over one step's deferred entries and the connections in
+ * Builds `eve__search` over one step's deferred entries and the connections in
  * `registry`. `describe` returns an entry's description as the model would
  * read it in its tool list.
  */
@@ -112,7 +112,7 @@ async function search(
   const query = input.query ?? "";
   if (isEmptyQuery(query)) {
     throw new Error(
-      'search needs at least one word in query, such as a capability ("list open issues") or a name or connection prefix ("linear__").',
+      `${SEARCH_TOOL_NAME} needs at least one word in query, such as a capability ("list open issues") or a name or connection prefix ("linear__").`,
     );
   }
   const namespace = parseNamespace(query);
@@ -207,7 +207,7 @@ function unknownNamespaceMessage(
   const hint =
     closest.length > 0
       ? `Closest connections: ${closest.join(", ")}.`
-      : "Find names in the catalog listing or your tool list, or search with plain words.";
+      : `Find names in the catalog listing or your tool list, or call ${SEARCH_TOOL_NAME} with plain words.`;
   return `No entries are named "${namespace}__…". ${hint}`;
 }
 

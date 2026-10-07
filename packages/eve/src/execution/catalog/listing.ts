@@ -1,5 +1,6 @@
 import { isAgentTool } from "#execution/tasks/tool-entry-point.js";
 import type { Announcement } from "#harness/announcements.js";
+import { EXECUTE_TOOL_NAME, SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 
 import { compareCodeUnits } from "./rank.js";
 import type { StepCatalog } from "./step-catalog.js";
@@ -115,7 +116,8 @@ function renderCatalogAnnouncement(
   current: CatalogListing,
   reachable: ReadonlySet<string>,
 ): string {
-  if (isEmpty(current)) return "The catalog changed. It is empty now; do not call execute.";
+  if (isEmpty(current))
+    return `The catalog changed. It is empty now; do not call ${EXECUTE_TOOL_NAME}.`;
   if (previous === undefined || isEmpty(previous)) return renderListing(current);
   const gone = [
     ...previous.namespaces.items,
@@ -134,7 +136,7 @@ function renderListing({ connections, kinds, namespaces }: CatalogListing): stri
       ? "Your connections have more tools"
       : `You have more ${kinds.join(" and ")}`;
   const lines = [
-    `${subject} than are loaded here. Before saying you have no tool for a task, look for one with search, which searches your own catalog, not the web. Call them with execute({ tool, input }).`,
+    `${subject} than are loaded here. Before saying you have no tool for a task, look for one with ${SEARCH_TOOL_NAME}, which searches your own catalog, not the web. Call them with ${EXECUTE_TOOL_NAME}({ tool, input }).`,
   ];
   if (namespaces.items.length > 0) {
     const listed = [...namespaces.items, ...(namespaces.more ? ["and more"] : [])];

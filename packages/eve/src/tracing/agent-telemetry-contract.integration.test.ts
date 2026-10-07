@@ -204,7 +204,7 @@ describe("exported agent telemetry contract", () => {
           })!;
           await binding.instrumentTaskToolCall({
             callId: "control",
-            toolName: tool.name as "task_wait" | "task_cancel",
+            toolName: tool.name as "eve__task_wait" | "eve__task_cancel",
             startedAtMs,
             completedAtMs,
             input,

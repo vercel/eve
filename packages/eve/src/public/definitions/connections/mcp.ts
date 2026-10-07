@@ -49,7 +49,7 @@ export interface McpClientConnectionDefinition {
    * Human-readable summary of the connection and its tools.
    *
    * The model sees it in the catalog listing eve announces, so it can
-   * choose which connection to search with `search`.
+   * choose which connection to search with `eve__search`.
    */
   readonly description: string;
   /**
@@ -107,7 +107,7 @@ export interface McpClientConnectionDefinition {
    */
   toolCall?: ConnectionToolCallDefinition;
   /**
-   * Client-side tool filter. When set, `search` returns and `execute`
+   * Client-side tool filter. When set, `eve__search` returns and `eve__execute`
    * calls only tools whose names pass the filter.
    *
    * Specify exactly one of `allow` or `block`.
