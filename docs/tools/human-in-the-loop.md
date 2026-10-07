@@ -158,7 +158,9 @@ export default defineTool({
 });
 ```
 
-When a response is refused without starting a turn, the session returns to `session.waiting`. The client finishes the submission and keeps the approval prompt answerable. Submitting an answer does not confirm approval: `approval.settled` or `input.resolved` records the server's decision. You can inspect `approval.candidate` events for the response policy's refusal reason.
+When the policy refuses a response, the approval stays pending and the turn stays held. The stream emits `approval.candidate` with `outcome: "pending"`, then `approval.candidate` with `outcome: "rejected"` and the policy's `reason`, then `turn.waiting` with `on: "input"` for the same `turnId`. It does not emit `session.waiting`, so a client that stops reading at a session boundary keeps reading through a refusal. The client finishes the submission and the approval prompt stays answerable. Submitting an answer does not confirm approval: `approval.settled` or `input.resolved` records the server's decision.
+
+Every response a policy evaluates starts the same way, not only refusals. eve first records the response as an `approval.candidate` with `outcome: "pending"`, then runs the policy so slow policy work cannot lose the response. An allowed response then emits `approval.settled` and `input.resolved`. An approval without a `response` policy settles directly and emits no `approval.candidate`. A candidate can also end with `failed`, `timed-out`, or `stale`; inspect `approval.candidate` events for the reason.
 
 ### Skipping approval for schedule-dispatched turns
 

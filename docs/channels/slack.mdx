@@ -167,7 +167,7 @@ Only the first available handler runs. A message hook returning `null` drops the
 
 Message hooks only decide whether and how a message starts a turn. They don't render anything, so replacing one never changes what people see: eve still acknowledges the message, shows progress, and posts the reply. To change what the agent posts, add [renderers](#customize-rendering).
 
-`onInteraction(action, ctx)` separately handles user-owned `block_actions` callbacks. eve-owned HITL buttons and modal submissions go through `onInputResponse(ctx, submission)` instead. eve attaches the triggering Slack user id to the same model message as its text, preserving speaker attribution without profile lookups.
+`onInteraction(action, ctx)` separately handles user-owned `block_actions` callbacks. eve-owned HITL buttons and modal submissions go through `onInputResponse(ctx, submission)` instead. `action.triggerId` carries the click's `trigger_id`, so a button can open a modal with `ctx.slack.request("views.open", { trigger_id, view })`. Slack accepts the id for about 3 seconds. eve attaches the triggering Slack user id to the same model message as its text, preserving speaker attribution without profile lookups.
 
 Use `onShortcut(shortcut, ctx)` for message shortcuts and global shortcuts configured under **Interactivity & Shortcuts** in your Slack app. The handler receives the shortcut callback ID, user, workspace, and trigger ID. Message shortcuts also include the selected message and channel. The context exposes workspace-scoped Slack API access because global shortcuts have no channel or message. eve acknowledges shortcut requests immediately and keeps their handlers alive in the background.
 

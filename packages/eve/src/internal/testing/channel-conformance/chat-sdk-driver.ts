@@ -115,6 +115,7 @@ export function chatSdkDriver(surface: Exclude<Surface, "public"> = "shared"): C
       return {
         id: messageIdOf(call),
         links: linkTargets(card),
+        onlyPerson: isPersonDirectMessage(call),
         options: buttonsOf(call),
         text: card === undefined ? (driver.postedText(call) ?? "") : texts(card),
       };
@@ -268,6 +269,14 @@ function isPost(call: PlatformCall): boolean {
   return call.method === "postMessage" || call.method === "editMessage";
 }
 
+/** The DM thread the bot opens with the person, beside the conversation's own thread. */
+const PERSON_DM_THREAD = `${ADAPTER}:direct-message:${PERSON.userId}`;
+
+function isPersonDirectMessage(call: PlatformCall): boolean {
+  const { threadId } = call.response as { readonly threadId?: string };
+  return threadId === PERSON_DM_THREAD;
+}
+
 function fakeAdapter({
   dm,
   nextId,
@@ -348,13 +357,27 @@ function fakeAdapter({
       isDM: dm,
       metadata: {},
     }),
+    // No native ephemerals, as on Discord or Linq: `postEphemeral` falls back to a DM.
+    // Only the person signing in can be reached, so a sign-in sent to anyone else fails its cells.
+    async openDM(userId: string) {
+      if (userId !== PERSON.userId) throw new Error(`no direct message with ${userId}`);
+      return PERSON_DM_THREAD;
+    },
     async postMessage(id: string, posted: AdapterPostableMessage) {
       const messageId = `posted-${nextId()}`;
-      record({ body: render(posted), method: "postMessage", response: { id: messageId } });
+      record({
+        body: render(posted),
+        method: "postMessage",
+        response: { id: messageId, threadId: id },
+      });
       return { id: messageId, raw: posted, threadId: id };
     },
     async editMessage(id: string, messageId: string, posted: AdapterPostableMessage) {
-      record({ body: render(posted), method: "editMessage", response: { id: messageId } });
+      record({
+        body: render(posted),
+        method: "editMessage",
+        response: { id: messageId, threadId: id },
+      });
       return { id: messageId, raw: posted, threadId: id };
     },
     async addReaction() {},
