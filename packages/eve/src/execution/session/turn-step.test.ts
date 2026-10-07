@@ -11,6 +11,7 @@ import { ContextContainer, loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import {
   AuthKey,
+  ScheduleIdKey,
   ChannelInstrumentationKey,
   ContinuationHookTokensKey,
   ContinuationTokenKey,
@@ -1536,12 +1537,15 @@ describe("turnStep", () => {
     ctx.set(BundleKey, bundle);
     ctx.set(ChannelKey, threadContextAdapter);
     ctx.set(ContinuationTokenKey, "http:auth-replacement");
+    ctx.set(ScheduleIdKey, "previous-scheduled-turn");
     ctx.set(SessionIdKey, "session-1");
 
+    let observedSchedule: string | undefined;
     let observed: SessionAuthContext | null | undefined;
     vi.mocked(createExecutionNodeStep).mockImplementation(() => {
       return async (session): Promise<StepResult> => {
         observed = loadContext().get(AuthKey);
+        observedSchedule = loadContext().get(ScheduleIdKey);
         return { next: null, session };
       };
     });
@@ -1554,6 +1558,7 @@ describe("turnStep", () => {
     });
 
     expect(observed).toEqual(expected);
+    expect(observedSchedule).toBeUndefined();
   });
 
   it("keeps a session-scoped dynamic model selection when the first turn is cancelled", async () => {

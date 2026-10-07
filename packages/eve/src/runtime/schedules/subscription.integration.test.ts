@@ -1,9 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "#compiled/zod/index.js";
 import { resolveApprovalPolicy, type ApprovalConfiguration } from "#approval/definition.js";
-import { once, always } from "#tools/approval/policies.js";
-import { serializeInputSchema } from "#tools/schema.js";
-import { readDurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
 import { loadContext } from "#context/container.js";
 import { AuthKey } from "#context/keys.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
@@ -13,6 +10,9 @@ import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { once } from "#tools/approval/policies.js";
+import { serializeInputSchema } from "#tools/schema.js";
+import { readDurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
 import type { DynamicToolEntry } from "#tools/dynamic.js";
 import type { ScheduleOccurrenceEvent, ScheduleRecord } from "#public/schedules/subscription.js";
 
@@ -22,7 +22,6 @@ const alice = {
   principalId: "alice",
   principalType: "user",
 };
-
 async function bindCaller() {
   loadContext().set(AuthKey, alice);
   loadContext().set(
@@ -33,24 +32,35 @@ async function bindCaller() {
   );
 }
 
-describe("schedule subscription invocation", () => {
-  it("routes management operations, validates input, and isolates approval policy by operation", async () => {
-    const approval = vi.fn(() => "user-approval" as const);
-    const dispatched = vi.fn();
-    const response = vi.fn(() => ({
-      status: "rejected" as const,
-      reason: "Only the fixture administrator can delete.",
-    }));
+describe("schedule creation and invocation", () => {
+  it("exposes direct operation schemas and approves prepared data without writing a changed destination", async () => {
+    let destination = "C123";
     const provider = inMemoryScheduleProvider();
     const write = vi.spyOn(provider, "create");
+    const approvedTargets: string[] = [];
+    const responseTargets: string[] = [];
+    const dispatched = vi.fn();
     const subscription = defineScheduleSubscription({
       schema: z.object({ task: z.string() }).strict(),
       provider,
+      prepare(input) {
+        return { task: input.task, target: destination };
+      },
+      approval: {
+        create: {
+          request: ({ payload }) => {
+            approvedTargets.push(payload.target);
+            return "user-approval";
+          },
+          response: ({ payload }) => {
+            responseTargets.push(payload.target);
+            return { status: "allowed" };
+          },
+        },
+        invoke: once(),
+      },
       auth: () => alice,
       run: dispatched,
-      tools: {
-        approval: { create: approval, invoke: once(), delete: { request: always(), response } },
-      },
     });
     const app = await createTestRuntime({
       modules: [
@@ -73,72 +83,79 @@ describe("schedule subscription invocation", () => {
         channel: {},
         messages: [],
       })) as Record<string, DynamicToolEntry>;
-      const manage = tools.schedule__requests__manage!;
-      expect(Object.keys(tools)).toEqual(["schedule__requests__manage"]);
-      expect(serializeInputSchema(manage.inputSchema)).toMatchObject({ type: "object" });
+      expect(Object.keys(tools).sort()).toEqual(
+        ["create", "delete", "disable", "enable", "get", "invoke", "list"].map(
+          (operation) => `schedule__requests__${operation}`,
+        ),
+      );
+      const create = tools.schedule__requests__create!;
       const input = {
-        operation: "create" as const,
         name: "joke",
         expression: { type: "delay" as const, minutes: 1 },
         payload: { task: "A joke" },
       };
-      const policy = resolveApprovalPolicy(manage.approval!);
-      const policyContext = (toolInput: unknown, approvedTools = new Set<string>()) =>
-        ({ toolInput, approvedTools, toolName: "schedule__requests__manage" }) as never;
-      await expect(policy(policyContext({ operation: "list" }))).resolves.toBe("not-applicable");
-      await expect(policy(policyContext(input))).resolves.toBe("user-approval");
-      expect(approval).toHaveBeenCalledOnce();
-      await expect(manage.execute({ ...input, cursor: "irrelevant" }, {} as never)).rejects.toThrow(
-        "not supported",
-      );
-      await expect(
-        policy(policyContext({ operation: "create", name: "missing" })),
-      ).resolves.toMatchObject({ type: "denied" });
-      expect(write).not.toHaveBeenCalled();
-      const created = (await manage.execute(input, {} as never)) as ScheduleRecord;
-      await expect(manage.execute({ operation: "list" }, {} as never)).resolves.toMatchObject({
-        data: [{ name: created.name }],
+      expect(serializeInputSchema(create.inputSchema)).toMatchObject({
+        type: "object",
+        required: ["name", "expression", "payload"],
       });
+      expect(tools.schedule__requests__list!.approval).toBeUndefined();
+      const policyContext = (
+        callId: string,
+        toolInput: unknown,
+        approvedTools = new Set<string>(),
+      ) => ({ callId, toolInput, approvedTools, toolName: "schedule__requests__create" }) as never;
+      const request = resolveApprovalPolicy(create.approval!);
       await expect(
-        manage.execute({ operation: "get", name: created.name }, {} as never),
-      ).resolves.toMatchObject({ displayName: "joke" });
-      const invokeInput = { operation: "invoke", name: created.name };
-      const invokeKey = manage.approvalKey!(invokeInput);
-      const approved = new Set([invokeKey]);
-      await expect(policy(policyContext(invokeInput))).resolves.toBe("user-approval");
-      await expect(policy(policyContext(invokeInput, approved))).resolves.toBe("not-applicable");
-      await expect(
-        policy(policyContext({ operation: "disable", name: created.name }, approved)),
-      ).resolves.toBe("user-approval");
-      await expect(manage.execute(invokeInput, {} as never)).resolves.toEqual({ accepted: true });
-      expect(dispatched).toHaveBeenCalledOnce();
-      const approvalResponse = (manage.approval as ApprovalConfiguration).response!;
-      const responder = {
-        request: { principal: alice, toolInput: { operation: "delete", name: created.name } },
-        response: { principal: alice },
+        request(policyContext("invalid", { ...input, payload: {} })),
+      ).resolves.toMatchObject({ type: "denied" });
+      expect(approvedTargets).toEqual([]);
+      await expect(request(policyContext("changed", input))).resolves.toBe("user-approval");
+      expect(approvedTargets).toEqual(["C123"]);
+      const response = (create.approval as ApprovalConfiguration).response!;
+      await expect(response({ request: { callId: "changed" } } as never)).resolves.toEqual({
+        status: "allowed",
+      });
+      expect(responseTargets).toEqual(["C123"]);
+      destination = "C999";
+      await expect(create.execute(input, { callId: "changed" } as never)).rejects.toThrow(
+        "changed after approval",
+      );
+      expect(write).not.toHaveBeenCalled();
+      await expect(request(policyContext("accepted", input))).resolves.toBe("user-approval");
+      const callbacks = readDurableDynamicToolCallbacks(create)!;
+      expect(callbacks.label!.start!.callback({}, input as never)).toBe("Create schedule: joke");
+      const created = (await callbacks.execute!.callback(
+        {},
+        input as never,
+        { callId: "accepted" } as never,
+      )) as ScheduleRecord;
+      expect(write.mock.calls[0]![1].payload).toMatchObject({
+        envelope: { payload: { task: "A joke", target: "C999" } },
+      });
+      await expect(tools.schedule__requests__list!.execute({}, {} as never)).resolves.toMatchObject(
+        { data: [{ name: created.name }] },
+      );
+      const invoke = tools.schedule__requests__invoke!;
+      const invoked = { name: created.name };
+      const invokeContext = {
+        toolName: "schedule__requests__invoke",
+        toolInput: invoked,
+        approvedTools: new Set(["schedule__requests__invoke"]),
       } as never;
-      await expect(approvalResponse(responder)).resolves.toMatchObject({ status: "rejected" });
-      expect(response).toHaveBeenCalledOnce();
-      await expect(
-        approvalResponse({
-          request: { principal: alice, toolInput: invokeInput },
-          response: { principal: { ...alice, principalId: "bob" } },
-        } as never),
-      ).resolves.toMatchObject({ status: "rejected" });
-      const callbacks = readDurableDynamicToolCallbacks(manage)!;
+      expect(await resolveApprovalPolicy(invoke.approval!)(invokeContext)).toBe("not-applicable");
       expect(
-        await callbacks.approvalRequest!.callback({}, policyContext(invokeInput, approved)),
-      ).toBe("not-applicable");
-      expect(callbacks.approvalKey!.callback({}, invokeInput as never)).toBe(invokeKey);
-      expect(callbacks.label!.start!.callback({}, invokeInput as never)).toBe("Run schedule: joke");
-      await manage.execute({ operation: "delete", name: created.name }, {} as never);
+        await resolveApprovalPolicy(tools.schedule__requests__delete!.approval!)(invokeContext),
+      ).toBe("user-approval");
+      await invoke.execute(invoked, {} as never);
+      expect(dispatched).toHaveBeenCalledOnce();
+      await tools.schedule__requests__delete!.execute(invoked, {} as never);
       await expect(
-        manage.execute({ operation: "get", name: created.name }, {} as never),
+        tools.schedule__requests__get!.execute(invoked, {} as never),
       ).resolves.toBeNull();
     });
   });
 
-  it("dispatches prepared data unchanged, preserves occurrence identity, and revalidates the creator", async () => {
+  it("prepares code-only creation once and revalidates the creator on each occurrence", async () => {
     let allowed = true;
     let preparations = 0;
     const messages: string[] = [];
@@ -146,6 +163,7 @@ describe("schedule subscription invocation", () => {
     const subscription = defineScheduleSubscription({
       schema: z.object({ task: z.string() }).strict(),
       provider: inMemoryScheduleProvider(),
+      tool: false,
       async prepare(input, context) {
         preparations += 1;
         return { message: input.task, author: context.session.auth.current!.principalId };

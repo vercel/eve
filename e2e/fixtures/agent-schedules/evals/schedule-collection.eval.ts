@@ -11,15 +11,14 @@ export default defineEval({
     turn.expectOk();
     const approval = turn.session.requireInputRequest({
       display: "confirmation",
-      toolName: "schedule__requests__manage",
+      toolName: "schedule__requests__create",
     });
     const created = await turn.session.respond([
       { optionId: "approve", requestId: approval.requestId },
     ]);
     created.expectOk();
-    created.session.calledTool("schedule__requests__manage", {
+    created.session.calledTool("schedule__requests__create", {
       input: {
-        operation: "create",
         name: "collection-email",
         payload: { destination: "creator-email" },
       },

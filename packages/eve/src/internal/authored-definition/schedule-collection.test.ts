@@ -20,14 +20,28 @@ describe("normalizeScheduleCollectionDefinition", () => {
     ["a malformed prepare hook", { prepare: true }, '"prepare" must be a function'],
     [
       "approval for the removed update tool",
-      { tools: { approval: { update: () => "user-approval" } } },
+      { approval: { update: () => "user-approval" } },
       "update",
     ],
+    ["unsupported deferral", { tool: "deferred" }, "deferred tools are not supported"],
     ["the removed capture hook", { resolvePayload: () => ({}) }, "resolvePayload"],
     ["the removed deliveries", { deliveries: {} }, "deliveries"],
   ])("rejects a subscription with %s", (_label, override, message) => {
     const definition = defineScheduleSubscription({ ...valid, ...override } as never);
     expect(() => normalizeScheduleCollectionDefinition(definition, "Invalid.")).toThrow(message);
+  });
+
+  it("rejects model approval configuration on code-only definitions at type and runtime boundaries", () => {
+    const invalid = {
+      ...valid,
+      tool: false as const,
+      approval: { create: () => "user-approval" as const },
+    };
+    // @ts-expect-error Code-only scheduling cannot configure model-call approval.
+    const definition = defineScheduleSubscription(invalid);
+    expect(() => normalizeScheduleCollectionDefinition(definition, "Invalid.")).toThrow(
+      "cannot be configured",
+    );
   });
 
   it("defaults to Vercel and preserves an explicit provider override", () => {

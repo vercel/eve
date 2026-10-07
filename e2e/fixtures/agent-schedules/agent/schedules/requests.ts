@@ -29,7 +29,6 @@ export default defineScheduleSubscription({
       throw new Error("The creator has no authorized fixture email destination.");
     await to(outbox, { scheduleName: occurrence.name }).send(
       `This scheduled occurrence is firing now. Perform the task using record-email for ${recipient}. Do not create another schedule.\n\nTask: ${payload.task}`,
-      { auth },
     );
   },
   events: {

@@ -15,7 +15,6 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
   }
   if (message.includes(`Create the schedule named ${SCHEDULE}`)) {
     const input = {
-      operation: "create",
       name: SCHEDULE,
       expression: { type: "single", at: "2030-01-01T09:00", timezone: "UTC" },
       payload: {
@@ -23,7 +22,7 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
         destination: "creator-email",
       },
     };
-    return once(request, "schedule__requests__manage", input, () => `Saved ${SCHEDULE}.`);
+    return once(request, "schedule__requests__create", input, () => `Saved ${SCHEDULE}.`);
   }
   for (const operation of ["get", "invoke", "delivery"] as const) {
     if (message.includes("share-schedule") && message.includes(OPERATION_PROMPTS[operation])) {

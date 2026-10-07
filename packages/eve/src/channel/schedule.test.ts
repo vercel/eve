@@ -93,15 +93,13 @@ describe("ScheduleDispatcher", () => {
       const run = vi.fn(
         async (args: {
           payload: { task: string; destination: string };
-          to: import("#public/definitions/schedule.js").ScheduleToFn;
+          to: import("#public/schedules/subscription.js").ScheduleSubscriptionToFn;
           auth: SessionAuthContext;
           waitUntil: (task: Promise<unknown>) => void;
         }) => {
           const channelId =
             args.payload.destination === "my-dm" ? `dm-${args.auth.principalId}` : "team-channel";
-          args.waitUntil(
-            args.to(channel, { channelId }).send(args.payload.task, { auth: args.auth }),
-          );
+          args.waitUntil(args.to(channel, { channelId }).send(args.payload.task));
         },
       );
       const definition = defineScheduleSubscription({
@@ -156,7 +154,7 @@ describe("ScheduleDispatcher", () => {
       expect(second.sessions).toHaveLength(1);
       const started = vi.mocked(runtime.createSession).mock.calls.map(([value]) => value);
       expect(started[0]).toMatchObject({
-        auth: { principalId: "alice", attributes: { "eve.scheduled_run": "true" } },
+        auth: { principalId: "alice", attributes: {} },
         capabilities: { requestInput: false },
         input: { message: "Summarize the week." },
       });

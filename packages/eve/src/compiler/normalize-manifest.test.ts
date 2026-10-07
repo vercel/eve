@@ -458,17 +458,19 @@ describe("compileAgentManifest source graph", () => {
       channel: {},
       messages: [],
     });
-    expect(Object.keys(tools as object)).toEqual(["schedule__billing-requests__manage"]);
-    const manage = (tools as Record<string, import("#tools/dynamic.js").DynamicToolEntry>)[
-      "schedule__billing-requests__manage"
-    ]!;
-    expect(manage.label?.start({ operation: "create", name: "daily-digest" })).toBe(
-      "Create schedule: daily-digest",
+    expect(Object.keys(tools as object).sort()).toEqual(
+      ["create", "delete", "disable", "enable", "get", "invoke", "list"].map(
+        (operation) => `schedule__billing-requests__${operation}`,
+      ),
     );
-    expect(manage.label?.start({ operation: "list" })).toBe("List schedules");
-    expect(manage.label?.start({ operation: "delete", name: "daily-digest" })).toBe(
-      "Delete schedule: daily-digest",
-    );
+    const entries = tools as Record<string, import("#tools/dynamic.js").DynamicToolEntry>;
+    expect(
+      entries["schedule__billing-requests__create"]!.label?.start({ name: "daily-digest" }),
+    ).toBe("Create schedule: daily-digest");
+    expect(entries["schedule__billing-requests__list"]!.label?.start({})).toBe("List schedules");
+    expect(
+      entries["schedule__billing-requests__delete"]!.label?.start({ name: "daily-digest" }),
+    ).toBe("Delete schedule: daily-digest");
   });
 
   it("classifies compile and runtime usage from normalized authored semantics", async () => {

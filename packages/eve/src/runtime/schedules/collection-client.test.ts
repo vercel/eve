@@ -52,6 +52,9 @@ describe("schedule subscription client", () => {
     expect(first.name).not.toBe(second.name);
     await client.delete(first.name);
     await expect(client.get(second.name)).resolves.toMatchObject({ displayName: "report" });
+    const longest = await client.create({ ...input, name: "r".repeat(256) });
+    expect(longest.name).toHaveLength(256);
+    await expect(client.get(longest.name)).resolves.toMatchObject({ displayName: "r".repeat(218) });
   });
   it("stores validated destination intent and a separate credential-free creator reference", async () => {
     const { client, create } = setup();
@@ -129,13 +132,7 @@ describe("schedule subscription client", () => {
       ...callContext,
       session: {
         ...callContext.session,
-        auth: {
-          current: {
-            ...callContext.session.auth.current!,
-            attributes: { "eve.scheduled_run": "true" },
-          },
-          initiator: null,
-        },
+        schedule: { definition: "requests", occurrenceId: "exec-1" },
       },
     });
     await expect(scheduled.create(input)).rejects.toThrow("unavailable during scheduled execution");
