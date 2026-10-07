@@ -137,6 +137,7 @@ export function slackDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
 
   return {
     name: dm ? "slack-dm" : "slack",
+    personId: PERSON,
     capabilities: dm
       ? ["attachments", "buttons", "text-replies"]
       : ["attachments", "another-person", "buttons", "text-replies"],

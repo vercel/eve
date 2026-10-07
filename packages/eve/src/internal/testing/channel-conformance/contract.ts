@@ -154,12 +154,12 @@ async function expectReleased(conversation: ChannelConversation) {
   await expectRan(conversation, REQUESTER_GATED_TOOL, { released: true });
 }
 
-/** Once the session settles after Bob's press, the requester-only approval is still pending. */
+/** Once the session settles after Bob answers, the requester-only approval is still pending. */
 async function expectStillPending(conversation: ChannelConversation) {
   await conversation.waitForRest();
   expect(
     conversation.runsOf(REQUESTER_GATED_TOOL),
-    `${REQUESTER_GATED_TOOL} ran on Bob's press`,
+    `${REQUESTER_GATED_TOOL} ran on Bob's answer`,
   ).toBe(0);
 }
 
@@ -947,16 +947,6 @@ const signInRules = [
 
 const approvalPermissionRules = [
   {
-    rule: "the requester pressing Approve on a requester-only approval runs the tool",
-    source: "docs/tools/human-in-the-loop.md#authorizing-approval-responses",
-    requires: ["buttons"],
-    async run(conversation) {
-      const options = await askToReleaseHotfix(conversation);
-      await conversation.press(option(options, APPROVE_LABELS));
-      await expectReleased(conversation);
-    },
-  },
-  {
     rule: "the requester typing approve on a requester-only approval runs the tool",
     source: "docs/tools/human-in-the-loop.md#authorizing-approval-responses",
     requires: ["text-replies"],
@@ -967,40 +957,34 @@ const approvalPermissionRules = [
     },
   },
   {
-    rule: "another person pressing Approve on a requester-only approval leaves it pending",
+    rule: "another person pressing Cancel or Approve on a requester-only approval leaves it pending",
     source: "docs/tools/human-in-the-loop.md#authorizing-approval-responses",
     requires: ["another-person", "buttons"],
     async run(conversation) {
       const options = await askToReleaseHotfix(conversation);
       const approve = option(options, APPROVE_LABELS);
+      await conversation.press(option(options, CANCEL_LABELS), "bob");
       await conversation.press(approve, "bob");
       await expectStillPending(conversation);
+      // A cancel that got through would settle the call as denied before this approval.
       await conversation.press(approve);
       await expectReleased(conversation);
     },
   },
   {
-    rule: "another person pressing Cancel on a requester-only approval leaves it pending",
-    source: "docs/tools/human-in-the-loop.md#authorizing-approval-responses",
-    requires: ["another-person", "buttons"],
-    async run(conversation) {
-      const options = await askToReleaseHotfix(conversation);
-      await conversation.press(option(options, CANCEL_LABELS), "bob");
-      await expectStillPending(conversation);
-      // A cancel that got through would settle the call as denied before this approval.
-      await conversation.press(option(options, APPROVE_LABELS));
-      await expectReleased(conversation);
-    },
-  },
-  {
-    rule: "another person typing cancel and approve leaves a requester-only approval pending",
-    source: "docs/tools/human-in-the-loop.md#authorizing-approval-responses",
+    rule: "another person typing cancel or approve doesn't settle a requester-only approval",
+    source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
     requires: ["another-person", "text-replies"],
     async run(conversation) {
       await askToReleaseHotfix(conversation);
+      // Today another person's message waits for the turn to end, so it never reaches the
+      // response policy; the approval stays pending either way.
       await conversation.say("cancel", "bob");
       await conversation.say("approve", "bob");
       await expectStillPending(conversation);
+      // A cancel taken as Alice's would settle the call as denied before this approval.
+      await conversation.say("approve");
+      await expectReleased(conversation);
     },
   },
   {
@@ -1036,6 +1020,12 @@ const callerRules = [
     async run(conversation) {
       const [caller] = await lookUpNotesAs(conversation, ["alice"]);
       expect(caller, `${PLAIN_TOOL} ran with no caller`).not.toBeNull();
+      const [principalId] = JSON.parse(caller!) as [string];
+      // Platform principals are namespaced, e.g. `slack:T01:U_ALICE`; a client's is the bare id.
+      expect(
+        principalId === conversation.personId || principalId.endsWith(`:${conversation.personId}`),
+        `${PLAIN_TOOL} ran as ${principalId}, which doesn't name ${conversation.personId}`,
+      ).toBe(true);
     },
   },
   {

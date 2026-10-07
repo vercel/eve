@@ -88,6 +88,7 @@ export function linqDriver(surface: Exclude<Surface, "public"> = "shared"): Chan
 
   return {
     name: group ? "linq" : "linq-dm",
+    personId: PERSON.id,
     capabilities: ["attachments", "text-replies"],
     surface,
     createChannel(record) {

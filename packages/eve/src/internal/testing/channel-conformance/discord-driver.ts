@@ -126,6 +126,7 @@ export function discordDriver(surface: Exclude<Surface, "public"> = "shared"): C
 
   return {
     name: dm ? "discord-dm" : "discord",
+    personId: PERSON.id,
     capabilities: dm ? ["attachments", "buttons"] : ["attachments", "another-person", "buttons"],
     surface,
     createChannel: (record) =>

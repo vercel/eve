@@ -13,7 +13,7 @@ let nextConversation = 0;
 
 /** Drives GitHub issue comments through the signed App webhook route. */
 const PEOPLE = {
-  alice: { id: 1, login: "octocat", type: "User" },
+  alice: { id: 583231, login: "octocat", type: "User" },
   bob: { id: 2, login: "hubot-bob", type: "User" },
 } as const;
 
@@ -70,6 +70,7 @@ export function githubDriver(): ChannelDriver {
 
   return {
     name: "github",
+    personId: String(PEOPLE.alice.id),
     capabilities: ["another-person", "text-replies"],
     surface: "public",
     createChannel: (record) =>

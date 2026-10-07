@@ -75,6 +75,7 @@ export function twilioDriver(): ChannelDriver {
 
   return {
     name: "twilio",
+    personId: PERSON,
     capabilities: ["attachments", "text-replies"],
     surface: "private",
     createChannel: (record) =>

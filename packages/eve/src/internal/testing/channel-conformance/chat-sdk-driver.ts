@@ -196,6 +196,7 @@ function chatSdkDriverWith(input: {
 
   return {
     name: input.name,
+    personId: PERSON.userId,
     inbound,
     createChannel(record) {
       const dm = input.surface === "private";

@@ -160,6 +160,7 @@ export function telegramDriver(surface: Exclude<Surface, "public"> = "shared"): 
 
   return {
     name: group ? "telegram" : "telegram-dm",
+    personId: String(PERSON.id),
     capabilities: !group
       ? ["attachments", "buttons", "text-replies"]
       : ["attachments", "another-person", "buttons", "text-replies"],

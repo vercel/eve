@@ -87,6 +87,7 @@ export function linearDriver(): ChannelDriver {
 
   return {
     name: "linear",
+    personId: PEOPLE.alice,
     capabilities: ["another-person", "attachments", "text-replies"],
     // An agent session lives on an issue the whole workspace can see.
     surface: "shared",

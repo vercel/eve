@@ -145,6 +145,7 @@ export function teamsDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
 
   return {
     name: personal ? "teams-dm" : "teams",
+    personId: PERSON.id,
     capabilities: personal
       ? ["attachments", "buttons", "text-replies"]
       : ["attachments", "another-person", "buttons", "text-replies"],

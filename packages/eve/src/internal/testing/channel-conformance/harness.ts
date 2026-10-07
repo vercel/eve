@@ -125,6 +125,8 @@ export type Surface =
  */
 export interface ChannelDriver {
   readonly name: string;
+  /** The platform's id for Alice, which the principal eve derives for her must name. */
+  readonly personId: string;
   readonly capabilities: readonly ChannelCapability[];
   readonly surface: Surface;
   /**
@@ -247,10 +249,13 @@ export interface ChannelConversation {
   shownPrompt(prompt: string): Promise<ShownMessage>;
   /** How the person appears in the platform's text, in any form. */
   readonly personShownAs: readonly string[];
+  /** Alice's id on the platform, or as the client authenticates her. */
+  readonly personId: string;
   runsOf(tool: CountedTool): number;
   /**
-   * The caller each run of `tool` saw, in order, as one opaque string per
-   * principal, or `null` for no caller. Equal strings are the same principal.
+   * The caller each run of `tool` saw, in order, as one string per principal,
+   * or `null` for no caller. Equal strings are the same principal. Each is JSON
+   * that begins with the principal id.
    */
   callersOf(tool: typeof PLAIN_TOOL): readonly (string | null)[];
 }
@@ -288,6 +293,8 @@ export interface ClientView {
   shownPrompt?(prompt: string): ShownMessage | Promise<ShownMessage>;
   /** How the person appears in the client's text, in any form. */
   readonly personShownAs?: readonly string[];
+  /** Alice's id on the platform; a client authenticates her as {@link CLIENT_PERSON}. */
+  readonly personId?: string;
   /** See {@link ChannelDriver.nextAddress}. */
   nextAddress?(): string | undefined;
   /** Everything the client shows now that a person can read or open, one entry per message. */
@@ -541,6 +548,7 @@ function webhookView(
         .at(-1)!;
     },
     personShownAs: driver.personShownAs ?? [],
+    personId: driver.personId,
     nextAddress: driver.nextAddress?.bind(driver),
     shown: () =>
       calls.flatMap((call) => {
@@ -922,6 +930,7 @@ async function converse(
         return await view.shownPrompt(prompt);
       },
       personShownAs: view.personShownAs ?? [],
+      personId: view.personId ?? CLIENT_PERSON.principalId,
     };
 
     /**

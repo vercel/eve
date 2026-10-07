@@ -104,6 +104,7 @@ export function photonDriver(): ChannelDriver {
 
   return {
     name: "photon",
+    personId: PERSON,
     capabilities: ["attachments", "text-replies"],
     surface: "private",
     createChannel(record) {
