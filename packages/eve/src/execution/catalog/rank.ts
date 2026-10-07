@@ -31,11 +31,7 @@ export interface RankCandidate {
   readonly connection?: { readonly description: string; readonly name: string };
 }
 
-/**
- * Candidates matching `query`, best first. A query with no words matches every
- * candidate in name order, which lists a namespace when only its prefix was
- * searched.
- */
+/** Candidates matching `query`, best first. */
 export function rankCandidates<T extends RankCandidate>(
   query: string,
   candidates: readonly T[],
@@ -59,15 +55,13 @@ export function isEmptyQuery(query: string): boolean {
   return tokenize(query).length === 0;
 }
 
+const MAX_SUGGESTIONS = 5;
+
 /** Names of the candidates closest to an unknown `name`, best first. */
-export function closestNames(
-  name: string,
-  candidates: readonly RankCandidate[],
-  limit: number,
-): string[] {
+export function closestNames(name: string, candidates: readonly RankCandidate[]): string[] {
   if (isEmptyQuery(name)) return [];
   return rankCandidates(name, candidates)
-    .slice(0, limit)
+    .slice(0, MAX_SUGGESTIONS)
     .map((candidate) => candidate.name);
 }
 
@@ -77,7 +71,6 @@ function rankCandidate(
   terms: readonly string[],
   candidate: RankCandidate,
 ): { readonly score: number; readonly tier: number } {
-  if (terms.length === 0) return { score: 1, tier: Tier.keyword };
   const ownName = tokenize(candidate.name);
   const fullName =
     candidate.connection === undefined

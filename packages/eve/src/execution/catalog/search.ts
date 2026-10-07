@@ -21,7 +21,7 @@ import {
   type ConnectionListing,
 } from "./connection-auth.js";
 import { connectionSignInEntry } from "./connection-entry.js";
-import { isEmptyQuery, rankCandidates, type RankCandidate } from "./rank.js";
+import { closestNames, isEmptyQuery, rankCandidates, type RankCandidate } from "./rank.js";
 import { connectionToolSignature, entrySignature } from "./signatures.js";
 
 const DEFAULT_LIMIT = 20;
@@ -30,7 +30,7 @@ const MAX_LIMIT = 50;
 const SEARCH_DESCRIPTION = [
   "Find your own tools, agents, and connected services by keyword; this searches what you can do, not the web.",
   "Returns each match's exact tool name, description, and TypeScript signature, to call with execute.",
-  'When you already know a name or connection, from the catalog listing, an earlier result, or an error, search it directly: the exact name, or "<connection>__" for one connection\'s tools, which is faster and returns only that connection.',
+  'When you already know a name or connection, from the catalog listing, an earlier result, or an error, search it directly: the exact name, or "<connection>__", which is faster and returns only that connection\'s tools.',
   "A connection that needs sign-in appears as a tool named after the connection: executing it asks the user to sign in.",
 ].join(" ");
 
@@ -56,7 +56,7 @@ const SEARCH_INPUT_SCHEMA = toInputSchema({
 
 interface SearchInput {
   readonly limit?: number;
-  /** Required by the schema; a call that skips validation fails like a query with no words. */
+  /** The schema requires it; a call that skips validation and omits it fails like a query with no words. */
   readonly query?: string;
 }
 
@@ -109,12 +109,13 @@ async function search(
   catalog: Parameters<typeof createSearchTool>[0],
   input: SearchInput,
 ): Promise<SearchOutput> {
-  const { namespace, words } = parseQuery(input.query ?? "");
-  if (namespace === undefined && isEmptyQuery(words)) {
+  const query = input.query ?? "";
+  if (isEmptyQuery(query)) {
     throw new Error(
       'search needs at least one word in query, such as a capability ("list open issues") or a name or connection prefix ("linear__").',
     );
   }
+  const namespace = parseNamespace(query);
   const inScope = (name: string) => namespace === undefined || inNamespace(name, namespace);
 
   const candidates = catalog.deferred
@@ -141,35 +142,32 @@ async function search(
     }
   }
 
+  if (namespace !== undefined && candidates.length === 0 && unavailable.length === 0) {
+    throw new Error(unknownNamespaceMessage(namespace, registry?.getConnections() ?? []));
+  }
+
   const limit = clampInteger(input.limit, 1, MAX_LIMIT, DEFAULT_LIMIT);
-  const results = rankCandidates(words, candidates)
+  const results = rankCandidates(query, candidates)
     .slice(0, limit)
     .map((candidate) => candidate.result());
   return unavailable.length > 0 ? { results, unavailable } : { results };
 }
 
 /**
- * Splits off a namespace: when the query's first word contains `__`,
- * everything before its last `__` scopes the search, and the rest of the
- * query is ranked within it. Characters that can't appear in a name, such as
- * a leading `^`, are ignored; regex isn't supported.
+ * The namespace a query scopes to: when its first word contains `__`,
+ * everything before its last `__`, without trailing underscores. It only
+ * filters; the whole query still ranks. Characters that can't appear in a
+ * name, such as a leading `^`, are ignored; regex isn't supported.
  */
-function parseQuery(query: string): { readonly namespace?: string; readonly words: string } {
-  const [first = "", ...rest] = query.trim().split(/\s+/u);
-  const word = first.replace(/^[^A-Za-z0-9_-]+/u, "");
-  const separator = word.lastIndexOf("__");
-  if (separator <= 0) return { words: query };
-  return {
-    namespace: word.slice(0, separator),
-    words: [word.slice(separator + 2), ...rest].join(" "),
-  };
+function parseNamespace(query: string): string | undefined {
+  const word = (query.trim().split(/\s+/u)[0] ?? "").replace(/^[^A-Za-z0-9_-]+/u, "");
+  const namespace = word.slice(0, Math.max(0, word.lastIndexOf("__"))).replace(/_+$/u, "");
+  return namespace === "" ? undefined : namespace;
 }
 
 /**
- * Whether `name` is in `namespace`: under its `<namespace>__` prefix, or the
- * namespace itself. A connection owns its name and every name under its
- * prefix, so when the namespace is a connection, the one entry named exactly
- * the namespace is that connection's sign-in entry.
+ * Names under `<namespace>__`, plus anything named exactly `namespace`, such
+ * as a connection's sign-in entry.
  */
 function inNamespace(name: string, namespace: string): boolean {
   return name === namespace || name.startsWith(`${namespace}__`);
@@ -184,6 +182,29 @@ function inNamespace(name: string, namespace: string): boolean {
  */
 function mayOwnNamespace(connectionName: string, namespace: string): boolean {
   return inNamespace(connectionName, namespace) || namespace.startsWith(`${connectionName}__`);
+}
+
+/**
+ * Why a namespace query found nothing, with the closest connection names, or
+ * how to find names when none is close. Names are case-sensitive, so
+ * `Linear__` misses `linear`.
+ */
+function unknownNamespaceMessage(
+  namespace: string,
+  connections: readonly ResolvedConnectionDefinition[],
+): string {
+  const closest = closestNames(
+    namespace,
+    connections.map(({ connectionName, description }) => ({
+      description,
+      name: connectionName,
+    })),
+  );
+  const hint =
+    closest.length > 0
+      ? `Closest connections: ${closest.join(", ")}.`
+      : "Find names in the catalog listing, or search with plain words.";
+  return `No entries are named "${namespace}__…". ${hint}`;
 }
 
 /** A connection's tools, or its sign-in entry while listing them needs sign-in. */
