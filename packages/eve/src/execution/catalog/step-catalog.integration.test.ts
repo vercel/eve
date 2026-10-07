@@ -58,7 +58,7 @@ vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async ()
 const NAMESPACES_OPS_TENANT = /^Namespaces, .*: ops, tenant$/mu;
 
 /** Every catalog listing says this, whatever kinds it names. */
-const LISTING_MARKER = "names aren't listed; find them with search";
+const LISTING_MARKER = "look for one with search, which searches your own catalog";
 
 type Reply = ReturnType<typeof textStreamResult>;
 
@@ -543,7 +543,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
     // 5. Deterministic rendering is owned by listing.test.ts; here each change
     // appends the listing again, and compaction starts a fresh baseline.
     expect(listingFor(0)).toEqual([
-      expect.stringContaining("More tools, agents, and skills are available"),
+      expect.stringContaining("You have more tools, agents, and skills than are loaded here"),
     ]);
     expect(listingFor(connectionStep).at(-1)).toContain(
       "- products: Caller-specific product catalog.",
