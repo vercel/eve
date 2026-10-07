@@ -11,7 +11,7 @@ import { authorizationEventFields } from "#harness/authorization-event-fields.js
 import { renderPendingApprovalsSnippet } from "#harness/hitl/approval-prompt.js";
 import { isApprovalRequest } from "#harness/input-request-class.js";
 import {
-  failedCallResult,
+  failedCall,
   resolveApprovalOutcome,
   resolveInputOutcome,
   TOOL_EXECUTION_DENIED_MESSAGE,
@@ -335,13 +335,9 @@ export function answer(
     for (const request of step.requests) {
       const { callId, toolName } = request.action;
       if (unavailable.has(request.requestId)) {
-        const failed = failedCallResult(step.event, {
-          callId,
-          message: unavailableToolMessage(toolName),
-          toolName,
-        });
+        const failed = failedCall({ callId, message: unavailableToolMessage(toolName), toolName });
         messages = withResult(messages, failed.part);
-        results.push(failed.event);
+        results.push(createActionResultEvent({ result: failed.result, ...step.event }));
         continue;
       }
       const { approved, reason, status } = resolveApprovalOutcome(byId.get(request.requestId));

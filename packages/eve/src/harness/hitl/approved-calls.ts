@@ -13,7 +13,7 @@ import { toolCallModelOutput } from "#harness/tool-call-io.js";
 import { projectDeltaPresentation, projectResultPresentation } from "#harness/tool-presentation.js";
 import { recheckApprovedCall, wrapToolExecute } from "#harness/tools.js";
 import {
-  failedCallResult,
+  failedCall,
   TOOL_EXECUTION_DENIED_MESSAGE,
   unavailableToolMessage,
 } from "#harness/input-request-resolution.js";
@@ -75,8 +75,8 @@ export async function runApprovedCalls(input: {
     toolName: string,
     message: string,
   ): Promise<ApprovedCallResult> => {
-    const failed = failedCallResult(at, { callId, message, toolName });
-    await input.publish(failed.event);
+    const failed = failedCall({ callId, message, toolName });
+    await input.publish(createActionResultEvent({ ...at, result: failed.result }));
     return { part: failed.part };
   };
   const executed = await Promise.allSettled(
