@@ -12,8 +12,8 @@ import {
 } from "#discover/filesystem.js";
 import {
   readSortedDirectoryEntries,
-  TOOL_SLUG_PATTERN,
-  TOOL_SLUG_RULE,
+  SKILL_NAME_PATTERN,
+  SKILL_NAME_RULE,
 } from "#discover/grammar.js";
 import {
   createModuleSourceRef,
@@ -115,11 +115,11 @@ export async function discoverSkills(input: DiscoverSkillsInput): Promise<Discov
       continue;
     }
 
-    if (!TOOL_SLUG_PATTERN.test(discoveredSkill.skillId)) {
+    if (!SKILL_NAME_PATTERN.test(discoveredSkill.skillId)) {
       diagnostics.push(
         createDiscoverErrorDiagnostic({
           code: DISCOVER_SKILL_NAME_INVALID,
-          message: `Skill "${discoveredSkill.logicalPath}" has an illegal name "${discoveredSkill.skillId}". ${TOOL_SLUG_RULE}`,
+          message: `Skill "${discoveredSkill.logicalPath}" has an illegal name "${discoveredSkill.skillId}". ${SKILL_NAME_RULE}`,
           sourcePath: join(skillsDirectoryPath, entry.name),
         }),
       );

@@ -40,7 +40,7 @@ The smallest skill is a flat markdown file. The content is the procedure, and th
 Use the weather tool before answering forecast or temperature questions.
 ```
 
-A skill's name comes from its path and must use only ASCII letters, digits, underscores, and dashes, start with a letter, and have at most 64 characters. The compiler rejects any other name.
+A skill's name comes from its path and must use only ASCII letters, digits, underscores, and dashes, start with a letter or digit, and have at most 64 characters. The compiler rejects any other name.
 
 A flat markdown skill can skip the `description` frontmatter. When it does, eve advertises the first non-empty, non-code-fence line of the body with any leading `#`, `>`, `*`, or `-` marker stripped. If the body has no such line, eve falls back to the literal `Instructions for the <name> skill.`, which is a weak routing hint, so add a `description` when you want the model to route on intent.
 
