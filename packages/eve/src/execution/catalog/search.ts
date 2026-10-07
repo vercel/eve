@@ -40,22 +40,20 @@ const SEARCH_INPUT_SCHEMA = toInputSchema({
     query: {
       type: "string",
       description:
-        "Words describing the capability, such as 'list open issues', or a name or name prefix, such as 'linear'. Omit to list every entry.",
+        "Words describing the capability, such as 'list open issues', or a name or name prefix, such as 'linear'. Without a query, returns entries up to limit; narrow the query or raise limit to find more.",
     },
     limit: {
       type: "integer",
       minimum: 1,
       maximum: MAX_LIMIT,
-      description: `Maximum results. Defaults to ${DEFAULT_LIMIT}.`,
+      description: `Maximum results, best matches first. Defaults to ${DEFAULT_LIMIT}.`,
     },
-    offset: { type: "integer", minimum: 0, description: "Results to skip, for paging." },
   },
   additionalProperties: false,
 });
 
 interface SearchInput {
   readonly limit?: number;
-  readonly offset?: number;
   readonly query?: string;
 }
 
@@ -72,12 +70,10 @@ interface UnavailableConnection {
 
 interface SearchOutput {
   readonly results: readonly SearchResult[];
-  /** Matches across all pages. */
-  readonly total: number;
   readonly unavailable?: readonly UnavailableConnection[];
 }
 
-/** `result` renders only for the results a page returns, since signatures cost a render. */
+/** `result` renders only for the results returned, since signatures cost a render. */
 type SearchCandidate = RankCandidate & { readonly result: () => SearchResult };
 
 /**
@@ -120,15 +116,11 @@ async function search(
     }
   }
 
-  const ranked = rankCandidates(input.query ?? "", candidates);
   const limit = clampInteger(input.limit, 1, MAX_LIMIT, DEFAULT_LIMIT);
-  const offset = clampInteger(input.offset, 0, Number.MAX_SAFE_INTEGER, 0);
-  const output: { -readonly [K in keyof SearchOutput]: SearchOutput[K] } = {
-    results: ranked.slice(offset, offset + limit).map((candidate) => candidate.result()),
-    total: ranked.length,
-  };
-  if (unavailable.length > 0) output.unavailable = unavailable;
-  return output;
+  const results = rankCandidates(input.query ?? "", candidates)
+    .slice(0, limit)
+    .map((candidate) => candidate.result());
+  return unavailable.length > 0 ? { results, unavailable } : { results };
 }
 
 /** A connection's tools, or its sign-in entry while listing them needs sign-in. */
