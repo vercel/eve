@@ -92,7 +92,6 @@ describe("vercelScheduleProvider", () => {
     ).rejects.toThrow("was created active, but disabling it failed; it may remain active");
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
-
   it("omits a blank first-page cursor", async () => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_ENV", "production");
