@@ -12,7 +12,7 @@ import type { MockModelRequest, MockModelResponse } from "eve/evals";
 import { LEDGER_REGIONS } from "./lib/ledger-regions";
 
 /** Every catalog listing says this, whatever kinds it names. */
-const LISTING_MARKER = "They aren't listed; find them with search";
+const LISTING_MARKER = "names aren't listed; find them with search";
 
 /** Entries that must reach the model only through `search` and `execute`. */
 const DEFERRED_SAMPLES = [
