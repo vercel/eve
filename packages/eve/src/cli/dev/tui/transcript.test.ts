@@ -27,7 +27,8 @@ import {
   type MessageStreamEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
-import type { Block } from "./blocks.js";
+import { type Block, renderBlockLines } from "./blocks.js";
+import { createTheme } from "./theme.js";
 import { tuiSessionReducer, type AgentTUIConversationView } from "./conversation-view.js";
 import { ConversationTranscript, turnActivity, type TranscriptOptions } from "./transcript.js";
 
@@ -755,6 +756,31 @@ describe("ConversationTranscript", () => {
       expect.objectContaining({ title: "Linear · authorization · authorized", live: false }),
       expect.objectContaining({ title: "Linear · authorization · required", live: true }),
     ]);
+  });
+
+  it("hyperlinks every wrapped row of a pending authorization URL to the full URL", () => {
+    const url = `https://idp.example.com/authorize?redirect_uri=${"x".repeat(160)}`;
+    const state = conversation([
+      turn,
+      event(
+        createAuthorizationRequiredEvent({
+          attemptId: "attempt_1",
+          authorization: { displayName: "Linear", url },
+          description: "Connect Linear",
+          name: "linear",
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "turn_1",
+          webhookUrl: "https://agent.example.com/callback",
+        }),
+      ),
+    ]);
+    const [block] = new ConversationTranscript().project(view(state, true), options);
+    expect(block).toEqual(expect.objectContaining({ kind: "connection-auth", link: url }));
+    const theme = createTheme({ color: false, unicode: true });
+    const rows = renderBlockLines(block!, 100, theme, { activityPulse: "▪" });
+    const linked = rows.filter((row) => row.includes(`\x1b]8;;${url}\x1b\\`));
+    expect(linked.length).toBeGreaterThan(1);
   });
 
   it("keeps an optimistic message's block when the server confirms it", () => {

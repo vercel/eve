@@ -410,17 +410,21 @@ export function authorizationTerminalMessage(state: string): string | undefined 
 export function formatAuthorization(
   part: EveAuthorizationPart,
   terminalMessage: string | undefined,
-): string {
+): { body: string; link?: string } {
   const lines: string[] = [];
+  let link: string | undefined;
   if (terminalMessage !== undefined) {
     lines.push(terminalMessage);
   } else {
     const description = stripTerminalControls(part.description);
     if (description.length > 0) lines.push(description);
     const challenge = part.authorization;
-    // The URL gets a row of its own: the renderer hard-wraps it and links
-    // every wrapped row to the full href (see `authorizationUrl`).
-    if (challenge?.url) lines.push("Open to authorize:", stripTerminalControls(challenge.url));
+    // The URL gets a row of its own; returning it as `link` (the block's
+    // `Block.link`) lets the renderer hyperlink every wrapped row to it.
+    if (challenge?.url) {
+      link = stripTerminalControls(challenge.url);
+      lines.push("Open to authorize:", link);
+    }
     if (challenge?.userCode) lines.push(`Code: ${stripTerminalControls(challenge.userCode)}`);
     if (challenge?.expiresAt) lines.push(`Expires: ${stripTerminalControls(challenge.expiresAt)}`);
     if (challenge?.instructions) lines.push(stripTerminalControls(challenge.instructions));
@@ -429,7 +433,8 @@ export function formatAuthorization(
     const reason = stripTerminalControls(part.reason);
     if (reason.length > 0) lines.push(`Reason: ${reason}`);
   }
-  return lines.join("\n");
+  const body = lines.join("\n");
+  return link === undefined ? { body } : { body, link };
 }
 
 /** Reads the shared write-file result's `existed` flag, whatever the tool. */
