@@ -88,6 +88,7 @@ function namespaceCounts(catalog: StepCatalog): ReadonlyMap<string, number> {
   const counts = new Map<string, number>();
   for (const name of deferredNames(catalog)) {
     const namespace = namespaceOf(name);
+    // Only a skill can share a connection's name, since connection ownership doesn't cover skills.
     if (namespace !== "" && !connections.has(namespace)) {
       counts.set(namespace, (counts.get(namespace) ?? 0) + 1);
     }
@@ -102,7 +103,7 @@ function namespaceCounts(catalog: StepCatalog): ReadonlyMap<string, number> {
  */
 function reachableNames(catalog: StepCatalog): ReadonlySet<string> {
   return new Set([
-    ...[...catalog.entries.keys()].map(namespaceOf),
+    ...[...catalog.entries.keys(), ...catalog.skills.keys()].map(namespaceOf),
     ...catalog.connections.map(({ connectionName }) => connectionName),
   ]);
 }
@@ -145,9 +146,7 @@ function renderCatalogAnnouncement(
 
 function renderListing({ connections, kinds, namespaces }: CatalogListing): string {
   const subject =
-    kinds.length === 0
-      ? "Your connections have more tools"
-      : `You have more ${new Intl.ListFormat("en", { type: "conjunction" }).format(kinds)}`;
+    kinds.length === 0 ? "Your connections have more tools" : `You have more ${joinWords(kinds)}`;
   const call = !kinds.includes("skills")
     ? `Call them with ${EXECUTE_TOOL_NAME}({ tool, input }).`
     : kinds.length === 1
@@ -170,6 +169,13 @@ function renderListing({ connections, kinds, namespaces }: CatalogListing): stri
     );
   }
   return lines.join("\n");
+}
+
+/** "a", "a and b", or "a, b, and c". */
+function joinWords(words: readonly string[]): string {
+  return words.length <= 2
+    ? words.join(" and ")
+    : `${words.slice(0, -1).join(", ")}, and ${words.at(-1)}`;
 }
 
 function formatConnection(entry: ListedConnection): string {
