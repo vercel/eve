@@ -100,7 +100,7 @@ export function connectionSignInEntry(
   connection: ResolvedConnectionDefinition,
 ): HarnessToolDefinition {
   const displayName = displayProperName(connection.connectionName);
-  const signIn = `Sign in to use ${displayName}'s tools`;
+  const signIn = `Sign in to use the ${displayName} tools`;
   return {
     deferred: true,
     description:
@@ -123,13 +123,15 @@ async function connect(
   const session = await completeConnectionSignIn(registry, connection);
   const listing = await listConnectionTools(connection, session);
   if ("failure" in listing) throw new Error(listing.failure);
-  if ("signIn" in listing) return await session.auth.handleError(listing.error, listing.signIn);
+  if ("authorization" in listing) {
+    return await session.auth.handleError(listing.error, listing.authorization);
+  }
   const displayName = displayProperName(connection.connectionName);
   const search = `search({ query: "${connection.connectionName}" })`;
   // A listable connection may not need sign-in at all, so only a sign-in this call completed counts.
   return session.scoped !== undefined && session.auth.isJustAuthorized(session.scoped)
-    ? `Signed in to ${displayName}. Find its tools with ${search}.`
-    : `${displayName}'s tools are available. Find them with ${search}.`;
+    ? `Signed in to ${displayName}. Find the ${displayName} tools with ${search}.`
+    : `The ${displayName} tools are available. Find them with ${search}.`;
 }
 
 async function callConnectionTool(
@@ -140,16 +142,14 @@ async function callConnectionTool(
   options: ToolExecuteOptions,
 ): Promise<unknown> {
   releaseApprovalPin(options.toolCallId, connection);
-  const { auth, client, scoped } = await completeConnectionSignIn(registry, connection);
-
-  let tools: readonly ConnectionToolMetadata[];
-  try {
-    tools = await client.getToolMetadata();
-  } catch (error) {
-    return await auth.handleError(error, scoped);
-  }
+  const session = await completeConnectionSignIn(registry, connection);
+  const { auth, client, scoped } = session;
+  const listing = await listConnectionTools(connection, session);
+  if ("failure" in listing) throw new Error(listing.failure);
+  if ("authorization" in listing)
+    return await auth.handleError(listing.error, listing.authorization);
   // Validation may have run before a sign-in made the tools listable.
-  const checked = await checkCall(connection, tools, toolName, rawInput);
+  const checked = await checkCall(connection, listing.tools, toolName, rawInput);
   if ("issues" in checked) throw new Error(issuesMessage(checked.issues));
   const { input, tool } = checked;
 

@@ -261,16 +261,25 @@ async function resolveExecuteInput(
   const checked = await checkToolCallInput(definition, input, "");
   if (checked.kind === "threw") throw checked.error;
   if (checked.kind === "invalid") {
-    // A connection tool's validation reports its own signature; agent entries get one here.
-    const issues = catalog.entries.has(tool)
-      ? [...checked.issues, { message: `Signature: ${entrySignature(definition)}` }]
-      : checked.issues;
+    // A connection tool's validation reports its own signature; every other entry gets one here.
+    const issues = isConnectionTool(tool, catalog.connections)
+      ? checked.issues
+      : [...checked.issues, { message: `Signature: ${entrySignature(definition)}` }];
     // The entry's issues rather than its message, so the SDK's report is the only wrapper.
     return {
       issues: issues.map(({ message, path = [] }) => ({ message, path: ["input", ...path] })),
     };
   }
   return { value: { input: checked.value, tool } };
+}
+
+function isConnectionTool(
+  name: string,
+  connections: readonly ResolvedConnectionDefinition[],
+): boolean {
+  return connections.some(({ connectionName }) =>
+    name.startsWith(connectionToolName(connectionName, "")),
+  );
 }
 
 function failure(path: keyof ExecuteInput, message: string): StandardSchemaV1.FailureResult {

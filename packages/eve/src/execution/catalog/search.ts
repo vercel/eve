@@ -148,7 +148,7 @@ async function searchConnection(
     return { unavailable: { connection: name, error: listingFailureMessage(name, error) } };
   }
   if ("failure" in listing) return { unavailable: { connection: name, error: listing.failure } };
-  if ("signIn" in listing) return { candidates: [signInCandidate(registry, connection)] };
+  if ("authorization" in listing) return { candidates: [signInCandidate(registry, connection)] };
   return { candidates: listing.tools.map((tool) => toolCandidate(connection, tool)) };
 }
 
