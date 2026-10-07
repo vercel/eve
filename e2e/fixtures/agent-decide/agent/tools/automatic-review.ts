@@ -1,17 +1,17 @@
 import { defineTool } from "eve/tools";
 import { auto } from "eve/tools/approval";
 
-import { permissionEvaluationModel } from "../testing";
+import { permissionDecisionModel } from "../testing";
 
 export default defineTool({
-  description: "Exercise evaluation-model approval.",
+  description: "Exercise decision-model approval.",
   inputSchema: {
     type: "object",
     properties: { effect: { type: "string", enum: ["safe", "malicious"] } },
     required: ["effect"],
     additionalProperties: false,
   },
-  approval: auto({ model: permissionEvaluationModel }),
+  approval: auto({ model: permissionDecisionModel }),
   execute({ effect }) {
     return { effect, executed: true };
   },

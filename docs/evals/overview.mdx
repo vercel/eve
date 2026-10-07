@@ -56,7 +56,7 @@ export default defineEvalConfig({
 });
 ```
 
-Everything is optional. `judge` sets the default model for [LLM-as-judge](./judge) assertions (`t.judge(...)`); omit it to use the default evaluator, `typesafe-ai/jev`. Deterministic evals make no judge requests. `reporters`, `maxConcurrency`, and `timeoutMs` round out the defaults. Config `reporters` observe every eval in the run, so set one `Braintrust()` here instead of adding it to each eval. CLI flags (`--max-concurrency`, `--timeout`) and per-eval values take precedence over the config defaults.
+Everything is optional. `judge` sets the default model for [LLM-as-judge](./judge) assertions (`t.judge(...)`); omit it to use the default decider, `typesafe-ai/jev`. Deterministic evals make no judge requests. `reporters`, `maxConcurrency`, and `timeoutMs` round out the defaults. Config `reporters` observe every eval in the run, so set one `Braintrust()` here instead of adding it to each eval. CLI flags (`--max-concurrency`, `--timeout`) and per-eval values take precedence over the config defaults.
 
 ### Run setup and teardown
 

@@ -37,7 +37,7 @@
     "@shikijs/langs": "^4.4.3",
     "@vercel/analytics": "^2.0.1",
     "@vercel/connect": "^2.4.0",
-    "ai": "7.0.105",
+    "ai": "7.0.128",
     "better-auth": "^1.7.1",
     "chat": "^4.38.1",
     "chat-adapter-sendblue": "^0.2.0",

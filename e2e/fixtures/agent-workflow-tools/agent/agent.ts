@@ -18,6 +18,27 @@ const HOOK_SCENARIO_CALLS = {
 } as const;
 
 /**
+ * public-catalog lists its tools without sign-in: run its public tool, then its
+ * protected one, which asks the user to sign in and resumes once they have.
+ */
+function respondToPublicCatalog(request: MockModelRequest): MockModelResponse | string {
+  const call = (id: string, tool: string) => ({
+    id,
+    name: "connection_execute",
+    input: { connection: "public-catalog", tool, input: {} },
+  });
+  const byId = new Map(request.toolResults.map((entry) => [entry.id, entry]));
+  if (!byId.has("public-catalog-items")) {
+    return { toolCalls: [call("public-catalog-items", "list_items")] };
+  }
+  const orders = byId.get("public-catalog-orders");
+  if (orders === undefined) {
+    return { toolCalls: [call("public-catalog-orders", "list_orders")] };
+  }
+  return `PUBLIC_CATALOG_DONE ${JSON.stringify(orders.output)}`;
+}
+
+/**
  * Deterministic script: each directive names the workflow tool to call with
  * service "api"; once the turn holds a tool result the reply echoes it.
  */
@@ -62,6 +83,9 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
     return typeof call.output === "string" ? call.output : JSON.stringify(call.output);
   }
 
+  if (request.userMessages.some((entry) => entry.startsWith("PUBLIC-CATALOG-E2E"))) {
+    return respondToPublicCatalog(request);
+  }
   const message =
     [...request.userMessages]
       .reverse()

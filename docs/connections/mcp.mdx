@@ -44,6 +44,17 @@ For OAuth-backed MCP servers, use the shared [Vercel Connect flow](../connection
 
 `connect("...")` is user-scoped by default and requires an authenticated user on the active eve session. Use `connect({ connector, principalType: "app" })` when the server should act as the agent instead. The connections overview covers connector setup, session requirements, app and user scope, callback behavior, and troubleshooting.
 
+## When eve asks for sign-in
+
+eve asks the user to sign in only when the MCP server asks for it. When a connection has `auth` but no token yet, because its `getToken` throws `ConnectionAuthorizationRequiredError`, eve connects without an `Authorization` header and lists the server's tools. Any other error from `getToken` still fails the connection.
+
+- **The server rejects every request without a token.** Most hosted OAuth servers, such as Linear, GitHub, and Notion, answer `initialize` or `tools/list` with HTTP `401`. A plain `connection_search` lists the connection under `unavailable` with `requiresSignIn: true`. Calling `connection_search({ connection, signIn: true })` or any of its tools with `connection_execute` asks the user to sign in.
+- **The server lists tools without a token.** `connection_search` returns its tools with no prompt, and `connection_execute` runs tools the server answers anonymously. Sign-in starts only when a tool call comes back with HTTP `401`, or with an error result that carries a `WWW-Authenticate` challenge in `_meta["mcp/www_authenticate"]`.
+
+After the user signs in, the call that asked for it runs again. eve reconnects with the token and reloads the tool list, which may now include tools the server hides from anonymous callers. A connection that already has a token sends it on every request, as before.
+
+A server that leaves protected tools out of its anonymous `tools/list` never triggers sign-in, because the model cannot find those tools. Servers that support anonymous use should list every tool and refuse the protected calls.
+
 ## Static tokens and headers
 
 MCP connections accept the shared connection `auth` and `headers` options. Use `auth.getToken` for a bearer token, `headers` for another scheme, and resolver functions when credentials or routing depend on the caller. See [Static-token auth](../connections#static-token-auth), [Headers](../connections#headers), and [Per-caller auth and headers](../connections#per-caller-auth-and-headers) for the canonical examples and token-lifecycle behavior.

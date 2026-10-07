@@ -37,17 +37,17 @@ export default defineTool({
 | `never()`  | Never require approval (the default when omitted).                                 |
 | `once()`   | Require approval only the first time the tool runs in a session; auto-allow after. |
 | `always()` | Require approval before every call.                                                |
-| `auto()`   | Ask an evaluation model whether to run the exact call or require user approval.    |
+| `auto()`   | Ask a decision model whether to run the exact call or require user approval.       |
 
 By default, omitted `approval` behaves like `never()`, so tool calls may execute without human approval. Require human approval or other safeguards for sensitive, irreversible, regulated, financial, healthcare, employment, housing, legal, safety-impacting, user-impacting, or external side-effecting actions.
 
-`auto()` uses an [AI SDK evaluation model](/docs/guides/evaluate) to classify each call as `clear` or `caution`. It defaults to `typesafe-ai/jev`, TypeSafe AI's [Jev evaluation model](https://vercel.com/i/what-is-jev). Like `evaluate`, a model string uses Vercel AI Gateway unless the application configures a global AI SDK default provider:
+`auto()` uses an [AI SDK decision model](/docs/guides/decide) to classify each call as `clear` or `caution`. It defaults to `typesafe-ai/jev`, TypeSafe AI's [Jev decision model](https://vercel.com/i/what-is-jev). Like `decide`, a model string uses Vercel AI Gateway unless the application configures a global AI SDK default provider:
 
 ```ts
 approval: auto({ model: "typesafe-ai/jev" });
 ```
 
-The evaluation model reviews the tool name and input for dangerous effects. A caution, failed review, or incomplete input requires user approval. The tool input is sent to the evaluation model's provider.
+The decision model reviews the tool name and input for dangerous effects. A caution, failed review, or incomplete input requires user approval. The tool input is sent to the decision model's provider.
 
 Override the classifier text for application-specific policy:
 
