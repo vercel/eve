@@ -109,7 +109,7 @@ Slash commands run immediately, even during a turn. Press `Esc` or `Ctrl+C`, or 
 | Key           | Action                                                                                                     |
 | ------------- | ---------------------------------------------------------------------------------------------------------- |
 | `Enter`       | Send the current message or answer.                                                                        |
-| `Shift+Enter` | Insert a newline. `Ctrl+J` also inserts one.                                                               |
+| `Shift+Enter` | Insert a newline. Requires a terminal that reports modified keys.                                          |
 | `Esc`         | Cancel a running turn.                                                                                     |
 | `Ctrl+C`      | Cancel a running turn; press again to stop waiting and start a new session; press twice to exit when idle. |
 | `↑` / `↓`     | Move through input lines or sent-message history.                                                          |
