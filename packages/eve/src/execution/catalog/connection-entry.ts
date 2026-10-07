@@ -1,8 +1,8 @@
 /**
- * A connection tool as a catalog entry: the definition an `execute` call to
- * `<connection>__<tool>` runs. It calls the connection's client, applies the
- * connection's approval under the entry's name, and runs an approved call only
- * against the connection instance it was approved for.
+ * A connection's catalog entries. `<connection>__<tool>` calls one of its
+ * tools: it applies the connection's approval under the entry's name and runs
+ * an approved call only against the connection instance it was approved for.
+ * The connection's own name signs the user in, so its tools become listable.
  */
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
@@ -21,9 +21,9 @@ import { connectionToolName } from "#connections/ownership.js";
 import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { isApprovalRecheck } from "#harness/approval-recheck.js";
+import type { AuthorizationSignal } from "#harness/authorization.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
-import { createAuthorizationExecution } from "#runtime/connections/scoped-authorization.js";
 import {
   connectionToolModelOutput,
   toConnectionToolResult,
@@ -37,9 +37,9 @@ import type { ToolExecuteOptions } from "#tools/definition.js";
 import { defineJsonSchema, refineJsonSchema } from "#tools/schema.js";
 
 import {
-  assertPendingAuthorizationInstances,
+  completeConnectionSignIn,
+  listConnectionTools,
   listingFailureMessage,
-  resolveInteractiveAuthorization,
 } from "./connection-auth.js";
 import { closestNames } from "./rank.js";
 import { connectionToolSignature } from "./signatures.js";
@@ -91,9 +91,46 @@ export function connectionEntry(
   };
 }
 
+/**
+ * The entry for a connection's own name: it signs the user in when listing the
+ * connection's tools needs that, then points the model at `search`.
+ */
+export function connectionSignInEntry(
+  registry: ConnectionRegistry,
+  connection: ResolvedConnectionDefinition,
+): HarnessToolDefinition {
+  const displayName = displayProperName(connection.connectionName);
+  const signIn = `Sign in to use ${displayName}'s tools`;
+  return {
+    deferred: true,
+    description:
+      connection.description === "" ? `${signIn}.` : `${signIn}: ${connection.description}`,
+    execute: () => connect(registry, connection),
+    inputSchema: defineJsonSchema({ type: "object", properties: {}, additionalProperties: false }),
+    label: { start: () => `Connect ${displayName}` },
+    name: connection.connectionName,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Execution
 // ---------------------------------------------------------------------------
+
+async function connect(
+  registry: ConnectionRegistry,
+  connection: ResolvedConnectionDefinition,
+): Promise<string | AuthorizationSignal> {
+  const session = await completeConnectionSignIn(registry, connection);
+  const listing = await listConnectionTools(connection, session);
+  if ("failure" in listing) throw new Error(listing.failure);
+  if ("signIn" in listing) return await session.auth.handleError(listing.error, listing.signIn);
+  const displayName = displayProperName(connection.connectionName);
+  const search = `search({ query: "${connection.connectionName}" })`;
+  // A listable connection may not need sign-in at all, so only a sign-in this call completed counts.
+  return session.scoped !== undefined && session.auth.isJustAuthorized(session.scoped)
+    ? `Signed in to ${displayName}. Find its tools with ${search}.`
+    : `${displayName}'s tools are available. Find them with ${search}.`;
+}
 
 async function callConnectionTool(
   registry: ConnectionRegistry,
@@ -103,14 +140,7 @@ async function callConnectionTool(
   options: ToolExecuteOptions,
 ): Promise<unknown> {
   releaseApprovalPin(options.toolCallId, connection);
-  assertPendingAuthorizationInstances(registry, [connection]);
-
-  const scoped = await resolveInteractiveAuthorization(registry, connection.connectionName);
-  const auth = createAuthorizationExecution();
-  if (scoped !== undefined) await auth.complete(scoped);
-  const client = registry.getClient(connection.connectionName);
-  // A client that connected anonymously before sign-in must reconnect with the new token.
-  if (scoped !== undefined && auth.isJustAuthorized(scoped)) await client.close();
+  const { auth, client, scoped } = await completeConnectionSignIn(registry, connection);
 
   let tools: readonly ConnectionToolMetadata[];
   try {
@@ -208,7 +238,7 @@ function unknownToolMessage(
   const hint =
     suggestions.length > 0
       ? ` Closest tools: ${suggestions.join(", ")}.`
-      : ` Find its tools with search({ connection: "${connectionName}" }).`;
+      : ` Find its tools with search({ query: "${connectionName}" }).`;
   return `Connection "${connectionName}" has no tool named "${toolName}".${hint}`;
 }
 
