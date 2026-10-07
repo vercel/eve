@@ -4,8 +4,8 @@ import { serializeContext } from "#context/serialize.js";
 import {
   ContextAgentTraceStateStore,
   pruneAgentTraceState,
-} from "#tracing/agent-trace-context-store.js";
-import { AGENT_TRACE_CONTEXT_KEY } from "#tracing/agent-trace-context-codec.js";
+} from "#tracing/eve/agent-trace-context-store.js";
+import { AGENT_TRACE_CONTEXT_KEY } from "#tracing/eve/agent-trace-context-store.js";
 import { AgentTraceSpanProcessor } from "#tracing/local/agent-trace-span-processor.js";
 
 const anchor = {
@@ -13,12 +13,9 @@ const anchor = {
   callId: "call",
   kind: "tool-call" as const,
   name: "workflow",
-  parent: { spanId: "1".repeat(16), traceFlags: 1, traceId: "2".repeat(32) },
+  context: { spanId: "3".repeat(16), traceFlags: 1, traceId: "2".repeat(32) },
   rootSessionId: "session",
-  traceSessionId: "session",
   sessionId: "session",
-  spanId: "3".repeat(16),
-  startTimeMs: 1,
   stepIndex: 0,
   turnId: "turn",
 };
@@ -28,7 +25,7 @@ describe("trace retention by live work", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const context = new ContextContainer();
     contextStorage.run(context, () =>
-      new ContextAgentTraceStateStore().setActionAnchor("key", anchor),
+      new ContextAgentTraceStateStore().set("anchor", "key", anchor),
     );
     const before = serializeContext(context);
     expect(() =>
@@ -49,7 +46,7 @@ describe("trace retention by live work", () => {
     contextStorage.run(context, () => {
       const store = new ContextAgentTraceStateStore();
       for (let index = 0; index < 1000; index++) {
-        store.setActionAnchor(`key-${index}`, {
+        store.set("anchor", `key-${index}`, {
           ...anchor,
           callId: `call-${index}`,
           turnId: `turn-${index}`,
@@ -57,7 +54,7 @@ describe("trace retention by live work", () => {
         pruneAgentTraceState(context, "session", undefined);
       }
     });
-    expect(serializeContext(context)[AGENT_TRACE_CONTEXT_KEY]).toMatchObject({ actionAnchors: {} });
+    expect(serializeContext(context)[AGENT_TRACE_CONTEXT_KEY]).toMatchObject({ entries: {} });
   });
 
   it("unpins completed activation traces only after the writer flushes", async () => {

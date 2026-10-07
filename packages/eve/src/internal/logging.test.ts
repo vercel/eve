@@ -1,12 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  ROOT_CONTEXT,
-  SpanStatusCode,
-  context,
-  trace,
-  type Span,
-} from "#compiled/@opentelemetry/api/index.js";
-import { withErrorContent } from "#tracing/error-content-context.js";
+import { ROOT_CONTEXT, SpanStatusCode, context, trace, type Span } from "@opentelemetry/api";
+import { withErrorContent } from "#tracing/lib/otel.js";
 
 import {
   createErrorId,
@@ -36,6 +30,11 @@ describe("span error content policy", () => {
 
   function mockSpan() {
     return {
+      setAttributes: vi.fn(),
+      addLink: vi.fn(),
+      addLinks: vi.fn(),
+      updateName: vi.fn(),
+      isRecording: vi.fn(() => true),
       addEvent: vi.fn(),
       end: vi.fn(),
       recordException: vi.fn(),

@@ -3,28 +3,26 @@ import { describe, expect, it } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionTraceSeedKey } from "#context/keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { INSTRUMENTATION_PRINCIPAL_TYPES } from "#instrumentation/lifecycle.js";
-import { deserializeAgentTraceContextState } from "#tracing/agent-trace-context-codec.js";
 import {
   ContextAgentTraceStateStore,
   preserveSerializedAgentTraceState,
   readActionTraceContext,
   readTurnTraceContext,
-} from "#tracing/agent-trace-context-store.js";
+} from "#tracing/eve/agent-trace-context-store.js";
 
 describe("ContextAgentTraceStateStore", () => {
   it("restores serializable session and turn context", async () => {
     const context = new ContextContainer();
     await contextStorage.run(context, () => {
       const store = new ContextAgentTraceStateStore();
-      store.setSession("session-1", {
+      store.set("session", "session-1", {
         agentName: "weather",
         channelType: "http",
         context: spanContext("1", "2"),
         rootSessionId: "session-1",
         traceSessionId: "session-1",
       });
-      store.setTurn("session-1", "turn-1", {
+      store.set("turn", JSON.stringify(["session-1", "turn-1"]), {
         channelDelivery: {
           channelKind: "channel:slack",
           channelName: "slack",
@@ -36,14 +34,13 @@ describe("ContextAgentTraceStateStore", () => {
         context: spanContext("1", "3"),
         currentPrincipal: { id: "user-123", type: "user" },
         initiatorPrincipal: { type: "none" },
-        modelUsage: { inputTokens: 12, outputTokens: 4 },
         caller: { ...spanContext("4", "2"), isRemote: true },
         rootSessionId: "session-1",
         traceSessionId: "session-1",
         sequence: 0,
         startTimeMs: 1_700_000_000_000,
         subagentName: "researcher",
-        terminal: { error: new Error("failed"), type: "turn.failed" },
+        terminal: { outcome: "failed", errorName: "Error", errorMessage: "failed" },
       });
     });
 
@@ -51,12 +48,14 @@ describe("ContextAgentTraceStateStore", () => {
     const restored = await deserializeContext(serialized);
     await contextStorage.run(restored, () => {
       const store = new ContextAgentTraceStateStore();
-      expect(store.getSession("session-1")).toMatchObject({
+      expect(store.get("session", "session-1")).toMatchObject({
         channelType: "http",
         context: spanContext("1", "2"),
       });
-      expect(store.getTurn("session-1", "turn-1")?.context).toEqual(spanContext("1", "3"));
-      expect(store.getTurn("session-1", "turn-1")).toMatchObject({
+      expect(store.get("turn", JSON.stringify(["session-1", "turn-1"]))?.context).toEqual(
+        spanContext("1", "3"),
+      );
+      expect(store.get("turn", JSON.stringify(["session-1", "turn-1"]))).toMatchObject({
         channelDelivery: {
           channelKind: "channel:slack",
           channelName: "slack",
@@ -67,59 +66,31 @@ describe("ContextAgentTraceStateStore", () => {
         },
         currentPrincipal: { id: "user-123", type: "user" },
         initiatorPrincipal: { type: "none" },
-        modelUsage: { inputTokens: 12, outputTokens: 4 },
+        terminal: { outcome: "failed", errorName: "Error", errorMessage: "failed" },
         caller: { ...spanContext("4", "2"), isRemote: true },
         startTimeMs: 1_700_000_000_000,
         subagentName: "researcher",
       });
-      expect(store.getTurn("session-1", "turn-1")?.initiatorPrincipal).toStrictEqual({
+      expect(
+        store.get("turn", JSON.stringify(["session-1", "turn-1"]))?.initiatorPrincipal,
+      ).toStrictEqual({
         type: "none",
       });
-      expect(JSON.stringify(store.getTurn("session-1", "turn-1"))).not.toContain("attributes");
-      const terminal = store.getTurn("session-1", "turn-1")?.terminal;
-      expect(terminal?.type).toBe("turn.failed");
-      expect(terminal?.type === "turn.failed" ? terminal.error : undefined).toMatchObject({
-        message: "failed",
-      });
+      expect(
+        JSON.stringify(store.get("turn", JSON.stringify(["session-1", "turn-1"]))),
+      ).not.toContain("attributes");
     });
-  });
-
-  it.each([
-    ...INSTRUMENTATION_PRINCIPAL_TYPES.map((type) => ({
-      input: { type, id: "user-123" },
-      expected: type === "none" ? { type } : { type, id: "user-123" },
-    })),
-    { input: { type: "unrecognized", id: "user-123" }, expected: undefined },
-    ...[undefined, null, 123, "", "x".repeat(1025), String.fromCodePoint(0x1f600).repeat(257)].map(
-      (id) => ({
-        input: { type: "user", id },
-        expected: { type: "user" },
-      }),
-    ),
-  ])("restores bounded principal summaries from $input", ({ input, expected }) => {
-    const state = deserializeAgentTraceContextState({
-      turns: {
-        turn: {
-          context: spanContext("1", "2"),
-          currentPrincipal: input,
-          initiatorPrincipal: input,
-          startTimeMs: 1,
-        },
-      },
-    });
-    expect(state.turns.turn?.currentPrincipal).toStrictEqual(expected);
-    expect(state.turns.turn?.initiatorPrincipal).toStrictEqual(expected);
   });
 
   it("removes terminal state", () => {
     contextStorage.run(new ContextContainer(), () => {
       const store = new ContextAgentTraceStateStore();
-      store.setSession("session-1", {
+      store.set("session", "session-1", {
         context: spanContext("1", "2"),
         rootSessionId: "session-1",
         traceSessionId: "session-1",
       });
-      store.setTurn("session-1", "turn-1", {
+      store.set("turn", JSON.stringify(["session-1", "turn-1"]), {
         context: spanContext("1", "3"),
         caller: spanContext("4", "2"),
         rootSessionId: "session-1",
@@ -128,18 +99,18 @@ describe("ContextAgentTraceStateStore", () => {
         startTimeMs: 1_700_000_000_000,
       });
 
-      store.deleteTurn("session-1", "turn-1");
-      store.deleteSession("session-1");
+      store.delete("turn", JSON.stringify(["session-1", "turn-1"]));
+      store.delete("session", "session-1");
 
-      expect(store.getTurn("session-1", "turn-1")).toBeUndefined();
-      expect(store.getSession("session-1")).toBeUndefined();
+      expect(store.get("turn", JSON.stringify(["session-1", "turn-1"]))).toBeUndefined();
+      expect(store.get("session", "session-1")).toBeUndefined();
     });
   });
 
   it("composes atomic turn updates without recreating deleted turns", () => {
     contextStorage.run(new ContextContainer(), () => {
       const store = new ContextAgentTraceStateStore();
-      store.setTurn("session-1", "turn-1", {
+      store.set("turn", JSON.stringify(["session-1", "turn-1"]), {
         context: spanContext("1", "3"),
         caller: spanContext("4", "2"),
         rootSessionId: "session-1",
@@ -148,32 +119,32 @@ describe("ContextAgentTraceStateStore", () => {
         startTimeMs: 1_700_000_000_000,
       });
 
-      store.updateTurn("session-1", "turn-1", (turn) => ({
+      store.update("turn", JSON.stringify(["session-1", "turn-1"]), (turn) => ({
         ...turn,
-        modelUsage: { inputTokens: 12, outputTokens: 4 },
+        terminal: { outcome: "completed" },
       }));
-      store.updateTurn("session-1", "turn-1", (turn) => ({
+      store.update("turn", JSON.stringify(["session-1", "turn-1"]), (turn) => ({
         ...turn,
-        terminal: { type: "turn.completed" },
+        channelDelivery: { channelKind: "http", channelName: "http", deliveryId: "delivery" },
       }));
 
-      expect(store.getTurn("session-1", "turn-1")).toMatchObject({
-        modelUsage: { inputTokens: 12, outputTokens: 4 },
-        terminal: { type: "turn.completed" },
+      expect(store.get("turn", JSON.stringify(["session-1", "turn-1"]))).toMatchObject({
+        terminal: { outcome: "completed" },
+        channelDelivery: { deliveryId: "delivery" },
       });
-      store.deleteTurn("session-1", "turn-1");
-      store.updateTurn("session-1", "turn-1", (turn) => ({
+      store.delete("turn", JSON.stringify(["session-1", "turn-1"]));
+      store.update("turn", JSON.stringify(["session-1", "turn-1"]), (turn) => ({
         ...turn,
-        modelUsage: { inputTokens: 99 },
+        terminal: { outcome: "cancelled" },
       }));
-      expect(store.getTurn("session-1", "turn-1")).toBeUndefined();
+      expect(store.get("turn", JSON.stringify(["session-1", "turn-1"]))).toBeUndefined();
     });
   });
 
   it("preserves only trace state from an interrupted context", async () => {
     const context = new ContextContainer();
     await contextStorage.run(context, () => {
-      new ContextAgentTraceStateStore().setSession("session-1", {
+      new ContextAgentTraceStateStore().set("session", "session-1", {
         context: spanContext("1", "2"),
         rootSessionId: "session-1",
         traceSessionId: "session-1",
@@ -202,13 +173,13 @@ describe("readTurnTraceContext", () => {
         traceFlags: 1,
         traceId: "1".repeat(32),
       });
-      new ContextAgentTraceStateStore().setSession("session-1", {
+      new ContextAgentTraceStateStore().set("session", "session-1", {
         context: spanContext("1", "2"),
         decision: { action: "record", recordInputs: true, recordOutputs: false },
         rootSessionId: "session-1",
         traceSessionId: "session-1",
       });
-      new ContextAgentTraceStateStore().setTurn("session-1", "turn-1", {
+      new ContextAgentTraceStateStore().set("turn", JSON.stringify(["session-1", "turn-1"]), {
         context: spanContext("3", "4"),
         rootSessionId: "session-1",
         traceSessionId: "session-1",
@@ -234,13 +205,13 @@ describe("readTurnTraceContext", () => {
     const context = new ContextContainer();
     await contextStorage.run(context, () => {
       const store = new ContextAgentTraceStateStore();
-      store.setSession("session-1", {
+      store.set("session", "session-1", {
         context: spanContext("1", "2"),
         decision: { action: "record", recordInputs: false, recordOutputs: true },
         rootSessionId: "session-1",
         traceSessionId: "session-1",
       });
-      store.setTurn("session-1", "turn-1", {
+      store.set("turn", JSON.stringify(["session-1", "turn-1"]), {
         context: spanContext("3", "4"),
         rootSessionId: "session-1",
         traceSessionId: "session-1",
@@ -270,19 +241,8 @@ describe("readActionTraceContext", () => {
         traceFlags: 1,
         traceId: "1".repeat(32),
       });
-      new ContextAgentTraceStateStore().setAction("action:session-1:turn-1:call-1", {
-        attemptIndex: 0,
-        callId: "call-1",
-        kind: "subagent-call",
-        name: "researcher",
-        parent: spanContext("1", "2"),
-        rootSessionId: "session-1",
-        traceSessionId: "session-1",
-        sessionId: "session-1",
-        spanId: "3".repeat(16),
-        startTimeMs: 1_700_000_000_000,
-        stepIndex: 0,
-        turnId: "turn-1",
+      new ContextAgentTraceStateStore().set("action", "action:session-1:turn-1:call-1", {
+        ...actionState(),
       });
     });
     const serialized = await serializeContext(context);
@@ -305,25 +265,14 @@ describe("readActionTraceContext", () => {
     const context = new ContextContainer();
     await contextStorage.run(context, () => {
       const store = new ContextAgentTraceStateStore();
-      store.setSession("session-1", {
+      store.set("session", "session-1", {
         context: spanContext("1", "2"),
         decision: { action: "record", recordInputs: true, recordOutputs: false },
         rootSessionId: "session-1",
         traceSessionId: "session-1",
       });
-      store.setAction("action:session-1:turn-1:call-1", {
-        attemptIndex: 0,
-        callId: "call-1",
-        kind: "subagent-call",
-        name: "researcher",
-        parent: spanContext("1", "2"),
-        rootSessionId: "session-1",
-        traceSessionId: "session-1",
-        sessionId: "session-1",
-        spanId: "3".repeat(16),
-        startTimeMs: 1_700_000_000_000,
-        stepIndex: 0,
-        turnId: "turn-1",
+      store.set("action", "action:session-1:turn-1:call-1", {
+        ...actionState(),
       });
     });
 
@@ -337,4 +286,15 @@ describe("readActionTraceContext", () => {
 
 function spanContext(traceId: string, spanId: string) {
   return { spanId: spanId.repeat(16), traceFlags: 1, traceId: traceId.repeat(32) };
+}
+function actionState() {
+  return {
+    attemptIndex: 0,
+    callId: "call-1",
+    context: spanContext("1", "3"),
+    name: "researcher",
+    sessionId: "session-1",
+    stepIndex: 0,
+    turnId: "turn-1",
+  };
 }

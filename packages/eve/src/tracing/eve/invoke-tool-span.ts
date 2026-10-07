@@ -1,11 +1,4 @@
-import {
-  context as otelContext,
-  SpanKind,
-  trace,
-  type Attributes,
-  type Context,
-  type Span,
-} from "#compiled/@opentelemetry/api/index.js";
+import { context as otelContext, type Context } from "@opentelemetry/api";
 
 import type { InvokeToolResult } from "#channel/invoke-tool.js";
 import type { SessionAuthContext } from "#channel/types.js";
@@ -21,21 +14,19 @@ import { resolveInstrumentationEnvironment } from "#internal/application/dev-env
 import { createLogger, formatError } from "#internal/logging.js";
 import { applyLiveDeliveryAudienceCeiling } from "#shared/forwarded-trace-policy.js";
 import { resolveTracePolicy } from "#shared/trace-policy.js";
-import { agentTraceIdentityAttributes } from "#tracing/agent-otel-attributes.js";
-import { contentAttribute } from "#tracing/agent-otel-content.js";
-import { recordAgentSpanError } from "#tracing/agent-span-error.js";
-import {
-  DIRECT_TOOL_CALL_ATTRIBUTE,
-  DIRECT_TOOL_CALL_VALUE,
-} from "#tracing/agent-span-contract.js";
-import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
+import { otelTelemetry, type Attributes, type SpanWriter } from "#tracing/lib/index.js";
+import { contentAttribute, mcpLifecycle, withErrorContent } from "#tracing/lib/otel.js";
+import { DIRECT_TOOL_CALL_ATTRIBUTE, DIRECT_TOOL_CALL_VALUE } from "#tracing/local/inspection.js";
 import { markAgentTraceContext } from "#tracing/eve/agent-trace-context.js";
-import { withAgentToolSpanContext } from "#tracing/agent-tool-span-context.js";
 import { withChannelAudience } from "#tracing/eve/channel-audience-context.js";
-import { withErrorContent } from "#tracing/error-content-context.js";
-import { suppressTracing } from "#tracing/suppress-tracing.js";
+import { operationConversationId } from "#tracing/eve/conversation-context.js";
+import { MCP_SERIALIZER } from "#tracing/eve/mcp.js";
+import { eveOutputMapping } from "#tracing/eve/profile.js";
 
 const log = createLogger("invoke-tool");
+// Built per call: the global tracer provider can be registered after this module loads.
+const agentTelemetry = () =>
+  otelTelemetry({ tracerName: "eve.agent", mapping: eveOutputMapping() });
 
 /** Where a direct tool call came from, so trace policy can classify it like a conversation. */
 export interface InvokeToolTraceOrigin {
@@ -109,6 +100,7 @@ async function traced(
 ): Promise<InvokeToolResult> {
   const runtime = getInstrumentationRuntime();
   if (runtime === undefined) return await run(silentObserver);
+  const telemetry = agentTelemetry();
 
   const conversation = buildConversationContext(
     {
@@ -147,7 +139,7 @@ async function traced(
       }),
   );
   if (decision.action === "drop") {
-    return await otelContext.with(suppressTracing(base), () => run(events.observer(undefined)));
+    return await telemetry.suppressed!(() => run(events.observer(undefined)));
   }
   const content = applyLiveDeliveryAudienceCeiling(
     {
@@ -164,7 +156,7 @@ async function traced(
 
   const spanName = `execute_tool ${input.toolName}`;
   const parent = withChannelAudience(base, conversation.audience);
-  const attributes: Attributes = {
+  const attributes: Record<string, Attributes[string]> = {
     "agent.tool.is_framework": false,
     "gen_ai.agent.name": input.agentName,
     "gen_ai.operation.name": "execute_tool",
@@ -172,30 +164,30 @@ async function traced(
     "gen_ai.tool.name": input.toolName,
     "gen_ai.tool.type": "function",
     [DIRECT_TOOL_CALL_ATTRIBUTE]: DIRECT_TOOL_CALL_VALUE,
-    ...agentSpanNamingAttributes(spanName, "execute_tool"),
-    ...agentTraceIdentityAttributes({
-      rootSessionId: input.sessionId,
-      sessionId: input.sessionId,
-      traceSessionId: input.sessionId,
-    }),
+    "operation.name": "execute_tool",
+    "resource.name": spanName,
+    "agent.run.id": input.sessionId,
+    "agent.trace.schema.version": 4,
+    "gen_ai.conversation.id": operationConversationId({ sessionId: input.sessionId }),
   };
+  if (process.env.VERCEL_ENV !== undefined) attributes["vercel.session_id"] = input.sessionId;
   if (input.origin !== undefined) {
     attributes["eve.channel.kind"] = conversation.channel.kind;
     attributes["eve.channel.name"] = input.origin.channelName;
   }
-  const span = trace
-    .getTracer("eve.agent")
-    .startSpan(spanName, { attributes, kind: SpanKind.INTERNAL }, parent);
-  // As on a conversation's tool span: error text inside the call follows the output decision.
-  const active = markAgentTraceContext(
-    withAgentToolSpanContext(withErrorContent(trace.setSpan(parent, span), recordOutputs), {
-      recordInputs,
-      recordOutputs,
-      recordError: (error, errorType) =>
-        recordAgentSpanError(span, recordOutputs ? error : undefined, errorType),
-      setAttributes: (attributes) => setDefined(span, attributes),
-    }),
+  const span = telemetry.startSpan(
+    { type: "tool", operationId: input.callId, name: spanName, kind: "INTERNAL", attributes },
+    { context: parent },
   );
+  const capture = { emit: true, recordInputs, recordOutputs };
+  // As on a conversation's tool span: error text inside the call follows the output decision.
+  const host = markAgentTraceContext(withErrorContent(parent, recordOutputs));
+  const mcp = mcpLifecycle({
+    serializer: MCP_SERIALIZER,
+    ...capture,
+    write: (attributes) => setDefined(span, attributes),
+    error: (error, errorType) => span.fail(recordOutputs ? error : undefined, errorType),
+  });
 
   let failure: { readonly error: unknown } | undefined;
   const observer = events.observer({
@@ -206,7 +198,11 @@ async function traced(
     span,
   });
   try {
-    const result = await otelContext.with(active, () => run(observer));
+    const result = await telemetry.run(
+      { type: "tool", reference: span.reference, capture, mcp },
+      () => run(observer),
+      host,
+    );
     span.setAttribute("eve.tool.outcome", result.status);
     if (result.status === "completed" && recordOutputs) {
       const output = contentAttribute(result.output);
@@ -214,18 +210,17 @@ async function traced(
     }
     if (result.status === "invalid-input") {
       // A model-issued call with invalid input never runs, so it has no span to compare to.
-      recordAgentSpanError(span, undefined, result.status);
+      span.fail(undefined, result.status);
     } else if (result.status === "failed") {
       // The conversation's rule: the error itself when outputs are recorded, else a generic one.
-      recordAgentSpanError(
-        span,
+      span.fail(
         recordOutputs ? failure?.error : undefined,
         failure === undefined ? result.status : undefined,
       );
     }
     return result;
   } catch (error) {
-    recordAgentSpanError(span, recordOutputs ? error : undefined);
+    span.fail(recordOutputs ? error : undefined);
     throw error;
   } finally {
     span.end();
@@ -260,7 +255,7 @@ function toolCallEvents(
         | {
             readonly failedWith: (error: unknown) => void;
             readonly recordInputs: boolean;
-            readonly span: Span;
+            readonly span: SpanWriter;
           }
         | undefined,
     ): InvokeToolObserver {
@@ -311,7 +306,7 @@ function toolCallEvents(
   };
 }
 
-function setDefined(span: Span, attributes: Attributes): void {
+function setDefined(span: SpanWriter, attributes: Attributes): void {
   for (const [name, value] of Object.entries(attributes)) {
     if (value !== undefined) span.setAttribute(name, value);
   }

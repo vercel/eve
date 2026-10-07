@@ -164,6 +164,64 @@ describe("resolveRemoteAgentStreamHeaders", () => {
 });
 
 describe("startRemoteAgentSession", () => {
+  it("uses the library transport handoff for a worker dispatch", async () => {
+    const { AsyncLocalStorageContextManager } = await import("@opentelemetry/context-async-hooks");
+    const { context } = await import("@opentelemetry/api");
+    const { agentDelegation } = await import("#tracing/eve/delegation.js");
+    const manager = new AsyncLocalStorageContextManager().enable();
+    context.setGlobalContextManager(manager);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        Response.json(
+          { ok: true, protocolVersion: 2, sessionId: "remote-session", status: "accepted" },
+          { status: 202 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await agentDelegation.resume(
+        {
+          context: {
+            trace: {
+              conversationId: "conversation",
+              originAudience: "public",
+              parentTraceContext: {
+                traceId: "a".repeat(32),
+                spanId: "b".repeat(16),
+                traceFlags: 1,
+                decision: { action: "record", recordInputs: false, recordOutputs: false },
+              },
+            },
+            parent: {
+              sessionId: "parent",
+              rootSessionId: "parent",
+              callId: "call",
+              turn: { id: "turn", sequence: 0 },
+            },
+          },
+          agentName: "research",
+        },
+        () =>
+          startRemoteAgentSession({
+            action: createAction(),
+            callbackBaseUrl: "https://caller.example.com",
+            remote: createRemoteAgent(),
+            session: { continuationToken: "eve:parent-token" },
+          }),
+      );
+      const options = fetchMock.mock.calls[0]?.[1];
+      expect(JSON.parse(new Headers(options.headers).get("x-agent-tracing")!)).toMatchObject({
+        conversationId: "conversation",
+        parentRunId: "parent",
+        parentCallId: "call",
+      });
+      expect(options.redirect).toBe("error");
+    } finally {
+      context.disable();
+      manager.disable();
+    }
+  });
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();

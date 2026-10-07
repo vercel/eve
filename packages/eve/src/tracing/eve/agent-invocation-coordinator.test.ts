@@ -4,7 +4,7 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionTraceSeedKey } from "#context/keys.js";
 import { serializeContext } from "#context/serialize.js";
 import { resolveToolCallAgentTrace } from "#tracing/eve/agent-invocation-coordinator.js";
-import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
+import { ContextAgentTraceStateStore } from "#tracing/eve/agent-trace-context-store.js";
 import { actionIdempotencyKey } from "#instrumentation/lifecycle.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
 
@@ -32,14 +32,14 @@ describe("resolveToolCallAgentTrace", () => {
       });
       await contextStorage.run(context, () => {
         const store = new ContextAgentTraceStateStore();
-        store.setTurn("session-1", "turn-1", {
+        store.set("turn", JSON.stringify(["session-1", "turn-1"]), {
           context: action.parent,
           rootSessionId: "session-1",
           traceSessionId: "session-1",
           sequence: 0,
           startTimeMs: 1,
         });
-        if (recorded) store.setActionAnchor(actionKey, action);
+        if (recorded) store.set("anchor", actionKey, action);
       });
 
       const dispatch = resolveToolCallAgentTrace({
@@ -52,7 +52,7 @@ describe("resolveToolCallAgentTrace", () => {
 
       expect(dispatch.parentTraceContext).toMatchObject({
         ...action.parent,
-        spanId: recorded ? action.spanId : action.parent.spanId,
+        spanId: recorded ? action.context.spanId : action.parent.spanId,
         decision: { action: "record", recordInputs: false, recordOutputs: false },
       });
       expect(dispatch.originAudience).toBe("public");
@@ -64,6 +64,7 @@ function workflowAction() {
   return {
     attemptIndex: 0,
     callId: "workflow",
+    context: { spanId: "3".repeat(16), traceId: "1".repeat(32), traceFlags: 1 },
     channelAudience: "private" as const,
     kind: "tool-call" as const,
     name: "coordinate",
@@ -73,10 +74,7 @@ function workflowAction() {
       traceId: "1".repeat(32),
     },
     rootSessionId: "session-1",
-    traceSessionId: "session-1",
     sessionId: "session-1",
-    spanId: "3".repeat(16),
-    startTimeMs: 1,
     stepIndex: 0,
     turnId: "turn-1",
   };

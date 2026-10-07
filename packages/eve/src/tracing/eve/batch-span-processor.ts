@@ -1,9 +1,5 @@
-import { TraceFlags, context, createContextKey } from "#compiled/@opentelemetry/api/index.js";
-import type { SpanExporter, SpanProcessor } from "#compiled/@vercel/otel/index.js";
-
-import { createLogger, formatError } from "#internal/logging.js";
-
-const log = createLogger("harness.batch-span-processor");
+import { TraceFlags, context, createContextKey } from "@opentelemetry/api";
+import type { SpanExporter, SpanProcessor } from "./otel-configuration.js";
 
 // This is the Symbol.for-backed key used by @opentelemetry/core's
 // suppressTracing(), without pulling that package into eve's runtime.
@@ -19,6 +15,10 @@ const DEFAULTS = {
 
 /** @internal — exposed for tests; authors get the defaults. */
 interface BatchSpanProcessorOptions {
+  readonly diagnostic?: (
+    message: string,
+    details: { error?: unknown; timeoutMillis?: number },
+  ) => void;
   readonly exportTimeoutMillis?: number;
   readonly maxExportBatchSize?: number;
   readonly maxQueueSize?: number;
@@ -40,6 +40,11 @@ export function batchSpanProcessor(
   exporter: SpanExporter,
   options: BatchSpanProcessorOptions = {},
 ): SpanProcessor {
+  const report = (message: string, details: { error?: unknown; timeoutMillis?: number }) => {
+    try {
+      options.diagnostic?.(message, details);
+    } catch {}
+  };
   const exportTimeoutMillis = options.exportTimeoutMillis ?? DEFAULTS.exportTimeoutMillis;
   const maxExportBatchSize = options.maxExportBatchSize ?? DEFAULTS.maxExportBatchSize;
   const maxQueueSize = options.maxQueueSize ?? DEFAULTS.maxQueueSize;
@@ -93,7 +98,7 @@ export function batchSpanProcessor(
     } catch (error: unknown) {
       // A destination that cannot take spans is not a reason to fail the turn
       // that produced them.
-      log.warn("span export failed", { error: formatError(error) });
+      report("span export failed", { error });
     }
   }
 
@@ -150,7 +155,7 @@ export function batchSpanProcessor(
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<false>((resolve) => {
       timer = setTimeout(() => {
-        log.warn(`${name} timed out; preserving exporter serialization`, {
+        report(`${name} timed out; preserving exporter serialization`, {
           timeoutMillis: exportTimeoutMillis,
         });
         resolve(false);
@@ -169,7 +174,7 @@ export function batchSpanProcessor(
     try {
       await operation.call(exporter);
     } catch (error: unknown) {
-      log.warn(`${name} failed`, { error: formatError(error) });
+      report(`${name} failed`, { error });
     }
   }
 }

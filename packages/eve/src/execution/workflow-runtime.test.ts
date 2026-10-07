@@ -3,11 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { context as apiContext } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 
-import {
-  ROOT_CONTEXT,
-  context as otelContext,
-  trace as otelTrace,
-} from "#compiled/@opentelemetry/api/index.js";
+import { ROOT_CONTEXT, context as otelContext, trace as otelTrace } from "@opentelemetry/api";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { ChannelRequestIdKey, SessionTitleKey } from "#context/keys.js";
@@ -26,7 +22,7 @@ import {
   sessionHandoffMarkerToken,
 } from "#execution/session-inbox/address.js";
 import { registerInstrumentationRuntime } from "#instrumentation/runtime.js";
-import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
+import { AgentSpanIdGenerator } from "#tracing/lib/index.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { markAgentTraceContext } from "#tracing/eve/agent-trace-context.js";

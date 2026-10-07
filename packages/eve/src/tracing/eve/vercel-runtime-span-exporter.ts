@@ -1,11 +1,8 @@
-import { JsonTraceSerializer } from "#compiled/@opentelemetry/otlp-transformer/index.js";
-import { TraceFlags } from "#compiled/@opentelemetry/api/index.js";
-import type { SpanExporter, SpanProcessor } from "#compiled/@vercel/otel/index.js";
-
-import { createLogger, formatError } from "#internal/logging.js";
+import { JsonTraceSerializer } from "@opentelemetry/otlp-transformer";
+import { TraceFlags } from "@opentelemetry/api";
+import type { SpanExporter, SpanProcessor } from "./otel-configuration.js";
 
 const VERCEL_REQUEST_CONTEXT = Symbol.for("@vercel/request-context");
-const log = createLogger("tracing.vercel-runtime-span-exporter");
 
 interface VercelRequestContextReader {
   get():
@@ -29,7 +26,9 @@ export function vercelRuntimeSpanExporter(): SpanExporter {
       }
 
       try {
-        const serialized = JsonTraceSerializer.serializeRequest([...spans]);
+        const serialized = JsonTraceSerializer.serializeRequest([...spans] as Parameters<
+          typeof JsonTraceSerializer.serializeRequest
+        >[0]);
         if (serialized === undefined) throw new Error("Failed to serialize spans.");
         telemetry.reportSpans(JSON.parse(new TextDecoder().decode(serialized)) as unknown);
         resultCallback({ code: 0 });
@@ -46,7 +45,7 @@ export function vercelRuntimeSpanExporter(): SpanExporter {
 }
 
 /** Reports immediately so the span stays attached to its request context. */
-export function vercelRuntimeSpanProcessor(): SpanProcessor {
+export function vercelRuntimeSpanProcessor(diagnostic?: (code: string) => void): SpanProcessor {
   const exporter = vercelRuntimeSpanExporter();
   let stopped = false;
   return {
@@ -55,9 +54,9 @@ export function vercelRuntimeSpanProcessor(): SpanProcessor {
       if (stopped || !isSampled(span)) return;
       exporter.export([span], (result) => {
         if (result.code !== 0) {
-          log.warn("Agent Runs export failed", {
-            error: formatError(result.error ?? new Error("Span export failed.")),
-          });
+          try {
+            diagnostic?.("agent.tracing.vercel.export.failed");
+          } catch {}
         }
       });
     },
