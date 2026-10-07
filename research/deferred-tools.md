@@ -21,7 +21,7 @@ through two fixed tools, `search` and `execute`:
 
 ```ts
 search(opts: {
-  query?: string;
+  query: string;
   limit?: number;
 }): Promise<{
   results: Array<
@@ -500,10 +500,23 @@ today.
 
 **`search`**
 
-- **Input:** `{ query?, limit? }`.
-  - `limit` defaults to 10 and is capped at 50.
-  - Leaving out `query` lists entries up to `limit`. A connection's name as
-    the query, such as `linear`, lists that connection's tools first.
+- **Input:** `{ query, limit? }`.
+  - `limit` defaults to 20 and is capped at 50.
+  - `query` is required and must contain a word. The listing already names
+    every tool, agent, skill, and connection, so there is no need for a
+    query-less browse. A connection's name as the query, such as `linear`,
+    lists that connection's tools first.
+  - **Namespace queries.** A query whose first word contains `__` searches one
+    namespace: everything before its last `__`. `linear__` and
+    `linear__issue` search only names that start with `linear__`, plus the
+    `linear` sign-in entry. Connection ownership guarantees no other entry
+    has such a name, so this is exact, and `search` lists only the
+    connections that can own names in that namespace (`linear`, or `crm__api`
+    under an extension mounted as `crm`). Other connections make no network
+    call and don't appear in `unavailable`. Characters that can't appear in a
+    name, such as a leading `^`, are ignored, and regex isn't supported. The
+    description tells the model to use this when it already knows the
+    connection or a name from the listing, a result, or an error.
   - There is no connection filter and no sign-in flag. The query already
     selects a connection, and sign-in is an `execute` call.
   - There is no paging and no match count. `search` returns the best matches
@@ -727,7 +740,7 @@ More tools and skills are available than your context shows. Find them with sear
 Tools: deploy_service, refund_invoice, stripe_list_disputes
 Agents: billing_specialist, researcher
 Skills: pdf-forms, release_notes
-Connections:
+Connections, whose tools are named <connection>__<tool>; search one connection's tools with "<connection>__":
 - linear: Linear issues and projects
 - petstore: Pet store inventory API
 ```
