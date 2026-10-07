@@ -2,7 +2,11 @@ import { bindTurnCallerContext } from "#subagents/parent-notification.js";
 import type { HandleEventFn } from "#harness/types.js";
 import { bindDynamicConnections } from "#execution/dynamic-connections.js";
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
-import { setEveAttributes } from "#runtime/attributes/emit.js";
+import {
+  bindStepAttributeWriter,
+  createStepAttributeWriter,
+  type StepAttributeWriter,
+} from "#runtime/attributes/step-writer.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
 import { contextStorage } from "#context/container.js";
 import { runStep } from "#context/run-step.js";
@@ -104,6 +108,18 @@ export async function turnStep(input: TurnStepInput): Promise<TurnStepResult> {
 }
 
 async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> {
+  const attributeWriter = createStepAttributeWriter();
+  try {
+    return await runSessionStepBody(input, attributeWriter);
+  } finally {
+    await attributeWriter.flush();
+  }
+}
+
+async function runSessionStepBody(
+  input: TurnStepInput,
+  attributeWriter: StepAttributeWriter,
+): Promise<DurableStepResult> {
   // The delivery as accepted, before authorization callbacks are matched out of it.
   const rawDelivery = input.input?.delivery;
   let delivery = rawDelivery;
@@ -115,6 +131,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     durableSession = countRunUsage(durableSession, usage);
   }
   const ctx = await deserializeContext(input.serializedContext);
+  bindStepAttributeWriter(ctx, attributeWriter);
   enterSessionProjection(ctx, durableSession.state);
   const adapter = ctx.require(ChannelKey);
   const bundle = ctx.require(BundleKey);
@@ -199,7 +216,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     const title = deriveSessionTitle(rawDelivery?.title ?? message);
     if (title !== undefined) {
       ctx.set(SessionTitleKey, title);
-      await setEveAttributes({ "$eve.title": title });
+      attributeWriter.enqueue({ "$eve.title": title });
     }
   }
 

@@ -10,6 +10,7 @@ import {
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import type { Step } from "#harness/step/context.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
+import { stepAttributeWriter } from "#runtime/attributes/step-writer.js";
 /**
  * The model's gateway id, or `undefined` for a model without a string `provider`, such as a
  * test double, so a missing field never throws into the tool loop.
@@ -80,7 +81,7 @@ export async function recordModelUsage(
     }),
   });
   step.session = setTurnUsageState(step.session, usage);
-  await setEveAttributes({
+  const attributes = {
     "$eve.model": gatewayModelId(input.model),
     "$eve.input_tokens": usage.inputTokens,
     "$eve.output_tokens": usage.outputTokens,
@@ -88,5 +89,8 @@ export async function recordModelUsage(
     "$eve.cache_write_tokens": usage.cacheWriteTokens,
     "$eve.cost_usd": usage.sawCost ? usage.costUsd : undefined,
     "$eve.tool_count": step.config.tools.size,
-  });
+  };
+  const writer = step.ctx === undefined ? undefined : stepAttributeWriter(step.ctx);
+  if (writer === undefined) await setEveAttributes(attributes);
+  else await writer.write(attributes);
 }

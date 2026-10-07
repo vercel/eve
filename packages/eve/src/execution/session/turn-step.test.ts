@@ -21,6 +21,7 @@ import {
   SessionDynamicToolRuntimeRevisionKey,
   ParentSessionKey,
   SessionIdKey,
+  SessionTitleKey,
   SessionTraceSeedKey,
   TraceRootKey,
   TurnDynamicToolMetadataKey,
@@ -69,6 +70,7 @@ import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.
 import type { TurnStepInput, TurnStepPayload } from "#execution/session/turn-step-types.js";
 import type { DeliverHookPayload } from "#channel/types.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
+import { setEveAttributes } from "#runtime/attributes/emit.js";
 
 type LegacyStepPayload =
   | DeliverHookPayload
@@ -819,6 +821,78 @@ describe("dispatchCoordinationStep", () => {
 });
 
 describe("turnStep", () => {
+  it("starts model work before the title attribute write settles and joins it before returning", async () => {
+    let finishTitle!: () => void;
+    vi.mocked(setEveAttributes)
+      .mockReset()
+      .mockReturnValue(
+        new Promise<void>((resolve) => {
+          finishTitle = resolve;
+        }),
+      );
+    installSessionStoreMocks([createStubSession()]);
+    const execute = vi.fn(async (session: HarnessSession): Promise<StepResult> => {
+      expect(loadContext().get(SessionTitleKey)).toBe("Start the quarterly report");
+      return { next: { done: true, output: "complete" }, session };
+    });
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => execute);
+
+    let settled = false;
+    const result = turnStep({
+      input: { kind: "deliver", payloads: [{ message: "Start the quarterly report" }] },
+      sessionWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    }).then((value) => {
+      settled = true;
+      return value;
+    });
+
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    expect(setEveAttributes).toHaveBeenCalledWith({
+      "$eve.title": "Start the quarterly report",
+    });
+    expect(settled).toBe(false);
+    finishTitle();
+
+    await expect(result).resolves.toMatchObject({ action: "done", output: "complete" });
+  });
+
+  it("joins the title attribute write before propagating a harness failure", async () => {
+    let finishTitle!: () => void;
+    vi.mocked(setEveAttributes)
+      .mockReset()
+      .mockReturnValue(
+        new Promise<void>((resolve) => {
+          finishTitle = resolve;
+        }),
+      );
+    installSessionStoreMocks([createStubSession()]);
+    const failure = new Error("model failed");
+    const execute = vi.fn(async (): Promise<StepResult> => {
+      throw failure;
+    });
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => execute);
+
+    let rejected = false;
+    const result = turnStep({
+      input: { kind: "deliver", payloads: [{ message: "Start the quarterly report" }] },
+      sessionWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    }).catch((error: unknown) => {
+      rejected = true;
+      throw error;
+    });
+
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    await Promise.resolve();
+    expect(rejected).toBe(false);
+    finishTitle();
+
+    await expect(result).rejects.toBe(failure);
+  });
+
   it("resumes an interrupted turn when the channel ignores the correction", async () => {
     const originalAuth: SessionAuthContext = {
       attributes: {},
