@@ -15,6 +15,7 @@ const log = createLogger("slack.reply");
 const LONG_RESPONSE_FILENAME = "eve-response.md";
 const LONG_RESPONSE_NOTICE = "Here's a snippet with the full response.";
 const FALLBACK_LOG = "Slack refused the final reply; delivering it with a fallback";
+const ROOT_GONE_LOG = "Slack thread root was deleted; dropping the final reply";
 
 /**
  * Slack error codes for a message payload Slack refused as too large or
@@ -64,6 +65,10 @@ export type SlackCompletedReply =
  *    This requires the `files:write` bot scope. In a session without a
  *    thread yet, the note posts first and anchors the thread.
  *
+ * Before any of that, eve checks that the bound thread's root still exists.
+ * Slack posts a reply to a deleted root as a top-level channel message, so
+ * when the root is gone eve drops the reply instead of posting it unthreaded.
+ *
  * Any other error, and a failed upload, is thrown so your renderer sees it.
  * eve logs each fallback it takes with Slack's error code, never the reply.
  *
@@ -94,6 +99,10 @@ export async function deliverCompletedSlackReply(
   logFields: { readonly turnId?: string },
 ): Promise<void> {
   const { blocks, markdown, text } = typeof reply === "string" ? { markdown: reply } : reply;
+  if (await threadRootIsGone(channel)) {
+    log.warn(ROOT_GONE_LOG, logFields);
+    return;
+  }
   let slackError: string | undefined;
   if (blocks !== undefined) {
     try {
@@ -120,6 +129,36 @@ export async function deliverCompletedSlackReply(
     log.warn(FALLBACK_LOG, { fallback: "snippet", slackError, ...logFields });
   }
   await uploadReplySnippet(channel, markdown);
+}
+
+/**
+ * True when the bound thread's root message was deleted. Slack accepts a
+ * `thread_ts` whose parent is gone and posts the message at the top level of
+ * the channel, so a reply to a deleted root would leak into the channel.
+ *
+ * Slack reports a deleted root as `thread_not_found`, or as a `tombstone`
+ * placeholder when the thread still has replies. Any other failure to look
+ * it up counts as "not gone", so a lookup problem never swallows a reply.
+ */
+async function threadRootIsGone(channel: SlackContext): Promise<boolean> {
+  const { channelId, threadTs } = channel.slack;
+  if (!channelId || !threadTs) return false;
+  try {
+    const response = await channel.slack.request("conversations.replies", {
+      channel: channelId,
+      limit: 1,
+      ts: threadTs,
+    });
+    if (response.ok !== true) return response.error === "thread_not_found";
+    const root = Array.isArray(response.messages) ? response.messages[0] : undefined;
+    return (
+      typeof root === "object" &&
+      root !== null &&
+      (root as { readonly subtype?: unknown }).subtype === "tombstone"
+    );
+  } catch {
+    return false;
+  }
 }
 
 async function uploadReplySnippet(channel: SlackContext, message: string): Promise<void> {

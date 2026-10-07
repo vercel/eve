@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 
 import { afterAll, afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import type { Mock } from "vitest";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
@@ -105,6 +106,25 @@ function parseSlackRequestBody(init: RequestInit | undefined): Record<string, un
   if (!init?.body) return {};
   const contentType = init.headers ? new Headers(init.headers).get("content-type") : null;
   return decodeSlackApiBody(init.body, contentType) as Record<string, unknown>;
+}
+
+// Wraps a recording `fetch` mock so the final-reply root check
+// (`conversations.replies`) finds a live thread root without being recorded.
+// Tests of that check supply their own `lookup` and read the lookups made.
+function withLiveThreadRoot(
+  fetchMock: ReturnType<typeof vi.fn>,
+  lookup: () => Record<string, unknown> = () => ({ ok: true, messages: [{ ts: "1" }] }),
+  lookups: string[] = [],
+): typeof fetch {
+  return (async (input: string | URL | Request, init?: RequestInit) => {
+    if (String(input) === "https://slack.com/api/conversations.replies") {
+      lookups.push(String(parseSlackRequestBody(init).ts));
+      return new Response(JSON.stringify(lookup()), {
+        headers: { "content-type": "application/json" },
+      });
+    }
+    return (fetchMock as Mock<typeof fetch>)(input, init);
+  }) as typeof fetch;
 }
 
 // Selects the captured calls to one Slack Web API method. The transport
@@ -562,7 +582,7 @@ describe("slackChannel() default event handlers", () => {
         }),
       ),
     );
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withLiveThreadRoot(fetchMock));
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -1957,10 +1977,17 @@ describe("slackChannel() default event handlers", () => {
 describe("slackChannel() final reply delivery", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
   let uploadedBodies: string[];
+  let rootLookup: () => Record<string, unknown>;
+  let rootLookups: string[];
   beforeEach(() => {
     fetchMock = vi.fn();
     uploadedBodies = useSuccessfulSlackFileUpload(fetchMock);
-    vi.stubGlobal("fetch", fetchMock);
+    rootLookup = () => ({ ok: true, messages: [{ ts: "1700000000.000001" }] });
+    rootLookups = [];
+    vi.stubGlobal(
+      "fetch",
+      withLiveThreadRoot(fetchMock, () => rootLookup(), rootLookups),
+    );
   });
 
   // Fails the next calls to each named Slack method with the queued error
@@ -2065,6 +2092,70 @@ describe("slackChannel() final reply delivery", () => {
 
   const shortAnswer = `# Findings\n\n${"r".repeat(6_000)}`;
   const longAnswer = `# Findings\n\n${"r".repeat(SLACK_MARKDOWN_TEXT_MAX_LENGTH)}`;
+
+  describe("deleted thread root", () => {
+    const rootGoneLog = "Slack thread root was deleted; dropping the final reply";
+
+    // Slack posts a reply to a deleted root as a top-level channel message.
+    it("drops the reply when Slack reports the root as thread_not_found", async () => {
+      const logs = captureLogRecords();
+      rootLookup = () => ({ ok: false, error: "thread_not_found" });
+      const { adapter, ctx } = adapterWith();
+
+      await callCompletionHandler(adapter, finalReply("hello"), ctx);
+
+      expect(rootLookups).toEqual(["1700000000.000001"]);
+      expect(urls()).toEqual([]);
+      expect(logs.records.some((entry) => entry.message === rootGoneLog)).toBe(true);
+    });
+
+    it("drops the reply when the root is a tombstone", async () => {
+      rootLookup = () => ({
+        ok: true,
+        messages: [{ subtype: "tombstone", ts: "1700000000.000001" }],
+      });
+      const { adapter, ctx } = adapterWith();
+
+      await callCompletionHandler(adapter, finalReply("hello"), ctx);
+
+      expect(urls()).toEqual([]);
+    });
+
+    it("drops a reply sent through postCompletedSlackReply", async () => {
+      rootLookup = () => ({ ok: false, error: "thread_not_found" });
+      const { adapter, ctx } = adapterWith([helperReplies()]);
+
+      await callCompletionHandler(adapter, finalReply(shortAnswer), ctx);
+
+      expect(urls()).toEqual([]);
+    });
+
+    it("posts the reply when the root is live", async () => {
+      const { adapter, ctx } = adapterWith();
+
+      await callCompletionHandler(adapter, finalReply("hello"), ctx);
+
+      expect(rootLookups).toEqual(["1700000000.000001"]);
+      expect(urls()).toEqual(["https://slack.com/api/chat.postMessage"]);
+    });
+
+    it.each([
+      ["a Slack error", () => ({ ok: false, error: "ratelimited" })],
+      [
+        "a thrown lookup",
+        () => {
+          throw new Error("network down");
+        },
+      ],
+    ])("posts the reply when the root lookup fails with %s", async (_label, lookup) => {
+      rootLookup = lookup;
+      const { adapter, ctx } = adapterWith();
+
+      await callCompletionHandler(adapter, finalReply("hello"), ctx);
+
+      expect(urls()).toEqual(["https://slack.com/api/chat.postMessage"]);
+    });
+  });
 
   describe("postCompletedSlackReply", () => {
     it("posts the caller's Markdown once when Slack refuses the blocks", async () => {
@@ -2432,7 +2523,7 @@ describe("rebuildSlackContext", () => {
         headers: { "content-type": "application/json" },
       }),
     );
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withLiveThreadRoot(fetchMock));
 
     const adapter = withState(
       getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
@@ -3612,6 +3703,40 @@ describe("slackChannel() onMessage", () => {
 
     expect(send).not.toHaveBeenCalled();
     expect(onEvent).toHaveBeenCalledTimes(1);
+  });
+
+  // The final reply no longer leaks into the channel when the user deletes the
+  // message that started a turn (see "deleted thread root" under final reply
+  // delivery). eve still drops `message_deleted`, so nothing cancels the
+  // in-flight turn and it runs to completion before its reply is discarded.
+  // Remove `.fails` once eve cancels the turn bound to a deleted thread root.
+  it.fails("cancels the turn bound to a thread root that the user deleted", async () => {
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+    const rootTs = "1700000000.000100";
+    const body = buildEventBody(
+      {
+        channel: "C_DELETED",
+        channel_type: "channel",
+        deleted_ts: rootTs,
+        hidden: true,
+        previous_message: {
+          text: "<@U_BOT> a question",
+          ts: rootTs,
+          type: "message",
+          user: "U01",
+        },
+        subtype: "message_deleted",
+        ts: "1700000000.000200",
+        type: "message",
+      },
+      { authorizations: [{ is_bot: true, user_id: "U_BOT" }] },
+    );
+
+    const { cancel } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(cancel).toHaveBeenCalledWith(
+      expect.objectContaining({ continuationToken: `C_DELETED:${rootTs}` }),
+    );
   });
 
   it("gives specialized message hooks precedence", async () => {
