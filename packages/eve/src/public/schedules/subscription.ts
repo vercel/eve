@@ -177,7 +177,7 @@ export interface ScheduleClient<TPayload> {
 }
 
 /** Starts fresh unattended work bound to the resolved creator; callers cannot choose another identity. */
-export type ScheduleSubscriptionToFn = <TChannel extends ChannelReference<unknown>>(
+export type DynamicSchedulesToFn = <TChannel extends ChannelReference<unknown>>(
   channel: TChannel,
   target: InferReceiveTarget<TChannel>,
 ) => { send(message: string | UserContent): Promise<Session> };
@@ -201,32 +201,29 @@ export type ScheduleApprovals<TPrepared> = Partial<
 };
 
 /** Execution context; `to` starts fresh, unattended sessions as the resolved creator. */
-export interface ScheduleSubscriptionRunArgs<TPayload> extends Pick<
-  ScheduleHandlerArgs,
-  "waitUntil"
-> {
-  readonly to: ScheduleSubscriptionToFn;
+export interface DynamicSchedulesRunArgs<TPayload> extends Pick<ScheduleHandlerArgs, "waitUntil"> {
+  readonly to: DynamicSchedulesToFn;
   readonly payload: TPayload;
   readonly occurrence: ScheduleOccurrenceIdentity;
   readonly auth: SessionAuthContext;
 }
 
-/** Defines runtime schedules whose occurrences invoke authored code. */
-export interface ScheduleSubscriptionDefinition<
+/** Defines dynamically created schedules whose occurrences invoke authored code. */
+export interface DynamicSchedulesDefinition<
   TPayload = unknown,
   TSchema extends StandardSchemaV1<unknown, TPayload> = StandardSchemaV1<unknown, TPayload>,
   TPrepared = TPayload,
 > {
   readonly description?: string;
   /** Model-facing payload schema. Destination intent may be resolved by `run`. */
-  readonly schema: TSchema;
+  readonly inputSchema: TSchema;
   /** Backend used to store schedules and deliver occurrences. */
   readonly provider: ScheduleProvider;
   /**
    * Validates application policy and enriches a creation payload before the provider write.
-   * The caller constructs the payload; eve validates it with `schema`, authorizes creation
-   * through `scope`, then calls `prepare` with trusted creation context. eve checks that the
-   * result is bounded JSON and persists it; `schema` describes input, not prepared output.
+   * The caller constructs input; eve validates it with `inputSchema`, authorizes creation
+   * through `scope`, then calls `preparePayload` with trusted creation context. eve checks that the
+   * result is bounded JSON and persists it; `inputSchema` describes caller input, not stored prepared output.
    * Throw an actionable error to reject creation without writing a schedule.
    *
    * A common use is capturing the current channel destination: derive channel/workspace
@@ -234,17 +231,17 @@ export interface ScheduleSubscriptionDefinition<
    * return them with the task. Keep captured fields out of the input schema.
    * Channel-less or delegated callers may lack that context; reject those cases explicitly.
    *
-   * Runs only on creation. Model calls prepare before approval, then prepare again before
+   * Runs only on creation. Model calls invoke preparePayload before approval and again before
    * writing; execution fails if the prepared result differs from the approved snapshot.
-   * Authenticated clients prepare once before writing without model approval. Reads, enable/disable operations, and occurrence execution do not call it. Omission
+   * Authenticated clients invoke preparePayload once before writing without model approval. Reads, enable/disable operations, and occurrence execution do not call it. Omission
    * stores validated input unchanged. Creation retries may call it again, so avoid
    * irreversible side effects; state changes never recapture a different destination.
-   * `auth`, `run`, and occurrence events receive the inferred return type. Declare `prepare`
+   * `auth`, `run`, and occurrence events receive the inferred return type. Declare `preparePayload`
    * before those callbacks for contextual inference, or annotate its return type explicitly.
    * Prepared application data is not revalidated against the input schema at execution;
    * validate the application's persisted contract in authored code when necessary.
    */
-  readonly prepare?: (
+  readonly preparePayload?: (
     payload: TPayload,
     context: ScheduleScopeContext & { readonly operation: "create"; readonly name: string },
   ) => TPrepared | Promise<TPrepared>;
@@ -259,7 +256,7 @@ export interface ScheduleSubscriptionDefinition<
     readonly occurrence: ScheduleOccurrenceIdentity;
   }) => SessionAuthContext | null | Promise<SessionAuthContext | null>;
   /** May repeat on provider retries. Key external effects on the occurrence identity. */
-  readonly run: (args: ScheduleSubscriptionRunArgs<NoInfer<TPrepared>>) => void | Promise<void>;
+  readonly run: (args: DynamicSchedulesRunArgs<NoInfer<TPrepared>>) => void | Promise<void>;
   readonly events?: {
     /** After `run` and registered `waitUntil` work succeed; may repeat on retries. */
     readonly "occurrence.dispatched"?: ScheduleOccurrenceEventHandler<NoInfer<TPrepared>>;
@@ -272,20 +269,20 @@ export interface ScheduleSubscriptionDefinition<
   readonly approval?: ScheduleApprovals<NoInfer<TPrepared>>;
 }
 
-export type DefinedScheduleSubscription<
+export type DefinedDynamicSchedules<
   TPayload = unknown,
   TSchema extends StandardSchemaV1<unknown, TPayload> = StandardSchemaV1<unknown, TPayload>,
   TPrepared = TPayload,
-> = ScheduleSubscriptionDefinition<TPayload, TSchema, TPrepared> & {
+> = DynamicSchedulesDefinition<TPayload, TSchema, TPrepared> & {
   readonly [SCHEDULE_COLLECTION_DEFINITION_BRAND]: true;
 };
 
-type ScheduleSubscriptionOptions<
+type DynamicSchedulesOptions<
   TInput,
   TSchema extends StandardSchemaV1<unknown, TInput>,
   TPrepared = TInput,
 > = Omit<
-  ScheduleSubscriptionDefinition<TInput, TSchema, TPrepared>,
+  DynamicSchedulesDefinition<TInput, TSchema, TPrepared>,
   "provider" | "tool" | "approval"
 > & {
   /** Backend used by this definition. */
@@ -297,36 +294,36 @@ type ScheduleSubscriptionOptions<
 
 /**
  * Defines a dynamic schedule subscription. Export it from `agent/schedules/`;
- * identity comes from the module path. The schema validates model-authored payload,
+ * identity comes from the module path. inputSchema validates caller input,
  * while eve captures creator identity separately and re-resolves it on every attempt.
  * `run` chooses destinations and starts work; no creation conversation is implicitly captured.
  */
-export function defineScheduleSubscription<TInput, TPrepared>(
+export function defineDynamicSchedules<TInput, TPrepared>(
   definition: Omit<
-    ScheduleSubscriptionOptions<TInput, StandardSchemaV1<unknown, TInput>, TPrepared>,
-    "prepare"
+    DynamicSchedulesOptions<TInput, StandardSchemaV1<unknown, TInput>, TPrepared>,
+    "preparePayload"
   > & {
-    readonly prepare: (
+    readonly preparePayload: (
       payload: TInput,
       context: ScheduleScopeContext & { readonly operation: "create"; readonly name: string },
     ) => TPrepared | Promise<TPrepared>;
   },
-): DefinedScheduleSubscription<TInput, StandardSchemaV1<unknown, TInput>, TPrepared>;
-export function defineScheduleSubscription<TSchema extends StandardSchemaV1<unknown, unknown>>(
+): DefinedDynamicSchedules<TInput, StandardSchemaV1<unknown, TInput>, TPrepared>;
+export function defineDynamicSchedules<TSchema extends StandardSchemaV1<unknown, unknown>>(
   definition: ExactDefinition<
-    ScheduleSubscriptionOptions<StandardSchemaV1.InferOutput<TSchema>, TSchema>,
-    ScheduleSubscriptionOptions<StandardSchemaV1.InferOutput<TSchema>, TSchema>
+    DynamicSchedulesOptions<StandardSchemaV1.InferOutput<TSchema>, TSchema>,
+    DynamicSchedulesOptions<StandardSchemaV1.InferOutput<TSchema>, TSchema>
   >,
-): DefinedScheduleSubscription<StandardSchemaV1.InferOutput<TSchema>, TSchema>;
-export function defineScheduleSubscription(
-  definition: Omit<ScheduleSubscriptionDefinition<any, any, any>, "provider"> & {
+): DefinedDynamicSchedules<StandardSchemaV1.InferOutput<TSchema>, TSchema>;
+export function defineDynamicSchedules(
+  definition: Omit<DynamicSchedulesDefinition<any, any, any>, "provider"> & {
     readonly provider: ScheduleProvider;
   },
-): DefinedScheduleSubscription<any, any, any> {
+): DefinedDynamicSchedules<any, any, any> {
   Object.assign(definition, {
     provider: definition.provider,
     tool: definition.tool ?? true,
     [SCHEDULE_COLLECTION_DEFINITION_BRAND]: true,
   });
-  return definition as DefinedScheduleSubscription<any, any, any>;
+  return definition as DefinedDynamicSchedules<any, any, any>;
 }

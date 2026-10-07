@@ -1,11 +1,11 @@
 /** Experimental dynamic schedule subscriptions. APIs may change without notice. */
 export { schedules } from "#public/experimental/schedules/client.js";
 export {
-  defineScheduleSubscription,
-  type DefinedScheduleSubscription,
-  type ScheduleSubscriptionDefinition,
-  type ScheduleSubscriptionRunArgs,
-  type ScheduleSubscriptionToFn,
+  defineDynamicSchedules,
+  type DefinedDynamicSchedules,
+  type DynamicSchedulesDefinition,
+  type DynamicSchedulesRunArgs,
+  type DynamicSchedulesToFn,
   type ScheduleCreateApproval,
   type ScheduleApprovals,
   type ScheduleClient,

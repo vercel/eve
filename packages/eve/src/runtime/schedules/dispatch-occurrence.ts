@@ -2,7 +2,7 @@ import { scheduleDisplayName } from "#runtime/schedules/record.js";
 import { ScheduleDispatcher } from "#channel/schedule.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import type {
-  ScheduleSubscriptionDefinition,
+  DynamicSchedulesDefinition,
   ScheduleOccurrenceIdentity,
 } from "#public/schedules/subscription.js";
 import type { ScheduleCollectionPayload } from "#runtime/schedules/payload.js";
@@ -12,7 +12,7 @@ import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agen
 export async function dispatchScheduledOccurrence(input: {
   readonly bundle: Pick<CompiledRuntimeAgentBundle, "compiledArtifactsSource" | "graph">;
   readonly collection: string;
-  readonly definition: ScheduleSubscriptionDefinition<any, any, any>;
+  readonly definition: DynamicSchedulesDefinition<any, any, any>;
   readonly occurrence: ScheduleOccurrenceIdentity;
   readonly payload: ScheduleCollectionPayload<unknown>;
   readonly verifyDelivery?: () => Promise<void>;

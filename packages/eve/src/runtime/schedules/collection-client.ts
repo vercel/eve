@@ -9,7 +9,7 @@ import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import type {
   ScheduleClient,
   ScheduleClientCreate,
-  ScheduleSubscriptionDefinition,
+  DynamicSchedulesDefinition,
   ScheduleEnvelope,
   SchedulePageResult,
   SchedulePrincipalReference,
@@ -54,11 +54,7 @@ export interface ScheduleCollectionClient<TInput, TPrepared> extends ScheduleCli
 }
 
 export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
-  definition: ScheduleSubscriptionDefinition<
-    TPayload,
-    StandardSchemaV1<unknown, TPayload>,
-    TPrepared
-  >,
+  definition: DynamicSchedulesDefinition<TPayload, StandardSchemaV1<unknown, TPayload>, TPrepared>,
   callContext: ScheduleBoundCallContext,
 ): ScheduleCollectionClient<TPayload, TPrepared> {
   const nextOperationId = callContext.operationId ?? randomUUID;
@@ -117,11 +113,14 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
     const creator = principalReference(callContext.session.auth.current);
     if (creator === null)
       throw new Error("Creating a schedule requires an authenticated principal.");
-    const validated = await validateSchedulePayload<TPayload>(definition.schema, input.payload);
+    const validated = await validateSchedulePayload<TPayload>(
+      definition.inputSchema,
+      input.payload,
+    );
     const preparedPayload =
-      definition.prepare === undefined
+      definition.preparePayload === undefined
         ? validated
-        : await definition.prepare(validated, {
+        : await definition.preparePayload(validated, {
             ...contextFor("create", displayName),
             operation: "create",
             name: displayName,

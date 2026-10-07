@@ -1,6 +1,6 @@
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { normalizeScheduleCollectionDefinition } from "#internal/authored-definition/schedule-collection.js";
-import type { ScheduleSubscriptionDefinition } from "#public/schedules/subscription.js";
+import type { DynamicSchedulesDefinition } from "#public/schedules/subscription.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
@@ -16,7 +16,7 @@ export async function loadScheduleCollectionDefinition(
   bundle: Pick<CompiledRuntimeAgentBundle, "compiledArtifactsSource" | "moduleMap" | "nodeId">,
   collection: string,
   options: { readonly manifest?: CompiledAgentManifest; readonly providerKind?: string } = {},
-): Promise<ScheduleSubscriptionDefinition<unknown>> {
+): Promise<DynamicSchedulesDefinition<unknown>> {
   const manifest =
     options.manifest ??
     (await loadCompiledManifest({ compiledArtifactsSource: bundle.compiledArtifactsSource }));
@@ -38,5 +38,5 @@ export async function loadScheduleCollectionDefinition(
   return normalizeScheduleCollectionDefinition(
     exported,
     `Invalid schedule collection ${collection}.`,
-  ) as ScheduleSubscriptionDefinition<unknown>;
+  ) as DynamicSchedulesDefinition<unknown>;
 }

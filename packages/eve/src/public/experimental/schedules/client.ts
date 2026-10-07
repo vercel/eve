@@ -11,10 +11,7 @@ import {
 } from "#context/keys.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getAdapterKind } from "#channel/adapter.js";
-import type {
-  DefinedScheduleSubscription,
-  ScheduleClient,
-} from "#public/schedules/subscription.js";
+import type { DefinedDynamicSchedules, ScheduleClient } from "#public/schedules/subscription.js";
 import { readSessionSchedule } from "#context/session-schedule.js";
 import {
   createScheduleCollectionClient,
@@ -23,14 +20,14 @@ import {
 
 /** Binds a registered subscription to a scope authorized on every operation. */
 export async function schedules<TPayload, TPrepared = TPayload>(
-  collection: DefinedScheduleSubscription<TPayload, StandardSchemaV1<unknown, TPayload>, TPrepared>,
+  collection: DefinedDynamicSchedules<TPayload, StandardSchemaV1<unknown, TPayload>, TPrepared>,
 ): Promise<ScheduleClient<TPayload>> {
   return await bindScheduleCollection(collection);
 }
 
 /** Shared binding for model approval preview and code-only client access. */
 export async function bindScheduleCollection<TPayload, TPrepared = TPayload>(
-  collection: DefinedScheduleSubscription<TPayload, StandardSchemaV1<unknown, TPayload>, TPrepared>,
+  collection: DefinedDynamicSchedules<TPayload, StandardSchemaV1<unknown, TPayload>, TPrepared>,
 ): Promise<ScheduleCollectionClient<TPayload, TPrepared>> {
   const identity = readScheduleCollectionSource(collection);
   if (identity === undefined)
@@ -38,7 +35,7 @@ export async function bindScheduleCollection<TPayload, TPrepared = TPayload>(
   const definition = normalizeScheduleCollectionDefinition(
     collection,
     `Invalid schedule subscription ${identity.logicalPath}.`,
-  ) as DefinedScheduleSubscription<TPayload, StandardSchemaV1<unknown, TPayload>, TPrepared>;
+  ) as DefinedDynamicSchedules<TPayload, StandardSchemaV1<unknown, TPayload>, TPrepared>;
   const context = loadContext();
   const channel = context.get(ChannelKey);
   return createScheduleCollectionClient(definition, {

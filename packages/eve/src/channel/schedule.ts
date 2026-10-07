@@ -14,7 +14,7 @@ import type {
   ScheduleRunHandler,
 } from "#public/definitions/schedule.js";
 import type {
-  ScheduleSubscriptionDefinition,
+  DynamicSchedulesDefinition,
   ScheduleOccurrenceIdentity,
 } from "#public/schedules/subscription.js";
 import {
@@ -55,7 +55,7 @@ export interface ScheduleDispatchResult {
 }
 export interface ScheduleCollectionDispatchInput {
   readonly collectionId: string;
-  readonly definition: ScheduleSubscriptionDefinition<any, any, any>;
+  readonly definition: DynamicSchedulesDefinition<any, any, any>;
   readonly payload: ScheduleCollectionPayload<unknown>;
   readonly occurrence: ScheduleOccurrenceIdentity;
   readonly verifyDelivery?: () => Promise<void>;
@@ -109,8 +109,8 @@ export class ScheduleDispatcher {
       displayName: scheduleDisplayName(input.occurrence.name),
     };
     const payload =
-      definition.prepare === undefined
-        ? await validateSchedulePayload(definition.schema, envelope.payload)
+      definition.preparePayload === undefined
+        ? await validateSchedulePayload(definition.inputSchema, envelope.payload)
         : envelope.payload;
     await input.verifyDelivery?.();
     const resolvedAuth = await definition.auth({

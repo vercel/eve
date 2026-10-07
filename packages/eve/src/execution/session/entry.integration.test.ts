@@ -26,7 +26,12 @@ import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import { defineInteractiveAuthorization } from "#shared/connection-types.js";
-import { SessionTitleKey } from "#context/keys.js";
+import {
+  SessionTitleKey,
+  ScheduleIdKey,
+  ScheduleInstanceKey,
+  OccurrenceIdKey,
+} from "#context/keys.js";
 import {
   buildSerializedContext,
   captureEvents,
@@ -43,6 +48,57 @@ afterEach(() => {
 });
 
 describe("workflowEntry integration", () => {
+  it("preserves scheduled provenance in the first turn so unattended tools need no approval", async () => {
+    const executions: unknown[] = [];
+    const runtime = await createTestRuntime({
+      agent: { name: "scheduled-first-turn" },
+      modules: [
+        {
+          logicalPath: "tools/inspect_schedule.ts",
+          loadNamespace: async () => ({
+            default: defineTool({
+              description: "Report this turn's schedule provenance.",
+              inputSchema: {},
+              approval: ({ session }) =>
+                session.schedule === undefined ? "user-approval" : "not-applicable",
+              execute: (_input, context) => {
+                executions.push(context.session.schedule);
+                return { inspected: true };
+              },
+            }),
+          }),
+        },
+      ],
+    });
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: "Use inspect_schedule exactly once." },
+          serializedContext: {
+            ...buildSerializedContext({ channelKind: "schedule" }),
+            [ScheduleIdKey.name]: "tasks",
+            [ScheduleInstanceKey.name]: "joke--id",
+            [OccurrenceIdKey.name]: "exec-1",
+            "eve.capabilities": { requestInput: false },
+          },
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      try {
+        const events = await stream.nextTurn();
+        expect(filterEventsByType(events, "input.requested")).toHaveLength(0);
+        expect(filterEventsByType(events, "turn.failed")).toHaveLength(0);
+        expect(executions).toEqual([
+          { definition: "tasks", instance: "joke--id", occurrenceId: "exec-1" },
+        ]);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
   it("registers first-turn abort hooks before a prewarmed session receives a message", async () => {
     const runtime = await createTestRuntime({ agent: { name: "workflow-entry-turn-prewarm" } });
 

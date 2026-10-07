@@ -15,7 +15,7 @@ import { markDynamicCallbackRebind } from "#internal/dynamic-tool-rebind.js";
 import { bindScheduleCollection, schedules } from "#public/experimental/schedules/client.js";
 import type {
   ScheduleOperation,
-  ScheduleSubscriptionDefinition,
+  DynamicSchedulesDefinition,
 } from "#public/schedules/subscription.js";
 import {
   assertScheduleManagementAllowed,
@@ -82,7 +82,7 @@ const timingGuidance =
   "For relative requests use expression { type: 'delay', minutes: 1 }; eve resolves timing after approval and rounds up to minute precision (up to 59 seconds later). Do not guess the clock or ask for a timezone for delays.";
 
 export function createScheduleCollectionToolDynamicDefinition<TInput, TPrepared = TInput>(
-  definition: ScheduleSubscriptionDefinition<TInput, StandardSchemaV1<unknown, TInput>, TPrepared>,
+  definition: DynamicSchedulesDefinition<TInput, StandardSchemaV1<unknown, TInput>, TPrepared>,
   identity: { readonly application: string; readonly collection: string },
 ) {
   return markDynamicCallbackRebind(
@@ -99,7 +99,11 @@ export function createScheduleCollectionToolDynamicDefinition<TInput, TPrepared 
           const prefix = `${scheduleCollectionToolPrefix(identity.collection)}__`;
           const keyFor = (callId: string) => `${prefix}create:${callId}`;
           const createSchema = z
-            .object({ name: nameSchema, expression: expressionSchema, payload: definition.schema })
+            .object({
+              name: nameSchema,
+              expression: expressionSchema,
+              payload: definition.inputSchema,
+            })
             .strict();
           const createPolicy = definition.approval?.create ?? always();
           const createApproval: { request: ApprovalPolicy; response?: ApprovalResponsePolicy } = {

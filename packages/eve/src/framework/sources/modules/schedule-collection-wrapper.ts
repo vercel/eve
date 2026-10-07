@@ -38,7 +38,7 @@ export async function loadScheduleCollectionWrapperNamespace(
   }
   const definition = normalizeScheduleCollectionDefinition(
     value,
-    `Expected the schedule collection export "${exportName}" from "${logicalPath}" to be created with defineScheduleSubscription().`,
+    `Expected the schedule collection export "${exportName}" from "${logicalPath}" to be created with defineDynamicSchedules().`,
   );
   stampScheduleCollectionSource(value as object, {
     application,

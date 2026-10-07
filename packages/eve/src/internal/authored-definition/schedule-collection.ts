@@ -1,6 +1,6 @@
 import { expectObjectRecord, expectOnlyKnownKeys } from "#internal/authored-module.js";
 import type {
-  ScheduleSubscriptionDefinition,
+  DynamicSchedulesDefinition,
   ScheduleProvider,
 } from "#public/schedules/subscription.js";
 import { isScheduleCollectionDefinition } from "#shared/schedule-collection-definition.js";
@@ -32,8 +32,8 @@ const DEFINITION_KEYS = [
   "description",
   "provider",
   "scope",
-  "schema",
-  "prepare",
+  "inputSchema",
+  "preparePayload",
   "run",
   "auth",
   "events",
@@ -44,7 +44,7 @@ const DEFINITION_KEYS = [
 export function normalizeScheduleCollectionDefinition(
   value: unknown,
   message: string,
-): ScheduleSubscriptionDefinition {
+): DynamicSchedulesDefinition {
   if (!isScheduleCollectionDefinition(value)) throw new Error(message);
   const record = expectObjectRecord(value, message);
   expectOnlyKnownKeys(record, DEFINITION_KEYS, message);
@@ -54,17 +54,17 @@ export function normalizeScheduleCollectionDefinition(
   )
     throw new Error(`${message} "description" must be a non-empty string when provided.`);
   const schema = expectObjectRecord(
-    record.schema,
-    `${message} "schema" is required and must be a Standard Schema.`,
+    record.inputSchema,
+    `${message} "inputSchema" is required and must be a Standard Schema.`,
   );
   const standard = expectObjectRecord(
     schema["~standard"],
-    `${message} "schema" must be a Standard Schema.`,
+    `${message} "inputSchema" must be a Standard Schema.`,
   );
   if (typeof standard.validate !== "function")
-    throw new Error(`${message} "schema" must supply a Standard Schema validate function.`);
-  if (record.prepare !== undefined && typeof record.prepare !== "function")
-    throw new Error(`${message} "prepare" must be a function when provided.`);
+    throw new Error(`${message} "inputSchema" must supply a Standard Schema validate function.`);
+  if (record.preparePayload !== undefined && typeof record.preparePayload !== "function")
+    throw new Error(`${message} "preparePayload" must be a function when provided.`);
   if (typeof record.run !== "function")
     throw new Error(`${message} "run" is required and must be a function.`);
   if (record.scope !== undefined && typeof record.scope !== "function")
@@ -115,5 +115,5 @@ export function normalizeScheduleCollectionDefinition(
         throw new Error(`${message} "approval.${operation}" must be an approval policy.`);
     }
   }
-  return value as ScheduleSubscriptionDefinition;
+  return value as DynamicSchedulesDefinition;
 }
