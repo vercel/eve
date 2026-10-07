@@ -92,6 +92,10 @@ function channelDeliveryErrorCode(error: unknown): string {
 
 export type { TurnStepInput };
 
+interface PendingStepAttributes {
+  title?: Promise<void>;
+}
+
 /** Runs a bounded batch of harness model steps inside one durable `"use step"` boundary. */
 export async function turnStep(input: TurnStepInput): Promise<TurnStepResult> {
   "use step";
@@ -104,6 +108,18 @@ export async function turnStep(input: TurnStepInput): Promise<TurnStepResult> {
 }
 
 async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> {
+  const pendingAttributes: PendingStepAttributes = {};
+  try {
+    return await runSessionStepBody(input, pendingAttributes);
+  } finally {
+    await pendingAttributes.title;
+  }
+}
+
+async function runSessionStepBody(
+  input: TurnStepInput,
+  pendingAttributes: PendingStepAttributes,
+): Promise<DurableStepResult> {
   // The delivery as accepted, before authorization callbacks are matched out of it.
   const rawDelivery = input.input?.delivery;
   let delivery = rawDelivery;
@@ -199,7 +215,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     const title = deriveSessionTitle(rawDelivery?.title ?? message);
     if (title !== undefined) {
       ctx.set(SessionTitleKey, title);
-      await setEveAttributes({ "$eve.title": title });
+      pendingAttributes.title = setEveAttributes({ "$eve.title": title });
     }
   }
 
@@ -467,6 +483,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
           nodeId: bundle.nodeId,
         },
         node: effectiveNode,
+        titleAttributeWrite: pendingAttributes.title,
       });
       return step(modelSession, stepInput);
     };

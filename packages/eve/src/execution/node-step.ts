@@ -77,6 +77,7 @@ interface CreateExecutionNodeStepInput {
   readonly historyProjector?: HistoryViewProjector;
   readonly historyView?: PreparedHistoryView;
   readonly instrumentation: ExecutionInstrumentation | undefined;
+  readonly titleAttributeWrite?: ToolLoopHarnessConfig["titleAttributeWrite"];
   readonly modelResolutionScope: RuntimeModelResolutionScope;
   readonly node: ResolvedRuntimeAgentNode;
 }
@@ -119,6 +120,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     resolveModel,
     runtimeIdentity: buildRuntimeIdentity(input.node),
     tools,
+    titleAttributeWrite: input.titleAttributeWrite,
   });
   if (instrumentation === undefined) return step;
   return async (session, stepInput) => {

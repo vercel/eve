@@ -80,7 +80,7 @@ export async function recordModelUsage(
     }),
   });
   step.session = setTurnUsageState(step.session, usage);
-  await setEveAttributes({
+  const attributes = {
     "$eve.model": gatewayModelId(input.model),
     "$eve.input_tokens": usage.inputTokens,
     "$eve.output_tokens": usage.outputTokens,
@@ -88,5 +88,7 @@ export async function recordModelUsage(
     "$eve.cache_write_tokens": usage.cacheWriteTokens,
     "$eve.cost_usd": usage.sawCost ? usage.costUsd : undefined,
     "$eve.tool_count": step.config.tools.size,
-  });
+  };
+  await step.config.titleAttributeWrite;
+  await setEveAttributes(attributes);
 }
