@@ -187,7 +187,6 @@ describe("MCP connections sign in only when the server asks", () => {
         expect.objectContaining({ tool: "kennel__find_pet" }),
         expect.objectContaining({ tool: "kennel__pet_invoice" }),
       ],
-      total: 2,
     });
     expect(kennel.startAuthorization).not.toHaveBeenCalled();
     expect(kennel.seen.every((request) => request.authorization === null)).toBe(true);
@@ -243,7 +242,6 @@ describe("MCP connections sign in only when the server asks", () => {
           tool: "kennel",
         },
       ],
-      total: 1,
     });
     expect(kennel.startAuthorization).not.toHaveBeenCalled();
 

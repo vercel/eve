@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import {
   catalogContext,
@@ -14,7 +15,6 @@ import { captureLogRecords } from "#internal/testing/log-records.js";
 
 interface SearchOutput {
   readonly results: readonly Record<string, unknown>[];
-  readonly total: number;
   readonly unavailable?: readonly Record<string, unknown>[];
 }
 
@@ -70,7 +70,6 @@ describe("search", () => {
       "billing_specialist",
       "list_invoices",
     ]);
-    expect(output.total).toBe(4);
     expect(output.results[0]).toEqual({
       description: "How to refund a disputed charge.",
       path: "$HOME/.agents/skills/refund-policy/SKILL.md",
@@ -95,34 +94,27 @@ describe("search", () => {
     ]);
   });
 
-  it("pages results and counts every match", async () => {
+  it("returns the best matches up to limit, 10 by default, and takes no paging", async () => {
     const many = Array.from({ length: 60 }, (_, index) =>
       inlineTool(`report_${String(index).padStart(2, "0")}`, { deferred: true }),
     );
     const search = searchFor(many);
 
-    const page = await search({ limit: 2, offset: 3, query: "report" });
-    expect(page).toEqual({
-      results: [
-        {
-          description: "report_03 description",
-          signature: "report_03(input: {}): Promise<unknown>",
-          tool: "report_03",
-        },
-        {
-          description: "report_04 description",
-          signature: "report_04(input: {}): Promise<unknown>",
-          tool: "report_04",
-        },
-      ],
-      total: 60,
+    const best = names(await search({ limit: 50, query: "report" }));
+    expect(best).toHaveLength(50);
+    // A smaller limit keeps the best matches, in rank order.
+    expect(names(await search({ limit: 3, query: "report" }))).toEqual(best.slice(0, 3));
+    expect(names(await search({ query: "report" }))).toEqual(best.slice(0, 10));
+
+    // The model's calls are checked against the schema, which caps limit at 50 and has no offset.
+    const schema = catalogContext({ tools: many }).catalog.advertised.get("search")!
+      .inputSchema as StandardSchemaV1;
+    expect(await schema["~standard"].validate({ limit: 51 })).toEqual({
+      issues: [expect.objectContaining({ path: ["limit"] })],
     });
-    expect((await search({})).results).toHaveLength(10);
-    expect((await search({ limit: 500 })).results).toHaveLength(50);
-    expect((await search({ offset: 58 })).results.map((result) => result.tool)).toEqual([
-      "report_58",
-      "report_59",
-    ]);
+    expect(await schema["~standard"].validate({ offset: 10, query: "report" })).toEqual({
+      issues: [expect.objectContaining({ message: 'Unrecognized key: "offset"' })],
+    });
   });
 
   describe("connections", () => {
@@ -173,7 +165,7 @@ describe("search", () => {
         signature: "notion(input: {}): Promise<unknown>",
         tool: "notion",
       };
-      expect(await search({ query: "notion" })).toEqual({ results: [signIn], total: 1 });
+      expect(await search({ query: "notion" })).toEqual({ results: [signIn] });
       // Found by the connection's description too, while its tools can't be listed.
       expect((await search({ query: "pages" })).results).toEqual([signIn]);
       expect(names(await search({}))).toEqual(
