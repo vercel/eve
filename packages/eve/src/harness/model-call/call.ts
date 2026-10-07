@@ -18,7 +18,7 @@ import {
 } from "#harness/attachment-staging.js";
 import { emitStreamContent } from "#harness/emission.js";
 import { toEntryStep, toEntryStream, toEntryTelemetry } from "#harness/execute-call.js";
-import { FINAL_OUTPUT_TOOL_NAME } from "#protocol/final-output-tool.js";
+import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import type { GenerationSteering } from "#harness/generation-steering.js";
 import { interruptStreamOnFailure } from "#harness/interruptible-stream.js";
 import type { HarnessModelMessage, UserModelMessage } from "#harness/messages.js";
@@ -399,7 +399,7 @@ export class ModelCaller {
   ): Promise<HarnessStepResult> {
     const { step } = this;
     const { catalog, generation } = this.input;
-    const excludedActionToolNames = new Set([FINAL_OUTPUT_TOOL_NAME]);
+    const excludedActionToolNames = new Set([REPLY_TOOL_NAME]);
     const streamResult = await agent.stream({ abortSignal: generation.signal, messages });
     const {
       emittedActionCallIds,

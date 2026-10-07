@@ -12,7 +12,7 @@ function directiveCall(message: string): MockModelToolCall | undefined {
     return {
       id: "mcp-whoami",
       input: { input: {}, tool: `${LOOPBACK_CONNECTION}__whoami` },
-      name: "execute",
+      name: "eve__execute",
     };
   }
   const notice = PUBLISH_DIRECTIVE.exec(message)?.[1];
@@ -20,7 +20,7 @@ function directiveCall(message: string): MockModelToolCall | undefined {
     return {
       id: "mcp-publish",
       input: { input: { notice }, tool: `${LOOPBACK_CONNECTION}__publish_notice` },
-      name: "execute",
+      name: "eve__execute",
     };
   }
   return undefined;

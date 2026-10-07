@@ -305,7 +305,7 @@ describe("ConversationTranscript", () => {
       toolCall("call_1", "summarize"),
       taskStarted("call_1", "summarize"),
       toolResult("call_1", "summarize"),
-      toolCall("wait_1", "task_wait"),
+      toolCall("wait_1", "eve__task_wait"),
       event(
         createTurnWaitingEvent({ on: "tasks", usage: TEST_USAGE, sequence: 3, turnId: "turn_1" }),
       ),

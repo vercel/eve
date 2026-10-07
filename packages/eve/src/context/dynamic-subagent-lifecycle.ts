@@ -14,7 +14,7 @@ import {
 import { createPreparedWorkflowToolHarnessDefinition } from "#execution/tools/workflow/harness-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createLogger } from "#internal/logging.js";
-import { runtimeToolReservation } from "#protocol/runtime-tools.js";
+import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
 import type { SessionStartedStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { ResolvedDynamicSubagentResolver } from "#runtime/subagents/registry.js";
 import { createPreparedRuntimeSubagentTool } from "#runtime/subagents/registry.js";
@@ -128,22 +128,22 @@ async function resolveSelections(input: {
 }
 
 /**
- * A dynamic subagent the model can call cannot take a runtime tool's name or
- * a tool's name. With `tool: false` it can: a same-named authored tool then
- * wraps it.
+ * No dynamic subagent may take a name in eve's namespace. One the model can
+ * call cannot take a tool's name either; with `tool: false` it can, since a
+ * same-named authored tool then wraps it.
  */
 function assertToolNameAvailable(
   ctx: ContextReader,
   resolver: ResolvedDynamicSubagentResolver,
   tool: AgentToolExposure | undefined,
 ): void {
-  if (tool === false) return;
-  const reservation = runtimeToolReservation(resolver.name);
+  const reservation = eveNamespaceReservation(resolver.name);
   if (reservation !== undefined) {
     throw new Error(
       `Dynamic subagent "${resolver.name}" from "${resolver.logicalPath}" uses the reserved name "${resolver.name}". ${reservation}; rename the subagent.`,
     );
   }
+  if (tool === false) return;
   const authoredTools = ctx.get(BundleKey)?.toolRegistry.toolsByName.keys() ?? [];
   const toolNames = new Set([LOAD_SKILL_TOOL_NAME, ...authoredTools]);
   if (!toolNames.has(resolver.name)) return;

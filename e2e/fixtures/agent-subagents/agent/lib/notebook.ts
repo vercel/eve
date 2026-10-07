@@ -67,7 +67,7 @@ function parentTurn(
       return {
         calls: [
           { id: "notebook-remember", input: () => ({ message: REMEMBER_ENTRY }), name: tool },
-          { id: "notebook-remember-wait", name: "task_wait" },
+          { id: "notebook-remember-wait", name: "eve__task_wait" },
         ],
         finish: (request) => latestTaskResult(request, tool),
       };
@@ -79,11 +79,15 @@ function parentTurn(
             input: (request) => ({ message: REVIEW_ENTRY, taskId: keeperTask(request) }),
             name: tool,
           },
-          { id: "notebook-review-wait", input: () => ({ timeoutSeconds: 2 }), name: "task_wait" },
+          {
+            id: "notebook-review-wait",
+            input: () => ({ timeoutSeconds: 2 }),
+            name: "eve__task_wait",
+          },
           {
             id: "notebook-cancel",
             input: (request) => ({ taskId: keeperTask(request) }),
-            name: "task_cancel",
+            name: "eve__task_cancel",
           },
         ],
         finish: (request) => outputOf(request, "notebook-cancel"),
@@ -96,7 +100,7 @@ function parentTurn(
             input: (request) => ({ message: RECALL_ENTRY, taskId: keeperTask(request) }),
             name: tool,
           },
-          { id: "notebook-recall-wait", name: "task_wait" },
+          { id: "notebook-recall-wait", name: "eve__task_wait" },
         ],
         finish: (request) => latestTaskResult(request, tool),
       };
@@ -112,7 +116,7 @@ function parentTurn(
             }),
             name: tool,
           },
-          { id: "notebook-correction-wait", name: "task_wait" },
+          { id: "notebook-correction-wait", name: "eve__task_wait" },
         ],
         finish: (request) => latestTaskResult(request, tool),
       };

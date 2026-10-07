@@ -824,7 +824,7 @@ describe("createMockAuthoredRuntimeModel", () => {
       [{ content: "Summarize this", role: "user" }],
       [
         {
-          name: "final_output",
+          name: "eve__reply",
           type: "function",
           description: "Deliver your final answer.",
           inputSchema: {
@@ -844,7 +844,7 @@ describe("createMockAuthoredRuntimeModel", () => {
       {
         input: JSON.stringify({ title: "structured-output", count: 1 }),
         toolCallId: expect.any(String),
-        toolName: "final_output",
+        toolName: "eve__reply",
         type: "tool-call",
       },
     ]);

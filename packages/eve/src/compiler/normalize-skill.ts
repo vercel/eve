@@ -3,6 +3,7 @@ import type { SkillSourceRef } from "#discover/manifest.js";
 import type { SkillPackageSourceRef } from "#shared/source-ref.js";
 import type { NamedSkillDefinition } from "#shared/skill-definition.js";
 import { normalizeSkillDefinition } from "#internal/authored-definition/core.js";
+import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
 import type {
   CompiledDynamicSkillDefinition,
   CompiledSkillDefinition,
@@ -27,6 +28,19 @@ import {
 type CompiledSkillEntry =
   | { readonly kind: "skill"; readonly definition: CompiledSkillDefinition }
   | { readonly kind: "dynamic-skill"; readonly definition: CompiledDynamicSkillDefinition };
+
+/** Throws when an authored skill takes a name in eve's namespace. */
+export function assertSkillNameAvailable(skill: {
+  readonly logicalPath: string;
+  readonly name: string;
+}): void {
+  const reservation = eveNamespaceReservation(skill.name);
+  if (reservation !== undefined) {
+    throw new Error(
+      `Skill "${skill.logicalPath}" uses the reserved name "${skill.name}". Rename its path; ${reservation}.`,
+    );
+  }
+}
 
 /**
  * Compiles one authored skill source (markdown, module, or skill

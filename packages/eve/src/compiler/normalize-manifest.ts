@@ -57,7 +57,7 @@ import { compileScheduleDefinition } from "#compiler/normalize-schedule.js";
 import { compileScheduleCollectionDefinition } from "#compiler/normalize-schedule-collection.js";
 import { isScheduleCollectionDefinition } from "#shared/schedule-collection-definition.js";
 import { createScheduleCollectionWrapperCandidates } from "#compiler/schedule-collection-wrapper-candidates.js";
-import { compileSkillSource } from "#compiler/normalize-skill.js";
+import { assertSkillNameAvailable, compileSkillSource } from "#compiler/normalize-skill.js";
 import {
   assertRemoteAgentDefinitionHasNoLocalPackageEntries,
   normalizeSubagentConfig,
@@ -576,8 +576,10 @@ class AgentGraphCompiler {
         }
         case "skill": {
           const result = await compileSkillSource(input.manifest.agentRoot, entry.source, options);
-          if (result.kind === "skill") skills.push(result.definition);
-          else {
+          if (result.kind === "skill") {
+            assertSkillNameAvailable(result.definition);
+            skills.push(result.definition);
+          } else {
             dynamicSkills.push(withExtensionNamespace(result.definition, candidate.owner));
             state.evaluation.requireRuntimeEntry(candidate.sourceId);
           }

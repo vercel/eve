@@ -15,7 +15,7 @@ export default defineEval({
     const turn = await t.send("WORKFLOW-NOTES-BATCH");
     turn.expectOk();
     turn.calledTool("collect_notes", { count: 2 });
-    turn.calledTool("task_wait", {
+    turn.calledTool("eve__task_wait", {
       count: 1,
       output: /^collect_notes-\w{6} completed; its result follows\.$/u,
     });

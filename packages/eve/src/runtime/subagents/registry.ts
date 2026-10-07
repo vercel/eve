@@ -1,5 +1,5 @@
 import { RuntimeRegistry, RuntimeRegistryError } from "#internal/runtime-registry.js";
-import { runtimeToolReservation } from "#protocol/runtime-tools.js";
+import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
 import type {
   ResolvedDynamicSubagentDefinition,
@@ -91,9 +91,7 @@ export function createRuntimeSubagentRegistry(input: {
       });
       const modelVisible =
         subagentDefinition.tool !== false && !disabledToolNames.has(subagentDefinition.name);
-      const reservation = modelVisible
-        ? runtimeToolReservation(subagentDefinition.name)
-        : undefined;
+      const reservation = eveNamespaceReservation(subagentDefinition.name);
       if (reservation !== undefined) {
         throw new RuntimeRegistryError(
           "subagent",

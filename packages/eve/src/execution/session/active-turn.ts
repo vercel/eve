@@ -25,7 +25,7 @@ export type RuntimeEvent =
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage }
   /** A steering message that answered no pending request arrived during the wait. */
   | { readonly kind: "steering" }
-  /** A `task_wait` call's timeout passed. */
+  /** An `eve__task_wait` call's timeout passed. */
   | { readonly kind: "timeout"; readonly callId: string }
   /** A delivery or sign-in callback was admitted; a held request may be answered. */
   | { readonly kind: "input" }

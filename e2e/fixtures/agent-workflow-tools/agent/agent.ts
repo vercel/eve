@@ -24,7 +24,7 @@ const HOOK_SCENARIO_CALLS = {
 function respondToPublicCatalog(request: MockModelRequest): MockModelResponse | string {
   const call = (id: string, tool: string) => ({
     id,
-    name: "execute",
+    name: "eve__execute",
     input: { tool: `public-catalog__${tool}`, input: {} },
   });
   const byId = new Map(request.toolResults.map((entry) => [entry.id, entry]));
@@ -68,7 +68,9 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
     if (call === undefined) return { toolCalls: [{ name: tool, input }] };
     // An agent call or task returned a receipt; its result arrives in a <task_result> message.
     if (mode === "direct") {
-      return latestTaskResult(request, tool) ?? { toolCalls: [{ name: "task_wait", input: {} }] };
+      return (
+        latestTaskResult(request, tool) ?? { toolCalls: [{ name: "eve__task_wait", input: {} }] }
+      );
     }
     // Ends the step with text while the task works, which holds the turn. The
     // step takes a few seconds, so the task's helper most likely opens while it

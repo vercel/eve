@@ -35,7 +35,7 @@ interface ToolDefinitionBase {
   readonly availableInSubagents?: boolean;
   /**
    * Keeps this tool out of the model's tool list. The model finds it with
-   * `search` and calls it with `execute`. Defaults to `false`.
+   * `eve__search` and calls it with `eve__execute`. Defaults to `false`.
    */
   readonly deferred?: boolean;
   readonly description: string;

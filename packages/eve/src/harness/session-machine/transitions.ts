@@ -372,7 +372,7 @@ function isComplete(step: SuspendedStep): boolean {
 
 /**
  * Places a result right after the message that made its call, under the call's name: a call
- * made through `execute` stays `execute` in history, whatever entry it ran.
+ * made through `eve__execute` stays `eve__execute` in history, whatever entry it ran.
  */
 export function withResult(
   messages: readonly ModelMessage[],

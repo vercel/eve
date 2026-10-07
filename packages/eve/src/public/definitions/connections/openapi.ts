@@ -26,7 +26,7 @@ export type OpenAPISpecSource = string | Record<string, unknown>;
  * `"vercel"`.
  *
  * Each operation in the document becomes a connection tool the model can
- * find with `search` and call with `execute` as `vercel__getProjects`, the
+ * find with `eve__search` and call with `eve__execute` as `vercel__getProjects`, the
  * name events report the call under. The tool name is the operation's
  * `operationId`; operations without one get a deterministic synthesized
  * name (`<method>_<sanitized-path>`).
