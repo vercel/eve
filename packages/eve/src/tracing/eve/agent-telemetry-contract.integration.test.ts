@@ -31,12 +31,15 @@ import {
   type InstrumentationAttemptScope,
 } from "#instrumentation/lifecycle.js";
 import { bindInstrumentationRuntime } from "#instrumentation/runtime.js";
-import { createAgentOtelInstrumentation } from "#tracing/agent-otel-provider.js";
-import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
-import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
-import { AGENT_TRACE_CONTEXT_KEY } from "#tracing/agent-trace-context-codec.js";
+import { createAgentOtelInstrumentation } from "#tracing/eve/agent-otel-provider.js";
+import { AgentSpanIdGenerator } from "#tracing/lib/index.js";
+import { otelTelemetry } from "#tracing/lib/index.js";
+import { eveOutputMapping } from "#tracing/eve/profile.js";
+import { ContextAgentTraceStateStore } from "#tracing/eve/agent-trace-context-store.js";
+import { AGENT_TRACE_CONTEXT_KEY } from "#tracing/eve/agent-trace-context-store.js";
 import { resolveToolCallAgentTrace } from "#tracing/eve/agent-invocation-coordinator.js";
 import * as instrumentation from "#instrumentation/runtime.js";
+import * as runtimeGlobal from "#instrumentation/runtime-global.js";
 import {
   assembleLocalTrace,
   isAgentTurnSpan,
@@ -82,11 +85,16 @@ function createRuntime() {
   });
   const agent = createAgentOtelInstrumentation({
     frameworkVersion: "test",
-    idGenerator,
     recordInputs: true,
     recordOutputs: true,
     stateStore: new ContextAgentTraceStateStore(),
-    tracer: provider.getTracer("eve.agent"),
+    telemetry: otelTelemetry({
+      provider,
+      tracerName: "eve.agent",
+      idGenerator,
+      mapping: eveOutputMapping(),
+    }),
+    idGenerator,
   });
   const hooks = createInstrumentationHooks([agent.hook]);
   return {
@@ -1249,7 +1257,7 @@ describe("exported agent telemetry contract", () => {
       const runtime = createRuntime();
       const hooks = runtime.hooks.forTrace!(traceContext("child", "public"));
       const registered = vi
-        .spyOn(instrumentation, "getInstrumentationRuntime")
+        .spyOn(runtimeGlobal, "getInstrumentationRuntime")
         .mockReturnValue(runtime);
       let ctx = contextFor("public");
       ctx.set(ParentTraceContextKey, {

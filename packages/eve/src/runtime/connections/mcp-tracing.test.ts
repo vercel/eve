@@ -15,7 +15,7 @@ import {
   ROOT_CONTEXT,
   SpanKind,
   trace as runtimeTrace,
-} from "#compiled/@opentelemetry/api/index.js";
+} from "@opentelemetry/api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -23,10 +23,7 @@ import {
   withMcpToolCallSpan,
   withMcpToolsListSpan,
 } from "#runtime/connections/mcp-tracing.js";
-import {
-  withAgentToolContentPolicy,
-  withAgentToolSpanContext,
-} from "#tracing/agent-tool-span-context.js";
+import { otelTelemetry } from "#tracing/lib/index.js";
 
 describe("MCP trace propagation", () => {
   let exporter: InMemorySpanExporter;
@@ -51,11 +48,20 @@ describe("MCP trace propagation", () => {
 
   it("injects configured propagation into params._meta and annotates the tool span", async () => {
     const setAttributes = vi.fn();
-    const toolContext = withAgentToolSpanContext(ROOT_CONTEXT, {
-      recordInputs: false,
-      recordOutputs: false,
-      setAttributes,
-    });
+    const capture = { emit: true, recordInputs: false, recordOutputs: false };
+    const telemetry = otelTelemetry({ provider });
+    let toolContext = ROOT_CONTEXT;
+    telemetry.run(
+      {
+        type: "tool",
+        reference: { traceId: "1".repeat(32), spanId: "2".repeat(16), traceFlags: 1 },
+        capture,
+        mcp: { update: setAttributes, error() {}, arguments() {}, result() {} },
+      },
+      () => {
+        toolContext = runtimeContext.active();
+      },
+    );
     const fetcher = vi.fn(
       async (_request: Parameters<typeof fetch>[0], _init?: Parameters<typeof fetch>[1]) =>
         new Response(null, { headers: { "mcp-session-id": "session-1" } }),
@@ -102,17 +108,14 @@ describe("MCP trace propagation", () => {
     expect(requestBody.params._meta).not.toHaveProperty("recordOutputs");
     expect(setAttributes).toHaveBeenCalledWith(
       expect.objectContaining({
-        "eve.connection.name": "linear",
-        "gen_ai.operation.name": "execute_tool",
-        "gen_ai.tool.name": "get_issue",
-        "jsonrpc.request.id": "42",
-        "mcp.method.name": "tools/call",
-        "mcp.protocol.version": "2025-11-25",
-        "network.protocol.name": "http",
-        "network.transport": "tcp",
+        connectionName: "linear",
+        toolName: "get_issue",
+        requestId: "42",
+        method: "tools/call",
+        protocolVersion: "2025-11-25",
       }),
     );
-    expect(setAttributes).toHaveBeenCalledWith({ "mcp.session.id": "session-1" });
+    expect(setAttributes).toHaveBeenCalledWith({ sessionId: "session-1" });
   });
 
   it("leaves oversized JSON-RPC requests untouched", async () => {
@@ -174,10 +177,17 @@ describe("MCP trace propagation", () => {
 
   it("propagates the fallback CLIENT span context for tools/call", async () => {
     const parent = runtimeTrace.getTracer("test.mcp").startSpan("parent");
-    const parentContext = withAgentToolContentPolicy(runtimeTrace.setSpan(ROOT_CONTEXT, parent), {
-      recordInputs: true,
-      recordOutputs: true,
-    });
+    let parentContext = ROOT_CONTEXT;
+    otelTelemetry({ provider }).run(
+      {
+        type: "activation",
+        reference: parent.spanContext(),
+        capture: { emit: true, recordInputs: true, recordOutputs: true },
+      },
+      () => {
+        parentContext = runtimeContext.active();
+      },
+    );
     const fetcher = vi.fn(
       async (_request: Parameters<typeof fetch>[0], _init?: Parameters<typeof fetch>[1]) =>
         new Response(null, { headers: { "mcp-session-id": "session-1" } }),

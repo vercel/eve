@@ -15,7 +15,7 @@ import {
   resolveLocalTraceSchemaDirectory,
   resolveLocalTraceSegmentsDirectory,
 } from "#tracing/local/trace-span-processor.js";
-import { isAgentActivationSpan } from "#tracing/agent-span-contract.js";
+import { isAgentActivationSpan } from "#tracing/local/inspection.js";
 
 const TRACE_ID_PATTERN = /^[0-9a-f]{32}$/u;
 const SPAN_FILE_PATTERN = /^[0-9a-f]{16}\.otlp\.json$/u;

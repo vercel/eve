@@ -1,4 +1,4 @@
-import { context, trace } from "#compiled/@opentelemetry/api/index.js";
+import { context, trace } from "@opentelemetry/api";
 import {
   EntityConflictError,
   HookNotFoundError,

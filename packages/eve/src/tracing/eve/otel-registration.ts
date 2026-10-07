@@ -1,33 +1,19 @@
-import { createRequire } from "node:module";
+import { context, metrics, propagation, trace, SpanKind, type Context } from "@opentelemetry/api";
+import { registerOTel } from "@vercel/otel";
+import type { Configuration, SpanProcessor, SpanProcessorOrName } from "./otel-configuration.js";
 
-import {
-  context,
-  metrics,
-  propagation,
-  trace,
-  SpanKind,
-  type Context,
-} from "#compiled/@opentelemetry/api/index.js";
-import {
-  registerOTel,
-  type Configuration,
-  type SpanProcessor,
-  type SpanProcessorOrName,
-} from "#compiled/@vercel/otel/index.js";
+import { AgentSpanIdGenerator } from "#tracing/lib/index.js";
+import type { OtelConfiguration } from "./otel-configuration.js";
+import { type Attributes } from "#tracing/lib/index.js";
+import { invocationName } from "#tracing/lib/otel.js";
+export type SamplingOperation = { readonly name: string; readonly attributes?: Attributes };
 
-import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { conversationIdFromContext } from "#tracing/eve/conversation-context.js";
-import type { OtelPipeline } from "#tracing/eve/otel-declaration.js";
-import {
-  agentInvocationSpanName,
-  type AgentSamplingOperation,
-} from "#tracing/agent-span-contract.js";
 
-const REGISTRATION_SPAN_NAME = "eve.otel.registration";
+const REGISTRATION_SPAN_NAME = "agent.tracing.registration";
 const REPLAY_DEDUPLICATION_LIMIT = 100_000;
 const PENDING_CHILD_SPAN_LIMIT = 10_000;
-const REPLAY_DEDUPLICATION_KEY = Symbol.for("eve.otel.replay-deduplication");
-const require = createRequire(import.meta.url);
+const REPLAY_DEDUPLICATION_KEY = Symbol.for("agent.tracing.replay-deduplication");
 
 interface ReplayDeduplicationGlobal {
   [REPLAY_DEDUPLICATION_KEY]?: Set<string>;
@@ -159,17 +145,14 @@ class PrivateSpanFilteringProcessor implements SpanProcessor {
  *
  * `registerOTel` reports a refused registration only through `diag`, which
  * goes nowhere unless `OTEL_LOG_LEVEL` is set, so a second caller would export
- * nothing and say nothing. eve primes its id generator and installs a private
+ * nothing and say nothing. The adapter primes its id generator and installs a private
  * propagator, then verifies both through the global APIs.
  */
 export function registerOtelPipeline(input: {
-  readonly pipeline: OtelPipeline;
+  readonly otel: OtelConfiguration;
   readonly serviceName: string;
 }): RegisteredOtelPipeline {
-  const { pipeline } = input;
-  // A tracer cached before registration retains this private proxy even after
-  // the vendored API takes the global slot. Delegate it only after ownership is proven.
-  const optionalPeerTracerProxy = captureOptionalPeerTracerProxy();
+  const pipeline = input.otel;
   const idGenerator = new AgentSpanIdGenerator();
   const markerPropagator = new RegistrationMarkerPropagator();
   const spanProcessors = privateSpanProcessors(pipeline.spanProcessors);
@@ -198,12 +181,12 @@ export function registerOtelPipeline(input: {
   }
   if (!ownsTracer) {
     throw new Error(
-      "eve could not register OpenTelemetry because another runtime already owns the global tracer provider. Remove the other `registerOTel` call, or move its exporters into eve's `otelIntegration({ spanProcessors: [...] })`.",
+      "Agent tracing could not register OpenTelemetry because another runtime already owns the global tracer provider. Register tracing before the application starts and supply destinations through the `otel` configuration instead of calling `registerOTel` separately.",
     );
   }
   if (!ownsPropagator) {
     throw new Error(
-      "eve could not register OpenTelemetry because another runtime already owns the global propagator. Remove the other global propagator registration and declare propagators through eve's `otel()` instead.",
+      "Agent tracing could not register OpenTelemetry because another runtime already owns the global propagator. Supply propagators through the `otel` configuration instead of registering them separately.",
     );
   }
   const provider = runtimeTracerProvider();
@@ -211,13 +194,13 @@ export function registerOtelPipeline(input: {
     rollbackRegistration({ ownsPropagator, ownsTracer });
     throw new Error("The registered OpenTelemetry tracer provider has no lifecycle methods.");
   }
-  optionalPeerTracerProxy?.setDelegate(provider);
   // `registerOTel` also registers a global meter provider when metric readers
   // are declared, but returns no handle to it. Capture it now so metrics get
   // the same flush and shutdown coverage as spans; without metric readers the
   // global is a no-op provider with no lifecycle methods.
   const meterProvider = runtimeMeterProvider();
   return {
+    provider: trace.getTracerProvider(),
     forceFlush: async () => {
       await Promise.all([provider.forceFlush!(), meterProvider.forceFlush?.()]);
     },
@@ -260,20 +243,22 @@ function replayDeduplicationRegistry(): Set<string> {
 
 /** Lifecycle retained from the providers that own every destination. */
 export interface RegisteredOtelPipeline {
+  readonly provider: import("@opentelemetry/api").TracerProvider;
   readonly forceFlush: () => Promise<void>;
   readonly idGenerator: AgentSpanIdGenerator;
   /** Whether the installed sampler would record a trace with this id. */
-  readonly samplesTrace: (traceId: string, operation?: AgentSamplingOperation) => boolean;
+  readonly samplesTrace: (traceId: string, operation?: SamplingOperation) => boolean;
   readonly shutdown: () => Promise<void>;
 }
+export const registerOtel = registerOtelPipeline;
 
 function samplerAdmitsTrace(
   idGenerator: AgentSpanIdGenerator,
   traceId: string,
-  operation: AgentSamplingOperation = { name: agentInvocationSpanName(undefined) },
+  operation: SamplingOperation = { name: invocationName(undefined) },
 ): boolean {
   const probe = idGenerator.withTraceId(traceId, () =>
-    trace.getTracer("eve.registration").startSpan(operation.name, {
+    trace.getTracer("agent.tracing.registration").startSpan(operation.name, {
       attributes: operation.attributes,
       kind: SpanKind.INTERNAL,
       root: true,
@@ -294,20 +279,6 @@ interface RuntimeMeterProvider {
 
 interface ProxyTracerProvider {
   getDelegate(): unknown;
-}
-
-interface OptionalPeerTracerProxy {
-  setDelegate(delegate: unknown): void;
-}
-
-function captureOptionalPeerTracerProxy(): OptionalPeerTracerProxy | undefined {
-  try {
-    const api = require("@opentelemetry/api") as typeof import("@opentelemetry/api");
-    const provider = api.trace.getTracerProvider();
-    return provider instanceof api.ProxyTracerProvider ? provider : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function rollbackRegistration(input: {
@@ -362,7 +333,7 @@ function disableInstrumentations(instrumentations: readonly unknown[] | undefine
 function globalTracerUses(idGenerator: AgentSpanIdGenerator): boolean {
   const spanId = idGenerator.allocateSpanId();
   const probe = idGenerator.withSpanId(spanId, () =>
-    trace.getTracer("eve.registration").startSpan(REGISTRATION_SPAN_NAME),
+    trace.getTracer("agent.tracing.registration").startSpan(REGISTRATION_SPAN_NAME),
   );
   // Deliberately not ended: named processors are resolved inside @vercel/otel
   // and cannot be wrapped, while an unended span is never exported.
@@ -375,7 +346,8 @@ function isRegistrationSpan(span: unknown): boolean {
     span !== null &&
     (("name" in span && span.name === REGISTRATION_SPAN_NAME) ||
       ("instrumentationScope" in span &&
-        (span.instrumentationScope as { name?: string } | undefined)?.name === "eve.registration"))
+        (span.instrumentationScope as { name?: string } | undefined)?.name ===
+          "agent.tracing.registration"))
   );
 }
 

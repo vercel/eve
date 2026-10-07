@@ -1,147 +1,76 @@
 import {
-  type Attributes,
   context,
   propagation,
-  type Span,
+  trace,
   SpanKind,
   SpanStatusCode,
   type TextMapGetter,
-  trace,
-} from "#compiled/@opentelemetry/api/index.js";
+} from "@opentelemetry/api";
 import { getInstrumentationRuntime } from "#instrumentation/runtime.js";
+import { withErrorContent } from "#tracing/lib/otel.js";
 import { markAgentTraceContext } from "#tracing/eve/agent-trace-context.js";
-import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
-import { AGENT_SPAN_NAMES } from "#tracing/agent-span-contract.js";
-import { withErrorContent } from "#tracing/error-content-context.js";
 
-/**
- * Stable tracer name for every inbound eve channel HTTP request. Kept
- * low-cardinality and independent of the agent so dashboards can group
- * request spans across deployments.
- */
-const TRACER_NAME = "eve.channel";
-
-/**
- * Reads OTel context from an inbound request's `Headers`. Header lookups
- * are case-insensitive, so this is a thin adapter over `Headers.get`.
- */
+export interface ChannelRequestTrace {
+  readonly reference: import("@opentelemetry/api").SpanContext;
+  channel(input: { channelName?: string; channelKind?: string }): void;
+}
 const headersGetter: TextMapGetter<Headers> = {
-  get(carrier, key) {
-    return carrier.get(key) ?? undefined;
-  },
-  keys(carrier) {
-    return [...carrier.keys()];
-  },
+  get: (headers, key) => headers.get(key) ?? undefined,
+  keys: (headers) => [...headers.keys()],
 };
 
-/** Inputs for {@link traceChannelRequest}. */
-interface TraceChannelRequestInput {
-  readonly request: Request;
-  readonly routeKey: string;
-}
-
-/**
- * Wraps one inbound channel HTTP request in an OTel `SERVER` span.
- *
- * The span is named for the low-cardinality registered `routeKey`
- * (`"POST /eve/v1/session/:sessionId"`), never the concrete URL, while the
- * `http.route` attribute carries only the path template and
- * `http.request.method` carries the method. It starts from context extracted
- * off the incoming request headers so an upstream `traceparent` becomes its
- * parent and nested channel operations become its descendants.
- *
- * The handler runs inside the span's active context. When it returns, the
- * response status is recorded and a `>= 500` status marks the span as an
- * error. A thrown handler marks failure status and is rethrown; request
- * spans never record exception content. The span always ends in `finally`, without
- * waiting for `event.waitUntil()` work or streamed response bodies.
- *
- * Emitting these spans is opt-in: unless authored instrumentation enables it
- * via `traceChannelRequests: true`, the handler runs with no span (`undefined`)
- * and performs no header extraction. The channel dispatcher can still use an
- * already-active platform span for the activation's cross-trace link.
- *
- * This is observability-only: it never changes the response and performs no
- * synchronous span export in the request path, adding only minimal in-process
- * tracing overhead.
- */
+/** The request lifetime ends at handler return, not response-body consumption. */
 export async function traceChannelRequest<T extends Response>(
-  input: TraceChannelRequestInput,
-  handler: (span: Span | undefined) => Promise<T>,
+  input: { readonly request: Request; readonly routeKey: string },
+  handler: (operation: ChannelRequestTrace | undefined) => Promise<T>,
 ): Promise<T> {
-  if (getInstrumentationRuntime()?.otelSettings?.traceChannelRequests !== true) {
-    return await handler(undefined);
-  }
-
+  if (getInstrumentationRuntime()?.otelSettings?.traceChannelRequests !== true)
+    return handler(undefined);
   const { request, routeKey } = input;
-  const parentContext = propagation.extract(context.active(), request.headers, headersGetter);
-  const spanName = AGENT_SPAN_NAMES.channelRequest;
-  const span = trace.getTracer(TRACER_NAME).startSpan(
-    spanName,
-    {
-      attributes: {
-        ...baseAttributes(request, routeKey),
-        ...(spanName === "agent.channel.request" ? agentSpanNamingAttributes(spanName) : undefined),
-      },
-      kind: SpanKind.SERVER,
-    },
-    parentContext,
-  );
-  const activeContext = markAgentTraceContext(
-    withErrorContent(trace.setSpan(parentContext, span), false),
-  );
-
+  const parent = propagation.extract(context.active(), request.headers, headersGetter);
+  const separator = routeKey.indexOf(" ");
+  let url: URL | undefined;
   try {
-    const response = await context.with(activeContext, () => handler(span));
+    url = new URL(request.url);
+  } catch {}
+  const span = trace.getTracer("eve.channel").startSpan(
+    "agent.channel.request",
+    {
+      kind: SpanKind.SERVER,
+      attributes: {
+        "operation.name": "agent.channel.request",
+        "resource.name": "agent.channel.request",
+        "http.request.method": request.method,
+        "http.route": separator === -1 ? routeKey : routeKey.slice(separator + 1),
+        "url.scheme": url?.protocol.replace(/:$/, ""),
+        "server.address": url?.hostname,
+      },
+    },
+    parent,
+  );
+  const operation: ChannelRequestTrace = {
+    reference: span.spanContext(),
+    channel(input) {
+      if (input.channelName !== undefined)
+        span.setAttribute("agent.channel.name", input.channelName);
+      if (input.channelName !== undefined) span.setAttribute("eve.channel.name", input.channelName);
+      if (input.channelKind !== undefined)
+        span.setAttribute("agent.channel.kind", input.channelKind);
+      if (input.channelKind !== undefined) span.setAttribute("eve.channel.kind", input.channelKind);
+    },
+  };
+  try {
+    const response = await context.with(
+      markAgentTraceContext(withErrorContent(trace.setSpan(parent, span), false)),
+      () => handler(operation),
+    );
     span.setAttribute("http.response.status_code", response.status);
-    if (response.status >= 500) {
-      span.setStatus({ code: SpanStatusCode.ERROR });
-    }
+    if (response.status >= 500) span.setStatus({ code: SpanStatusCode.ERROR });
     return response;
   } catch (error) {
     span.setStatus({ code: SpanStatusCode.ERROR });
     throw error;
   } finally {
     span.end();
-  }
-}
-
-/**
- * Standard, non-sensitive request attributes known before the channel is
- * resolved. `eve.channel.name` / `eve.channel.kind` are attached later by
- * the caller once the matching channel is known. Never records session
- * ids, tokens, auth or cookie headers, bodies, or query parameters.
- */
-function baseAttributes(request: Request, routeKey: string): Attributes {
-  const attributes: Attributes = {
-    "http.request.method": request.method,
-    "http.route": routeTemplate(routeKey),
-  };
-
-  const url = parseRequestUrl(request.url);
-  if (url !== undefined) {
-    attributes["url.scheme"] = url.protocol.replace(/:$/, "");
-    attributes["server.address"] = url.hostname;
-  }
-
-  return attributes;
-}
-
-/**
- * Extracts the path template from a `"METHOD /path/:param"` route key. The
- * OTel HTTP convention keeps `http.route` free of the method so route
- * facets align with other server spans; the method lives in
- * `http.request.method` and the full key remains the span name.
- */
-function routeTemplate(routeKey: string): string {
-  const separator = routeKey.indexOf(" ");
-  return separator === -1 ? routeKey : routeKey.slice(separator + 1);
-}
-
-function parseRequestUrl(rawUrl: string): URL | undefined {
-  try {
-    return new URL(rawUrl);
-  } catch {
-    return undefined;
   }
 }

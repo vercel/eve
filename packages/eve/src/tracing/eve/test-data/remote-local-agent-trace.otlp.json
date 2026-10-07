@@ -45,132 +45,6 @@
               "endTimeUnixNano": "1700000000001000000",
               "attributes": [
                 {
-                  "key": "agent.framework.name",
-                  "value": {
-                    "stringValue": "eve"
-                  }
-                },
-                {
-                  "key": "agent.framework.version",
-                  "value": {
-                    "stringValue": "test"
-                  }
-                },
-                {
-                  "key": "agent.name",
-                  "value": {
-                    "stringValue": "remote"
-                  }
-                },
-                {
-                  "key": "agent.channel.audience",
-                  "value": {
-                    "stringValue": "public"
-                  }
-                },
-                {
-                  "key": "agent.principal.current.id",
-                  "value": {
-                    "stringValue": "current-user"
-                  }
-                },
-                {
-                  "key": "agent.principal.current.type",
-                  "value": {
-                    "stringValue": "service"
-                  }
-                },
-                {
-                  "key": "agent.principal.initiator.id",
-                  "value": {
-                    "stringValue": "initiator-user"
-                  }
-                },
-                {
-                  "key": "agent.principal.initiator.type",
-                  "value": {
-                    "stringValue": "user"
-                  }
-                },
-                {
-                  "key": "agent.channel.kind",
-                  "value": {
-                    "stringValue": "http"
-                  }
-                },
-                {
-                  "key": "agent.session.origin",
-                  "value": {
-                    "stringValue": "channel"
-                  }
-                },
-                {
-                  "key": "agent.parent_call.id",
-                  "value": {
-                    "stringValue": "remote-call"
-                  }
-                },
-                {
-                  "key": "agent.parent_run.id",
-                  "value": {
-                    "stringValue": "caller-root"
-                  }
-                },
-                {
-                  "key": "agent.run.type",
-                  "value": {
-                    "stringValue": "subagent"
-                  }
-                },
-                {
-                  "key": "agent.trace.content.input",
-                  "value": {
-                    "boolValue": true
-                  }
-                },
-                {
-                  "key": "agent.trace.content.output",
-                  "value": {
-                    "boolValue": true
-                  }
-                },
-                {
-                  "key": "agent.turn.id",
-                  "value": {
-                    "stringValue": "turn_0"
-                  }
-                },
-                {
-                  "key": "agent.turn.sequence",
-                  "value": {
-                    "intValue": 0
-                  }
-                },
-                {
-                  "key": "gen_ai.agent.name",
-                  "value": {
-                    "stringValue": "remote"
-                  }
-                },
-                {
-                  "key": "gen_ai.operation.name",
-                  "value": {
-                    "stringValue": "invoke_agent"
-                  }
-                },
-                {
-                  "key": "operation.name",
-                  "value": {
-                    "stringValue": "invoke_agent"
-                  }
-                },
-                {
-                  "key": "resource.name",
-                  "value": {
-                    "stringValue": "invoke_agent remote"
-                  }
-                },
-                {
                   "key": "agent.run.id",
                   "value": {
                     "stringValue": "remote-session"
@@ -186,6 +60,132 @@
                   "key": "gen_ai.conversation.id",
                   "value": {
                     "stringValue": "caller-root"
+                  }
+                },
+                {
+                  "key": "agent.framework.name",
+                  "value": {
+                    "stringValue": "eve"
+                  }
+                },
+                {
+                  "key": "agent.framework.version",
+                  "value": {
+                    "stringValue": "test"
+                  }
+                },
+                {
+                  "key": "operation.name",
+                  "value": {
+                    "stringValue": "invoke_agent"
+                  }
+                },
+                {
+                  "key": "resource.name",
+                  "value": {
+                    "stringValue": "invoke_agent remote"
+                  }
+                },
+                {
+                  "key": "agent.channel.kind",
+                  "value": {
+                    "stringValue": "http"
+                  }
+                },
+                {
+                  "key": "agent.session.origin",
+                  "value": {
+                    "stringValue": "channel"
+                  }
+                },
+                {
+                  "key": "agent.name",
+                  "value": {
+                    "stringValue": "remote"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "remote"
+                  }
+                },
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "invoke_agent"
+                  }
+                },
+                {
+                  "key": "agent.turn.id",
+                  "value": {
+                    "stringValue": "turn_0"
+                  }
+                },
+                {
+                  "key": "agent.turn.sequence",
+                  "value": {
+                    "intValue": 0
+                  }
+                },
+                {
+                  "key": "agent.run.type",
+                  "value": {
+                    "stringValue": "subagent"
+                  }
+                },
+                {
+                  "key": "agent.parent_call.id",
+                  "value": {
+                    "stringValue": "remote-call"
+                  }
+                },
+                {
+                  "key": "agent.parent_run.id",
+                  "value": {
+                    "stringValue": "caller-root"
+                  }
+                },
+                {
+                  "key": "agent.trace.content.input",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "agent.trace.content.output",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "agent.channel.audience",
+                  "value": {
+                    "stringValue": "public"
+                  }
+                },
+                {
+                  "key": "agent.principal.current.type",
+                  "value": {
+                    "stringValue": "service"
+                  }
+                },
+                {
+                  "key": "agent.principal.current.id",
+                  "value": {
+                    "stringValue": "current-user"
+                  }
+                },
+                {
+                  "key": "agent.principal.initiator.type",
+                  "value": {
+                    "stringValue": "user"
+                  }
+                },
+                {
+                  "key": "agent.principal.initiator.id",
+                  "value": {
+                    "stringValue": "initiator-user"
                   }
                 },
                 {
@@ -248,132 +248,6 @@
               "endTimeUnixNano": "1700000000001000000",
               "attributes": [
                 {
-                  "key": "agent.framework.name",
-                  "value": {
-                    "stringValue": "eve"
-                  }
-                },
-                {
-                  "key": "agent.framework.version",
-                  "value": {
-                    "stringValue": "test"
-                  }
-                },
-                {
-                  "key": "agent.name",
-                  "value": {
-                    "stringValue": "remote"
-                  }
-                },
-                {
-                  "key": "agent.channel.audience",
-                  "value": {
-                    "stringValue": "public"
-                  }
-                },
-                {
-                  "key": "agent.principal.current.id",
-                  "value": {
-                    "stringValue": "current-user"
-                  }
-                },
-                {
-                  "key": "agent.principal.current.type",
-                  "value": {
-                    "stringValue": "service"
-                  }
-                },
-                {
-                  "key": "agent.principal.initiator.id",
-                  "value": {
-                    "stringValue": "initiator-user"
-                  }
-                },
-                {
-                  "key": "agent.principal.initiator.type",
-                  "value": {
-                    "stringValue": "user"
-                  }
-                },
-                {
-                  "key": "agent.channel.kind",
-                  "value": {
-                    "stringValue": "http"
-                  }
-                },
-                {
-                  "key": "agent.session.origin",
-                  "value": {
-                    "stringValue": "channel"
-                  }
-                },
-                {
-                  "key": "agent.parent_call.id",
-                  "value": {
-                    "stringValue": "remote-call"
-                  }
-                },
-                {
-                  "key": "agent.parent_run.id",
-                  "value": {
-                    "stringValue": "caller-root"
-                  }
-                },
-                {
-                  "key": "agent.run.type",
-                  "value": {
-                    "stringValue": "subagent"
-                  }
-                },
-                {
-                  "key": "agent.trace.content.input",
-                  "value": {
-                    "boolValue": true
-                  }
-                },
-                {
-                  "key": "agent.trace.content.output",
-                  "value": {
-                    "boolValue": true
-                  }
-                },
-                {
-                  "key": "agent.turn.id",
-                  "value": {
-                    "stringValue": "turn_1"
-                  }
-                },
-                {
-                  "key": "agent.turn.sequence",
-                  "value": {
-                    "intValue": 1
-                  }
-                },
-                {
-                  "key": "gen_ai.agent.name",
-                  "value": {
-                    "stringValue": "remote"
-                  }
-                },
-                {
-                  "key": "gen_ai.operation.name",
-                  "value": {
-                    "stringValue": "invoke_agent"
-                  }
-                },
-                {
-                  "key": "operation.name",
-                  "value": {
-                    "stringValue": "invoke_agent"
-                  }
-                },
-                {
-                  "key": "resource.name",
-                  "value": {
-                    "stringValue": "invoke_agent remote"
-                  }
-                },
-                {
                   "key": "agent.run.id",
                   "value": {
                     "stringValue": "remote-session"
@@ -389,6 +263,132 @@
                   "key": "gen_ai.conversation.id",
                   "value": {
                     "stringValue": "caller-root"
+                  }
+                },
+                {
+                  "key": "agent.framework.name",
+                  "value": {
+                    "stringValue": "eve"
+                  }
+                },
+                {
+                  "key": "agent.framework.version",
+                  "value": {
+                    "stringValue": "test"
+                  }
+                },
+                {
+                  "key": "operation.name",
+                  "value": {
+                    "stringValue": "invoke_agent"
+                  }
+                },
+                {
+                  "key": "resource.name",
+                  "value": {
+                    "stringValue": "invoke_agent remote"
+                  }
+                },
+                {
+                  "key": "agent.channel.kind",
+                  "value": {
+                    "stringValue": "http"
+                  }
+                },
+                {
+                  "key": "agent.session.origin",
+                  "value": {
+                    "stringValue": "channel"
+                  }
+                },
+                {
+                  "key": "agent.name",
+                  "value": {
+                    "stringValue": "remote"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "remote"
+                  }
+                },
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "invoke_agent"
+                  }
+                },
+                {
+                  "key": "agent.turn.id",
+                  "value": {
+                    "stringValue": "turn_1"
+                  }
+                },
+                {
+                  "key": "agent.turn.sequence",
+                  "value": {
+                    "intValue": 1
+                  }
+                },
+                {
+                  "key": "agent.run.type",
+                  "value": {
+                    "stringValue": "subagent"
+                  }
+                },
+                {
+                  "key": "agent.parent_call.id",
+                  "value": {
+                    "stringValue": "remote-call"
+                  }
+                },
+                {
+                  "key": "agent.parent_run.id",
+                  "value": {
+                    "stringValue": "caller-root"
+                  }
+                },
+                {
+                  "key": "agent.trace.content.input",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "agent.trace.content.output",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "agent.channel.audience",
+                  "value": {
+                    "stringValue": "public"
+                  }
+                },
+                {
+                  "key": "agent.principal.current.type",
+                  "value": {
+                    "stringValue": "service"
+                  }
+                },
+                {
+                  "key": "agent.principal.current.id",
+                  "value": {
+                    "stringValue": "current-user"
+                  }
+                },
+                {
+                  "key": "agent.principal.initiator.type",
+                  "value": {
+                    "stringValue": "user"
+                  }
+                },
+                {
+                  "key": "agent.principal.initiator.id",
+                  "value": {
+                    "stringValue": "initiator-user"
                   }
                 },
                 {
@@ -437,120 +437,6 @@
               "endTimeUnixNano": "1700000000001000000",
               "attributes": [
                 {
-                  "key": "agent.framework.name",
-                  "value": {
-                    "stringValue": "eve"
-                  }
-                },
-                {
-                  "key": "agent.framework.version",
-                  "value": {
-                    "stringValue": "test"
-                  }
-                },
-                {
-                  "key": "agent.name",
-                  "value": {
-                    "stringValue": "local"
-                  }
-                },
-                {
-                  "key": "agent.channel.audience",
-                  "value": {
-                    "stringValue": "public"
-                  }
-                },
-                {
-                  "key": "agent.principal.current.id",
-                  "value": {
-                    "stringValue": "current-user"
-                  }
-                },
-                {
-                  "key": "agent.principal.current.type",
-                  "value": {
-                    "stringValue": "service"
-                  }
-                },
-                {
-                  "key": "agent.principal.initiator.id",
-                  "value": {
-                    "stringValue": "initiator-user"
-                  }
-                },
-                {
-                  "key": "agent.principal.initiator.type",
-                  "value": {
-                    "stringValue": "user"
-                  }
-                },
-                {
-                  "key": "agent.parent_call.id",
-                  "value": {
-                    "stringValue": "local-call"
-                  }
-                },
-                {
-                  "key": "agent.parent_run.id",
-                  "value": {
-                    "stringValue": "remote-session"
-                  }
-                },
-                {
-                  "key": "agent.run.type",
-                  "value": {
-                    "stringValue": "subagent"
-                  }
-                },
-                {
-                  "key": "agent.trace.content.input",
-                  "value": {
-                    "boolValue": true
-                  }
-                },
-                {
-                  "key": "agent.trace.content.output",
-                  "value": {
-                    "boolValue": true
-                  }
-                },
-                {
-                  "key": "agent.turn.id",
-                  "value": {
-                    "stringValue": "turn_0"
-                  }
-                },
-                {
-                  "key": "agent.turn.sequence",
-                  "value": {
-                    "intValue": 0
-                  }
-                },
-                {
-                  "key": "gen_ai.agent.name",
-                  "value": {
-                    "stringValue": "local"
-                  }
-                },
-                {
-                  "key": "gen_ai.operation.name",
-                  "value": {
-                    "stringValue": "invoke_agent"
-                  }
-                },
-                {
-                  "key": "operation.name",
-                  "value": {
-                    "stringValue": "invoke_agent"
-                  }
-                },
-                {
-                  "key": "resource.name",
-                  "value": {
-                    "stringValue": "invoke_agent local"
-                  }
-                },
-                {
                   "key": "agent.run.id",
                   "value": {
                     "stringValue": "local-session"
@@ -566,6 +452,120 @@
                   "key": "gen_ai.conversation.id",
                   "value": {
                     "stringValue": "caller-root"
+                  }
+                },
+                {
+                  "key": "agent.framework.name",
+                  "value": {
+                    "stringValue": "eve"
+                  }
+                },
+                {
+                  "key": "agent.framework.version",
+                  "value": {
+                    "stringValue": "test"
+                  }
+                },
+                {
+                  "key": "operation.name",
+                  "value": {
+                    "stringValue": "invoke_agent"
+                  }
+                },
+                {
+                  "key": "resource.name",
+                  "value": {
+                    "stringValue": "invoke_agent local"
+                  }
+                },
+                {
+                  "key": "agent.name",
+                  "value": {
+                    "stringValue": "local"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "local"
+                  }
+                },
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "invoke_agent"
+                  }
+                },
+                {
+                  "key": "agent.turn.id",
+                  "value": {
+                    "stringValue": "turn_0"
+                  }
+                },
+                {
+                  "key": "agent.turn.sequence",
+                  "value": {
+                    "intValue": 0
+                  }
+                },
+                {
+                  "key": "agent.run.type",
+                  "value": {
+                    "stringValue": "subagent"
+                  }
+                },
+                {
+                  "key": "agent.parent_call.id",
+                  "value": {
+                    "stringValue": "local-call"
+                  }
+                },
+                {
+                  "key": "agent.parent_run.id",
+                  "value": {
+                    "stringValue": "remote-session"
+                  }
+                },
+                {
+                  "key": "agent.trace.content.input",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "agent.trace.content.output",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "agent.channel.audience",
+                  "value": {
+                    "stringValue": "public"
+                  }
+                },
+                {
+                  "key": "agent.principal.current.type",
+                  "value": {
+                    "stringValue": "service"
+                  }
+                },
+                {
+                  "key": "agent.principal.current.id",
+                  "value": {
+                    "stringValue": "current-user"
+                  }
+                },
+                {
+                  "key": "agent.principal.initiator.type",
+                  "value": {
+                    "stringValue": "user"
+                  }
+                },
+                {
+                  "key": "agent.principal.initiator.id",
+                  "value": {
+                    "stringValue": "initiator-user"
                   }
                 },
                 {

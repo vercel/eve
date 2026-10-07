@@ -1,4 +1,4 @@
-import { createTraceState, type TraceState } from "#compiled/@opentelemetry/api/index.js";
+import { createTraceState, type TraceState } from "@opentelemetry/api";
 
 interface TraceparentContext {
   readonly isRemote?: boolean;

@@ -1,4 +1,4 @@
-import type { SpanContext } from "#compiled/@opentelemetry/api/index.js";
+import type { SpanContext } from "@opentelemetry/api";
 
 import type {
   InstrumentationChannelDeliveryStartedEvent,
@@ -9,9 +9,9 @@ import type {
 import { contextStorage } from "#context/container.js";
 import { ActiveChannelDeliveriesKey } from "#context/keys.js";
 import type { JsonValue } from "#shared/json.js";
-import { contentAttribute } from "#tracing/agent-otel-content.js";
-import type { AgentTraceStateStore } from "#tracing/agent-trace-state.js";
-import { isSampledTrace } from "#tracing/sampled-trace.js";
+import { contentAttribute } from "#tracing/lib/otel.js";
+import type { AgentTraceStateStore } from "#tracing/eve/agent-trace-state.js";
+import { isSampledTrace } from "#shared/trace-policy.js";
 
 interface ChannelDeliveryState {
   readonly inputAttribute?: string;
@@ -33,11 +33,11 @@ export function createAgentChannelDeliveryInstrumentation(input: {
     event: InstrumentationChannelDeliveryStartedEvent,
     ctx: InstrumentationHandlerContext,
   ): Promise<void> => {
-    const session = await input.stateStore.getSession(event.sessionId);
+    const session = await input.stateStore.get("session", event.sessionId);
     const turn =
       event.turnId === undefined || event.sequence === undefined
         ? undefined
-        : await input.stateStore.getTurn(event.sessionId, event.turnId);
+        : await input.stateStore.get("turn", JSON.stringify([event.sessionId, event.turnId]));
     const traceContext = turn?.context ?? session?.context;
     if (traceContext === undefined || !isSampledTrace(traceContext)) return;
     const inputAttribute = input.recordInputs ? contentAttribute(event.input) : undefined;
@@ -59,7 +59,10 @@ export function createAgentChannelDeliveryInstrumentation(input: {
   ): Promise<void> => {
     const state = readState(ctx.state.get());
     if (state === undefined || event.turnId === undefined) return;
-    const turn = await input.stateStore.getTurn(event.sessionId, event.turnId);
+    const turn = await input.stateStore.get(
+      "turn",
+      JSON.stringify([event.sessionId, event.turnId]),
+    );
     if (
       turn === undefined ||
       !isSampledTrace(turn.context) ||
@@ -67,23 +70,27 @@ export function createAgentChannelDeliveryInstrumentation(input: {
     ) {
       return;
     }
-    await input.stateStore.updateTurn(event.sessionId, event.turnId, (current) => ({
-      ...current,
-      channelDelivery: {
-        channelKind: event.delivery.channelKind,
-        channelName: event.delivery.channelName,
-        deliveryId: event.delivery.deliveryId,
-        ...(state.inputAttribute === undefined
-          ? undefined
-          : { inputAttribute: state.inputAttribute }),
-        ...(event.delivery.requestId === undefined
-          ? undefined
-          : { requestId: event.delivery.requestId }),
-        ...(state.requestTraceContext === undefined
-          ? undefined
-          : { requestTraceContext: state.requestTraceContext }),
-      },
-    }));
+    await input.stateStore.update(
+      "turn",
+      JSON.stringify([event.sessionId, event.turnId]),
+      (current) => ({
+        ...current,
+        channelDelivery: {
+          channelKind: event.delivery.channelKind,
+          channelName: event.delivery.channelName,
+          deliveryId: event.delivery.deliveryId,
+          ...(state.inputAttribute === undefined
+            ? undefined
+            : { inputAttribute: state.inputAttribute }),
+          ...(event.delivery.requestId === undefined
+            ? undefined
+            : { requestId: event.delivery.requestId }),
+          ...(state.requestTraceContext === undefined
+            ? undefined
+            : { requestTraceContext: state.requestTraceContext }),
+        },
+      }),
+    );
   };
 
   return {

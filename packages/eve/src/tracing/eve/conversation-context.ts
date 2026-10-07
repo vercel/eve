@@ -1,4 +1,4 @@
-import { createContextKey, type Context } from "#compiled/@opentelemetry/api/index.js";
+import { createContextKey, type Context } from "@opentelemetry/api";
 import { readBaggageMember, replaceBaggageMember } from "#protocol/baggage.js";
 import { readConversationId, resolveConversationId } from "#shared/conversation-identity.js";
 

@@ -1,4 +1,3 @@
-import { trace } from "#compiled/@opentelemetry/api/index.js";
 import type { SpanProcessor } from "#compiled/@vercel/otel/index.js";
 
 import { contextStorage } from "#context/container.js";
@@ -13,15 +12,15 @@ import {
 } from "#instrumentation/runtime.js";
 import { createLogger, formatError } from "#internal/logging.js";
 import { resolveInstrumentationEnvironment } from "#internal/application/dev-environment.js";
-import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
-import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
-import { createAgentOtelInstrumentation } from "#tracing/agent-otel-provider.js";
+import { AgentSpanIdGenerator } from "#tracing/lib/index.js";
+import { ContextAgentTraceStateStore } from "#tracing/eve/agent-trace-context-store.js";
+import { createAgentOtelInstrumentation } from "#tracing/eve/agent-otel-provider.js";
 import { hasConversationRelease, type LocalTracesProcessor } from "#tracing/local/traces.js";
 import type { CollectedOtel, RuntimeContextResolver } from "#tracing/eve/otel-declaration.js";
-import {
-  registerOtelPipeline,
-  type RegisteredOtelPipeline,
-} from "#tracing/eve/otel-registration.js";
+import { otelTelemetry } from "#tracing/lib/index.js";
+import type { RegisteredOtelPipeline } from "#tracing/eve/otel-registration.js";
+import { registerOtel } from "#tracing/eve/otel-registration.js";
+import { eveOutputMapping } from "#tracing/eve/profile.js";
 import { readConversationId } from "#shared/conversation-identity.js";
 
 const log = createLogger("tracing.install-instrumentation-runtime");
@@ -48,21 +47,28 @@ export function installInstrumentationRuntime(input: {
   let prepareSessionTrace: InstrumentationRuntime["prepareSessionTrace"];
   let prepareTurnTrace: InstrumentationRuntime["prepareTurnTrace"];
   let runInContext: InstrumentationRuntime["runInContext"] = (_operation, execute) => execute();
+  let idGenerator: AgentSpanIdGenerator;
 
   if (input.collected.declared) {
-    otelRuntime = registerOtelPipeline({
-      pipeline: input.collected.pipeline,
+    otelRuntime = registerOtel({
       serviceName: input.serviceName,
+      otel: input.collected.configuration,
     });
+    idGenerator = otelRuntime.idGenerator;
     const agentOtel = createAgentOtelInstrumentation({
       environment: resolveInstrumentationEnvironment(),
       frameworkVersion: input.frameworkVersion,
-      idGenerator: otelRuntime.idGenerator,
+      telemetry: otelTelemetry({
+        provider: otelRuntime.provider,
+        tracerName: "eve.agent",
+        idGenerator,
+        samplesTrace: otelRuntime.samplesTrace,
+        mapping: eveOutputMapping(),
+      }),
+      idGenerator,
       recordInputs: input.collected.settings.recordInputs,
       recordOutputs: input.collected.settings.recordOutputs,
-      samplesTrace: otelRuntime.samplesTrace,
       stateStore: new ContextAgentTraceStateStore(),
-      tracer: trace.getTracer("eve.agent", input.frameworkVersion),
       tracePolicy: input.collected.settings.tracePolicy,
     });
     // The span must exist before authored providers observe the lifecycle event.
@@ -71,10 +77,12 @@ export function installInstrumentationRuntime(input: {
     prepareTurnTrace = agentOtel.prepareTurnTrace;
     runInContext = agentOtel.runInContext;
 
-    const releasable = input.collected.pipeline.spanProcessors
+    const releasable = input.collected.configuration.spanProcessors
       .filter(isSpanProcessor)
       .filter(hasConversationRelease);
     if (releasable.length > 0) serialAfter.push(sessionReleaseProvider(releasable));
+  } else {
+    idGenerator = new AgentSpanIdGenerator();
   }
 
   const allProviders = [...serialBefore, ...input.providers, ...serialAfter];
@@ -89,7 +97,7 @@ export function installInstrumentationRuntime(input: {
       serialAfter,
       serialBefore,
     }),
-    idGenerator: otelRuntime?.idGenerator ?? new AgentSpanIdGenerator(),
+    idGenerator,
     memoryOperations: otelRuntime !== undefined || input.providers.some(hasMemoryOperationHandler),
     otelSettings: input.collected.declared ? input.collected.settings : undefined,
     ownsAgentSpans: otelRuntime !== undefined,
