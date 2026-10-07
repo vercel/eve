@@ -31,7 +31,11 @@ export interface RankCandidate {
   readonly connection?: { readonly description: string; readonly name: string };
 }
 
-/** Candidates matching `query`, best first. An empty query matches every candidate. */
+/**
+ * Candidates matching `query`, best first. A query with no words matches every
+ * candidate in name order, which lists a namespace when only its prefix was
+ * searched.
+ */
 export function rankCandidates<T extends RankCandidate>(
   query: string,
   candidates: readonly T[],
@@ -50,13 +54,18 @@ export function rankCandidates<T extends RankCandidate>(
     .map((entry) => entry.candidate);
 }
 
+/** Whether `query` has no searchable words, such as `"^"` or `"  "`. */
+export function isEmptyQuery(query: string): boolean {
+  return tokenize(query).length === 0;
+}
+
 /** Names of the candidates closest to an unknown `name`, best first. */
 export function closestNames(
   name: string,
   candidates: readonly RankCandidate[],
   limit: number,
 ): string[] {
-  if (tokenize(name).length === 0) return [];
+  if (isEmptyQuery(name)) return [];
   return rankCandidates(name, candidates)
     .slice(0, limit)
     .map((candidate) => candidate.name);
