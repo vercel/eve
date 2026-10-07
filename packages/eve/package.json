@@ -527,7 +527,7 @@
     "dev": "pnpm run build:compiled && node ./scripts/copy-runtime-assets.mjs && tsc -p tsconfig.dev.json --watch --preserveWatchOutput",
     "prepack": "pnpm run build && node ../../scripts/copy-package-license.mjs .",
     "test": "pnpm run test:unit && pnpm run test:integration",
-    "test:browser": "pnpm run build:js && vitest run --config vitest.browser.config.ts",
+    "test:webchat": "pnpm run build:js && vitest run --config vitest.browser.config.ts",
     "test:framework-fixtures": "pnpm run build:compiled && vitest run --config vitest.framework-fixtures.config.ts",
     "test:integration": "pnpm run build:js && vitest run --config vitest.integration.config.ts",
     "test:scenario": "pnpm run build:compiled && vitest run --config vitest.scenario.config.ts",
