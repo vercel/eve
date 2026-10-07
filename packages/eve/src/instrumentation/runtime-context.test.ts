@@ -8,7 +8,7 @@ import {
   buildTelemetryRuntimeContext,
   type BuildTelemetryRuntimeContextInput,
 } from "#instrumentation/runtime-context.js";
-import type { RuntimeContextResolver } from "#tracing/otel-declaration.js";
+import type { RuntimeContextResolver } from "#tracing/eve/otel-declaration.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { InstrumentationStepStartedEventInput } from "#public/instrumentation/index.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
