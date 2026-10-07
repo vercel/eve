@@ -31,14 +31,24 @@ const schedule = {
 } as VercelSchedule;
 
 describe("schedule queue delivery", () => {
-  it("accepts a bounded, versioned dynamic occurrence matching its current resource", () => {
-    const parsed = expectScheduleQueueMessage(message);
-    expect(() => verifyScheduleDelivery(parsed, schedule, application, topic)).not.toThrow();
+  it("accepts matching occurrences with optional identity/timing and extra transport metadata", () => {
+    const { executionId, scheduledAt, ...withoutOptionalFields } = message;
+    for (const body of [message, { ...withoutOptionalFields, transportAttempt: 1 }]) {
+      const parsed = expectScheduleQueueMessage(body);
+      expect(parsed.payload.payload).toBe("Review open incidents");
+      expect(() => verifyScheduleDelivery(parsed, schedule, application, topic)).not.toThrow();
+    }
   });
 
   it.each([
     null,
+    undefined,
+    { ...message, executionId: 1n },
     { ...message, source: "static" },
+    { ...message, name: "" },
+    { ...message, executionId: 42 },
+    { ...message, scheduledAt: { invalid: true } },
+    { ...message, payload: null },
     { ...message, payload: { ...message.payload, eve: { ...message.payload.eve, version: 2 } } },
     { ...message, payload: { ...message.payload, payload: "x".repeat(256 * 1024) } },
   ])("rejects invalid or oversized queue bodies", (body) => {
