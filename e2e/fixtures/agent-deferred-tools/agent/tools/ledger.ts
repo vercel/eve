@@ -2,13 +2,16 @@ import { defineDynamic, defineTool } from "eve/tools";
 
 import { LEDGER_REGIONS } from "../lib/ledger-regions";
 
-/** A session-scoped resolver that returns one deferred ledger tool per region. */
+/**
+ * A session-scoped resolver that returns one deferred ledger tool per region,
+ * all under the `ledger` namespace.
+ */
 export default defineDynamic({
   events: {
     "session.started": () =>
       Object.fromEntries(
         LEDGER_REGIONS.map((region) => [
-          `ledger_${region}`,
+          `ledger__${region}`,
           defineTool({
             description: `Read the ${region.replaceAll("_", " ")} regional ledger balance for a month.`,
             deferred: true,

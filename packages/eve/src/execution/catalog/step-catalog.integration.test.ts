@@ -54,7 +54,11 @@ import { stampDurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
 // be written; the attribute contract is covered by emit.test.ts.
 vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
 
-const LISTING_HEADER = "More tools and skills are available than your context shows.";
+/** The namespaces line once a dynamic `tenant__*` tool joins the static `ops__*` one. */
+const NAMESPACES_OPS_TENANT = /^Namespaces, .*: ops, tenant$/mu;
+
+/** Every catalog listing says this, whatever kinds it names. */
+const LISTING_MARKER = "They aren't listed; find them with search";
 
 type Reply = ReturnType<typeof textStreamResult>;
 
@@ -149,7 +153,7 @@ function catalogMessages(request: LanguageModelV4CallOptions): string[] {
   return request.prompt
     .filter((message) => message.role === "user")
     .map(messageText)
-    .filter((entry) => entry.startsWith(LISTING_HEADER) || entry.startsWith("The catalog changed"));
+    .filter((entry) => entry.includes(LISTING_MARKER) || entry.startsWith("The catalog changed"));
 }
 
 /** What the model read back for `callId`: a JSON value or error text. */
@@ -232,6 +236,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
       }),
       inlineTool("issue_credit", { approval: always(), deferred: true }),
       inlineTool("release_notes", { deferred: true, description: "Publish release notes." }),
+      inlineTool("ops__restart", { deferred: true, description: "Restart an ops service." }),
       workflowTool("deploy_service", "execute", { deferred: true }),
       workflowTool("research", "task", { deferred: true }),
       subagentTool("billing_specialist", { deferred: true }),
@@ -414,7 +419,8 @@ describe("step catalog in the harness (real AI SDK)", () => {
     expect(gone).toContain("tenant__sync");
 
     // A tool and a skill share a name; skills load deferred or not, including
-    // a dynamic deferred skill that appears when the turn starts.
+    // a dynamic deferred skill that appears when the turn starts. It joins the
+    // listed `ops` namespace, so the listing doesn't change.
     await dispatchDynamicSkillEvent({
       ctx,
       event: createTurnStartedEvent({ sequence: 9, turnId: "turn_9" }),
@@ -424,10 +430,10 @@ describe("step catalog in the harness (real AI SDK)", () => {
           eventNames: ["turn.started"],
           events: {
             "turn.started": () => ({
-              "tenant-playbook": defineSkill({
+              ops__playbook: defineSkill({
                 deferred: true,
-                description: "The tenant's escalation playbook.",
-                markdown: "# Tenant playbook",
+                description: "The ops escalation playbook.",
+                markdown: "# Ops playbook",
               }),
             }),
           },
@@ -445,7 +451,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
       calls(
         call("notes", "execute", { skill: "release_notes" }),
         call("forms", "execute", { skill: "pdf-forms" }),
-        call("playbook", "execute", { skill: "tenant-playbook" }),
+        call("playbook", "execute", { skill: "ops__playbook" }),
         call("rules", "execute", { skill: "house-rules" }),
       ),
       text("Loaded the skills."),
@@ -462,12 +468,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
       ]),
     });
     const loaded = JSON.stringify(driver.requests().at(-1)!.prompt);
-    for (const markdown of [
-      "# release_notes",
-      "# pdf-forms",
-      "# Tenant playbook",
-      "# House rules",
-    ]) {
+    for (const markdown of ["# release_notes", "# pdf-forms", "# Ops playbook", "# House rules"]) {
       expect(loaded).toContain(markdown);
     }
 
@@ -508,7 +509,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
       "tenant__sync",
       "plan_advisor",
       "pdf-forms",
-      "tenant-playbook",
+      "ops__playbook",
       "private",
       "products",
     ]) {
@@ -526,36 +527,37 @@ describe("step catalog in the harness (real AI SDK)", () => {
     }
 
     // 4. No system-message fallback, including on the step that runs approved
-    // calls: the approved call's result, then the diff as an appended message.
+    // calls: the approved call's result, then the listing, which gained the
+    // `tenant` namespace, as an appended message.
     const approvedStep = requests[approvalStep]!;
     expect(toolResult(approvedStep, "credit")).toEqual({ input: {}, ran: "issue_credit" });
     expect(approvedStep.prompt.at(-2)?.role).toBe("tool");
     expect(approvedStep.prompt.at(-1)).toEqual({
-      content: [{ text: "The catalog changed.\nTools added: tenant__sync", type: "text" }],
+      content: [{ text: expect.stringMatching(NAMESPACES_OPS_TENANT), type: "text" }],
       role: "user",
     });
-    expect(systemText(approvedStep).join("\n")).not.toContain("tenant__sync");
+    expect(listingFor(approvalStep).at(-1)).toMatch(/^The catalog changed\./u);
+    expect(systemText(approvedStep).join("\n")).not.toContain("tenant");
     expect(listingFor(approvalStep)).toHaveLength(2);
 
     // 5. Deterministic rendering is owned by listing.test.ts; here each change
-    // lands as one diff, and compaction starts a fresh baseline.
-    expect(listingFor(0)).toEqual([expect.stringContaining("Agents: billing_specialist")]);
+    // appends the listing again, and compaction starts a fresh baseline.
+    expect(listingFor(0)).toEqual([
+      expect.stringContaining("More tools, agents, and skills are available"),
+    ]);
     expect(listingFor(connectionStep).at(-1)).toContain(
       "- products: Caller-specific product catalog.",
     );
-    expect(listingFor(changedStep).at(-1)).toContain(
-      "No longer available, do not call or load: tenant__sync",
-    );
-    expect(listingFor(skillStep).at(-1)).toContain("Skills added: tenant-playbook");
-    expect(listingFor(compactionStep)).toEqual([
-      expect.stringContaining("Agents: billing_specialist, plan_advisor"),
-    ]);
+    expect(listingFor(changedStep).at(-1)).toMatch(/\nNo longer available: tenant$/u);
+    expect(listingFor(compactionStep)).toEqual([expect.stringMatching(/^Namespaces, .*: ops$/mu)]);
 
-    // 6. Calling an entry adds nothing: only catalog changes append listing messages.
+    // 6. Calling an entry adds nothing: only catalog changes append listing
+    // messages. A dynamic agent of a kind already listed, or a skill joining a
+    // listed namespace (skillStep), changes nothing the listing says.
     const announcedAt = requests.flatMap((_request, index) =>
       index > 0 && listingFor(index).length > listingFor(index - 1).length ? [index] : [],
     );
-    expect(announcedAt).toEqual([approvalStep, connectionStep, changedStep, skillStep]);
+    expect(announcedAt).toEqual([approvalStep, connectionStep, changedStep]);
 
     // The stand-in result for calls the harness dispatches after the step never
     // reaches the model or the protocol: until compaction, each prompt carries
