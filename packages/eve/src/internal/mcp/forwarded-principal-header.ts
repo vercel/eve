@@ -19,6 +19,8 @@ export interface McpRequestPrincipals {
   readonly current: SessionAuthContext;
   /** The accepted forwarded initiator, or `current` when none was forwarded. */
   readonly initiator: SessionAuthContext;
+  /** The verified route principal that forwarded `current`, when one did. */
+  readonly forwarder?: SessionAuthContext;
 }
 
 /**
@@ -55,7 +57,7 @@ export async function resolveMcpRequestPrincipals(
   if (resolved instanceof Response) return resolved;
   if (!resolved.accepted) return { current: routePrincipal, initiator: routePrincipal };
   // resolveForwardedPrincipal already stamped both with `eve:forwarded-by`.
-  return { current: resolved.auth, initiator: resolved.initiatorAuth };
+  return { current: resolved.auth, forwarder: routePrincipal, initiator: resolved.initiatorAuth };
 }
 
 /**

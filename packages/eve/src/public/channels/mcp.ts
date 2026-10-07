@@ -16,7 +16,10 @@ import type {
 } from "#internal/invocation/agent-invocation.js";
 import { WorkflowAgentInvocationExecution } from "#internal/invocation/workflow-execution.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
-import { createPublishedTools } from "#internal/mcp/published-tools.js";
+import {
+  createPublishedTools,
+  MCP_TOOL_SESSIONS_EXTENSION,
+} from "#internal/mcp/published-tools.js";
 import {
   resolveMcpRequestPrincipals,
   type McpRequestPrincipals,
@@ -65,7 +68,9 @@ export interface McpChannelInput {
   /**
    * Also publish the agent's invocable tools, each `tools/call` running the
    * tool as the route-authenticated caller. While `agent` is on, an agent
-   * tool named like an `agent_*` tool is not published.
+   * tool named like an `agent_*` tool is not published. Also advertises the
+   * `dev.eve/tool-sessions` extension: a client that declares it joins a tool
+   * session by sending `_meta["dev.eve/tool-session"]` on `tools/call`.
    * @default false
    */
   readonly tools?: boolean;
@@ -437,6 +442,13 @@ async function handleMcpRequest(
         })
       : [];
   const features: McpServerFeature[] = [];
+  if (publish.tools) {
+    // Advertised only; published tools read the key from each call's `_meta`.
+    features.push({
+      capabilities: { extensions: { [MCP_TOOL_SESSIONS_EXTENSION]: {} } },
+      register() {},
+    });
+  }
   if (publish.skills && described !== undefined) {
     const files = readSkillFileSource(args);
     if (files === undefined) {

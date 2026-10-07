@@ -227,7 +227,7 @@ export default mcpChannel({
 
 `tools/list` returns the `agent_*` tools first, then the agent's tools in name order with their input and output JSON schemas. Framework tools, workflow and provider tools, tools without `execute`, and tools added by dynamic resolvers or subagents are not published. While `agent` is on, an agent tool named `agent_start`, `agent_get`, `agent_update`, or `agent_cancel` is not published, and eve logs a warning. With `agent: false`, the channel sends no `agent_*` instructions. Turning off `agent`, `tools`, and `skills` all at once throws, since the channel would publish nothing.
 
-Each `tools/call` checks the arguments against the tool's input schema, then runs the tool as the route-authenticated caller, or as a [forwarded user](#forwarded-principals), with no model, turn, or workflow run. Every caller the channel's `auth` admits can call these tools, outside the agent's instructions, so review what becomes callable before you turn this on. Each call gets its own session:
+Each `tools/call` checks the arguments against the tool's input schema, then runs the tool as the route-authenticated caller, or as a [forwarded user](#forwarded-principals), with no model, turn, or workflow run. Every caller the channel's `auth` admits can call these tools, outside the agent's instructions, so review what becomes callable before you turn this on. Unless the call joins a [tool session](#tool-sessions), it gets its own session:
 
 - Authored state starts from its initial value, and updates are not kept.
 - A sandbox the tool opens is deleted when the call ends.
@@ -238,7 +238,7 @@ A tool that cannot finish over MCP returns an error result with `isError: true` 
 | Code                     | When                                                                                             |
 | ------------------------ | ------------------------------------------------------------------------------------------------ |
 | `invalid_input`          | The tool rejected its input.                                                                     |
-| `denied`                 | The tool's approval policy denied the call.                                                      |
+| `denied`                 | The tool's approval policy denied the call, or an anonymous caller sent a tool session key.      |
 | `approval_required`      | The approval policy asks a person. The tool did not run; call it from a conversation instead.    |
 | `authorization_required` | The tool needs a sign-in to a connection first. Sign in from a conversation, then call it again. |
 | `internal`               | The tool failed. The message carries an error id that matches the server logs.                   |
@@ -276,6 +276,49 @@ The predicate receives the verified forwarder and the principals it asserts, as 
 | The forwarder is anonymous (`none()`)                  | `403`                    |
 | The channel has no `trustedForwarders`                 | `403`                    |
 | The predicate throws                                   | `500`                    |
+
+### Tool sessions
+
+A tool session lets several `tools/call` requests share one sandbox, so a file one call writes is there for the next. With `tools: true`, the channel advertises the `dev.eve/tool-sessions` extension in `capabilities.extensions` of `server/discover`. A client joins a session by declaring the same extension in the request's `io.modelcontextprotocol/clientCapabilities` and sending a key of 1 to 512 characters in `_meta["dev.eve/tool-session"]`:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "write_note",
+    "arguments": { "text": "Feed Biscuit at 18:00." },
+    "_meta": {
+      "dev.eve/tool-session": "alice-front-desk",
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+      "io.modelcontextprotocol/clientInfo": { "name": "front-desk", "version": "1.0.0" },
+      "io.modelcontextprotocol/clientCapabilities": {
+        "extensions": { "dev.eve/tool-sessions": {} }
+      }
+    }
+  }
+}
+```
+
+eve derives the session id from the principal the call runs as (the route-authenticated caller, or a [forwarded user](#forwarded-principals) together with the verified router that forwarded them) and the key, so calls from the same principal with the same key share the session, and another caller who sends the same key gets a different one. That holds for forwarded users too: two users forwarded with the same key, or one user forwarded by two routers, get separate sessions. The router counted is the one the channel's `auth` verified, never one named in the forwarded principal. A key from a client that did not declare the extension is ignored, and the call gets its own session. Clients on the 2025-11-25 protocol send no per-request capabilities, so they always get their own session.
+
+Tool sessions need an authenticated caller. With `auth: none()` every request is the same anonymous principal, so a key alone would name the session and anyone who knew it could read what another client left in the sandbox. A keyed call from an anonymous caller is therefore denied with the `denied` error code before anything runs; unkeyed anonymous calls still get a one-off session.
+
+In a tool session:
+
+- The sandbox opens on the first `ctx.getSandbox()` and is kept for later calls with the same key. Concurrent first calls share one sandbox.
+- The sandbox belongs to the agent's current sandbox definition. A deploy that changes it (the template, its snapshot, or the open options in `sandbox.ts` and its resources) starts a fresh, empty sandbox for the same key; the old one expires as below.
+- `ctx.session.id` is the same for every call with the key.
+- Traces still show each call as its own run. Its `agent.run.id` and `gen_ai.conversation.id` are a fresh id for that call, not `ctx.session.id`, so traces do not link calls that share a key.
+- Authored state still starts from its initial value on every call, and updates are not kept. Keep data that must outlive a call in the sandbox.
+- Calls may still run in parallel, and nothing orders them.
+
+Tool sessions need a sandbox provider that finds the session's sandbox again: Vercel Sandbox or just-bash. On another provider, a call with a key fails with a `Sandbox provider "<name>" cannot keep a sandbox between invokeTool calls` error when the tool opens its sandbox. Tools that never open a sandbox still run. just-bash keeps its sandboxes on the local disk, so on Vercel Functions a just-bash tool session lasts only as long as the function instance.
+
+A tool session has no end, so eve bounds how long its sandbox is kept. On Vercel Sandbox, a tool-session sandbox's saved filesystem expires a day after its last use, and each call that resumes it restarts that day. The next call with the key after that replaces it with a fresh, empty sandbox. If two calls with the key find the expired filesystem at the same time, each can replace the sandbox, and files the first one writes can be lost. Vercel only keeps the latest snapshot of the sandbox. Tool sessions use this one-day expiry whatever `snapshotExpiration` `sandbox.ts` sets; sessions that conversations start keep the authored setting.
+
+just-bash keeps tool-session sandboxes on the local disk, and nothing removes them.
 
 ## Publish the agent's skills
 

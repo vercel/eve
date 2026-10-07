@@ -495,6 +495,175 @@ describe("createVercelSandbox", () => {
     );
   });
 
+  describe("tool sessions", () => {
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    // What the Sandbox API answers a resume whose snapshot expired or was deleted.
+    const snapshotNotFound = () =>
+      Object.assign(new Error("Cannot resume sandbox: no snapshot available."), {
+        json: { error: { code: "snapshot_not_found" } },
+        response: { status: 410 },
+      });
+    const nameTaken = () =>
+      Object.assign(new Error("A sandbox with the name already exists"), {
+        response: { status: 400 },
+      });
+
+    /*
+     * A Vercel project over `sandboxes`, by name. `create` fails for a name
+     * that is taken, as the API does, so a test can let another instance win
+     * a name before this one's create lands.
+     */
+    function project(sandboxes: Map<string, ReturnType<typeof createMockSandbox>>) {
+      const sandboxModule = {
+        Sandbox: {
+          create: vi.fn(async (options: { name: string }) => {
+            if (sandboxes.has(options.name)) throw nameTaken();
+            const created = createMockSandbox({ name: options.name });
+            sandboxes.set(options.name, created);
+            return created;
+          }),
+          get: vi.fn(async (options: { name: string }) => sandboxes.get(options.name) ?? null),
+        },
+      };
+      const provider = createTestVercelSandbox({
+        loadDeleteSandboxModule: async () => sandboxModule as never,
+        loadSandboxModule: async () => sandboxModule as never,
+      });
+      const open = async (sessionId = "tool_session_abc") =>
+        await provider.openSession({
+          appRoot: "/tmp/test-app-root",
+          prepared: { snapshotId: "prepared-snapshot" },
+          sandboxName: sessionId,
+        });
+      return { open, sandboxModule };
+    }
+
+    function expiredSandbox(
+      sandboxes: Map<string, ReturnType<typeof createMockSandbox>>,
+      name: string,
+    ) {
+      const sandbox = createMockSandbox({ name, status: "stopped" });
+      sandbox.runCommand.mockRejectedValue(snapshotNotFound());
+      sandbox.delete.mockImplementation(async () => {
+        sandboxes.delete(name);
+      });
+      sandboxes.set(name, sandbox);
+      return sandbox;
+    }
+
+    async function baseName() {
+      const sandboxes = new Map<string, ReturnType<typeof createMockSandbox>>();
+      await project(sandboxes).open();
+      return [...sandboxes.keys()][0]!;
+    }
+
+    it("expires a tool session's snapshots a day after last use and keeps only the latest", async () => {
+      const { open, sandboxModule } = project(new Map());
+      await open();
+      expect(sandboxModule.Sandbox.create).toHaveBeenCalledWith(
+        expect.objectContaining({ keepLastSnapshots: { count: 1 }, snapshotExpiration: DAY_MS }),
+      );
+    });
+
+    it("leaves a conversation session's snapshot retention to the author", async () => {
+      const { open, sandboxModule } = project(new Map());
+      await open("session-key");
+      const params = sandboxModule.Sandbox.create.mock.calls[0]?.[0];
+      expect(params).not.toHaveProperty("keepLastSnapshots");
+      expect(params).not.toHaveProperty("snapshotExpiration");
+    });
+
+    it("resumes a stopped sandbox whose snapshot is still there, keeping it", async () => {
+      const base = await baseName();
+      const stopped = createMockSandbox({ name: base, status: "stopped" });
+      const { open, sandboxModule } = project(new Map([[base, stopped]]));
+
+      await open();
+
+      expect(stopped.runCommand).toHaveBeenCalled();
+      expect(stopped.delete).not.toHaveBeenCalled();
+      expect(sandboxModule.Sandbox.create).not.toHaveBeenCalled();
+    });
+
+    it("starts a fresh sandbox under the same name once the snapshot expired", async () => {
+      const base = await baseName();
+      const sandboxes = new Map<string, ReturnType<typeof createMockSandbox>>();
+      const expired = expiredSandbox(sandboxes, base);
+      const { open, sandboxModule } = project(sandboxes);
+
+      await open();
+
+      expect(expired.delete).toHaveBeenCalledTimes(1);
+      expect(sandboxModule.Sandbox.create).toHaveBeenCalledTimes(1);
+      expect(sandboxModule.Sandbox.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: base,
+          snapshotExpiration: DAY_MS,
+          source: { snapshotId: "prepared-snapshot", type: "snapshot" },
+        }),
+      );
+      expect(sandboxes.get(base)?.runCommand).toHaveBeenCalled();
+    });
+
+    it("adopts the fresh sandbox another instance made first after the same expiry", async () => {
+      const base = await baseName();
+      const sandboxes = new Map<string, ReturnType<typeof createMockSandbox>>();
+      const expired = expiredSandbox(sandboxes, base);
+      const { open, sandboxModule } = project(sandboxes);
+      // Another instance recreates the name after this one finds it free
+      // and before its create lands.
+      const theirs = createMockSandbox({ name: base });
+      const get = sandboxModule.Sandbox.get.getMockImplementation()!;
+      sandboxModule.Sandbox.get.mockImplementation(async (options) => {
+        const found = await get(options);
+        if (found === null && !sandboxes.has(base)) sandboxes.set(base, theirs);
+        return found;
+      });
+
+      await open();
+
+      expect(sandboxModule.Sandbox.create).toHaveBeenCalledTimes(1);
+      await expect(sandboxModule.Sandbox.create.mock.results[0]!.value).rejects.toThrow(
+        "already exists",
+      );
+      expect(expired.delete).toHaveBeenCalledTimes(1);
+      expect(theirs.runCommand).toHaveBeenCalled();
+      expect(theirs.delete).not.toHaveBeenCalled();
+    });
+
+    it("starts fresh when another instance already deleted the expired sandbox", async () => {
+      const base = await baseName();
+      const sandboxes = new Map<string, ReturnType<typeof createMockSandbox>>();
+      expiredSandbox(sandboxes, base);
+      const { open, sandboxModule } = project(sandboxes);
+      const get = sandboxModule.Sandbox.get.getMockImplementation()!;
+      sandboxModule.Sandbox.get.mockImplementationOnce(get).mockImplementationOnce(async () => {
+        sandboxes.delete(base);
+        throw Object.assign(new Error("Sandbox not found"), { response: { status: 404 } });
+      });
+
+      await open();
+
+      expect(sandboxModule.Sandbox.create).toHaveBeenCalledWith(
+        expect.objectContaining({ name: base }),
+      );
+      expect(sandboxes.get(base)?.runCommand).toHaveBeenCalled();
+    });
+
+    it("surfaces any other 410 instead of replacing the sandbox", async () => {
+      const base = await baseName();
+      const gone = createMockSandbox({ name: base, status: "stopped" });
+      gone.runCommand.mockRejectedValue(
+        Object.assign(new Error("Session is gone"), { response: { status: 410 } }),
+      );
+      const { open, sandboxModule } = project(new Map([[base, gone]]));
+
+      await expect(open()).rejects.toThrow();
+      expect(sandboxModule.Sandbox.create).not.toHaveBeenCalled();
+      expect(gone.delete).not.toHaveBeenCalled();
+    });
+  });
+
   it("forwards author source to template create as the base layer", async () => {
     /*
      * The real Vercel SDK pre-populates `currentSnapshotId` on a

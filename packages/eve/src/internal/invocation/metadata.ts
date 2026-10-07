@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import { principalIdentity } from "#channel/principal-identity.js";
 import type { RunInput, SessionAuthContext } from "#channel/types.js";
 import {
   INVOCATION_OWNER_ATTRIBUTE,
@@ -19,16 +20,7 @@ export function invocationInputRequestId(pendingBatchId: string, requestId: stri
 
 /** Fixed-width fingerprint used to bind an invocation to its initiating principal. */
 export function invocationOwnerKey(auth: SessionAuthContext | null): string {
-  const identity =
-    auth === null
-      ? ["anonymous"]
-      : [
-          auth.authenticator,
-          auth.issuer ?? "",
-          auth.principalType,
-          auth.principalId,
-          auth.subject ?? "",
-        ];
+  const identity = auth === null ? ["anonymous"] : principalIdentity(auth);
   return createHash("sha256").update(JSON.stringify(identity), "utf8").digest("hex");
 }
 
