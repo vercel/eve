@@ -10,8 +10,7 @@ export interface Announcement {
   readonly value: string;
   /**
    * Renders the message for `value`. `previous` is the last announced value,
-   * or `undefined` for a baseline. Returning `undefined` records the value
-   * without adding a message.
+   * or `undefined` for a baseline.
    */
-  render(previous: string | undefined): string | undefined;
+  render(previous: string | undefined): string;
 }

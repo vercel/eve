@@ -91,8 +91,7 @@ export function createCurrentMessages(
         const announcement = keyed[key]!;
         const previous = historyState.announcements?.[key];
         if (previous === announcement.value) continue;
-        const message = announcement.render(previous);
-        if (message !== undefined) appendUserMessage(message, "context.state");
+        appendUserMessage(announcement.render(previous), "context.state");
         historyState.announcements = { ...historyState.announcements, [key]: announcement.value };
       }
     },
