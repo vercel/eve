@@ -5,6 +5,7 @@ import { DynamicSkillManifestKey } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { stripSkillFrontmatter } from "#shared/skill-package.js";
+import { EXECUTE_TOOL_NAME, SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 
 /**
  * Typed input accepted by {@link executeLoadSkillTool}.
@@ -41,7 +42,7 @@ async function executeLoadSkillTool(args: LoadSkillInput): Promise<unknown> {
   if (connectionName === undefined) throw new Error(message);
   throw new Error(
     `${message} "${connectionName}" is a connection, not a skill. ` +
-      `Find its tools with search and connection "${connectionName}", then call them with execute.`,
+      `Find its tools with ${SEARCH_TOOL_NAME}({ query: "${connectionName}__" }), then call them with ${EXECUTE_TOOL_NAME}.`,
   );
 }
 

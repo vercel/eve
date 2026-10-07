@@ -692,7 +692,7 @@ function finalOutputResult(text: string, structured: unknown): Record<string, un
     finishReason: "stop",
     response: { messages: [{ content: text, role: "assistant" }] },
     text,
-    toolCalls: [{ input: structured, toolCallId: "final-output-1", toolName: "final_output" }],
+    toolCalls: [{ input: structured, toolCallId: "final-output-1", toolName: "eve__reply" }],
     toolResults: [],
   };
 }
@@ -1751,13 +1751,13 @@ describe("createToolLoopHarness", () => {
     const waitToolCall = {
       input: {},
       toolCallId: "wait-1",
-      toolName: "task_wait",
+      toolName: "eve__task_wait",
       type: "tool-call" as const,
     };
     const invalidCancelToolCall = {
       input: "not an object",
       toolCallId: "cancel-1",
-      toolName: "task_cancel",
+      toolName: "eve__task_cancel",
       type: "tool-call" as const,
     };
     const assistantContent = [
@@ -2394,7 +2394,7 @@ describe("createToolLoopHarness", () => {
     ]);
     expect(result.session.outputSchema).toBeUndefined();
     expect(vi.mocked(ToolLoopAgent).mock.calls[0]?.[0]).toMatchObject({
-      tools: expect.objectContaining({ final_output: expect.anything() }),
+      tools: expect.objectContaining({ eve__reply: expect.anything() }),
     });
   });
 
@@ -2415,7 +2415,7 @@ describe("createToolLoopHarness", () => {
 
     expect(vi.mocked(ToolLoopAgent).mock.calls).toHaveLength(1);
     expect(vi.mocked(ToolLoopAgent).mock.calls[0]?.[0]).not.toMatchObject({
-      tools: expect.objectContaining({ final_output: expect.anything() }),
+      tools: expect.objectContaining({ eve__reply: expect.anything() }),
     });
   });
 
@@ -2438,7 +2438,7 @@ describe("createToolLoopHarness", () => {
               {
                 type: "tool-call",
                 toolCallId: "final-output-1",
-                toolName: "final_output",
+                toolName: "eve__reply",
                 input: { title: "Done" },
               },
             ],
@@ -2453,7 +2453,7 @@ describe("createToolLoopHarness", () => {
       text: "",
       toolCalls: [
         { input: {}, toolCallId: "add-1", toolName: "add" },
-        { input: { title: "Done" }, toolCallId: "final-output-1", toolName: "final_output" },
+        { input: { title: "Done" }, toolCallId: "final-output-1", toolName: "eve__reply" },
       ],
       toolResults: [{ toolCallId: "add-1", toolName: "add", output: "42" }],
     });

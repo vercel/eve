@@ -10,6 +10,7 @@ import {
   writeSkillPackageToSandbox,
 } from "#shared/skill-package.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
 import type { ResolvedDynamicSkillResolver } from "#runtime/types.js";
 import { formatAvailableSkillsSection } from "#execution/skills/instructions.js";
 import { createLogger } from "#internal/logging.js";
@@ -45,16 +46,23 @@ function qualifyDynamicSkillNames(
   // namespaced for an extension). A map names each entry by its bare key.
   if (isSingle) {
     result.push({ name: resolver.slug, entryKey: keys[0]!, entry: entries[keys[0]!]! });
-    return result;
+  } else {
+    // Map entries from an extension resolver are prefixed with the mount
+    // namespace so extension-produced skills are namespaced like the extension's
+    // static skills; a non-extension resolver's keys stay bare.
+    const prefix =
+      resolver.extensionNamespace !== undefined ? `${resolver.extensionNamespace}__` : "";
+    for (const key of keys) {
+      result.push({ name: `${prefix}${key}`, entryKey: key, entry: entries[key]! });
+    }
   }
-
-  // Map entries from an extension resolver are prefixed with the mount
-  // namespace so extension-produced skills are namespaced like the extension's
-  // static skills; a non-extension resolver's keys stay bare.
-  const prefix =
-    resolver.extensionNamespace !== undefined ? `${resolver.extensionNamespace}__` : "";
-  for (const key of keys) {
-    result.push({ name: `${prefix}${key}`, entryKey: key, entry: entries[key]! });
+  for (const { name } of result) {
+    const reservation = eveNamespaceReservation(name);
+    if (reservation !== undefined) {
+      throw new Error(
+        `Dynamic skill resolver "${resolver.slug}" returned the reserved skill name "${name}". ${reservation}; rename the skill.`,
+      );
+    }
   }
   return result;
 }

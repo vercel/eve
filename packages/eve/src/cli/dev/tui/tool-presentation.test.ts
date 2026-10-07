@@ -8,7 +8,7 @@ describe("presentPreparingTool", () => {
     expect(presentPreparingTool("bash").title).toBe("Run …");
     expect(presentPreparingTool("write_file").title).toBe("Write …");
     expect(presentPreparingTool("eve.web_search").title).toBe("Search …");
-    expect(presentPreparingTool("final_output").title).toBe("Return final output");
+    expect(presentPreparingTool("eve__reply").title).toBe("Return final output");
   });
 
   it("leads unknown tools with their name", () => {
@@ -146,7 +146,7 @@ describe("presentTool", () => {
     expect(presentTool("agent", { message: "Audit the auth flow.\nDetails…" }).title).toBe(
       "Delegate Audit the auth flow.",
     );
-    expect(presentTool("final_output", { anything: true }).title).toBe("Return final output");
+    expect(presentTool("eve__reply", { anything: true }).title).toBe("Return final output");
   });
 
   it("covers the builtin presentation table with semantic copy", () => {

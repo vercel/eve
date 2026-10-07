@@ -1,5 +1,5 @@
 import type { ConnectionSourceRef } from "#discover/manifest.js";
-import { runtimeToolReservation } from "#protocol/runtime-tools.js";
+import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
 import {
   normalizeMcpClientConnectionDefinition,
   normalizeOpenApiConnectionDefinition,
@@ -84,7 +84,7 @@ export async function compileConnectionDefinition(
   }
 
   // A connection's own name is the entry that signs the user in to it.
-  const reservation = runtimeToolReservation(source.connectionName);
+  const reservation = eveNamespaceReservation(source.connectionName);
   if (reservation !== undefined) {
     throw new Error(
       `Connection "${source.logicalPath}" uses the reserved name "${source.connectionName}". Rename its path; ${reservation}.`,

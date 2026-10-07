@@ -35,6 +35,7 @@ import { isObject } from "#shared/guards.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { defineJsonSchema, refineJsonSchema } from "#tools/schema.js";
+import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 
 import {
   completeConnectionSignIn,
@@ -91,7 +92,7 @@ export function connectionEntry(
 
 /**
  * The entry for a connection's own name: it signs the user in when listing the
- * connection's tools needs that, then points the model at `search`.
+ * connection's tools needs that, then points the model at `eve__search`.
  */
 export function connectionSignInEntry(
   registry: ConnectionRegistry,
@@ -125,7 +126,7 @@ async function connect(
     return await session.auth.handleError(listing.error, listing.authorization);
   }
   const displayName = displayProperName(connection.connectionName);
-  const search = `search({ query: "${connection.connectionName}__" })`;
+  const search = `${SEARCH_TOOL_NAME}({ query: "${connection.connectionName}__" })`;
   // A listable connection may not need sign-in at all, so only a sign-in this call completed counts.
   return session.scoped !== undefined && session.auth.isJustAuthorized(session.scoped)
     ? `Signed in to ${displayName}. Find the ${displayName} tools with ${search}.`
@@ -237,7 +238,7 @@ function unknownToolMessage(
   const hint =
     suggestions.length > 0
       ? ` Closest tools: ${suggestions.join(", ")}.`
-      : ` Find its tools with search({ query: "${connectionName}__" }).`;
+      : ` Find its tools with ${SEARCH_TOOL_NAME}({ query: "${connectionName}__" }).`;
   return `Connection "${connectionName}" has no tool named "${toolName}".${hint}`;
 }
 

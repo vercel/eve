@@ -199,7 +199,7 @@ Run this first when something behaves unexpectedly. It confirms a file was disco
 }
 ```
 
-`toolInputSchemas` covers only tools compiled from tool files. It does not include provider-managed tools such as `web_search`, dynamic tools, connection tools, the tools eve generates at runtime for each subagent and remote agent, or the `task_wait` and `task_cancel` tools. Model providers can also transform a schema before the model reads it; those changes are not reflected here. To compute the same form for an input schema in your own code, such as in a test, call `serializeModelInputSchema(schema)` from `eve/tools`; it returns JSON Schema data and does not add `taskId`.
+`toolInputSchemas` covers only tools compiled from tool files. It does not include provider-managed tools such as `web_search`, dynamic tools, connection tools, the tools eve generates at runtime for each subagent and remote agent, or the `eve__task_wait` and `eve__task_cancel` tools. Model providers can also transform a schema before the model reads it; those changes are not reflected here. To compute the same form for an input schema in your own code, such as in a test, call `serializeModelInputSchema(schema)` from `eve/tools`; it returns JSON Schema data and does not add `taskId`.
 
 ## `eve build`
 
@@ -397,7 +397,7 @@ Each workflow tool call has one `execute_tool <tool>` span. The first turn of ea
 
 Outbound MCP `tools/call` requests add MCP semantic attributes to the matching `execute_tool` span. When eve has no tool span to enrich, it creates a `CLIENT` `tools/call <tool>` span. Each `tools/list` discovery also has a `CLIENT` span. Configured OpenTelemetry propagation fields are injected into MCP `params._meta` for JSON-RPC bodies up to 1 MiB and propagation metadata up to 8 KiB; larger requests are sent unchanged. eve removes its audience and session-lineage baggage before forwarding, and keeps the input/output content-capture policy local.
 
-A call the model makes through `execute` is traced exactly like a direct call to the entry it names: its `execute_tool` span carries that entry's name and input, such as `execute_tool linear__list_issues`, and a workflow tool or agent reached this way gets the same span its direct call would. The AI SDK's own tracing channel, which eve does not filter, still reports the `execute` tool running for each such call.
+A call the model makes through `eve__execute` is traced exactly like a direct call to the entry it names: its `execute_tool` span carries that entry's name and input, such as `execute_tool linear__list_issues`, and a workflow tool or agent reached this way gets the same span its direct call would. The AI SDK's own tracing channel, which eve does not filter, still reports the `execute` tool running for each such call.
 
 Each root agent turn starts a new trace. With local caller trace context, that trace includes the first turn of each local subagent it starts. Remote child turns and later local child turns start separate traces. If a worker is replaced, the new worker uses the prepared trace context for the same turn. Supply the conversation ID to show all related traces, oldest first.
 

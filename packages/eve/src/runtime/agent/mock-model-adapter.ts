@@ -33,9 +33,8 @@ import {
   getAvailableSkills,
 } from "#runtime/agent/mock-model-skill-selection.js";
 import { createJsonSchemaSample } from "#runtime/agent/mock-structured-output.js";
-import { FINAL_OUTPUT_TOOL_NAME } from "#protocol/final-output-tool.js";
+import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import { readTaskResults } from "#execution/tasks/render.js";
-import { CATALOG_TOOL_NAMES } from "#protocol/catalog-tools.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 
 const MOCK_RUNTIME_MODEL_PROVIDER = "eve-runtime-mock";
@@ -120,7 +119,7 @@ function createMockModelResult(
     }
   }
 
-  // The model is ready to answer. With the framework `final_output` tool
+  // The model is ready to answer. With the framework `eve__reply` tool
   // offered, deliver the answer by calling it with a schema-derived sample;
   // otherwise reply in prose.
   const finalOutput = createFinalOutputResult(options, modelId);
@@ -142,7 +141,7 @@ function createMockModelResult(
 }
 
 /**
- * When the framework `final_output` tool is offered, returns a tool-call result
+ * When the framework `eve__reply` tool is offered, returns a tool-call result
  * carrying a schema-derived sample — the structured-output analogue of a final
  * text reply. Returns `null` when the tool is absent.
  */
@@ -150,7 +149,7 @@ function createFinalOutputResult(
   options: BootstrapGenerateOptions,
   modelId: string,
 ): BootstrapGenerateResult | null {
-  const tool = getAvailableTools(options).find((entry) => entry.name === FINAL_OUTPUT_TOOL_NAME);
+  const tool = getAvailableTools(options).find((entry) => entry.name === REPLY_TOOL_NAME);
 
   if (tool === undefined) {
     return null;
@@ -163,8 +162,8 @@ function createFinalOutputResult(
     inputTokens: estimateTokenCount(getPromptText(options.prompt)),
     modelId,
     outputTokens: estimateTokenCount(JSON.stringify(sample)),
-    toolCallId: createToolCallId(FINAL_OUTPUT_TOOL_NAME),
-    toolName: FINAL_OUTPUT_TOOL_NAME,
+    toolCallId: createToolCallId(REPLY_TOOL_NAME),
+    toolName: REPLY_TOOL_NAME,
   });
 }
 
@@ -644,12 +643,10 @@ function findRelevantTool(
   // `load_skill` is reachable only through skill-relevance selection
   // (createSkillLoadResult); matching it by name here would re-call it on
   // every step, because its results are invisible to the tool-result check.
-  // Every session has `search` and `execute`, whose names are ordinary words.
   const explicitTool = tools.find(
     (tool) =>
       tool.name !== "agent" &&
       tool.name !== LOAD_SKILL_TOOL_NAME &&
-      !CATALOG_TOOL_NAMES.includes(tool.name) &&
       normalizedMessage.includes(normalizeText(tool.name)),
   );
   if (explicitTool !== undefined) {

@@ -767,7 +767,7 @@ describe("compileAgentManifest source graph", () => {
   it("reserves the task tools' names", async () => {
     const sourceRegistry = registry([
       {
-        logicalPath: "tools/task_cancel.ts",
+        logicalPath: "tools/eve__task_cancel.ts",
         loadNamespace: async () => ({
           default: defineTool({ description: "Cancel.", inputSchema: {}, execute: () => null }),
         }),
@@ -777,7 +777,7 @@ describe("compileAgentManifest source graph", () => {
     await expect(
       compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
     ).rejects.toThrow(
-      'Tool "tools/task_cancel.ts" uses the reserved name "task_cancel". Rename its path; eve reserves "task_cancel" for its built-in task tool.',
+      'Tool "tools/eve__task_cancel.ts" uses the reserved name "eve__task_cancel". Rename its path; eve reserves the "eve" namespace for its built-in tools.',
     );
   });
 

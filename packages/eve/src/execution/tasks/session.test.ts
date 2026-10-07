@@ -60,7 +60,7 @@ describe("answerTaskCancel", () => {
 
     await answerTaskCancel(cursor, {
       callId: "cancel-call",
-      kind: "task_cancel",
+      kind: "eve__task_cancel",
       taskId: research.taskId,
     });
 
