@@ -478,4 +478,19 @@ describe("just-bash provider", () => {
 
     await expect(resumedHandle.sandbox.readTextFile({ path: "notes.txt" })).resolves.toBe("hi\n");
   });
+
+  it("rejects session state whose root is outside the app's session cache", async () => {
+    const appRoot = await createTemporaryCacheDirectory("foreign-root");
+    const provider = createJustBashProvider();
+    const { handle, state } = await provider.start({ appRoot, sandboxName: "session-foreign" });
+    await handle.onRuntimeShutdown();
+
+    await expect(
+      provider.openSession({
+        existing: { ...state, rootPath: join(appRoot, "elsewhere") },
+        appRoot,
+        sandboxName: "session-foreign",
+      }),
+    ).rejects.toThrow("session state is incompatible");
+  });
 });
