@@ -7,8 +7,9 @@
  * 1. Exact: the query's words are the full name's words.
  * 2. Exact without prefix: they are a connection tool's name without its
  *    connection prefix, so `create_issue` finds `linear__create_issue`.
- * 3. Connection: they start the connection's name, so `linear` lists the
- *    `linear` connection's tools.
+ * 3. Connection: they are the connection's name, or its first whole words,
+ *    so `linear` lists the `linear` connection's tools, while `git` leaves
+ *    `github`'s tools to the name prefix tier.
  * 4. Name prefix: the name's words start with the query's words, the last of
  *    which may be partial, so `create_iss` finds `create_issue`.
  * 5. Keyword: any other match. A query word matches a word when either is a
@@ -78,7 +79,7 @@ function rankCandidate(
     : sameWords(ownName, terms)
       ? Tier.exactWithoutPrefix
       : candidate.connection !== undefined &&
-          startsWithWords(tokenize(candidate.connection.name), terms)
+          startsWithWholeWords(tokenize(candidate.connection.name), terms)
         ? Tier.connection
         : startsWithWords(fullName, terms) || startsWithWords(ownName, terms)
           ? Tier.namePrefix
@@ -87,7 +88,11 @@ function rankCandidate(
 }
 
 function sameWords(words: readonly string[], terms: readonly string[]): boolean {
-  return words.length === terms.length && terms.every((term, index) => words[index] === term);
+  return words.length === terms.length && startsWithWholeWords(words, terms);
+}
+
+function startsWithWholeWords(words: readonly string[], terms: readonly string[]): boolean {
+  return terms.length <= words.length && terms.every((term, index) => words[index] === term);
 }
 
 /** The last term may be a partial word. */

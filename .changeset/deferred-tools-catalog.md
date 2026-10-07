@@ -7,6 +7,7 @@ Every agent now has `search` and `execute`, which reach tools marked `deferred: 
 Breaking changes:
 
 - `search` and `execute` are reserved: rename an `agent/tools/search.ts` or `agent/tools/execute.ts`, a subagent with either name, or a dynamic tool map key `search` or `execute`.
+- A connection named after a tool eve adds at runtime (`search`, `execute`, `task_wait`, `task_cancel`, or `final_output`) now fails to build, and a dynamic connection with one of those names fails when it resolves. Rename the connection.
 - A connection owns its name and every name starting with `<name>__`. A tool, subagent, or connection under another connection's prefix is rejected at build time, and a dynamic one when it resolves.
 - Dynamic tool map keys must be legal tool names: ASCII letters, digits, `_`, and `-`, starting with a letter, up to 64 characters.
 - Connection approvals are keyed by `<connection>__<tool>` instead of a `[connection, tool]` pair, so saved "always approve" decisions for connection tools reset.
