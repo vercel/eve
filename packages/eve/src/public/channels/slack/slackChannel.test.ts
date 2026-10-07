@@ -3268,6 +3268,71 @@ describe("slackChannel() inbound mention pipeline", () => {
     );
   });
 
+  it("adds prior thread replies as history when a mention starts the thread's session", async () => {
+    const threadTs = "1700000000.000001";
+    const currentTs = "1700000000.000004";
+    fetchMock.mockImplementation(async (request: string | URL | Request) => {
+      if (String(request).includes("conversations.replies")) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            messages: [
+              { user: "U_ROOT", text: "Daily report?", ts: threadTs, thread_ts: threadTs },
+              {
+                app_id: "A01",
+                bot_id: "B_AGENT",
+                text: "Deploys are green.",
+                ts: "1700000000.000002",
+                thread_ts: threadTs,
+                user: "U_BOT",
+              },
+              { user: "U_OTHER", text: "Thanks!", ts: "1700000000.000003", thread_ts: threadTs },
+              { user: "U_CURRENT", text: "Any flakes?", ts: currentTs, thread_ts: threadTs },
+            ],
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ ok: true, ts: "1700000001.000001" }), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onAppMention: () => ({ auth: null }),
+      threadContext: {},
+    });
+    const body = buildEventBody(
+      {
+        channel: "C01",
+        event_ts: currentTs,
+        text: "Any flakes?",
+        thread_ts: threadTs,
+        ts: currentTs,
+        type: "app_mention",
+        user: "U_CURRENT",
+      },
+      { authorizations: [{ is_bot: true, user_id: "U_BOT" }] },
+    );
+
+    const { send } = await firePost(channel, buildSignedRequest({ body }), {
+      resolveSession: async () => undefined,
+    });
+
+    const [, input] = send.mock.calls[0]! as [
+      string,
+      { history?: readonly { id?: string; role: string; content: string }[]; message: string },
+    ];
+    expect(input.message).not.toContain("<slack_thread_context>");
+    expect(input.history?.map(({ id, role }) => ({ id, role }))).toEqual([
+      { id: threadTs, role: "user" },
+      { id: "1700000000.000002", role: "assistant" },
+      { id: "1700000000.000003", role: "user" },
+    ]);
+    expect(input.history?.[0]?.content).toContain("sender_id: U_ROOT");
+    expect(input.history?.[1]?.content).toBe("Deploys are green.");
+  });
+
   it("does not dispatch when onAppMention resolves to null", async () => {
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },

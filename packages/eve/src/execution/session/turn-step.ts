@@ -32,6 +32,7 @@ import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
+import { readPendingHistory, withoutPendingHistory } from "#execution/session/pending-history.js";
 import * as agentTraceState from "#tracing/agent-trace-context-store.js";
 import { matchAuthorizationCallbacks } from "#execution/authorization-callback-match.js";
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
@@ -205,14 +206,21 @@ async function runSessionStepBody(
           .requester
       : undefined;
   if (requester !== undefined) ctx.set(AuthKey, requester);
+  // History left by `create()` joins the first message's turn, so a message takes it out of state.
+  const pendingHistory =
+    delivery?.payloads.some((payload) => payload.message !== undefined) === true
+      ? readPendingHistory(durableSession.state)
+      : [];
+  const hydrated = hydrateDurableSession({
+    compactionOverrides: {
+      thresholdPercent: effectiveAgent.thresholdPercent,
+    },
+    durable: durableSession,
+    turnAgent: effectiveAgent.turnAgent,
+  });
   const initialSession: HarnessSession = {
-    ...hydrateDurableSession({
-      compactionOverrides: {
-        thresholdPercent: effectiveAgent.thresholdPercent,
-      },
-      durable: durableSession,
-      turnAgent: effectiveAgent.turnAgent,
-    }),
+    ...hydrated,
+    ...(pendingHistory.length > 0 && { state: withoutPendingHistory(hydrated.state) }),
     history: validateHarnessModelMessages(input.history),
   };
   const history = createExecutionHistoryView(initialSession);
@@ -321,7 +329,12 @@ async function runSessionStepBody(
             : defaultDeliverResult(payload);
 
           if (result !== undefined && result !== null) {
-            results.push(result);
+            // `history` is framework-owned, so a channel's deliver hook cannot drop or rewrite it.
+            const history = [
+              ...(results.length === 0 ? pendingHistory : []),
+              ...(payload.history ?? []),
+            ];
+            results.push(history.length === 0 ? result : { ...result, history });
           }
         }
       } catch (error) {

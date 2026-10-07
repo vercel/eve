@@ -1490,6 +1490,71 @@ describe("createToolLoopHarness", () => {
     ).rejects.toThrow(/Dynamic model selection is required/);
   });
 
+  it("adds delivered history before each turn's context and message", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "ok", role: "assistant" }] },
+      text: "ok",
+      toolCalls: [],
+      toolResults: [],
+    });
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig(emit));
+
+    const first = await runStep(createTestSession(), {
+      context: ["Current context"],
+      history: [
+        { content: "What is the code word?", id: "m1", role: "user" },
+        { content: "It is heron.", role: "assistant" },
+      ],
+      message: "Repeat it.",
+    });
+    await runStep(first.session, {
+      history: [{ content: "Bob: it changed to egret.", role: "user" }],
+      message: "And now?",
+    });
+
+    const agents = vi
+      .mocked(ToolLoopAgent)
+      .mock.results.map((result) => result.value as { stream: ReturnType<typeof vi.fn> });
+    expect(agents[0]?.stream.mock.calls[0]?.[0].messages).toEqual([
+      {
+        content: "What is the code word?",
+        kind: "user",
+        metadata: { "eve.imported": true },
+        role: "user",
+      },
+      { content: "It is heron.", role: "assistant" },
+      { content: "Current context", kind: "context.instruction", role: "user" },
+      { content: "Repeat it.", kind: "user", role: "user" },
+    ]);
+    expect(agents[1]?.stream.mock.calls[0]?.[0].messages.slice(-3)).toEqual([
+      { content: "ok", role: "assistant" },
+      {
+        content: "Bob: it changed to egret.",
+        kind: "user",
+        metadata: { "eve.imported": true },
+        role: "user",
+      },
+      { content: "And now?", kind: "user", role: "user" },
+    ]);
+    const received = events.filter(
+      (event) => event.type === "history.imported" || event.type === "message.received",
+    );
+    expect(received.map((event) => [event.type, event.data.turnId])).toEqual([
+      ["history.imported", "turn_0"],
+      ["message.received", "turn_0"],
+      ["history.imported", "turn_1"],
+      ["message.received", "turn_1"],
+    ]);
+    expect(received[0]?.data).toMatchObject({
+      messages: [
+        { id: "m1", role: "user", text: "What is the code word?" },
+        { role: "assistant", text: "It is heron." },
+      ],
+    });
+  });
+
   it("passes projected history and incoming input to turn.started on every turn", async () => {
     setupMockAgent({
       finishReason: "stop",

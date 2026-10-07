@@ -475,6 +475,7 @@ export function hasRunnableQueue(view: SessionView): boolean {
   if (
     queued.message !== undefined ||
     (queued.context?.length ?? 0) > 0 ||
+    (queued.history?.length ?? 0) > 0 ||
     readClientContext(queued) !== undefined ||
     queued.outputSchema !== undefined ||
     (queued.runtimeActionResults?.length ?? 0) > 0

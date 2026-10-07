@@ -25,6 +25,7 @@ export {
   type ChannelReceiveContext,
   type ChannelResolveSession,
   type ChannelRespondOptions,
+  type ChannelCreateOptions,
   type ChannelSendOptions,
   type ChannelSource,
   type ChannelCors,
@@ -59,6 +60,7 @@ export {
   type WebSocketUpgradeResult,
   isDisabledRouteSentinel,
 } from "#public/definitions/channel.js";
+export type { SessionHistoryMessage } from "#shared/session-history.js";
 export {
   createWebSocketUpgradeServer,
   type WebSocketUpgradeServerBridge,

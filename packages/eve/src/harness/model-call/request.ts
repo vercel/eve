@@ -6,11 +6,7 @@ import { HistoryStateKey } from "#context/keys.js";
 import { taskSystemMessages } from "#execution/tasks/model-step.js";
 import { getPendingAnnouncements } from "#harness/announcements.js";
 import { createCurrentMessages } from "#harness/current-messages.js";
-import {
-  createFrameworkUserMessage,
-  type HarnessModelMessage,
-  type UserModelMessage,
-} from "#harness/messages.js";
+import { createFrameworkUserMessage, type HarnessModelMessage } from "#harness/messages.js";
 import { type AnthropicCacheMarker, applySystemCacheBreakpoint } from "#harness/prompt-cache.js";
 import type { Step } from "#harness/step/context.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
@@ -27,7 +23,7 @@ export function requestMessages(
   input: {
     readonly messages: readonly HarnessModelMessage[];
     readonly projectedMessages: readonly HarnessModelMessage[];
-    readonly turnMessages: readonly UserModelMessage[];
+    readonly turnMessages: readonly HarnessModelMessage[];
     readonly coordinationTools: HarnessToolMap;
     readonly hidesHeldText: boolean;
     readonly pendingApprovalsNote: string | undefined;

@@ -181,6 +181,7 @@ export async function acceptHumanInput(
       // resumes that turn, and the model reads the message from history.
       const turn = await prepareTurnInput(step, decision.input, { consumedMessage: false });
       const failed = await openTurn(step, {
+        imported: turn.imported,
         input: [...turn.ephemeral, ...turn.messages],
         message: delivered.displayMessage ?? decision.input?.message,
       });
