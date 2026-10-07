@@ -775,7 +775,7 @@ describe("mcpChannel tools", () => {
         auth,
         initiator,
         signal: expect.any(AbortSignal),
-        ...(auth === principal ? {} : { forwardedBy: principal }),
+        forwardedBy: auth === principal ? undefined : principal,
       });
     }
 

@@ -59,12 +59,12 @@ export function createPublishedTools(input: {
           const key = toolSessionKey(context);
           const result = await input.invokeTool(tool.name, value, {
             auth: current,
-            initiator,
-            signal: context.signal,
             // The verified forwarder scopes a keyed session, so two routers
             // that name the same user do not share a sandbox.
-            ...(forwarder === undefined ? {} : { forwardedBy: forwarder }),
-            ...(key === undefined ? {} : { key }),
+            forwardedBy: forwarder,
+            initiator,
+            key,
+            signal: context.signal,
           });
           return toCallToolResult(tool.name, result, tool.outputSchema !== undefined);
         },
