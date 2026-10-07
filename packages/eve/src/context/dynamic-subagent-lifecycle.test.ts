@@ -12,13 +12,16 @@ import {
   SessionDynamicSubagentRuntimeRevisionKey,
   SessionIdKey,
 } from "#context/keys.js";
-import { RUNTIME_TOOL_NAMES } from "#protocol/runtime-tools.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineRemoteAgent } from "#public/definitions/remote-agent.js";
 import { createSessionStartedEvent, createTurnStartedEvent } from "#protocol/message.js";
 import type { ResolvedDynamicSubagentResolver } from "#runtime/subagents/registry.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
-import { connectionRegistry, fakeConnection } from "#internal/testing/catalog-fixtures.js";
+import {
+  connectionRegistry,
+  fakeConnection,
+  RESERVED_TOOL_NAMES,
+} from "#internal/testing/catalog-fixtures.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 
@@ -521,14 +524,12 @@ describe("dynamic subagent names", () => {
     });
   });
 
-  it.each(RUNTIME_TOOL_NAMES)("omits a subagent named after the runtime tool %s", async (name) => {
+  it.each(RESERVED_TOOL_NAMES)("omits a subagent named %s, the built-in %s", async (name, role) => {
     const resolved = await resolveResearcher({ name });
 
     expect(resolved.selected).toBe(false);
     expect(resolved.errors).toEqual([
-      expect.stringContaining(
-        `Dynamic subagent "${name}" from "agent.ts" collides with the tool "${name}".`,
-      ),
+      `Dynamic subagent "${name}" from "agent.ts" uses the reserved name "${name}". eve reserves "${name}" for its built-in ${role}; rename the subagent.`,
     ]);
   });
 

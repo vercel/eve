@@ -2,7 +2,12 @@ import { jsonSchema } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
-import { subagentTool, toolMap, workflowTool } from "#internal/testing/catalog-fixtures.js";
+import {
+  inlineTool,
+  subagentTool,
+  toolMap,
+  workflowTool,
+} from "#internal/testing/catalog-fixtures.js";
 import {
   foldingHandler,
   parkedSteps,
@@ -530,4 +535,47 @@ describe("generation steering with the real AI SDK", () => {
       expect(parkedSteps(result.session)).toEqual([]);
     },
   );
+
+  it("does not interrupt a step once an inline entry called through execute is running", async () => {
+    const steering = new AbortController();
+    const executing = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const refund = vi.fn(async () => {
+      executing.resolve();
+      await release.promise;
+      return { refunded: true };
+    });
+    const model = new MockLanguageModelV3({
+      doStream: async () => ({
+        stream: new ReadableStream<Part>({
+          start(controller) {
+            controller.enqueue({
+              type: "tool-call",
+              toolCallId: "refund-1",
+              toolName: "execute",
+              input: JSON.stringify({ input: {}, tool: "refund_invoice" }),
+            });
+            controller.enqueue({
+              type: "finish",
+              finishReason: { unified: "tool-calls", raw: undefined },
+              usage,
+            });
+            controller.close();
+          },
+        }),
+      }),
+    });
+    const running = createToolLoopHarness({
+      steeringSignal: steering.signal,
+      tools: toolMap(inlineTool("refund_invoice", { deferred: true, execute: refund })),
+      resolveModel: async () => model,
+      handleEvent: async () => {},
+    })(session(), { message: "Alice asks for a refund of invoice in_1" });
+    await executing.promise;
+    steering.abort();
+    release.resolve();
+
+    expect((await running).steered).toBeUndefined();
+    expect(refund).toHaveBeenCalledOnce();
+  });
 });

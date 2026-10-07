@@ -26,7 +26,7 @@ import { defineDynamicSchedules } from "#public/schedules/subscription.js";
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
 import { z } from "#compiled/zod/index.js";
 import { defineSkill } from "#public/definitions/skill.js";
-import { RUNTIME_TOOL_NAMES } from "#protocol/runtime-tools.js";
+import { RESERVED_TOOL_NAMES } from "#internal/testing/catalog-fixtures.js";
 import { resolveAgent } from "#runtime/resolve-agent.js";
 import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
 import { compiledAgentManifestSchema } from "#compiler/manifest.js";
@@ -765,39 +765,29 @@ describe("compileAgentManifest source graph", () => {
     );
   });
 
-  // Every runtime name, each with the role its error names.
-  const RESERVED: readonly (readonly [string, string])[] = [
-    ["search", "catalog tool"],
-    ["execute", "catalog tool"],
-    ["task_wait", "task tool"],
-    ["task_cancel", "task tool"],
-    ["final_output", "final output tool"],
-  ];
-
-  it("covers every runtime tool name", () => {
-    expect(RESERVED.map(([name]) => name).sort()).toEqual([...RUNTIME_TOOL_NAMES].sort());
-  });
-
-  it.each(RESERVED)("rejects an authored tool named %s, the built-in %s", async (name, role) => {
-    const sourceRegistry = registry([
-      {
-        logicalPath: `tools/${name}.ts`,
-        loadNamespace: async () => ({
-          default: defineTool({
-            description: "Replacement.",
-            execute: () => null,
-            inputSchema: {},
+  it.each(RESERVED_TOOL_NAMES)(
+    "rejects an authored tool named %s, the built-in %s",
+    async (name, role) => {
+      const sourceRegistry = registry([
+        {
+          logicalPath: `tools/${name}.ts`,
+          loadNamespace: async () => ({
+            default: defineTool({
+              description: "Replacement.",
+              execute: () => null,
+              inputSchema: {},
+            }),
           }),
-        }),
-      },
-    ]);
+        },
+      ]);
 
-    await expect(
-      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
-    ).rejects.toThrow(
-      `Tool "tools/${name}.ts" uses the reserved name "${name}". Rename its path; eve reserves "${name}" for its built-in ${role}.`,
-    );
-  });
+      await expect(
+        compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+      ).rejects.toThrow(
+        `Tool "tools/${name}.ts" uses the reserved name "${name}". Rename its path; eve reserves "${name}" for its built-in ${role}.`,
+      );
+    },
+  );
 
   it("rejects disabling a catalog tool, since every agent has search and execute", async () => {
     const sourceRegistry = registry([
