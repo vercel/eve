@@ -525,7 +525,7 @@ describe("compileAgentManifest source graph", () => {
       "instructions/dynamic.ts": { compile: true, runtimeEntry: true },
       "instructions/static.ts": { compile: true, runtimeEntry: false },
       "schedules/handler.ts": { compile: true, runtimeEntry: true },
-      "schedules/prompt.ts": { compile: true, runtimeEntry: false },
+      "schedules/prompt.ts": { compile: true, runtimeEntry: true },
       "skills/dynamic.ts": { compile: true, runtimeEntry: true },
       "skills/static.ts": { compile: true, runtimeEntry: false },
       "tools/dynamic.ts": { compile: true, runtimeEntry: true },

@@ -101,6 +101,7 @@ export interface LocalDevRequestProvenance {
 export const LocalDevRequestKey = new ContextKey<LocalDevRequestProvenance>(
   "eve.internal.localDevRequest",
 );
+export const OccurrenceIdKey = new ContextKey<string>("eve.scheduleOccurrenceId");
 /** Authored schedule whose dispatch created this session. */
 export const ScheduleIdKey = new ContextKey<string>("eve.scheduleId");
 /** Display title derived from the session's initial input. */
