@@ -727,8 +727,9 @@ One announcement under the key `catalog` replaces the connection listing.
   names, such as `sre` for `sre__list_alerts`, whether the entries come from
   an extension mount or are vendored under that prefix. A namespace query
   (`search({ query: "sre__" })`) searches exactly that set. At most 20 are
-  listed, the largest first and then by name, and a longer list ends with
-  "and more". A namespace that is also a connection's name is listed only
+  listed: the 20 with the most entries, rendered by name, so a namespace
+  growing or shrinking only changes the listing at the cap. A longer list
+  ends with "and more". A namespace that is also a connection's name is listed only
   as the connection.
 - **Connections** are listed by name and description, capped at 20 the same
   way. Listing their tools would mean connecting to every server, and
@@ -748,7 +749,7 @@ One announcement under the key `catalog` replaces the connection listing.
 
 ```text
 More tools, agents, and skills are available than your context shows. They aren't listed; find them with search before deciding you can't do something. Call tools with execute({ tool, input }) and load skills with execute({ skill }).
-Namespaces, whose entries are named <namespace>__<name>; search one with "<namespace>__": index, sre, d0, support
+Namespaces, whose entries are named <namespace>__<name>; search one with "<namespace>__": d0, index, sre, support
 Connections, whose tools are named <connection>__<tool>; search one connection's tools with "<connection>__":
 - linear: Linear issues and projects
 - petstore: Pet store inventory API
