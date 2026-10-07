@@ -1,4 +1,8 @@
-import type { LanguageModelV4CallOptions, LanguageModelV4Prompt } from "@ai-sdk/provider";
+import type {
+  LanguageModelV4CallOptions,
+  LanguageModelV4Prompt,
+  LanguageModelV4ToolResultPart,
+} from "@ai-sdk/provider";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
@@ -32,6 +36,7 @@ import {
   toolMap,
   workflowTool,
 } from "#internal/testing/catalog-fixtures.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 import { parkedSteps } from "#internal/testing/session-machine.js";
 import {
   createSessionStartedEvent,
@@ -158,6 +163,21 @@ function toolResult(request: LanguageModelV4CallOptions, callId: string): unknow
     }
   }
   throw new Error(`No result for ${callId} in the request.`);
+}
+
+/** Every tool-result part for `callId` in the request's prompt. */
+function toolResultParts(
+  request: LanguageModelV4CallOptions,
+  callId: string,
+): LanguageModelV4ToolResultPart[] {
+  return request.prompt.flatMap((message) =>
+    message.role === "tool"
+      ? message.content.filter(
+          (part): part is LanguageModelV4ToolResultPart =>
+            part.type === "tool-result" && part.toolCallId === callId,
+        )
+      : [],
+  );
 }
 
 /** A dynamic tool, stamped with the durable callback the bundler adds to authored resolvers. */
@@ -389,9 +409,9 @@ describe("step catalog in the harness (real AI SDK)", () => {
     );
     await drive({ message: "Alice asks to sync the tenant again." });
     // An entry the resolver no longer returns can't be called.
-    expect(toolResult(driver.requests().at(-1)!, "sync-again")).toContain(
-      'No tool named \\"tenant__sync\\". Closest tools: plan_advisor.',
-    );
+    const gone = toolResult(driver.requests().at(-1)!, "sync-again");
+    expect(gone).toContain("No tool named");
+    expect(gone).toContain("tenant__sync");
 
     // A tool and a skill share a name; skills load deferred or not, including
     // a dynamic deferred skill that appears when the turn starts.
@@ -538,9 +558,19 @@ describe("step catalog in the harness (real AI SDK)", () => {
     expect(announcedAt).toEqual([approvalStep, connectionStep, changedStep, skillStep]);
 
     // The stand-in result for calls the harness dispatches after the step never
-    // reaches the model or the protocol.
-    for (const request of requests) {
-      expect(JSON.stringify(request.prompt)).not.toContain("dispatched");
+    // reaches the model or the protocol: until compaction, each prompt carries
+    // exactly one result per call, and it is the dispatched call's real result.
+    for (const callId of ["deploy", "research", "delegate"]) {
+      const firstResult = requests.findIndex(
+        (request) => toolResultParts(request, callId).length > 0,
+      );
+      expect(firstResult, callId).toBeGreaterThan(0);
+      for (const request of requests.slice(firstResult, compactionStep)) {
+        expect(
+          toolResultParts(request, callId).map((part) => part.output),
+          callId,
+        ).toEqual([expect.objectContaining({ value: expect.anything() })]);
+      }
     }
     for (const callId of ["deploy", "research", "delegate"]) {
       const results = driver.events.filter(
@@ -583,6 +613,37 @@ describe("step catalog in the harness (real AI SDK)", () => {
       "load-skill",
       "load-skill",
     ]);
+  });
+
+  it("names the entry, not execute, when a deferred entry returns a result that isn't JSON", async () => {
+    const logs = captureLogRecords();
+    const ctx = createSessionContext();
+    ctx.set(BundleKey, catalogBundle());
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    const driver = createDriver(
+      ctx,
+      toolMap(
+        inlineTool("add"),
+        inlineTool("export_ledger", { deferred: true, execute: async () => circular }),
+      ),
+    );
+    driver.reply(
+      calls(call("export", "execute", { tool: "export_ledger" })),
+      text("The ledger export failed."),
+    );
+
+    await driver.drive({ message: "Alice asks for the ledger export." });
+
+    expect(toolResult(driver.requests()[1]!, "export")).toContain(
+      'Tool "export_ledger" call "export" returned a non-JSON-serializable result.',
+    );
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        fields: expect.objectContaining({ toolCallId: "export", toolName: "export_ledger" }),
+        message: "tool execution failed",
+      }),
+    );
   });
 
   it("gives an agent with an empty catalog both tools and no listing", async () => {

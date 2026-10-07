@@ -12,6 +12,7 @@ import {
   SessionDynamicSubagentRuntimeRevisionKey,
   SessionIdKey,
 } from "#context/keys.js";
+import { RUNTIME_TOOL_NAMES } from "#protocol/runtime-tools.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineRemoteAgent } from "#public/definitions/remote-agent.js";
 import { createSessionStartedEvent, createTurnStartedEvent } from "#protocol/message.js";
@@ -520,8 +521,18 @@ describe("dynamic subagent names", () => {
     });
   });
 
+  it.each(RUNTIME_TOOL_NAMES)("omits a subagent named after the runtime tool %s", async (name) => {
+    const resolved = await resolveResearcher({ name });
+
+    expect(resolved.selected).toBe(false);
+    expect(resolved.errors).toEqual([
+      expect.stringContaining(
+        `Dynamic subagent "${name}" from "agent.ts" collides with the tool "${name}".`,
+      ),
+    ]);
+  });
+
   it.each([
-    ["search", 'Dynamic subagent "search" from "agent.ts" collides with the tool "search".'],
     [
       "linear__triage",
       'Dynamic subagent "linear__triage" starts with "linear__", which belongs to connection "linear". Rename the subagent directory.',

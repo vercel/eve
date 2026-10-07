@@ -58,7 +58,7 @@ const usage = {
 };
 const sessionId = "turn-connection-approval";
 const TOOL_GONE_RESULT =
-  'The approved tool "notes__saveNote" is no longer available, so the call didn\'t run. If the task still needs it, find an available tool with search and make a new call, which needs approval again.';
+  'The tool "notes__saveNote" is no longer available, so the call didn\'t run. If the task still needs it, find an available tool with search and make a new call.';
 
 /** A model step that saves notes through `execute`, or replies when `callId` is omitted. */
 function modelResponse(callId?: string | readonly string[], connection = "notes") {
