@@ -40,7 +40,8 @@ export function historyCallNames(messages: readonly ModelMessage[]): ReadonlyMap
  */
 const DISPATCHED = Object.freeze({ dispatched: true });
 
-function dispatchesAfterStep(resolved: ResolvedCall<ToolCallLike> | undefined): boolean {
+/** Whether a call runs as a workflow tool or agent the harness dispatches after the step. */
+export function dispatchesAfterStep(resolved: ResolvedCall<ToolCallLike> | undefined): boolean {
   return resolved !== undefined && isWorkflowTool(resolved.definition);
 }
 
@@ -63,9 +64,8 @@ export function runEntryCall(
  */
 export function stubbedCall(
   call: ToolCallLike,
-  resolve: CallResolver | undefined,
+  resolved: ResolvedCall<ToolCallLike> | undefined,
 ): ToolCallLike | undefined {
-  const resolved = resolve?.(call);
   if (resolved === undefined) return call;
   return dispatchesAfterStep(resolved) ? undefined : resolved.call;
 }

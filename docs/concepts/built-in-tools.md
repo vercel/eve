@@ -307,7 +307,7 @@ After `execute` resolves its entry, the call runs exactly like a direct call to 
 
 eve tells the model what it can reach in append-only context messages rather than in the system prompt: the names of deferred tools and agents, and each connection's name and description. A later step adds a message only when that listing changes. The definitions of `search` and `execute` never change, so adding a deferred entry, signing in, or resolving a dynamic connection keeps the cached prompt prefix.
 
-Both names are reserved. The compiler rejects an authored `agent/tools/search.ts` or `agent/tools/execute.ts`, and a subagent or dynamic tool cannot use either name. A connection's own name is the entry that signs the user in to it, so a connection, static or dynamic, cannot be named after any tool eve adds itself, such as `search` or `execute`.
+The names of the tools eve adds itself are reserved: `search`, `execute`, `task_wait`, `task_cancel`, and `final_output`. No tool, subagent, or connection can take one, whether authored or dynamic: the compiler rejects an authored one, such as `agent/tools/search.ts`, and eve rejects a dynamic one when its resolver returns it. A connection's own name is also the entry that signs the user in to it.
 
 ### `task_wait` and `task_cancel`
 

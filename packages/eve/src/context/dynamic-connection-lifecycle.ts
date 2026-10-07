@@ -1,13 +1,14 @@
 import { getAdapterKind } from "#channel/adapter.js";
 import type { ContextContainer } from "#context/container.js";
 import { AuthKey, InitiatorAuthKey, SessionIdKey } from "#context/keys.js";
-import { assertNotConnectionOwned, RUNTIME_TOOL_NAMES } from "#connections/ownership.js";
+import { assertNotConnectionOwned } from "#connections/ownership.js";
 import { dynamicToolNames } from "#context/build-dynamic-tools.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { ALLOWED_DYNAMIC_CONNECTION_EVENTS } from "#dynamic/definition.js";
 import { CONNECTION_SLUG_PATTERN } from "#discover/grammar.js";
 import { createLogger } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { runtimeToolRole } from "#protocol/runtime-tools.js";
 import { readStampedConnectionProtocol } from "#public/definitions/connections/protocol.js";
 import type { DynamicConnectionResolveContext } from "#public/definitions/connections/dynamic.js";
 import { ConnectionRegistryImpl } from "#runtime/connections/registry.js";
@@ -153,12 +154,16 @@ export async function dispatchDynamicConnectionEvent(input: {
   );
 }
 
-/** The agent's tool and subagent names, which no connection may own. */
+/**
+ * The agent's tool and subagent names, which no connection may own. A dynamic
+ * subagent's name counts whether or not its resolver has resolved yet.
+ */
 function agentEntryNames(ctx: ContextContainer): readonly string[] {
   const bundle = ctx.get(BundleKey);
   return [
     ...(bundle?.toolRegistry.toolsByName.keys() ?? []),
     ...(bundle?.subagentRegistry.subagentsByName.keys() ?? []),
+    ...(bundle?.subagentRegistry.dynamicResolvers.map((resolver) => resolver.name) ?? []),
     ...dynamicToolNames(ctx),
   ];
 }
@@ -168,9 +173,10 @@ function assertNoRuntimeToolNames(
   resolver: ResolvedDynamicConnectionResolver,
 ): void {
   for (const { connectionName } of connections) {
-    if (!RUNTIME_TOOL_NAMES.includes(connectionName)) continue;
+    const reservedFor = runtimeToolRole(connectionName);
+    if (reservedFor === undefined) continue;
     throw new Error(
-      `Dynamic connection resolver "${resolver.logicalPath}" returned the reserved connection name "${connectionName}". eve reserves "${connectionName}" for its built-in tool; rename the connection.`,
+      `Dynamic connection resolver "${resolver.logicalPath}" returned the reserved connection name "${connectionName}". eve reserves "${connectionName}" for its built-in ${reservedFor}; rename the connection.`,
     );
   }
 }

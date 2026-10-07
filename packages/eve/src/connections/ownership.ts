@@ -5,20 +5,6 @@
  * check them.
  */
 
-import { CATALOG_TOOL_NAMES } from "#protocol/catalog-tools.js";
-import { FINAL_OUTPUT_TOOL_NAME } from "#protocol/final-output-tool.js";
-import { TASK_TOOL_NAMES } from "#protocol/task-tools.js";
-
-/**
- * The tools eve adds to sessions itself. A connection's own name is the entry
- * that signs the user in to it, so no connection may take one of these.
- */
-export const RUNTIME_TOOL_NAMES: readonly string[] = [
-  ...CATALOG_TOOL_NAMES,
-  ...TASK_TOOL_NAMES,
-  FINAL_OUTPUT_TOOL_NAME,
-];
-
 /** The full name of a connection tool: `linear__list_issues`. */
 export function connectionToolName(connectionName: string, toolName: string): string {
   return `${connectionName}__${toolName}`;
