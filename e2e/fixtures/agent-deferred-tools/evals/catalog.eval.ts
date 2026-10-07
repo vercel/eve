@@ -27,7 +27,7 @@ export default defineEval({
     turn.usedNoTools();
     t.messageIncludes("DEFERRED-IN-TOOLS: none");
     t.messageIncludes("CATALOG-TOOLS: search, execute");
-    t.messageIncludes("More tools, agents, and skills are available than your context shows.");
+    t.messageIncludes("You have more tools, agents, and skills than are loaded here.");
     // The dynamic ledger tools share one namespace.
     t.messageIncludes(/^Namespaces, .*: ledger$/mu);
     t.messageIncludes("\n- petstore: Pet store inventory API.");
