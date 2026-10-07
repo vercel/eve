@@ -1,14 +1,7 @@
-import type { ModelMessage } from "ai";
-
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
+import type { SettledCall } from "#harness/session-machine/transitions.js";
 import type { StepCoordinates as PendingInputBatchEvent } from "#harness/session-machine/view.js";
-import { createActionResultEvent, type UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
-
-type ToolResultPart = Extract<
-  Extract<ModelMessage, { role: "tool" }>["content"][number],
-  { type: "tool-result" }
->;
 
 const IGNORED_INPUT_REASON = "Ignored because the user continued without responding.";
 export const TOOL_EXECUTION_DENIED_MESSAGE = "Tool execution was denied.";
@@ -80,29 +73,22 @@ export function unavailableToolMessage(toolName: string): string {
 }
 
 /**
- * A call that ends without running: the failed action result the stream reports, and the
- * `error-text` result the model reads.
+ * A call that ends without running: its failed runtime result, which the lifecycle reports at the
+ * step's coordinates, and the `error-text` result the model reads.
  */
-export function failedCallResult(
-  at: PendingInputBatchEvent,
-  call: { readonly callId: string; readonly message: string; readonly toolName: string },
-): { readonly event: UnstampedMessageStreamEvent; readonly part: ToolResultPart } {
+export function failedCall(call: {
+  readonly callId: string;
+  readonly message: string;
+  readonly toolName: string;
+}): Required<SettledCall> {
   const { callId, message, toolName } = call;
   return {
-    event: createActionResultEvent({
-      ...at,
-      result: createRuntimeToolResultFromValue({
-        callId,
-        isError: true,
-        output: message,
-        toolName,
-      }),
-    }),
     part: {
       output: { type: "error-text", value: message },
       toolCallId: callId,
       toolName,
       type: "tool-result",
     },
+    result: createRuntimeToolResultFromValue({ callId, isError: true, output: message, toolName }),
   };
 }
