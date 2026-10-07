@@ -3,7 +3,8 @@ import type { ToolSet } from "ai";
 
 import type { StepCatalog } from "#execution/catalog/step-catalog.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { buildFinalOutputTool, FINAL_OUTPUT_TOOL_NAME } from "#harness/final-output.js";
+import { buildFinalOutputTool } from "#harness/final-output.js";
+import { FINAL_OUTPUT_TOOL_NAME } from "#protocol/final-output-tool.js";
 import type { GenerationSteering } from "#harness/generation-steering.js";
 import { type AnthropicCacheMarker, applyLastToolCacheBreakpoint } from "#harness/prompt-cache.js";
 import type { Step } from "#harness/step/context.js";

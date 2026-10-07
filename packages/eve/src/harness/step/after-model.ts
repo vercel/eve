@@ -2,10 +2,8 @@ import { stageToolResultMedia } from "#harness/attachment-staging.js";
 import type { ModelMessage, ToolSet, TypedToolCall, TypedToolError } from "ai";
 
 import type { CompactionConfig, StepResult } from "#harness/types.js";
-import {
-  FINAL_OUTPUT_BESIDE_PENDING_CALLS,
-  FINAL_OUTPUT_TOOL_NAME,
-} from "#harness/final-output.js";
+import { FINAL_OUTPUT_BESIDE_PENDING_CALLS } from "#harness/final-output.js";
+import { FINAL_OUTPUT_TOOL_NAME } from "#protocol/final-output-tool.js";
 import {
   type HarnessModelMessage,
   resolveAssistantStepText,

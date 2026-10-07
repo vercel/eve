@@ -33,7 +33,7 @@ import {
   getAvailableSkills,
 } from "#runtime/agent/mock-model-skill-selection.js";
 import { createJsonSchemaSample } from "#runtime/agent/mock-structured-output.js";
-import { FINAL_OUTPUT_TOOL_NAME } from "#harness/final-output.js";
+import { FINAL_OUTPUT_TOOL_NAME } from "#protocol/final-output-tool.js";
 import { readTaskResults } from "#execution/tasks/render.js";
 import { CATALOG_TOOL_NAMES } from "#protocol/catalog-tools.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";

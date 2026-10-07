@@ -5,8 +5,8 @@
  * check them.
  */
 
-import { FINAL_OUTPUT_TOOL_NAME } from "#harness/final-output.js";
 import { CATALOG_TOOL_NAMES } from "#protocol/catalog-tools.js";
+import { FINAL_OUTPUT_TOOL_NAME } from "#protocol/final-output-tool.js";
 import { TASK_TOOL_NAMES } from "#protocol/task-tools.js";
 
 /**

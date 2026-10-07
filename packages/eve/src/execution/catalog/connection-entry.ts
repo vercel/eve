@@ -146,8 +146,9 @@ async function callConnectionTool(
   const { auth, client, scoped } = session;
   const listing = await listConnectionTools(connection, session);
   if ("failure" in listing) throw new Error(listing.failure);
-  if ("authorization" in listing)
+  if ("authorization" in listing) {
     return await auth.handleError(listing.error, listing.authorization);
+  }
   // Validation may have run before a sign-in made the tools listable.
   const checked = await checkCall(connection, listing.tools, toolName, rawInput);
   if ("issues" in checked) throw new Error(issuesMessage(checked.issues));
