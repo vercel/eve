@@ -1,3 +1,4 @@
+import type { Experimental_ConnectionEvents } from "#public/definitions/connections/events.js";
 import type {
   ConnectionAuthDefinition,
   HeadersDefinition,
@@ -22,6 +23,8 @@ import { stampDefinitionKey } from "#internal/authored-definition/source-identit
  * servers that require no authentication (e.g. localhost).
  */
 export interface McpClientConnectionDefinition {
+  /** Opt-in Connect webhook callbacks. Enabling this does not subscribe. */
+  readonly experimental_events?: Experimental_ConnectionEvents;
   /**
    * The MCP server's HTTP endpoint URL.
    *

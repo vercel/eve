@@ -1,3 +1,4 @@
+import { readConnectionEventsBackend } from "#shared/connection-events.js";
 /**
  * Structural validation for authored connection auth definitions. Returns
  * `undefined` on success or a context-free error fragment for the caller to
@@ -95,6 +96,13 @@ export function normalizeAuthorizationSpec(
 
   const auth = authorization as Record<string, unknown>;
   const vercelConnect = extractVercelConnectMetadata(auth.vercelConnect);
+  const backend = readConnectionEventsBackend(
+    (auth.vercelConnect as { experimental_events?: unknown } | undefined)?.experimental_events,
+  );
+  let runtimeConnect: AuthorizationDefinition["vercelConnect"] = vercelConnect;
+  if (backend !== undefined && vercelConnect !== undefined) {
+    runtimeConnect = { ...vercelConnect, experimental_events: backend };
+  }
   const displayName = auth.displayName as string | undefined;
   const evict =
     typeof auth.evict === "function" ? (auth.evict as AuthorizationDefinition["evict"]) : undefined;
@@ -107,7 +115,8 @@ export function normalizeAuthorizationSpec(
       startAuthorization:
         auth.startAuthorization as InteractiveAuthorizationDefinition["startAuthorization"],
     };
-    if (vercelConnect !== undefined) interactive = { ...interactive, vercelConnect };
+    if (runtimeConnect !== undefined)
+      interactive = { ...interactive, vercelConnect: runtimeConnect };
     if (displayName !== undefined) interactive = { ...interactive, displayName };
     if (evict !== undefined) interactive = { ...interactive, evict };
     return interactive;
@@ -119,7 +128,8 @@ export function normalizeAuthorizationSpec(
       auth.principalType ??
       "app") as NonInteractiveAuthorizationDefinition["principalType"],
   };
-  if (vercelConnect !== undefined) nonInteractive = { ...nonInteractive, vercelConnect };
+  if (runtimeConnect !== undefined)
+    nonInteractive = { ...nonInteractive, vercelConnect: runtimeConnect };
   if (displayName !== undefined) nonInteractive = { ...nonInteractive, displayName };
   if (evict !== undefined) nonInteractive = { ...nonInteractive, evict };
   return nonInteractive;

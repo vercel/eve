@@ -110,6 +110,9 @@ export async function compileConnectionDefinition(
       ...shared,
       description: normalized.description,
       protocol: "mcp",
+      ...(normalized.experimental_events === undefined
+        ? {}
+        : { experimental_events: true as const }),
       url: normalized.url,
     };
     auth = normalized.auth;

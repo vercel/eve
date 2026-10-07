@@ -51,3 +51,10 @@ export {
   isConnectionAuthorizationFailedError,
   isConnectionAuthorizationRequiredError,
 } from "#public/connections/errors.js";
+
+export type {
+  Experimental_ConnectionEvents,
+  Experimental_ConnectionEvent,
+  Experimental_ConnectionEventOrigin,
+  Experimental_ConnectionEventContext,
+} from "#public/definitions/connections/events.js";

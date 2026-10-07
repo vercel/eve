@@ -1,3 +1,4 @@
+import type { Experimental_ConnectionEvents } from "#public/definitions/connections/events.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { CompiledChannel } from "#channel/compiled-channel.js";
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
@@ -100,6 +101,7 @@ export type ResolvedScheduleDefinition = Readonly<
  * server that requires no authentication (e.g. localhost) may omit both.
  */
 export interface ResolvedConnectionDefinition extends ResolvedModuleSourceRef {
+  readonly experimental_events?: Experimental_ConnectionEvents;
   readonly protocolVersionDiscovery?: boolean;
   /** MCP only: send the turn's principals in `eve-forwarded-principal`. */
   readonly forwardPrincipal?: boolean;

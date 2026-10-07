@@ -199,3 +199,46 @@ When a remote tool returns more data than the model needs, narrow the result at 
 - [OpenAPI connections](./openapi): generate tools from OpenAPI operations.
 - [Authentication](../guides/auth-and-route-protection): establish the caller identity required by user-scoped auth.
 - [Security model](../concepts/security-model): how connection credentials stay out of the model's reach.
+
+## Experimental managed events
+
+The experimental connection event contract accepts separate callbacks:
+
+```ts
+import { defineMcpClientConnection } from "eve/connections";
+import { connect } from "@vercel/connect/eve";
+
+export default defineMcpClientConnection({
+  url: "https://issues.example/mcp",
+  description: "Search and watch issues",
+  auth: connect("oauth/issues"),
+  experimental_events: {
+    async onEvent({ event, origin, auth, attachSession }) {
+      await attachSession(origin.sessionId).send(
+        `Review this issue event: ${JSON.stringify(event.data)}`,
+        { auth, turnPolicy: "queue" },
+      );
+    },
+    async onGap({ origin, cursor }) {
+      // Reconcile the source before assuming a contiguous event stream.
+    },
+    async onTerminated({ origin, error }) {
+      // Decide whether to notify the session or request another subscription.
+    },
+  },
+});
+```
+
+This contract is experimental and requires the matching managed-events runtime
+and Connect SDK releases. Defining callbacks does not create a subscription or
+start a model turn. `onEvent` is required; lifecycle callbacks are optional.
+Use a statically authored MCP connection and a static `connect()` auth provider
+that exposes the events bridge. Dynamic connections and auth resolvers are not
+supported by this first version because the receiver must be mounted at build
+time. The provider still resolves the current authorized user or app for each
+subscription operation.
+
+`origin` and `auth` come from eve's saved subscription binding. Provider event
+payloads never select the execution principal. Callback code chooses whether
+to send input to an existing session. A session attachment never creates a
+replacement session.

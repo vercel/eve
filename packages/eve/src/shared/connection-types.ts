@@ -1,3 +1,4 @@
+import type { ConnectionEventsBackend } from "#shared/connection-events.js";
 /**
  * Protocol-agnostic interfaces for the connection system.
  *
@@ -255,6 +256,7 @@ interface AuthorizationDefinitionBase {
    * Connect side.
    */
   readonly vercelConnect?: {
+    readonly experimental_events?: ConnectionEventsBackend;
     readonly connector: string;
   };
 
