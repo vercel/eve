@@ -18,7 +18,7 @@ import {
 } from "#harness/attachment-staging.js";
 import { emitStreamContent } from "#harness/emission.js";
 import { toEntryStep, toEntryStream, toEntryTelemetry } from "#harness/execute-call.js";
-import { FINAL_OUTPUT_TOOL_NAME } from "#harness/final-output.js";
+import { FINAL_OUTPUT_TOOL_NAME } from "#protocol/final-output-tool.js";
 import type { GenerationSteering } from "#harness/generation-steering.js";
 import { interruptStreamOnFailure } from "#harness/interruptible-stream.js";
 import type { HarnessModelMessage, UserModelMessage } from "#harness/messages.js";
