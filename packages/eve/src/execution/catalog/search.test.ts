@@ -348,7 +348,14 @@ describe("search", () => {
         signIn: true,
         tools: [connectionTool("search_pages")],
       });
-      const linear = fakeConnection({ name: "linear", tools: [connectionTool("list_issues")] });
+      const linear = fakeConnection({
+        name: "linear",
+        tools: [
+          connectionTool("list_issues"),
+          connectionTool("issue__create"),
+          connectionTool("issue__create_comment"),
+        ],
+      });
       const broken = fakeConnection({
         listing: new Error("upstream returned 502"),
         name: "jira",
@@ -374,41 +381,66 @@ describe("search", () => {
     it("keeps only the namespace, including a connection mounted under it, and never lists other connections", async () => {
       const { outside, search } = namespaced();
 
-      expect(await search({ query: "crm__" })).toEqual({
-        results: [
-          expect.objectContaining({ tool: "crm__export" }),
-          expect.objectContaining({ tool: "crm__api__get_customer" }),
-          expect.objectContaining({ tool: "crm__api__list_customers" }),
-          expect.objectContaining({ tool: "crm__api__list_deals" }),
-        ],
-      });
+      const output = await search({ query: "crm__" });
+
+      expect(names(output).sort()).toEqual([
+        "crm__api__get_customer",
+        "crm__api__list_customers",
+        "crm__api__list_deals",
+        "crm__export",
+      ]);
       // Connections that can't own the namespace aren't asked for their tools, so the
       // failing one isn't reported either.
+      expect(output.unavailable).toBeUndefined();
       for (const getToolMetadata of outside) expect(getToolMetadata).not.toHaveBeenCalled();
     });
 
-    it("ranks the rest of the query within the namespace", async () => {
+    it("ranks the namespace by the whole query, best match first", async () => {
       const { search } = namespaced();
 
-      expect(names(await search({ query: "crm__api__list" })).sort()).toEqual([
-        "crm__api__list_customers",
-        "crm__api__list_deals",
-      ]);
+      const found = names(await search({ query: "crm__api__list deals" }));
+
+      expect(found[0]).toBe("crm__api__list_deals");
+      expect(found.every((name) => String(name).startsWith("crm__api__"))).toBe(true);
     });
 
-    it("finds a connection's sign-in entry under its own namespace, without prompting", async () => {
+    it("ranks a tool whose own name contains __ first for its exact full name", async () => {
+      const { search } = namespaced();
+
+      expect(names(await search({ query: "linear__issue__create" }))[0]).toBe(
+        "linear__issue__create",
+      );
+    });
+
+    it("keeps a connection's sign-in entry, alone or with words after the namespace, without prompting", async () => {
       const { notion, search } = namespaced();
 
       expect(names(await search({ query: "notion__" }))).toEqual(["notion"]);
+      expect(names(await search({ query: "notion__search pages" }))).toEqual(["notion"]);
       expect(notion.signIns).toEqual([]);
     });
 
-    it("ignores a leading ^ and returns nothing for an unknown namespace", async () => {
+    it("ignores a leading ^ and trailing underscores", async () => {
+      const { search } = namespaced();
+      const linear = await search({ query: "linear__" });
+
+      expect(await search({ query: "^linear__" })).toEqual(linear);
+      expect(await search({ query: "linear____" })).toEqual(linear);
+    });
+
+    it.each([
+      ["Linear__", 'No entries are named "Linear__…". Closest connections: linear.'],
+      [
+        "nope__x",
+        'No entries are named "nope__…". Find names in the catalog listing, or search with plain words.',
+      ],
+    ])("fails for %s, a namespace with no entries", async (query, message) => {
       const { outside, search } = namespaced();
 
-      expect(await search({ query: "^crm__" })).toEqual(await search({ query: "crm__" }));
-      expect(await search({ query: "nope__x" })).toEqual({ results: [] });
-      for (const getToolMetadata of outside) expect(getToolMetadata).not.toHaveBeenCalled();
+      await expect(search({ query })).rejects.toThrow(message);
+      if (query === "nope__x") {
+        for (const getToolMetadata of outside) expect(getToolMetadata).not.toHaveBeenCalled();
+      }
     });
   });
 });
