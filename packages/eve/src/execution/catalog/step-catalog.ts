@@ -33,7 +33,7 @@ import type { JsonObject } from "#shared/json.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { refineJsonSchema } from "#tools/schema.js";
 
-import { connectionEntry } from "./connection-entry.js";
+import { connectionEntry, connectionSignInEntry } from "./connection-entry.js";
 import { closestNames } from "./rank.js";
 import { createSearchTool } from "./search.js";
 import { entrySignature } from "./signatures.js";
@@ -201,12 +201,14 @@ function isVisible(
   return !rootOnly || session.rootSessionId === undefined;
 }
 
+/** A connection owns its own name, which signs the user in, and every name under its prefix. */
 function connectionEntryNamed(
   name: string,
   registry: ConnectionRegistry,
   connections: readonly ResolvedConnectionDefinition[],
 ): HarnessToolDefinition | undefined {
   for (const connection of connections) {
+    if (name === connection.connectionName) return connectionSignInEntry(registry, connection);
     const prefix = connectionToolName(connection.connectionName, "");
     if (name.length > prefix.length && name.startsWith(prefix)) {
       return connectionEntry(registry, connection, name.slice(prefix.length));

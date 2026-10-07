@@ -1,12 +1,21 @@
 /**
- * Keyword ranking for `search` and for `execute`'s suggestions when a name is
- * unknown. Query and field text split into lowercase words (camelCase and
- * punctuation are boundaries); a query word matches a field word when either
- * is a prefix of the other, so `repo` finds `repositories` and `issues` finds
- * `issue`. Each query word adds the weight of every field it matches, so broad
- * fields rank below an entry's own name.
+ * Ranking for `search` and for `execute`'s suggestions when a name is unknown.
+ * Query and text split into lowercase words (camelCase and punctuation are
+ * boundaries), so `create issue`, `createIssue`, and `create_issue` are the
+ * same words. Matches rank in tiers:
+ *
+ * 1. Exact: the query's words are the name's words. A connection tool's full
+ *    name ranks just above its name without the connection prefix.
+ * 2. Prefix: the name's words start with the query's words, the last of which
+ *    may be partial, so `linear` and `create_iss` find `linear__create_issue`.
+ * 3. Keyword: any other match. A query word matches a word when either is a
+ *    prefix of the other, so `repo` finds `repositories` and `issues` finds
+ *    `issue`, and each query word adds the weight of every field it matches.
+ *
+ * Within a tier, the keyword score orders matches, then connection, then name.
  */
 
+import { connectionToolName } from "#connections/ownership.js";
 import { isObject } from "#shared/guards.js";
 
 /** What the ranker reads from one catalog entry. */
@@ -25,13 +34,11 @@ export function rankCandidates<T extends RankCandidate>(
 ): T[] {
   const terms = tokenize(query);
   return candidates
-    .map((candidate) => ({
-      candidate,
-      score: terms.length === 0 ? 1 : scoreFields(terms, candidateFields(candidate)),
-    }))
+    .map((candidate) => ({ candidate, ...rankCandidate(terms, candidate) }))
     .filter((entry) => entry.score > 0)
     .sort(
       (a, b) =>
+        a.tier - b.tier ||
         b.score - a.score ||
         (a.candidate.connection?.name ?? "").localeCompare(b.candidate.connection?.name ?? "") ||
         a.candidate.name.localeCompare(b.candidate.name),
@@ -49,6 +56,42 @@ export function closestNames(
   return rankCandidates(name, candidates)
     .slice(0, limit)
     .map((candidate) => candidate.name);
+}
+
+const Tier = { exact: 0, exactWithoutPrefix: 1, prefix: 2, keyword: 3 } as const;
+
+function rankCandidate(
+  terms: readonly string[],
+  candidate: RankCandidate,
+): { readonly score: number; readonly tier: number } {
+  if (terms.length === 0) return { score: 1, tier: Tier.keyword };
+  const ownName = tokenize(candidate.name);
+  const fullName =
+    candidate.connection === undefined
+      ? ownName
+      : tokenize(connectionToolName(candidate.connection.name, candidate.name));
+  const tier = sameWords(fullName, terms)
+    ? Tier.exact
+    : sameWords(ownName, terms)
+      ? Tier.exactWithoutPrefix
+      : startsWithWords(fullName, terms) || startsWithWords(ownName, terms)
+        ? Tier.prefix
+        : Tier.keyword;
+  return { score: scoreFields(terms, candidateFields(candidate)), tier };
+}
+
+function sameWords(words: readonly string[], terms: readonly string[]): boolean {
+  return words.length === terms.length && terms.every((term, index) => words[index] === term);
+}
+
+/** The last term may be a partial word. */
+function startsWithWords(words: readonly string[], terms: readonly string[]): boolean {
+  return (
+    terms.length <= words.length &&
+    terms.every((term, index) =>
+      index === terms.length - 1 ? words[index]!.startsWith(term) : words[index] === term,
+    )
+  );
 }
 
 type Field = readonly [words: readonly string[], weight: number];

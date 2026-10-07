@@ -48,7 +48,7 @@ For OAuth-backed MCP servers, use the shared [Vercel Connect flow](../connection
 
 eve asks the user to sign in only when the MCP server asks for it. When a connection has `auth` but no token yet, because its `getToken` throws `ConnectionAuthorizationRequiredError`, eve connects without an `Authorization` header and lists the server's tools. Any other error from `getToken` still fails the connection.
 
-- **The server rejects every request without a token.** Most hosted OAuth servers, such as Linear, GitHub, and Notion, answer `initialize` or `tools/list` with HTTP `401`. A plain `search` lists the connection under `unavailable` with `requiresSignIn: true`. Calling `search({ connection, signIn: true })`, or any of its tools with `execute`, asks the user to sign in.
+- **The server rejects every request without a token.** Most hosted OAuth servers, such as Linear, GitHub, and Notion, answer `initialize` or `tools/list` with HTTP `401`. `search` lists the connection as one result named after it, such as `linear`. Calling that name with `execute({ tool: "linear" })`, or any of its tools with `execute`, asks the user to sign in.
 - **The server lists tools without a token.** `search` returns its tools with no prompt, and `execute` runs tools the server answers anonymously. Sign-in starts only when a tool call comes back with HTTP `401`, or with an error result that carries a `WWW-Authenticate` challenge in `_meta["mcp/www_authenticate"]`.
 
 After the user signs in, the call that asked for it runs again. eve reconnects with the token and reloads the tool list, which may now include tools the server hides from anonymous callers. A connection that already has a token sends it on every request, as before.
