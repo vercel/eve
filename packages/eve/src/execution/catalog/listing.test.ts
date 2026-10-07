@@ -147,13 +147,13 @@ describe("catalogAnnouncements", () => {
     );
   });
 
-  it("calls a skill gone only when it can no longer be loaded, not when it stops being deferred", () => {
+  it("says nothing when a skill stops being deferred, and calls it gone only when it can no longer be loaded", () => {
     const tools = [deferred("tenant__sync")];
     const before = announce({ skills: [{ deferred: true, name: "pdf-forms" }], tools }).catalog!
       .value;
 
     const listed = announce({ skills: [{ name: "pdf-forms" }], tools }, { catalog: before });
-    expect(listed.catalog?.render(before)).not.toContain("No longer available");
+    expect(listed.catalog?.render(before)).toBeUndefined();
     const dropped = announce({ tools }, { catalog: before });
     expect(dropped.catalog?.render(before)).toBe(
       "The catalog changed.\nNo longer available, do not call or load: pdf-forms",
