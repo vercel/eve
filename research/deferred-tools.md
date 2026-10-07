@@ -353,8 +353,8 @@ export default defineDynamic({
   the resolver returns it means any entry that works deferred also works
   direct.
 - **Prefer session- or turn-scoped resolvers.** A `step.started` resolver
-  whose deferred set changes every step appends a listing diff every step.
-  The cache stays intact, but history grows.
+  whose set of kinds or namespaces changes every step appends a listing every
+  step. The cache stays intact, but history grows.
 
 **Skills.** `deferred?: boolean` joins the skill definition. It defaults to
 `false` and is set in any of three places:
@@ -502,10 +502,9 @@ today.
 
 - **Input:** `{ query, limit? }`.
   - `limit` defaults to 20 and is capped at 50.
-  - `query` is required and must contain a word. The listing already names
-    every tool, agent, skill, and connection, so there is no need for a
-    query-less browse. A connection's name as the query, such as `linear`,
-    lists that connection's tools first.
+  - `query` is required and must contain a word. Deferred entries are found
+    by what they do or by namespace, not browsed. A connection's name as the
+    query, such as `linear`, lists that connection's tools first.
   - **Namespace queries.** A query whose first word contains `__` searches one
     namespace: everything before its last `__`, with trailing underscores
     trimmed. The namespace only filters. `search` keeps names under
@@ -521,8 +520,8 @@ today.
     connection names instead of returning an empty list. Characters that
     can't appear in a name, such as a leading `^`, are ignored, and regex
     isn't supported. The description tells the model to use this when it
-    already knows the connection or a name from the listing, a result, or
-    an error.
+    already knows a name or namespace, from the listing, a result, or an
+    error.
   - There is no connection filter and no sign-in flag. The query already
     selects a connection, and sign-in is an `execute` call.
   - There is no paging and no match count. `search` returns the best matches
@@ -717,35 +716,39 @@ looks a call up by name. Model history is the only place that keeps
 One announcement under the key `catalog` replaces the connection listing.
 
 - **Baseline.** On a session's first model step, eve appends one
-  `context.state` message. It lists deferred tools, subagents, and skills by
-  name, and connections by name and description. Each group is sorted.
+  `context.state` message. It says which kinds of deferred entries exist
+  (tools, agents, skills) and tells the model to search before deciding it
+  can't do something. It then lists namespaces and connections, each capped.
+- **No deferred names.** A deferred entry is meant to stay out of context
+  until a search finds it, so the listing never names one. It doesn't count
+  entries either: counts would change, and append a message, whenever a
+  dynamic resolver adds or drops one.
+- **Namespaces.** The first `__` segment of deferred tool, agent, and skill
+  names, such as `sre` for `sre__list_alerts`, whether the entries come from
+  an extension mount or are vendored under that prefix. A namespace query
+  (`search({ query: "sre__" })`) searches exactly that set. At most 20 are
+  listed, the largest first and then by name, and a longer list ends with
+  "and more". A namespace that is also a connection's name is listed only
+  as the connection.
+- **Connections** are listed by name and description, capped at 20 the same
+  way. Listing their tools would mean connecting to every server, and
+  possibly asking for sign-in, at session start.
 - **Skills that aren't deferred stay where they are:** static skills in the
   system prompt's skill section, dynamic skills in their announcement. Only
   the load instruction in both changes, to `execute({ skill })`.
-- **Why connection tools aren't listed by name.** Listing them would mean
-  connecting to every server, and possibly asking for sign-in, at session
-  start.
-- **Diffs.** Any of these changes appends a diff, or the full listing again
-  if that is shorter:
-  - a dynamic resolver adds or drops a deferred tool, subagent, or skill;
-  - a dynamic connection resolves;
-  - the session upgrades to a new deployment.
-
-  The renderer is today's connection diff, extended to four groups. It also
-  says which entries must no longer be called. Deferred dynamic skills get
-  diffs, where today's dynamic skill announcement re-renders the full list.
-
+- **Changes.** The listing only changes when the kinds present, the listed
+  namespaces, or the listed connections change: when a dynamic resolver adds
+  the first entry of a kind or namespace, a dynamic connection resolves, or
+  the session upgrades to a new deployment. eve then appends the full
+  listing again, prefixed with "The catalog changed.", and names any
+  namespace or connection that is gone. A deferred entry added to a listed
+  namespace, or without one, appends nothing; `search` finds it.
 - **After compaction,** the next step appends a fresh baseline.
-- **Names only for local entries.** Descriptions and signatures come from
-  `search`. At roughly 5 tokens per name, 300 entries cost about 1.5k tokens,
-  cached once per session.
 - **Empty catalog,** no message.
 
 ```text
-More tools and skills are available than your context shows. Find them with search, call tools with execute({ tool, input }), and load skills with execute({ skill }).
-Tools: deploy_service, refund_invoice, stripe_list_disputes
-Agents: billing_specialist, researcher
-Skills: pdf-forms, release_notes
+More tools, agents, and skills are available than your context shows. They aren't listed; find them with search before deciding you can't do something. Call tools with execute({ tool, input }) and load skills with execute({ skill }).
+Namespaces, whose entries are named <namespace>__<name>; search one with "<namespace>__": index, sre, d0, support
 Connections, whose tools are named <connection>__<tool>; search one connection's tools with "<connection>__":
 - linear: Linear issues and projects
 - petstore: Pet store inventory API
@@ -933,8 +936,9 @@ Everything in this section lands in [3/3].
   - The model doesn't call `search` for web questions on agents that have
     `web_search`.
   - No cache regression after discovery.
-- **Later, gated by evals.** Descriptions or signatures in the listing, up to
-  a token budget, as opencode v2 does.
+- **Later, gated by evals.** A real-model eval of discovery with a large
+  catalog and no connections, which decides whether the listing needs more
+  than kinds and namespaces.
 - **Docs,** updated in [1/3] and [2/3]:
   - `tools/overview`: deferring a tool, and which tools to defer (keep
     frequently used tools direct and defer the long tail).
@@ -972,7 +976,7 @@ Everything in this section lands in [3/3].
 | Search output       | TypeScript `signature`                                                                       | Raw JSON Schema (larger, and code mode needs the signature anyway)                                                                                                                                                           |
 | Protocol shape      | Actions carry the entry's name; only history says `execute`                                  | An outer `execute` action with a nested entry action                                                                                                                                                                         |
 | Search state        | Stateless; any entry can be executed                                                         | A durable discovered set that execution checks                                                                                                                                                                               |
-| Listing             | One append-only listing: names, plus connection descriptions                                 | Nothing (the model can't tell when to search); full signatures (eval-gated)                                                                                                                                                  |
+| Listing             | One append-only listing: the kinds present, capped namespaces, and capped connections        | Nothing (the model can't tell when to search); every deferred name (defeats deferring and grows without bound); counts (churn on dynamic changes)                                                                            |
 | Old paths and tests | Deleted with no compatibility layer; old tests deleted, and new tests written fresh in [3/3] | Aliases or flags for removed tools; porting old tests to the new surface; tests spread across the implementation PRs                                                                                                         |
 | Loading skills      | `execute({ skill })` for every skill; `load_skill` is removed                                | Keeping `load_skill` beside `execute` (two ways to load); `load_skill` only for skills that aren't deferred (the model must know which kind it has)                                                                          |
 
