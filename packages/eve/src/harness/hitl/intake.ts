@@ -13,7 +13,7 @@ import { validateHarnessModelMessages } from "#harness/messages.js";
 import { openTurn, type Step } from "#harness/step/context.js";
 import { prepareTurnInput } from "#harness/step/intake.js";
 import { placeTurnInput } from "#harness/step/prompt.js";
-import { SessionLimitDeclinedError } from "#harness/turn-cancellation.js";
+import { SessionLimitDeclinedError, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { bumpSessionRuntimeUsageLimits } from "#harness/turn-tag-state.js";
 import type { HarnessToolMap, StepInput, StepResult } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
@@ -328,6 +328,8 @@ export async function runApprovedLocalCalls(
     }),
   );
   await step.apply(settle(step.view(), { results: executed.flatMap((run) => run.settled) }));
+  // A cancellation ends the turn once the calls it cut short have their results.
+  throwIfTurnAborted(step.config.abortSignal);
   const signIn = resolveInlineAuthorizationInterrupt({
     messages: [],
     toolResults: executed.flatMap((run) => run.toolResults),

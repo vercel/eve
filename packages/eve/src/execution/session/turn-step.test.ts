@@ -34,7 +34,8 @@ import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { startWorkflowTask } from "#execution/tools/workflow/start.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
-import { storedProjection } from "#harness/session-machine/view.js";
+import { queuedInput, storedProjection } from "#harness/session-machine/view.js";
+import { APPROVED_CALL_INTERRUPTED_MESSAGE } from "#harness/hitl/approved-calls.js";
 import { textStreamResult } from "#internal/testing/approval-resume.js";
 import { openInputs } from "#protocol/session-projection.js";
 import type { InputRequest } from "#shared/input.js";
@@ -1095,8 +1096,15 @@ describe("turnStep", () => {
       requestId: "approval-1",
     };
 
-    /** Answers the parked approval, cancels the model call that follows, then sends a message. */
-    async function answerThenCancel(optionId: "approve" | "cancel", message?: string) {
+    /**
+     * Answers the parked approval, cancels the model call that follows (or, with `cutTool`, the
+     * approved call while it runs), then sends a message.
+     */
+    async function answerThenCancel(
+      optionId: "approve" | "cancel",
+      options: { readonly cutTool?: boolean; readonly message?: string } = {},
+    ) {
+      const { cutTool = false, message } = options;
       const parked = withParkedStep(
         createStubSession({ history: [{ content: "Run pwd.", kind: "user", role: "user" }] }),
         {
@@ -1124,10 +1132,17 @@ describe("turnStep", () => {
       );
       const controller = new AbortController();
       const events: UnstampedMessageStreamEvent[] = [];
-      const execute = vi.fn(async () => "/workspace");
+      const execute = vi.fn(async () => {
+        // The tool has started its side effect when the turn is cancelled.
+        if (cutTool && execute.mock.calls.length === 1) {
+          controller.abort(new TurnCancelledError());
+          throw controller.signal.reason;
+        }
+        return "/workspace";
+      });
       const model = new MockLanguageModelV4({
         doStream: async () => {
-          if (model.doStreamCalls.length > 1) return textStreamResult("Done.");
+          if (cutTool || model.doStreamCalls.length > 1) return textStreamResult("Done.");
           return {
             stream: new ReadableStream({
               start(stream) {
@@ -1191,14 +1206,14 @@ describe("turnStep", () => {
 
       events.length = 0;
       installSessionStoreMocks([session]);
-      await turnStep({
+      const next = await turnStep({
         history: cancelled.history,
         input: { kind: "deliver", payloads: [{ message: "next" }] },
         sessionWritable: createTestWritable(),
         serializedContext: cancelled.serializedContext,
         sessionState: cancelled.sessionState,
       });
-      return { cancelled, cancelledEvents, execute, nextEvents: [...events], session };
+      return { cancelled, cancelledEvents, execute, next, nextEvents: [...events], session };
     }
 
     const resolutions = (events: readonly UnstampedMessageStreamEvent[]) =>
@@ -1227,19 +1242,43 @@ describe("turnStep", () => {
       expect(nextEvents.map((event) => event.type)).not.toContain("input.requested");
     });
 
-    it("PROBE message with denial", async () => {
-      const r = await answerThenCancel("cancel", "do something else");
-      console.info(
-        JSON.stringify(
-          {
-            hist: r.cancelled.history,
-            queued: (r.session.state as any)?.["eve.harness.turnState"],
-            next: r.nextEvents.map((e) => e.type),
-          },
-          null,
-          1,
-        ),
+    it("keeps a message sent with the denial once, and doesn't queue it again", async () => {
+      const { cancelled, next, session } = await answerThenCancel("cancel", {
+        message: "do something else",
+      });
+      const sent = (history: readonly ModelMessage[]) =>
+        history.filter((entry) => entry.role === "user" && entry.content === "do something else");
+
+      expect(cancelled.action).toBe("cancelled");
+      expect(sent(cancelled.history)).toHaveLength(1);
+      expect(queuedInput(session.state)).toBeUndefined();
+      // The next message doesn't consume the preserved one a second time.
+      expect(sent(next.history)).toHaveLength(1);
+      expect(next.history).toContainEqual(
+        expect.objectContaining({ content: "next", role: "user" }),
       );
+    });
+
+    it("doesn't run an approved call again after the cancellation cut it short", async () => {
+      const { cancelled, execute, nextEvents, session } = await answerThenCancel("approve", {
+        cutTool: true,
+      });
+
+      expect(cancelled.action).toBe("cancelled");
+      expect(execute).toHaveBeenCalledOnce();
+      expect(parkedSteps(session)).toEqual([]);
+      expect(cancelled.history).toContainEqual({
+        content: [
+          {
+            output: { type: "error-text", value: APPROVED_CALL_INTERRUPTED_MESSAGE },
+            toolCallId: "approval-call",
+            toolName: "bash",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      });
+      expect(resolutions(nextEvents)).toEqual([]);
     });
 
     it("keeps the result of an approved call that ran before the cut", async () => {
