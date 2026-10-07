@@ -1,5 +1,6 @@
 import { createTestSessionState } from "#internal/testing/session-state.js";
-import type { ModelMessage } from "ai";
+import { jsonSchema, type ModelMessage } from "ai";
+import { MockLanguageModelV4 } from "ai/test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js";
 import type {
@@ -32,9 +33,15 @@ import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { startWorkflowTask } from "#execution/tools/workflow/start.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
+import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { storedProjection } from "#harness/session-machine/view.js";
+import { textStreamResult } from "#internal/testing/approval-resume.js";
+import { openInputs } from "#protocol/session-projection.js";
+import type { InputRequest } from "#shared/input.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
 import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import {
+  parkedSteps,
   positionOf,
   positionState,
   withOpenTurn,
@@ -1066,6 +1073,188 @@ describe("turnStep", () => {
     expect(result.history.at(-1)).toEqual({
       content: "model call 50",
       role: "assistant",
+    });
+  });
+
+  describe("an approval answered before a cancelled model call", () => {
+    const approvalRequest: InputRequest = {
+      action: {
+        callId: "approval-call",
+        input: { command: "pwd" },
+        kind: "tool-call",
+        toolName: "bash",
+      },
+      allowFreeform: false,
+      display: "confirmation",
+      kind: "tool-approval",
+      options: [
+        { id: "approve", label: "Yes" },
+        { id: "cancel", label: "No" },
+      ],
+      prompt: "Approve tool call: bash",
+      requestId: "approval-1",
+    };
+
+    /** Answers the parked approval, cancels the model call that follows, then sends a message. */
+    async function answerThenCancel(optionId: "approve" | "cancel", message?: string) {
+      const parked = withParkedStep(
+        createStubSession({ history: [{ content: "Run pwd.", kind: "user", role: "user" }] }),
+        {
+          event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+          messages: [
+            {
+              content: [
+                {
+                  input: { command: "pwd" },
+                  toolCallId: "approval-call",
+                  toolName: "bash",
+                  type: "tool-call",
+                },
+                {
+                  approvalId: "approval-1",
+                  toolCallId: "approval-call",
+                  type: "tool-approval-request",
+                },
+              ],
+              role: "assistant",
+            },
+          ],
+          requests: [approvalRequest],
+        },
+      );
+      const controller = new AbortController();
+      const events: UnstampedMessageStreamEvent[] = [];
+      const execute = vi.fn(async () => "/workspace");
+      const model = new MockLanguageModelV4({
+        doStream: async () => {
+          if (model.doStreamCalls.length > 1) return textStreamResult("Done.");
+          return {
+            stream: new ReadableStream({
+              start(stream) {
+                stream.enqueue({ type: "stream-start", warnings: [] });
+                stream.enqueue({ id: "answer", type: "text-start" });
+                stream.enqueue({ delta: "Interrupted.", id: "answer", type: "text-delta" });
+                controller.abort(new TurnCancelledError());
+              },
+            }),
+          };
+        },
+      });
+      vi.mocked(createExecutionNodeStep).mockImplementation((input) =>
+        createToolLoopHarness({
+          abortSignal: input.abortSignal,
+          handleEvent: async (event, messages) => {
+            events.push(event);
+            await input.handleEvent?.(event, messages);
+          },
+          resolveModel: async () => model,
+          tools: new Map([
+            [
+              "bash",
+              {
+                description: "Run a shell command.",
+                execute,
+                inputSchema: jsonSchema({ type: "object" }),
+                name: "bash",
+              },
+            ],
+          ]),
+        }),
+      );
+      // An adapter without `deliver` passes the answer through as an answer, not a message.
+      const adapter: ChannelAdapter = { kind: "answers" };
+      const bundle = Object.assign({}, createTurnStepTestBundle() as object, {
+        adapterRegistry: { adaptersByKind: new Map([[adapter.kind, adapter]]) },
+      }) as never;
+      vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(bundle);
+      const ctx = new ContextContainer();
+      ctx.set(AuthKey, null);
+      ctx.set(BundleKey, bundle);
+      ctx.set(ChannelKey, adapter);
+      ctx.set(ContinuationTokenKey, "answers");
+      ctx.set(SessionIdKey, "sess-test");
+      installSessionStoreMocks([parked]);
+
+      const cancelled = await turnStep({
+        abortSignal: controller.signal,
+        history: parked.history,
+        input: {
+          kind: "deliver",
+          payloads: [{ inputResponses: [{ optionId, requestId: "approval-1" }], message }],
+        },
+        sessionWritable: createTestWritable(),
+        serializedContext: serializeContext(ctx),
+        sessionState: createStubSessionState(),
+      });
+      const cancelledEvents = [...events];
+      const session = cancelled.sessionState.snapshot.session;
+
+      events.length = 0;
+      installSessionStoreMocks([session]);
+      await turnStep({
+        history: cancelled.history,
+        input: { kind: "deliver", payloads: [{ message: "next" }] },
+        sessionWritable: createTestWritable(),
+        serializedContext: cancelled.serializedContext,
+        sessionState: cancelled.sessionState,
+      });
+      return { cancelled, cancelledEvents, execute, nextEvents: [...events], session };
+    }
+
+    const resolutions = (events: readonly UnstampedMessageStreamEvent[]) =>
+      events.filter((event) => event.type === "input.resolved");
+
+    it("keeps a denial the cancelled step published", async () => {
+      const { cancelled, cancelledEvents, nextEvents, session } = await answerThenCancel("cancel");
+
+      expect(cancelled.action).toBe("cancelled");
+      expect(resolutions(cancelledEvents)).toHaveLength(1);
+      expect(openInputs(storedProjection(session.state))).toEqual([]);
+      expect(parkedSteps(session)).toEqual([]);
+      expect(cancelled.history).toContainEqual({
+        content: [
+          {
+            output: { reason: "Tool execution was denied.", type: "execution-denied" },
+            toolCallId: "approval-call",
+            toolName: "bash",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      });
+      // The next message neither resolves the denied approval again nor asks it again.
+      expect(resolutions(nextEvents)).toEqual([]);
+      expect(nextEvents.map((event) => event.type)).not.toContain("input.requested");
+    });
+
+    it("PROBE message with denial", async () => {
+      const r = await answerThenCancel("cancel", "do something else");
+      console.info(
+        JSON.stringify(
+          {
+            hist: r.cancelled.history,
+            queued: (r.session.state as any)?.["eve.harness.turnState"],
+            next: r.nextEvents.map((e) => e.type),
+          },
+          null,
+          1,
+        ),
+      );
+    });
+
+    it("keeps the result of an approved call that ran before the cut", async () => {
+      const { cancelled, execute, nextEvents, session } = await answerThenCancel("approve");
+
+      expect(cancelled.action).toBe("cancelled");
+      expect(parkedSteps(session)).toEqual([]);
+      expect(cancelled.history).toContainEqual(
+        expect.objectContaining({
+          content: [expect.objectContaining({ toolCallId: "approval-call", type: "tool-result" })],
+          role: "tool",
+        }),
+      );
+      expect(resolutions(nextEvents)).toEqual([]);
+      expect(execute).toHaveBeenCalledOnce();
     });
   });
 
