@@ -34,13 +34,11 @@ export default defineEval({
     });
     t.messageIncludes("V-88");
 
-    // Tracked, not gated: whether the model built the nested input on its first try.
+    // Tracked, not gated: no step had every tool call rejected, a proxy for building
+    // the nested input right on the first try.
     t.check(
       noCallRejectedWholesale(turn),
-      satisfies(
-        (firstTry: boolean) => firstTry,
-        "no book_visit attempt was rejected for its input shape",
-      ).soft(),
+      satisfies((firstTry: boolean) => firstTry, "every step that requested tools ran one").soft(),
     );
   },
 });

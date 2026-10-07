@@ -26,13 +26,11 @@ export default defineEval({
     t.calledTool(ADD_PET_TOOL, { output: isStoredBiscuit });
     t.messageIncludes("4217");
 
-    // Tracked, not gated: how often the model had the right input shape on its first try.
+    // Tracked, not gated: no step had every tool call rejected, a proxy for building
+    // the nested input right on the first try.
     t.check(
       noCallRejectedWholesale(turn),
-      satisfies(
-        (firstTry: boolean) => firstTry,
-        "no addPet attempt was rejected for its input shape",
-      ).soft(),
+      satisfies((firstTry: boolean) => firstTry, "every step that requested tools ran one").soft(),
     );
   },
 });

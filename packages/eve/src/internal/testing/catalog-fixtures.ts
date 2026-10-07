@@ -275,3 +275,15 @@ export function catalogContext(
   });
   return { catalog, ctx, run: <T>(fn: () => T) => contextStorage.run(ctx, fn) };
 }
+
+/**
+ * The tool names eve adds to every session, each with the role a reserved-name
+ * error names. No tool, subagent, or connection may take one.
+ */
+export const RESERVED_TOOL_NAMES: readonly (readonly [name: string, role: string])[] = [
+  ["search", "catalog tool"],
+  ["execute", "catalog tool"],
+  ["task_wait", "task tool"],
+  ["task_cancel", "task tool"],
+  ["final_output", "final output tool"],
+];
