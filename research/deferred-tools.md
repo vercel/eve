@@ -717,8 +717,10 @@ One announcement under the key `catalog` replaces the connection listing.
 
 - **Baseline.** On a session's first model step, eve appends one
   `context.state` message. It says which kinds of deferred entries exist
-  (tools, agents, skills) and tells the model to search before deciding it
-  can't do something. It then lists namespaces and connections, each capped.
+  (tools, agents, skills) and tells the model to look for a tool with
+  `search`, which searches its own catalog rather than the web, before saying
+  it has no tool for a task. It then lists namespaces and connections, each
+  capped.
 - **No deferred names.** A deferred entry is meant to stay out of context
   until a search finds it, so the listing never names one. It doesn't count
   entries either: counts would change, and append a message, whenever a
@@ -748,7 +750,7 @@ One announcement under the key `catalog` replaces the connection listing.
 - **Empty catalog,** no message.
 
 ```text
-More tools, agents, and skills are available than your context shows. Their names aren't listed; find them with search before deciding you can't do something. Call tools with execute({ tool, input }) and load skills with execute({ skill }).
+You have more tools, agents, and skills than are loaded here. Before saying you have no tool for a task, look for one with search, which searches your own catalog, not the web. Call tools with execute({ tool, input }) and load skills with execute({ skill }).
 Namespaces, whose entries are named <namespace>__<name>; search one with "<namespace>__": d0, index, sre, support
 Connections, whose tools are named <connection>__<tool>; search one connection's tools with "<connection>__":
 - linear: Linear issues and projects
