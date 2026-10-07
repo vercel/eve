@@ -28,151 +28,232 @@ function announce(state: CatalogState, announced?: Readonly<Record<string, strin
   return catalogAnnouncements(catalog, announced);
 }
 
-/** Announces `next` after `previous` was announced; the message the model reads. */
-function diff(previous: CatalogState, next: CatalogState): string | undefined {
+/** The listing a session's first step appends. */
+function baseline(state: CatalogState): string | undefined {
+  return announce(state).catalog?.render(undefined);
+}
+
+/**
+ * What the model reads when the catalog goes from `previous` to `next`. Like
+ * the harness, nothing is appended while the recorded value stays the same.
+ */
+function appended(previous: CatalogState, next: CatalogState): string | undefined {
   const before = announce(previous).catalog!.value;
-  return announce(next, { catalog: before }).catalog?.render(before);
+  const after = announce(next, { catalog: before }).catalog;
+  return after === undefined || after.value === before ? undefined : after.render(before);
 }
 
 const deferred = (name: string) => inlineTool(name, { deferred: true });
 
-const BASELINE: CatalogState = {
+/** `count` deferred tools under `namespace`. */
+const namespace = (name: string, count: number) =>
+  Array.from({ length: count }, (_, index) => deferred(`${name}__tool_${index}`));
+
+const HEADER_GUIDANCE =
+  "than your context shows. They aren't listed; find them with search before deciding you can't do something.";
+const NAMESPACES =
+  'Namespaces, whose entries are named <namespace>__<name>; search one with "<namespace>__":';
+const CONNECTIONS =
+  'Connections, whose tools are named <connection>__<tool>; search one connection\'s tools with "<connection>__":';
+
+/** A catalog shaped like a real agent's: vendored namespaces, loose entries, and connections. */
+const INK: CatalogState = {
   connections: [
     { description: "Pet store inventory API", name: "petstore" },
-    { description: "", name: "crm" },
     { description: "Linear issues and projects", name: "linear" },
   ],
   skills: [
-    { deferred: true, name: "release_notes" },
-    { deferred: true, name: "pdf-forms" },
+    { deferred: true, name: "sre__incident-runbook" },
+    { deferred: true, name: "support__refund-policy" },
     { name: "house-rules" },
   ],
   tools: [
-    deferred("stripe_list_disputes"),
     inlineTool("add"),
-    deferred("deploy_service"),
-    subagentTool("researcher", { deferred: true }),
-    deferred("refund_invoice"),
+    deferred("sre__list_alerts"),
+    deferred("sre__page_oncall"),
+    deferred("d0__deploy_preview"),
+    deferred("index__search_docs"),
+    deferred("support__open_ticket"),
+    deferred("summarize_usage"),
     subagentTool("billing_specialist", { deferred: true }),
-    subagentTool("delegate"),
   ],
 };
 
 describe("catalogAnnouncements", () => {
-  it("lists deferred entries by name and connections with descriptions, each group sorted", () => {
-    expect(announce(BASELINE).catalog?.render(undefined)).toBe(
+  it("names the kinds, namespaces, and connections, but no deferred entry", () => {
+    const listing = baseline(INK);
+
+    expect(listing).toBe(
       [
-        "More tools and skills are available than your context shows. Find them with search, call tools with execute({ tool, input }), and load skills with execute({ skill }).",
-        "Tools: deploy_service, refund_invoice, stripe_list_disputes",
-        "Agents: billing_specialist, researcher",
-        "Skills: pdf-forms, release_notes",
-        'Connections, whose tools are named <connection>__<tool>; search one connection\'s tools with "<connection>__":',
-        "- crm",
+        `More tools, agents, and skills are available ${HEADER_GUIDANCE} Call tools with execute({ tool, input }) and load skills with execute({ skill }).`,
+        `${NAMESPACES} d0, index, sre, support`,
+        CONNECTIONS,
         "- linear: Linear issues and projects",
         "- petstore: Pet store inventory API",
       ].join("\n"),
     );
+    const deferredNames = [
+      ...INK.tools!.filter((tool) => tool.deferred === true).map((tool) => tool.name),
+      ...INK.skills!.filter((skill) => skill.deferred === true).map((skill) => skill.name),
+    ];
+    for (const name of deferredNames) expect(listing).not.toContain(name);
+  });
+
+  it.each([
+    [
+      "tools",
+      { tools: [deferred("export_ledger")] },
+      `More tools are available ${HEADER_GUIDANCE} Call them with execute({ tool, input }).`,
+    ],
+    [
+      "agents",
+      { tools: [subagentTool("billing_specialist", { deferred: true })] },
+      `More agents are available ${HEADER_GUIDANCE} Call them with execute({ tool, input }).`,
+    ],
+    [
+      "skills",
+      { skills: [{ deferred: true, name: "pdf-forms" }] },
+      `More skills are available ${HEADER_GUIDANCE} Load them with execute({ skill }).`,
+    ],
+    [
+      "tools and agents, but no deferred skill",
+      {
+        skills: [{ name: "house-rules" }],
+        tools: [deferred("export_ledger"), subagentTool("researcher", { deferred: true })],
+      },
+      `More tools and agents are available ${HEADER_GUIDANCE} Call them with execute({ tool, input }).`,
+    ],
+    [
+      "only connections",
+      { connections: [{ description: "Linear issues", name: "linear" }] },
+      `Your connections have more tools ${HEADER_GUIDANCE} Call them with execute({ tool, input }).`,
+    ],
+  ])("names only the kinds present: %s", (_case, state: CatalogState, header) => {
+    expect(baseline(state)?.split("\n")[0]).toBe(header);
+  });
+
+  it("lists the 20 largest namespaces by name, then 'and more', and a connection's namespace only as the connection", () => {
+    const large = Array.from(
+      { length: 20 },
+      (_, index) => `ns${String(index + 1).padStart(2, "0")}`,
+    );
+    const listing = baseline({
+      connections: [{ description: "Linear issues", name: "linear" }],
+      tools: [
+        // Smaller than every listed namespace, though first by name.
+        ...namespace("aa", 1),
+        ...namespace("ab", 1),
+        ...large.flatMap((name, index) => namespace(name, 2 + (index % 3))),
+        ...namespace("linear", 5),
+      ],
+    });
+
+    expect(listing?.split("\n")[1]).toBe(`${NAMESPACES} ${large.join(", ")}, and more`);
+    expect(listing).toContain("- linear: Linear issues");
+  });
+
+  it("caps connections at 20 by name, then 'and more'", () => {
+    const connections = Array.from({ length: 21 }, (_, index) => ({
+      name: `svc${String(index + 1).padStart(2, "0")}`,
+    }));
+
+    const lines = baseline({ connections })!.split("\n");
+
+    expect(lines.slice(2)).toEqual([
+      ...connections.slice(0, 20).map(({ name }) => `- ${name}: ${name} service`),
+      "- and more",
+    ]);
   });
 
   it("renders the same value for the same catalog, whatever order entries arrive in", () => {
     const reordered = {
-      ...BASELINE,
-      connections: [...BASELINE.connections!].reverse(),
-      tools: [...BASELINE.tools!].reverse(),
+      ...INK,
+      connections: [...INK.connections!].reverse(),
+      tools: [...INK.tools!].reverse(),
     };
 
-    expect(announce(reordered).catalog?.value).toBe(announce(BASELINE).catalog?.value);
+    expect(announce(reordered).catalog?.value).toBe(announce(INK).catalog?.value);
   });
 
   it("announces nothing for a catalog that is empty and was never announced", () => {
     expect(announce({ skills: [{ name: "house-rules" }], tools: [inlineTool("add")] })).toEqual({});
   });
 
-  it("announces only what changed, including what must no longer be called", () => {
-    const next: CatalogState = {
-      ...BASELINE,
-      connections: [
-        ...BASELINE.connections!.filter((connection) => connection.name !== "crm"),
-        { description: "Caller-specific product catalog.", name: "dynamic-catalog" },
+  describe("changes", () => {
+    it("appends nothing when an entry joins a listed namespace or has no namespace", () => {
+      expect(
+        appended(INK, {
+          ...INK,
+          skills: [...INK.skills!, { deferred: true, name: "sre__postmortem" }],
+          tools: [...INK.tools!, deferred("sre__ack_alert"), deferred("export_ledger")],
+        }),
+      ).toBeUndefined();
+    });
+
+    it.each([
+      ["a namespace", { ...INK, tools: [...INK.tools!, deferred("billing__refund")] }],
+      [
+        "a connection",
+        { ...INK, connections: [...INK.connections!, { description: "CRM", name: "crm" }] },
       ],
-      skills: [...BASELINE.skills!, { deferred: true, name: "tenant-playbook" }],
-      tools: [
-        ...BASELINE.tools!.filter((tool) => tool.name !== "researcher"),
-        deferred("tenant__sync"),
-      ],
-    };
+    ])("appends the full listing again when %s appears", (_case, next: CatalogState) => {
+      const message = appended(INK, next);
 
-    expect(diff(BASELINE, next)).toBe(
-      [
-        "The catalog changed.",
-        "Tools added: tenant__sync",
-        "Skills added: tenant-playbook",
-        "Connections added or updated:",
-        "- dynamic-catalog: Caller-specific product catalog.",
-        "No longer available, do not call or load: researcher, crm",
-      ].join("\n"),
-    );
-  });
+      expect(message).toBe(`The catalog changed.\n${baseline(next)}`);
+    });
 
-  it("announces a connection whose description changed", () => {
-    const next = {
-      ...BASELINE,
-      connections: BASELINE.connections!.map((connection) =>
-        connection.name === "petstore"
-          ? { ...connection, description: "Pet store inventory and orders API" }
-          : connection,
-      ),
-    };
+    it("names a namespace or connection that is gone", () => {
+      const next: CatalogState = {
+        ...INK,
+        connections: INK.connections!.filter(({ name }) => name !== "linear"),
+        tools: INK.tools!.filter(({ name }) => !name.startsWith("d0__")),
+      };
 
-    expect(diff(BASELINE, next)).toBe(
-      [
-        "The catalog changed.",
-        "Connections added or updated:",
-        "- petstore: Pet store inventory and orders API",
-      ].join("\n"),
-    );
-  });
+      expect(appended(INK, next)).toBe(
+        `The catalog changed.\n${baseline(next)}\nNo longer available: d0, linear`,
+      );
+    });
 
-  it("replaces the listing when that is shorter than the diff", () => {
-    const previous = {
-      tools: Array.from({ length: 20 }, (_, index) => deferred(`tenant_action_${index}`)),
-    };
+    it("does not call a namespace or connection gone when it only falls past the cap", () => {
+      const twenty = Array.from(
+        { length: 20 },
+        (_, index) => `ns${String(index + 1).padStart(2, "0")}`,
+      );
+      const previous: CatalogState = {
+        connections: twenty.map((name) => ({ name: `svc_${name}` })),
+        tools: twenty.flatMap((name) => namespace(name, 2)),
+      };
+      // A larger namespace and an earlier connection push ns20 and svc_ns20 past their caps.
+      const next: CatalogState = {
+        connections: [{ name: "svc_ns00" }, ...previous.connections!],
+        tools: [...namespace("top", 3), ...previous.tools!],
+      };
 
-    expect(diff(previous, { tools: [deferred("echo")] })).toBe(
-      [
-        "The catalog changed. This list replaces the previous one.",
-        "More tools and skills are available than your context shows. Find them with search, call tools with execute({ tool, input }), and load skills with execute({ skill }).",
-        "Tools: echo",
-      ].join("\n"),
-    );
-  });
+      const message = appended(previous, next);
 
-  it("says nothing when a skill stops being deferred, and calls it gone only when it can no longer be loaded", () => {
-    const tools = [deferred("tenant__sync")];
-    const before = announce({ skills: [{ deferred: true, name: "pdf-forms" }], tools }).catalog!
-      .value;
+      expect(message).toContain(", and more");
+      expect(message).toContain("- and more");
+      expect(message).not.toContain("No longer available");
+    });
 
-    const listed = announce({ skills: [{ name: "pdf-forms" }], tools }, { catalog: before });
-    expect(listed.catalog?.render(before)).toBeUndefined();
-    const dropped = announce({ tools }, { catalog: before });
-    expect(dropped.catalog?.render(before)).toBe(
-      "The catalog changed.\nNo longer available, do not call or load: pdf-forms",
-    );
-  });
+    it("says when an announced catalog becomes empty, and lists it in full when entries return", () => {
+      const synced = announce({ tools: [deferred("tenant__sync")] }).catalog!.value;
+      const empty = announce({ tools: [inlineTool("add")] }, { catalog: synced }).catalog!;
 
-  it("says when an announced catalog becomes empty, and lists it in full when entries return", () => {
-    const synced = announce({ tools: [deferred("tenant__sync")] }).catalog!.value;
-    const empty = announce({ tools: [inlineTool("add")] }, { catalog: synced }).catalog!;
+      expect(empty.render(synced)).toBe(
+        "The catalog changed. It is empty now: search finds nothing, and execute has no tools to call.",
+      );
+      const returned = { tools: [deferred("tenant__export")] };
+      expect(announce(returned, { catalog: empty.value }).catalog?.render(empty.value)).toBe(
+        baseline(returned),
+      );
+    });
 
-    expect(empty.render(synced)).toBe(
-      "The catalog changed. It is empty now: search finds nothing, and execute has no tools to call.",
-    );
-    const returned = announce({ tools: [deferred("tenant__export")] }, { catalog: empty.value });
-    expect(returned.catalog?.render(empty.value)).toBe(
-      [
-        "More tools and skills are available than your context shows. Find them with search, call tools with execute({ tool, input }), and load skills with execute({ skill }).",
-        "Tools: tenant__export",
-      ].join("\n"),
+    it.each(["not json", JSON.stringify({ tools: ["tenant__sync"] }), "null"])(
+      "treats an unexpected recorded value as a fresh baseline: %s",
+      (recorded) => {
+        expect(announce(INK, { catalog: recorded }).catalog?.render(recorded)).toBe(baseline(INK));
+      },
     );
   });
 });

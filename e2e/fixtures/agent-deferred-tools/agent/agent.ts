@@ -11,7 +11,8 @@ import type { MockModelRequest, MockModelResponse } from "eve/evals";
 
 import { LEDGER_REGIONS } from "./lib/ledger-regions";
 
-const LISTING_HEADER = "More tools and skills are available than your context shows.";
+/** Every catalog listing says this, whatever kinds it names. */
+const LISTING_MARKER = "They aren't listed; find them with search";
 
 /** Entries that must reach the model only through `search` and `execute`. */
 const DEFERRED_SAMPLES = [
@@ -19,7 +20,7 @@ const DEFERRED_SAMPLES = [
   "deploy_service",
   "research_report",
   "billing_specialist",
-  `ledger_${LEDGER_REGIONS[0]}`,
+  `ledger__${LEDGER_REGIONS[0]}`,
 ];
 
 /** The first tool `execute` suggested in its error for the call with `id`. */
@@ -46,7 +47,7 @@ const SCENARIOS: Record<string, (request: MockModelRequest) => MockModelResponse
       request.tools.some((tool) => tool.name === name),
     );
     const listing = request.messages.find(
-      (message) => message.role === "user" && message.text.startsWith(LISTING_HEADER),
+      (message) => message.role === "user" && message.text.includes(LISTING_MARKER),
     );
     return [
       `DEFERRED-IN-TOOLS: ${listed.length === 0 ? "none" : listed.join(", ")}`,
@@ -105,7 +106,7 @@ const SCENARIOS: Record<string, (request: MockModelRequest) => MockModelResponse
         {
           id: "ledger",
           input: (current) => ({
-            tool: /"tool":"(ledger_[a-z_]+)"/u.exec(outputOf(current, "ledger-search"))?.[1],
+            tool: /"tool":"(ledger__[a-z_]+)"/u.exec(outputOf(current, "ledger-search"))?.[1],
             input: { month: "2026-09" },
           }),
           name: "execute",
