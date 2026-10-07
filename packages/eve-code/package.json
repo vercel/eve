@@ -12,7 +12,8 @@
     "test:unit": "node --test \"test/unit/*.test.ts\"",
     "test:integration": "node --test \"test/integration/*.test.ts\"",
     "test:scenario": "node --test \"test/scenario/*.test.ts\"",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "verify:eve-gh": "node scripts/verify-eve-gh.ts"
   },
   "dependencies": {
     "@vercel/connect": "catalog:",

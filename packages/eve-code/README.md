@@ -104,3 +104,118 @@ eve-bench trials logs https://github.com/vercel/eve/actions/runs/<id> --harness 
 ```
 
 The report's Diagnostics section prints this command with the run URL filled in. The download uses the GitHub CLI and needs read access to this repository. The raw files (`agent.log`, `events.ndjson`, `observability.ndjson`, `verifier.log`) are cached under `~/.cache/eve-bench/runs/`.
+
+## eve-gh preview
+
+`eveGh.enabled` exposes the extension's `eve_gh` subagent, named
+`code__eve_gh` when mounted as `code`. It defaults to false. The child runs
+coding tasks with eve's built-in shell and file tools in its own GitHub checkout;
+it does not share the parent's workspace. eve owns sandbox persistence, resume,
+and deletion. The agent server continues to run in the host application.
+
+```ts
+import { connect } from "@vercel/connect/eve";
+import code from "eve/extensions/code";
+
+export default code({
+  eveGh: {
+    enabled: process.env.EVE_GH_ENABLED === "1",
+    auth: connect({
+      connector: "<Vercel user OAuth connector UID>",
+      principalType: "user",
+      validate: true,
+      // Sandbox access is an app permission granted during team consent, not an
+      // OIDC scope. offline_access lets Connect refresh the user's access token.
+      tokenParams: { scopes: ["openid", "profile", "email", "offline_access"] },
+      displayName: "Vercel Sandbox",
+      instructions: "Connect your Vercel account to start your coding sandbox.",
+    }),
+    resolveOptions: () => ({
+      repository: "https://github.com/vercel/internal-agents",
+      revision: process.env.VERCEL_GIT_COMMIT_SHA,
+      teamId,
+      projectId,
+    }),
+  },
+});
+```
+
+eve compiles this extension into `eve/extensions/code` and cannot import
+`@vercel/connect/eve` (that adapter imports eve), so the consumer supplies the
+user-scoped authorization as `eveGh.auth`.
+
+The child's first shell or file operation uses eve's interactive authorization
+flow to connect the current user's Vercel account. Configure a Vercel Connect
+OAuth connector whose Vercel app allows the OIDC scopes `openid`, `profile`,
+`email`, and `offline_access`, and the API permission `read-write:sandbox`.
+The permission is configured on the Vercel app using the v2 permissions model;
+it is not an OIDC scope. Users must grant access to the target team/project during
+consent. Link the connector to the consuming project. A read-only Vercel MCP
+connector is not sufficient evidence of Sandbox permission. The user's Vercel
+token authorizes sandbox creation and resume; the verified Vercel userinfo supplies
+the commit coauthor. Only the caller and Vercel account IDs are stored in authored
+session state. A different caller or a changed Vercel account must start a new
+coding session.
+
+The child then uses Devbox's existing [setup](https://github.com/vercel/api/blob/7f5d4fdbe6b71c377cb4163fa7e8a04712cf9d24/services/api-devbox/src/endpoints/setup-devbox.ts)
+and [registration](https://github.com/vercel/api/blob/7f5d4fdbe6b71c377cb4163fa7e8a04712cf9d24/services/api-devbox/src/endpoints/register-devbox.ts)
+exchange, authenticated by that user, to obtain the owner's Vercel token and
+their GitHub OAuth Login Connection token. These become `VERCEL_TOKEN` /
+`VERCEL_API_KEY` and `GH_TOKEN` / `GITHUB_TOKEN` on shell commands. The adapter
+does not forward the installation token, project environment, or other returned
+secrets. Missing human GitHub credentials fail with a request to connect GitHub
+in Vercel's Login Connections; there is no bot-token fallback for these variables.
+These credentials are visible to code executing inside the sandbox, as in
+Devbox, but are not placed in authored state, deployment settings, or files by
+the adapter.
+
+This reuses the internal Devbox service, so the user must belong to its allowed
+internal teams. Setup registers the existing sandbox with `skipDevboxdInstall`
+and adds Devbox's agent port; it does not install a daemon. eve continues to own
+commands and compute lifecycle. Resume re-registers the same Devbox ID and
+refreshes runtime credentials. Only that ID is added to the provider's session
+state. Session deletion revokes the Devbox record before deleting the sandbox;
+stopping preserves both for resume. No Devbox heartbeat or task is created.
+The service currently issues other startup credentials during registration;
+the adapter discards those fields.
+
+The child uses a dedicated sandbox provider, `eve-gh`, that wraps
+eve's Vercel provider. Credentials are resolved only when a session starts or
+resumes, never during preparation. Keep this child free of skills and workspace
+seeds: those require a template snapshot, which cannot issue the new sandbox's
+managed Git grant, so preparation rejects them rather than silently creating an
+unauthenticated checkout. Each fresh sandbox is created from a Git source; resume
+reconnects to the existing named sandbox and fails if it no longer exists.
+
+The project must be enabled for `vercel-sandbox-git-credentials` and
+`vercel-sandbox-signed-commits`, have a Git Bound (a project/repository permission)
+authorizing the required Git actions, and use a repository accessible to the
+Vercel GitHub App. Creation currently requires a user-scoped Vercel token; project
+OIDC is insufficient. The provider does not create Bounds or change platform
+flags. API errors propagate to the caller without falling back to unmanaged
+credentials.
+
+Sandbox owns Git credentials and commit signing; Devbox supplies the user's
+GitHub API credential separately. eve's pinned Sandbox SDK does not yet expose
+these preview fields, so the provider adds `source.credentials: true` and
+top-level `commitAs` to its creation request through the SDK's fetch option.
+
+The current [signing preview contract](https://github.com/vercel/api/blob/f42b9d530ffd60245fb00eae0a741de5da2156be/hive-containers/sandbox-controller/README.md#supported-push-contract)
+requires an existing remote branch and linear commits; it rejects new-branch,
+merge, and force pushes. Create a new remote branch through the user's GitHub
+API access before pushing to it. Signing changes commit IDs, so the child reports
+the post-push HEAD.
+
+The opt-in live check is `pnpm --filter @eve/code verify:eve-gh`. It uses the
+same provider, but bypasses interactive consent for a manual platform diagnostic.
+Supply a short-lived user token as `EVE_GH_CHECK_TOKEN` and coauthor identity
+as `EVE_GH_CHECK_NAME` / `EVE_GH_CHECK_EMAIL` only in that local process,
+plus `VERCEL_TEAM_ID`, `VERCEL_PROJECT_ID`, and `EVE_GH_REPOSITORY`.
+The check requires a full commit SHA in `EVE_GH_REVISION`, and
+explicitly creates a temporary sandbox regardless of the feature flag. It verifies
+the clean checkout and remote Git read access, stops and resumes the sandbox,
+repeats the read checks, then deletes it. It also exchanges Devbox credentials and
+checks authenticated Vercel and GitHub API access from a command. It does not push
+or establish that signed commits work. Unit tests use mocked HTTP responses; they
+verify SDK requests and provider lifecycle integration, not live Git authorization
+or signing.
