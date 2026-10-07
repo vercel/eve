@@ -115,7 +115,7 @@ export function chatSdkDriver(surface: Exclude<Surface, "public"> = "shared"): C
       return {
         id: messageIdOf(call),
         links: linkTargets(card),
-        onlyPerson: isDirectMessage(call),
+        onlyPerson: isPersonDirectMessage(call),
         options: buttonsOf(call),
         text: card === undefined ? (driver.postedText(call) ?? "") : texts(card),
       };
@@ -269,12 +269,12 @@ function isPost(call: PlatformCall): boolean {
   return call.method === "postMessage" || call.method === "editMessage";
 }
 
-/** A DM thread the bot opened with one person, beside the conversation's own thread. */
-const DIRECT_MESSAGE_THREAD = `${ADAPTER}:direct-message:`;
+/** The DM thread the bot opens with the person, beside the conversation's own thread. */
+const PERSON_DM_THREAD = `${ADAPTER}:direct-message:${PERSON.userId}`;
 
-function isDirectMessage(call: PlatformCall): boolean {
+function isPersonDirectMessage(call: PlatformCall): boolean {
   const { threadId } = call.response as { readonly threadId?: string };
-  return threadId?.startsWith(DIRECT_MESSAGE_THREAD) === true;
+  return threadId === PERSON_DM_THREAD;
 }
 
 function fakeAdapter({
@@ -358,8 +358,10 @@ function fakeAdapter({
       metadata: {},
     }),
     // No native ephemerals, as on Discord or Linq: `postEphemeral` falls back to a DM.
+    // Only the person signing in can be reached, so a sign-in sent to anyone else fails its cells.
     async openDM(userId: string) {
-      return `${DIRECT_MESSAGE_THREAD}${userId}`;
+      if (userId !== PERSON.userId) throw new Error(`no direct message with ${userId}`);
+      return PERSON_DM_THREAD;
     },
     async postMessage(id: string, posted: AdapterPostableMessage) {
       const messageId = `posted-${nextId()}`;

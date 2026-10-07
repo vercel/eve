@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Chat SDK channels can now deliver a sign-in privately when it starts outside a direct message, as a native ephemeral where the adapter supports one and otherwise as a direct message, with a link-free status in the thread. This needs per-person `auth` and the handler's `Thread` passed to `send`; otherwise, including with the default `auth: null`, the thread still gets the "continue in a direct message" notice.
+Chat SDK channels now send a sign-in started in a shared thread to the person signing in, as an ephemeral message or a direct message, and show a link-free status in the thread. Adapters that support neither still post the existing "continue in a direct message" notice.
