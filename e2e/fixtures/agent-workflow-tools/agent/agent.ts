@@ -95,18 +95,15 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
   const scenario = respondToTaskScenario(request, directiveOf(message));
   if (scenario !== undefined) return scenario;
   if (message.startsWith("WORKFLOW-CATALOG-SIGN-IN")) {
-    // A plain search reports that the catalog needs sign-in; searching it with
-    // `signIn` asks the user. Sign-in drops that interrupted call from history,
-    // so the script makes it again once the turn resumes.
+    // A plain search finds the catalog as its sign-in entry; executing it asks
+    // the user. Sign-in drops that interrupted call from history, so the script
+    // makes it again once the turn resumes, then searches and calls a tool.
     return playScript(
       request,
       [
-        { id: "catalog-search", name: "search", input: () => ({ connection: "private-catalog" }) },
-        {
-          id: "catalog-sign-in",
-          name: "search",
-          input: () => ({ connection: "private-catalog", signIn: true }),
-        },
+        { id: "catalog-search", name: "search", input: () => ({ query: "private-catalog" }) },
+        { id: "catalog-sign-in", name: "execute", input: () => ({ tool: "private-catalog" }) },
+        { id: "catalog-tools", name: "search", input: () => ({ query: "private-catalog" }) },
         {
           id: "catalog-items",
           name: "execute",

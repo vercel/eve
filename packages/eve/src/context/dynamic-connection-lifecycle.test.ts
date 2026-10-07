@@ -331,6 +331,29 @@ describe("dynamic connection lifecycle", () => {
     expect(registry.getConnectionNames()).toEqual([]);
   });
 
+  it("fails when a dynamic connection takes a runtime tool's name", async () => {
+    const { ctx, registry } = createContext();
+    const resolver = createResolver({
+      handler: () => ({
+        execute: defineMcpClientConnection({
+          description: "Runs jobs.",
+          url: "https://mcp.example.com/jobs",
+        }),
+      }),
+    });
+
+    await expect(
+      dispatchDynamicConnectionEvent({
+        ctx,
+        event: createSessionStartedEvent(),
+        resolvers: [resolver],
+      }),
+    ).rejects.toThrow(
+      'Dynamic connection resolver "connections/accounts.ts" returned the reserved connection name "execute". eve reserves "execute" for its built-in tool; rename the connection.',
+    );
+    expect(registry.getConnectionNames()).toEqual([]);
+  });
+
   it("fails when a dynamic connection nests under another connection's name", async () => {
     const { ctx, registry } = createContext([createStaticConnection("cloud")]);
     const resolver = createResolver({
