@@ -132,9 +132,9 @@ function renderListing({ connections, kinds, namespaces }: CatalogListing): stri
   const subject =
     kinds.length === 0
       ? "Your connections have more tools"
-      : `More ${kinds.join(" and ")} are available`;
+      : `You have more ${kinds.join(" and ")}`;
   const lines = [
-    `${subject} than your context shows. Their names aren't listed; find them with search before deciding you can't do something. Call them with execute({ tool, input }).`,
+    `${subject} than are loaded here. Before saying you have no tool for a task, look for one with search, which searches your own catalog, not the web. Call them with execute({ tool, input }).`,
   ];
   if (namespaces.items.length > 0) {
     const listed = [...namespaces.items, ...(namespaces.more ? ["and more"] : [])];
