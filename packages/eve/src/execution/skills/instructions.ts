@@ -1,5 +1,6 @@
 import type { DynamicSkillManifest } from "#context/keys.js";
 import type { Announcement } from "#harness/announcements.js";
+import { EXECUTE_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { FALLBACK_SKILL_ROOT, MODEL_SKILL_ROOT } from "#shared/skill-paths.js";
 
 export interface AvailableSkillDescription {
@@ -36,7 +37,7 @@ export function formatAvailableSkillsSection(
     "Available skills",
     "Listed skills are available in this run. Do not claim a listed skill is inaccessible unless activation or workspace inspection actually fails.",
     "Dynamic skill announcements replace earlier dynamic skills and override static skills with the same name. Static skills omitted from a dynamic announcement remain available.",
-    "If the user names a skill or the request clearly matches one of the descriptions below, load it with execute({ skill }) before proceeding.",
+    `If the user names a skill or the request clearly matches one of the descriptions below, load it with ${EXECUTE_TOOL_NAME}({ skill }) before proceeding.`,
     "If multiple skills match, activate the minimal set that covers the task. After activation, follow the returned instructions instead of improvising around them.",
     "If activation fails, say so briefly and continue with the best available alternative.",
     `Skill files live under \`${MODEL_SKILL_ROOT}/<skill>/\`, with \`${FALLBACK_SKILL_ROOT}/<skill>/\` as the fallback when \`$HOME\` is unavailable.`,
