@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -83,18 +83,29 @@ describe("search", () => {
   });
 
   it("finds only deferred entries; direct tools and listed skills are already in context", async () => {
-    const output = await searchFor(tools, { skills })({});
+    const search = searchFor(tools, { skills });
 
-    expect(names(output)).toEqual([
-      "billing_specialist",
-      "export_ledger",
-      "list_invoices",
-      "refund-policy",
-      "refund_invoice",
-    ]);
+    expect(await search({ query: "add" })).toEqual({ results: [] });
+    expect(names(await search({ query: "refund voice" }))).not.toContain("refund-voice");
   });
 
-  it("returns the best matches up to limit, 10 by default, and takes no paging", async () => {
+  it("requires a query with at least one word", async () => {
+    const search = searchFor(tools, { skills });
+    const schema = catalogContext({ tools }).catalog.advertised.get("search")!
+      .inputSchema as StandardSchemaV1;
+    const needsWords =
+      'search needs at least one word in query, such as a capability ("list open issues") or a name or connection prefix ("linear__").';
+
+    expect(await schema["~standard"].validate({ limit: 5 })).toEqual({
+      issues: [
+        expect.objectContaining({ message: 'Instance does not have required property "query".' }),
+      ],
+    });
+    await expect(search({ query: "  ^ " })).rejects.toThrow(needsWords);
+    await expect(search({})).rejects.toThrow(needsWords);
+  });
+
+  it("returns the best matches up to limit, 20 by default, and takes no paging", async () => {
     const many = Array.from({ length: 60 }, (_, index) =>
       inlineTool(`report_${String(index).padStart(2, "0")}`, { deferred: true }),
     );
@@ -104,12 +115,12 @@ describe("search", () => {
     expect(best).toHaveLength(50);
     // A smaller limit keeps the best matches, in rank order.
     expect(names(await search({ limit: 3, query: "report" }))).toEqual(best.slice(0, 3));
-    expect(names(await search({ query: "report" }))).toEqual(best.slice(0, 10));
+    expect(names(await search({ query: "report" }))).toEqual(best.slice(0, 20));
 
     // The model's calls are checked against the schema, which caps limit at 50 and has no offset.
     const schema = catalogContext({ tools: many }).catalog.advertised.get("search")!
       .inputSchema as StandardSchemaV1;
-    expect(await schema["~standard"].validate({ limit: 51 })).toEqual({
+    expect(await schema["~standard"].validate({ limit: 51, query: "report" })).toEqual({
       issues: [expect.objectContaining({ path: ["limit"] })],
     });
     expect(await schema["~standard"].validate({ offset: 10, query: "report" })).toEqual({
@@ -168,9 +179,7 @@ describe("search", () => {
       expect(await search({ query: "notion" })).toEqual({ results: [signIn] });
       // Found by the connection's description too, while its tools can't be listed.
       expect((await search({ query: "pages" })).results).toEqual([signIn]);
-      expect(names(await search({}))).toEqual(
-        expect.arrayContaining(["notion", "linear__list_issues"]),
-      );
+      expect(names(await search({ query: "notion__" }))).toEqual(["notion"]);
       expect(notion.signIns).toEqual([]);
     });
 
@@ -183,7 +192,9 @@ describe("search", () => {
         tools: [],
       });
 
-      const output = await searchFor(tools, { connections: [linear(), vault, crm] })({});
+      const output = await searchFor(tools, { connections: [linear(), vault, crm] })({
+        query: "issues",
+      });
 
       expect(names(output)).toContain("linear__list_issues");
       expect(names(output)).not.toContain("vault");
@@ -311,20 +322,93 @@ describe("search", () => {
       },
     );
 
-    it("lists every entry for an empty query, by connection and then name in code-unit order", async () => {
-      expect(await ranked("")).toEqual([
-        "create_issue",
-        "linear_report",
-        "pdf",
-        "pdf-forms",
-        "pdf_fill",
-        "jira__create_issue",
+    it("lists a bare namespace by name, in a fixed order", async () => {
+      expect(await ranked("linear__")).toEqual([
         "linear__create_issue",
         "linear__create_project",
         "linear__list_issues",
-        "ops__getHTTPServerStatus",
-        "x__post",
       ]);
+    });
+  });
+
+  describe("namespace queries", () => {
+    function namespaced() {
+      const crmApi = fakeConnection({
+        description: "CRM customers and deals",
+        name: "crm__api",
+        tools: [
+          connectionTool("get_customer"),
+          connectionTool("list_customers"),
+          connectionTool("list_deals"),
+        ],
+      });
+      const notion = fakeConnection({
+        listing: "sign-in",
+        name: "notion",
+        signIn: true,
+        tools: [connectionTool("search_pages")],
+      });
+      const linear = fakeConnection({ name: "linear", tools: [connectionTool("list_issues")] });
+      const broken = fakeConnection({
+        listing: new Error("upstream returned 502"),
+        name: "jira",
+        tools: [],
+      });
+      const outside = [linear, broken].map((connection) =>
+        vi.spyOn(connection.client, "getToolMetadata"),
+      );
+      const search = searchFor(
+        [
+          // An extension mounted as `crm` adds a tool and a connection under its name.
+          inlineTool("crm__export", { deferred: true, description: "Export CRM accounts." }),
+          inlineTool("export_ledger", {
+            deferred: true,
+            description: "Export the ledger to the crm.",
+          }),
+        ],
+        { connections: [crmApi, notion, linear, broken] },
+      );
+      return { notion, outside, search };
+    }
+
+    it("keeps only the namespace, including a connection mounted under it, and never lists other connections", async () => {
+      const { outside, search } = namespaced();
+
+      expect(await search({ query: "crm__" })).toEqual({
+        results: [
+          expect.objectContaining({ tool: "crm__export" }),
+          expect.objectContaining({ tool: "crm__api__get_customer" }),
+          expect.objectContaining({ tool: "crm__api__list_customers" }),
+          expect.objectContaining({ tool: "crm__api__list_deals" }),
+        ],
+      });
+      // Connections that can't own the namespace aren't asked for their tools, so the
+      // failing one isn't reported either.
+      for (const getToolMetadata of outside) expect(getToolMetadata).not.toHaveBeenCalled();
+    });
+
+    it("ranks the rest of the query within the namespace", async () => {
+      const { search } = namespaced();
+
+      expect(names(await search({ query: "crm__api__list" })).sort()).toEqual([
+        "crm__api__list_customers",
+        "crm__api__list_deals",
+      ]);
+    });
+
+    it("finds a connection's sign-in entry under its own namespace, without prompting", async () => {
+      const { notion, search } = namespaced();
+
+      expect(names(await search({ query: "notion__" }))).toEqual(["notion"]);
+      expect(notion.signIns).toEqual([]);
+    });
+
+    it("ignores a leading ^ and returns nothing for an unknown namespace", async () => {
+      const { outside, search } = namespaced();
+
+      expect(await search({ query: "^crm__" })).toEqual(await search({ query: "crm__" }));
+      expect(await search({ query: "nope__x" })).toEqual({ results: [] });
+      for (const getToolMetadata of outside) expect(getToolMetadata).not.toHaveBeenCalled();
     });
   });
 });

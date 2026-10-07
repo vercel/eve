@@ -30,7 +30,7 @@ export default defineEval({
       status: "completed",
       output: (value) =>
         value ===
-        'The Public catalog tools are available. Find them with search({ query: "public-catalog" }).',
+        'The Public catalog tools are available. Find them with search({ query: "public-catalog__" }).',
     });
     started.eventsSatisfy("no sign-in is requested before the protected call", (events) => {
       const protectedCall = events.findIndex(

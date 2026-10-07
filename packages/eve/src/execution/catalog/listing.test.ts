@@ -66,7 +66,7 @@ describe("catalogAnnouncements", () => {
         "Tools: deploy_service, refund_invoice, stripe_list_disputes",
         "Agents: billing_specialist, researcher",
         "Skills: pdf-forms, release_notes",
-        "Connections:",
+        'Connections, whose tools are named <connection>__<tool>; search one connection\'s tools with "<connection>__":',
         "- crm",
         "- linear: Linear issues and projects",
         "- petstore: Pet store inventory API",

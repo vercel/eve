@@ -35,6 +35,6 @@ export default defineEval({
     );
     t.messageIncludes("Agents: billing_specialist");
     t.messageIncludes("Skills: pdf-forms, release_notes, tenant-playbook");
-    t.messageIncludes("Connections:\n- petstore: Pet store inventory API.");
+    t.messageIncludes("\n- petstore: Pet store inventory API.");
   },
 });
