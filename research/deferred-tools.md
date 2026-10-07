@@ -22,8 +22,6 @@ through two fixed tools, `search` and `execute`:
 ```ts
 search(opts: {
   query?: string;
-  connection?: string;
-  signIn?: boolean;
   limit?: number;
   offset?: number;
 }): {
@@ -32,7 +30,7 @@ search(opts: {
     | { skill: string; description: string; path?: string }
   >;
   total: number;
-  unavailable?: Array<{ connection: string; error: string; requiresSignIn?: true }>;
+  unavailable?: Array<{ connection: string; error: string }>;
 };
 
 execute(
@@ -504,13 +502,12 @@ today.
 
 **`search`**
 
-- **Input:** `{ query?, connection?, signIn?, limit?, offset? }`.
+- **Input:** `{ query?, limit?, offset? }`.
   - `limit` defaults to 10 and is capped at 50.
-  - Leaving out `query` lists every entry. Pair it with `connection` to list
-    one connection's tools.
-  - `connection` and `signIn` mean what they mean on today's
-    `connection_search`. They stay on search because sign-in applies to a
-    whole connection, not one tool.
+  - Leaving out `query` lists every entry. A connection's name as the query,
+    such as `linear`, lists that connection's tools first.
+  - There is no connection filter and no sign-in flag. The query already
+    selects a connection, and sign-in is an `execute` call.
 - **Result:** `{ results, total, unavailable? }`.
   - A tool entry is `{ tool, description, signature }`. `tool` is the exact
     name to pass to `execute`.
@@ -528,15 +525,31 @@ today.
     deferred, so relative references inside the skill still resolve.
   - Tools and skills rank together, so one query such as "fill a PDF form"
     can return a `pdf_fill` tool and a `pdf-forms` skill.
-  - `unavailable` reports connections that need sign-in or failed to list,
-    as it does today.
-- **Ranking.** The `connection_search` ranker, generalized to any entry. It
-  weights the name, then the connection name, input property names, the
-  description, and last property descriptions and the connection
-  description. A skill has only a name and a description to match.
-- **Sign-in.** A plain search never prompts.
-  `search({ connection, signIn: true })` starts authorization for that one
-  connection.
+  - A connection whose tools can't be listed until the user signs in appears
+    as a tool result named after the connection, such as
+    `{ tool: "linear", description: "Sign in to use the Linear tools: …" }`.
+  - `unavailable` reports only connections that failed to list or can't
+    start an interactive sign-in.
+- **Ranking.** Matches rank in tiers, and an exact name always ranks first:
+  1. the query's words equal the entry's full name, such as
+     `linear__create_issue`;
+  2. they equal the name without its connection prefix, such as
+     `create_issue`;
+  3. they start the entry's connection name and the full name, so `linear`
+     returns the `linear` connection's tools;
+  4. they start the entry's name, with the last word allowed to be partial,
+     such as `create_iss`;
+  5. keyword matches, weighted by field: the name, then the connection name,
+     input property names, the description, and last property descriptions
+     and the connection description.
+
+  A score breaks ties within a tier, then the connection name, then the
+  entry name. A skill has only a name and a description to match. `execute`'s
+  closest-name suggestions use the same ranking.
+
+- **Sign-in.** `search` never prompts. It lists a connection that needs
+  sign-in as a result, and `execute({ tool: "<connection>" })` asks the user
+  to sign in.
 - **Description.** Fixed for each eve version. It names no entry. It says
   that `search` finds the agent's own tools and services, not web pages, so
   the model doesn't use it in place of `web_search`.
@@ -565,7 +578,15 @@ today.
   - A direct tool returns `"<name>" is in your tool list; call it directly.`
   - Invalid input returns the entry's `signature`.
   - A skill name that matches a connection says to find its tools with
-    `search({ connection })`. This hint moves over from `load_skill`.
+    `search({ query: "<connection>" })`. This hint moves over from
+    `load_skill`.
+- **Sign-in.** A connection's own name is an entry.
+  `execute({ tool: "linear" })` finishes a pending sign-in or starts one, the
+  same way a call to one of its tools does, and parks until the user signs
+  in. It then says the connection's tools can be searched. When the tools
+  are already listable, it only confirms. It has no approval, and its label
+  is `Connect Linear`. Every path that finishes a sign-in, whether in
+  `search`, a tool call, or this entry, goes through one helper.
 - **Description.** Fixed for each eve version. It tells the model to use
   names exactly as `search` returns them, to load skills with `skill`, and to
   prefer connected services over web search or general knowledge. That last
@@ -585,7 +606,11 @@ today.
   `agent/tools/execute.ts`, and the framework module that provides them are
   compile errors in every agent, as the connection tool slots are today. The
   error tells the author to rename the file. Extension tools are prefixed, so
-  an extension's `tools/search.ts` (`crm__search`) is unaffected.
+  an extension's `tools/search.ts` (`crm__search`) is unaffected. A
+  connection can't take the name of a tool eve adds at runtime, such as
+  `search` or `execute`, because its own name is the entry that signs in to
+  it. Static connections fail at compile time, and dynamic ones when they
+  resolve.
 - **`defaultTools: false`** doesn't remove them.
 
 ### Dispatch
@@ -830,6 +855,7 @@ Everything in this section lands in [3/3].
   - a background workflow tool;
   - a deferred subagent;
   - a connection tool that parks for sign-in;
+  - a connection listed for sign-in, then `execute` of its name;
   - a dynamic connection resolving;
   - a dynamic deferred tool and a dynamic deferred subagent appearing
     mid-session, then one of them disappearing;
