@@ -1,5 +1,5 @@
-import { RUNTIME_TOOL_NAMES } from "#connections/ownership.js";
 import type { ConnectionSourceRef } from "#discover/manifest.js";
+import { runtimeToolRole } from "#protocol/runtime-tools.js";
 import {
   normalizeMcpClientConnectionDefinition,
   normalizeOpenApiConnectionDefinition,
@@ -83,9 +83,11 @@ export async function compileConnectionDefinition(
     };
   }
 
-  if (RUNTIME_TOOL_NAMES.includes(source.connectionName)) {
+  // A connection's own name is the entry that signs the user in to it.
+  const reservedFor = runtimeToolRole(source.connectionName);
+  if (reservedFor !== undefined) {
     throw new Error(
-      `Connection "${source.logicalPath}" uses the reserved name "${source.connectionName}". Rename its path; eve reserves "${source.connectionName}" for its built-in tool.`,
+      `Connection "${source.logicalPath}" uses the reserved name "${source.connectionName}". Rename its path; eve reserves "${source.connectionName}" for its built-in ${reservedFor}.`,
     );
   }
 

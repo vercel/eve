@@ -40,7 +40,6 @@ import { compileConnectionDefinition } from "#compiler/normalize-connection.js";
 import {
   applyAgentToolPolicy,
   applyDefaultToolPolicy,
-  assertFrameworkToolPolicy,
   canDisableToolWithoutSelectedSource,
 } from "#compiler/default-tool-policy.js";
 import {
@@ -585,7 +584,6 @@ class AgentGraphCompiler {
           break;
         }
         case "tool": {
-          assertFrameworkToolPolicy(candidate);
           const result = await compileToolEntry(input.manifest.agentRoot, entry.source, {
             binding: binding!,
             loadNamespace,

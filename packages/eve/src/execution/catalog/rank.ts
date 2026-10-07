@@ -153,6 +153,7 @@ function proseWords(text: string): string[] {
   return tokenize(text).filter((word) => word.length > 1);
 }
 
-function compareCodeUnits(a: string, b: string): number {
+/** Orders by UTF-16 code unit, the same in every locale. */
+export function compareCodeUnits(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }

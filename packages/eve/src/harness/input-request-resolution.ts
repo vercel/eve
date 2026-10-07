@@ -67,9 +67,9 @@ export function resolveApprovalOutcome(response: InputResponse | undefined): {
   };
 }
 
-/** What the model reads when an approved call's tool went away before the call could run. */
+/** What the model reads when a call's tool went away before the call could run. */
 export function unavailableToolMessage(toolName: string): string {
-  return `The approved tool "${toolName}" is no longer available, so the call didn't run. If the task still needs it, find an available tool with search and make a new call, which needs approval again.`;
+  return `The tool "${toolName}" is no longer available, so the call didn't run. If the task still needs it, find an available tool with search and make a new call.`;
 }
 
 /**

@@ -3,23 +3,7 @@ import type {
   FinalizedNodeSourceState,
   PhaseOneNodeSourceState,
 } from "#compiler/node-source-state.js";
-import {
-  canonicalSourceSlot,
-  composeAgentModuleCandidates,
-  type AgentSourceCandidate,
-} from "#compiler/source-graph.js";
-import { CATALOG_TOOL_NAMES } from "#protocol/catalog-tools.js";
-
-const CATALOG_TOOL_SLOTS = new Set(CATALOG_TOOL_NAMES.map((name) => `tools/${name}`));
-
-/** Rejects authored sources that would replace or disable the catalog tools. */
-export function assertFrameworkToolPolicy(candidate: AgentSourceCandidate): void {
-  const slot = canonicalSourceSlot(candidate.logicalPath);
-  if (!CATALOG_TOOL_SLOTS.has(slot)) return;
-  throw new Error(
-    `"agent/${slot}.ts" is reserved. search and execute are framework tools that every agent has; they cannot be replaced or disabled. Rename the file.`,
-  );
-}
+import { canonicalSourceSlot, composeAgentModuleCandidates } from "#compiler/source-graph.js";
 
 export function applyAgentToolPolicy(
   phaseOne: PhaseOneNodeSourceState,

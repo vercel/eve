@@ -111,10 +111,12 @@ async function search(
   const unavailable: UnavailableConnection[] = [];
   const { registry } = catalog;
   if (registry !== undefined) {
-    for (const connection of registry.getConnections()) {
-      const found = await searchConnection(registry, connection);
-      if ("unavailable" in found) unavailable.push(found.unavailable);
-      else candidates.push(...found.candidates);
+    const found = await Promise.all(
+      registry.getConnections().map((connection) => searchConnection(registry, connection)),
+    );
+    for (const connection of found) {
+      if ("unavailable" in connection) unavailable.push(connection.unavailable);
+      else candidates.push(...connection.candidates);
     }
   }
 

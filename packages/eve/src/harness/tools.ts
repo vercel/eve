@@ -82,7 +82,10 @@ export function buildToolSet(input: {
  * stashed out-of-band ({@link stashToolInterrupt}) for the park detector while
  * the AI SDK records an opaque {@link AuthorizationPendingModelOutput} that
  * omits OAuth URLs, user codes, and hook URLs from model-facing history.
- * Returns `undefined` for client-side tools (no `execute`).
+ * Returns `undefined` for client-side tools (no `execute`). With `resolve`,
+ * output is normalized under the name of the entry each call resolves to, so
+ * an error from a call through `execute` names the entry, and a tool stub
+ * matches that entry and its input, as it would a direct call.
  */
 export function wrapToolExecute(
   definition: HarnessToolDefinition,
@@ -92,7 +95,10 @@ export function wrapToolExecute(
   if (execute === undefined) return undefined;
 
   return (input, options) => {
-    const call = stubbedCall({ input, toolName: definition.name }, resolve);
+    const self = { input, toolName: definition.name };
+    const resolved = resolve?.(self);
+    const toolName = resolved?.definition.name ?? definition.name;
+    const call = stubbedCall(self, resolved);
     const run = () => execute(input, options);
     let output: unknown;
     try {
@@ -106,13 +112,13 @@ export function wrapToolExecute(
     if (isAsyncIterable(output)) {
       return normalizeToolExecuteIterable(
         iterateAsApprover(options.toolCallId, output),
-        definition.name,
+        toolName,
         options,
       );
     }
 
     return Promise.resolve(output).then((value) =>
-      normalizeToolExecuteOutput(value, definition.name, options),
+      normalizeToolExecuteOutput(value, toolName, options),
     );
   };
 }

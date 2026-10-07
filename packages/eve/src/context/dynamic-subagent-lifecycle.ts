@@ -14,7 +14,7 @@ import {
 import { createPreparedWorkflowToolHarnessDefinition } from "#execution/tools/workflow/harness-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createLogger } from "#internal/logging.js";
-import { CATALOG_TOOL_NAMES } from "#protocol/catalog-tools.js";
+import { RUNTIME_TOOL_NAMES } from "#protocol/runtime-tools.js";
 import type { SessionStartedStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { ResolvedDynamicSubagentResolver } from "#runtime/subagents/registry.js";
 import { createPreparedRuntimeSubagentTool } from "#runtime/subagents/registry.js";
@@ -138,7 +138,7 @@ function assertToolNameAvailable(
 ): void {
   if (tool === false) return;
   const authoredTools = ctx.get(BundleKey)?.toolRegistry.toolsByName.keys() ?? [];
-  const toolNames = new Set([...CATALOG_TOOL_NAMES, LOAD_SKILL_TOOL_NAME, ...authoredTools]);
+  const toolNames = new Set([...RUNTIME_TOOL_NAMES, LOAD_SKILL_TOOL_NAME, ...authoredTools]);
   if (!toolNames.has(resolver.name)) return;
   throw new Error(
     `Dynamic subagent "${resolver.name}" from "${resolver.logicalPath}" collides with the tool "${resolver.name}". Set the subagent's tool to false when that tool wraps it.`,
