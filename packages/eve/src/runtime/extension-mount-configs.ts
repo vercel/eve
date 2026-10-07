@@ -56,8 +56,8 @@ export function resolveExtensionMountConfigs(
       const config = readMountedExtensionConfig(
         moduleMap.nodes[nodeId]?.modules[mount.mountSourceId]?.default,
       );
-      if (config === undefined) configs.delete(mount.packageNamespace);
-      else configs.set(mount.packageNamespace, config);
+      if (config === undefined) configs.delete(mount.packageName);
+      else configs.set(mount.packageName, config);
     }
     effectiveByNodeId.set(nodeId, configs);
     return configs;
