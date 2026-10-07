@@ -11,12 +11,12 @@ import {
 const SECRET = "github-conformance-secret";
 let nextConversation = 0;
 
-/** Drives GitHub issue comments through the signed App webhook route. */
 const PEOPLE = {
   alice: { id: 583231, login: "octocat", type: "User" },
   bob: { id: 2, login: "hubot-bob", type: "User" },
 } as const;
 
+/** Drives GitHub issue comments through the signed App webhook route. */
 export function githubDriver(): ChannelDriver {
   // Repository and issue identities are the continuation key, so isolate each driver instance.
   nextConversation += 1;

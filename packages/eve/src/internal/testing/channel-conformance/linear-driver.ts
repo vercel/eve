@@ -13,10 +13,10 @@ import { signLinearWebhookBody } from "#public/channels/linear/verify.js";
 const SECRET = "linear-conformance-secret";
 let nextConversation = 0;
 
-/** Drives Linear Agent Session webhooks and Agent Activity GraphQL mutations. */
 // Anyone in the workspace can reply in an issue's agent session.
 const PEOPLE = { alice: "user_1", bob: "user_2" } as const;
 
+/** Drives Linear Agent Session webhooks and Agent Activity GraphQL mutations. */
 export function linearDriver(): ChannelDriver {
   nextConversation += 1;
   const sessionId = `agent-session-conformance-${nextConversation}`;
