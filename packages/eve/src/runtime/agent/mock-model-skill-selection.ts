@@ -1,4 +1,3 @@
-import { NAME_GROUP_LABELS } from "#execution/catalog/listing.js";
 import { EXECUTE_TOOL_NAME } from "#protocol/catalog-tools.js";
 import type { BootstrapPrompt } from "#runtime/agent/bootstrap-model-utils.js";
 import { getPromptContentText } from "#runtime/agent/bootstrap-model-utils.js";
@@ -7,9 +6,6 @@ interface AvailableBootstrapSkill {
   readonly description: string;
   readonly name: string;
 }
-
-/** A catalog listing's skills line, or a diff's line of added skills. */
-const LISTED_SKILLS = new RegExp(`^${NAME_GROUP_LABELS.skills}(?: added)?: (.+)$`);
 
 export function getAvailableSkills(prompt: BootstrapPrompt): AvailableBootstrapSkill[] {
   const skillsById = new Map<string, AvailableBootstrapSkill>();
@@ -22,14 +18,9 @@ export function getAvailableSkills(prompt: BootstrapPrompt): AvailableBootstrapS
     // The "Available skills" section may be a standalone announcement
     // (dynamic skills) or embedded inside the agent's static instructions
     // (authored skills); parse bullet lines from the section header to the
-    // first blank line either way. The catalog listing names deferred skills.
+    // first blank line either way. Deferred skills aren't listed, so only
+    // these are offered.
     const lines = getPromptContentText(message.content).split("\n");
-    for (const line of lines) {
-      const deferred = LISTED_SKILLS.exec(line.trim())?.[1];
-      for (const name of deferred?.split(", ") ?? []) {
-        skillsById.set(name, { description: "", name });
-      }
-    }
     const headerIndex = lines.findIndex((line) => line.trim() === "Available skills");
 
     if (headerIndex < 0) {

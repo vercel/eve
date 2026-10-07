@@ -6,14 +6,11 @@ import { compareCodeUnits } from "./rank.js";
 import type { StepCatalog } from "./step-catalog.js";
 
 const ANNOUNCEMENT_KEY = "catalog";
-
-/** Each name group's label, which both the listing and its diffs start lines with. */
-export const NAME_GROUP_LABELS = { agents: "Agents", skills: "Skills", tools: "Tools" } as const;
 const MAX_LISTED_NAMESPACES = 20;
 const MAX_LISTED_CONNECTIONS = 20;
 
 /** The kinds of deferred entries, as the header names them. */
-type Kind = "tools" | "agents";
+type Kind = "tools" | "agents" | "skills";
 
 interface ListedConnection {
   readonly description: string;
@@ -65,6 +62,8 @@ function listCatalog(catalog: StepCatalog): CatalogListing {
   const kinds: Kind[] = [];
   if (deferred.some((definition) => !isAgentTool(definition))) kinds.push("tools");
   if (deferred.some(isAgentTool)) kinds.push("agents");
+  // Skills that aren't deferred are announced with their descriptions elsewhere.
+  if ([...catalog.skills.values()].some(({ deferred }) => deferred)) kinds.push("skills");
   // The largest namespaces make the cut, rendered by name, so an entry joining or leaving one
   // only changes the text when it moves a namespace across the cap.
   const namespaces = capped(
@@ -85,10 +84,13 @@ function listCatalog(catalog: StepCatalog): CatalogListing {
 
 /** How many deferred entries each namespace holds. */
 function namespaceCounts(catalog: StepCatalog): ReadonlyMap<string, number> {
+  const connections = new Set(catalog.connections.map(({ connectionName }) => connectionName));
   const counts = new Map<string, number>();
-  for (const { name } of catalog.deferred.values()) {
+  for (const name of deferredNames(catalog)) {
     const namespace = namespaceOf(name);
-    if (namespace !== "") counts.set(namespace, (counts.get(namespace) ?? 0) + 1);
+    if (namespace !== "" && !connections.has(namespace)) {
+      counts.set(namespace, (counts.get(namespace) ?? 0) + 1);
+    }
   }
   return counts;
 }
@@ -108,6 +110,13 @@ function reachableNames(catalog: StepCatalog): ReadonlySet<string> {
 /** A name's first `__` segment, or "" when it has none. */
 function namespaceOf(name: string): string {
   return name.slice(0, Math.max(0, name.indexOf("__")));
+}
+
+function deferredNames(catalog: StepCatalog): readonly string[] {
+  return [
+    ...[...catalog.deferred.values()].map(({ name }) => name),
+    ...[...catalog.skills.values()].filter(({ deferred }) => deferred).map(({ name }) => name),
+  ];
 }
 
 function capped<T>(items: readonly T[], max: number): Capped<T> {
@@ -137,9 +146,14 @@ function renderListing({ connections, kinds, namespaces }: CatalogListing): stri
   const subject =
     kinds.length === 0
       ? "Your connections have more tools"
-      : `You have more ${kinds.join(" and ")}`;
+      : `You have more ${new Intl.ListFormat("en", { type: "conjunction" }).format(kinds)}`;
+  const call = !kinds.includes("skills")
+    ? `Call them with ${EXECUTE_TOOL_NAME}({ tool, input }).`
+    : kinds.length === 1
+      ? `Load them with ${EXECUTE_TOOL_NAME}({ skill }).`
+      : `Call tools with ${EXECUTE_TOOL_NAME}({ tool, input }) and load skills with ${EXECUTE_TOOL_NAME}({ skill }).`;
   const lines = [
-    `${subject} than are loaded here. Before saying you have no tool for a task, look for one with ${SEARCH_TOOL_NAME}, which searches your own catalog, not the web. Call them with ${EXECUTE_TOOL_NAME}({ tool, input }).`,
+    `${subject} than are loaded here. Before saying you have no tool for a task, look for one with ${SEARCH_TOOL_NAME}, which searches your own catalog, not the web. ${call}`,
   ];
   if (namespaces.items.length > 0) {
     const listed = [...namespaces.items, ...(namespaces.more ? ["and more"] : [])];
