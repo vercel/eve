@@ -185,14 +185,18 @@ function mayOwnNamespace(connectionName: string, namespace: string): boolean {
 }
 
 /**
- * Why a namespace query found nothing, with the closest connection names, or
- * how to find names when none is close. Names are case-sensitive, so
- * `Linear__` misses `linear`.
+ * Why a namespace query found nothing: the connection it names has no tools,
+ * or the closest connection names, or how to find names when none is close.
+ * Names are case-sensitive, so `Linear__` misses `linear`.
  */
 function unknownNamespaceMessage(
   namespace: string,
   connections: readonly ResolvedConnectionDefinition[],
 ): string {
+  // A connection that lists no tools, such as an empty server or one its tool filter empties.
+  if (connections.some(({ connectionName }) => connectionName === namespace)) {
+    return `Connection "${namespace}" has no tools.`;
+  }
   const closest = closestNames(
     namespace,
     connections.map(({ connectionName, description }) => ({
@@ -203,7 +207,7 @@ function unknownNamespaceMessage(
   const hint =
     closest.length > 0
       ? `Closest connections: ${closest.join(", ")}.`
-      : "Find names in the catalog listing, or search with plain words.";
+      : "Find names in the catalog listing or your tool list, or search with plain words.";
   return `No entries are named "${namespace}__…". ${hint}`;
 }
 
