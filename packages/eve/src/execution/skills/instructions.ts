@@ -13,7 +13,8 @@ const ANNOUNCEMENT_KEY = "skills";
 
 /**
  * Formats the "Available skills" section: every skill that isn't deferred,
- * with the instruction to load it. Deferred skills are in the catalog listing.
+ * with the instruction to load it. Deferred skills stay out of context until
+ * search finds them.
  *
  * A loaded skill's instructions are never injected into the system prompt;
  * the model has them from the result of loading it. The formatter uses the
