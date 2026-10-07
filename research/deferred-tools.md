@@ -507,16 +507,22 @@ today.
     query-less browse. A connection's name as the query, such as `linear`,
     lists that connection's tools first.
   - **Namespace queries.** A query whose first word contains `__` searches one
-    namespace: everything before its last `__`. `linear__` and
-    `linear__issue` search only names that start with `linear__`, plus the
-    `linear` sign-in entry. Connection ownership guarantees no other entry
-    has such a name, so this is exact, and `search` lists only the
-    connections that can own names in that namespace (`linear`, or `crm__api`
-    under an extension mounted as `crm`). Other connections make no network
-    call and don't appear in `unavailable`. Characters that can't appear in a
-    name, such as a leading `^`, are ignored, and regex isn't supported. The
-    description tells the model to use this when it already knows the
-    connection or a name from the listing, a result, or an error.
+    namespace: everything before its last `__`, with trailing underscores
+    trimmed. The namespace only filters. `search` keeps names under
+    `<namespace>__` and anything named exactly the namespace, such as a
+    connection's sign-in entry, then ranks them by the whole query. So
+    `linear__list_issues` still finds the `linear` sign-in entry when Linear
+    needs sign-in, and an exact name that contains `__` still ranks first.
+    Connection ownership means no tool outside a connection uses its
+    prefix, so `search` lists only the connections that can own names in
+    the namespace (`linear`, or `crm__api` under an extension mounted as
+    `crm`). Other connections make no network call and don't appear in
+    `unavailable`. A namespace that matches nothing fails with the closest
+    connection names instead of returning an empty list. Characters that
+    can't appear in a name, such as a leading `^`, are ignored, and regex
+    isn't supported. The description tells the model to use this when it
+    already knows the connection or a name from the listing, a result, or
+    an error.
   - There is no connection filter and no sign-in flag. The query already
     selects a connection, and sign-in is an `execute` call.
   - There is no paging and no match count. `search` returns the best matches
