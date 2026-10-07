@@ -159,10 +159,11 @@ message, and ordering a side effect after the result it depends on. Every eval
 in it is tagged `real-model`. Deterministic task coverage lives with the
 surfaces it exercises, in `agent-workflow-tools` and `agent-subagents`.
 
-`agent-deferred-tools` owns the catalog: about 40 deferred tools, agents,
-skills, and a connection, reached only through `search` and `execute`. Its
-mock-model evals cover dispatch through `execute`; its `real-model` evals gate
-prompt-cache reuse after discovery and that web questions go to `web_search`.
+`agent-deferred-tools` owns the catalog: about 40 deferred tools (20 of them
+under the `ledger` namespace), agents, skills, and a connection, reached only
+through `search` and `execute`. Its mock-model evals cover dispatch through
+`execute`; its `real-model` evals gate prompt-cache reuse after discovery and
+that web questions go to `web_search`.
 
 E2E fixtures live under `e2e/fixtures/*`. Fixture discovery also accepts
 `apps/fixtures/*` apps with an `evals/` directory, but shared development apps

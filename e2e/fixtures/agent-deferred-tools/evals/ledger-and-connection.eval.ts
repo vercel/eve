@@ -12,8 +12,8 @@ export default defineEval({
 
     turn.expectOk();
     turn.noFailedActions();
-    t.toolOrder(["search", "ledger_us_west", "petstore__getInventory"]);
-    turn.calledTool("ledger_us_west", {
+    t.toolOrder(["search", "ledger__us_west", "petstore__getInventory"]);
+    turn.calledTool("ledger__us_west", {
       count: 1,
       output: { balance: 1000, month: "2026-09", region: "us_west" },
     });
