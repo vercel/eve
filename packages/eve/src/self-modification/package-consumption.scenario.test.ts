@@ -141,7 +141,6 @@ describe("packed package consumption", () => {
           type: "module",
           scripts: { build: "eve build" },
           dependencies: {
-            "@vercel/connect": "2.2.0",
             eve: `file:${eveTarball}`,
             "just-bash": "3.1.0",
             microsandbox: "0.5.5",
@@ -166,12 +165,10 @@ describe("packed package consumption", () => {
       appRoot,
       DEPLOYED_SELF_MODIFICATION_CONFIG_PATH,
       renderSelfModificationConfig({
-        branch: "main",
-        channelNames: [],
+        baseBranch: "main",
         connector: "github/selfmod-acme-agent",
         directory: ".",
-        repository: "github.com/acme/agent",
-        vercelBackend: true,
+        repository: "acme/agent",
       }),
     );
 
@@ -212,9 +209,13 @@ import { compileAgentManifest } from "./node_modules/eve/dist/src/compiler/norma
 const discovered = await discoverAgent({ appRoot: process.cwd(), agentRoot: process.cwd() + "/agent" });
 assert.deepEqual(discovered.diagnostics.filter((entry) => entry.severity === "error"), []);
 const compiled = await compileAgentManifest(discovered.manifest);
-assert.deepEqual(compiled.subagents.map((entry) => entry.name), ["self-modification-remote__agent"]);
-const slugs = compiled.subagents[0].agent.dynamicTools.map((tool) => tool.slug);
-assert.ok(slugs.includes("publish") && slugs.includes("registry_add"));
+const child = compiled.subagents.find((entry) => entry.name === "self-modification-remote__agent");
+assert.ok(child);
+assert.ok(child.agent.extensionMounts.some((mount) => mount.namespace === "code"));
+assert.ok(child.agent.tools.some((tool) => tool.name === "code__gh"));
+assert.ok(!compiled.tools.some((tool) => tool.name === "code__gh"));
+assert.ok(!child.agent.tools.some((tool) => tool.name.includes("computer")));
+assert.ok(compiled.subagents.some((entry) => entry.parentNodeId === child.nodeId));
 `,
     );
     await run("node", ["verify-remote-extension.mjs"], appRoot);

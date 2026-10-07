@@ -5,7 +5,7 @@ description: "Ask your agent to update its own authored files during local devel
 
 When `eve dev` starts a local server, it mounts the bundled self-modification extension by default. Ask your agent to change its instructions, tools, skills, or other files under `agent/`; eve delegates the source work to the `self-modification__agent` subagent. Connecting to an existing server with `eve remote connect --url <url>` does not add the bundled extension to that server.
 
-The bundled extension is `eve/self-modification/local`. It is for local development and is not included in production builds. To let a deployed agent propose source changes, mount the separate [`eve/self-modification/remote`](#propose-changes-from-a-deployed-agent) extension.
+The bundled extension is `eve/self-modification/local`. It is for local development and is not included in production builds. To let a deployed agent propose source changes, mount the separate [`eve/self-modification/remote`](#propose-changes-from-a-deployed-agent-experimental) extension.
 
 ```bash
 eve dev
@@ -39,43 +39,6 @@ export default selfModification({
 });
 ```
 
-Mounts that import `eve/self-modification` still work; that specifier is an alias for `eve/self-modification/local`. Neither specifier accepts a `deployed` option. If your mount sets `deployed`, eve rejects it and asks you to move that configuration to an `eve/self-modification/remote` mount.
-
-## Propose changes from a deployed agent
-
-`eve/self-modification/remote` is a separate extension for deployed agents. It adds a subagent that checks out your repository in a sandbox, edits the authored source, and opens a draft pull request against a target branch. It never changes the running deployment. Changes take effect only after you review, merge, and redeploy.
-
-Mount it under its own namespace so it does not replace the local extension:
-
-```ts
-// agent/extensions/self-modification-remote/extension.ts
-import selfModification from "eve/self-modification/remote";
-
-export default selfModification({
-  source: {
-    git: {
-      repository: "github.com/acme/agents",
-      directory: "apps/support",
-    },
-  },
-  target: { branch: "main" },
-  credentials: { pat: true },
-  authorize: ({ channel, principal }) =>
-    channel.kind === "http" && principal?.principalId === "release-bot",
-});
-```
-
-| Option                  | Description                                                                                                                                                                                             |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `source.git.repository` | GitHub repository in `github.com/owner/repo` form.                                                                                                                                                      |
-| `source.git.directory`  | Application directory relative to the repository root. Use `"."` for the root.                                                                                                                          |
-| `target.branch`         | Branch that is checked out and targeted by draft pull requests.                                                                                                                                         |
-| `authorize`             | Required. Receives the requesting `channel` and `principal` and returns whether that caller can use the subagent. The subagent is hidden when it returns `false` or throws.                             |
-| `credentials`           | Required. An object with a `resolve({ capability, repository })` function that returns a GitHub token, or `{ pat: true }` to read `EVE_SELF_MODIFICATION_GITHUB_TOKEN` from the deployment environment. |
-| `model`, `reasoning`    | Optional model and reasoning level for the deployed subagent. It defaults to the parent agent's model.                                                                                                  |
-
-The deployed subagent is never offered during `eve dev`. In a deployment, it needs a sandbox provider that supports runtime credential transforms: Vercel Sandbox on Vercel, or microsandbox on a supported self-hosted system. eve applies the GitHub token as a sandbox network credential only while it checks out or publishes, so commands in the sandbox cannot read it.
-
 ## Run without self-modification
 
 Pass `--no-default-extensions` when you do not want `eve dev` to mount bundled development extensions:
@@ -85,6 +48,37 @@ eve dev --no-default-extensions
 ```
 
 This disables the complete bundled default set for that server, including self-modification. It does not remove files from your project or disable extensions that you have explicitly mounted under `agent/extensions/`.
+
+## Propose changes from a deployed agent (Experimental)
+
+`eve/self-modification/remote` is a separate extension for deployed agents. Outside `eve dev`, it delegates repository work to a coding subagent that proposes changes as draft pull requests. It never changes the running agent. Changes take effect only after you review, merge, and deploy them. Support is limited to repositories hosted by GitHub.
+
+To configure it with guided setup, install the experimental registry item by its full name.
+
+```bash
+eve add experimental/self-modification/remote
+```
+
+The extension accepts:
+
+- `authorize` (required): decides whether the current caller can delegate to the coding subagent.
+- `github.repository` (required): the repository to check out and open pull requests against, in `owner/repo` form.
+- `github.connector` (required): the GitHub Vercel Connect connector that provides repository credentials.
+- `directory`: the application directory relative to the repository root. Defaults to `"."`.
+- `baseBranch`: the branch pull requests target. Defaults to `"main"`.
+- `model` and `reasoning`: the coding subagent's model and reasoning level. The model defaults to the parent agent's model.
+
+The deployed subagent is never offered during `eve dev`, where the local extension handles source edits.
+
+### Authorize callers
+
+`authorize` receives the current authenticated `principal`, or `null` for anonymous callers, and the request's `channel` kind and metadata. Return `true` to offer the coding subagent. Returning `false` or throwing hides it, and eve logs the thrown error. The callback runs on session start and on each turn, including follow-ups.
+
+Check the identities your channel produces before you write a policy.
+
+### Connect GitHub
+
+Create a GitHub Vercel Connect connector, attach it to the deployed project, and install it on the configured repository. Grant the repository permissions needed to read source, push branches, and create pull requests. Use repository rules to require review on protected branches.
 
 ## What to read next
 

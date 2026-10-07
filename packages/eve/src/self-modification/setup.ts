@@ -4,8 +4,6 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { promisify } from "node:util";
 
-import { discoverAgent } from "#discover/discover-agent.js";
-import { stripLogicalPathExtension } from "#discover/filesystem.js";
 import {
   captureVercel,
   runVercelCaptureStdout,
@@ -13,6 +11,12 @@ import {
 } from "#setup/primitives/run-vercel.js";
 import type { VercelProjectReference } from "#setup/project-resolution.js";
 
+import {
+  isBranchName,
+  isGitHubOwner,
+  isGitHubRepositoryName,
+  isRepositoryRelativeDirectory,
+} from "./remote/config-schema.js";
 import { renderLocalSelfModificationExtension } from "./scaffold.js";
 
 export const SELF_MODIFICATION_CONFIG_PATH = "agent/extensions/self-modification/extension.ts";
@@ -30,12 +34,10 @@ const LEGACY_DEFAULT_EXTENSION = DEFAULT_EXTENSION.replace(
 );
 
 export interface SelfModificationSetupValues {
-  readonly branch: string;
-  readonly channelNames: readonly string[];
+  readonly baseBranch: string;
   readonly connector: string;
   readonly directory: string;
   readonly repository: string;
-  readonly vercelBackend: boolean;
 }
 export interface DetectedGitRepository {
   readonly branch?: string;
@@ -46,7 +48,6 @@ export interface DetectedGitRepository {
 }
 export interface SelfModificationSetupOperations {
   attachConnector(connector: string, project: VercelProjectReference): Promise<void>;
-  detectChannelNames(): Promise<readonly string[]>;
   detectGitRepository(): Promise<DetectedGitRepository>;
   findOrCreateConnector(name: string, project: VercelProjectReference): Promise<string>;
   /** Reads the deployed mount at {@link DEPLOYED_SELF_MODIFICATION_CONFIG_PATH}. */
@@ -74,69 +75,20 @@ export function connectorName(owner: string, repo: string): string {
 export function renderSelfModificationConfig(values?: SelfModificationSetupValues): string {
   if (values === undefined) return DEFAULT_EXTENSION;
 
-  const channelNames = [...new Set(values.channelNames)].filter((name) => name !== "eve").sort();
-  const channelCases = (values.vercelBackend ? channelNames : [])
-    .map(
-      (name) => `      case ${JSON.stringify(`channel:${name}`)}:
-        // Authorize trusted principals for this channel before returning true.
-        return false;`,
-    )
-    .join("\n");
-  const httpCase = values.vercelBackend
-    ? `      case "http": {
-        const projectId = process.env.VERCEL_PROJECT_ID;
-        return (
-          projectId !== undefined &&
-          projectId.length > 0 &&
-          principal?.authenticator === "oidc" &&
-          (principal.issuer === "https://oidc.vercel.com" ||
-            principal.issuer?.startsWith("https://oidc.vercel.com/") === true) &&
-          principal.attributes.project_id === projectId
-        );
-      }
-`
-    : "";
-  const switchCases = `${httpCase}${channelCases}`;
-  const credentialErrorMessage = `Self-modification could not obtain a GitHub credential from Vercel Connect for ${values.connector}. Install and attach the configured GitHub connector to this Vercel project, install the managed GitHub App for the configured repository, then retry.`;
-  const body = `import { getToken } from "@vercel/connect";
-import selfModification from "eve/self-modification/remote";
+  const body = `import selfModification from "eve/self-modification/remote";
 
 export default selfModification({
-  source: {
-    git: {
-      repository: ${JSON.stringify(values.repository)},
-      directory: ${JSON.stringify(values.directory)},
-    },
+  // Allows every caller to delegate source changes. Replace with a custom policy
+  // that checks the caller's principal and channel (recommended).
+  authorize: () => true,
+  github: {
+    repository: ${JSON.stringify(values.repository)},
+    connector: ${JSON.stringify(values.connector)},
   },
-  target: { branch: ${JSON.stringify(values.branch)} },
-  credentials: {
-    async resolve({ capability, repository }) {
-      try {
-        return await getToken(${JSON.stringify(values.connector)}, {
-          authorizationDetails: [
-            {
-              type: "github_app_installation",
-              repositories: [repository.owner + "/" + repository.repo],
-            },
-          ],
-          scopes:
-            capability === "checkout"
-              ? ["contents:read", "metadata:read"]
-              : ["contents:write", "pull_requests:write", "metadata:read"],
-          subject: { type: "app" },
-        });
-      } catch (error) {
-        throw new Error(${JSON.stringify(credentialErrorMessage)}, { cause: error });
-      }
-    },
-  },
-  authorize: ({ channel, principal }) => {
-    switch (channel.kind) {
-${switchCases}      default:
-        // Add another branch when you add a trusted channel.
-        return false;
-    }
-  },
+  directory: ${JSON.stringify(values.directory)},
+  baseBranch: ${JSON.stringify(values.baseBranch)},
+  // model: "provider/model",
+  // reasoning: "high",
 });
 `;
   return `${GENERATED_MARKER} digest:${createHash("sha256").update(body).digest("hex")}\n${body}`;
@@ -181,12 +133,6 @@ export function defaultSelfModificationSetupOperations(
 ): SelfModificationSetupOperations {
   const configPath = join(appRoot, DEPLOYED_SELF_MODIFICATION_CONFIG_PATH);
   return {
-    async detectChannelNames() {
-      const discovered = await discoverAgent({ appRoot, agentRoot: join(appRoot, "agent") });
-      return discovered.manifest.channels.map((source) =>
-        stripLogicalPathExtension(source.logicalPath).replace(/^channels\//, ""),
-      );
-    },
     async detectGitRepository() {
       const remote = await gitOutput(appRoot, ["config", "--get", "remote.origin.url"]);
       const repository = remote === undefined ? undefined : parseGitHubRemote(remote);
@@ -340,29 +286,19 @@ export function repositoryRelativeDirectory(
 ): string {
   return relativePath(repositoryRoot, appRoot).replaceAll("\\", "/") || ".";
 }
-export function repositoryPartError(value: string): string | undefined {
-  return /^[A-Za-z0-9_.-]+$/u.test(value)
-    ? undefined
-    : "Enter a valid GitHub owner or repository name.";
+export function repositoryOwnerError(value: string): string | undefined {
+  return isGitHubOwner(value) ? undefined : "Enter a valid GitHub user or organization name.";
+}
+export function repositoryNameError(value: string): string | undefined {
+  return isGitHubRepositoryName(value) ? undefined : "Enter a valid GitHub repository name.";
 }
 export function directoryError(value: string): string | undefined {
-  return value === "." ||
-    (value.length > 0 &&
-      !value.startsWith("/") &&
-      !value.includes("\\") &&
-      value.split("/").every((part) => part !== "" && part !== "." && part !== ".."))
+  return isRepositoryRelativeDirectory(value)
     ? undefined
     : 'Enter a safe repository-relative directory or ".".';
 }
 export function gitRefError(value: string): string | undefined {
-  return /^[A-Za-z0-9][A-Za-z0-9._/-]*$/u.test(value) &&
-    !value.endsWith(".") &&
-    !value.endsWith("/") &&
-    !value.includes("..") &&
-    !value.includes("//") &&
-    !value.includes("@{")
-    ? undefined
-    : "Enter a valid branch name.";
+  return isBranchName(value) ? undefined : "Enter a valid branch name.";
 }
 async function gitOutput(appRoot: string, args: string[]): Promise<string | undefined> {
   try {

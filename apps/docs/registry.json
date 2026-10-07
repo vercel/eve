@@ -42,10 +42,10 @@
       ]
     },
     {
-      "name": "experimental/self-modification",
+      "name": "experimental/self-modification/remote",
       "type": "registry:item",
-      "title": "Self-modification (Experimental)",
-      "description": "Add an experimental source editing subagent with local edits and official registry installation.",
+      "title": "Remote Self-Modification (Experimental)",
+      "description": "Let deployed agents propose repository changes through draft pull requests.",
       "dependencies": ["just-bash"],
       "meta": {
         "eve": {
@@ -66,7 +66,7 @@
             {
               "package": "eve",
               "bin": "eve",
-              "args": ["integration", "setup", "self-modification"]
+              "args": ["integration", "setup", "self-modification-remote"]
             }
           ],
           "requires": ">=0.62.0"
@@ -74,9 +74,9 @@
       },
       "files": [
         {
-          "path": "registry/eve/self-modification/extension.ts",
+          "path": "registry/experimental/self-modification/remote/extension.ts",
           "type": "registry:file",
-          "target": "agent/extensions/self-modification/extension.ts"
+          "target": "agent/extensions/self-modification-remote/extension.ts"
         }
       ]
     },
