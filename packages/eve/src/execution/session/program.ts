@@ -68,12 +68,15 @@ export interface SessionBoot {
   readonly capabilities?: SessionCapabilities;
   readonly deploymentId: string;
   readonly history: HarnessModelMessage[];
+  readonly prestartedControls?: {
+    readonly timeoutControl?: SessionTimeoutControl;
+    readonly turnControl: PreparedTurnControl;
+  };
   readonly start: SessionStart;
   readonly retention?: AgentWorkflowRetentionDefinition;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionId: string;
   readonly sessionState: DurableSessionState;
-  readonly sessionTimeoutControl?: SessionTimeoutControl;
   readonly sessionTimeoutDeadline?: Date;
   readonly sessionTimeoutMs: number | false;
   readonly sessionWritable: WritableStream<Uint8Array>;
@@ -221,7 +224,7 @@ async function runSessionLoop(
     sessionId: boot.sessionId,
   });
   const sessionTimeout =
-    boot.sessionTimeoutControl ??
+    boot.prestartedControls?.timeoutControl ??
     (boot.sessionTimeoutDeadline === undefined
       ? undefined
       : createSessionTimeoutControl({
@@ -252,7 +255,8 @@ async function runSessionLoop(
   };
 
   let preparedTurnControl: PreparedTurnControl | undefined =
-    boot.anchor.kind === "self" ? createPreparedTurnControl() : undefined;
+    boot.prestartedControls?.turnControl ??
+    (boot.anchor.kind === "self" ? createPreparedTurnControl() : undefined);
   let turnIndex = 0;
   // Set when a turn compacts and kept until the session moves to a fresh run,
   // so this run's event log does not keep growing.

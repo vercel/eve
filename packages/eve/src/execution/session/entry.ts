@@ -15,6 +15,10 @@ import {
   createSessionTimeoutControl,
   type SessionTimeoutControl,
 } from "#execution/session/timeout-control.js";
+import {
+  createPreparedTurnControl,
+  type PreparedTurnControl,
+} from "#execution/session/turn-control.js";
 import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
@@ -80,29 +84,48 @@ function stampSessionIdentity(
   };
 }
 
-type InitialOwnership = { readonly kind: "owned" } | { readonly kind: "alias-conflict" };
+type InitialOwnerPreparation =
+  | { readonly kind: "owned"; readonly turnControl: PreparedTurnControl }
+  | { readonly kind: "alias-conflict" };
 
-async function claimInitialOwnership(
+async function prepareInitialOwner(
   inbox: SessionInboxHandle,
-  input: { readonly continuationToken: string; readonly sessionId: string },
-): Promise<InitialOwnership> {
+  input: {
+    readonly continuationToken: string;
+    readonly sessionId: string;
+    readonly timeoutControl: SessionTimeoutControl | undefined;
+  },
+): Promise<InitialOwnerPreparation> {
   await inbox.claimSessionHook(sessionCommandHookToken(input.sessionId));
-  if (input.continuationToken === "") return { kind: "owned" };
+  if (input.continuationToken !== "") {
+    try {
+      await inbox.claimSessionHook(input.continuationToken);
+    } catch (error) {
+      if (isHookConflictError(error)) return { kind: "alias-conflict" };
+      throw error;
+    }
+  }
+
+  const turnControl = createPreparedTurnControl();
   try {
-    await inbox.claimSessionHook(input.continuationToken);
-    return { kind: "owned" };
+    await input.timeoutControl?.start();
+    return { kind: "owned", turnControl };
   } catch (error) {
-    if (isHookConflictError(error)) return { kind: "alias-conflict" };
+    turnControl.dispose();
     throw error;
   }
 }
 
 async function disposeInitialBoot(
   inbox: SessionInboxHandle,
-  sessionTimeoutControl: SessionTimeoutControl | undefined,
+  resources: {
+    readonly turnControl: PreparedTurnControl | undefined;
+    readonly timeoutControl: SessionTimeoutControl | undefined;
+  },
 ): Promise<void> {
+  resources.turnControl?.dispose();
   const [timeoutDisposal, inboxDisposal] = await Promise.allSettled([
-    sessionTimeoutControl?.dispose(),
+    resources.timeoutControl?.dispose(),
     inbox.dispose(),
   ]);
   if (timeoutDisposal.status === "rejected") throw timeoutDisposal.reason;
@@ -125,9 +148,10 @@ export async function bootInitialOwner(
     source: DurableCompiledArtifactsSource;
     nodeId?: string;
   };
-  let sessionTimeoutControl: SessionTimeoutControl | undefined;
+  let turnControl: PreparedTurnControl | undefined;
+  let timeoutControl: SessionTimeoutControl | undefined;
   try {
-    sessionTimeoutControl =
+    timeoutControl =
       deadline === undefined ? undefined : createSessionTimeoutControl({ deadline, sessionId });
     const sessionCreationPromise = createSessionStep({
       compiledArtifactsSource: serializedBundle.source,
@@ -141,33 +165,35 @@ export async function bootInitialOwner(
       rootSessionId: readRootSessionId(serializedContext),
       sessionId,
     });
-    const ownershipPromise = claimInitialOwnership(inbox, { continuationToken, sessionId });
+    const ownerPreparationPromise = prepareInitialOwner(inbox, {
+      continuationToken,
+      sessionId,
+      timeoutControl,
+    });
     const callerResolutionPromise = hasDelegatedSessionContext(serializedContext)
       ? resolveInitialTurnCallerStep({ serializedContext })
       : Promise.resolve(undefined);
-    const timeoutStartPromise = ownershipPromise.then(async (ownership) => {
-      if (ownership.kind === "owned") await sessionTimeoutControl?.start();
-    });
-    const [sessionCreation, ownership, callerResolution, timeoutStart] = await Promise.allSettled([
+    const [sessionCreation, ownerPreparation, callerResolution] = await Promise.allSettled([
       sessionCreationPromise,
-      ownershipPromise,
+      ownerPreparationPromise,
       callerResolutionPromise,
-      timeoutStartPromise,
     ]);
+    if (ownerPreparation.status === "fulfilled" && ownerPreparation.value.kind === "owned") {
+      turnControl = ownerPreparation.value.turnControl;
+    }
     if (sessionCreation.status === "rejected") throw sessionCreation.reason;
-    if (ownership.status === "rejected") throw ownership.reason;
-    if (ownership.value.kind === "alias-conflict") {
+    if (ownerPreparation.status === "rejected") throw ownerPreparation.reason;
+    if (ownerPreparation.value.kind === "alias-conflict") {
       if (input.continuationConflictCommand !== undefined) {
         await settleContinuationConflictStep({
           command: input.continuationConflictCommand,
           continuationToken,
         });
       }
-      await disposeInitialBoot(inbox, sessionTimeoutControl);
+      await disposeInitialBoot(inbox, { turnControl, timeoutControl });
       return undefined;
     }
     if (callerResolution.status === "rejected") throw callerResolution.reason;
-    if (timeoutStart.status === "rejected") throw timeoutStart.reason;
     return {
       inbox,
       session: {
@@ -180,18 +206,21 @@ export async function bootInitialOwner(
           input.input.message === undefined
             ? { kind: "first-message" }
             : { input: createInitialDelivery(input, serializedContext), kind: "turn" },
+        prestartedControls: {
+          timeoutControl,
+          turnControl: ownerPreparation.value.turnControl,
+        },
         retention: input.retention,
         serializedContext,
         sessionId,
         sessionState: sessionCreation.value.state,
-        sessionTimeoutControl,
         sessionTimeoutMs,
         sessionTimeoutDeadline: deadline,
         sessionWritable,
       },
     };
   } catch (error) {
-    await disposeInitialBoot(inbox, sessionTimeoutControl);
+    await disposeInitialBoot(inbox, { turnControl, timeoutControl });
     return await failSession({
       error,
       serializedContext,

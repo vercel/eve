@@ -10,6 +10,7 @@ import {
 import { resolveInitialTurnCallerStep } from "#subagents/parent-notification.js";
 import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
 import { settleContinuationConflictStep } from "#execution/continuation-conflict-step.js";
+import { createPreparedTurnControl } from "#execution/session/turn-control.js";
 
 type Deferred<T> = {
   readonly promise: Promise<T>;
@@ -43,6 +44,7 @@ vi.mock("./timeout-steps.js", () => ({
   cancelSessionTimeoutStep: vi.fn(),
   startSessionTimeoutStep: vi.fn(),
 }));
+vi.mock("./turn-control.js", () => ({ createPreparedTurnControl: vi.fn() }));
 vi.mock("#subagents/parent-notification.js", () => ({
   resolveInitialTurnCallerStep: vi.fn(),
 }));
@@ -94,6 +96,11 @@ beforeEach(() => {
   vi.mocked(createSessionStep).mockResolvedValue({ history: [], state: {} } as never);
   vi.mocked(startSessionTimeoutStep).mockResolvedValue({ runId: "timeout-run-1" });
   vi.mocked(cancelSessionTimeoutStep).mockResolvedValue(undefined);
+  vi.mocked(createPreparedTurnControl).mockImplementation(() => ({
+    cancellation: new AbortController(),
+    dispose: vi.fn(),
+    steering: new AbortController(),
+  }));
   vi.mocked(resolveInitialTurnCallerStep).mockResolvedValue(undefined);
   vi.mocked(hasDelegatedSessionContext).mockReturnValue(false);
   vi.mocked(settleContinuationConflictStep).mockResolvedValue(undefined);
@@ -109,13 +116,40 @@ describe("bootInitialOwner timeout startup", () => {
     const bootPromise = bootInitialOwner(initialInput(), "session-1");
 
     await vi.waitFor(() => expect(startSessionTimeoutStep).toHaveBeenCalledOnce());
+    expect(createPreparedTurnControl).toHaveBeenCalledOnce();
     expect(inbox.claimSessionHook).toHaveBeenCalledWith("eve:session:session-1:inbox");
     sessionCreation.resolve({ history: [], state: {} } as never);
 
     const boot = await bootPromise;
-    expect(boot?.session.sessionTimeoutControl).toBeDefined();
-    await boot?.session.sessionTimeoutControl?.start();
+    expect(boot?.session.prestartedControls?.turnControl).toBeDefined();
+    expect(boot?.session.prestartedControls?.timeoutControl).toBeDefined();
+    await boot?.session.prestartedControls?.timeoutControl?.start();
     expect(startSessionTimeoutStep).toHaveBeenCalledOnce();
+  });
+
+  it("prepares turn controls while timeout startup and session creation are pending", async () => {
+    const sessionCreation = deferred<never>();
+    const timeoutStartup = deferred<{ runId: string }>();
+    const inbox = createInbox();
+    vi.mocked(createSessionStep).mockReturnValue(sessionCreation.promise);
+    vi.mocked(startSessionTimeoutStep).mockReturnValue(timeoutStartup.promise);
+    vi.mocked(createSessionInbox).mockReturnValue(inbox as never);
+
+    let booted = false;
+    const bootPromise = bootInitialOwner(initialInput(), "session-1").then((boot) => {
+      booted = true;
+      return boot;
+    });
+
+    await vi.waitFor(() => expect(startSessionTimeoutStep).toHaveBeenCalledOnce());
+    expect(createPreparedTurnControl).toHaveBeenCalledOnce();
+    expect(booted).toBe(false);
+    sessionCreation.resolve({ history: [], state: {} } as never);
+    await Promise.resolve();
+    expect(booted).toBe(false);
+    timeoutStartup.resolve({ runId: "timeout-run-1" });
+
+    await expect(bootPromise).resolves.toBeDefined();
   });
 
   it("waits for stable and alias ownership before starting the timeout", async () => {
@@ -138,12 +172,15 @@ describe("bootInitialOwner timeout startup", () => {
     );
 
     await vi.waitFor(() => expect(inbox.claimSessionHook).toHaveBeenCalledTimes(1));
+    expect(createPreparedTurnControl).not.toHaveBeenCalled();
     expect(startSessionTimeoutStep).not.toHaveBeenCalled();
     stableClaim.resolve();
     await vi.waitFor(() => expect(inbox.claimSessionHook).toHaveBeenCalledTimes(2));
+    expect(createPreparedTurnControl).not.toHaveBeenCalled();
     expect(startSessionTimeoutStep).not.toHaveBeenCalled();
     aliasClaim.resolve();
     await expect(bootPromise).resolves.toBeDefined();
+    expect(createPreparedTurnControl).toHaveBeenCalledOnce();
     expect(startSessionTimeoutStep).toHaveBeenCalledOnce();
   });
 
@@ -172,6 +209,7 @@ describe("bootInitialOwner timeout startup", () => {
       command: continuationConflictCommand,
       continuationToken: "channel:conversation-1",
     });
+    expect(createPreparedTurnControl).not.toHaveBeenCalled();
     expect(startSessionTimeoutStep).not.toHaveBeenCalled();
     expect(inbox.dispose).toHaveBeenCalledOnce();
   });
@@ -189,6 +227,9 @@ describe("bootInitialOwner timeout startup", () => {
 
     await expect(bootPromise).rejects.toBe(failure);
     expect(cancelSessionTimeoutStep).toHaveBeenCalledWith({ runId: "timeout-run-1" });
+    expect(
+      vi.mocked(createPreparedTurnControl).mock.results[0]?.value.dispose,
+    ).toHaveBeenCalledOnce();
     expect(inbox.dispose).toHaveBeenCalledOnce();
   });
 
@@ -206,6 +247,9 @@ describe("bootInitialOwner timeout startup", () => {
 
     await expect(bootPromise).rejects.toBe(failure);
     expect(cancelSessionTimeoutStep).toHaveBeenCalledWith({ runId: "timeout-run-1" });
+    expect(
+      vi.mocked(createPreparedTurnControl).mock.results[0]?.value.dispose,
+    ).toHaveBeenCalledOnce();
     expect(inbox.dispose).toHaveBeenCalledOnce();
   });
 
@@ -217,6 +261,9 @@ describe("bootInitialOwner timeout startup", () => {
 
     await expect(bootInitialOwner(initialInput(), "session-1")).rejects.toBe(failure);
 
+    expect(
+      vi.mocked(createPreparedTurnControl).mock.results[0]?.value.dispose,
+    ).toHaveBeenCalledOnce();
     expect(cancelSessionTimeoutStep).not.toHaveBeenCalled();
     expect(inbox.dispose).toHaveBeenCalledOnce();
     expect(mocks.failSession).toHaveBeenCalledWith(expect.objectContaining({ error: failure }));
@@ -228,8 +275,10 @@ describe("bootInitialOwner timeout startup", () => {
 
     const boot = await bootInitialOwner(initialInput({ sessionTimeoutMs: false }), "session-1");
 
+    expect(boot?.session.prestartedControls?.turnControl).toBeDefined();
     expect(boot?.session.sessionTimeoutDeadline).toBeUndefined();
-    expect(boot?.session.sessionTimeoutControl).toBeUndefined();
+    expect(boot?.session.prestartedControls?.timeoutControl).toBeUndefined();
+    expect(createPreparedTurnControl).toHaveBeenCalledOnce();
     expect(startSessionTimeoutStep).not.toHaveBeenCalled();
   });
 
@@ -241,10 +290,12 @@ describe("bootInitialOwner timeout startup", () => {
 
     const bootPromise = bootInitialOwner(initialInput({ sessionTimeoutMs: 1 }), "session-1");
     await vi.waitFor(() => expect(inbox.claimSessionHook).toHaveBeenCalledOnce());
+    expect(createPreparedTurnControl).not.toHaveBeenCalled();
     expect(startSessionTimeoutStep).not.toHaveBeenCalled();
     ownership.resolve();
 
     await expect(bootPromise).resolves.toBeDefined();
+    expect(createPreparedTurnControl).toHaveBeenCalledOnce();
     expect(startSessionTimeoutStep).toHaveBeenCalledOnce();
   });
 });
