@@ -5,7 +5,7 @@ description: "Call an eve agent from TypeScript with Client, sessions, auth, and
 
 The `eve/client` entrypoint is the typed client for eve's default HTTP API. Use it from scripts, server-to-server integrations, tests, evals, backend jobs, or custom UIs that want the session protocol without hand-writing the POST and NDJSON (newline-delimited JSON) stream loop.
 
-For browser chat UIs, start with [`useEveAgent`](../frontend/overview). For wire-level details, read [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming). The client sits between those two: lower level than the frontend hooks, higher level than raw HTTP.
+For browser chat UIs, start with [`useEveAgent`](../frontend/overview.mdx). For wire-level details, read [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming.md). The client sits between those two: lower level than the frontend hooks, higher level than raw HTTP.
 
 ## Create a client
 
@@ -47,7 +47,7 @@ Version 4 separates active static definitions from dynamic resolvers, includes b
 
 ## Authentication
 
-Pass `auth` when the [eve channel](../../channels/eve) route requires credentials:
+Pass `auth` when the [eve channel](../../channels/eve.mdx) route requires credentials:
 
 ```ts
 const client = new Client({
@@ -180,13 +180,13 @@ await Promise.all([aliceResponse.result(), bobResponse.result()]);
 
 The next pages cover the session lifecycle:
 
-- [Messages](./messages): send turns and collect results
-- [Continuations](./continuations): persist and resume sessions
-- [Streaming](./streaming): render events as they arrive
-- [Output schema](./output-schema): request structured results
+- [Messages](./messages.mdx): send turns and collect results
+- [Continuations](./continuations.mdx): persist and resume sessions
+- [Streaming](./streaming.mdx): render events as they arrive
+- [Output schema](./output-schema.mdx): request structured results
 
 ## What to read next
 
-- [eve channel](../../channels/eve): the HTTP API this client calls
-- [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming): the raw HTTP contract
-- [Frontend](../frontend/overview): browser UI with `useEveAgent`
+- [eve channel](../../channels/eve.mdx): the HTTP API this client calls
+- [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming.md): the raw HTTP contract
+- [Frontend](../frontend/overview.mdx): browser UI with `useEveAgent`

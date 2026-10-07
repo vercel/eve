@@ -5,7 +5,7 @@ description: "Resolve tenant policy asynchronously for authored tools, OpenAPI o
 
 eve's `approval` field is an async policy hook. It receives the active session, qualified tool name, tool input, and previously approved tools. That is enough to ask your application whether this tenant should allow, deny, or require human confirmation for any authored or connection tool.
 
-Use this with [multi-tenant outbound auth](./multi-tenant-auth) when your own
+Use this with [multi-tenant outbound auth](./multi-tenant-auth.md) when your own
 API key, JWT, or app session establishes the tenant and the connection
 credential is selected from your credential store rather than OAuth.
 

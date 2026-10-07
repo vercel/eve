@@ -41,7 +41,7 @@ This disables the complete bundled default set for that server, including self-m
 
 ## What to read next
 
-- [Terminal UI](./dev-tui): work with your agent locally.
-- [Instructions](../instructions): define the agent's behavior.
-- [Tools](../tools): add model-callable actions.
-- [Skills](../skills): give the agent reusable procedures.
+- [Terminal UI](./dev-tui.md): work with your agent locally.
+- [Instructions](../instructions.mdx): define the agent's behavior.
+- [Tools](../tools/overview.mdx): add model-callable actions.
+- [Skills](../skills.mdx): give the agent reusable procedures.

@@ -89,7 +89,7 @@ The function may be async and must return a non-empty string. `auth` and `header
 
 By default, a remote agent is another subagent tool to the model. The model calls it the same way it calls a local subagent, with a `message` and an optional `taskId`. Set `tool: false` when an authored workflow tool should be the only model-facing routing surface; the workflow can still call the remote agent by its path-derived name through `ctx.agent()`. The message must carry the full task, including any context the remote agent needs, because it never receives the parent's conversation history.
 
-To require structured output, open a session with the remote agent from an authored workflow tool with `ctx.agent(name)` and pass `outputSchema` to `send()`. The schema applies to that turn, the structured value is the response's `data`, and the session accepts follow-up messages until the workflow run finishes. See [Delegate work: `ctx.agent`](../tools/workflows#delegate-work-ctxagent).
+To require structured output, open a session with the remote agent from an authored workflow tool with `ctx.agent(name)` and pass `outputSchema` to `send()`. The schema applies to that turn, the structured value is the response's `data`, and the session accepts follow-up messages until the workflow run finishes. See [Delegate work: `ctx.agent`](../tools/workflows.mdx#delegate-work-ctxagent).
 
 ## Outbound auth
 
@@ -116,13 +116,13 @@ export default eveChannel({
 });
 ```
 
-Set `teamSlug`, `projectName`, and `environment` to the calling deployment's Vercel OIDC subject. See [subject patterns and `vercelSubject(...)`](./auth-and-route-protection#subjects-patterns-and-vercelsubject) for other environments and wildcard matching.
+Set `teamSlug`, `projectName`, and `environment` to the calling deployment's Vercel OIDC subject. See [subject patterns and `vercelSubject(...)`](./auth-and-route-protection.md#subjects-patterns-and-vercelsubject) for other environments and wildcard matching.
 
 If [Vercel Deployment Protection](https://vercel.com/docs/deployment-protection) is active on the receiving project, also configure [Trusted Sources](https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/trusted-sources) to allow the calling project and environment. The eve subject allowlist and Trusted Sources are separate checks; cross-project calls need both.
 
 ## Forwarding the caller identity
 
-Outbound auth authenticates your _deployment_ to the remote, so by default the remote session runs as your calling app — not as the end user who is talking to your agent. That breaks per-user workloads on the remote deployment, most directly per-user [Vercel Connect](./auth-and-route-protection#tool-and-connection-auth), which requires an authenticated `user` principal on the session.
+Outbound auth authenticates your _deployment_ to the remote, so by default the remote session runs as your calling app — not as the end user who is talking to your agent. That breaks per-user workloads on the remote deployment, most directly per-user [Vercel Connect](./auth-and-route-protection.md#tool-and-connection-auth), which requires an authenticated `user` principal on the session.
 
 Set `forwardPrincipal: true` to forward the dispatching turn's session principal across the hop:
 
@@ -144,7 +144,7 @@ This makes caller authority turn-scoped even when the remote child session is pe
 
 Identity forwarding does not make a persistent session private to one caller. Conversation history, tool outputs, and other child-session state still persist. If those values must not be visible across users, give each user a distinct child session or enforce that ownership at the application boundary.
 
-Forwarding identity is explicit on both sides. The receiver names which deployments it trusts with `eveChannel({ trustedForwarders })` and can limit each one to the principals it may assert (see [Auth & route protection](./auth-and-route-protection#accepting-forwarded-identity-from-another-deployment)); refusing the forwarder or what it asserts rejects a forwarded principal with a 403. The same trust decision covers parent session lineage and, with principal forwarding, trace-content constraints.
+Forwarding identity is explicit on both sides. The receiver names which deployments it trusts with `eveChannel({ trustedForwarders })` and can limit each one to the principals it may assert (see [Auth & route protection](./auth-and-route-protection.md#accepting-forwarded-identity-from-another-deployment)); refusing the forwarder or what it asserts rejects a forwarded principal with a 403. The same trust decision covers parent session lineage and, with principal forwarding, trace-content constraints.
 
 ## Trace propagation
 
@@ -157,7 +157,7 @@ of a local child can use the remote agent's trace as a nested span.
 Use `gen_ai.conversation.id` to find all turns and child sessions for one
 conversation. The child has its own session ID, message history, and agent
 state. Trace context identifies related work. It does not give authorization.
-See [OpenTelemetry](../observability/otel#trace-topology) for the trace structure.
+See [OpenTelemetry](./instrumentation/otel.mdx#trace-topology) for the trace structure.
 
 eve carries parent session lineage separately. The receiver accepts it only
 when `trustedForwarders` approves the authenticated caller; otherwise, trace
@@ -209,15 +209,15 @@ A remote subagent call runs a child session in the remote deployment as a task:
 
 The parent stream carries the same `task.started`, `agent.started`, and `task.settled` events as local delegation. For a remote child, `agent.started.data.remote.url` records the target.
 
-Clients follow a remote child through the parent. [`session.agent(started).stream()`](./client/streaming#follow-a-subagent) reads the `agent.started` event's `streamPath`, a route on the parent deployment. The parent verifies that its session recorded the child for that tool call, resolves the remote agent's `auth` and `headers`, and relays the child's stream. A browser never calls the remote deployment or holds its credentials; it only needs access to the parent session.
+Clients follow a remote child through the parent. [`session.agent(started).stream()`](./client/streaming.mdx#follow-a-subagent) reads the `agent.started` event's `streamPath`, a route on the parent deployment. The parent verifies that its session recorded the child for that tool call, resolves the remote agent's `auth` and `headers`, and relays the child's stream. A browser never calls the remote deployment or holds its credentials; it only needs access to the parent session.
 
 Cancelling the parent turn or the agent task with `task_cancel` also cancels the remote child's current turn. eve resolves the remote's `headers` and `auth` again for every cancellation attempt, so rotating credentials work the same way as they do for session creation. Cancellation always uses the standard eve cancel path on `url`, even when `path` customizes only the create-session endpoint. The remote child reports `turn.cancelled` → `session.waiting` on its own stream; an older or unreachable remote is logged but cannot turn the parent's cancellation into a failure.
 
 When the workflow run that opened a remote child finishes, eve sends an authenticated `POST /eve/v1/session/:childSessionId/reset` for it. An agent task's run finishes when the parent session ends. Reset retires the parked remote session and recursively cleans up its descendants. The request uses freshly resolved `headers` and `auth`; failures are logged so an unreachable remote cannot block parent finalization.
 
-The parent names its eve remote agent protocol version when it creates the child, and the remote answers with the version it serves. A remote also serves parents on protocol 1 (eve 0.66 through 0.68), including their approvals and sign-in requests, so upgrade remote agents before their callers; see [Upgrade remote agents before their callers](../tools/tasks-upgrade#upgrade-remote-agents-before-their-callers). Any other mismatch fails the call at start with an error naming both versions. A failed _start_ fails the call immediately. After a remote starts, a terminal failure callback fails the call with the remote's error. Terminal callback delivery runs as a durable step on the underlying workflow engine (see [Execution model & durability](../concepts/execution-model-and-durability)). A failed callback POST is rethrown rather than completing the call, so the engine retries it.
+The parent names its eve remote agent protocol version when it creates the child, and the remote answers with the version it serves. A remote also serves parents on protocol 1 (eve 0.66 through 0.68), including their approvals and sign-in requests, so upgrade remote agents before their callers; see [Upgrade remote agents before their callers](../tools/tasks-upgrade.md#upgrade-remote-agents-before-their-callers). Any other mismatch fails the call at start with an error naming both versions. A failed _start_ fails the call immediately. After a remote starts, a terminal failure callback fails the call with the remote's error. Terminal callback delivery runs as a durable step on the underlying workflow engine (see [Execution model & durability](../concepts/execution-model-and-durability.mdx)). A failed callback POST is rethrown rather than completing the call, so the engine retries it.
 
 ## What to read next
 
-- Local delegation and the isolation boundary → [Subagents](../subagents)
-- Securing the receiving deployment → [Auth & route protection](./auth-and-route-protection)
+- Local delegation and the isolation boundary → [Subagents](../subagents/index.mdx)
+- Securing the receiving deployment → [Auth & route protection](./auth-and-route-protection.md)

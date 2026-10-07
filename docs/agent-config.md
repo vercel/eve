@@ -3,7 +3,7 @@ title: "Agent Configuration"
 description: "Configure an eve agent's model, reasoning effort, compaction, limits, and runtime behavior in agent.ts."
 ---
 
-An eve app has one root agent assembled from the files under `agent/`. Its optional `agent.ts` calls `defineAgent` (from `eve`) when you need to configure the model or other runtime behavior. Declared [subagents](./subagents) have their own `agent.ts` and capabilities; this page covers the configuration shared by root agents and subagents.
+An eve app has one root agent assembled from the files under `agent/`. Its optional `agent.ts` calls `defineAgent` (from `eve`) when you need to configure the model or other runtime behavior. Declared [subagents](./subagents/index.mdx) have their own `agent.ts` and capabilities; this page covers the configuration shared by root agents and subagents.
 
 ## Set the model
 
@@ -24,7 +24,7 @@ dev TUI with `/model anthropic/claude-opus-5.5`.
 The root `agent.ts` can be omitted when no runtime config is needed. eve then selects its default `agent.ts` source at the same slot, configured with `openai/gpt-6-luna-fast` and `reasoning: "high"`; authoring the file replaces that source.
 When `agent.ts` is present, `model` is required.
 
-A config that selects a static Gateway model is compile-only. A config that contains a dynamic model or a direct-provider `LanguageModel` remains a runtime entry because eve must resolve that authored value while the agent runs. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).
+A config that selects a static Gateway model is compile-only. A config that contains a dynamic model or a direct-provider `LanguageModel` remains a runtime entry because eve must resolve that authored value while the agent runs. See [Authored module lifecycle](./reference/typescript-api.md#authored-module-lifecycle).
 
 `model` accepts a gateway model id string, which routes through the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway). To call a provider directly and configure the model in code, pass a provider-authored `LanguageModel`.
 
@@ -49,7 +49,7 @@ Model use is subject to the terms, data-processing commitments, retention behavi
 
 For every OpenAI or Anthropic model call, eve fills the provider's end-user
 safety identifier from the active turn's
-[`auth.current`](./guides/auth-and-route-protection#what-reaches-ctxsessionauth)
+[`auth.current`](./guides/auth-and-route-protection.md#what-reaches-ctxsessionauth)
 principal when you have not configured it. For OpenAI, the option is
 `providerOptions.openai.safetyIdentifier`; for Anthropic, it is
 `providerOptions.anthropic.metadata.userId`. The default value is a SHA-256
@@ -70,7 +70,7 @@ takes precedence; AI Gateway hashes IDs longer than 256 characters.
 ### Choose the model dynamically
 
 To select a model from the incoming prompt with an AI SDK decision model, use
-[`auto` from `eve/models`](./guides/decide).
+[`auto` from `eve/models`](./guides/decide.md).
 
 `model` also accepts `defineDynamic({ events })`. Each matching handler must
 return the concrete model for its scope; a dynamic model has no compiled
@@ -95,7 +95,7 @@ export default defineAgent({
 ```
 
 Handlers receive the shared [dynamic resolver
-context](./guides/dynamic-capabilities) and return a gateway model id, an AI
+context](./guides/dynamic-capabilities.md) and return a gateway model id, an AI
 SDK `LanguageModel`, or a selection object. Returning `null` or `undefined`
 fails the turn.
 
@@ -157,7 +157,7 @@ export default defineAgent({
 });
 ```
 
-See [Default harness](./concepts/default-harness#compaction) for how the loop applies it.
+See [Default harness](./concepts/default-harness.md#compaction) for how the loop applies it.
 
 ## Runtime limits
 
@@ -317,7 +317,7 @@ Before assistant output begins, steering can interrupt pending model generation.
 Executing tools finish safely before the batch yields and applies the correction.
 This option is experimental and may change or
 disappear in any release. See [Execution model and
-durability](./concepts/execution-model-and-durability#resuming-after-a-crash)
+durability](./concepts/execution-model-and-durability.mdx#resuming-after-a-crash)
 for the retry behavior.
 
 ## Run data retention
@@ -344,9 +344,9 @@ export default defineAgent({
 This applies to every run that owns the session, including successor owners
 started after a deployment handoff, and to the run that collects session
 activity. Runs eve starts for other purposes keep the world's default: session
-timeouts and [workflow tools](./tools/workflows).
+timeouts and [workflow tools](./tools/workflows.mdx).
 
-The value applies per agent. A [subagent](./subagents) that runs its own session
+The value applies per agent. A [subagent](./subagents/index.mdx) that runs its own session
 uses its own value, unlike `experimental.workflow.world`, which is root-only.
 
 Custom Worlds used with eve might not support this feature, in which case
@@ -356,7 +356,7 @@ it falls back to the World's default retention period.
 
 ## Other defineAgent fields
 
-`defineAgent` takes a few more fields, all optional. For the exported types, see the [TypeScript API Reference](./reference/typescript-api).
+`defineAgent` takes a few more fields, all optional. For the exported types, see the [TypeScript API Reference](./reference/typescript-api.md).
 
 | Field          | Type                                  | Default          | Description                                                                                                                                                                                                                                               |
 | -------------- | ------------------------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -373,16 +373,16 @@ During `eve dev`, ordinary dependencies are bundled into each retained runtime g
 
 ## Where adjacent settings live
 
-| Concern                       | Lives in                                                                         |
-| ----------------------------- | -------------------------------------------------------------------------------- |
-| Instructions prompt           | `agent/instructions.md`, [Instructions](./instructions)                          |
-| Per-tool approval (HITL)      | `agent/tools/*.ts`, [Tools](./tools)                                             |
-| Inbound auth & network policy | the channel layer, [Auth & route protection](./guides/auth-and-route-protection) |
-| Sandbox / workspace           | `agent/sandbox/`, [Sandbox](./sandbox)                                           |
-| Telemetry & debugging         | `agent/instrumentation/`, [Instrumentation](./observability/instrumentation)     |
+| Concern                       | Lives in                                                                                  |
+| ----------------------------- | ----------------------------------------------------------------------------------------- |
+| Instructions prompt           | `agent/instructions.md`, [Instructions](./instructions.mdx)                               |
+| Per-tool approval (HITL)      | `agent/tools/*.ts`, [Tools](./tools/overview.mdx)                                         |
+| Inbound auth & network policy | the channel layer, [Auth & route protection](./guides/auth-and-route-protection.md)       |
+| Sandbox / workspace           | `agent/sandbox/`, [Sandbox](./sandbox/index.mdx)                                          |
+| Telemetry & debugging         | `agent/instrumentation/`, [Instrumentation](./guides/instrumentation/instrumentation.mdx) |
 
 ## What to read next
 
-- [Default harness](./concepts/default-harness) for compaction and model context, and [Built-in tools](./concepts/built-in-tools) for the framework-provided tool set
-- [TypeScript API Reference](./reference/typescript-api) for every `defineAgent` field and type
-- [Subagents](./subagents) for the `description` requirement and child-agent config
+- [Default harness](./concepts/default-harness.md) for compaction and model context, and [Built-in tools](./concepts/built-in-tools.md) for the framework-provided tool set
+- [TypeScript API Reference](./reference/typescript-api.md) for every `defineAgent` field and type
+- [Subagents](./subagents/index.mdx) for the `description` requirement and child-agent config

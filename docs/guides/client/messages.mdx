@@ -26,13 +26,13 @@ console.log(result.status, result.message);
 
 `response.result()` consumes the event stream and returns a `MessageResult`:
 
-| Field       | Meaning                                                                        |
-| ----------- | ------------------------------------------------------------------------------ |
-| `message`   | Final assistant text for the turn, when one completed.                         |
-| `status`    | `"waiting"`, `"completed"`, or `"failed"`.                                     |
-| `events`    | All stream events observed during the turn.                                    |
-| `sessionId` | Session ID for streaming and inspection.                                       |
-| `data`      | Structured output when the turn requested an [output schema](./output-schema). |
+| Field       | Meaning                                                                            |
+| ----------- | ---------------------------------------------------------------------------------- |
+| `message`   | Final assistant text for the turn, when one completed.                             |
+| `status`    | `"waiting"`, `"completed"`, or `"failed"`.                                         |
+| `events`    | All stream events observed during the turn.                                        |
+| `sessionId` | Session ID for streaming and inspection.                                           |
+| `data`      | Structured output when the turn requested an [output schema](./output-schema.mdx). |
 
 When the stream includes `session.failed`, the turn returns `status: "failed"` rather than throwing. Transport and route errors throw `ClientError`.
 
@@ -103,7 +103,7 @@ await response.result();
 The stream confirms the turn with `message.received`. Its `data.message` remains the flattened
 summary for compatibility, and `data.parts` contains structured text and file metadata for clients
 that render attachments. File parts never include raw bytes or internal sandbox paths. See [Inbound
-attachments](../../sandbox#inbound-attachments) for how eve stages byte-backed files in the session
+attachments](../../sandbox/index.mdx#inbound-attachments) for how eve stages byte-backed files in the session
 sandbox and prepares them for each model call.
 
 ## Answer human input requests
@@ -157,6 +157,6 @@ Don't do both on the same response. Once the stream is consumed, the `ClientSess
 
 ## What to read next
 
-- [Continuations](./continuations): how the session cursor advances
-- [Streaming](./streaming): handle events live instead of using `result()`
-- [Tools](../../tools): configure approvals and question prompts
+- [Continuations](./continuations.mdx): how the session cursor advances
+- [Streaming](./streaming.mdx): handle events live instead of using `result()`
+- [Tools](../../tools/overview.mdx): configure approvals and question prompts

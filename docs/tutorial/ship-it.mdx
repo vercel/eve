@@ -28,9 +28,9 @@ export default withEve(nextConfig);
 
 Keep the generated `app/_components/agent-chat.tsx` and `agent-message.tsx` components. `app/page.tsx` already renders the chat, and `useEveAgent` handles session creation and streaming.
 
-The generated UI displays tool results and errors, authorization links, approval buttons, and question forms. The spend approval from [Guard the spend](./guard-the-spend) needs those controls to resume a waiting turn. A component that renders only text messages leaves those interactions unavailable.
+The generated UI displays tool results and errors, authorization links, approval buttons, and question forms. The spend approval from [Guard the spend](./guard-the-spend.mdx) needs those controls to resume a waiting turn. A component that renders only text messages leaves those interactions unavailable.
 
-Run `npm run dev`, open the local web URL printed by the server, and ask for an unfiltered revenue query. Confirm that the approval appears and that approving it lets the query finish. You can customize the UI after this flow works; see [Frontend](../guides/frontend/overview).
+Run `npm run dev`, open the local web URL printed by the server, and ask for an unfiltered revenue query. Confirm that the approval appears and that approving it lets the query finish. You can customize the UI after this flow works; see [Frontend](../guides/frontend/overview.mdx).
 
 ## Replace `placeholderAuth`
 
@@ -75,7 +75,7 @@ export default eveChannel({
 });
 ```
 
-The verified username becomes the user principal. The `growth` team selects the sample playbook from [Team playbooks](./team-playbooks). Keep these credentials private to one person. A shared password does not give each person a separate identity or isolated sessions. For a multi-user app, use a real session provider and enforce [session ownership](../guides/auth-and-route-protection#what-reaches-ctxsessionauth).
+The verified username becomes the user principal. The `growth` team selects the sample playbook from [Team playbooks](./team-playbooks.mdx). Keep these credentials private to one person. A shared password does not give each person a separate identity or isolated sessions. For a multi-user app, use a real session provider and enforce [session ownership](../guides/auth-and-route-protection.md#what-reaches-ctxsessionauth).
 
 Add `proxy.ts` at the project root so opening the dashboard triggers the browser's native username/password prompt. It protects the generated UI routes; eve API routes keep their channel auth, so an OIDC-authenticated CLI request does not encounter a browser-only gate:
 
@@ -105,7 +105,7 @@ npx vercel@latest env add ANALYTICS_USERNAME preview
 npx vercel@latest env add ANALYTICS_PASSWORD preview
 ```
 
-Before deploying, configure the model credential your agent uses in the project's Preview environment; local `.env` values are not uploaded by deployment. If you used a local ChatGPT subscription, switch `agent/agent.ts` to an AI Gateway model and configure `AI_GATEWAY_API_KEY` for that model. Subscription credentials stay on your laptop. See [Deployment](../guides/deployment/overview) for model and runtime configuration.
+Before deploying, configure the model credential your agent uses in the project's Preview environment; local `.env` values are not uploaded by deployment. If you used a local ChatGPT subscription, switch `agent/agent.ts` to an AI Gateway model and configure `AI_GATEWAY_API_KEY` for that model. Subscription credentials stay on your laptop. See [Deployment](../guides/deployment/overview.md) for model and runtime configuration.
 
 ```bash
 npx vercel@latest deploy
@@ -137,10 +137,10 @@ Across the eight steps you built and shipped one agent, and along the way you us
 
 ## Next steps
 
-- [Connect a warehouse](./connect-a-warehouse) when you have a data service to use in place of the sample dataset.
-- [MCP connections](../connections/mcp) for tool allowlists and per-connection approval.
-- [Sandbox](../sandbox) for backends, lifecycle, and network policy.
-- [Dynamic capabilities](../guides/dynamic-capabilities) for schema-derived dynamic tools, a read-only analyst subagent, and model-authored report workflows on this same example.
-- [Authentication](../guides/auth-and-route-protection) for production auth patterns.
+- [Connect a warehouse](./connect-a-warehouse.mdx) when you have a data service to use in place of the sample dataset.
+- [MCP connections](../connections/mcp.mdx) for tool allowlists and per-connection approval.
+- [Sandbox](../sandbox/index.mdx) for backends, lifecycle, and network policy.
+- [Dynamic capabilities](../guides/dynamic-capabilities.md) for schema-derived dynamic tools, a read-only analyst subagent, and model-authored report workflows on this same example.
+- [Authentication](../guides/auth-and-route-protection.md) for production auth patterns.
 
-Learn more: [Frontend](../guides/frontend/overview) · [Authentication](../guides/auth-and-route-protection) · [Deployment](../guides/deployment/overview)
+Learn more: [Frontend](../guides/frontend/overview.mdx) · [Authentication](../guides/auth-and-route-protection.md) · [Deployment](../guides/deployment/overview.md)

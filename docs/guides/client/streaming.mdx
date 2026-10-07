@@ -147,12 +147,12 @@ The most common UI events are:
 | `task.settled`          | Show the task's result, error, or cancellation for the call's `callId`.        |
 | `input.requested`       | Pause the UI for approval or a question answer.                                |
 | `input.resolved`        | Record the server-accepted outcome and response for each human-input request.  |
-| `result.completed`      | Read structured output from an [output schema](./output-schema).               |
+| `result.completed`      | Read structured output from an [output schema](./output-schema.mdx).           |
 | `session.waiting`       | Enable the composer; the same fixed session handle accepts the next message.   |
 | `session.completed`     | Mark the conversation terminal.                                                |
 | `session.failed`        | Mark the conversation failed.                                                  |
 
-For the complete event table, see [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming).
+For the complete event table, see [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming.md).
 
 For `action.input.appended`, the default message reducer accumulates accepted deltas into a `dynamic-tool` part with `state: "input-streaming"`; its `inputText` field contains cumulative raw text that may be incomplete JSON. The matching `actions.requested` event upgrades the same `toolCallId` to `state: "input-available"` and puts the validated value in `input`.
 
@@ -175,7 +175,7 @@ HTTP connections can end before a run does. The client reconnects from the numbe
 
 Browser network failures use the same reconnect policy, both when opening a stream (`TypeError: Failed to fetch`, `TypeError: Load failed`, or `TypeError: NetworkError when attempting to fetch resource.`) and while reading a response body (any `TypeError`, such as `TypeError: network error`). Invalid stream events still fail the read.
 
-If your consumer persists events, key on `event.meta.id`. It is stable across reconnects and rewinds, so an overlapping replay is safe to ingest twice. See [the event envelope](../../concepts/sessions-runs-and-streaming#the-event-envelope).
+If your consumer persists events, key on `event.meta.id`. It is stable across reconnects and rewinds, so an overlapping replay is safe to ingest twice. See [the event envelope](../../concepts/sessions-runs-and-streaming.md#the-event-envelope).
 
 Set `streamReconnectPolicy: { reconnect: false }` when a relay or proxy owns the cursor and reconnection policy. This makes a single stream GET attempt and returns when that connection ends; it does not stop the server-side turn:
 
@@ -281,7 +281,7 @@ if (started?.type === "agent.started") {
 }
 ```
 
-`stream()` reads the event's `streamPath` with the parent session's host and credentials, so the same client works for local and [remote](../remote-agents) children:
+`stream()` reads the event's `streamPath` with the parent session's host and credentials, so the same client works for local and [remote](../remote-agents.md) children:
 
 - A local child's path is its own session stream route on the same deployment. The channel's usual session authorization applies.
 - A remote child's path is a proxy route on the parent deployment. The parent checks that its session recorded the child for that tool call, then relays the remote child's stream with the remote agent's authored `auth` and `headers`. The client never needs the remote URL or its credentials.
@@ -313,6 +313,6 @@ Once a response is aborted, create a new send for the next turn. Don't reuse the
 
 ## What to read next
 
-- [Messages](./messages): the send APIs that create streams
-- [Continuations](./continuations): how stream cursors are persisted
-- [Output schema](./output-schema): consume `result.completed`
+- [Messages](./messages.mdx): the send APIs that create streams
+- [Continuations](./continuations.mdx): how stream cursors are persisted
+- [Output schema](./output-schema.mdx): consume `result.completed`

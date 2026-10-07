@@ -178,4 +178,4 @@ export function kvBackend(store: KvStore): MemoryDocumentBackend {
 
 A backend changes only where the document is stored. It does not change file
 memory's recall format or tools. When you need different retrieval, capture, or
-tools, [build a memory provider](./custom-provider) instead.
+tools, [build a memory provider](./custom-provider.md) instead.

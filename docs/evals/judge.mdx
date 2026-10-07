@@ -3,7 +3,7 @@ title: "Judge"
 description: "Grade evals with decision models using criteria, typed questions, or batches, and set thresholds on each assertion."
 ---
 
-Use `t.judge(...)` when a deterministic [assertion](./assertions) cannot capture what a good response looks like. It calls [`decide` from `eve/ai`](../guides/decide#decide-inside-a-tool) and defaults to `typesafe-ai/jev`, TypeSafe AI's [Jev decision model](https://vercel.com/i/what-is-jev). The judge is separate from the agent under test and is used only for scoring.
+Use `t.judge(...)` when a deterministic [assertion](./assertions.mdx) cannot capture what a good response looks like. It calls [`decide` from `eve/ai`](../guides/decide.md#decide-inside-a-tool) and defaults to `typesafe-ai/jev`, TypeSafe AI's [Jev decision model](https://vercel.com/i/what-is-jev). The judge is separate from the agent under test and is used only for scoring.
 
 ```ts
 import { defineEval } from "eve/evals";
@@ -64,7 +64,7 @@ t.judge("The assistant remembers the user's favorite word across turns.", {
 }).atLeast(0.8);
 ```
 
-The transcript contains user and assistant messages in turn order, excluding reasoning, tool calls, and tool results. See [Multi-turn evals](./cases#multi-turn-evals).
+The transcript contains user and assistant messages in turn order, excluding reasoning, tool calls, and tool results. See [Multi-turn evals](./cases.mdx#multi-turn-evals).
 
 ## Decide several questions together
 
@@ -155,10 +155,10 @@ Reports use `judge.boolean`, `judge.score`, and `judge.choice`; batch assertion 
 
 The autoevals graders have been removed. Replace `t.judge.autoevals.closedQA(criteria, options)` with `t.judge(criteria, options)`. Scores now represent a probability rather than a binary yes/no answer, so review thresholds against your examples. For factuality, summaries, or SQL equivalence, write an explicit question and include the reference in shared state. No old grader buckets are preserved.
 
-Change configured language model instances to decision model instances. `modelOptions.providerOptions`, assertion labels, and threshold methods remain available. [Braintrust reporting](./reporters) continues to accept judge scores independently of the grader implementation.
+Change configured language model instances to decision model instances. `modelOptions.providerOptions`, assertion labels, and threshold methods remain available. [Braintrust reporting](./reporters.mdx) continues to accept judge scores independently of the grader implementation.
 
 ## What to read next
 
-- [Assertions](./assertions): deterministic run-level and value assertions
-- [Reporters](./reporters): publish scores and inspect results
-- [Targets](./targets): local and remote eval targets
+- [Assertions](./assertions.mdx): deterministic run-level and value assertions
+- [Reporters](./reporters.mdx): publish scores and inspect results
+- [Targets](./targets.mdx): local and remote eval targets

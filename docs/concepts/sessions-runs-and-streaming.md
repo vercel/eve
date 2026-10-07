@@ -3,7 +3,7 @@ title: "Sessions, Runs & Streaming"
 description: "The ID-addressed session contract: messages, controls, the NDJSON event stream, and reconnecting."
 ---
 
-Every eve app speaks the same stable HTTP API to a [durable session](./execution-model-and-durability). This page is the contract you hold: the handles you get back, the events you stream, and how to reconnect.
+Every eve app speaks the same stable HTTP API to a [durable session](./execution-model-and-durability.mdx). This page is the contract you hold: the handles you get back, the events you stream, and how to reconnect.
 
 ## Identity by surface
 
@@ -19,7 +19,7 @@ caller-assigned session IDs or globally addressed streams.
 Authored channels also have channel-local continuation tokens. A token addresses
 whichever session currently owns a platform conversation, such as a Slack thread.
 That identity stays behind the channel boundary and is never accepted or returned
-by the eve HTTP session API. See [Custom channels](../channels/custom#channel-operations-and-session-handles).
+by the eve HTTP session API. See [Custom channels](../channels/custom.mdx#channel-operations-and-session-handles).
 
 Sessions last 30 days by default; configure `limits.sessionTimeoutMs` in
 `agent.ts`, or set it to `false` to disable the deadline. A successful deployment
@@ -27,9 +27,9 @@ handoff or legacy-session import restarts the original configured duration.
 Ordinary messages, compaction handoffs, and process restarts keep the existing deadline. At expiration, eve
 lets an active turn settle, emits `session.completed`, and releases the
 session's continuation addresses so the next qualifying channel message starts fresh. Stored
-session data is not deleted. See [Agent config](../agent-config#runtime-limits).
+session data is not deleted. See [Agent config](../agent-config.md#runtime-limits).
 
-React, Vue, and Svelte apps reach for [`useEveAgent()`](../guides/frontend/overview) instead of calling these routes by hand. Next.js and Nuxt apps can proxy them to the eve runtime from the same origin.
+React, Vue, and Svelte apps reach for [`useEveAgent()`](../guides/frontend/overview.mdx) instead of calling these routes by hand. Next.js and Nuxt apps can proxy them to the eve runtime from the same origin.
 
 ## Start a session
 
@@ -195,7 +195,7 @@ Three more things to know:
 - **Ids identify events, not intent.** Two events with identical payloads — the `step.failed` → `turn.failed` → `session.failed` cascade, or two identical text deltas in one step — are distinct events with distinct ids. Deduplicate on `meta.id` only; matching on content would drop real data.
 - **A subagent's event is re-emitted, not shared.** When a parent forwards a child's event onto its own stream, the parent's copy is a separate event with its own id. Correlate the two streams through `agent.started.data.sessionId`.
 
-Authored [hooks](../guides/hooks) receive the same envelope, but observe each event as it is emitted rather than as it is read — so a hook sees a retry as new events, and `meta.id` is a key for a stored row rather than a retry guard. Two things a hook does not have to defend against: a turn that parks for human input resumes without re-emitting anything it already sent, and a retried turn dispatch cannot double-stream a turn, because one session owner executes it.
+Authored [hooks](../guides/hooks.md) receive the same envelope, but observe each event as it is emitted rather than as it is read — so a hook sees a retry as new events, and `meta.id` is a key for a stored row rather than a retry guard. Two things a hook does not have to defend against: a turn that parks for human input resumes without re-emitting anything it already sent, and a retried turn dispatch cannot double-stream a turn, because one session owner executes it.
 
 ## Send a follow-up message
 
@@ -227,7 +227,7 @@ One delivery can answer requests from several batches. eve resumes approval-bear
 
 When steering interrupts pending model generation, the interrupted step still ends with `step.completed`, carrying `finishReason: "other"` and any usage the provider reported. The correction's `message.received` and the next `step.started` for the same `turnId` follow.
 
-Multiple steering messages retain their durable arrival order and may be folded into one input at the next boundary. A message accepted after turn settlement starts the next turn. See [message delivery and steering](./execution-model-and-durability#message-delivery-and-steering).
+Multiple steering messages retain their durable arrival order and may be folded into one input at the next boundary. A message accepted after turn settlement starts the next turn. See [message delivery and steering](./execution-model-and-durability.mdx#message-delivery-and-steering).
 
 ## Cancel the in-flight turn
 
@@ -238,14 +238,14 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/cancel
 # {"ok":true,"sessionId":"<sessionId>","status":"accepted"}
 ```
 
-`"accepted"` means the live session durably queued the request; cancellation completes asynchronously. Confirm turn cancellation on the stream as `turn.cancelled` followed by `session.waiting`. The session then accepts the next message normally. Each cancelled child reports its own boundary on its child-session stream. Cancelling also stops every working task, each reported as `task.settled` with `status: "cancelled"` and `cancel.reason: "turn_cancelled"`, including while the session waits between turns. A live but already-parked session returns `"accepted"`; with no working tasks, cancellation is a no-op there. `"no_active_turn"` means the session or channel address is unknown or terminal. Both statuses are success, so clients can fire and forget. See the [eve channel](../channels/eve) for the full route contract.
+`"accepted"` means the live session durably queued the request; cancellation completes asynchronously. Confirm turn cancellation on the stream as `turn.cancelled` followed by `session.waiting`. The session then accepts the next message normally. Each cancelled child reports its own boundary on its child-session stream. Cancelling also stops every working task, each reported as `task.settled` with `status: "cancelled"` and `cancel.reason: "turn_cancelled"`, including while the session waits between turns. A live but already-parked session returns `"accepted"`; with no working tasks, cancellation is a no-op there. `"no_active_turn"` means the session or channel address is unknown or terminal. Both statuses are success, so clients can fire and forget. See the [eve channel](../channels/eve.mdx) for the full route contract.
 
 The HTTP route returns `202` for `"accepted"` and `200` for
 `"no_active_turn"`. Only the accepted result includes `sessionId`.
 
 Custom channel routes request the same cancellation through
 `from(address).cancel()` or `attachSession(sessionId).cancel()`. See
-[custom channels](../channels/custom#channel-operations-and-session-handles).
+[custom channels](../channels/custom.mdx#channel-operations-and-session-handles).
 
 ## Compact, clear, and reset
 
@@ -259,7 +259,7 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/reset \
   -d '{"reason":"Start over"}'
 ```
 
-Compaction summarizes context without adding a user message. User-role instructions are ordinary history and may be represented by the summary; system-role instructions remain outside it. Attributed [memory](../memory) records are excluded from the summary, canonicalized, and recalled again after the checkpoint. If a turn is active, eve queues the request until that turn settles. A successful compaction emits `compaction.requested` and `compaction.completed`, followed by `session.waiting`; if summarization fails before a checkpoint, the session returns to waiting with its previous history.
+Compaction summarizes context without adding a user message. User-role instructions are ordinary history and may be represented by the summary; system-role instructions remain outside it. Attributed [memory](../memory/overview.mdx) records are excluded from the summary, canonicalized, and recalled again after the checkpoint. If a turn is active, eve queues the request until that turn settles. A successful compaction emits `compaction.requested` and `compaction.completed`, followed by `session.waiting`; if summarization fails before a checkpoint, the session returns to waiting with its previous history.
 
 Clear removes model-message history in place, including static and dynamic user-role instructions and recalled memory records, while preserving the session identity, system-role instructions, tools, skills, application-defined durable state, limits, and sandbox. It clears framework memory locks and replay bookkeeping but does not delete data from a provider's external store. It does not rerun instruction definitions or resolvers. Approvals, the session-limit prompt, and sign-ins the cleared history asked for are withdrawn: each resolves as `cancelled` in `input.resolved` or `declined` in `authorization.completed`. Requests relayed from tasks that keep running stay answerable. It then emits `context.cleared` followed by `session.waiting`.
 
@@ -300,7 +300,7 @@ The lookup is opt-in; requests without the parameter get no header. The TypeScri
 
 For scripts, server-to-server calls, tests, evals, and custom UIs, `eve/client` wraps these routes in a typed client so you don't hand-roll the POST and NDJSON stream loop.
 
-Start with the [Client SDK](../guides/client/overview) guide. It covers basic usage, sending messages, session state, streaming, and per-turn `outputSchema` results.
+Start with the [Client SDK](../guides/client/overview.mdx) guide. It covers basic usage, sending messages, session state, streaming, and per-turn `outputSchema` results.
 
 ## Read a session in process
 
@@ -330,7 +330,7 @@ The info route belongs to the selected `channels/eve.ts` source and uses its res
 curl http://127.0.0.1:2000/eve/v1/info
 ```
 
-With the default auth chain (`[vercelOidc(), localDev(), placeholderAuth()]`), a Vercel OIDC bearer takes precedence, `localDev()` accepts requests to an `eve dev` or `vercel dev` server, and everything else is rejected. A deployed Vercel target requires a valid OIDC bearer, with a same-project bypass for in-deployment callers. See [auth & route protection](../guides/auth-and-route-protection).
+With the default auth chain (`[vercelOidc(), localDev(), placeholderAuth()]`), a Vercel OIDC bearer takes precedence, `localDev()` accepts requests to an `eve dev` or `vercel dev` server, and everything else is rejected. A deployed Vercel target requires a valid OIDC bearer, with a same-project bypass for in-deployment callers. See [auth & route protection](../guides/auth-and-route-protection.md).
 
 ## Dispatch order
 
@@ -338,14 +338,14 @@ Every stream event runs four steps, in this order:
 
 1. **Channel handler**: the channel's event handler runs and can mutate adapter state.
 2. **Metadata projection**: the framework re-evaluates the channel's `metadata(state)` and stores the result.
-3. **Hooks**: authored [hooks](../guides/hooks) subscribed to the event fire.
-4. **Dynamic resolvers**: [dynamic](../guides/dynamic-capabilities) tool, skill, and instruction resolvers fire, and `ctx.channel.metadata` already holds the freshly projected metadata from step 2.
+3. **Hooks**: authored [hooks](../guides/hooks.md) subscribed to the event fire.
+4. **Dynamic resolvers**: [dynamic](../guides/dynamic-capabilities.md) tool, skill, and instruction resolvers fire, and `ctx.channel.metadata` already holds the freshly projected metadata from step 2.
 
 The order is structural, not incidental. By the time a resolver or hook reads channel metadata, the channel has already updated its state and the projection is current.
 
 ## What to read next
 
-- [Execution model & durability](./execution-model-and-durability): what makes a session durable and how parked work resumes.
-- [Channels](../channels/overview): how platform addresses map to durable sessions.
-- [Client SDK](../guides/client/overview): call these routes from scripts and server-side code.
-- [Frontend](../guides/frontend/overview): `useEveAgent` instead of raw routes.
+- [Execution model & durability](./execution-model-and-durability.mdx): what makes a session durable and how parked work resumes.
+- [Channels](../channels/overview.mdx): how platform addresses map to durable sessions.
+- [Client SDK](../guides/client/overview.mdx): call these routes from scripts and server-side code.
+- [Frontend](../guides/frontend/overview.mdx): `useEveAgent` instead of raw routes.

@@ -3,9 +3,9 @@ title: "Dynamic Capabilities"
 description: "Resolve models, subagents, connections, tools, skills, and instructions at runtime with defineDynamic resolver events."
 ---
 
-`defineDynamic` resolves the model, subagents, connections, tools, skills, and instructions at runtime from a session event instead of declaring them up front. Reach for it when the right capability isn't known until the session starts, because it hinges on who the caller is, what tenant they belong to, feature flags, or external data. The [subagents](../subagents), [connections](../connections), [tools](../tools), [skills](../skills), and [instructions](../instructions) guides each point here for their dynamic form.
+`defineDynamic` resolves the model, subagents, connections, tools, skills, and instructions at runtime from a session event instead of declaring them up front. Reach for it when the right capability isn't known until the session starts, because it hinges on who the caller is, what tenant they belong to, feature flags, or external data. The [subagents](../subagents/index.mdx), [connections](../connections/overview.mdx), [tools](../tools/overview.mdx), [skills](../skills.mdx), and [instructions](../instructions.mdx) guides each point here for their dynamic form.
 
-eve evaluates a dynamic definition module once during compilation to classify and validate it, then retains that module as a runtime entry so its event handlers can run. Its top-level code therefore runs in both phases; keep caller-specific work inside the handlers. See [Authored module lifecycle](../reference/typescript-api#authored-module-lifecycle).
+eve evaluates a dynamic definition module once during compilation to classify and validate it, then retains that module as a runtime entry so its event handlers can run. Its top-level code therefore runs in both phases; keep caller-specific work inside the handlers. See [Authored module lifecycle](../reference/typescript-api.md#authored-module-lifecycle).
 
 ## Dynamic models
 
@@ -15,7 +15,7 @@ turn > session). Every matching handler must return a concrete model. A
 missing, invalid, or throwing selection fails the turn before model-dependent
 work begins. Prefer `session.started` — prompt caches are per model, so
 switching mid-session re-ingests the conversation at uncached prices. See
-[agent configuration](../agent-config#choose-the-model-dynamically) for the
+[agent configuration](../agent-config.md#choose-the-model-dynamically) for the
 full contract.
 
 Dynamic models do not compile a default model or model metadata. When a
@@ -59,7 +59,7 @@ eve stages byte-backed `file` parts under `/workspace/.eve/attachments` before
 `step.started`, but keeps their media type in `ctx.messages`. When an image
 reaches the provider, vision models can process it and non-vision models reject
 it. eve does not reroute automatically. See [Inbound
-attachments](../sandbox#inbound-attachments).
+attachments](../sandbox/index.mdx#inbound-attachments).
 
 ## Dynamic subagents
 
@@ -191,8 +191,8 @@ export default defineDynamic({
 ```
 
 The returned definitions use the same auth, headers, filtering, provided
-arguments, and approval options as static [MCP](../connections/mcp) and
-[OpenAPI](../connections/openapi) connections. Each resolved connection joins
+arguments, and approval options as static [MCP](../connections/mcp.mdx) and
+[OpenAPI](../connections/openapi.mdx) connections. Each resolved connection joins
 the per-step connection registry. eve announces it to the model in an
 append-only context message, and the model reaches its tools through
 `connection_search` and `connection_execute`, so the tool list never changes.
@@ -277,7 +277,7 @@ Call expressions such as `execute: makeExecutor()` are not transformed. Put the 
 
 ### Create dynamic tools in a package
 
-Prefer an [extension](../extensions) for reusable eve integrations. Extensions contribute a namespaced set of capabilities that consumers can override. Author the final `defineTool()` calls in the extension source. Then build the package with `eve extension build` so eve transforms its callbacks.
+Prefer an [extension](../extensions.md) for reusable eve integrations. Extensions contribute a namespaced set of capabilities that consumers can override. Author the final `defineTool()` calls in the extension source. Then build the package with `eve extension build` so eve transforms its callbacks.
 
 Use `defineDurableCallback` when a provider package must return dynamic `defineTool()` values directly. eve cannot transform callback code inside an installed dependency. Put every per-tool value in the helper's `closure`. The callback receives that snapshot as its first argument. The closure follows the same JSON-serializability rules as transformed captures.
 
@@ -324,7 +324,7 @@ Pass the result as `inputSchema` or `outputSchema` in `defineTool()`. Rebuild ex
 
 `closure` is the callback's only durable snapshot. Store the identifiers and configuration needed to reproduce the call there. Reconstruct clients or look up live runtime state when the callback runs. The callback may call stable imported functions, but it must not capture runtime objects outside `closure`. Those values disappear on a cold start.
 
-eve-provided factories, including [memory provider tools](../memory), use the same durable callback mechanism.
+eve-provided factories, including [memory provider tools](../memory/overview.mdx), use the same durable callback mechanism.
 
 ### Identity and redeploys
 
@@ -369,7 +369,7 @@ A message that steers a held turn joins it without another `turn.started`, as do
 When a stream event fires, three things happen in order.
 
 1. The channel adapter handler runs and the event is written to the durable stream.
-2. Stream-event [hooks](./hooks) fire.
+2. Stream-event [hooks](./hooks.md) fire.
 3. Dynamic tool resolvers subscribed to that event run and update the tool set.
 
 The tool loop reads the current set right before each model call, so a mid-turn update is visible on the next call.
@@ -406,7 +406,7 @@ Resolvers across files run concurrently.
 
 ## Dynamic skills
 
-A dynamic skills file resolves which [skill](../skills) a caller can load, keyed on the principal. It resolves on `session.started` and `turn.started` only (`step.started` is reserved for dynamic tools). Read `ctx.session.auth` or channel metadata and return a `defineSkill(...)` (named after the file slug) or `null`:
+A dynamic skills file resolves which [skill](../skills.mdx) a caller can load, keyed on the principal. It resolves on `session.started` and `turn.started` only (`step.started` is reserved for dynamic tools). Read `ctx.session.auth` or channel metadata and return a `defineSkill(...)` (named after the file slug) or `null`:
 
 ```ts title="agent/skills/team_playbook.ts"
 import { defineDynamic, defineSkill } from "eve/skills";
@@ -474,10 +474,10 @@ Dynamic system content that changes frequently can reduce provider prompt-cache 
 
 ## What to read next
 
-- Conditionally expose a specialist → [Subagents](../subagents)
-- Resolve caller-specific external services → [Connections](../connections)
-- The static tool basics this builds on → [Tools](../tools)
-- The built-in tools and how to override them → [Built-in tools](../concepts/built-in-tools)
-- Authenticate a tool or connection to an external service → [Auth & route protection](./auth-and-route-protection)
-- Durable per-session memory for resolvers to read → [State](../concepts/state)
-- Cross-session recall and provider-generated tools → [Memory](../memory)
+- Conditionally expose a specialist → [Subagents](../subagents/index.mdx)
+- Resolve caller-specific external services → [Connections](../connections/overview.mdx)
+- The static tool basics this builds on → [Tools](../tools/overview.mdx)
+- The built-in tools and how to override them → [Built-in tools](../concepts/built-in-tools.md)
+- Authenticate a tool or connection to an external service → [Auth & route protection](./auth-and-route-protection.md)
+- Durable per-session memory for resolvers to read → [State](../concepts/state.md)
+- Cross-session recall and provider-generated tools → [Memory](../memory/overview.mdx)

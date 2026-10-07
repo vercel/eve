@@ -223,7 +223,7 @@ Keep secret values (`ROUTE_AUTH_BASIC_PASSWORD`, signing keys) in environment va
 
 ## Accepting forwarded identity from another deployment
 
-A `defineRemoteAgent({ forwardPrincipal: true })` caller (see [Remote agents](./remote-agents#forwarding-the-caller-identity)) asserts its end user's principal on create and continuation requests as a `forwardedPrincipal` body field. By default every such assertion is rejected with `403` — accepting someone else's word for who the user is requires naming exactly which forwarders you trust. Do that with `trustedForwarders` on `eveChannel`:
+A `defineRemoteAgent({ forwardPrincipal: true })` caller (see [Remote agents](./remote-agents.md#forwarding-the-caller-identity)) asserts its end user's principal on create and continuation requests as a `forwardedPrincipal` body field. By default every such assertion is rejected with `403` — accepting someone else's word for who the user is requires naming exactly which forwarders you trust. Do that with `trustedForwarders` on `eveChannel`:
 
 ```ts title="agent/channels/eve.ts"
 import { eveChannel } from "eve/channels/eve";
@@ -277,11 +277,11 @@ The forwarder is recorded on accepted contexts as the `eve:forwarded-by` attribu
 
 Trusted parent session lineage populates `ctx.session.parent` and preserves the root session across the delegation chain. Untrusted lineage is ignored, and accepted lineage does not remove the normal root-session token cap.
 
-For requests marked as remote delegations by a callback body and valid sampled `traceparent`, the same accepted `trustedForwarders` result may admit an origin audience and directional content ceiling from one W3C Baggage member. The assertion is not an authorization grant: the receiver's trace policy independently decides against the immutable origin audience, and the two decisions are intersected. Every later hop forwards only that narrowed result. Malformed, partial, unsampled, or mixed-version assertions become metadata-only. The callback and headers are caller-supplied; the verified transport principal and `trustedForwarders` are the trust boundary. See [Preserving trace content](./remote-agents#preserving-trace-content).
+For requests marked as remote delegations by a callback body and valid sampled `traceparent`, the same accepted `trustedForwarders` result may admit an origin audience and directional content ceiling from one W3C Baggage member. The assertion is not an authorization grant: the receiver's trace policy independently decides against the immutable origin audience, and the two decisions are intersected. Every later hop forwards only that narrowed result. Malformed, partial, unsampled, or mixed-version assertions become metadata-only. The callback and headers are caller-supplied; the verified transport principal and `trustedForwarders` are the trust boundary. See [Preserving trace content](./remote-agents.md#preserving-trace-content).
 
 W3C `traceparent`, `tracestate`, and the forwarded conversation ID are correlation metadata. They do not require `trustedForwarders`, establish session lineage, or grant session access.
 
-> ⚠️ Both deployments must support continuation forwarding before you resume persistent remote sessions. A create-only receiver rejects a forwarded continuation with HTTP 400; the sender does not fall back to service authority. See [Forwarding the caller identity](./remote-agents#forwarding-the-caller-identity) for the upgrade behavior.
+> ⚠️ Both deployments must support continuation forwarding before you resume persistent remote sessions. A create-only receiver rejects a forwarded continuation with HTTP 400; the sender does not fall back to service authority. See [Forwarding the caller identity](./remote-agents.md#forwarding-the-caller-identity) for the upgrade behavior.
 
 Subagent sessions are persistent by default, but they do not preserve caller authority between turns. Every accepted follow-up replaces `auth.current`, including replacing it with no authenticated caller on internal local delivery; per-user connection lookup is then keyed from that current principal. This prevents a later caller from resolving a prior caller's OAuth grant. It does not hide the persistent session's conversation history or artifacts from a caller who is otherwise allowed to continue that session; session ownership remains an application policy.
 
@@ -294,7 +294,7 @@ Inside runtime code, `ctx.session.auth` carries the result of the channel's rout
 - A follow-up message updates `auth.current` but leaves `auth.initiator` alone. When a different caller follows up on the same session, `auth.current` tracks the new caller for that turn while `auth.initiator` stays pinned to whoever started it.
 - `auth.current` is whatever the channel passed as `auth` when it dispatched the message. Route auth either accepts the request or returns `401`, but a route handler or channel hook can still dispatch with `auth: null`, such as `source.send(message, { auth: null })` or a Slack `onMessage` hook that returns `{ auth: null }`. On a new session, both values are then `null`. On a continuation, `auth.current` is `null` while `auth.initiator` stays pinned to the session's original caller. Internal runtime paths, such as subagents, can also have no caller auth.
 
-Use the principal on `auth.current` (or `auth.initiator`) to scope tools, resolve [dynamic capabilities](./dynamic-capabilities) per principal, or enforce tenant boundaries. There's no second per-session ownership ACL stacked on top of route auth. Access is decided at the HTTP boundary, and the durable session carries the caller snapshot forward into your runtime code.
+Use the principal on `auth.current` (or `auth.initiator`) to scope tools, resolve [dynamic capabilities](./dynamic-capabilities.md) per principal, or enforce tenant boundaries. There's no second per-session ownership ACL stacked on top of route auth. Access is decided at the HTTP boundary, and the durable session carries the caller snapshot forward into your runtime code.
 
 Route auth does not enforce session ownership. If multiple users or tenants can reach the same route, you must implement the per-user, per-tenant, or per-session authorization your application requires.
 
@@ -351,7 +351,7 @@ Built-in platform channels that identify a human sender, such as Slack, Discord,
 
 ### On a connection
 
-Set `auth` on an MCP or OpenAPI connection when the external service supplies a family of remote tools. The [connections overview](../connections) owns the shared `connect()` setup, static-token providers, app and user scope, approval interaction, and self-hosted OAuth flow.
+Set `auth` on an MCP or OpenAPI connection when the external service supplies a family of remote tools. The [connections overview](../connections/overview.mdx) owns the shared `connect()` setup, static-token providers, app and user scope, approval interaction, and self-hosted OAuth flow.
 
 ### On a single tool
 
@@ -434,7 +434,7 @@ Inline providers derive a stable tool-qualified auth key from Vercel Connect met
 
 ## What to read next
 
-- [Security model](../concepts/security-model): trust boundaries and the pre-production checklist
-- [Connections](../connections): connection auth shapes (`connect()` vs static token)
-- [Multi-tenant outbound auth](../patterns/multi-tenant-auth): select tenant-scoped outbound credentials from the verified inbound identity
-- [Deployment](./deployment/overview): where route-auth secrets live in production
+- [Security model](../concepts/security-model.md): trust boundaries and the pre-production checklist
+- [Connections](../connections/overview.mdx): connection auth shapes (`connect()` vs static token)
+- [Multi-tenant outbound auth](../patterns/multi-tenant-auth.md): select tenant-scoped outbound credentials from the verified inbound identity
+- [Deployment](./deployment/overview.md): where route-auth secrets live in production

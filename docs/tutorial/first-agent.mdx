@@ -11,14 +11,14 @@ For a bespoke learning experience, start with the [eve template gallery](https:/
 
 If you prefer a step-by-step walkthrough, continue with this tutorial. It constructs one app end to end: a data analytics assistant. You ask in natural language, and over eight steps it learns to query sample data, run analysis in a sandbox, remember your team's metric definitions, and refuse to exceed your query budget without asking.
 
-Step 1 gets it talking. In Step 3 you create a small local dataset that you use throughout the tutorial. You can complete the tutorial without a warehouse or Vercel Connect account. [Connect a warehouse](./connect-a-warehouse) is an optional follow-up once your agent works.
+Step 1 gets it talking. In Step 3 you create a small local dataset that you use throughout the tutorial. You can complete the tutorial without a warehouse or Vercel Connect account. [Connect a warehouse](./connect-a-warehouse.mdx) is an optional follow-up once your agent works.
 
 ## Prerequisites
 
 - Node 24 or newer and npm.
-- A working model credential, configured through [Getting Started](../getting-started). Keep the model and credential you already tested there.
+- A working model credential, configured through [Getting Started](../getting-started.mdx). Keep the model and credential you already tested there.
 
-If you have not run eve before, complete [Getting Started](../getting-started) first. Without a credential, "Run the agent" below fails when the runtime tries to reach the model; the dev TUI's `/model` flow walks you through pasting a key or linking a project.
+If you have not run eve before, complete [Getting Started](../getting-started.mdx) first. Without a credential, "Run the agent" below fails when the runtime tries to reach the model; the dev TUI's `/model` flow walks you through pasting a key or linking a project.
 
 ## Scaffold the agent
 
@@ -54,7 +54,7 @@ You are a senior data analyst. You answer questions about the team's data.
   the data, say so plainly.
 ```
 
-Instructions are identity and standing rules. On-demand procedures belong in skills (Step 6), and actions belong in tools (Step 3). See [Instructions](../instructions).
+Instructions are identity and standing rules. On-demand procedures belong in skills (Step 6), and actions belong in tools (Step 3). See [Instructions](../instructions.mdx).
 
 ## Run the agent
 
@@ -70,6 +70,6 @@ What's a good way to measure week-over-week retention?
 
 You get a reply that follows the analyst persona. It can't see your data yet (that comes in Step 3). First, a look at what happened under the hood.
 
-→ Next: [How it runs](./how-it-runs)
+→ Next: [How it runs](./how-it-runs.mdx)
 
-Learn more: [Getting Started](../getting-started) · [Instructions](../instructions)
+Learn more: [Getting Started](../getting-started.mdx) · [Instructions](../instructions.mdx)

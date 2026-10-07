@@ -179,7 +179,7 @@ and adds the per-turn routing behavior described below.
 
 ## Judge eval results
 
-Eval authors can use `t.judge(...)` to turn decision answers into scored assertions, including batches of questions sharing one state. It uses this same `decide` implementation and default model. See [Judge](../evals/judge) for criteria, rubrics, and thresholds.
+Eval authors can use `t.judge(...)` to turn decision answers into scored assertions, including batches of questions sharing one state. It uses this same `decide` implementation and default model. See [Judge](../evals/judge.mdx) for criteria, rubrics, and thresholds.
 
 ## Decide tool approvals
 

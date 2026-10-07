@@ -5,7 +5,7 @@ description: "Turn an OpenAPI 3.x or Swagger 2.0 document into eve connection to
 
 OpenAPI connections turn an OpenAPI 3.x or Swagger 2.0 document into connection tools, one per operation. Use OpenAPI when a service publishes an HTTP API contract and you want eve to derive model-facing tools from that contract.
 
-Use an [MCP connection](./mcp) instead when the service already exposes an MCP server, when the server should own tool schemas dynamically, or when the remote service has richer MCP semantics than its raw HTTP API.
+Use an [MCP connection](./mcp.mdx) instead when the service already exposes an MCP server, when the server should own tool schemas dynamically, or when the remote service has richer MCP semantics than its raw HTTP API.
 
 ## Define an OpenAPI connection
 
@@ -51,7 +51,7 @@ export default defineOpenAPIConnection({
 
 ## Use Vercel Connect for OAuth
 
-For an OAuth-backed API, follow the shared [Vercel Connect setup](../connections#interactive-oauth-via-vercel-connect), then attach the returned connector UID to the OpenAPI connection:
+For an OAuth-backed API, follow the shared [Vercel Connect setup](./overview.mdx#interactive-oauth-via-vercel-connect), then attach the returned connector UID to the OpenAPI connection:
 
 ```ts title="agent/connections/github.ts"
 import { connect } from "@vercel/connect/eve";
@@ -69,7 +69,7 @@ export default defineOpenAPIConnection({
 
 ## Static tokens and headers
 
-OpenAPI connections accept the shared connection `auth` and `headers` options. Use `auth.getToken` for a bearer token, `headers` for another scheme or API version, and resolver functions when credentials or routing depend on the caller. See [Static-token auth](../connections#static-token-auth), [Headers](../connections#headers), and [Per-caller auth and headers](../connections#per-caller-auth-and-headers) for the canonical examples and token-lifecycle behavior.
+OpenAPI connections accept the shared connection `auth` and `headers` options. Use `auth.getToken` for a bearer token, `headers` for another scheme or API version, and resolver functions when credentials or routing depend on the caller. See [Static-token auth](./overview.mdx#static-token-auth), [Headers](./overview.mdx#headers), and [Per-caller auth and headers](./overview.mdx#per-caller-auth-and-headers) for the canonical examples and token-lifecycle behavior.
 
 ## Application-provided operation arguments
 
@@ -162,11 +162,11 @@ eve removes `default` and `example` annotations when their values conflict with 
 
 ## Approval gates
 
-Generated operations can mutate state like authored tools. Use the shared connection `approval` option for human approval, and combine it with `operations.allow` for the smallest practical surface. See [Per-connection approval](../connections#per-connection-approval) for the helpers and [Human-in-the-loop](../human-in-the-loop#approvals) for policy behavior.
+Generated operations can mutate state like authored tools. Use the shared connection `approval` option for human approval, and combine it with `operations.allow` for the smallest practical surface. See [Per-connection approval](./overview.mdx#per-connection-approval) for the helpers and [Human-in-the-loop](../tools/human-in-the-loop.md#approvals) for policy behavior.
 
 ## What to read next
 
-- [Connections](../connections): shared auth, headers, approval, and per-caller patterns.
-- [MCP connections](./mcp): connect to remote MCP servers.
-- [Authentication](../guides/auth-and-route-protection): establish the caller identity required by user-scoped auth.
-- [Security model](../concepts/security-model): how connection credentials stay out of the model's reach.
+- [Connections](./overview.mdx): shared auth, headers, approval, and per-caller patterns.
+- [MCP connections](./mcp.mdx): connect to remote MCP servers.
+- [Authentication](../guides/auth-and-route-protection.md): establish the caller identity required by user-scoped auth.
+- [Security model](../concepts/security-model.md): how connection credentials stay out of the model's reach.

@@ -17,7 +17,7 @@ The description is a routing hint, not a label. Write it as the task that should
 Use when the user needs a release checklist or changelog workflow.
 ```
 
-Loading a skill adds instructions, never a new execution surface. Tools stay visible whether a skill is loaded or not. If you need typed runtime behavior, reach for a [tool](./tools) instead.
+Loading a skill adds instructions, never a new execution surface. Tools stay visible whether a skill is loaded or not. If you need typed runtime behavior, reach for a [tool](./tools/overview.mdx) instead.
 
 ## Markdown vs `defineSkill`
 
@@ -59,7 +59,7 @@ export default defineSkill({
 
 eve generates `SKILL.md` from `markdown`, and each `files` entry becomes a package-relative sibling. Start with plain markdown and move to `defineSkill` only when you hit its limits.
 
-A static `defineSkill` module is evaluated during compilation and its resolved definition is stored in the manifest; a dynamic skill module is also retained as a runtime entry. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).
+A static `defineSkill` module is evaluated during compilation and its resolved definition is stored in the manifest; a dynamic skill module is also retained as a runtime entry. See [Authored module lifecycle](./reference/typescript-api.md#authored-module-lifecycle).
 
 ## Find and install community skills
 
@@ -70,11 +70,11 @@ eve registry search react --registry @skills
 eve add @skills/vercel-labs/agent-skills/vercel-react-best-practices
 ```
 
-skills.sh skills are community-authored project files. Review their source and the resulting diff before running the agent. See [Install integrations](./install-integrations#add-a-skill) for registry configuration and install behavior.
+skills.sh skills are community-authored project files. Review their source and the resulting diff before running the agent. See [Install integrations](./install-integrations.mdx#add-a-skill) for registry configuration and install behavior.
 
 ## Skills are scoped per agent
 
-Skills are scoped to the agent that declares them. A [subagent](./subagents)'s `skills/` are invisible to the root agent, and the reverse holds too. To share one skill definition across agents, package it in a [workspace extension](./extensions#use-an-extension-in-a-workspace) and mount that extension in each agent. Put shared executable helpers in `lib/`.
+Skills are scoped to the agent that declares them. A [subagent](./subagents/index.mdx)'s `skills/` are invisible to the root agent, and the reverse holds too. To share one skill definition across agents, package it in a [workspace extension](./extensions.md#use-an-extension-in-a-workspace) and mount that extension in each agent. Put shared executable helpers in `lib/`.
 
 ## Supporting files
 
@@ -82,12 +82,12 @@ Supporting files are for the model. After loading a skill, the model reads its r
 
 ## Dynamic skills
 
-To serve a different skill per principal, tenant, or channel (the caller's own team playbook, say), wrap `defineSkill` in a `defineDynamic` resolver keyed on `ctx.session.auth`. See [Dynamic capabilities](./guides/dynamic-capabilities).
+To serve a different skill per principal, tenant, or channel (the caller's own team playbook, say), wrap `defineSkill` in a `defineDynamic` resolver keyed on `ctx.session.auth`. See [Dynamic capabilities](./guides/dynamic-capabilities.md).
 
 Subagent lifecycle events do not re-run skill resolvers. The parent's resolved dynamic skills remain available when it resumes after delegation.
 
 ## What to read next
 
-- [Connections](./connections): add tools from external MCP and OpenAPI servers
-- [Dynamic capabilities](./guides/dynamic-capabilities): resolve skills per caller with `defineDynamic`
-- [Context control](./concepts/context-control): how skills fit the full context model
+- [Connections](./connections/overview.mdx): add tools from external MCP and OpenAPI servers
+- [Dynamic capabilities](./guides/dynamic-capabilities.md): resolve skills per caller with `defineDynamic`
+- [Context control](./concepts/context-control.md): how skills fit the full context model

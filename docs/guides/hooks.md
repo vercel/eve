@@ -3,7 +3,7 @@ title: "Hooks"
 description: "Subscribe to runtime stream events from agent/hooks/."
 ---
 
-Hooks are eve's authored extension points for the runtime event stream. A hook subscribes to stream events and runs side effects after each event is durably recorded, such as audit logging, metrics and alerting, or persisting every session and message to your own database for analytics. Reach for one to observe what the agent does without writing a tool, a context provider (a value made available across a step), or a channel adapter handler (a handler defined on a channel's adapter; see [Channels](../channels/overview)).
+Hooks are eve's authored extension points for the runtime event stream. A hook subscribes to stream events and runs side effects after each event is durably recorded, such as audit logging, metrics and alerting, or persisting every session and message to your own database for analytics. Reach for one to observe what the agent does without writing a tool, a context provider (a value made available across a step), or a channel adapter handler (a handler defined on a channel's adapter; see [Channels](../channels/overview.mdx)).
 
 ## Define a hook
 
@@ -26,7 +26,7 @@ The slug is the path-relative basename. `agent/hooks/audit.ts` becomes `"audit"`
 
 `defineHook`, `HookDefinition`, and `HookContext` live on `eve/hooks`.
 
-A hook file declares stream-event subscribers under the `events` map, keyed by event type, with `*` matching every event. Subscribe to any event in the runtime stream vocabulary documented in [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming), including the lifecycle events `session.started`, `turn.completed`, `message.completed`, `action.partial`, and `action.result`. Handlers are observe-only. They cannot inject model context. To contribute runtime model messages, use `defineDynamic` and `defineInstructions` in `agent/instructions/`.
+A hook file declares stream-event subscribers under the `events` map, keyed by event type, with `*` matching every event. Subscribe to any event in the runtime stream vocabulary documented in [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming.md), including the lifecycle events `session.started`, `turn.completed`, `message.completed`, `action.partial`, and `action.result`. Handlers are observe-only. They cannot inject model context. To contribute runtime model messages, use `defineDynamic` and `defineInstructions` in `agent/instructions/`.
 
 ## Scope side effects to a channel
 
@@ -50,12 +50,12 @@ export default githubChannel({
 
 A GitHub channel event handler cannot fire for a Slack-owned session, so platform-specific side effects do not depend on an early-return guard. On a built-in channel, an authored handler replaces that channel's default handler for the same event key. Check the channel page before overriding events that deliver replies, progress, errors, or human-input prompts. The [Slack channel](/docs/channels/slack#customize-rendering) takes renderers instead: a renderer's handler keeps Slack's default by calling `next()` and replaces it by skipping `next`.
 
-Use `ctx.channel.kind` inside a global hook only when the operation is otherwise agent-wide and conditional handling is intentional. For typed channel metadata in dynamic resolvers or instrumentation, import the channel definition and narrow with `isChannel`; see [OpenTelemetry runtime context](../observability/otel#add-runtime-context).
+Use `ctx.channel.kind` inside a global hook only when the operation is otherwise agent-wide and conditional handling is intentional. For typed channel metadata in dynamic resolvers or instrumentation, import the channel definition and narrow with `isChannel`; see [OpenTelemetry runtime context](./instrumentation/otel.mdx#add-runtime-context).
 
 ## Hook structure and context
 
 Every handler receives the same `HookContext`, including the shared session
-helpers documented in [Session context](./session-context):
+helpers documented in [Session context](./session-context.md):
 
 ```ts
 interface HookContext extends SessionContext {
@@ -173,7 +173,7 @@ What to key on instead depends on what you are protecting:
 
 Behind that split is an asymmetry worth knowing: durable history keeps only the attempt that completed, while the event stream keeps every attempt, and no field marks which is which. Hooks are at-least-once, and no key collapses a retry.
 
-See [the event envelope](../concepts/sessions-runs-and-streaming#the-event-envelope) for the full contract.
+See [the event envelope](../concepts/sessions-runs-and-streaming.md#the-event-envelope) for the full contract.
 
 ## Execution order
 
@@ -217,7 +217,7 @@ export default defineHook({
 });
 ```
 
-The remaining subscribers for the event still run. Then eve cancels the turn the same way [`session.cancel()`](./client/streaming) does: in-flight model and tool work is aborted, delegated child turns are cancelled, and the turn ends with `turn.cancelled` followed by `session.waiting`. No failure event is emitted. A cancel from `turn.started` or `step.started` takes effect before that model call. In a conversation, the next message starts a new turn. A delegated task reports the cancellation to its caller.
+The remaining subscribers for the event still run. Then eve cancels the turn the same way [`session.cancel()`](./client/streaming.mdx) does: in-flight model and tool work is aborted, delegated child turns are cancelled, and the turn ends with `turn.cancelled` followed by `session.waiting`. No failure event is emitted. A cancel from `turn.started` or `step.started` takes effect before that model call. In a conversation, the next message starts a new turn. A delegated task reports the cancellation to its caller.
 
 `ctx.cancel()` returns `void` rather than a promise. The turn stops after the hook returns, so there is nothing to await. Call it before the handler's promise settles: eve ignores a call from work the handler does not await and logs a warning.
 
@@ -242,7 +242,7 @@ Stream-event hooks and channel adapter event handlers are structurally identical
 
 ## What to read next
 
-- [Tools](../tools)
-- [Context control](../concepts/context-control)
-- [Session context](../reference/typescript-api)
-- [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming)
+- [Tools](../tools/overview.mdx)
+- [Context control](../concepts/context-control.md)
+- [Session context](../reference/typescript-api.md)
+- [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming.md)

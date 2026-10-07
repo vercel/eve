@@ -29,7 +29,7 @@ Top-level workspace entries get advertised to the model automatically, so it kno
 
 ## Install the chart dependencies
 
-Python needs a sandbox that runs real binaries. For local development, start a Docker-compatible daemon and run `docker info` to verify it is reachable before restarting `npm run dev`. eve also supports [microsandbox](../sandbox#microsandbox) on compatible hosts. The `just-bash` fallback cannot run Python or install packages; installing Python on your laptop does not add it to the sandbox. You can [continue to the next chapter](./remember-definitions) if you do not want to set up a local container or VM yet.
+Python needs a sandbox that runs real binaries. For local development, start a Docker-compatible daemon and run `docker info` to verify it is reachable before restarting `npm run dev`. eve also supports [microsandbox](../sandbox/index.mdx#microsandbox) on compatible hosts. The `just-bash` fallback cannot run Python or install packages; installing Python on your laptop does not add it to the sandbox. You can [continue to the next chapter](./remember-definitions.mdx) if you do not want to set up a local container or VM yet.
 
 The default eve images for Docker, microsandbox, and Vercel Sandbox include Python, but not matplotlib. Add this definition alongside `workspace/` to install matplotlib in a virtual environment. It uses the same environment for installation and chart execution, without changing the system Python:
 
@@ -209,9 +209,9 @@ node save-chart.ts http://localhost:2000
 
 Open the saved `chart.png` in your image viewer. This creates a separate session from your TUI conversation and overwrites an existing `chart.png`. A failed tool call or a turn without a chart fails the script instead of claiming a file was saved.
 
-This step does not require approvals. If you return after adding the approval gate in [Guard the spend](./guard-the-spend), the script reports any pending request with its session ID. [Respond through the client](../guides/client/messages#answer-human-input-requests) before collecting that session's chart result.
+This step does not require approvals. If you return after adding the approval gate in [Guard the spend](./guard-the-spend.mdx), the script reports any pending request with its session ID. [Respond through the client](../guides/client/messages.mdx#answer-human-input-requests) before collecting that session's chart result.
 
-The same client can save a chart from a hosted agent: pass the deployment URL and configure [client authentication](../guides/client/overview#authentication) for that deployment. The file is saved on the computer running the script. In a web UI, consume the same `action.result` output to build an image preview or download control. Returning bytes from a tool does not add that UI automatically.
+The same client can save a chart from a hosted agent: pass the deployment URL and configure [client authentication](../guides/client/overview.mdx#authentication) for that deployment. The file is saved on the computer running the script. In a web UI, consume the same `action.result` output to build an image preview or download control. Returning bytes from a tool does not add that UI automatically.
 
 This example caps charts at 1 MiB because tool outputs are persisted with session events. For larger files, copy the bytes to your application's file storage and return an authorized download URL instead. Sandbox files themselves are not permanent artifact storage.
 
@@ -219,8 +219,8 @@ This example caps charts at 1 MiB because tool outputs are persisted with sessio
 
 The sandbox has no `process.env` and no access to your app's secrets. The `run_sql` tool and sample database run in your app. You pass only the query results to the chart tool; the sandbox does not need database credentials.
 
-The local backend runs the sandbox on your laptop during `eve dev`; on Vercel it runs on Vercel Sandbox. Lifecycle, backends, and network policy are in [Sandbox](../sandbox).
+The local backend runs the sandbox on your laptop during `eve dev`; on Vercel it runs on Vercel Sandbox. Lifecycle, backends, and network policy are in [Sandbox](../sandbox/index.mdx).
 
-→ Next: [Remember definitions](./remember-definitions)
+→ Next: [Remember definitions](./remember-definitions.mdx)
 
-Learn more: [Sandbox](../sandbox)
+Learn more: [Sandbox](../sandbox/index.mdx)

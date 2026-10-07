@@ -9,12 +9,12 @@ Deploy eve to Vercel or run it as a Node service on your own infrastructure. You
 
 Choose where the eve runtime will run:
 
-| Strategy                       | Build output           | Workflows                      | Sandbox                         | Choose it when                                        |
-| ------------------------------ | ---------------------- | ------------------------------ | ------------------------------- | ----------------------------------------------------- |
-| [Vercel](./vercel)             | `.vercel/output`       | Vercel Workflow                | Vercel Sandbox                  | You want Vercel to operate the runtime services       |
-| [Self-hosting](./self-hosting) | `.output/` Node server | Local or custom Workflow world | Docker, microsandbox, or custom | You operate your own Node or container infrastructure |
+| Strategy                          | Build output           | Workflows                      | Sandbox                         | Choose it when                                        |
+| --------------------------------- | ---------------------- | ------------------------------ | ------------------------------- | ----------------------------------------------------- |
+| [Vercel](./vercel.mdx)            | `.vercel/output`       | Vercel Workflow                | Vercel Sandbox                  | You want Vercel to operate the runtime services       |
+| [Self-hosting](./self-hosting.md) | `.output/` Node server | Local or custom Workflow world | Docker, microsandbox, or custom | You operate your own Node or container infrastructure |
 
-eve is frontend agnostic and can be deployed within Next.js, Nuxt, or SvelteKit applications. See [Frontend integrations](../frontend/overview) for more details.
+eve is frontend agnostic and can be deployed within Next.js, Nuxt, or SvelteKit applications. See [Frontend integrations](../frontend/overview.mdx) for more details.
 
 ## Prepare for production
 
@@ -32,9 +32,9 @@ Every production deployment must satisfy the same runtime requirements:
 
 Keep credentials in your deployment environment or secret manager. Don’t include them in source or compiled artifacts.
 
-Your model configuration determines the required credential. A string model ID uses the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway) and requires Vercel project OpenID Connect (OIDC) or `AI_GATEWAY_API_KEY`. A provider-authored model uses that provider’s package and API key. See [Agent configuration](../../agent-config#set-the-model) for both forms.
+Your model configuration determines the required credential. A string model ID uses the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway) and requires Vercel project OpenID Connect (OIDC) or `AI_GATEWAY_API_KEY`. A provider-authored model uses that provider’s package and API key. See [Agent configuration](../../agent-config.md#set-the-model) for both forms.
 
-Configure production route authentication separately from model access. The default policy rejects browser traffic in production. See [Authentication](../auth-and-route-protection) for the available policies and secret requirements.
+Configure production route authentication separately from model access. The default policy rejects browser traffic in production. See [Authentication](../auth-and-route-protection.md) for the available policies and secret requirements.
 
 ## Verify the deployment
 
@@ -56,6 +56,6 @@ Set `VERCEL_AUTOMATION_BYPASS_SECRET` locally first if a Vercel deployment uses 
 
 Follow the guide for your deployment platform or application topology:
 
-- [Deploy to Vercel](./vercel): use Vercel Build Output, Workflow, Sandbox, Cron, and observability
-- [Self-host eve](./self-hosting): run the Nitro Node server with infrastructure you manage
-- [Frontend integrations](../frontend/overview): mount eve alongside Next.js, Nuxt, or SvelteKit
+- [Deploy to Vercel](./vercel.mdx): use Vercel Build Output, Workflow, Sandbox, Cron, and observability
+- [Self-host eve](./self-hosting.md): run the Nitro Node server with infrastructure you manage
+- [Frontend integrations](../frontend/overview.mdx): mount eve alongside Next.js, Nuxt, or SvelteKit

@@ -4,7 +4,7 @@ description: "Reach your agent from Slack app mentions, DMs, slash commands, and
 type: integration
 ---
 
-The Slack channel puts your agent inside a workspace. It handles `@mentions`, DMs, slash commands, shortcuts, and interactive callbacks; replies in threads; shows typing indicators; and turns human-in-the-loop (HITL) prompts into buttons. [Vercel Connect](https://vercel.com/kb/guide/vercel-connect) is the recommended setup: it manages the Slack bot token, verifies inbound requests, supports token rotation and multiple workspace installations, and forwards events to your agent without copying Slack secrets into your project environment. If you cannot use Vercel Connect, you can provide the bot token and signing secret through environment variables. See [Channels](./overview) for the contract this builds on.
+The Slack channel puts your agent inside a workspace. It handles `@mentions`, DMs, slash commands, shortcuts, and interactive callbacks; replies in threads; shows typing indicators; and turns human-in-the-loop (HITL) prompts into buttons. [Vercel Connect](https://vercel.com/kb/guide/vercel-connect) is the recommended setup: it manages the Slack bot token, verifies inbound requests, supports token rotation and multiple workspace installations, and forwards events to your agent without copying Slack secrets into your project environment. If you cannot use Vercel Connect, you can provide the bot token and signing secret through environment variables. See [Channels](./overview.mdx) for the contract this builds on.
 
 ## Add the channel
 
@@ -144,7 +144,7 @@ Slack public channels are `public`; DMs, group DMs, and private channels are
 `private`. When an inbound event does not identify the conversation type, eve
 checks Slack and treats an ambiguous or failed lookup as `private`. The audience
 controls observability content capture, not access to the channel. See
-[Audience](./overview#audience) for the shared channel model.
+[Audience](./overview.mdx#audience) for the shared channel model.
 
 ## How the channel handles inbound events
 
@@ -301,7 +301,7 @@ export default slackChannel({
 
 Accepted Slack messages steer by default. Before assistant answer output or local tool execution begins, steering interrupts pending model generation and continues the same turn with the correction. Executing tools finish and checkpoint their results first; after answer output starts, steering waits for the next committed workflow boundary. Reasoning and search progress do not count as answer output, and interrupted provider-managed search may run again.
 
-Mentions and messages filtered before sending never reach the active turn. See [Overlapping messages](./overview#overlapping-messages) for deliveries ignored later by a channel's `deliver` hook. Set `turnPolicy: "queue"` when every active turn should finish:
+Mentions and messages filtered before sending never reach the active turn. See [Overlapping messages](./overview.mdx#overlapping-messages) for deliveries ignored later by a channel's `deliver` hook. Set `turnPolicy: "queue"` when every active turn should finish:
 
 ```ts title="agent/channels/slack.ts"
 export default slackChannel({
@@ -775,7 +775,7 @@ The private authorization button uses the label **Sign in**, so long connection 
 
 ### Proactive sessions
 
-Start a Slack conversation from a [webhook on another channel](./custom#cross-channel-hand-off) or a [schedule](../schedules#handler-form-run), without waiting for someone to message the app.
+Start a Slack conversation from a [webhook on another channel](./custom.mdx#cross-channel-hand-off) or a [schedule](../schedules.mdx#handler-form-run), without waiting for someone to message the app.
 
 Pass `{ channelId }` as the target to start a new thread. The agent's first post becomes the thread's root message. You can also set these target fields:
 
@@ -792,7 +792,7 @@ For a Slack post without an agent turn, use `ctx.thread.post(...)` in an inbound
 
 ### Attachments
 
-Inbound files behind authenticated Slack URLs are staged with `fetchFile`. See [File uploads](./custom#file-uploads) for the `fetchFile` contract.
+Inbound files behind authenticated Slack URLs are staged with `fetchFile`. See [File uploads](./custom.mdx#file-uploads) for the `fetchFile` contract.
 
 Private file downloads resolve credentials from the session's app installation workspace and require the Slack bot token's `files:read` scope. Add the scope and reinstall the Slack app before sending attachments.
 
@@ -802,5 +802,5 @@ Staged files live in the session sandbox under `/workspace/.eve/attachments`. Se
 
 ## What to read next
 
-- [Channels overview](./overview): the channel contract and every built-in channel
-- [Auth & route protection](../guides/auth-and-route-protection): authenticating inbound traffic
+- [Channels overview](./overview.mdx): the channel contract and every built-in channel
+- [Auth & route protection](../guides/auth-and-route-protection.md): authenticating inbound traffic

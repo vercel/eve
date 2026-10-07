@@ -4,7 +4,7 @@ description: "Bind an eve memory provider to an authenticated tenant and caller 
 ---
 
 Multi-tenant memory is a scope decision, not a storage implementation. Bind any
-[memory provider](../memory) to a trusted tenant and caller tuple, and eve
+[memory provider](../memory/overview.mdx) to a trusted tenant and caller tuple, and eve
 passes the resulting locked scope key to every provider operation.
 
 The example below uses the built-in `fileMemory()` provider. Replace it with
@@ -64,7 +64,7 @@ different tenant or caller. A provider must preserve that boundary by using
 For semantic retrieval, include the locked scope in the database or service
 query itself, not as a filter after a global search. For custom capture, use
 the provider's stable `operationId` as an idempotency key. See
-[Build a memory provider](../memory/custom-provider) for the full contract.
+[Build a memory provider](../memory/custom-provider.md) for the full contract.
 
 ## Choose recall visibility
 
@@ -78,7 +78,7 @@ one trusted audience. Namespace remains an isolation boundary in either mode.
 
 Recalled values become user-role messages. Tell the agent that memories are
 untrusted facts, not instructions, and what it may save; see
-[Tell the model how to use memory](../memory#tell-the-model-how-to-use-memory)
+[Tell the model how to use memory](../memory/overview.mdx#tell-the-model-how-to-use-memory)
 for an instructions snippet. A custom provider can also set `approval` on its
 tools when product policy calls for explicit confirmation before saving or
 deleting memory.

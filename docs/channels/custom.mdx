@@ -7,7 +7,7 @@ Build a custom channel to connect an HTTP or WebSocket endpoint to your agent. I
 
 ## File location and identity
 
-Custom channels live in `agent/channels/` at the root agent or in an [extension](../extensions) mounted there. Local subagents do not declare channels today.
+Custom channels live in `agent/channels/` at the root agent or in an [extension](../extensions.md) mounted there. Local subagents do not declare channels today.
 
 The channel file stem becomes the channel id, so `agent/channels/internal-webhook.ts` is addressed as `internal-webhook`. Export the channel definition as the module's default export.
 
@@ -70,7 +70,7 @@ Each route receives these operation surfaces:
 - `describe()` returns the agent's name, description, and the compiled tools a caller can run outside a turn, with their JSON schemas, sorted by name. It carries no paths, config, or other inspection detail, so a channel can publish it to its callers. Tools that need a turn (framework tools, workflow and provider tools, tools without `execute`) and tools added by dynamic resolvers or subagents are left out.
 - `invokeTool(name, input, { auth })` runs one of those tools as `auth`, outside any conversation: no model, turn, or workflow run. Each call gets its own session. Authored state starts from its initial value and is not kept, and a sandbox the tool opens is deleted when the call ends. It resolves to `completed` with the tool's output, or to `invalid-input`, `denied`, `failed`, `approval-required` when the tool's approval policy asks a person (the tool did not run), or `authorization-required` with the connections the tool needs a sign-in to.
 
-  A direct call doesn't go through the AI SDK, so AI SDK telemetry integrations never see it. Conversation tool calls do: an integration that an `agent/instrumentation/*.ts` module registers with `registerTelemetry()` from `ai` receives `onToolExecutionStart` and `onToolExecutionEnd` for each of them. A direct call is traced by eve itself instead. It gets an `execute_tool` span under the caller's trace and emits `tool.call.started` and `tool.call.completed` to instrumentation. Over MCP, the caller's trace comes from the request's `_meta` trace context (see [Trace context](./mcp#trace-context)).
+  A direct call doesn't go through the AI SDK, so AI SDK telemetry integrations never see it. Conversation tool calls do: an integration that an `agent/instrumentation/*.ts` module registers with `registerTelemetry()` from `ai` receives `onToolExecutionStart` and `onToolExecutionEnd` for each of them. A direct call is traced by eve itself instead. It gets an `execute_tool` span under the caller's trace and emits `tool.call.started` and `tool.call.completed` to instrumentation. Over MCP, the caller's trace comes from the request's `_meta` trace context (see [Trace context](./mcp.mdx#trace-context)).
 
 Event handlers receive `(eventData, channel, ctx)`. `ctx.session.id` identifies
 the exact session, while `channel.continuation` exposes the current address and
@@ -342,11 +342,11 @@ Before sending:
 
 The supplied `auth` identifies who started the session, available to tools and event handlers as `session.auth.initiator`.
 
-The destination's `receive` hook defines the target fields and how they map to a session. See [Slack proactive sessions](./slack#proactive-sessions) for its target options. To let people continue the conversation, configure the destination's inbound handlers to accept follow-ups.
+The destination's `receive` hook defines the target fields and how they map to a session. See [Slack proactive sessions](./slack.mdx#proactive-sessions) for its target options. To let people continue the conversation, configure the destination's inbound handlers to accept follow-ups.
 
-`ctx.to(...)` is a route-handler API, not a method on every platform callback. [Handler-form schedules](../schedules#handler-form-run) provide the same operation as `to(...)`.
+`ctx.to(...)` is a route-handler API, not a method on every platform callback. [Handler-form schedules](../schedules.mdx#handler-form-run) provide the same operation as `to(...)`.
 
-For notifications that don't need an agent turn, use the platform's API instead. See [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications) when those posts also need retries.
+For notifications that don't need an agent turn, use the platform's API instead. See [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications.md) when those posts also need retries.
 
 ## Channel metadata
 
@@ -388,7 +388,7 @@ export default defineChannel({
 });
 ```
 
-The projection is re-evaluated whenever adapter state changes after channel event handlers run. Dynamic tool resolvers read it via `ctx.channel.metadata` and narrow it with `isChannel`. See [Dynamic capabilities](../guides/dynamic-capabilities) for the full consumption pattern.
+The projection is re-evaluated whenever adapter state changes after channel event handlers run. Dynamic tool resolvers read it via `ctx.channel.metadata` and narrow it with `isChannel`. See [Dynamic capabilities](../guides/dynamic-capabilities.md) for the full consumption pattern.
 
 ### Conversation audience
 
@@ -525,12 +525,12 @@ If `fetchFile` throws, eve replaces that attachment with a model-visible error n
 
 The `URL` object survives the queue boundary as a string and is reconstituted inside the workflow step. The staging pipeline calls `fetchFile` with the URL serialized as a string (the URL's `href`), which is why the example matches on `url.startsWith(...)`. Return bytes to stage the file to the sandbox, or `null` to let the URL pass through to the model provider.
 
-The framework handles staging bytes to the sandbox, enforcing upload policy, hydrating files for the model call, and reconstituting `URL` objects after queue serialization. See [Inbound attachments](../sandbox#inbound-attachments) for the shared storage, size, and provider-input behavior.
+The framework handles staging bytes to the sandbox, enforcing upload policy, hydrating files for the model call, and reconstituting `URL` objects after queue serialization. See [Inbound attachments](../sandbox/index.mdx#inbound-attachments) for the shared storage, size, and provider-input behavior.
 
 ## What to read next
 
-- [Channels overview](./overview)
-- [Dynamic capabilities](../guides/dynamic-capabilities)
-- [Auth & route protection](../guides/auth-and-route-protection)
-- [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications): deliver a provider message without starting an agent turn
-- [Universal Commerce Protocol (UCP)](../protocols/ucp): serve a UCP profile from a custom channel
+- [Channels overview](./overview.mdx)
+- [Dynamic capabilities](../guides/dynamic-capabilities.md)
+- [Auth & route protection](../guides/auth-and-route-protection.md)
+- [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications.md): deliver a provider message without starting an agent turn
+- [Universal Commerce Protocol (UCP)](../protocols/ucp.mdx): serve a UCP profile from a custom channel

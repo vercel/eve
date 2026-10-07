@@ -25,7 +25,7 @@ Use `--team` as well when the account has access to more than one team. `eve lin
 
 A string model ID routes requests through the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway). The deployment authenticates through project OpenID Connect (OIDC), so you don’t need a provider API key for that path.
 
-Add credentials for direct model providers, tools, and connections to the Vercel project environment. Add any signing keys or passwords required by your [route authentication policy](../auth-and-route-protection). Replace `placeholderAuth()` before a browser sends a production request.
+Add credentials for direct model providers, tools, and connections to the Vercel project environment. Add any signing keys or passwords required by your [route authentication policy](../auth-and-route-protection.md). Replace `placeholderAuth()` before a browser sends a production request.
 
 ## Select the sandbox environment
 
@@ -39,19 +39,19 @@ export const environment = VercelSandbox.environment();
 export default defineSandbox(() => environment.open());
 ```
 
-See [Sandbox](../../sandbox) for preparation, resource limits, network policy, and lifecycle.
+See [Sandbox](../../sandbox/index.mdx) for preparation, resource limits, network policy, and lifecycle.
 
 <Callout type="info" title="Sandbox prewarming">
   During a Vercel build, eve creates or reuses a snapshot-backed template when an environment uses
   `VercelSandbox.environment({prepare})` or has seed files. A prewarm failure stops the deployment.
-  See the [sandbox lifecycle](../../sandbox#lifecycle).
+  See the [sandbox lifecycle](../../sandbox/index.mdx#lifecycle).
 </Callout>
 
 ## Deploy the agent
 
-For a single-agent project without a frontend, use `eve build`. For an agent-only workspace, run it from the workspace root: eve generates a separately built service and a `/<name>/eve/v1/*` transport route for each member. All members deploy together in one Vercel project. See [Project Structure](../../concepts/project-structure) for workspace membership and layout rules.
+For a single-agent project without a frontend, use `eve build`. For an agent-only workspace, run it from the workspace root: eve generates a separately built service and a `/<name>/eve/v1/*` transport route for each member. All members deploy together in one Vercel project. See [Project Structure](../../concepts/project-structure.mdx) for workspace membership and layout rules.
 
-A Next.js-centered project uses [`withEve` in `next.config.ts`](../frontend/nextjs) and its Next.js build command. If you author the project's broader service graph in `vercel.ts`, use the configuration below instead.
+A Next.js-centered project uses [`withEve` in `next.config.ts`](../frontend/nextjs.mdx) and its Next.js build command. If you author the project's broader service graph in `vercel.ts`, use the configuration below instead.
 
 ### Compose agents with other Vercel services
 
@@ -81,7 +81,7 @@ export default await withEve({
 
 Vercel evaluates `vercel.ts` before resolving the service graph. `withEve` adds the root agent, or every direct workspace member, as an independently built service and returns a plain Vercel configuration. Named workspace agents mount at `/eve/<name>/v1/*`; a root agent mounts at `/eve/v1/*`. Vercel then builds the frontend and each eve agent separately. The frontend does not need `withEve` in its framework configuration or a build script that builds the agents.
 
-The Web Chat installer can generate this composition for a standalone agent or a selected workspace agent. Configure authentication for every exposed agent. To self-host the same source layout, replace Vercel composition with your own [process and proxy configuration](./self-hosting#run-workspace-members).
+The Web Chat installer can generate this composition for a standalone agent or a selected workspace agent. Configure authentication for every exposed agent. To self-host the same source layout, replace Vercel composition with your own [process and proxy configuration](./self-hosting.md#run-workspace-members).
 
 Run Vercel CLI 59.16.0 or newer with `vercel dev --local` to start the complete service graph locally without linking a Vercel project. A generated Vercel Web Chat project exposes this as `pnpm dev:all`. When the directory is linked, Vercel also loads its development environment and settings. Use `pnpm dev` or `pnpm dev:eve` when you want one agent and the eve terminal UI, or `pnpm dev:web` when you want the frontend without its agent services. Named agents use the same `/eve/<name>/v1/*` routes in development, and default `defineWorkspaceAgent` transports can call peers without deployment credentials.
 
@@ -123,7 +123,7 @@ eve deploy
 
 `eve deploy` installs dependencies, runs `vercel deploy --prod --logs` to show build logs, and pulls the project environment after deployment. You can also push to a Git-connected Vercel project. Hosted Vercel builds set `VERCEL`, so `eve build` writes the deployment bundle under `.vercel/output`.
 
-When `eve deploy` creates a new Vercel project, it configures trace sampling so traces appear in Agent Runs automatically. See [Agent Runs](../../observability/agent-runs) for details. Pass `--no-trace-sampling` to skip this setting.
+When `eve deploy` creates a new Vercel project, it configures trace sampling so traces appear in Agent Runs automatically. See [Agent Runs](../instrumentation/agent-runs.mdx) for details. Pass `--no-trace-sampling` to skip this setting.
 
 For non-interactive use, confirm the production deploy up front. `--project` links first, so a new project needs no separate `eve link`:
 
@@ -159,13 +159,13 @@ Set `VERCEL_AUTOMATION_BYPASS_SECRET` locally before connecting if the deploymen
 ## Inspect agent runs
 
 Use the **Agent Runs** tab under **Observability** to browse sessions and
-inspect conversation traces. See [Agent Runs](../../observability/agent-runs)
+inspect conversation traces. See [Agent Runs](../instrumentation/agent-runs.mdx)
 for beta access, pricing, retention, and tracing setup.
 
 ## Continue configuring production
 
 Use these guides to secure and observe the deployed agent:
 
-- [Authentication](../auth-and-route-protection): configure who can call the deployed agent
-- [Instrumentation](../../observability/instrumentation): export traces and diagnose runtime failures
-- [Sandbox](../../sandbox): configure resources, isolation, and network access
+- [Authentication](../auth-and-route-protection.md): configure who can call the deployed agent
+- [Instrumentation](../instrumentation/instrumentation.mdx): export traces and diagnose runtime failures
+- [Sandbox](../../sandbox/index.mdx): configure resources, isolation, and network access

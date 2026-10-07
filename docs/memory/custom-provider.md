@@ -215,6 +215,6 @@ provider:
 ## What to read next
 
 - [Memory overview](/docs/memory): slots, scope, namespace, and visibility.
-- [File memory](./file): the built-in provider as a reference implementation.
-- [Dynamic capabilities](../guides/dynamic-capabilities): the dynamic-tool lifecycle provider tools run through.
-- [Default harness](../concepts/default-harness): compaction in the built-in loop.
+- [File memory](./file.md): the built-in provider as a reference implementation.
+- [Dynamic capabilities](../guides/dynamic-capabilities.md): the dynamic-tool lifecycle provider tools run through.
+- [Default harness](../concepts/default-harness.md): compaction in the built-in loop.

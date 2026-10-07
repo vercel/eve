@@ -3,7 +3,7 @@ title: "Built-in Tools"
 description: "The default and opt-in tools eve provides, including glob, grep, and sleep."
 ---
 
-eve provides a default tool set for every agent and additional tools you can add with one file. Each default occupies the same `agent/tools/<name>.ts` slot you would author yourself, so an authored definition replaces it and `disableTool()` removes it. Use this page to review what the model can call, opt into more capabilities, or override and disable defaults. For custom tools, see [Tools](../tools).
+eve provides a default tool set for every agent and additional tools you can add with one file. Each default occupies the same `agent/tools/<name>.ts` slot you would author yourself, so an authored definition replaces it and `disableTool()` removes it. Use this page to review what the model can call, opt into more capabilities, or override and disable defaults. For custom tools, see [Tools](../tools/overview.mdx).
 
 ## Default tools
 
@@ -28,7 +28,7 @@ This turns off the optional defaults described below. Add back only the tools th
 
 ### `bash`
 
-`bash` runs shell commands in the agent's [sandbox](../sandbox).
+`bash` runs shell commands in the agent's [sandbox](../sandbox/index.mdx).
 
 ```sh
 eve add tool/bash
@@ -216,7 +216,7 @@ import { webSearch } from "eve/tools/web_search";
 export default webSearch({ provider: "browserbase" });
 ```
 
-Use a [Gateway model ID](../agent-config#set-the-model) to route searches through Browserbase. AI Gateway executes the search using `AI_GATEWAY_API_KEY` or Vercel project OIDC credentials; no `BROWSERBASE_API_KEY` is needed. See [Browserbase Search on AI Gateway](https://vercel.com/docs/ai-gateway/models-and-providers/web-search#using-browserbase-search).
+Use a [Gateway model ID](../agent-config.md#set-the-model) to route searches through Browserbase. AI Gateway executes the search using `AI_GATEWAY_API_KEY` or Vercel project OIDC credentials; no `BROWSERBASE_API_KEY` is needed. See [Browserbase Search on AI Gateway](https://vercel.com/docs/ai-gateway/models-and-providers/web-search#using-browserbase-search).
 
 The `provider` setting applies only to AI Gateway models. Unsupported direct providers omit `web_search`.
 
@@ -244,7 +244,7 @@ export default disableTool();
 
 ### `agent`
 
-`agent` delegates a subtask to a fresh copy of the root agent. It is root-only, and each call is a [task](/docs/tools/tasks): the call returns a receipt, and the child's reply arrives later as the task's result. The child receives the root's instructions, tools, connections, and sandbox, but starts with fresh conversation history and [state](./state). See [Subagents](../subagents).
+`agent` delegates a subtask to a fresh copy of the root agent. It is root-only, and each call is a [task](/docs/tools/tasks): the call returns a receipt, and the child's reply arrives later as the task's result. The child receives the root's instructions, tools, connections, and sandbox, but starts with fresh conversation history and [state](./state.md). See [Subagents](../subagents/index.mdx).
 
 ```sh
 eve add tool/agent
@@ -264,7 +264,7 @@ export default disableTool();
 
 ### `load_skill`
 
-`load_skill` pulls an on-demand [skill](../skills)'s instructions into the current turn. It appears only when the agent declares skills and adds no execution surface by itself.
+`load_skill` pulls an on-demand [skill](../skills.mdx)'s instructions into the current turn. It appears only when the agent declares skills and adds no execution surface by itself.
 
 ```sh
 eve add tool/load_skill
@@ -296,7 +296,7 @@ export default disableTool();
 
 ### `connection_search`
 
-`connection_search` and `connection_execute` give the model every tool from the agent's [connections](../connections) without adding each tool to the model's tool list. eve adds both when the agent has a static connection or a dynamic connection resolver, even when `defaultTools` is `false`, so there is no add command.
+`connection_search` and `connection_execute` give the model every tool from the agent's [connections](../connections/overview.mdx) without adding each tool to the model's tool list. eve adds both when the agent has a static connection or a dynamic connection resolver, even when `defaultTools` is `false`, so there is no add command.
 
 - `connection_search({ query?, connection?, signIn?, limit?, offset? })` returns matching tools with their connection, name, description, and a TypeScript signature rendered from the tool's schemas. Omit `query` to list every tool, or pair it with `connection` to list one connection's tools. A plain search never asks the user to sign in. For a connection whose server will not list its tools until the user signs in, the result tells the model that sign-in is needed: the connection appears under `unavailable` with `requiresSignIn: true` and an error that points to `signIn: true`. Tools from the other connections are still returned.
 - `connection_search({ connection, signIn: true, query? })` asks the user to sign in to that one connection when they have not yet, then returns its matching tools. Without `connection` it fails, so the user is asked about one service at a time.
@@ -435,7 +435,7 @@ Remove the file to remove the tool. `disableTool()` is unnecessary because `slee
 
 ## What to read next
 
-- [Tools](../tools): define your own tools, gate them on approval, and shape their output with `toModelOutput`
-- [Dynamic capabilities](../guides/dynamic-capabilities): generate the tool set per session with `defineDynamic`
-- [Sandbox](../sandbox): configure the sandbox used by shell and file tools
-- [Subagents](../subagents): declare specialists that the model can delegate to
+- [Tools](../tools/overview.mdx): define your own tools, gate them on approval, and shape their output with `toModelOutput`
+- [Dynamic capabilities](../guides/dynamic-capabilities.md): generate the tool set per session with `defineDynamic`
+- [Sandbox](../sandbox/index.mdx): configure the sandbox used by shell and file tools
+- [Subagents](../subagents/index.mdx): declare specialists that the model can delegate to

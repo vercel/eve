@@ -6,7 +6,7 @@ url: "/observability/instrumentation"
 
 Add lifecycle instrumentation as files under `agent/instrumentation/`. Each
 file handles eve runtime events independently. Configure trace exporters and
-shared span settings with the [built-in OpenTelemetry APIs](./otel).
+shared span settings with the [built-in OpenTelemetry APIs](./otel.mdx).
 
 The instrumentation directory replaces `agent/instrumentation.ts`. See
 [Migrate instrumentation](/docs/observability/instrumentation-migration) when
@@ -16,7 +16,7 @@ upgrading from `eve < 0.62.0`.
 
 The filename identifies the instrumentation slot. A lifecycle-event file must
 default-export `defineInstrumentation(...)` or `disableInstrumentation()`.
-See [OpenTelemetry](./otel) for the supported OTel declarations.
+See [OpenTelemetry](./otel.mdx) for the supported OTel declarations.
 
 ```text
 agent/instrumentation/
@@ -105,7 +105,7 @@ requests for user input, model provider metadata, and error details. Omitted
 content fields are unavailable to the handler.
 
 The channel assigns the audience once when it creates the session. It controls
-content capture, not access. See [Audience](../channels/overview#audience) for
+content capture, not access. See [Audience](../../channels/overview.mdx#audience) for
 how the channel derives `public`, `private`, and `unknown`.
 
 ## Redact fields
@@ -181,5 +181,5 @@ not depend on execution order. Use `flush` to drain buffered records and
 - [Migrate instrumentation](/docs/observability/instrumentation-migration): replace `agent/instrumentation.ts`.
 - [OpenTelemetry](/docs/observability/otel): configure process-wide settings and third-party destinations.
 - [Agent Runs](/docs/observability/agent-runs): configure Vercel's built-in trace destination.
-- [Local development](../guides/dev-tui): inspect local traces in the TUI
-- [Hooks](../guides/hooks): react to runtime events outside the instrumentation lifecycle
+- [Local development](../dev-tui.md): inspect local traces in the TUI
+- [Hooks](../hooks.md): react to runtime events outside the instrumentation lifecycle

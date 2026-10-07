@@ -9,7 +9,7 @@ Use the sample dataset to practice an approval before a tool runs. The example a
 
 ## Estimate, then gate
 
-This step keeps `run_sql` on the Step 3 sample dataset so you can demo the gate locally. If you later [connect a warehouse](./connect-a-warehouse), use the provider's dry-run estimate to decide when approval is needed.
+This step keeps `run_sql` on the Step 3 sample dataset so you can demo the gate locally. If you later [connect a warehouse](./connect-a-warehouse.mdx), use the provider's dry-run estimate to decide when approval is needed.
 
 Add a cheap estimator and gate `run_sql` on it:
 
@@ -55,8 +55,8 @@ The model proposes the query, `approval` returns `"user-approval"`, and the turn
 
 Each session has exactly one active continuation. Answer an approval against a stale handle and it's rejected, so there's no way to double-resume the same parked turn.
 
-The same machinery backs the opt-in `ask_question` tool, where the model asks you mid-turn, and per-connection approval via `approval: once()`. See [Tools and human-in-the-loop](../tools).
+The same machinery backs the opt-in `ask_question` tool, where the model asks you mid-turn, and per-connection approval via `approval: once()`. See [Tools and human-in-the-loop](../tools/overview.mdx).
 
-→ Next: [Ship it](./ship-it)
+→ Next: [Ship it](./ship-it.mdx)
 
-Learn more: [Tools and human-in-the-loop](../tools)
+Learn more: [Tools and human-in-the-loop](../tools/overview.mdx)

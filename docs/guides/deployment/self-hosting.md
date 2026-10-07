@@ -20,9 +20,9 @@ Run this process under the same process manager or container platform you use fo
 
 ## Configure model access and route auth
 
-Set `AI_GATEWAY_API_KEY` to use a string model ID through the Vercel AI Gateway from a non-Vercel host. To call a provider directly, install its [AI SDK provider package](https://ai-sdk.dev/docs/foundations/providers-and-models). Then pass its model object in `agent.ts` and set its API key. See [Agent configuration](../../agent-config#set-the-model) for examples.
+Set `AI_GATEWAY_API_KEY` to use a string model ID through the Vercel AI Gateway from a non-Vercel host. To call a provider directly, install its [AI SDK provider package](https://ai-sdk.dev/docs/foundations/providers-and-models). Then pass its model object in `agent.ts` and set its API key. See [Agent configuration](../../agent-config.md#set-the-model) for examples.
 
-Don’t rely on `vercelOidc()` as the only production authenticator outside Vercel. Configure Basic auth, JSON Web Token (JWT) verification, generic OpenID Connect (OIDC), or a custom verifier that your host can validate. See [Authentication](../auth-and-route-protection).
+Don’t rely on `vercelOidc()` as the only production authenticator outside Vercel. Configure Basic auth, JSON Web Token (JWT) verification, generic OpenID Connect (OIDC), or a custom verifier that your host can validate. See [Authentication](../auth-and-route-protection.md).
 
 ## Persist workflow state
 
@@ -50,7 +50,7 @@ See [Workflow Worlds](https://workflow-sdk.dev/worlds) for the underlying Workfl
 
 The default sandbox environment selects Docker, microsandbox, or just-bash according to local availability. You can select one explicitly or implement a custom provider with `defineSandboxProvider()` for your container, virtual machine, or isolation service.
 
-Don’t select `VercelSandbox.environment()` unless the self-hosted process should create hosted Vercel sandboxes. See [Sandbox](../../sandbox) for provider configuration and selection order.
+Don’t select `VercelSandbox.environment()` unless the self-hosted process should create hosted Vercel sandboxes. See [Sandbox](../../sandbox/index.mdx) for provider configuration and selection order.
 
 ## Configure proxy routes
 
@@ -63,7 +63,7 @@ A proxy restricted to `/eve/` lets a session start, but the run stalls when its 
 
 ## Run workspace members
 
-An [agent workspace](../../concepts/project-structure#several-root-agents) does not require Vercel or a frontend at runtime. Build each member from its own directory: root `eve build` produces a Vercel workspace deployment, not a group of self-hosted Node servers.
+An [agent workspace](../../concepts/project-structure.mdx#several-root-agents) does not require Vercel or a frontend at runtime. Build each member from its own directory: root `eve build` produces a Vercel workspace deployment, not a group of self-hosted Node servers.
 
 For a workspace containing `support` and `research`, run these from the workspace root, outside a Vercel build environment:
 
@@ -91,15 +91,15 @@ research.example.com {
 }
 ```
 
-Apply the authentication, persistent storage, and sandbox configuration above to each member. With the default local Workflow world, persist each member's own `.eve/.workflow-data` directory. If agents delegate to one another, configure an explicit [workspace-peer transport](../../subagents#vercel-workspace-peers) with the peer's URL and credentials; the default transport requires Vercel. Ensure callback URLs are reachable from the services that call them.
+Apply the authentication, persistent storage, and sandbox configuration above to each member. With the default local Workflow world, persist each member's own `.eve/.workflow-data` directory. If agents delegate to one another, configure an explicit [workspace-peer transport](../../subagents/index.mdx#vercel-workspace-peers) with the peer's URL and credentials; the default transport requires Vercel. Ensure callback URLs are reachable from the services that call them.
 
 ### Add a peer frontend
 
-A frontend under `apps/web/` is another service managed by your host, not by `eve start`. Build and start it using its framework commands. A browser client can use `useEveAgent({ host: "https://support.example.com" })`; configure [CORS](../../channels/eve#cors) and browser credentials for that deployment. Alternatively, mount each agent on the frontend's origin through your reverse proxy.
+A frontend under `apps/web/` is another service managed by your host, not by `eve start`. Build and start it using its framework commands. A browser client can use `useEveAgent({ host: "https://support.example.com" })`; configure [CORS](../../channels/eve.mdx#cors) and browser credentials for that deployment. Alternatively, mount each agent on the frontend's origin through your reverse proxy.
 
 For path-based mounts, strip the public prefix before forwarding requests to the agent and set `EVE_PUBLIC_ROUTE_PREFIX` in that agent's build and runtime environments. Forward its workflow callback routes as well as its eve routes. Keep the browser client, callback URLs, and peer transports consistent with the public mounts.
 
-You can instead use [`eve/next`](../frontend/nextjs#dev-vs-deploy-topology) if you want Next.js to start built agent processes and provide the browser-facing proxy routes. That integration is optional; `eve/vercel` configuration is not used by a self-hosted process manager.
+You can instead use [`eve/next`](../frontend/nextjs.mdx#dev-vs-deploy-topology) if you want Next.js to start built agent processes and provide the browser-facing proxy routes. That integration is optional; `eve/vercel` configuration is not used by a self-hosted process manager.
 
 ## Run schedules
 
@@ -123,6 +123,6 @@ eve remote connect --url https://your_agent.example.com
 
 Use these guides to secure and observe the deployed agent:
 
-- [Authentication](../auth-and-route-protection): configure the host’s route policy
-- [Instrumentation](../../observability/instrumentation): export traces and diagnose runtime failures
-- [Sandbox](../../sandbox): select and secure a sandbox provider
+- [Authentication](../auth-and-route-protection.md): configure the host’s route policy
+- [Instrumentation](../instrumentation/instrumentation.mdx): export traces and diagnose runtime failures
+- [Sandbox](../../sandbox/index.mdx): select and secure a sandbox provider

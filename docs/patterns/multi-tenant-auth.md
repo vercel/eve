@@ -33,7 +33,7 @@ export function requireTenantCaller(ctx: SessionContext): {
 }
 ```
 
-The tenant comes from verified route auth, never a prompt, tool argument, or remote API response. See [Auth & route protection](../guides/auth-and-route-protection) for custom session and OIDC examples.
+The tenant comes from verified route auth, never a prompt, tool argument, or remote API response. See [Auth & route protection](../guides/auth-and-route-protection.md) for custom session and OIDC examples.
 
 ## Authenticate with your own API key or JWT
 

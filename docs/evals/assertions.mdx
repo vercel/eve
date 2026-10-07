@@ -3,7 +3,7 @@ title: "Assertions"
 description: "Scoped methods, value assertions, the matcher mini-language, and gate vs soft severity."
 ---
 
-Assertions are how an eval grades what its `test(t)` function produced. Each one records a result and returns a chainable handle. The runner reads every recorded result to compute the verdict, so a single run reports every failing assertion rather than dying on the first. There are two deterministic surfaces: scoped methods and `t.check` for grading a specific value. For model-graded assertions, see [Judge](./judge).
+Assertions are how an eval grades what its `test(t)` function produced. Each one records a result and returns a chainable handle. The runner reads every recorded result to compute the verdict, so a single run reports every failing assertion rather than dying on the first. There are two deterministic surfaces: scoped methods and `t.check` for grading a specific value. For model-graded assertions, see [Judge](./judge.mdx).
 
 ## Scoped assertions
 
@@ -27,7 +27,7 @@ Scoped assertions take no explicit value and gate by default. Assertions on `t` 
 | `t.eventOrder([...matchers])`                         | Matching event groups occur in order                                          |
 | `t.eventsSatisfy(label, predicate)`                   | Escape hatch: any predicate over the typed event stream                       |
 
-`succeeded()` accepts both a closed session and a healthy session left open for the next user message; it rejects protocol failures and unanswered HITL. `parked()` requires a clean HITL park. Structured output assertions live on turns and independent sessions, where the output is unambiguous (see the [output schema guide](../guides/client/output-schema)).
+`succeeded()` accepts both a closed session and a healthy session left open for the next user message; it rejects protocol failures and unanswered HITL. `parked()` requires a clean HITL park. Structured output assertions live on turns and independent sessions, where the output is unambiguous (see the [output schema guide](../guides/client/output-schema.mdx)).
 
 ```ts
 await t.send("What is the weather in Brooklyn?");
@@ -79,7 +79,7 @@ For example, a failed labeled equality check prints:
 ✗ equals [status] (0% < 100%): expected {"status":"active"}; received {"status":"disabled"}
 ```
 
-Pick the cheapest builder that captures what "correct" means. When exact match is too strict but a judge model is overkill, `similarity` is the middle ground. For nuanced grading, reach for the [judge](./judge).
+Pick the cheapest builder that captures what "correct" means. When exact match is too strict but a judge model is overkill, `similarity` is the middle ground. For nuanced grading, reach for the [judge](./judge.mdx).
 
 ## The matcher mini-language
 
@@ -176,6 +176,6 @@ t.check(turn.message, includes("error")).soft(); // track without failing the bu
 
 ## What to read next
 
-- [Judge](./judge): LLM-graded assertions with thresholds
-- [Cases](./cases): where assertions attach
-- [Running evals](./running): how verdicts map to exit codes
+- [Judge](./judge.mdx): LLM-graded assertions with thresholds
+- [Cases](./cases.mdx): where assertions attach
+- [Running evals](./running.mdx): how verdicts map to exit codes

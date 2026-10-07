@@ -3,7 +3,7 @@ title: "Terminal UI"
 description: "Use eve locally or connect to a deployed agent from an interactive terminal UI."
 ---
 
-`eve dev` starts a local development server and opens an interactive terminal UI. Use it to talk to your agent, approve tool calls, answer its questions, and configure local development. When `eve dev` starts a local server, self-modification is available by default; see [Self-Modification](./self-modification).
+`eve dev` starts a local development server and opens an interactive terminal UI. Use it to talk to your agent, approve tool calls, answer its questions, and configure local development. When `eve dev` starts a local server, self-modification is available by default; see [Self-Modification](./self-modification.md).
 
 ```bash
 eve dev
@@ -96,7 +96,7 @@ Required authorization or deployment setup still runs for the selected item. Pre
 
 Type a message and press `Enter` to send it. When the agent asks a question or requests tool approval, respond in the prompt shown by the UI. Each answer is sent as soon as you give it. When several requests are open, the prompt shows its place among them, such as `2 of 5`, and names the task that asked as its transcript lines do. Connection authorization can open a browser; keep local `eve dev` running until the browser returns to it.
 
-The activity line shows **Thinking** while the model reasons or waits to respond, **Generating** while it writes a response or tool input, and **Running** while tools execute. A blinking dot and elapsed time indicate progress, with token counts shown when available. While [tasks](../tools/tasks) work, the drawer header replaces this line: it shows the parent's current activity, task count, and turn elapsed time without token counts. **Waiting** means the parent is waiting on work; **Working** appears without a turn timer when tasks remain active between turns.
+The activity line shows **Thinking** while the model reasons or waits to respond, **Generating** while it writes a response or tool input, and **Running** while tools execute. A blinking dot and elapsed time indicate progress, with token counts shown when available. While [tasks](../tools/tasks.md) work, the drawer header replaces this line: it shows the parent's current activity, task count, and turn elapsed time without token counts. **Waiting** means the parent is waiting on work; **Working** appears without a turn timer when tasks remain active between turns.
 
 A tool call shows the tool's own `label`, or eve's copy for built-in tools such as `Read README.md`. Any other call shows a readable tool name without its extension or connection prefix, such as `List issues` for `linear__list_issues`. Approval prompts show the exact tool name unless the tool provides a title.
 
@@ -122,9 +122,9 @@ By default, the UI shows severity-tagged errors. Use `/loglevel <none|error|warn
 
 Workflow SDK output, such as lines tagged `[workflow-sdk]` or `[world-local]`, reports internal runtime details, so the transcript shows it only in `all` mode.
 
-Every `eve dev` process writes diagnostic logs to `.eve/logs/`, regardless of the display mode. Read them with [`eve logs`](../reference/cli#eve-logs).
+Every `eve dev` process writes diagnostic logs to `.eve/logs/`, regardless of the display mode. Read them with [`eve logs`](../reference/cli.md#eve-logs).
 
-Use `/traces` to inspect traces recorded during local development. See [Local traces](../observability/otel#local-traces) for trace capture and retention settings.
+Use `/traces` to inspect traces recorded during local development. See [Local traces](./instrumentation/otel.mdx#local-traces) for trace capture and retention settings.
 
 ## Display options
 
@@ -136,7 +136,7 @@ eve dev --tools full --reasoning collapsed --logs all
 
 `--subagents` accepts `collapsed` (the default), `full`, or `hidden`. `full` also writes each subagent message and tool call to the transcript as it finishes, and `hidden` leaves subagent tasks out of the transcript and the task panel.
 
-Use `--host` and `--port` to bind the local server, or `--no-ui` to run without the terminal UI. Set `EVE_TUI_RENDER_MARKDOWN=0` to show assistant and subagent responses without Markdown parsing or styling; `1` (the default) enables Markdown rendering. See the [`eve dev` CLI reference](../reference/cli#eve-dev) for the complete option list, accepted values, and defaults.
+Use `--host` and `--port` to bind the local server, or `--no-ui` to run without the terminal UI. Set `EVE_TUI_RENDER_MARKDOWN=0` to show assistant and subagent responses without Markdown parsing or styling; `1` (the default) enables Markdown rendering. See the [`eve dev` CLI reference](../reference/cli.md#eve-dev) for the complete option list, accepted values, and defaults.
 
 ## Connect to a deployment
 
@@ -159,6 +159,6 @@ When Deployment Protection blocks startup, eve verifies the target project and a
 
 ## What to read next
 
-- [Instrumentation](../observability/instrumentation): traces, OpenTelemetry, and diagnostics.
-- [CLI](../reference/cli): commands and flags.
-- [Agent Client Protocol (ACP)](../protocols/acp): drive the same agent from ACP clients such as Zed instead of the TUI.
+- [Instrumentation](./instrumentation/instrumentation.mdx): traces, OpenTelemetry, and diagnostics.
+- [CLI](../reference/cli.md): commands and flags.
+- [Agent Client Protocol (ACP)](../protocols/acp.md): drive the same agent from ACP clients such as Zed instead of the TUI.

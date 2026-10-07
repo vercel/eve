@@ -27,13 +27,13 @@ interface ScheduleHandlerArgs {
 
 `defineSchedule` is a type-level pass-through. The compiler is what enforces the one-of rule.
 
-A TypeScript schedule with `markdown` is compile-only because eve stores the prompt in the manifest. A schedule with `run` remains a runtime entry so the handler can execute. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).
+A TypeScript schedule with `markdown` is compile-only because eve stores the prompt in the manifest. A schedule with `run` remains a runtime entry so the handler can execute. See [Authored module lifecycle](./reference/typescript-api.md#authored-module-lifecycle).
 
 `cron` is a standard 5-field string (`minute hour day-of-month month day-of-week`) with minute granularity. On Vercel, each schedule becomes a Vercel Cron Job, and Vercel evaluates the expression in UTC, so `"0 9 * * 1-5"` fires at 09:00 UTC on weekdays. `eve dev` never fires schedules on their cron cadence. A built app served with `eve start` does run production scheduled tasks. To trigger one while iterating in dev, use the dispatch route below.
 
 ## Markdown form (fire-and-forget)
 
-This is the minimal schedule. eve runs the agent on the prompt and throws away the output, though the agent can still call tools, write to backends, and log along the way. The session has no channel, so it cannot ask a person for input, and nothing can send it a follow-up message. If the agent calls a tool that needs approval, the session fails instead of waiting for an answer. After its turn settles, the session parks like any other session until its [session timeout](./agent-config#runtime-limits) ends it.
+This is the minimal schedule. eve runs the agent on the prompt and throws away the output, though the agent can still call tools, write to backends, and log along the way. The session has no channel, so it cannot ask a person for input, and nothing can send it a follow-up message. If the agent calls a tool that needs approval, the session fails instead of waiting for an answer. After its turn settles, the session parks like any other session until its [session timeout](./agent-config.md#runtime-limits) ends it.
 
 ```ts title="agent/schedules/heartbeat.ts"
 import { defineSchedule } from "eve/schedules";
@@ -114,13 +114,13 @@ curl -X POST http://localhost:2000/eve/v1/dev/schedules/heartbeat
 # -> { "scheduleId": "heartbeat", "sessionIds": ["..."] }
 ```
 
-`:scheduleId` is the path-derived schedule name (`agent/schedules/heartbeat.ts` → `heartbeat`; URL-encode the `/` in nested names). It runs the exact dispatch path the production cron handler uses and returns the started session ids as JSON, so you can subscribe to each one's [stream](./concepts/sessions-runs-and-streaming) at `GET /eve/v1/session/:sessionId/stream`. An unknown id comes back `404` with `availableScheduleIds`, listing the schedules the app actually defines.
+`:scheduleId` is the path-derived schedule name (`agent/schedules/heartbeat.ts` → `heartbeat`; URL-encode the `/` in nested names). It runs the exact dispatch path the production cron handler uses and returns the started session ids as JSON, so you can subscribe to each one's [stream](./concepts/sessions-runs-and-streaming.md) at `GET /eve/v1/session/:sessionId/stream`. An unknown id comes back `404` with `availableScheduleIds`, listing the schedules the app actually defines.
 
 The route is dev-only. Production builds never mount it, and it needs no auth since the dev server is local-only.
 
 ## On Vercel
 
-Hosted Vercel builds turn every `defineSchedule(...)` into a Vercel Cron Job, with each `cron` written as an entry in `.vercel/output/config.json`. This also applies when [`withEve`](./guides/frontend/nextjs) embeds one or more agents in a Next.js deployment: Vercel assembles each generated eve service's schedules into the project Build Output config while preserving existing project cron entries. Named agents use their public `/eve/<name>` route prefix automatically.
+Hosted Vercel builds turn every `defineSchedule(...)` into a Vercel Cron Job, with each `cron` written as an entry in `.vercel/output/config.json`. This also applies when [`withEve`](./guides/frontend/nextjs.mdx) embeds one or more agents in a Next.js deployment: Vercel assembles each generated eve service's schedules into the project Build Output config while preserving existing project cron entries. Named agents use their public `/eve/<name>` route prefix automatically.
 
 When running `vercel build` locally, use Vercel CLI 56.4.0 or later so generated-service cron entries are included in the project output.
 
@@ -134,6 +134,6 @@ The gotcha is custom hosting. If you adapt the generated output to a process man
 
 ## What to read next
 
-- [Channels](./channels/overview): deliver schedule output to users.
-- [Sessions, runs & streaming](./concepts/sessions-runs-and-streaming): inspect a schedule run.
-- [Dynamic scheduling](./patterns/dynamic-scheduling): manage schedule rows in your own store behind one dispatcher schedule.
+- [Channels](./channels/overview.mdx): deliver schedule output to users.
+- [Sessions, runs & streaming](./concepts/sessions-runs-and-streaming.md): inspect a schedule run.
+- [Dynamic scheduling](./patterns/dynamic-scheduling.md): manage schedule rows in your own store behind one dispatcher schedule.

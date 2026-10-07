@@ -3,18 +3,18 @@ title: "Overview"
 description: "Put an eve agent behind a browser chat UI with useEveAgent."
 ---
 
-Use this guide when you already have a browser application and need to connect it to an eve agent. `useEveAgent()` opens a durable session, sends turns, streams the reply back, and turns the raw event stream into render-ready state. React is the reference implementation; [Vue](./use-eve-agent-vue) and [Svelte](./use-eve-agent-svelte) ship the same surface.
+Use this guide when you already have a browser application and need to connect it to an eve agent. `useEveAgent()` opens a durable session, sends turns, streams the reply back, and turns the raw event stream into render-ready state. React is the reference implementation; [Vue](./use-eve-agent-vue.mdx) and [Svelte](./use-eve-agent-svelte.mdx) ship the same surface.
 
 ## The integration model
 
-A browser UI is a client of the agent's HTTP routes (the [eve channel](../../channels/overview)). Two layers wire it up:
+A browser UI is a client of the agent's HTTP routes (the [eve channel](../../channels/overview.mdx)). Two layers wire it up:
 
-- **Routing** makes the agent reachable from the browser. A framework integration can mount eve on your app's origin: [Next.js](./nextjs) (`withEve`), [Nuxt](./nuxt) (the `eve/nuxt` module), or [SvelteKit](./sveltekit) (the `eveSvelteKit` Vite plugin). If the frontend and agents are peer services, use your deployment platform or reverse proxy instead. The hook works with either setup; pass `host` for a different origin or a named path mount.
+- **Routing** makes the agent reachable from the browser. A framework integration can mount eve on your app's origin: [Next.js](./nextjs.mdx) (`withEve`), [Nuxt](./nuxt.mdx) (the `eve/nuxt` module), or [SvelteKit](./sveltekit.mdx) (the `eveSvelteKit` Vite plugin). If the frontend and agents are peer services, use your deployment platform or reverse proxy instead. The hook works with either setup; pass `host` for a different origin or a named path mount.
 - **The hook** (`useEveAgent`) holds the session state, streaming, errors, and composer status. It defaults to same-origin eve routes such as `/eve/v1/session`.
 
-The framework pages walk through the wiring step by step: [Next.js](./nextjs), [Nuxt](./nuxt), and [SvelteKit](./sveltekit). See [Project Structure](../../concepts/project-structure#configure-a-web-deployment) to choose between a framework integration and peer services.
+The framework pages walk through the wiring step by step: [Next.js](./nextjs.mdx), [Nuxt](./nuxt.mdx), and [SvelteKit](./sveltekit.mdx). See [Project Structure](../../concepts/project-structure.mdx#configure-a-web-deployment) to choose between a framework integration and peer services.
 
-For scripts, server-to-server calls, evals, tests, or custom clients that do not need framework UI state, use the [Client SDK](../client/overview) directly.
+For scripts, server-to-server calls, evals, tests, or custom clients that do not need framework UI state, use the [Client SDK](../client/overview.mdx) directly.
 
 ## Authenticate browser requests
 
@@ -22,7 +22,7 @@ A same-origin framework integration sends your application cookies with every ev
 
 The default eve channel fails closed. Without an authored `agent/channels/eve.ts`, production browser traffic receives `401` from the default `[vercelOidc(), localDev(), placeholderAuth()]` policy. Add the channel file with an `AuthFn` that verifies your application session or token.
 
-For a public demo, use `none()` from `eve/channels/auth` to admit anonymous requests explicitly. Do not use `none()` for an agent that handles private or production data. See [Authentication](../auth-and-route-protection) for application-session examples, token verifiers, and the default policy.
+For a public demo, use `none()` from `eve/channels/auth` to admit anonymous requests explicitly. Do not use `none()` for an agent that handles private or production data. See [Authentication](../auth-and-route-protection.md) for application-session examples, token verifiers, and the default policy.
 
 ## Basic chat (React)
 
@@ -180,7 +180,7 @@ When the root agent delegates, its stream emits `task.started` for the call, `ag
 
 Detailed child progress lives on the child session's stream, not in the root `data.messages`. Pass `followSubagents: true` to follow the session each subagent call reaches while the component is mounted; following is off by default. Narrow `data.agents[sessionId].observation.status` before reading its `conversation`: `"not-followed"` has no child detail, `"following"` has live detail, and `"idle"` has everything the calls so far produced and resumes when another call reaches the task. `"unavailable"` means the stream failed, not that the child failed. Calls that continue a task with its `taskId` reach the same session, so one session's `conversation.messages`, `inputs`, and `turns` span all of them. Sessions that a custom task opens with `ctx.agent` are recorded but not followed.
 
-If you manage your own session rather than using the hook, pass an `agent.started` event from `events` to [`session.agent()`](../client/streaming#follow-a-subagent) and follow the child with `stream()`. It follows local and remote children through the parent, so the browser never calls a remote deployment directly. See [What the parent sees](../../subagents#what-the-parent-sees) for the complete contract.
+If you manage your own session rather than using the hook, pass an `agent.started` event from `events` to [`session.agent()`](../client/streaming.mdx#follow-a-subagent) and follow the child with `stream()`. It follows local and remote children through the parent, so the browser never calls a remote deployment directly. See [What the parent sees](../../subagents/index.mdx#what-the-parent-sees) for the complete contract.
 
 ## Sending and streaming
 
@@ -437,16 +437,16 @@ const support = useEveAgent({ agent: "support" });
 
 ## Per-framework integration
 
-| Framework | Integration                          | Hook                                             |
-| --------- | ------------------------------------ | ------------------------------------------------ |
-| Next.js   | [`withEve`](./nextjs)                | [`useEveAgent` (React)](#basic-chat-react)       |
-| Nuxt      | [`eve/nuxt` module](./nuxt)          | [`useEveAgent` (Vue)](./use-eve-agent-vue)       |
-| SvelteKit | [`eveSvelteKit` plugin](./sveltekit) | [`useEveAgent` (Svelte)](./use-eve-agent-svelte) |
-| Any React | same-origin or `host`                | [`useEveAgent` (React)](#basic-chat-react)       |
+| Framework | Integration                              | Hook                                                 |
+| --------- | ---------------------------------------- | ---------------------------------------------------- |
+| Next.js   | [`withEve`](./nextjs.mdx)                | [`useEveAgent` (React)](#basic-chat-react)           |
+| Nuxt      | [`eve/nuxt` module](./nuxt.mdx)          | [`useEveAgent` (Vue)](./use-eve-agent-vue.mdx)       |
+| SvelteKit | [`eveSvelteKit` plugin](./sveltekit.mdx) | [`useEveAgent` (Svelte)](./use-eve-agent-svelte.mdx) |
+| Any React | same-origin or `host`                    | [`useEveAgent` (React)](#basic-chat-react)           |
 
 ## What to read next
 
-- [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming): the event stream and session cursor
-- [Channels](../../channels/overview): the HTTP routes the hook talks to
-- [Client SDK](../client/overview): the lower-level client underneath the frontend hooks
-- [Next.js](./nextjs): step-by-step setup for wiring eve into a Next.js app
+- [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming.md): the event stream and session cursor
+- [Channels](../../channels/overview.mdx): the HTTP routes the hook talks to
+- [Client SDK](../client/overview.mdx): the lower-level client underneath the frontend hooks
+- [Next.js](./nextjs.mdx): step-by-step setup for wiring eve into a Next.js app

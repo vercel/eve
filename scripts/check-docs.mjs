@@ -22,7 +22,7 @@
  * README.md in each root) are skipped via isExcluded().
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, relative, resolve } from "node:path";
+import { dirname, posix, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOTS = [
@@ -201,21 +201,38 @@ function renderedUrl(relPath, source) {
   return `/docs${route}`.replace(/\/$/, "");
 }
 
-function checkLinks(rootDir) {
-  const files = walkMarkdown(rootDir);
-  const renderedUrls = new Set();
-  for (const abs of files) {
+function collectPages(rootDir) {
+  const urls = new Set();
+  const fileUrls = new Map();
+  for (const abs of walkMarkdown(rootDir)) {
     const rel = relative(rootDir, abs).split("\\").join("/");
     if (isExcluded(rel)) continue;
-    const source = readFileSync(abs, "utf8");
-    renderedUrls.add(renderedUrl(rel, source));
+    const url = renderedUrl(rel, readFileSync(abs, "utf8"));
+    urls.add(url);
+    fileUrls.set(rel, url);
   }
+  return { urls, fileUrls };
+}
+
+// Mirrors fumadocs' getPageByHref: a relative link that names a `.md`/`.mdx`
+// file resolves against the linking file's directory (which is also what
+// GitHub does); anything else resolves against the page URL. Returns the
+// rendered URL, or undefined when a file link points at no rendered page.
+function resolveInternalLink(target, rel, pages) {
+  const isRel = target.startsWith("./") || target.startsWith("../");
+  if (isRel && /\.mdx?$/.test(target)) {
+    return pages.fileUrls.get(posix.normalize(posix.join(posix.dirname(rel), target)));
+  }
+  const sourceUrl = pages.fileUrls.get(rel);
+  return new URL(target, `https://eve.dev${sourceUrl}`).pathname
+    .replace(/\/$/, "")
+    .replace(/\.mdx?$/, "");
+}
+
+function checkLinks(rootDir, pages) {
   const linkRe = /\]\((\s*[^)]+?)\s*\)/g;
-  for (const abs of files) {
-    const rel = relative(rootDir, abs).split("\\").join("/");
-    if (isExcluded(rel)) continue;
-    const source = readFileSync(abs, "utf8");
-    const sourceUrl = renderedUrl(rel, source);
+  for (const rel of pages.fileUrls.keys()) {
+    const source = readFileSync(resolve(rootDir, rel), "utf8");
     let m;
     while ((m = linkRe.exec(source)) !== null) {
       let target = m[1].trim();
@@ -226,15 +243,15 @@ function checkLinks(rootDir) {
       if (!isRel && !isSite) continue; // external, mailto, #anchor, bare /eve/* runtime route, etc.
       target = target.split("#")[0].split("?")[0];
       if (!target) continue; // pure in-page anchor
-      const resolvedUrl = new URL(target, `https://eve.dev${sourceUrl}`).pathname
-        .replace(/\/$/, "")
-        .replace(/\.mdx?$/, "");
+      const resolvedUrl = resolveInternalLink(target, rel, pages);
       if (resolvedUrl === "/docs") continue; // docs root / index
-      if (renderedUrls.has(resolvedUrl)) continue;
+      if (pages.urls.has(resolvedUrl)) continue;
       failures.push({
         root: "docs",
         file: rel,
-        issue: `broken internal link → \`${m[1].trim()}\` (resolves to \`${resolvedUrl}\`, no such page)`,
+        issue: resolvedUrl
+          ? `broken internal link → \`${m[1].trim()}\` (resolves to \`${resolvedUrl}\`, no such page)`
+          : `broken internal link → \`${m[1].trim()}\` (no such page file)`,
       });
     }
   }
@@ -297,9 +314,9 @@ function checkRepositoryMarkdownLinks(absPath) {
   }
 }
 
-function checkChannelHubLinks(rootDir) {
-  const hubPath = resolve(rootDir, "channels/overview.mdx");
-  const source = readFileSync(hubPath, "utf8");
+function checkChannelHubLinks(rootDir, pages) {
+  const hubRel = "channels/overview.mdx";
+  const source = readFileSync(resolve(rootDir, hubRel), "utf8");
   const linkedRoutes = new Set();
   const linkRe = /\]\((\s*[^)]+?)\s*\)/g;
   let match;
@@ -307,7 +324,7 @@ function checkChannelHubLinks(rootDir) {
   while ((match = linkRe.exec(source)) !== null) {
     const target = match[1].trim().split("#")[0].split("?")[0];
     if (!target || (!target.startsWith("./") && !target.startsWith("/docs/"))) continue;
-    linkedRoutes.add(new URL(target, "https://eve.dev/docs/channels/overview").pathname);
+    linkedRoutes.add(resolveInternalLink(target, hubRel, pages));
   }
 
   const meta = loadMetaJson(resolve(rootDir, "channels"));
@@ -324,10 +341,11 @@ function checkChannelHubLinks(rootDir) {
   }
 }
 
-checkLinks(ROOTS[0].dir);
+const pages = collectPages(ROOTS[0].dir);
+checkLinks(ROOTS[0].dir, pages);
 checkMetaReferences(ROOTS[0].dir);
 checkRepositoryMarkdownLinks(resolve(ROOTS[0].dir, "README.md"));
-checkChannelHubLinks(ROOTS[0].dir);
+checkChannelHubLinks(ROOTS[0].dir, pages);
 
 if (failures.length === 0) {
   process.stdout.write(

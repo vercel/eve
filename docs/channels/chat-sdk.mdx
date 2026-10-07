@@ -3,9 +3,9 @@ title: "Chat SDK"
 description: "Bridge any Vercel Chat SDK adapter — Slack, Discord, Telegram, WhatsApp, email, and more — to your agent through one channel, using your own credentials and state store."
 ---
 
-The Chat SDK channel connects your agent to any [Vercel Chat SDK](https://chat-sdk.dev) adapter. You pick an adapter (`@chat-adapter/slack`, `@resend/chat-sdk-adapter`, and so on), register handlers for the messages you care about, and call `send` to hand each turn to eve. Use it to reach a surface eve does not ship a first-class channel for, or when you want to manage credentials and state with the Chat SDK's own primitives rather than [Vercel Connect](../guides/auth-and-route-protection). See [Channels](./overview) for the contract this builds on.
+The Chat SDK channel connects your agent to any [Vercel Chat SDK](https://chat-sdk.dev) adapter. You pick an adapter (`@chat-adapter/slack`, `@resend/chat-sdk-adapter`, and so on), register handlers for the messages you care about, and call `send` to hand each turn to eve. Use it to reach a surface eve does not ship a first-class channel for, or when you want to manage credentials and state with the Chat SDK's own primitives rather than [Vercel Connect](../guides/auth-and-route-protection.md). See [Channels](./overview.mdx) for the contract this builds on.
 
-You supply an adapter and a state store: the adapter owns provider auth, webhook verification, and delivery, while eve owns session dispatch, streaming, typing, and human-in-the-loop. First-class channels such as [Slack](./slack) use their own channel APIs and can manage credentials through Vercel Connect or environment variables you configure directly.
+You supply an adapter and a state store: the adapter owns provider auth, webhook verification, and delivery, while eve owns session dispatch, streaming, typing, and human-in-the-loop. First-class channels such as [Slack](./slack.mdx) use their own channel APIs and can manage credentials through Vercel Connect or environment variables you configure directly.
 
 ## Install
 
@@ -84,7 +84,7 @@ Use `routes` when a provider requires a fixed URL or when you are migrating an e
 Workspace-visible threads are `public`. DMs and private or external threads
 are `private`; threads without a known visibility are `unknown`. The audience
 controls observability content capture, not access to the thread. See
-[Audience](./overview#audience) for the shared channel model.
+[Audience](./overview.mdx#audience) for the shared channel model.
 
 ## How the channel handles messages
 
@@ -247,7 +247,7 @@ bot.onNewMention(async (thread, message) => {
 
 When the adapter can download an attachment (it sets `fetchData`, as the Slack, Google Chat, WhatsApp, and Twilio adapters do), eve downloads it with the adapter's credentials when the turn runs, not in the webhook, and passes the bytes. Platform file URLs usually need those credentials, so the model provider couldn't open them. eve rebuilds the download with the adapter's `rehydrateAttachment`; an adapter without one can't download after the webhook returns, so its files reach the agent as a short note. A failed download, or a file over 25 MB, also becomes a note. An attachment with only a URL is passed as that URL.
 
-See [File uploads](./custom#file-uploads) for how eve stages remote file URLs before the model call.
+See [File uploads](./custom.mdx#file-uploads) for how eve stages remote file URLs before the model call.
 
 ## Configuration reference
 
@@ -269,6 +269,6 @@ Any other Chat SDK `ChatConfig` field (for example `concurrency`) is accepted an
 
 ## What to read next
 
-- [Channels overview](./overview): the channel contract and every built-in channel
-- [Custom channels](./custom): build a channel for any surface with `defineChannel`
-- [Auth & route protection](../guides/auth-and-route-protection): authenticating inbound traffic
+- [Channels overview](./overview.mdx): the channel contract and every built-in channel
+- [Custom channels](./custom.mdx): build a channel for any surface with `defineChannel`
+- [Auth & route protection](../guides/auth-and-route-protection.md): authenticating inbound traffic

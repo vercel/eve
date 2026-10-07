@@ -30,7 +30,7 @@ When `eve build` fails on discovery errors, it prints the full diagnostics repor
 
 ## CLI telemetry
 
-eve collects CLI telemetry by default to improve the command-line interface. Run `eve telemetry disable` to disable it for this machine, or set `EVE_TELEMETRY_DISABLED=1` for one command. See [CLI telemetry](./telemetry) for the current data fields, exclusions, debug mode, notice, and local preference storage.
+eve collects CLI telemetry by default to improve the command-line interface. Run `eve telemetry disable` to disable it for this machine, or set `EVE_TELEMETRY_DISABLED=1` for one command. See [CLI telemetry](./telemetry.md) for the current data fields, exclusions, debug mode, notice, and local preference storage.
 
 ## `eve init`
 
@@ -278,9 +278,9 @@ Starts a local development server and terminal UI. To connect the UI to an exist
 | `--context-size <tokens>`           | number | none               | Model context window size                                       |
 | `--logs <mode>`                     | enum   | `error`            | Display `none`, `error`, `warn`, `debug`, or `all` logs         |
 
-Local development mounts bundled development extensions without adding files to your project. Pass `--no-default-extensions` to disable them. See [Self-Modification](../guides/self-modification) for details.
+Local development mounts bundled development extensions without adding files to your project. Pass `--no-default-extensions` to disable them. See [Self-Modification](../guides/self-modification.md) for details.
 
-A fresh `eve init` opens the TUI and reuses an available model connection or opens `/login`. No Vercel project, channels, integrations, or review step is required before chat. Use `/model` to change models and settings, and `/add` to install an addition. Other `--input` text stays editable in the prompt. See [Terminal UI](../guides/dev-tui) for credential precedence and login options.
+A fresh `eve init` opens the TUI and reuses an available model connection or opens `/login`. No Vercel project, channels, integrations, or review step is required before chat. Use `/model` to change models and settings, and `/add` to install an addition. Other `--input` text stays editable in the prompt. See [Terminal UI](../guides/dev-tui.md) for credential precedence and login options.
 
 ### Local development lifecycle
 
@@ -290,7 +290,7 @@ Local dev keeps immutable runtime generations under `.eve/dev-runtime/snapshots/
 
 Local development records traces under `.eve/traces/` by default and bounds that store by age, size, and a keep-newest floor. Configure it with `EVE_TRACES*` in `.env.local`, or disable the destination with `agent/instrumentation/local.ts`; see [`eve traces`](#retention) for the rules and defaults.
 
-`eve acp` reserves stdin and stdout for newline-delimited JSON-RPC and sends diagnostics to stderr. Without a URL, it supervises an isolated local development server. With a URL, it bridges ACP to that server's existing eve HTTP API. See [Agent Client Protocol (ACP)](../protocols/acp) for client configuration and capability limits.
+`eve acp` reserves stdin and stdout for newline-delimited JSON-RPC and sends diagnostics to stderr. Without a URL, it supervises an isolated local development server. With a URL, it bridges ACP to that server's existing eve HTTP API. See [Agent Client Protocol (ACP)](../protocols/acp.md) for client configuration and capability limits.
 
 ### Local workflow recovery
 
@@ -463,7 +463,7 @@ Runs all discovered evals when no eval ids are given; ids match exactly or by di
 | `--skip-report`          | flag   | off     | Skip eval-defined reporters (e.g. Braintrust)                 |
 | `--verbose`              | flag   | off     | Stream per-eval logs and workflow run IDs to stdout           |
 
-See [Evals](../evals/overview) for authoring evals.
+See [Evals](../evals/overview.mdx) for authoring evals.
 
 ## Recommended loop
 
@@ -473,10 +473,10 @@ See [Evals](../evals/overview) for authoring evals.
 4. `eve build` before shipping.
 5. `eve start` to smoke-test the built output locally.
 
-Related: [Agent Files](/docs/reference/agent-files) · [Instrumentation](../observability/instrumentation).
+Related: [Agent Files](/docs/reference/agent-files) · [Instrumentation](../guides/instrumentation/instrumentation.mdx).
 
 ## What to read next
 
 - [Agent Files](/docs/reference/agent-files): what `eve info` discovers
-- [Instrumentation](../observability/instrumentation): tracing and the error catalog
-- [Deployment](../guides/deployment/overview): `eve build` and `eve start` in production
+- [Instrumentation](../guides/instrumentation/instrumentation.mdx): tracing and the error catalog
+- [Deployment](../guides/deployment/overview.md): `eve build` and `eve start` in production

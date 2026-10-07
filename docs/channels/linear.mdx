@@ -4,7 +4,7 @@ description: "Reach your agent through Linear Agent Sessions, with native Agent 
 type: integration
 ---
 
-The Linear channel uses Linear's Agent Session surface rather than ordinary comments. Users delegate work to the agent from Linear, eve receives `AgentSessionEvent` webhooks at `/eve/v1/linear`, and the channel replies with native Agent Activities, including `thought`, `action`, `elicitation`, `response`, and `error`. Credentials can run through [Vercel Connect](../guides/auth-and-route-protection), which manages the Linear app, its access token, and inbound webhook verification, so there's no API key or webhook secret for you to hold. See [Channels](./overview) for the contract this builds on.
+The Linear channel uses Linear's Agent Session surface rather than ordinary comments. Users delegate work to the agent from Linear, eve receives `AgentSessionEvent` webhooks at `/eve/v1/linear`, and the channel replies with native Agent Activities, including `thought`, `action`, `elicitation`, `response`, and `error`. Credentials can run through [Vercel Connect](../guides/auth-and-route-protection.md), which manages the Linear app, its access token, and inbound webhook verification, so there's no API key or webhook secret for you to hold. See [Channels](./overview.mdx) for the contract this builds on.
 
 ## Guided Connect setup
 
@@ -192,5 +192,5 @@ For issue or comment targets, the channel calls Linear's proactive Agent Session
 
 ## What to read next
 
-- [Channels overview](./overview): the channel contract and every built-in channel
-- [MCP connections](../connections/mcp): use the Linear MCP connection when the agent needs to inspect or edit Linear data from another channel
+- [Channels overview](./overview.mdx): the channel contract and every built-in channel
+- [MCP connections](../connections/mcp.mdx): use the Linear MCP connection when the agent needs to inspect or edit Linear data from another channel

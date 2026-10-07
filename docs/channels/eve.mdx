@@ -3,7 +3,7 @@ title: "eve"
 description: "The default HTTP API for an agent, covering session routes, auth, and customization."
 ---
 
-The eve channel is the framework's default HTTP API. It's what the terminal UI, [`useEveAgent`](../guides/frontend/overview), `curl`, and any SDK client talk to when they start sessions, send messages, and stream events. The selected `channels/eve.ts` source owns the complete `/eve/v1` surface, including health, inspection, callbacks, task input, and session routes. eve supplies that source when `agent/channels/eve.ts` does not exist.
+The eve channel is the framework's default HTTP API. It's what the terminal UI, [`useEveAgent`](../guides/frontend/overview.mdx), `curl`, and any SDK client talk to when they start sessions, send messages, and stream events. The selected `channels/eve.ts` source owns the complete `/eve/v1` surface, including health, inspection, callbacks, task input, and session routes. eve supplies that source when `agent/channels/eve.ts` does not exist.
 
 Every running eve app exposes its own API. `eve.dev` publishes framework documentation; it is not a shared API, authorization server, MCP server, or A2A server. Each deployment supplies its own host and authentication policy.
 
@@ -110,7 +110,7 @@ curl -X POST https://<deployment>/eve/v1/session
 # {"ok":true,"sessionId":"wrun_A","status":"accepted"}
 ```
 
-See [Start a session](../concepts/sessions-runs-and-streaming#start-a-session) for the
+See [Start a session](../concepts/sessions-runs-and-streaming.md#start-a-session) for the
 initialization boundary, first-turn identity, readiness response, and retry behavior.
 
 The create request still requires route auth. Session audience and the timeout are selected
@@ -164,25 +164,25 @@ creates or follows a replacement session.
 
 ### Stream events
 
-Stream a session as newline-delimited JSON from `GET /eve/v1/session/:sessionId/stream`. The [session protocol](../concepts/sessions-runs-and-streaming#stream-a-session) defines the event set, envelopes, cursors, and reconnection behavior.
+Stream a session as newline-delimited JSON from `GET /eve/v1/session/:sessionId/stream`. The [session protocol](../concepts/sessions-runs-and-streaming.md#stream-a-session) defines the event set, envelopes, cursors, and reconnection behavior.
 
 ### Cancel a turn
 
 Post to `/eve/v1/session/:sessionId/cancel` to request cancellation of the active turn. You can include the observed `turnId` to keep a late request from cancelling a newer turn. Cancellation is asynchronous; confirm the turn boundary on the stream as `turn.cancelled` followed by `session.waiting`.
 
-See [Cancel the in-flight turn](../concepts/sessions-runs-and-streaming#cancel-the-in-flight-turn) for response statuses, HTTP status codes, subagent cancellation, and race behavior.
+See [Cancel the in-flight turn](../concepts/sessions-runs-and-streaming.md#cancel-the-in-flight-turn) for response statuses, HTTP status codes, subagent cancellation, and race behavior.
 
 ### Clear context
 
-Post to `/eve/v1/session/:sessionId/clear` to remove model-message history while preserving the session ID, system prompt, tools, skills, durable state, limits, and sandbox. See [Compact, clear, and reset](../concepts/sessions-runs-and-streaming#compact-clear-and-reset).
+Post to `/eve/v1/session/:sessionId/clear` to remove model-message history while preserving the session ID, system prompt, tools, skills, durable state, limits, and sandbox. See [Compact, clear, and reset](../concepts/sessions-runs-and-streaming.md#compact-clear-and-reset).
 
 ### Compact context
 
-Post to `/eve/v1/session/:sessionId/compact` to summarize context without sending a user message. The operation waits for an active turn to settle and reports its result on the stream. See [Compact, clear, and reset](../concepts/sessions-runs-and-streaming#compact-clear-and-reset).
+Post to `/eve/v1/session/:sessionId/compact` to summarize context without sending a user message. The operation waits for an active turn to settle and reports its result on the stream. See [Compact, clear, and reset](../concepts/sessions-runs-and-streaming.md#compact-clear-and-reset).
 
 ### Reset a session
 
-Post to `/eve/v1/session/:sessionId/reset` to terminally retire that session. Reset never replaces the ID automatically; create a new session explicitly for a fresh conversation. See [Compact, clear, and reset](../concepts/sessions-runs-and-streaming#compact-clear-and-reset).
+Post to `/eve/v1/session/:sessionId/reset` to terminally retire that session. Reset never replaces the ID automatically; create a new session explicitly for a fresh conversation. See [Compact, clear, and reset](../concepts/sessions-runs-and-streaming.md#compact-clear-and-reset).
 
 ## Replace or disable the defaults
 
@@ -232,7 +232,7 @@ Neither admits browser users or external clients in production. For a public app
 
 `eve init` scaffolds an `agent/channels/eve.ts` with a production placeholder so you replace it before going live. The generated channel checks Vercel OIDC before falling back to localhost access, and includes `placeholderAuth()`, which returns a setup-focused 401 in production until you swap it for real auth. Delete the file and eve selects its default channel source with `[vercelOidc(), localDev(), placeholderAuth()]`, which rejects all production traffic.
 
-For the full auth model and helper list, see [Auth & route protection](../guides/auth-and-route-protection).
+For the full auth model and helper list, see [Auth & route protection](../guides/auth-and-route-protection.md).
 
 ## Audience
 
@@ -263,7 +263,7 @@ export default eveChannel({
 `audience` controls observability content capture; it does not change who may
 call the endpoint. `auth` still controls access. For a classification that
 depends on channel state or application-specific verified data, use a [custom
-channel audience](./custom#conversation-audience).
+channel audience](./custom.mdx#conversation-audience).
 
 You can also pass a function that receives `caller`, channel, and deployment
 environment. Classification is fixed at session creation, so a later
@@ -271,7 +271,7 @@ turn from a different caller does not reclassify the session.
 
 For a remote agent, a trusted dispatch can forward the original audience and
 its trace-content ceiling. See [Preserving trace
-content](../guides/remote-agents#preserving-trace-content).
+content](../guides/remote-agents.md#preserving-trace-content).
 
 ## Customization
 
@@ -304,13 +304,13 @@ export default eveChannel({
 
 ## Clients
 
-The browser side of this API lives in the [Frontend](../guides/frontend/overview) docs, where `useEveAgent` drives the eve channel from React UI.
+The browser side of this API lives in the [Frontend](../guides/frontend/overview.mdx) docs, where `useEveAgent` drives the eve channel from React UI.
 
-For scripts, server-to-server calls, evals, tests, and custom clients, use the [Client SDK](../guides/client/overview). It wraps the ID-addressed session routes, stream cursor, and reconnect loop.
+For scripts, server-to-server calls, evals, tests, and custom clients, use the [Client SDK](../guides/client/overview.mdx). It wraps the ID-addressed session routes, stream cursor, and reconnect loop.
 
 ## What to read next
 
-- [Frontend](../guides/frontend/overview): drive the eve channel from browser UI with `useEveAgent`
-- [Client SDK](../guides/client/overview): call the eve channel from TypeScript
-- [Auth & route protection](../guides/auth-and-route-protection): the route auth policy
-- [Sessions, runs & streaming](../concepts/sessions-runs-and-streaming): the routes this channel exposes
+- [Frontend](../guides/frontend/overview.mdx): drive the eve channel from browser UI with `useEveAgent`
+- [Client SDK](../guides/client/overview.mdx): call the eve channel from TypeScript
+- [Auth & route protection](../guides/auth-and-route-protection.md): the route auth policy
+- [Sessions, runs & streaming](../concepts/sessions-runs-and-streaming.md): the routes this channel exposes

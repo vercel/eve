@@ -97,7 +97,7 @@ export default defineTool({
 });
 ```
 
-Tools run in your app runtime with full `process.env`, not in the sandbox. The `inputSchema` both validates the call and types the `input` you get inside `execute`. For output bounding, `toModelOutput`, and authorization, see [Tools](../tools).
+Tools run in your app runtime with full `process.env`, not in the sandbox. The `inputSchema` both validates the call and types the `input` you get inside `execute`. For output bounding, `toModelOutput`, and authorization, see [Tools](../tools/overview.mdx).
 
 ## Watch the tool loop
 
@@ -109,8 +109,8 @@ Which customer has spent the most, and how much?
 
 Watch the loop play out in the TUI. The model emits a `run_sql` call, eve runs your `execute`, and the rows come back as a tool result. The model reads them and answers with a real number. The result is Globex with 9,900 cents ($99.00). The amounts are stored in cents, so divide by 100 when reporting dollars. eve drove the whole loop; you supplied the tool.
 
-Keep `run_sql` and the sample database for the rest of the tutorial. When you have your own data service, [Connect a warehouse](./connect-a-warehouse) explains the optional integration.
+Keep `run_sql` and the sample database for the rest of the tutorial. When you have your own data service, [Connect a warehouse](./connect-a-warehouse.mdx) explains the optional integration.
 
-→ Next: [Run analysis](./run-analysis)
+→ Next: [Run analysis](./run-analysis.mdx)
 
-Learn more: [Tools](../tools)
+Learn more: [Tools](../tools/overview.mdx)

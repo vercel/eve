@@ -115,7 +115,7 @@ export default defineChannel({
 ```
 
 - **Caching**: The spec requires `public` and a `max-age` of at least 60 seconds, and forbids `private`, `no-store`, and `no-cache`. See [Profile Requirements](https://ucp.dev/2026-08-25/specification/overview#hosting).
-- **CORS**: `cors: true` suits public discovery metadata. Pass a `cors` options object to narrow origins. See [CORS](../channels/custom#cors).
+- **CORS**: `cors: true` suits public discovery metadata. Pass a `cors` options object to narrow origins. See [CORS](../channels/custom.mdx#cors).
 - **HTTPS, no redirects**: The spec requires HTTPS and forbids 3xx responses on the profile endpoint.
 
 ## Add your commerce endpoints
@@ -181,5 +181,5 @@ Commerce operation semantics are author-owned: the checkout, cart, and order sta
 
 ## Read next
 
-- [Channels overview](../channels/overview): The channel contract this builds on.
-- [Custom channels](../channels/custom): The route helpers, CORS, and metadata this page uses.
+- [Channels overview](../channels/overview.mdx): The channel contract this builds on.
+- [Custom channels](../channels/custom.mdx): The route helpers, CORS, and metadata this page uses.

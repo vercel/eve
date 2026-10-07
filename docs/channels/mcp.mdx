@@ -5,7 +5,7 @@ description: "Publish an eve agent as an MCP server with auth support."
 
 The MCP channel lets clients such as Claude Code delegate durable work to an eve agent through four tools: `agent_start`, `agent_get`, `agent_update`, and `agent_cancel`. It can also publish the agent's own tools, so a client calls them directly; see [Publish the agent's tools](#publish-the-agents-tools).
 
-Use an [MCP connection](../connections/mcp) instead when your eve agent needs to call someone else's MCP server.
+Use an [MCP connection](../connections/mcp.mdx) instead when your eve agent needs to call someone else's MCP server.
 
 ## Configure the channel
 
@@ -131,7 +131,7 @@ The metadata endpoint serves cross-origin `GET`, `HEAD`, and `OPTIONS` requests 
 
 When a protected request has no accepted credentials, eve returns a Bearer challenge. A supplied Bearer token rejected by every strategy gets `error="invalid_token"`. To report a verified caller that lacks the necessary scopes, throw `ForbiddenError` with an `error="insufficient_scope"` Bearer challenge. The MCP channel preserves that challenge and adds the protected-resource metadata URL.
 
-For the complete strategy and auth-walk model, see [Authentication](../guides/auth-and-route-protection).
+For the complete strategy and auth-walk model, see [Authentication](../guides/auth-and-route-protection.md).
 
 ### Public access
 
@@ -251,7 +251,7 @@ MCP clients send W3C trace context in each request's `params._meta`, not in HTTP
 
 ### Forwarded principals
 
-A router that calls the channel on behalf of its own users, such as another eve agent's [`forwardPrincipal` connection](../connections/mcp#forward-the-caller-to-an-eve-agent), can name the user in the `eve-forwarded-principal` header: unpadded base64url of UTF-8 JSON `{ current, initiator? }`, at most 16 KiB. eve accepts the header only when `trustedForwarders` is set, and only from a route-authenticated forwarder the predicate accepts:
+A router that calls the channel on behalf of its own users, such as another eve agent's [`forwardPrincipal` connection](../connections/mcp.mdx#forward-the-caller-to-an-eve-agent), can name the user in the `eve-forwarded-principal` header: unpadded base64url of UTF-8 JSON `{ current, initiator? }`, at most 16 KiB. eve accepts the header only when `trustedForwarders` is set, and only from a route-authenticated forwarder the predicate accepts:
 
 ```ts title="agent/channels/mcp.ts"
 import { vercelOidc, vercelSubject } from "eve/channels/auth";
@@ -266,7 +266,7 @@ export default mcpChannel({
 });
 ```
 
-The predicate receives the verified forwarder and the principals it asserts, as the [eve channel](./eve)'s `trustedForwarders` does, so match the forwarder precisely; see [Accepting forwarded identity](../guides/auth-and-route-protection#accepting-forwarded-identity-from-another-deployment). A published tool called with an accepted header runs as the forwarded user: `ctx.session.auth.current` is that user, `ctx.session.auth.initiator` is the asserted initiator or that user, and both carry the forwarder's `principalId` in the `eve:forwarded-by` attribute. The `agent_*` tools still act as the route-authenticated caller.
+The predicate receives the verified forwarder and the principals it asserts, as the [eve channel](./eve.mdx)'s `trustedForwarders` does, so match the forwarder precisely; see [Accepting forwarded identity](../guides/auth-and-route-protection.md#accepting-forwarded-identity-from-another-deployment). A published tool called with an accepted header runs as the forwarded user: `ctx.session.auth.current` is that user, `ctx.session.auth.initiator` is the asserted initiator or that user, and both carry the forwarder's `principalId` in the `eve:forwarded-by` attribute. The `agent_*` tools still act as the route-authenticated caller.
 
 | Request                                                | Response                 |
 | ------------------------------------------------------ | ------------------------ |
@@ -285,6 +285,6 @@ With `none()`, every caller shares the anonymous principal, so the random invoca
 
 ## What to read next
 
-- [Authentication](../guides/auth-and-route-protection): configure inbound route authentication
-- [MCP connections](../connections/mcp): let an eve agent call another MCP server
-- [Sessions, runs & streaming](../concepts/sessions-runs-and-streaming): understand the durable sessions behind invocations
+- [Authentication](../guides/auth-and-route-protection.md): configure inbound route authentication
+- [MCP connections](../connections/mcp.mdx): let an eve agent call another MCP server
+- [Sessions, runs & streaming](../concepts/sessions-runs-and-streaming.md): understand the durable sessions behind invocations

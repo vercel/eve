@@ -3,12 +3,12 @@ title: "Nuxt"
 description: "Run an eve agent and a Nuxt app as one project with the eve/nuxt module."
 ---
 
-The `eve/nuxt` module runs a Nuxt frontend and an eve agent as a single project from one dev server and one Vercel deploy. The auto-imported [`useEveAgent`](./use-eve-agent-vue) composable finds the mounted routes on its own, so there's no CORS to configure and no URL env vars to keep in sync.
+The `eve/nuxt` module runs a Nuxt frontend and an eve agent as a single project from one dev server and one Vercel deploy. The auto-imported [`useEveAgent`](./use-eve-agent-vue.mdx) composable finds the mounted routes on its own, so there's no CORS to configure and no URL env vars to keep in sync.
 
 ## Prerequisites
 
 - The `eve` package installed in your project (`npm install eve@latest`).
-- An existing eve agent directory. If you don't have one, start from [Getting started](../../getting-started).
+- An existing eve agent directory. If you don't have one, start from [Getting started](../../getting-started.mdx).
 - A Nuxt app to mount the agent in.
 
 ## Register the module
@@ -80,7 +80,7 @@ async function handleSubmit() {
 </template>
 ```
 
-The browser still needs a production authentication policy. See [Authenticate browser requests](./overview#authenticate-browser-requests) for the default fail-closed behavior and channel configuration.
+The browser still needs a production authentication policy. See [Authenticate browser requests](./overview.mdx#authenticate-browser-requests) for the default fail-closed behavior and channel configuration.
 
 ## Dev vs deploy topology
 
@@ -102,7 +102,7 @@ The browser still needs a production authentication policy. See [Authenticate br
   EVE_NUXT_PRODUCTION_ORIGIN=https://agent.example.com npm run build
   ```
 
-  `eve build` and `nuxt build` both write `.output/`. When the agent lives in the Nuxt project root, build and serve eve from a separate directory (set `eveRoot` to it) so the two outputs do not overwrite each other. See [Self-host eve](../deployment/self-hosting) for running the eve service.
+  `eve build` and `nuxt build` both write `.output/`. When the agent lives in the Nuxt project root, build and serve eve from a separate directory (set `eveRoot` to it) so the two outputs do not overwrite each other. See [Self-host eve](../deployment/self-hosting.md) for running the eve service.
 
 ## Managing vercel.json yourself
 
@@ -127,6 +127,6 @@ Earlier versions of the module wrote the legacy `experimentalServices` field int
 
 ## What to read next
 
-- [`useEveAgent` (Vue)](./use-eve-agent-vue): the composable API
-- [Auth & route protection](../auth-and-route-protection)
-- [Deployment](../deployment/overview)
+- [`useEveAgent` (Vue)](./use-eve-agent-vue.mdx): the composable API
+- [Auth & route protection](../auth-and-route-protection.md)
+- [Deployment](../deployment/overview.md)

@@ -3,12 +3,12 @@ title: "SvelteKit"
 description: "Run an eve agent and a SvelteKit app as one project with the eveSvelteKit Vite plugin."
 ---
 
-`eve/sveltekit` runs a SvelteKit frontend and an eve agent as one project instead of two services. The `eveSvelteKit()` Vite plugin puts both on one dev server and one Vercel deploy, and [`useEveAgent`](./use-eve-agent-svelte) finds the mounted routes on its own. There's no CORS to configure and no URL env vars to keep in sync.
+`eve/sveltekit` runs a SvelteKit frontend and an eve agent as one project instead of two services. The `eveSvelteKit()` Vite plugin puts both on one dev server and one Vercel deploy, and [`useEveAgent`](./use-eve-agent-svelte.mdx) finds the mounted routes on its own. There's no CORS to configure and no URL env vars to keep in sync.
 
 ## Prerequisites
 
 - The `eve` package installed in your project (`npm install eve@latest`).
-- An existing eve agent directory. If you don't have one, start from [Getting started](../../getting-started).
+- An existing eve agent directory. If you don't have one, start from [Getting started](../../getting-started.mdx).
 - A SvelteKit app to mount the agent in.
 
 ## Register the Vite plugin
@@ -42,7 +42,7 @@ The plugin accepts only two options, `eveRoot` and `eveBuildCommand`.
 
 ## Call the binding
 
-With the plugin in `vite.config.ts`, components call [`useEveAgent`](./use-eve-agent-svelte) from `eve/svelte` and don't pass a host:
+With the plugin in `vite.config.ts`, components call [`useEveAgent`](./use-eve-agent-svelte.mdx) from `eve/svelte` and don't pass a host:
 
 ```svelte
 <script lang="ts">
@@ -70,7 +70,7 @@ With the plugin in `vite.config.ts`, components call [`useEveAgent`](./use-eve-a
 </form>
 ```
 
-The browser still needs a production authentication policy. See [Authenticate browser requests](./overview#authenticate-browser-requests) for the default fail-closed behavior and channel configuration.
+The browser still needs a production authentication policy. See [Authenticate browser requests](./overview.mdx#authenticate-browser-requests) for the default fail-closed behavior and channel configuration.
 
 ## Dev vs deploy topology
 
@@ -119,6 +119,6 @@ Earlier versions of the plugin wrote the legacy `experimentalServices` field int
 
 ## What to read next
 
-- [`useEveAgent` (Svelte)](./use-eve-agent-svelte): the binding API
-- [Auth & route protection](../auth-and-route-protection)
-- [Deployment](../deployment/overview)
+- [`useEveAgent` (Svelte)](./use-eve-agent-svelte.mdx): the binding API
+- [Auth & route protection](../auth-and-route-protection.md)
+- [Deployment](../deployment/overview.md)

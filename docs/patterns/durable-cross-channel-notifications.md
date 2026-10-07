@@ -37,7 +37,7 @@ export default githubChannel({
 
 `enqueue` must enforce a unique constraint on `key`, for example with `INSERT ... ON CONFLICT DO NOTHING`. A durable step can re-run after an interruption, and channel event handlers are at least once. The stable key prevents those attempts from creating multiple outbox rows.
 
-A channel's `events` handlers run only for sessions owned by that channel. On built-in channels, an authored handler replaces the built-in handler for the same event key; use an event without a built-in handler or reproduce behavior you intend to replace. See [Hooks](../guides/hooks#scope-side-effects-to-a-channel) for the channel-scoping rules.
+A channel's `events` handlers run only for sessions owned by that channel. On built-in channels, an authored handler replaces the built-in handler for the same event key; use an event without a built-in handler or reproduce behavior you intend to replace. See [Hooks](../guides/hooks.md#scope-side-effects-to-a-channel) for the channel-scoping rules.
 
 ## Claim and deliver pending rows
 
@@ -111,4 +111,4 @@ Handle that window in this order:
 
 Do not mark an ambiguous row complete merely to suppress a duplicate; that can lose a notification the provider never accepted. Do not describe an outbox as exactly once unless the provider's contract closes this ambiguity window.
 
-If the destination should run the agent rather than receive a notification, use [`ctx.to(...).send(...)`](../channels/custom#cross-channel-hand-off) instead. That path creates or resumes a durable session and invokes the model.
+If the destination should run the agent rather than receive a notification, use [`ctx.to(...).send(...)`](../channels/custom.mdx#cross-channel-hand-off) instead. That path creates or resumes a durable session and invokes the model.

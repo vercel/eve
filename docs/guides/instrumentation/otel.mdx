@@ -35,7 +35,7 @@ export default otel({
 The OpenTelemetry `tracePolicy` is a capture ceiling shared by every OTel
 destination. A destination cannot restore content excluded by this policy. It
 does not affect lifecycle instrumentation created with `defineInstrumentation()`.
-See [Audience](../channels/overview#audience) for how channels classify the
+See [Audience](../../channels/overview.mdx#audience) for how channels classify the
 conversation passed to this policy.
 
 ## Instrument Node.js dependencies
@@ -173,7 +173,7 @@ or credentials. It does not give authorization or require the same worker for
 each turn. Remote requests carry the conversation ID in W3C Baggage.
 `trustedForwarders` controls whether the receiver accepts parent session data
 and the trace-content policy. See
-[Remote agents](../guides/remote-agents#preserving-trace-content).
+[Remote agents](../remote-agents.md#preserving-trace-content).
 
 ## Local traces
 
@@ -190,7 +190,7 @@ export default disableInstrumentation();
 ## Enable tracing on Vercel
 
 For Agent Runs sampling defaults and existing-deployment setup, see
-[Enable tracing on Vercel](./agent-runs#enable-tracing-on-vercel).
+[Enable tracing on Vercel](./agent-runs.mdx#enable-tracing-on-vercel).
 
 ## Filter a destination
 
@@ -223,6 +223,6 @@ one attribute.
 ## What to read next
 
 - [Instrumentation](/docs/observability/instrumentation): handle eve lifecycle events.
-- [Agent Runs](./agent-runs): configure Vercel's built-in trace destination.
+- [Agent Runs](./agent-runs.mdx): configure Vercel's built-in trace destination.
 - [Migrate instrumentation](/docs/observability/instrumentation-migration): replace `agent/instrumentation.ts`.
-- [Local development](../guides/dev-tui): inspect local traces in the TUI.
+- [Local development](../dev-tui.md): inspect local traces in the TUI.

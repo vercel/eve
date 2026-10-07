@@ -3,9 +3,9 @@ title: "Connect a Warehouse (Optional)"
 description: "Optional follow-up to the Build an Agent tutorial. Let each user connect their own warehouse over an OAuth MCP via Vercel Connect."
 ---
 
-Complete [the tutorial with sample data](./first-agent) first. When you have a warehouse with an MCP server, you can connect it to the analytics assistant and let each user sign in through their browser. That's what a connection is for. It's an MCP server the model reaches through tools, with auth that eve drives for you.
+Complete [the tutorial with sample data](./first-agent.mdx) first. When you have a warehouse with an MCP server, you can connect it to the analytics assistant and let each user sign in through their browser. That's what a connection is for. It's an MCP server the model reaches through tools, with auth that eve drives for you.
 
-[Vercel Connect is generally available](https://vercel.com/changelog/vercel-connect-secure-access-to-external-services-for-your-agents). You can complete the tutorial with the [sample dataset](./query-sample-data); Connect is only needed for the OAuth integration shown on this page.
+[Vercel Connect is generally available](https://vercel.com/changelog/vercel-connect-secure-access-to-external-services-for-your-agents). You can complete the tutorial with the [sample dataset](./query-sample-data.mdx); Connect is only needed for the OAuth integration shown on this page.
 
 ## Before you start
 
@@ -14,9 +14,9 @@ This integration needs:
 - A warehouse account and a working MCP server for that warehouse, with its full endpoint URL. Connect manages credentials; it does not create a warehouse or turn a SQL database into an MCP server.
 - Permission to authorize that server, with read-only access to the data you want the agent to query.
 - A Vercel account and a linked project for Connect.
-- An authenticated user on the eve session. Complete the route-auth setup in [Ship it](./ship-it#replace-placeholderauth) before trying per-user OAuth from a web app.
+- An authenticated user on the eve session. Complete the route-auth setup in [Ship it](./ship-it.mdx#replace-placeholderauth) before trying per-user OAuth from a web app.
 
-If you are working through the tutorial for the first time, keep `run_sql` and [continue to Run analysis](./run-analysis). You can add this integration later.
+If you are working through the tutorial for the first time, keep `run_sql` and [continue to Run analysis](./run-analysis.mdx). You can add this integration later.
 
 ## Register the connector
 
@@ -35,7 +35,7 @@ npx vercel@latest connect attach "<returned-connector-uid>" --yes
 npx vercel@latest env pull
 ```
 
-`vercel env pull` provides `VERCEL_OIDC_TOKEN` for local requests to Connect. That token identifies your Vercel project; it does not sign an end user into the app. The steps below use the authenticated deployment from [Ship it](./ship-it#replace-placeholderauth). The [Connect reference](https://vercel.com/docs/connect) covers service-specific setup and project attachments.
+`vercel env pull` provides `VERCEL_OIDC_TOKEN` for local requests to Connect. That token identifies your Vercel project; it does not sign an end user into the app. The steps below use the authenticated deployment from [Ship it](./ship-it.mdx#replace-placeholderauth). The [Connect reference](https://vercel.com/docs/connect) covers service-specific setup and project attachments.
 
 ## Declare the connection
 
@@ -54,7 +54,7 @@ export default defineMcpClientConnection({
 
 The filename registers the eve connection as `"warehouse"`, with tools named `warehouse__<tool>`. This eve name is independent of the Connect connector UID. The remote server determines which tools exist; check its tool inventory and read-only permissions before using it.
 
-`connect("...")` is user-scoped by default. Each end-user authorizes in their own browser, and eve resolves that user's token before a tool call. The eve channel's route auth must map the signed-in app user to `principalType: "user"`. `localDev()`, a runtime token, or a placeholder guard cannot supply that identity; those sessions fail with `reason: "principal_required"` before OAuth starts. For a shared app credential, see [app vs. user auth](../connections#choose-app-vs-user-auth).
+`connect("...")` is user-scoped by default. Each end-user authorizes in their own browser, and eve resolves that user's token before a tool call. The eve channel's route auth must map the signed-in app user to `principalType: "user"`. `localDev()`, a runtime token, or a placeholder guard cannot supply that identity; those sessions fail with `reason: "principal_required"` before OAuth starts. For a shared app credential, see [app vs. user auth](../connections/overview.mdx#choose-app-vs-user-auth).
 
 ## Deploy and try it
 
@@ -64,18 +64,18 @@ Deploy the updated app so the authenticated web app includes the new connection:
 npx vercel@latest deploy
 ```
 
-Open the new HTTPS preview URL, sign in with the credentials configured in [Ship it](./ship-it#replace-placeholderauth), and create a new session. The tutorial's development server bypasses the browser login and uses `localDev()`; restarting `npm run dev` alone does not provide the user identity this connection requires.
+Open the new HTTPS preview URL, sign in with the credentials configured in [Ship it](./ship-it.mdx#replace-placeholderauth), and create a new session. The tutorial's development server bypasses the browser login and uses `localDev()`; restarting `npm run dev` alone does not provide the user identity this connection requires.
 
 From your authenticated web app, ask the agent to inspect the warehouse's available tables and then query a table you have access to. Use the server's schema rather than assuming it has the tutorial's `orders` and `customers` tables.
 
-If the user has not authorized the connector, the turn parks and the channel shows a sign-in link. Complete authorization in the browser; after the callback succeeds, the turn resumes and retries the tool call. Later calls use the existing grant while it remains valid. See [MCP connection troubleshooting](../connections/mcp#troubleshooting) if registration succeeds but the tool cannot connect.
+If the user has not authorized the connector, the turn parks and the channel shows a sign-in link. Complete authorization in the browser; after the callback succeeds, the turn resumes and retries the tool call. Later calls use the existing grant while it remains valid. See [MCP connection troubleshooting](../connections/mcp.mdx#troubleshooting) if registration succeeds but the tool cannot connect.
 
 ## The token never reaches the model
 
 Right before each request to the MCP server, eve resolves the bearer and sends it as `Authorization: Bearer <token>`. The model sees tool names, descriptions, and results. The credential stays in the app runtime.
 
-Gate the connection behind approval (`approval: once()`) or narrow which tools the model sees (`tools.allow`) when needed. See [MCP connections](../connections/mcp).
+Gate the connection behind approval (`approval: once()`) or narrow which tools the model sees (`tools.allow`) when needed. See [MCP connections](../connections/mcp.mdx).
 
-→ Return to the tutorial: [Run analysis](./run-analysis)
+→ Return to the tutorial: [Run analysis](./run-analysis.mdx)
 
-Learn more: [MCP connections](../connections/mcp) · [Authentication](../guides/auth-and-route-protection)
+Learn more: [MCP connections](../connections/mcp.mdx) · [Authentication](../guides/auth-and-route-protection.md)

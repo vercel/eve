@@ -19,7 +19,7 @@ eve add memory/file
 
 If an item is not found, `eve add` searches the available catalogs and prints close matches without installing anything.
 
-Web Chat installs a shared Next.js application at `apps/web` for either a standalone agent or a selected member of an agent workspace. Choose **Vercel services** (recommended) to deploy Web Chat and agents as separate services, or **Next.js** to serve Web Chat and route agent requests through one Next.js app. Vercel services run locally without a linked Vercel project; link one when you are ready to deploy. Existing authored Next.js or Vercel configuration is preserved, and eve stops with manual composition guidance instead of overwriting it. See [Project Structure](./concepts/project-structure) for browser-app placement and [Next.js](./guides/frontend/nextjs) for Next.js-owned integration.
+Web Chat installs a shared Next.js application at `apps/web` for either a standalone agent or a selected member of an agent workspace. Choose **Vercel services** (recommended) to deploy Web Chat and agents as separate services, or **Next.js** to serve Web Chat and route agent requests through one Next.js app. Vercel services run locally without a linked Vercel project; link one when you are ready to deploy. Existing authored Next.js or Vercel configuration is preserved, and eve stops with manual composition guidance instead of overwriting it. See [Project Structure](./concepts/project-structure.mdx) for browser-app placement and [Next.js](./guides/frontend/nextjs.mdx) for Next.js-owned integration.
 
 If you do not know an item name yet, run `eve add` without an argument. Its help output shows how to search the registry with `eve registry search <query>`.
 
@@ -185,7 +185,7 @@ eve add @acme/analytics
 
 Integrations add project files. Read the generated mount before you run the agent, then add the configuration the extension requires.
 
-For an extension, this usually means setting environment variables and editing the file under `agent/extensions/`. See [Extensions](./extensions) for mount configuration, namespacing, and overrides.
+For an extension, this usually means setting environment variables and editing the file under `agent/extensions/`. See [Extensions](./extensions.md) for mount configuration, namespacing, and overrides.
 
 Provider-specific setup lives in the [Integrations directory](/integrations). Follow that guidance for credentials, approval policies, and service-specific options.
 
@@ -213,6 +213,6 @@ Integrations can add dependencies and write files. Add sources you trust, inspec
 
 ## What to read next
 
-- [Extensions](./extensions): configure and override installed extension mounts
+- [Extensions](./extensions.md): configure and override installed extension mounts
 - [Integrations directory](/integrations): provider-specific setup and security guidance
 - [shadcn registry documentation](https://ui.shadcn.com/docs/registry): publish a compatible third-party registry

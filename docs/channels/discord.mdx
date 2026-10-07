@@ -4,7 +4,7 @@ description: "Reach your agent from Discord HTTP Interactions, including slash c
 type: integration
 ---
 
-The Discord channel wires your agent into Discord's HTTP Interactions, including slash and application commands, message components, and modal submissions. Discord enforces a three-second ACK deadline, so the channel acknowledges the command right away and runs the eve work in the background. Credentials and inbound request verification run through [Vercel Connect](../guides/auth-and-route-protection), so Discord's bot token stays out of your environment and Connect verifies Discord's signature before forwarding an interaction to eve. See [Channels](./overview) for the contract this builds on.
+The Discord channel wires your agent into Discord's HTTP Interactions, including slash and application commands, message components, and modal submissions. Discord enforces a three-second ACK deadline, so the channel acknowledges the command right away and runs the eve work in the background. Credentials and inbound request verification run through [Vercel Connect](../guides/auth-and-route-protection.md), so Discord's bot token stays out of your environment and Connect verifies Discord's signature before forwarding an interaction to eve. See [Channels](./overview.mdx) for the contract this builds on.
 
 ## Set up Discord
 
@@ -126,5 +126,5 @@ Files attached through a command's attachment options (type `11`) reach the agen
 
 ## What to read next
 
-- [Channels overview](./overview): the channel contract and every built-in channel
-- [Auth & route protection](../guides/auth-and-route-protection): authenticating inbound traffic
+- [Channels overview](./overview.mdx): the channel contract and every built-in channel
+- [Auth & route protection](../guides/auth-and-route-protection.md): authenticating inbound traffic

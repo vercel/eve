@@ -46,7 +46,7 @@ export default defineTool({
 
 ## Reset state between turns
 
-State is durable by default and does not reset between turns. If you want a clean slate every turn, overwrite it from a lifecycle [hook](../guides/hooks) on `turn.started`:
+State is durable by default and does not reset between turns. If you want a clean slate every turn, overwrite it from a lifecycle [hook](../guides/hooks.md) on `turn.started`:
 
 ```ts title="agent/hooks/reset-budget.ts"
 import { defineHook } from "eve/hooks";
@@ -65,7 +65,7 @@ The hook imports the same module-scope `budget` handle as the tool, so both read
 
 ## State is never shared with subagents
 
-Every [subagent](../subagents) starts with its own fresh state, whether it's a built-in `agent` copy or a declared specialist. `defineState` values never cross the parent/child boundary, even when the child is a copy of the same agent.
+Every [subagent](../subagents/index.mdx) starts with its own fresh state, whether it's a built-in `agent` copy or a declared specialist. `defineState` values never cross the parent/child boundary, even when the child is a copy of the same agent.
 
 ## State vs. connection-side storage
 
@@ -73,16 +73,16 @@ Every [subagent](../subagents) starts with its own fresh state, whether it's a b
 the session, including counters, the current plan, and what the user has told
 you this conversation. It is the agent's short-term memory, persisted durably
 for the life of the session. For context that must outlive a session, configure
-a first-class [memory provider](../memory). Use the built-in file provider, a
+a first-class [memory provider](../memory/overview.mdx). Use the built-in file provider, a
 third-party provider, or a custom provider for application-specific storage and
-retrieval. Use a general [connection](../connections) instead when the data
+retrieval. Use a general [connection](../connections/overview.mdx) instead when the data
 should be queried only through explicit model tool calls rather than recalled
 automatically.
 
 ## What to read next
 
-- Read state inside dynamic resolvers → [Dynamic capabilities](../guides/dynamic-capabilities)
-- How step durability works → [Execution model & durability](../concepts/execution-model-and-durability)
-- The `ctx` accessors available alongside state → [TypeScript API Reference](../reference/typescript-api)
-- Tenant-scoped long-term memory with any provider → [Multi-tenant memory](../patterns/multi-tenant-memory)
-- First-class recall, capture, and provider tools → [Memory](../memory)
+- Read state inside dynamic resolvers → [Dynamic capabilities](../guides/dynamic-capabilities.md)
+- How step durability works → [Execution model & durability](./execution-model-and-durability.mdx)
+- The `ctx` accessors available alongside state → [TypeScript API Reference](../reference/typescript-api.md)
+- Tenant-scoped long-term memory with any provider → [Multi-tenant memory](../patterns/multi-tenant-memory.md)
+- First-class recall, capture, and provider tools → [Memory](../memory/overview.mdx)

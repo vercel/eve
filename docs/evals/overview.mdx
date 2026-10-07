@@ -5,11 +5,11 @@ description: "Define repeatable scored checks for an eve agent with defineEval a
 
 An eval is a scored check that runs your agent against real sessions and grades the result, catching regressions when you change a prompt or a tool. Drive the agent through one or more turns, assert on what it did (the run completed, the right tool ran, the reply contains the right text), and optionally ship the results to Braintrust.
 
-Evals exercise the same HTTP surface your users hit. The runner boots (or targets) a real agent server, drives sessions through the [TypeScript client](../guides/client/overview) protocol, and grades what comes back, so a passing eval means the agent booted, accepted a request, and produced the result you asserted.
+Evals exercise the same HTTP surface your users hit. The runner boots (or targets) a real agent server, drives sessions through the [TypeScript client](../guides/client/overview.mdx) protocol, and grades what comes back, so a passing eval means the agent booted, accepted a request, and produced the result you asserted.
 
 ## `defineEval`
 
-eve discovers evals under the app-root `evals/` directory, in `.eval.ts` files. Each file is one eval by default. A file can also default-export an array to fan out over a dataset (see [Cases](./cases)). The file path is the eval's identity, so you don't author an `id` or `name`. Directories group related evals (`evals/weather/brooklyn-forecast.eval.ts` becomes id `weather/brooklyn-forecast`).
+eve discovers evals under the app-root `evals/` directory, in `.eval.ts` files. Each file is one eval by default. A file can also default-export an array to fan out over a dataset (see [Cases](./cases.mdx)). The file path is the eval's identity, so you don't author an `id` or `name`. Directories group related evals (`evals/weather/brooklyn-forecast.eval.ts` becomes id `weather/brooklyn-forecast`).
 
 ```text
 my-agent/
@@ -56,7 +56,7 @@ export default defineEvalConfig({
 });
 ```
 
-Everything is optional. `judge` sets the default model for [LLM-as-judge](./judge) assertions (`t.judge(...)`); omit it to use the default decider, `typesafe-ai/jev`. Deterministic evals make no judge requests. `reporters`, `maxConcurrency`, and `timeoutMs` round out the defaults. Config `reporters` observe every eval in the run, so set one `Braintrust()` here instead of adding it to each eval. CLI flags (`--max-concurrency`, `--timeout`) and per-eval values take precedence over the config defaults.
+Everything is optional. `judge` sets the default model for [LLM-as-judge](./judge.mdx) assertions (`t.judge(...)`); omit it to use the default decider, `typesafe-ai/jev`. Deterministic evals make no judge requests. `reporters`, `maxConcurrency`, and `timeoutMs` round out the defaults. Config `reporters` observe every eval in the run, so set one `Braintrust()` here instead of adding it to each eval. CLI flags (`--max-concurrency`, `--timeout`) and per-eval values take precedence over the config defaults.
 
 ### Run setup and teardown
 
@@ -143,16 +143,16 @@ model: mockModel({
 
 `t` is both the driver and the assertion surface. There are no separate `input`, `run`, `checks`, or `scores` fields. You write ordinary control flow, sending turns and asserting inline.
 
-- **Drive** the agent: `t.session()` creates an empty session; `t.send(...)` creates a session with its first message and returns a turn. Continue through `turn.session.send(...)`. Session handles also expose `start`, `cancel`, `respond`, `respondAll`, `sendFile`, and `requireInputRequest`. Read output from `turn.message`, and conversation state from `turn.session`. See [Cases](./cases).
+- **Drive** the agent: `t.session()` creates an empty session; `t.send(...)` creates a session with its first message and returns a turn. Continue through `turn.session.send(...)`. Session handles also expose `start`, `cancel`, `respond`, `respondAll`, `sendFile`, and `requireInputRequest`. Read output from `turn.message`, and conversation state from `turn.session`. See [Cases](./cases.mdx).
 - **Assert** with three surfaces, covered next.
 
 ## Three assertion surfaces
 
 Each surface matches a genuinely different kind of judgment:
 
-- **Scoped methods** read the final whole run on `t`, snapshot one independent session when invoked there, or inspect one immutable `EveEvalTurn`. See [Assertions](./assertions).
-- **`t.check(value, assertion)`** grades an explicit value with a deterministic builder from `eve/evals/expect`, such as `t.check(turn.message, includes("sunny"))`. Grade `turn.message`, an intermediate draft, parsed JSON, or anything else. See [Assertions](./assertions).
-- **`t.judge(...)`** is the LLM-as-judge surface, like `t.judge("cites a source")`. It grades the most recently settled turn’s assistant message by default; pass `{ on: turn.session.transcript }` to grade a multi-turn conversation. The judge uses the configured judge model, never the agent under test. See [Judge](./judge).
+- **Scoped methods** read the final whole run on `t`, snapshot one independent session when invoked there, or inspect one immutable `EveEvalTurn`. See [Assertions](./assertions.mdx).
+- **`t.check(value, assertion)`** grades an explicit value with a deterministic builder from `eve/evals/expect`, such as `t.check(turn.message, includes("sunny"))`. Grade `turn.message`, an intermediate draft, parsed JSON, or anything else. See [Assertions](./assertions.mdx).
+- **`t.judge(...)`** is the LLM-as-judge surface, like `t.judge("cites a source")`. It grades the most recently settled turn’s assistant message by default; pass `{ on: turn.session.transcript }` to grade a multi-turn conversation. The judge uses the configured judge model, never the agent under test. See [Judge](./judge.mdx).
 
 ## Gate vs soft
 
@@ -182,7 +182,7 @@ eve eval weather               # run one eval, or every eval under evals/weather
 eve eval --url https://<app>   # target an existing server or deployment
 ```
 
-Exit code `0` means every eval passed its gates. See [Running evals](./running) for the full flag list, exit codes, and CI guidance.
+Exit code `0` means every eval passed its gates. See [Running evals](./running.mdx) for the full flag list, exit codes, and CI guidance.
 
 ## A good baseline
 
@@ -192,10 +192,10 @@ Most apps do fine with a few small smoke evals. Assert behavior with `t.succeede
 
 The rest of this section covers each piece:
 
-- [Cases](./cases): single-turn evals, scripted multi-turn evals, and dataset fan-out
-- [Assertions](./assertions): run-level methods and `t.check` value assertions, with matchers and severity
-- [Judge](./judge): LLM-as-judge grading and the judge model
-- [Targets](./targets): local vs remote targets for the same eval files
-- [Reporters](./reporters): Braintrust experiments and JUnit XML
-- [Running evals](./running): the `eve eval` CLI, exit codes, and artifacts
-- [Tools](../tools): the surface most evals assert on
+- [Cases](./cases.mdx): single-turn evals, scripted multi-turn evals, and dataset fan-out
+- [Assertions](./assertions.mdx): run-level methods and `t.check` value assertions, with matchers and severity
+- [Judge](./judge.mdx): LLM-as-judge grading and the judge model
+- [Targets](./targets.mdx): local vs remote targets for the same eval files
+- [Reporters](./reporters.mdx): Braintrust experiments and JUnit XML
+- [Running evals](./running.mdx): the `eve eval` CLI, exit codes, and artifacts
+- [Tools](../tools/overview.mdx): the surface most evals assert on

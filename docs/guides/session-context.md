@@ -5,11 +5,11 @@ description: "Use ctx.session and runtime accessors inside eve-managed execution
 
 eve passes a runtime `ctx` to tool executors, hook handlers, channel event handlers, and connection auth and header resolvers. Use it to inspect the active session and reach resources bound to that execution.
 
-| Accessor                     | Provides                                                  | Full guide                 |
-| ---------------------------- | --------------------------------------------------------- | -------------------------- |
-| `ctx.session`                | Session identity, turn metadata, auth, and parent lineage | This page                  |
-| `ctx.getSandbox()`           | The current agent's live sandbox handle                   | [Sandbox](../sandbox)      |
-| `defineState(name, initial)` | Durable typed state shared by runtime code in one session | [State](../concepts/state) |
+| Accessor                     | Provides                                                  | Full guide                      |
+| ---------------------------- | --------------------------------------------------------- | ------------------------------- |
+| `ctx.session`                | Session identity, turn metadata, auth, and parent lineage | This page                       |
+| `ctx.getSandbox()`           | The current agent's live sandbox handle                   | [Sandbox](../sandbox/index.mdx) |
+| `defineState(name, initial)` | Durable typed state shared by runtime code in one session | [State](../concepts/state.md)   |
 
 These APIs work only during eve-managed runtime execution. Calling them during module evaluation, discovery, or a build throws.
 
@@ -47,7 +47,7 @@ Public fields include:
 - `auth.initiator`: the caller that started the session.
 - `parent`: the parent call, session, root session, and turn for a child subagent session.
 
-Unprotected agents expose `auth.current` and `auth.initiator` as `null`. Top-level schedule sessions use the framework app principal (`principalId: "eve:app"`, `principalType: "runtime"`). See [Authentication](./auth-and-route-protection#what-reaches-ctxsessionauth) for how inbound identity becomes session auth.
+Unprotected agents expose `auth.current` and `auth.initiator` as `null`. Top-level schedule sessions use the framework app principal (`principalId: "eve:app"`, `principalType: "runtime"`). See [Authentication](./auth-and-route-protection.md#what-reaches-ctxsessionauth) for how inbound identity becomes session auth.
 
 ## `ctx.getSandbox()`
 
@@ -58,7 +58,7 @@ const sandbox = await ctx.getSandbox();
 const result = await sandbox.run({ command: "npm test" });
 ```
 
-The accessor is asynchronous because eve may need to bind or restore the sandbox. A subagent sees its own sandbox, not its parent's. The returned handle also exposes `stop()` and `delete()`; see [Sandbox lifecycle](../sandbox#lifecycle) for their behavior.
+The accessor is asynchronous because eve may need to bind or restore the sandbox. A subagent sees its own sandbox, not its parent's. The returned handle also exposes `stop()` and `delete()`; see [Sandbox lifecycle](../sandbox/index.mdx#lifecycle) for their behavior.
 
 When you need capabilities specific to the configured environment, pass its exported environment object. The return type preserves the environment's session capabilities. Provider-specific methods such as `setNetworkPolicy()` are not available from the no-argument accessor:
 
@@ -73,7 +73,7 @@ The environment must be the one configured for the current sandbox. eve rejects 
 
 ## Custom state with `defineState`
 
-Use `defineState` for durable per-session values that tools, hooks, and channel handlers share. Unlike the `ctx` accessors, import it from `eve/context` and declare the handle at module scope. Its `get()` and `update()` methods still require active eve execution. See [State](../concepts/state) for the read, update, reset, and subagent-isolation model.
+Use `defineState` for durable per-session values that tools, hooks, and channel handlers share. Unlike the `ctx` accessors, import it from `eve/context` and declare the handle at module scope. Its `get()` and `update()` methods still require active eve execution. See [State](../concepts/state.md) for the read, update, reset, and subagent-isolation model.
 
 ## Where these APIs work
 
@@ -92,6 +92,6 @@ eve establishes the managed context before invoking authored runtime code and ke
 
 ## What to read next
 
-- [State](../concepts/state): durable typed values scoped to one session.
-- [Sandbox](../sandbox): runtime filesystem and process access.
-- [Sessions, runs, and streaming](../concepts/sessions-runs-and-streaming): the durable session and event contract.
+- [State](../concepts/state.md): durable typed values scoped to one session.
+- [Sandbox](../sandbox/index.mdx): runtime filesystem and process access.
+- [Sessions, runs, and streaming](../concepts/sessions-runs-and-streaming.md): the durable session and event contract.

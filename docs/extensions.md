@@ -5,7 +5,7 @@ description: "Package reusable eve capabilities and mount them from npm or a mon
 
 Extensions package eve tools, channels, connections, skills, schedules, subagents, instruction fragments, and hooks. An author builds an extension package; each agent that uses it declares the package as a dependency and mounts it. The package can be published to a package registry or kept private inside a monorepo workspace.
 
-Ready-made extensions can also be distributed through an eve integration registry. See [Add Integrations](./install-integrations) to discover and add one with `eve add`; this page explains how extension packages are authored, mounted, configured, and overridden.
+Ready-made extensions can also be distributed through an eve integration registry. See [Add Integrations](./install-integrations.mdx) to discover and add one with `eve add`; this page explains how extension packages are authored, mounted, configured, and overridden.
 
 This enables sharing many different capability sets. A browser extension might include several tools for navigating a site. A self-improving extension could pair hooks with dynamic instructions.
 
@@ -44,10 +44,10 @@ Each listed slot accepts the same authored forms as its agent counterpart. Stati
 Names come from paths, so call the tool `search`, not `crm_search`; the consumer's mount adds the `crm__` prefix. The same prefix applies to channel, schedule, and parent-visible subagent IDs, while channel route paths and schedule cron expressions stay unchanged. Keep shared code in `extension/lib/`.
 
 The extension root cannot declare agent configuration, instrumentation,
-[memory](./memory), a sandbox, or nested extensions. Those agent-level concerns
+[memory](./memory/overview.mdx), a sandbox, or nested extensions. Those agent-level concerns
 belong to the consuming application. A subagent contributed under
 `extension/subagents/` owns its own agent configuration, memory, and sandbox
-like any other [declared subagent](./subagents).
+like any other [declared subagent](./subagents/index.mdx).
 
 ### Add configuration and contributions
 
@@ -361,7 +361,7 @@ export default defineHook({
 
 ### Bundled development extensions
 
-Local `eve dev` also mounts bundled development extensions without creating a project mount. The self-modification extension is included by default when `eve dev` starts a local server. Bundled development extensions are not included in production builds. See [Self-Modification](./guides/self-modification) for the local workflow.
+Local `eve dev` also mounts bundled development extensions without creating a project mount. The self-modification extension is included by default when `eve dev` starts a local server. Bundled development extensions are not included in production builds. See [Self-Modification](./guides/self-modification.md) for the local workflow.
 
 ### Compatibility
 
