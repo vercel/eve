@@ -8,7 +8,7 @@ import { ALLOWED_DYNAMIC_CONNECTION_EVENTS } from "#dynamic/definition.js";
 import { CONNECTION_SLUG_PATTERN } from "#discover/grammar.js";
 import { createLogger } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import { runtimeToolRole } from "#protocol/runtime-tools.js";
+import { runtimeToolReservation } from "#protocol/runtime-tools.js";
 import { readStampedConnectionProtocol } from "#public/definitions/connections/protocol.js";
 import type { DynamicConnectionResolveContext } from "#public/definitions/connections/dynamic.js";
 import { ConnectionRegistryImpl } from "#runtime/connections/registry.js";
@@ -145,10 +145,10 @@ function assertNoRuntimeToolNames(
   resolver: ResolvedDynamicConnectionResolver,
 ): void {
   for (const { connectionName } of connections) {
-    const reservedFor = runtimeToolRole(connectionName);
-    if (reservedFor === undefined) continue;
+    const reservation = runtimeToolReservation(connectionName);
+    if (reservation === undefined) continue;
     throw new Error(
-      `Dynamic connection resolver "${resolver.logicalPath}" returned the reserved connection name "${connectionName}". eve reserves "${connectionName}" for its built-in ${reservedFor}; rename the connection.`,
+      `Dynamic connection resolver "${resolver.logicalPath}" returned the reserved connection name "${connectionName}". ${reservation}; rename the connection.`,
     );
   }
 }

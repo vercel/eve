@@ -1,4 +1,5 @@
 import { RuntimeRegistry, RuntimeRegistryError } from "#internal/runtime-registry.js";
+import { runtimeToolReservation } from "#protocol/runtime-tools.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
 import type {
   ResolvedDynamicSubagentDefinition,
@@ -90,6 +91,16 @@ export function createRuntimeSubagentRegistry(input: {
       });
       const modelVisible =
         subagentDefinition.tool !== false && !disabledToolNames.has(subagentDefinition.name);
+      const reservation = modelVisible
+        ? runtimeToolReservation(subagentDefinition.name)
+        : undefined;
+      if (reservation !== undefined) {
+        throw new RuntimeRegistryError(
+          "subagent",
+          `Subagent "${subagentDefinition.logicalPath}" uses the reserved name "${subagentDefinition.name}". Rename its path; ${reservation}.`,
+          { ...location, entryName: subagentDefinition.name },
+        );
+      }
       if (modelVisible && reservedToolNames.has(subagentDefinition.name)) {
         throw new RuntimeRegistryError(
           "subagent",
