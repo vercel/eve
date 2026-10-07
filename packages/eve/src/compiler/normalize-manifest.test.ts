@@ -22,7 +22,7 @@ import { defineMcpClientConnection } from "#public/definitions/connections/mcp.j
 import { defineHook } from "#public/definitions/hook.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
-import { defineScheduleSubscription } from "#public/schedules/subscription.js";
+import { defineDynamicSchedules } from "#public/schedules/subscription.js";
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
 import { z } from "#compiled/zod/index.js";
 import { defineSkill } from "#public/definitions/skill.js";
@@ -428,9 +428,9 @@ describe("compileAgentManifest source graph", () => {
       {
         logicalPath: "schedules/billing/requests.ts",
         loadNamespace: async () => ({
-          default: defineScheduleSubscription({
+          default: defineDynamicSchedules({
             provider: inMemoryScheduleProvider(),
-            schema: z.object({ task: z.string() }),
+            inputSchema: z.object({ task: z.string() }),
             auth: () => null,
             run: async () => {},
           }),

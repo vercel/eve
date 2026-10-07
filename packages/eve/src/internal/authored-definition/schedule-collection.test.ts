@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "#compiled/zod/index.js";
 import { normalizeScheduleCollectionDefinition } from "#internal/authored-definition/schedule-collection.js";
-import { defineScheduleSubscription } from "#public/schedules/subscription.js";
+import { defineDynamicSchedules } from "#public/schedules/subscription.js";
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
 
 const valid = {
   provider: inMemoryScheduleProvider(),
-  schema: z.object({ task: z.string() }),
+  inputSchema: z.object({ task: z.string() }),
   auth: () => null,
   run: async () => {},
 };
@@ -14,10 +14,14 @@ const valid = {
 describe("normalizeScheduleCollectionDefinition", () => {
   it.each([
     ["no auth", { auth: undefined }, '"auth" is required'],
-    ["no schema", { schema: undefined }, '"schema" is required'],
-    ["a malformed schema", { schema: { "~standard": {} } }, "validate function"],
+    ["no input schema", { inputSchema: undefined }, '"inputSchema" is required'],
+    ["a malformed schema", { inputSchema: { "~standard": {} } }, "validate function"],
     ["no run", { run: undefined }, '"run" is required'],
-    ["a malformed prepare hook", { prepare: true }, '"prepare" must be a function'],
+    [
+      "a malformed preparation hook",
+      { preparePayload: true },
+      '"preparePayload" must be a function',
+    ],
     [
       "approval for the removed update tool",
       { approval: { update: () => "user-approval" } },
@@ -27,7 +31,7 @@ describe("normalizeScheduleCollectionDefinition", () => {
     ["the removed capture hook", { resolvePayload: () => ({}) }, "resolvePayload"],
     ["the removed deliveries", { deliveries: {} }, "deliveries"],
   ])("rejects a subscription with %s", (_label, override, message) => {
-    const definition = defineScheduleSubscription({ ...valid, ...override } as never);
+    const definition = defineDynamicSchedules({ ...valid, ...override } as never);
     expect(() => normalizeScheduleCollectionDefinition(definition, "Invalid.")).toThrow(message);
   });
 
@@ -38,7 +42,7 @@ describe("normalizeScheduleCollectionDefinition", () => {
       approval: { create: () => "user-approval" as const },
     };
     // @ts-expect-error Code-only scheduling cannot configure model-call approval.
-    const definition = defineScheduleSubscription(invalid);
+    const definition = defineDynamicSchedules(invalid);
     expect(() => normalizeScheduleCollectionDefinition(definition, "Invalid.")).toThrow(
       "cannot be configured",
     );
@@ -48,13 +52,13 @@ describe("normalizeScheduleCollectionDefinition", () => {
     vi.stubEnv("EVE_DEV", "");
     try {
       const { provider, ...options } = valid;
-      const implicit = defineScheduleSubscription({ ...options });
+      const implicit = defineDynamicSchedules({ ...options });
       expect(normalizeScheduleCollectionDefinition(implicit, "Invalid.").provider.kind).toBe(
         "vercel",
       );
-      expect(defineScheduleSubscription({ ...options, provider }).provider).toBe(provider);
+      expect(defineDynamicSchedules({ ...options, provider }).provider).toBe(provider);
       vi.stubEnv("EVE_DEV", "1");
-      expect(defineScheduleSubscription({ ...options }).provider.kind).toBe("in-memory");
+      expect(defineDynamicSchedules({ ...options }).provider.kind).toBe("in-memory");
     } finally {
       vi.unstubAllEnvs();
     }
@@ -62,7 +66,7 @@ describe("normalizeScheduleCollectionDefinition", () => {
 
   it("accepts a schema and callback without configured deliveries", () => {
     expect(() =>
-      normalizeScheduleCollectionDefinition(defineScheduleSubscription(valid), "Invalid."),
+      normalizeScheduleCollectionDefinition(defineDynamicSchedules(valid), "Invalid."),
     ).not.toThrow();
   });
 });

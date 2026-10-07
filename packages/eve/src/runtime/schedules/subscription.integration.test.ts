@@ -4,7 +4,7 @@ import { resolveApprovalPolicy, type ApprovalConfiguration } from "#approval/def
 import { loadContext } from "#context/container.js";
 import { AuthKey } from "#context/keys.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
-import { defineScheduleSubscription } from "#public/schedules/subscription.js";
+import { defineDynamicSchedules } from "#public/schedules/subscription.js";
 import { schedules } from "#public/experimental/schedules/client.js";
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
@@ -40,10 +40,10 @@ describe("schedule creation and invocation", () => {
     const approvedTargets: string[] = [];
     const responseTargets: string[] = [];
     const dispatched = vi.fn();
-    const subscription = defineScheduleSubscription({
-      schema: z.object({ task: z.string() }).strict(),
+    const subscription = defineDynamicSchedules({
+      inputSchema: z.object({ task: z.string() }).strict(),
       provider,
-      prepare(input) {
+      preparePayload(input) {
         return { task: input.task, target: destination };
       },
       approval: {
@@ -160,11 +160,11 @@ describe("schedule creation and invocation", () => {
     let preparations = 0;
     const messages: string[] = [];
     const outcomes: ScheduleOccurrenceEvent[] = [];
-    const subscription = defineScheduleSubscription({
-      schema: z.object({ task: z.string() }).strict(),
+    const subscription = defineDynamicSchedules({
+      inputSchema: z.object({ task: z.string() }).strict(),
       provider: inMemoryScheduleProvider(),
       tool: false,
-      async prepare(input, context) {
+      async preparePayload(input, context) {
         preparations += 1;
         return { message: input.task, author: context.session.auth.current!.principalId };
       },

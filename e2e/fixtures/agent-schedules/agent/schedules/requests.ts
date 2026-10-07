@@ -1,14 +1,14 @@
-import { defineScheduleSubscription } from "eve/experimental/schedules";
+import { defineDynamicSchedules } from "eve/experimental/schedules";
 import { inMemoryScheduleProvider } from "eve/experimental/schedules/testing";
 import { z } from "zod";
 import outbox from "../channels/outbox";
 import { recordCollectionOccurrence } from "../lib/collection-occurrences";
 
-export default defineScheduleSubscription({
+export default defineDynamicSchedules({
   description:
     "Manage process-local fixture tasks. Destination creator-email means the creator's fixture email, not a model-selected address.",
   provider: inMemoryScheduleProvider(),
-  schema: z
+  inputSchema: z
     .object({
       task: z.string().min(1).max(2000),
       destination: z.literal("creator-email"),

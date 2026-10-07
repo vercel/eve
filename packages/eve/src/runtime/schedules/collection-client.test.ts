@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "#compiled/zod/index.js";
-import { defineScheduleSubscription } from "#public/schedules/subscription.js";
+import { defineDynamicSchedules } from "#public/schedules/subscription.js";
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
 import {
   createScheduleCollectionClient,
@@ -29,9 +29,9 @@ const payload = { task: "Summarize the week.", destination: "my-dm" as const };
 function setup() {
   const provider = inMemoryScheduleProvider();
   const create = vi.spyOn(provider, "create");
-  const definition = defineScheduleSubscription({
+  const definition = defineDynamicSchedules({
     provider,
-    schema: z
+    inputSchema: z
       .object({ task: z.string().min(1), destination: z.enum(["my-dm", "team-channel"]) })
       .strict(),
     auth: () => null,
@@ -78,9 +78,9 @@ describe("schedule subscription client", () => {
     });
     const client = createScheduleCollectionClient(
       {
-        schema: definition.schema,
+        inputSchema: definition.inputSchema,
         provider: definition.provider,
-        prepare,
+        preparePayload: prepare,
         auth: () => null,
         run: () => {},
       },
@@ -116,7 +116,10 @@ describe("schedule subscription client", () => {
     const prepare = vi.fn(
       (value: { task: string; destination: "my-dm" | "team-channel" }) => value,
     );
-    const denied = createScheduleCollectionClient({ ...definition, scope, prepare }, callContext);
+    const denied = createScheduleCollectionClient(
+      { ...definition, scope, preparePayload: prepare },
+      callContext,
+    );
     const get = vi.spyOn(provider, "get");
     await expect(denied.get(created.name)).rejects.toThrow("not available");
     await expect(denied.delete(created.name)).rejects.toThrow("not available");

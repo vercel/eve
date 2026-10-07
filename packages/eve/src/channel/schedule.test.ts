@@ -17,7 +17,7 @@ import type { RunHandle, Runtime, SessionAuthContext } from "#channel/types.js";
 import { slackChannel } from "#public/channels/slack/slackChannel.js";
 import { isScheduleAuth } from "#public/schedules/index.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
-import { defineScheduleSubscription } from "#public/schedules/subscription.js";
+import { defineDynamicSchedules } from "#public/schedules/subscription.js";
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
 import { createScheduleCollectionPayload } from "#runtime/schedules/payload.js";
 import { z } from "#compiled/zod/index.js";
@@ -93,7 +93,7 @@ describe("ScheduleDispatcher", () => {
       const run = vi.fn(
         async (args: {
           payload: { task: string; destination: string };
-          to: import("#public/schedules/subscription.js").ScheduleSubscriptionToFn;
+          to: import("#public/schedules/subscription.js").DynamicSchedulesToFn;
           auth: SessionAuthContext;
           waitUntil: (task: Promise<unknown>) => void;
         }) => {
@@ -102,9 +102,9 @@ describe("ScheduleDispatcher", () => {
           args.waitUntil(args.to(channel, { channelId }).send(args.payload.task));
         },
       );
-      const definition = defineScheduleSubscription({
+      const definition = defineDynamicSchedules({
         provider: inMemoryScheduleProvider(),
-        schema: z.object({ task: z.string(), destination: z.enum(["my-dm", "team-channel"]) }),
+        inputSchema: z.object({ task: z.string(), destination: z.enum(["my-dm", "team-channel"]) }),
         auth: () => auth,
         run,
       });
@@ -188,7 +188,7 @@ describe("ScheduleDispatcher", () => {
         ...input.definition,
         run: ({
           waitUntil,
-        }: import("#public/schedules/subscription.js").ScheduleSubscriptionRunArgs<unknown>) =>
+        }: import("#public/schedules/subscription.js").DynamicSchedulesRunArgs<unknown>) =>
           waitUntil(Promise.reject(new Error("send failed"))),
       };
       await expect(dispatcher.triggerCollection({ ...input, definition })).rejects.toThrow(
