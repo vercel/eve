@@ -1,4 +1,4 @@
-import { createActionResultEvent, createStepCompletedEvent } from "#protocol/message.js";
+import { createStepCompletedEvent } from "#protocol/message.js";
 import {
   isStepCount,
   type LanguageModel,
@@ -10,7 +10,6 @@ import {
 } from "ai";
 
 import { AuthKey, HistoryStateKey } from "#context/keys.js";
-import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import { workingTaskIds } from "#execution/tasks/model-step.js";
 import {
   hydrateSandboxAttachments,
@@ -33,6 +32,7 @@ import {
 } from "#harness/prompt-cache.js";
 import { estimateRequestEnvelope } from "#harness/request-envelope.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
+import { discardAttempt } from "#harness/session-machine/transitions.js";
 import { activeTurnId } from "#harness/session-machine/view.js";
 import type { Step } from "#harness/step/context.js";
 import {
@@ -180,27 +180,10 @@ export class ModelCaller {
    * attempt starts. The replacement re-requests whatever the model still wants to run.
    */
   private async settleRetriedActions(unsettled: Map<string, string>): Promise<void> {
-    const { step } = this;
-    for (const [callId, toolName] of unsettled) {
-      const { sequence, stepIndex, turnId } = step.position();
-      await step.publish(
-        createActionResultEvent({
-          sequence,
-          stepIndex,
-          turnId,
-          result: createRuntimeToolResultFromValue({
-            callId,
-            isError: true,
-            output: {
-              code: "MODEL_CALL_ATTEMPT_RETRIED",
-              message: "The model call attempt was retried before this tool could run.",
-            },
-            toolName,
-          }),
-        }),
-      );
-      unsettled.delete(callId);
-    }
+    if (unsettled.size === 0) return;
+    const calls = [...unsettled].map(([callId, toolName]) => ({ callId, toolName }));
+    await this.step.apply(discardAttempt(this.step.view(), { calls }));
+    unsettled.clear();
   }
 
   /** A failed compaction fails the step, whatever recovery the call attempted. */

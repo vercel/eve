@@ -276,6 +276,45 @@ export function settle(view: SessionView, input: { readonly results: readonly Se
   } satisfies Transition;
 }
 
+/** A call a discarded model-call attempt announced without a result. */
+export interface DiscardedCall {
+  readonly callId: string;
+  readonly toolName: string;
+}
+
+/** What a discarded attempt's calls report: the replacement attempt re-requests what it needs. */
+const RETRIED_CALL_RESULT = {
+  code: "MODEL_CALL_ATTEMPT_RETRIED",
+  message: "The model call attempt was retried before this tool could run.",
+} as const;
+
+/**
+ * A model-call attempt failed and the step retries it. The calls the attempt announced never
+ * ran, so each settles as failed before the replacement attempt streams. Nothing reaches
+ * history: the discarded response was never committed.
+ */
+export function discardAttempt(
+  view: SessionView,
+  input: { readonly calls: readonly DiscardedCall[] },
+): Transition {
+  const coordinates = at(view.projection);
+  return unchanged(
+    view,
+    input.calls.map(({ callId, toolName }) =>
+      createActionResultEvent({
+        ...coordinates,
+        result: {
+          callId,
+          isError: true,
+          kind: "tool-result",
+          output: { ...RETRIED_CALL_RESULT },
+          toolName,
+        },
+      }),
+    ),
+  );
+}
+
 /**
  * A model response made calls the runtime runs. The response waits in a suspended step until
  * every call it made has a result, so a call never reaches the model without its result.
