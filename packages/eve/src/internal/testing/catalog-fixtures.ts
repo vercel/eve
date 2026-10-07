@@ -146,13 +146,14 @@ export interface FakeConnection {
 
 /**
  * An in-memory connection. With `signIn`, it supports interactive sign-in and
- * lists its tools once a sign-in completes.
+ * lists its tools once a sign-in completes, unless it `rejectsToken`.
  */
 export function fakeConnection(input: {
   readonly approval?: ResolvedConnectionDefinition["approval"];
   readonly description?: string;
   readonly listing?: ConnectionListing;
   readonly name: string;
+  readonly rejectsToken?: boolean;
   readonly signIn?: boolean;
   readonly tools: readonly ConnectionToolMetadata[];
 }): FakeConnection {
@@ -200,7 +201,7 @@ export function fakeConnection(input: {
                 };
               },
               completeAuthorization: async () => {
-                connection.listing = "listed";
+                if (input.rejectsToken !== true) connection.listing = "listed";
                 return { token: `${input.name}-token` };
               },
             }),

@@ -843,6 +843,19 @@ describe("compileAgentManifest source graph", () => {
       ).rejects.toThrow(message);
     });
 
+    it.each(["search", "final_output"])(
+      "rejects a connection named after the runtime tool %s",
+      async (name) => {
+        const sourceRegistry = registry([{ ...linear, logicalPath: `connections/${name}.ts` }]);
+
+        await expect(
+          compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+        ).rejects.toThrow(
+          `Connection "connections/${name}.ts" uses the reserved name "${name}". Rename its path; eve reserves "${name}" for its built-in tool.`,
+        );
+      },
+    );
+
     it("allows a convention prefix that no connection owns", async () => {
       const sourceRegistry = registry([linear, tool("linearize"), tool("tenant__export")]);
 

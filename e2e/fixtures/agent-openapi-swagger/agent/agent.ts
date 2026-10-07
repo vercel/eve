@@ -67,7 +67,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
       [
         {
           id: "dynamic-search",
-          input: () => ({ connection: "dynamic-catalog", query: "status" }),
+          input: () => ({ query: "dynamic-catalog" }),
           name: "search",
         },
       ],
@@ -83,7 +83,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
       [
         {
           id: "petstore-search",
-          input: () => ({ connection: "petstore", query: "inventory" }),
+          input: () => ({ query: "petstore" }),
           name: "search",
         },
         execute("petstore-inventory", { input: {}, tool: "petstore__getInventory" }),
