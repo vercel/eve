@@ -232,6 +232,105 @@ describe("tool loop streamed provider retries", () => {
     ]);
   });
 
+  it("settles each abandoned call once when a settlement publish fails and retries", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    let attempt = 0;
+    const doStream = vi.fn(async () => ({
+      stream: new ReadableStream<StreamPart>({
+        start(controller) {
+          attempt += 1;
+          controller.enqueue({ type: "stream-start", warnings: [] });
+          if (attempt === 1) {
+            enqueueToolCall(controller, "call_a1", "first note");
+            enqueueToolCall(controller, "call_a2", "second note");
+            controller.enqueue({
+              error: { message: "Overloaded", type: "overloaded_error" },
+              type: "error",
+            });
+            controller.close();
+            return;
+          }
+          if (attempt === 2) {
+            enqueueToolCall(controller, "call_b1", "first note");
+            enqueueToolCall(controller, "call_b2", "second note");
+            controller.enqueue({
+              finishReason: { raw: undefined, unified: "tool-calls" },
+              type: "finish",
+              usage,
+            });
+            controller.close();
+            return;
+          }
+          enqueueTextSuccess(controller, "Notes saved.");
+        },
+      }),
+    }));
+    const model = new MockLanguageModelV3({
+      doStream,
+      modelId: "retry-integration-model",
+      provider: "eve-integration-mock",
+    });
+    const execute = vi.fn(async ({ note }: { readonly note: string }) => ({ saved: note }));
+    const tools: ToolLoopHarnessConfig["tools"] = new Map([
+      [
+        "save_note",
+        {
+          description: "Save a note.",
+          execute,
+          inputSchema: jsonSchema({
+            additionalProperties: false,
+            properties: { note: { type: "string" } },
+            required: ["note"],
+            type: "object",
+          }),
+          name: "save_note",
+        },
+      ],
+    ]);
+    const events: UnstampedMessageStreamEvent[] = [];
+    let sinkFailed = false;
+    const emit: HarnessEmitFn = async (event) => {
+      if (!sinkFailed && event.type === "action.result" && event.data.result.callId === "call_a2") {
+        sinkFailed = true;
+        // A transient sink failure the model-call retry classifies as retryable.
+        throw Object.assign(new Error("Event sink unavailable"), { statusCode: 503 });
+      }
+      events.push(event);
+    };
+
+    const toolStep = await createToolLoopHarness(createConfig(model, emit, tools))(
+      createSession(),
+      { message: "Save both notes." },
+    );
+    if (typeof toolStep.next !== "function") {
+      throw new TypeError("Expected tool calls to continue the tool loop.");
+    }
+    await toolStep.next(toolStep.session);
+
+    expect(sinkFailed).toBe(true);
+    // The failed settlement consumed the second attempt before it streamed.
+    expect(doStream).toHaveBeenCalledTimes(3);
+    const abandonedResultIds = events.flatMap((event) =>
+      event.type === "action.result" &&
+      (event.data.result.callId === "call_a1" || event.data.result.callId === "call_a2")
+        ? [event.data.result.callId]
+        : [],
+    );
+    expect(abandonedResultIds).toEqual(["call_a1", "call_a2"]);
+    const lastAbandoned = events.findLastIndex(
+      (event) => event.type === "action.result" && event.data.result.callId === "call_a2",
+    );
+    const replacementStart = events.findIndex(
+      (event) => event.type === "action.input.appended" && event.data.callId === "call_b1",
+    );
+    expect(replacementStart).toBeGreaterThan(-1);
+    expect(lastAbandoned).toBeLessThan(replacementStart);
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
+
   it("retries an overloaded stream and preserves prior work", async () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     vi.spyOn(console, "error").mockImplementation(() => {});

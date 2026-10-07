@@ -180,10 +180,12 @@ export class ModelCaller {
    * attempt starts. The replacement re-requests whatever the model still wants to run.
    */
   private async settleRetriedActions(unsettled: Map<string, string>): Promise<void> {
-    if (unsettled.size === 0) return;
-    const calls = [...unsettled].map(([callId, toolName]) => ({ callId, toolName }));
-    await this.step.apply(discardAttempt(this.step.view(), { calls }));
-    unsettled.clear();
+    // One call per transition: publishing isn't atomic, so a publish that fails partway leaves
+    // only the calls it didn't reach for the next attempt to settle.
+    for (const [callId, toolName] of unsettled) {
+      await this.step.apply(discardAttempt(this.step.view(), { calls: [{ callId, toolName }] }));
+      unsettled.delete(callId);
+    }
   }
 
   /** A failed compaction fails the step, whatever recovery the call attempted. */
