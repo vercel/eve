@@ -28,7 +28,7 @@ import type {
 import { assertNotConnectionOwned } from "#connections/ownership.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { TOOL_SLUG_PATTERN } from "#discover/grammar.js";
-import { runtimeToolRole } from "#protocol/runtime-tools.js";
+import { runtimeToolReservation } from "#protocol/runtime-tools.js";
 import { ALLOWED_DYNAMIC_TOOL_EVENTS } from "#dynamic/definition.js";
 import { isBrandedToolEntry, type DynamicToolEntry } from "#tools/dynamic.js";
 import {
@@ -74,10 +74,10 @@ function qualifyDynamicToolNames(
         `Dynamic tool resolver "${resolver.logicalPath}" returned illegal tool name "${name}". Expected ASCII letters, digits, underscores, and dashes only, starting with a letter, up to 64 characters.`,
       );
     }
-    const reservedFor = runtimeToolRole(name);
-    if (reservedFor !== undefined) {
+    const reservation = runtimeToolReservation(name);
+    if (reservation !== undefined) {
       throw new Error(
-        `Dynamic tool resolver "${resolver.logicalPath}" returned the reserved tool name "${name}". eve reserves "${name}" for its built-in ${reservedFor}; rename the map key.`,
+        `Dynamic tool resolver "${resolver.logicalPath}" returned the reserved tool name "${name}". ${reservation}; rename the map key.`,
       );
     }
     return { entry: entries[entryKey]!, entryKey, name };

@@ -6,7 +6,7 @@ import {
   loadModuleBackedDefinition,
   type ModuleBackedDefinitionLoadOptions,
 } from "#compiler/normalize-helpers.js";
-import { runtimeToolRole } from "#protocol/runtime-tools.js";
+import { runtimeToolReservation } from "#protocol/runtime-tools.js";
 
 /**
  * Compiled tool entry produced from one authored `tools/*.ts` file.
@@ -55,10 +55,10 @@ export async function compileToolEntry(
     .replaceAll("/", "-");
 
   // Checked before a disabled tool returns: a runtime tool can't be disabled either.
-  const reservedFor = runtimeToolRole(toolName);
-  if (reservedFor !== undefined) {
+  const reservation = runtimeToolReservation(toolName);
+  if (reservation !== undefined) {
     throw new Error(
-      `Tool "${source.logicalPath}" uses the reserved name "${toolName}". Rename its path; eve reserves "${toolName}" for its built-in ${reservedFor}.`,
+      `Tool "${source.logicalPath}" uses the reserved name "${toolName}". Rename its path; ${reservation}.`,
     );
   }
 

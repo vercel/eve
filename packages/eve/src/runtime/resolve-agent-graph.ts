@@ -19,7 +19,6 @@ import { resolveAgent } from "#runtime/resolve-agent.js";
 import { resolveDynamicSubagentDefinition } from "#runtime/resolve-dynamic-subagent.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
 import { createRuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
-import { RUNTIME_TOOL_NAMES } from "#protocol/runtime-tools.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import { createRuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
@@ -163,7 +162,6 @@ async function resolveRuntimeAgentNode(
       ];
     }),
     reservedToolNames: [
-      ...RUNTIME_TOOL_NAMES,
       LOAD_SKILL_TOOL_NAME,
       ...toolRegistry.preparedTools.map((tool) => tool.name),
     ],
