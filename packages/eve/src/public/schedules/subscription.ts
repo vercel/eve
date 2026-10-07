@@ -17,6 +17,7 @@ import type { InferReceiveTarget } from "#channel/receive-target.js";
 import type { Session } from "#channel/session.js";
 import { SCHEDULE_COLLECTION_DEFINITION_BRAND } from "#shared/schedule-collection-definition.js";
 import type { ScheduleProviderContext } from "#runtime/schedules/provider-types.js";
+import { vercelScheduleProvider } from "#public/schedules/providers/vercel.js";
 
 /** A provider namespace scope, represented by one key or a hierarchical key path. */
 export type ScheduleScopeValue = string | readonly string[];
@@ -217,7 +218,7 @@ export interface DynamicSchedulesDefinition<
   readonly description?: string;
   /** Model-facing payload schema. Destination intent may be resolved by `run`. */
   readonly inputSchema: TSchema;
-  /** Backend used to store schedules and deliver occurrences. */
+  /** Resolved backend. defineDynamicSchedules defaults omitted providers to Vercel Schedules. */
   readonly provider: ScheduleProvider;
   /**
    * Validates application policy and enriches a creation payload before the provider write.
@@ -285,8 +286,8 @@ type DynamicSchedulesOptions<
   DynamicSchedulesDefinition<TInput, TSchema, TPrepared>,
   "provider" | "tool" | "approval"
 > & {
-  /** Backend used by this definition. */
-  readonly provider: ScheduleProvider;
+  /** Defaults to vercelScheduleProvider(): hosted production scheduling, process-local storage in eve dev. */
+  readonly provider?: ScheduleProvider;
 } & (
     | { readonly tool: false; readonly approval?: never }
     | { readonly tool?: true; readonly approval?: ScheduleApprovals<NoInfer<TPrepared>> }
@@ -297,6 +298,8 @@ type DynamicSchedulesOptions<
  * identity comes from the module path. inputSchema validates caller input,
  * while eve captures creator identity separately and re-resolves it on every attempt.
  * `run` chooses destinations and starts work; no creation conversation is implicitly captured.
+ * Provider defaults to vercelScheduleProvider(); pass provider explicitly to select another backend.
+ * The default supports Vercel production and eve dev, not preview or self-hosted scheduling.
  */
 export function defineDynamicSchedules<TInput, TPrepared>(
   definition: Omit<
@@ -317,11 +320,11 @@ export function defineDynamicSchedules<TSchema extends StandardSchemaV1<unknown,
 ): DefinedDynamicSchedules<StandardSchemaV1.InferOutput<TSchema>, TSchema>;
 export function defineDynamicSchedules(
   definition: Omit<DynamicSchedulesDefinition<any, any, any>, "provider"> & {
-    readonly provider: ScheduleProvider;
+    readonly provider?: ScheduleProvider;
   },
 ): DefinedDynamicSchedules<any, any, any> {
   Object.assign(definition, {
-    provider: definition.provider,
+    provider: definition.provider ?? vercelScheduleProvider(),
     tool: definition.tool ?? true,
     [SCHEDULE_COLLECTION_DEFINITION_BRAND]: true,
   });
