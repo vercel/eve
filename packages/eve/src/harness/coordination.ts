@@ -66,7 +66,7 @@ export async function runtimeResultCalls(
   const settled: { part: ToolResultPart; result: RuntimeActionResult }[] = [];
   for (const result of results) {
     switch (result.kind) {
-      // A skill load is always an `execute` call in history.
+      // A skill load is always an `eve__execute` call in history.
       case "load-skill-result":
         settled.push({
           part: toolResult(result, EXECUTE_TOOL_NAME, toToolResultOutput(result)),

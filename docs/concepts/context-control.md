@@ -28,7 +28,7 @@ Use `instructions.ts` when you need typed helpers, build-time composition, or a 
 
 ## Load procedures on demand with `skills/`
 
-Use skills for optional procedures that would otherwise make the always-on prompt unnecessarily large. eve advertises each skill's description and loads the full instructions only when the model calls `execute({ skill })`. A deferred skill is listed by name only, so even its description stays out of context until the model searches for it.
+Use skills for optional procedures that would otherwise make the always-on prompt unnecessarily large. eve advertises each skill's description and loads the full instructions only when the model calls `eve__execute({ skill })`. A deferred skill isn't named in context, so even its description stays out of context until the model searches for it.
 
 ### Flat skill
 

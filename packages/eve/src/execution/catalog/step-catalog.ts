@@ -338,7 +338,7 @@ function failure(path: keyof ExecuteInput, message: string): StandardSchemaV1.Fa
 
 function unknownEntryMessage(name: string, catalog: StepCatalog): string {
   if (catalog.skills.has(name)) {
-    return `"${name}" is a skill; load it with execute({ skill: "${name}" }).`;
+    return `"${name}" is a skill; load it with ${EXECUTE_TOOL_NAME}({ skill: "${name}" }).`;
   }
   const candidates = [...catalog.deferred.values()].map(({ description, name }) => ({
     description,

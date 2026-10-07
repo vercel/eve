@@ -239,7 +239,7 @@ the handler.
 
 ## Dynamic tools
 
-Pass `defineDynamic` an `events` object whose handlers return either a single `defineTool(...)`, a `Record<string, defineTool(...)>`, or `null` for no tools. Wrap every entry in `defineTool()`. eve records durable descriptors for `execute`, approval request and response policies, input-scoped `approvalKey` callbacks, and `toModelOutput`, so a parked call can reconstruct the same callbacks in a fresh process.
+Pass `defineDynamic` an `events` object whose handlers return either a single `defineTool(...)`, a `Record<string, defineTool(...)>`, or `null` for no tools. Wrap every entry in `defineTool()`. eve records durable descriptors for `eve__execute`, approval request and response policies, input-scoped `approvalKey` callbacks, and `toModelOutput`, so a parked call can reconstruct the same callbacks in a fresh process.
 
 Dynamic tool executors receive the same `ToolContext` as static authored tools, including inline provider auth through `ctx.getToken(provider)` and `ctx.requireAuth(provider)`.
 
@@ -310,7 +310,7 @@ export function createSearchTool(baseUrl: string) {
 }
 ```
 
-Wrap every callback property with the helper. This includes labels, approval policies, `approvalKey`, `execute`, and `toModelOutput`.
+Wrap every callback property with the helper. This includes labels, approval policies, `approvalKey`, `eve__execute`, and `toModelOutput`.
 
 For live schemas created in a provider package, use `defineDurableSchema` from `eve/tools`. Put the schema's per-tool values in `closure` and construct the schema in `schema`. Plain JSON Schema objects need no helper.
 
@@ -435,7 +435,7 @@ The caller's team gets its own playbook advertised as a loadable skill; everyone
 
 Skills follow the same naming rule as tools: a single `defineSkill(...)` is named after the file slug, while a map names each entry by its bare key (namespace the key yourself if it might collide). Every name must use only ASCII letters, digits, underscores, and dashes, start with a letter, and have at most 64 characters; eve logs a resolver that returns another name and skips its result. A dynamic skill overrides a same-named authored one; two dynamic resolvers emitting the same name throws.
 
-A dynamic skill with `deferred: true` is listed in the catalog by name instead of in the dynamic skill announcement, and eve adds or removes it there as the resolver's result changes. The model finds it with `search` and loads it with `execute({ skill })`, like a static deferred skill. When it overrides a static skill that isn't deferred, the system prompt still lists the static skill's description, and loading returns the dynamic body.
+A dynamic skill with `deferred: true` is left out of the dynamic skill announcement and isn't named in context. The model finds it with `eve__search` and loads it with `eve__execute({ skill })`, like a static deferred skill. When it overrides a static skill that isn't deferred, the system prompt still lists the static skill's description, and loading returns the dynamic body.
 
 A dynamic skill that returns only `markdown` never starts a sandbox: eve keeps its instructions in session state and returns them when the model loads the skill. When the skill also returns `files`, eve writes the package to the sandbox skill root when the resolver first returns it, and again only when its contents change or the session gets a new sandbox. A changed package replaces the previous directory, so files omitted from the new result are removed.
 
