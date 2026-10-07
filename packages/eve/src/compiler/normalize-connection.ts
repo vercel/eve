@@ -1,3 +1,4 @@
+import { RUNTIME_TOOL_NAMES } from "#connections/ownership.js";
 import type { ConnectionSourceRef } from "#discover/manifest.js";
 import {
   normalizeMcpClientConnectionDefinition,
@@ -80,6 +81,12 @@ export async function compileConnectionDefinition(
         sourceKind: "module",
       },
     };
+  }
+
+  if (RUNTIME_TOOL_NAMES.includes(source.connectionName)) {
+    throw new Error(
+      `Connection "${source.logicalPath}" uses the reserved name "${source.connectionName}". Rename its path; eve reserves "${source.connectionName}" for its built-in tool.`,
+    );
   }
 
   const protocol = readConnectionProtocol(loaded);

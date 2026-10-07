@@ -32,9 +32,9 @@ export interface ConnectionSession {
 }
 
 /**
- * Completes the sign-in the user finished for `connection`, if any, before its
- * client is used. Every path that lists or calls a connection's tools starts
- * here, and none of them prompts.
+ * Completes the sign-in the user finished for `connection`, if any, before a
+ * search, a sign-in, or a tool call uses its client. It never prompts; a caller
+ * that needs sign-in starts it through `auth`.
  */
 export async function completeConnectionSignIn(
   registry: ConnectionRegistry,
@@ -54,7 +54,7 @@ export async function completeConnectionSignIn(
 export type ConnectionListing =
   | { readonly tools: readonly ConnectionToolMetadata[] }
   /** Listable once the user signs in; `error` is the listing's request for sign-in. */
-  | { readonly error: unknown; readonly signIn: ScopedAuthorization }
+  | { readonly authorization: ScopedAuthorization; readonly error: unknown }
   | { readonly failure: string };
 
 export async function listConnectionTools(
@@ -78,7 +78,7 @@ export async function listConnectionTools(
         failure: `Authorization failed for "${name}": the service rejected the token immediately after authorization.`,
       };
     }
-    return { error, signIn: scoped };
+    return { authorization: scoped, error };
   }
 }
 
@@ -110,7 +110,7 @@ function assertPendingSignInInstance(connection: ResolvedConnectionDefinition): 
     if (result.name !== connection.connectionName || result.instanceId === undefined) continue;
     if (result.instanceId === connection.instanceId) continue;
     throw new Error(
-      `Authorization for "${result.name}" cannot complete because its resolved connection changed while sign-in was pending. Start sign-in again.`,
+      `Authorization for "${result.name}" cannot complete because its resolved connection changed while sign-in was pending. Sign in again with execute({ tool: "${result.name}" }).`,
     );
   }
 }
