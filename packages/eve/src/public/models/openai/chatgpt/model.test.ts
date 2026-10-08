@@ -1,3 +1,4 @@
+import { generateText, jsonSchema, tool } from "ai";
 import { describe, expect, it } from "vitest";
 
 import { createCodexSubscriptionModel } from "./model.js";
@@ -26,6 +27,28 @@ describe("Codex model", () => {
     expect(() => createCodexSubscriptionModel({ model: " " })).toThrow(
       'Expected "model" to name a Codex model.',
     );
+  });
+
+  it("streams generate calls, which the Codex backend requires", async () => {
+    const requests: RecordedRequest[] = [];
+    const model = createCodexSubscriptionModel(
+      { model: "gpt-5.2" },
+      { broker: fakeBroker(), fetch: createRecordingFetch(requests) },
+    );
+
+    const result = await generateText({
+      model,
+      prompt: "What is the total?",
+      tools: { lookup: tool({ inputSchema: jsonSchema({ type: "object" }) }) },
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(result.text).toBe("ok");
+    expect(result.toolCalls).toEqual([
+      expect.objectContaining({ input: { q: "total" }, toolCallId: "call_1", toolName: "lookup" }),
+    ]);
+    expect(result.usage).toMatchObject({ inputTokens: 7, outputTokens: 3 });
+    expect(result.response.id).toBe("resp_1");
   });
 
   it("disables response storage before OpenAI Responses prompt conversion", async () => {
@@ -210,24 +233,53 @@ interface RecordedRequest {
   readonly url: string;
 }
 
+// Mirrors the Codex backend, which serves only streaming requests.
 function createRecordingFetch(requests: RecordedRequest[]): typeof fetch {
   return async (input, init) => {
-    requests.push({
-      body: typeof init?.body === "string" ? init.body : undefined,
-      url: input instanceof Request ? input.url : input.toString(),
-    });
-    return Response.json({
-      created_at: 0,
-      id: "resp_1",
-      model: "gpt-5.2-codex",
-      output: [
-        {
-          content: [{ annotations: [], text: "ok", type: "output_text" }],
-          id: "msg_new",
-          role: "assistant",
-          type: "message",
+    const body = typeof init?.body === "string" ? init.body : undefined;
+    requests.push({ body, url: input instanceof Request ? input.url : input.toString() });
+    if (JSON.parse(body ?? "{}").stream !== true) {
+      return Response.json(
+        { detail: "Stream must be set to true" },
+        { status: 400, statusText: "Bad Request" },
+      );
+    }
+    const message = { type: "message", id: "msg_1", role: "assistant", content: [] };
+    const tool = {
+      type: "function_call",
+      id: "fc_1",
+      call_id: "call_1",
+      name: "lookup",
+      arguments: '{"q":"total"}',
+    };
+    return sseResponse([
+      { type: "response.created", response: { id: "resp_1", created_at: 0, model: "gpt-5.2" } },
+      { type: "response.output_item.added", output_index: 0, item: message },
+      { type: "response.output_text.delta", item_id: "msg_1", output_index: 0, delta: "o" },
+      { type: "response.output_text.delta", item_id: "msg_1", output_index: 0, delta: "k" },
+      { type: "response.output_item.done", output_index: 0, item: message },
+      { type: "response.output_item.added", output_index: 1, item: { ...tool, arguments: "" } },
+      {
+        type: "response.output_item.done",
+        output_index: 1,
+        item: { ...tool, status: "completed" },
+      },
+      {
+        type: "response.completed",
+        response: {
+          id: "resp_1",
+          created_at: 0,
+          model: "gpt-5.2",
+          status: "completed",
+          usage: { input_tokens: 7, output_tokens: 3 },
         },
-      ],
-    });
+      },
+    ]);
   };
+}
+
+function sseResponse(events: readonly unknown[]): Response {
+  return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {
+    headers: { "content-type": "text/event-stream" },
+  });
 }
