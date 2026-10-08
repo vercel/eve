@@ -157,7 +157,9 @@ const OFFICIAL_REGISTRY = resolveOfficialRegistryUrl();
 const OFFICIAL_CATALOG = `${OFFICIAL_REGISTRY}/registry.json`;
 const SKILLS_REGISTRY = "@skills";
 const SKILLS_REGISTRY_URL = "https://www.skills.sh/r/{name}?agent=eve";
-const CATALOG_PAGE_SIZE = 100;
+// Browsing loads the whole catalog in one page, so this must stay above the
+// official registry's item count (hidden items count until they are filtered).
+const CATALOG_PAGE_SIZE = 500;
 const DEFAULT_SEARCH_LIMIT = 10;
 const ADD_SUGGESTION_LIMIT = 5;
 

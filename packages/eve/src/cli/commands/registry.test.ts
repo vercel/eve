@@ -1187,11 +1187,11 @@ describe("registry commands", () => {
     expect(getRegistryItems).not.toHaveBeenCalled();
     expect(searchRegistries).toHaveBeenCalledWith(
       ["https://eve.dev/r/registry.json"],
-      expect.objectContaining({ limit: 100, query: "sdk" }),
+      expect.objectContaining({ limit: 500, query: "sdk" }),
     );
     expect(searchRegistries).toHaveBeenCalledWith(
       ["@acme"],
-      expect.objectContaining({ limit: 100, query: "sdk" }),
+      expect.objectContaining({ limit: 500, query: "sdk" }),
     );
   });
 
@@ -1245,7 +1245,7 @@ describe("registry commands", () => {
 
     expect(searchRegistries).toHaveBeenCalledWith(["https://eve.dev/r/registry.json"], {
       config: { registries: { "@skills": "https://www.skills.sh/r/{name}?agent=eve" } },
-      limit: 100,
+      limit: 500,
       query: undefined,
     });
     expect(logger.logs).toEqual(["No registry items found."]);
@@ -1265,7 +1265,7 @@ describe("registry commands", () => {
       JSON.stringify(
         {
           ...result,
-          pagination: { hasMore: false, limit: 100, offset: 0, total: 1 },
+          pagination: { hasMore: false, limit: 500, offset: 0, total: 1 },
         },
         null,
         2,
@@ -1596,7 +1596,7 @@ describe("registry commands", () => {
       JSON.stringify(
         {
           items: [],
-          pagination: { hasMore: false, limit: 100, offset: 0, total: 0 },
+          pagination: { hasMore: false, limit: 500, offset: 0, total: 0 },
           errors: result.errors,
         },
         null,
