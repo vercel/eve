@@ -28,13 +28,14 @@ The pipeline can land first. The new API ships with the event break, so authors 
 
 ## Participants versus observers
 
-|                  | Observers                          | Participants                                                                    |
-| ---------------- | ---------------------------------- | ------------------------------------------------------------------------------- |
-| Who              | Hooks, channel handlers            | Dynamic model, tools, instructions, skills, connections, subagents; memory      |
-| Run on           | Committed events                   | Committed events, before the work that depends on them continues                |
-| Can change state | No; they react to what was decided | Yes; their results feed the model call, and are recorded so restores reuse them |
-| Receive          | Every event they subscribe to      | Only the events their kind accepts, narrowed by eve                             |
-| Unknown values   | Branch on them, with a fallback    | Never see them: a new kind reaches a participant only if eve adds it            |
+|                  | Observers                                    | Participants                                                                    |
+| ---------------- | -------------------------------------------- | ------------------------------------------------------------------------------- |
+| Who              | Hooks, channel handlers                      | Dynamic model, tools, instructions, skills, connections, subagents; memory      |
+| Run on           | Committed events                             | Committed events, before the work that depends on them continues                |
+| Can change state | No; they react to what was decided           | Yes; their results feed the model call, and are recorded so restores reuse them |
+| Receive          | Every event they subscribe to                | Only the events their kind accepts, narrowed by eve                             |
+| Unknown values   | Branch on them, with a fallback              | Never see them: a new kind reaches a participant only if eve adds it            |
+| Shape            | A handler per event type, plus `*` for hooks | One function per action                                                         |
 
 The rule for authors: **observers render whatever arrives; participants handle the few moments that matter to them.**
 
