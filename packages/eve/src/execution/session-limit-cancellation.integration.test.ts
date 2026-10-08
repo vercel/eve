@@ -110,7 +110,7 @@ describe("session-limit continuation decline integration", () => {
         // Turn 2 parks on the continuation prompt before any model call.
         await deliver(continuationToken, { message: "keep going please" });
         const promptTurn = await stream.nextTurn();
-        expect(promptTurn.at(-1)?.type).toBe("session.waiting");
+        expect(promptTurn.at(-1)?.type).toBe("turn.waiting");
         const requestId = requestIdFromPromptTurn(promptTurn);
 
         // Declining settles the turn as cancelled — a user decision, not an
@@ -123,7 +123,7 @@ describe("session-limit continuation decline integration", () => {
         expect(declinedTurn.at(-1)?.type).toBe("session.waiting");
         expect(
           containsEventSequence(declinedTurn, [
-            "turn.started",
+            "input.resolved",
             "turn.cancelled",
             "session.waiting",
           ]),
@@ -137,7 +137,7 @@ describe("session-limit continuation decline integration", () => {
         await deliver(continuationToken, { message: "try again" });
         const repromptTurn = await stream.nextTurn();
 
-        expect(repromptTurn.at(-1)?.type).toBe("session.waiting");
+        expect(repromptTurn.at(-1)?.type).toBe("turn.waiting");
         expect(filterEventsByType(repromptTurn, "input.requested")).toHaveLength(1);
         expect(filterEventsByType(repromptTurn, "turn.cancelled")).toHaveLength(0);
         expectNoFailureEvents(repromptTurn);
