@@ -10,6 +10,8 @@ export async function executeSleepTool(
 ): Promise<SleepToolOutput> {
   "use workflow";
 
+  if (ctx.abortSignal.aborted) return { interrupted: true };
+
   const interrupted = new Promise<"interrupted">((resolve) =>
     ctx.abortSignal.addEventListener("abort", () => resolve("interrupted"), { once: true }),
   );
