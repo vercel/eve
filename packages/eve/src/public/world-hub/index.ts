@@ -122,6 +122,13 @@ export async function createWorldHubWorld(options: WorldHubOptions): Promise<Wor
   }
   const world = {
     ...forwarded,
+    // SDK step scheduling may omit deploymentId; retain this client's deployment.
+    queue: ((name, message, opts) =>
+      call("queue", [
+        name,
+        message,
+        { ...opts, deploymentId: opts?.deploymentId ?? deploymentId },
+      ])) as World["queue"],
     specVersion: info.specVersion,
     capabilities: info.capabilities,
     streamFlushIntervalMs: options.streamFlushIntervalMs ?? 30,
@@ -150,7 +157,8 @@ export async function createWorldHubWorld(options: WorldHubOptions): Promise<Wor
           attempt,
         });
         return Response.json(result ?? { ok: true });
-      } catch {
+      } catch (error) {
+        console.error("World hub delivery failed", error);
         return new Response("Delivery failed", { status: 500 });
       }
     }) as World["createQueueHandler"],
