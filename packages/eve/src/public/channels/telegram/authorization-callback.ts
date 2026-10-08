@@ -1,7 +1,8 @@
 import type { ChannelResolveSession } from "#channel/channel-operations.js";
 import type { Session } from "#channel/session.js";
 import { createLogger } from "#internal/logging.js";
-import type { AuthorizationRequiredStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
+import { foldSessionEvents } from "#protocol/session-projection.js";
 import {
   TELEGRAM_AUTHORIZATION_CALLBACK_PREFIX,
   renderTelegramAuthorizationPrompt,
@@ -38,7 +39,7 @@ export async function dispatchTelegramAuthorizationCallback(input: {
       await inactiveAuthorization(input.telegram.telegram, input.query.id);
       return;
     }
-    const authorization = await findPendingAuthorization(session);
+    const authorization = await findOpenAuthorization(session);
     if (authorization === undefined) {
       await inactiveAuthorization(input.telegram.telegram, input.query.id);
       return;
@@ -46,7 +47,7 @@ export async function dispatchTelegramAuthorizationCallback(input: {
 
     await input.telegram.telegram.postEphemeral(
       input.query.from.id,
-      renderTelegramAuthorizationPrompt(authorization.data),
+      renderTelegramAuthorizationPrompt(authorization),
       { callbackQueryId: input.query.id },
     );
     await input.telegram.telegram.answerCallbackQuery({
@@ -69,27 +70,20 @@ async function inactiveAuthorization(
   });
 }
 
-async function findPendingAuthorization(
-  session: Session,
-): Promise<AuthorizationRequiredStreamEvent | undefined> {
+/** The latest sign-in still open. An approval responder's sign-in has its own prompt. */
+async function findOpenAuthorization(session: Session) {
+  const { signIns } = await foldSessionEvents(eventsToTail(session));
+  return signIns.findLast((prompt) => prompt.candidateId === undefined);
+}
+
+/** The session's events up to its tail when the read starts. Its stream follows the session. */
+async function* eventsToTail(session: Session): AsyncGenerator<MessageStreamEvent> {
   const tailIndex = await session.getStreamTailIndex();
-  if (tailIndex < 0) return undefined;
-  const events = await session.getEventStream({ startIndex: 0 });
-  const reader = events.getReader();
-  let authorization: AuthorizationRequiredStreamEvent | undefined;
-  try {
-    for (let index = 0; index <= tailIndex; index += 1) {
-      const next = await reader.read();
-      if (next.done) break;
-      if (
-        next.value.type === "authorization.required" &&
-        next.value.data.candidateId === undefined
-      ) {
-        authorization = next.value;
-      }
-    }
-  } finally {
-    await reader.cancel().catch(() => {});
+  if (tailIndex < 0) return;
+  let index = 0;
+  // Leaving the loop cancels the stream.
+  for await (const event of await session.getEventStream({ startIndex: 0 })) {
+    yield event;
+    if (++index > tailIndex) return;
   }
-  return authorization;
 }
