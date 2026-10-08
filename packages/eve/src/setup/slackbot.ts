@@ -408,7 +408,8 @@ async function runAttempt(input: {
       applySlackRouting({ deps, projectRoot, ref, plan, orgId, onOutput, signal }),
     );
     signal?.throwIfAborted();
-    if (routing.state === "attach-failed") return { state: "attach-failed", ref };
+    if (routing.state === "attach-failed")
+      return { state: "attach-failed", ref, message: routing.message };
     changed = true;
   }
   return workspace === undefined

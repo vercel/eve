@@ -1,7 +1,6 @@
 /**
- * Pure decisions for resumable Slack setup: how the linked project's trigger
- * destination stands, which mutation (if any) finishes event delivery, and
- * which connector setup suggests. No I/O, so every branch is unit-testable.
+ * Pure decisions for resumable Slack setup: which mutation (if any) finishes
+ * event delivery and which connector setup suggests.
  */
 
 import type {
@@ -13,12 +12,6 @@ import type {
 
 /** Connect rejects a fourth trigger destination on one connector. */
 export const MAX_SLACK_TRIGGER_DESTINATIONS = 3;
-
-/**
- * How the linked project's default-deployment destination compares to eve's
- * Slack route. Branch and custom-environment destinations never count.
- */
-type SlackDestinationState = "correct" | "stale" | "missing";
 
 /** A connector other projects use, which setup never attaches to this one. */
 export interface SlackConnectorInUse {
@@ -59,17 +52,6 @@ function isProjectDefault(destination: SlackTriggerDestination, projectId: strin
   return destination.projectId === projectId && isDefaultDeployment(destination);
 }
 
-/** Sorts the project's default-deployment destination into correct, stale, or missing. */
-export function classifySlackDestination(
-  destinations: readonly SlackTriggerDestination[],
-  projectId: string,
-  route: string,
-): SlackDestinationState {
-  const own = destinations.filter((destination) => isProjectDefault(destination, projectId));
-  if (own.some((destination) => destination.path === route)) return "correct";
-  return own.length > 0 ? "stale" : "missing";
-}
-
 /**
  * What finishes event delivery for one connector. `attach` gives the project
  * token access; `destinations`, when present, is the full destination set to
@@ -93,9 +75,8 @@ export function planSlackRouting(input: {
 }): SlackRoutingPlan {
   const { attached, destinations, projectId, route } = input;
   const attach = !attached;
-  if (classifySlackDestination(destinations, projectId, route) === "correct") {
-    return { kind: "apply", attach };
-  }
+  const own = destinations.filter((destination) => isProjectDefault(destination, projectId));
+  if (own.length === 1 && own[0]?.path === route) return { kind: "apply", attach };
   const kept = destinations.filter((destination) => !isProjectDefault(destination, projectId));
   const next = [...kept, { projectId, path: route }];
   if (next.length > MAX_SLACK_TRIGGER_DESTINATIONS) {

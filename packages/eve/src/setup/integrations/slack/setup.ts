@@ -1,6 +1,6 @@
 import { join } from "node:path";
 
-import { readDevelopmentEnvironmentValues } from "#cli/dev/environment.js";
+import { readDevelopmentEnvironmentValues } from "#shared/development-env-files.js";
 import { InvalidAnswerError, select } from "#setup/ask.js";
 import {
   deriveSlackConnectorSlug,

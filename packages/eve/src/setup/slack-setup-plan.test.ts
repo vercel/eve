@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import type { SlackTriggerDestination } from "./slack-connect.js";
 import {
-  classifySlackDestination,
   orderSlackConnectorCandidates,
   planSlackRouting,
   type SlackConnectorCandidate,
@@ -20,31 +19,24 @@ const customEnvironment: SlackTriggerDestination = {
 };
 const otherProject: SlackTriggerDestination = { projectId: "prj_other", path: ROUTE };
 
-describe("classifySlackDestination", () => {
-  it.each<[string, SlackTriggerDestination[], string]>([
-    ["correct", [{ projectId: PROJECT, path: ROUTE }], "correct"],
-    [
-      "correct beside a stale entry",
-      [
-        { projectId: PROJECT, path: "/triggers/slack" },
-        { projectId: PROJECT, path: ROUTE },
-      ],
-      "correct",
-    ],
-    ["stale default path", [{ projectId: PROJECT, path: "/triggers/slack" }], "stale"],
-    ["missing", [otherProject], "missing"],
-    ["branch and custom environment entries are ignored", [branch, customEnvironment], "missing"],
-  ])("%s", (_name, destinations, expected) => {
-    expect(classifySlackDestination(destinations, PROJECT, ROUTE)).toBe(expected);
-  });
-});
-
 describe("planSlackRouting", () => {
   const own = { projectId: PROJECT, path: ROUTE };
   const stale = { projectId: PROJECT, path: "/triggers/slack" };
 
   it.each<[string, boolean, SlackTriggerDestination[], SlackRoutingPlan]>([
     ["changes nothing when attached and routed", true, [own], { kind: "apply", attach: false }],
+    [
+      "replaces a stale default even beside the correct route",
+      true,
+      [stale, own, branch],
+      { kind: "apply", attach: false, destinations: [branch, own] },
+    ],
+    [
+      "deduplicates two correct default destinations",
+      true,
+      [own, own],
+      { kind: "apply", attach: false, destinations: [own] },
+    ],
     ["only attaches when routed but unattached", false, [own], { kind: "apply", attach: true }],
     [
       "adds a missing destination without re-attaching",

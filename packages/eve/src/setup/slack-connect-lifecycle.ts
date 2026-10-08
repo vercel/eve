@@ -370,7 +370,9 @@ export async function findFreeSlackConnectorName(input: {
 }
 
 /** Result of making a connector deliver this project's events to eve's Slack route. */
-export type SlackRoutingResult = { state: "configured" } | { state: "attach-failed" };
+export type SlackRoutingResult =
+  | { state: "configured" }
+  | { state: "attach-failed"; message?: string };
 
 /**
  * Applies the planned routing mutation. Never detaches: attach only adds
@@ -415,7 +417,9 @@ export async function applySlackRouting(input: {
       signal,
     }),
   );
-  return result.ok ? { state: "configured" } : { state: "attach-failed" };
+  return result.ok
+    ? { state: "configured" }
+    : { state: "attach-failed", message: result.failure.message };
 }
 
 type SlackWorkspaceLookup =

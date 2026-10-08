@@ -1,27 +1,12 @@
-import { MODEL_CONNECTION_ENV } from "#shared/model-helper.js";
-import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { parseEnv } from "node:util";
 
 import { findEveProjectRoot } from "#internal/eve-project-root.js";
-import { isObject } from "#shared/guards.js";
+import {
+  DEVELOPMENT_ENV_FILE_NAMES,
+  readDevelopmentEnvironmentValues,
+} from "#shared/development-env-files.js";
+import { MODEL_CONNECTION_ENV } from "#shared/model-helper.js";
 import { readProviderSettingsSync } from "#setup/provider-settings.js";
-
-/**
- * Development environment files loaded by local CLI commands such as
- * `eve dev`, `eve build`, and `eve eval`, ordered from highest to lowest
- * precedence.
- */
-export const DEVELOPMENT_ENV_FILE_NAMES = [
-  ".env.development.local",
-  ".env.local",
-  ".env.development",
-  ".env",
-] as const;
-
-function isMissingEnvironmentFileError(error: unknown): error is NodeJS.ErrnoException {
-  return isObject(error) && error.code === "ENOENT";
-}
 
 interface DevelopmentEnvironmentLoader {
   readonly environmentRoot: string;
@@ -196,23 +181,4 @@ function applyDevelopmentEnvironmentValues(input: {
     process.env[key] = value;
     input.managedValues.set(key, value);
   }
-}
-
-/** Merged values of the development env files in `environmentRoot`, by precedence. */
-export function readDevelopmentEnvironmentValues(environmentRoot: string): Map<string, string> {
-  const values = new Map<string, string>();
-
-  for (const fileName of [...DEVELOPMENT_ENV_FILE_NAMES].reverse()) {
-    try {
-      const parsedValues = parseEnv(readFileSync(join(environmentRoot, fileName), "utf8"));
-
-      for (const [key, value] of Object.entries(parsedValues)) {
-        if (value !== undefined) values.set(key, value);
-      }
-    } catch (error) {
-      if (!isMissingEnvironmentFileError(error)) throw error;
-    }
-  }
-
-  return values;
 }

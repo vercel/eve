@@ -225,6 +225,7 @@ function fakeConnect(initial: FakeConnector[]) {
     commands,
     pageSize: Number.POSITIVE_INFINITY,
     fail: (_args: readonly string[]): boolean => false,
+    patchError: undefined as string | undefined,
     /** Every command that changes Connect state, in order; detach included. */
     mutations: () =>
       commands.filter(
@@ -257,6 +258,12 @@ function fakeConnect(initial: FakeConnector[]) {
     if (entry === undefined) return NOT_FOUND;
     const suffix = match[2];
     if (suffix === "/trigger-destinations" && args.includes("PATCH")) {
+      if (fake.patchError !== undefined) {
+        return {
+          ok: true,
+          stdout: JSON.stringify({ error: { code: 403, message: fake.patchError } }),
+        };
+      }
       entry.destinations = (
         JSON.parse(options.stdin!) as { destinations: SlackTriggerDestination[] }
       ).destinations;
@@ -658,6 +665,25 @@ describe("provisionSlackbot", () => {
       connectorUid: "slack/my-agent",
     });
     expect(connect.state.has("slack/my-agent")).toBe(true);
+  });
+
+  it("reports the API reason when routing a connector fails", async () => {
+    const connect = fakeConnect([]);
+    connect.patchError = "You do not have access to update trigger destinations.";
+    const log = createTestLog();
+
+    await expect(provision(log, ROOT, "my-agent", connect.deps)).resolves.toEqual({
+      state: "attach-failed",
+      connectorUid: "slack/my-agent",
+    });
+    expect(connect.state.get("slack/my-agent")?.destinations).toEqual([
+      { projectId: PROJECT, path: "/triggers/slack" },
+    ]);
+    expect(log.warning).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "Vercel API request failed: You do not have access to update trigger destinations.",
+      ),
+    );
   });
 
   it("reports Vercel's error when create fails before the browser flow starts", async () => {
