@@ -15,28 +15,48 @@ export type DynamicToolEventName = Extract<
   "session.started" | "turn.started" | "step.started"
 >;
 
-export const ALLOWED_DYNAMIC_TOOL_EVENTS: ReadonlySet<string> = new Set<DynamicToolEventName>([
-  "session.started",
-  "turn.started",
-  "step.started",
-]);
+/** The event a dynamic resolver answers: a session's start, a turn's, or one model call's. */
+export type DynamicScopeEvent = Extract<
+  UnstampedMessageStreamEvent,
+  { type: DynamicToolEventName }
+>;
+
+/** The kinds of dynamic resolver, by the slot they're authored in. */
+export type DynamicResolverKind =
+  | "connection"
+  | "instructions"
+  | "model"
+  | "skill"
+  | "subagent"
+  | "tool";
 
 /**
- * Instructions and skills are restricted to session/turn boundaries.
- * Keeping their resolved context stable within a turn avoids changing the
- * model input between tool-loop steps.
+ * The events each kind of dynamic resolver handles. Instructions, skills, connections, and
+ * subagents stay stable within a turn, so the model input doesn't change between its steps.
  */
-export const ALLOWED_DYNAMIC_INSTRUCTION_EVENTS: ReadonlySet<string> =
-  new Set<DynamicToolEventName>(["session.started", "turn.started"]);
+export const DYNAMIC_RESOLVER_EVENTS = {
+  connection: ["session.started", "turn.started"],
+  instructions: ["session.started", "turn.started"],
+  model: ["session.started", "turn.started", "step.started"],
+  skill: ["session.started", "turn.started"],
+  subagent: ["session.started", "turn.started"],
+  tool: ["session.started", "turn.started", "step.started"],
+} as const satisfies Record<DynamicResolverKind, readonly DynamicToolEventName[]>;
 
-export const ALLOWED_DYNAMIC_SKILL_EVENTS: ReadonlySet<string> = new Set<DynamicToolEventName>([
-  "session.started",
-  "turn.started",
-]);
-
-export const ALLOWED_DYNAMIC_CONNECTION_EVENTS: ReadonlySet<string> = new Set<DynamicToolEventName>(
-  ["session.started", "turn.started"],
-);
+/** Fails the build when a resolver of `kind` handles an event it never receives. */
+export function assertDynamicResolverEvents(
+  kind: DynamicResolverKind,
+  eventNames: readonly string[],
+  message: string,
+): void {
+  const supported: readonly string[] = DYNAMIC_RESOLVER_EVENTS[kind];
+  const unsupported = eventNames.find((eventName) => !supported.includes(eventName));
+  if (unsupported === undefined) return;
+  const names = supported.map((eventName) => `"${eventName}"`);
+  throw new Error(
+    `${message} Dynamic ${kind} resolvers support only ${names.slice(0, -1).join(", ")} and ${names.at(-1)!} handlers. Unsupported event: "${unsupported}".`,
+  );
+}
 
 /**
  * Context passed to a dynamic resolver's event handler.
@@ -127,11 +147,10 @@ export type DynamicSentinel<TResult = unknown> = {
  * - `agent/subagents/<name>/agent.ts`: return `defineAgent(...)` to configure
  *   and expose the subagent, or `null` to omit it.
  *
- * Per-slot events: tools resolvers run at `session.started`,
- * `turn.started`, and `step.started`. Skills and connection resolvers run only
- * at `session.started` and `turn.started`; the runtime never invokes a
- * handler keyed on `step.started` in that slot. Dynamic subagents run at
- * `session.started` and `turn.started` only.
+ * Per-slot events: tool and model resolvers run at `session.started`,
+ * `turn.started`, and `step.started`. Skill, instruction, connection, and
+ * subagent resolvers run only at `session.started` and `turn.started`. A
+ * handler keyed on any other event fails the build.
  *
  * ```ts
  * import { defineDynamic, defineTool } from "eve/tools";

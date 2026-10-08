@@ -1,3 +1,4 @@
+import type { DynamicScopeEvent } from "#dynamic/definition.js";
 import { z } from "#compiled/zod/index.js";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { asSchema } from "ai";
@@ -28,7 +29,7 @@ vi.mock("#context/build-callback-context.js", () => ({
 
 // Import after mock so the module picks up the mock
 const {
-  dispatchDynamicToolEvent,
+  resolveDynamicTools,
   refreshDynamicSessionToolsForRuntimeRevision,
   rebindMissingCompiledDynamicToolCallbacks,
   validateDurableDynamicToolCallbacks,
@@ -52,11 +53,7 @@ import {
   stampDurableDynamicToolCallbacks,
 } from "#tools/durable-callbacks.js";
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
-import {
-  createSessionStartedEvent,
-  createStepStartedEvent,
-  type UnstampedMessageStreamEvent,
-} from "#protocol/message.js";
+import { createSessionStartedEvent, createStepStartedEvent } from "#protocol/message.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import {
   connectionRegistry,
@@ -120,7 +117,7 @@ describe("dynamic tool names", () => {
       ConnectionRegistryKey,
       connectionRegistry([fakeConnection({ name: "linear", tools: [] })]),
     );
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       event: makeEvent("session.started"),
       messages: [],
@@ -457,7 +454,7 @@ describe("replayDynamicTools", () => {
 });
 
 // ---------------------------------------------------------------------------
-// dispatchDynamicToolEvent — unified event dispatch
+// resolveDynamicTools — unified event dispatch
 // ---------------------------------------------------------------------------
 
 function createResolver(
@@ -506,7 +503,7 @@ function createApprovalContext(input: {
   } as ApprovalContext;
 }
 
-function makeEvent(type: string): UnstampedMessageStreamEvent {
+function makeEvent(type: string): DynamicScopeEvent {
   if (type === "step.started") {
     return createStepStartedEvent({
       modelId: "test-model",
@@ -515,7 +512,7 @@ function makeEvent(type: string): UnstampedMessageStreamEvent {
       turnId: "test-turn",
     });
   }
-  return { type, data: {} } as UnstampedMessageStreamEvent;
+  return { type, data: {} } as DynamicScopeEvent;
 }
 
 function simulateColdStart(ctx: ContextContainer): void {
@@ -591,14 +588,14 @@ function stampTestTool(entry: DynamicToolEntry): DynamicToolEntry {
   return entry;
 }
 
-describe("dispatchDynamicToolEvent", () => {
+describe("resolveDynamicTools", () => {
   it("replaces session tools with the current deployment's resolver output", async () => {
     const ctx = createCtx();
     const oldResolver = createResolver("old", ["session.started"], () => ({
       old_tool: createReplayableTool("old deployment"),
     }));
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [oldResolver],
       messages: [],
@@ -632,7 +629,7 @@ describe("dispatchDynamicToolEvent", () => {
     }));
     const resolver = createResolver("current", ["session.started"], handler);
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -657,7 +654,7 @@ describe("dispatchDynamicToolEvent", () => {
     const resolver = createResolver("live", ["session.started"], handler);
     ctx.set(SessionDynamicToolRuntimeRevisionKey, "deployment:dpl_current");
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -673,7 +670,7 @@ describe("dispatchDynamicToolEvent", () => {
     const ctx = createCtx();
     const handler = vi.fn(() => ({ tool: createReplayableTool() }));
     const resolver = createResolver("live", ["session.started"], handler);
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -692,7 +689,7 @@ describe("dispatchDynamicToolEvent", () => {
     const ctx = createCtx();
     const handler = vi.fn(() => ({ tool: createReplayableTool("rebound") }));
     const resolver = createResolver("live", ["session.started"], handler);
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -847,7 +844,7 @@ describe("dispatchDynamicToolEvent", () => {
     }));
     const resolver = createResolver("authored", ["turn.started"], handler);
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -883,7 +880,7 @@ describe("dispatchDynamicToolEvent", () => {
     const handler = vi.fn(() => ({ tool: createReplayableTool() }));
     const resolver = createResolver("authored", ["turn.started"], handler);
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -915,7 +912,7 @@ describe("dispatchDynamicToolEvent", () => {
       rebindMissingCallbacks: true,
     };
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -984,7 +981,7 @@ describe("dispatchDynamicToolEvent", () => {
     const oldResolver = createResolver("old", ["session.started"], () => ({
       old_tool: createReplayableTool(),
     }));
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [oldResolver],
       messages: [],
@@ -1032,7 +1029,7 @@ describe("dispatchDynamicToolEvent", () => {
       ),
     }));
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -1060,7 +1057,7 @@ describe("dispatchDynamicToolEvent", () => {
       forecast: createReplayableTool(),
     }));
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -1081,7 +1078,7 @@ describe("dispatchDynamicToolEvent", () => {
     const handler = vi.fn(() => ({ forecast: createReplayableTool() }));
     const resolver = createResolver("weather", ["session.started"], handler);
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -1107,7 +1104,7 @@ describe("dispatchDynamicToolEvent", () => {
       extensionNamespace: "warehouse",
     };
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -1138,7 +1135,7 @@ describe("dispatchDynamicToolEvent", () => {
       ),
     }));
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -1162,11 +1159,11 @@ describe("dispatchDynamicToolEvent", () => {
       turnId: "turn-1",
     });
 
-    await dispatchDynamicToolEvent({ ctx, event, messages: [], resolvers: [resolver] });
+    await resolveDynamicTools({ ctx, event, messages: [], resolvers: [resolver] });
     ctx.clearVirtualContext();
     expect(buildDynamicTools(ctx).map((tool) => tool.name)).toEqual(["query"]);
 
-    await dispatchDynamicToolEvent({ ctx, event, messages: [], resolvers: [resolver] });
+    await resolveDynamicTools({ ctx, event, messages: [], resolvers: [resolver] });
     expect(buildDynamicTools(ctx)[0]?.description).toBe("cached");
   });
 
@@ -1180,7 +1177,7 @@ describe("dispatchDynamicToolEvent", () => {
       };
     });
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -1193,7 +1190,7 @@ describe("dispatchDynamicToolEvent", () => {
     });
     expect(buildDynamicTools(ctx)[0]!.description).toBe("call 1");
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -1217,7 +1214,7 @@ describe("dispatchDynamicToolEvent", () => {
       b_tool: createReplayableTool(),
     }));
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [resolverA, resolverB],
       messages: [],
@@ -1226,7 +1223,7 @@ describe("dispatchDynamicToolEvent", () => {
     expect(buildDynamicTools(ctx)).toHaveLength(1);
     expect(buildDynamicTools(ctx)[0]!.name).toBe("a_tool");
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [resolverA, resolverB],
       messages: [],
@@ -1247,7 +1244,7 @@ describe("dispatchDynamicToolEvent", () => {
     }));
 
     await expect(
-      dispatchDynamicToolEvent({
+      resolveDynamicTools({
         ctx,
         resolvers: [alpha, beta],
         messages: [],
@@ -1266,7 +1263,7 @@ describe("dispatchDynamicToolEvent", () => {
     }));
 
     // Session resolver fires first
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [sessionResolver, stepResolver],
       messages: [],
@@ -1278,7 +1275,7 @@ describe("dispatchDynamicToolEvent", () => {
     expect(metadataAfterSession![0]!.resolverSlug).toBe("tenant");
 
     // Step resolver fires — should NOT clobber session metadata
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [sessionResolver, stepResolver],
       messages: [],
@@ -1309,7 +1306,7 @@ describe("dispatchDynamicToolEvent", () => {
       return { root_only: entry };
     });
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -1347,7 +1344,7 @@ describe("dispatchDynamicToolEvent", () => {
 
     // First step: resolve session tools, metadata is stored durably and the
     // callback binds under the final tool name.
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -1396,7 +1393,7 @@ describe("dispatchDynamicToolEvent", () => {
       return { probe: entry };
     });
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -1415,7 +1412,7 @@ describe("dispatchDynamicToolEvent", () => {
     const ctx = createCtx();
     const resolver = createResolver("empty", ["session.started"], () => null);
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -1436,7 +1433,7 @@ describe("dispatchDynamicToolEvent", () => {
       },
     }));
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [rawResolver],
       messages: [],
@@ -1467,7 +1464,7 @@ describe("dispatchDynamicToolEvent", () => {
       const resolver = createResolver("workflow", ["session.started"], () =>
         shape === "single" ? tool : { workflow: tool },
       );
-      await dispatchDynamicToolEvent({
+      await resolveDynamicTools({
         ctx,
         resolvers: [resolver],
         messages: [],
@@ -1493,7 +1490,7 @@ describe("dispatchDynamicToolEvent", () => {
       working: createReplayableTool(),
     }));
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [badResolver, goodResolver],
       messages: [],
@@ -1517,7 +1514,7 @@ describe("dispatchDynamicToolEvent", () => {
       Object.assign(createReplayableTool(), { endsTurn: true }),
     );
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -1534,7 +1531,7 @@ describe("dispatchDynamicToolEvent", () => {
       Object.assign(createReplayableTool(), { endsTurn: () => true }),
     );
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -1551,7 +1548,7 @@ describe("dispatchDynamicToolEvent", () => {
     const ctx = createCtx();
     const resolver = createResolver("analytics", ["session.started"], () => createReplayableTool());
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -1583,7 +1580,7 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
       lookup: createProgrammaticTool("programmatic search", executeFn),
     }));
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -1616,7 +1613,7 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
       assist: createProgrammaticTool("turn helper", executeFn),
     }));
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -1645,7 +1642,7 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
       query: createReplayableTool("authored query"),
     }));
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [frameworkResolver, authoredResolver],
       messages: [],
@@ -1666,7 +1663,7 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
       createProgrammaticTool("single tool"),
     );
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -1691,7 +1688,7 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
     );
     const resolver = createResolver("connection", ["step.started"], () => ({ risky: entry }));
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -1726,7 +1723,7 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
         ),
       );
       const resolver = createResolver("connection", [eventName], () => ({ risky: entry }));
-      await dispatchDynamicToolEvent({
+      await resolveDynamicTools({
         ctx,
         resolvers: [resolver],
         messages: [],
@@ -1765,7 +1762,7 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
       guarded: entry,
     }));
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -1846,7 +1843,7 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
     }));
     const resolver = createResolver("session_provider", ["session.started"], handler);
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       event: makeEvent("session.started"),
       messages: [],
@@ -2006,7 +2003,7 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
     }));
     const resolver = createResolver("session_guard", ["session.started"], handler);
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       event: makeEvent("session.started"),
       messages: [],
@@ -2044,7 +2041,7 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
     );
     const resolver = createResolver("connection", ["session.started"], () => ({ typed: entry }));
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -2065,7 +2062,7 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
       safe: createProgrammaticTool("read-only op"),
     }));
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -2088,7 +2085,7 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
       };
     });
 
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -2100,7 +2097,7 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
     expect(result1).toEqual({ version: 1 });
 
     // Re-dispatch overwrites the resolver's slot
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -2161,7 +2158,7 @@ describe("dynamic callback binding isolation", () => {
         };
       });
       for (const ctx of [first, second]) {
-        await dispatchDynamicToolEvent({
+        await resolveDynamicTools({
           ctx,
           resolvers: [resolver],
           event: makeEvent("session.started"),
@@ -2210,7 +2207,7 @@ describe("dynamic callback binding isolation", () => {
       [first, "guarded-owner", "guarded"],
       [second, "open-owner", "open"],
     ] as const) {
-      await dispatchDynamicToolEvent({
+      await resolveDynamicTools({
         ctx,
         resolvers: [
           createResolver(slug, ["session.started"], () => ({
@@ -2230,7 +2227,7 @@ describe("dynamic callback binding isolation", () => {
     const ctx = createCtx();
     for (const scope of ["session", "turn", "step"] as const) {
       const eventName = `${scope}.started`;
-      await dispatchDynamicToolEvent({
+      await resolveDynamicTools({
         ctx,
         resolvers: [
           createResolver("shared-owner", [eventName], () => ({
@@ -2255,7 +2252,7 @@ describe("dynamic callback binding isolation", () => {
       lookup: variantTool("guarded", "original"),
     }));
     for (const ctx of [first, second]) {
-      await dispatchDynamicToolEvent({
+      await resolveDynamicTools({
         ctx,
         resolvers: [resolver],
         event: makeEvent("session.started"),
@@ -2283,19 +2280,14 @@ describe("dynamic callback binding isolation", () => {
       lookup: variantTool("guarded", "original"),
     }));
     for (const ctx of [first, second]) {
-      await dispatchDynamicToolEvent({
+      await resolveDynamicTools({
         ctx,
         resolvers: [resolver],
         event: makeEvent("session.started"),
         messages: [],
       });
     }
-    await dispatchDynamicToolEvent({
-      ctx: first,
-      resolvers: [],
-      event: { type: "session.completed" },
-      messages: [],
-    });
+    clearDurableDynamicCallbacks(first.require(SessionIdKey));
     await expect(buildDynamicTools(first)[0]!.execute!({}, executeOptions)).rejects.toThrow(
       "cannot replay its execute callback",
     );
@@ -2317,7 +2309,7 @@ describe("dynamic callback cache recovery", () => {
       const other = createResolver("other", ["session.started"], () => ({
         other: createReplayableTool(),
       }));
-      await dispatchDynamicToolEvent({
+      await resolveDynamicTools({
         ctx,
         resolvers: [original, other],
         event: makeEvent("session.started"),
@@ -2336,7 +2328,7 @@ describe("dynamic callback cache recovery", () => {
           }),
         };
       });
-      await dispatchDynamicToolEvent({
+      await resolveDynamicTools({
         ctx,
         resolvers: [replacement],
         event: makeEvent("session.started"),
@@ -2366,7 +2358,7 @@ describe("dynamic callback cache recovery", () => {
       const resolver = createResolver("evicted", [eventName], () => ({
         lookup: createReplayableTool(),
       }));
-      await dispatchDynamicToolEvent({
+      await resolveDynamicTools({
         ctx,
         resolvers: [resolver],
         event: makeEvent(eventName),

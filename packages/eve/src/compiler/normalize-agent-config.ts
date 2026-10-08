@@ -14,7 +14,7 @@ import {
   type PublicAgentStaticModelDefinition,
   type AgentToolExposure,
 } from "#shared/agent-definition.js";
-import type { DynamicToolEventName } from "#dynamic/definition.js";
+import { assertDynamicResolverEvents, type DynamicToolEventName } from "#dynamic/definition.js";
 import type { CompiledAgentDefinition, CompiledRuntimeModelReference } from "#compiler/manifest.js";
 import type { CompiledRuntimeModelLimits } from "#compiler/model-catalog.js";
 import {
@@ -107,8 +107,14 @@ export async function compileAgentConfig(
 
   let dynamicModel: CompiledAgentDefinition["dynamicModel"] | undefined;
   if (dynamicModelDefinition !== undefined) {
+    const eventNames = Object.keys(dynamicModelDefinition.events) as DynamicToolEventName[];
+    assertDynamicResolverEvents(
+      "model",
+      eventNames,
+      `Expected the agent model from "${configModule.logicalPath}" to match the public eve shape.`,
+    );
     dynamicModel = {
-      eventNames: Object.keys(dynamicModelDefinition.events) as DynamicToolEventName[],
+      eventNames,
       exportName: configModule.exportName,
       sourceKind: "module",
       logicalPath: configModule.logicalPath,
