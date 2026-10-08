@@ -92,20 +92,16 @@ but harder tasks are needed to evaluate the literal success gate.
 
 ## Reproduce
 
-From the validation checkout, install dependencies, then run the matrix:
+The `agent-tool-arms` fixture is marked `"e2e": { "manual": true }`, so CI
+fixture discovery skips it; run it by hand. It needs `AI_GATEWAY_API_KEY` and
+a clean environment (no inherited `EVE_*` / `WORKFLOW_*` credentials).
 
 ```sh
-pnpm install --no-frozen-lockfile
-source /tmp/eve4400-env.sh
+pnpm install
+pnpm --filter eve run build
 cd e2e/fixtures/agent-tool-arms
-EVE_ARMS_OUTPUT=/tmp/arms-rerun/measurements.jsonl \
-  node scripts/run-arms.mjs
+EVE_ARMS_OUTPUT=/tmp/arms/measurements.jsonl pnpm run measure
 ```
-
-The environment script is required before every eval shell. It clears inherited
-EVE_/WORKFLOW_ credentials and sets AI_GATEWAY_API_KEY. Do not commit it.
-The new workspace lockfile importer is intentionally excluded because changes
-outside the assigned fixture/results paths are out of scope.
 
 Runner defaults: both CI models, both sizes, all three arms, one repetition.
 Set `EVE_ARMS_REPETITIONS=3` for three repetitions. Optional comma-separated
@@ -114,11 +110,9 @@ Use a fresh output file: rows append, so reusing one duplicates observations.
 Each configuration runs `pnpm exec eve eval --strict --verbose`, setting
 `EVE_E2E_MODEL`, `EVE_ARMS_MODE`, `EVE_ARMS_SIZE`, `EVE_ARMS_REPETITION`.
 
-Type validation: `pnpm exec tsc --noEmit` from the fixture passed.
-Single-task validation:
+Single configuration:
 
 ```sh
-source /tmp/eve4400-env.sh
 cd e2e/fixtures/agent-tool-arms
 EVE_E2E_MODEL=anthropic/claude-opus-5.5 \
   EVE_ARMS_MODE=subagents EVE_ARMS_SIZE=large \

@@ -8,7 +8,8 @@
     "dev": "eve dev",
     "start": "eve start",
     "typecheck": "eve build --skip-sandbox-prewarm && tsc",
-    "test:e2e": "eve eval --strict"
+    "test:e2e": "eve eval --strict",
+    "measure": "node scripts/run-arms.mjs"
   },
   "dependencies": {
     "@eve-e2e/config": "workspace:*",
@@ -21,9 +22,6 @@
     "typescript": "catalog:"
   },
   "e2e": {
-    "modelMatrix": "full",
-    "optionalModels": [
-      "anthropic-opus"
-    ]
+    "manual": true
   }
 }
