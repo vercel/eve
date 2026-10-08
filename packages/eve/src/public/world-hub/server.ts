@@ -1,3 +1,35 @@
+import { getWorkflowRunStreamId } from "#compiled/@workflow/core/util.js";
+import {
+  getCommonRevivers,
+  getDeserializeStream,
+  type EncryptionKeyParam,
+} from "#compiled/@workflow/core/serialization.js";
+import { parseNdjsonStream } from "#execution/ndjson-stream.js";
+
+/** The SDK stream ID used by the session route's default run readable. */
+export function sessionStreamName(sessionId: string): string {
+  return getWorkflowRunStreamId(sessionId);
+}
+
+/** Decode one stored session chunk. Encrypted runs require their run key (or key resolver). */
+export async function decodeSessionStreamChunk(
+  data: Uint8Array,
+  encryptionKey?: EncryptionKeyParam,
+): Promise<unknown[]> {
+  const source = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(data);
+      controller.close();
+    },
+  });
+  const events = parseNdjsonStream(() =>
+    source.pipeThrough(getDeserializeStream(getCommonRevivers(globalThis), encryptionKey)),
+  );
+  const values: unknown[] = [];
+  for await (const event of events) values.push(event);
+  return values;
+}
+
 import { randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
 import type { IncomingMessage, ServerResponse } from "node:http";
