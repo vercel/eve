@@ -426,7 +426,10 @@ function resolveSkillInput(
         : `"${name}" is a tool in your tool list, not a skill; call it directly.`,
     );
   }
-  return failure("name", unknownSkillMessage(name, catalog.skills, connections, tools.search));
+  return failure(
+    "name",
+    unknownSkillMessage(name, catalog.skills, connections, tools.searchableSkills),
+  );
 }
 
 function isConnectionTool(

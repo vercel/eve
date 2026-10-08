@@ -18,7 +18,7 @@ const UNREPORTED_TOOL_NAMES = new Map([
   ],
   [
     "eve__execute",
-    `Tool name "eve__execute" was retired: it was split into ${CALL_TOOL_NAME} and ${SKILL_TOOL_NAME}. Assert on the tool or agent a call reaches, or use t.loadedSkill(name) for skills.`,
+    "eve__execute isn't a tool eve registers (it's reserved for code mode); assert on the tool or agent a call reaches, or use t.loadedSkill(name).",
   ],
 ]);
 

@@ -52,7 +52,7 @@ describe("tool-name assertions", () => {
     ],
     [
       "eve__execute",
-      'Tool name "eve__execute" was retired: it was split into eve__tool and eve__skill. Assert on the tool or agent a call reaches, or use t.loadedSkill(name) for skills.',
+      "eve__execute isn't a tool eve registers (it's reserved for code mode); assert on the tool or agent a call reaches, or use t.loadedSkill(name).",
     ],
   ])("always reject %s, which no call is reported under", (name, message) => {
     expect(() => assertionsFor(undefined).notCalledTool(name)).toThrow(message);

@@ -396,6 +396,17 @@ describe("buildStepCatalog", () => {
       });
     });
 
+    it("doesn't point eve__skill at eve__search when search can't find skills", async () => {
+      const { catalog: toolSearch } = catalogContext({
+        skills: [{ name: "house-rules" }],
+        tools: [inlineTool("refund_invoice", { deferred: true })],
+      });
+
+      expect(await validateSkill(toolSearch, { name: "weather" })).toEqual({
+        issues: [{ message: 'No skill named "weather".', path: ["name"] }],
+      });
+    });
+
     it("calls the tool and loads the skill that share a name, since tools and skills have separate names", async () => {
       expect(
         await validateTool(catalog, { input: { invoiceId: "in_1" }, name: "refund_invoice" }),
@@ -576,7 +587,7 @@ describe("buildStepCatalog", () => {
       };
     }
 
-    it("parks execute({ tool: <connection> }) for sign-in, then reports the sign-in and lists the tools", async () => {
+    it("parks eve__tool({ name: <connection> }) for sign-in, then reports the sign-in and lists the tools", async () => {
       const { catalog, connect, finishSignIn, notion, run, signIn } = notionCatalog();
 
       expect(signIn.call.toolName).toBe("notion");
