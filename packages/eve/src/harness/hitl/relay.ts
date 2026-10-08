@@ -18,7 +18,7 @@ import type { InputResponse } from "#shared/input.js";
 import { outcomeOf } from "./approval.js";
 import type { Command } from "./command.js";
 import type { Input, RelayRoute } from "./input.js";
-import { type Reduced, type OpenRelayed } from "./state.js";
+import { type Reduced, type OpenRelayed } from "./record.js";
 import { typedAnswers } from "./input-typed-reply.js";
 
 /**

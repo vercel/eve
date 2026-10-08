@@ -16,7 +16,7 @@ import type { InputRequest, InputResponse } from "#shared/input.js";
 
 import type { Command } from "./command.js";
 import type { Input, RequestAt } from "./input.js";
-import { EMPTY_AUDIT, type Reduced, type OpenApproval } from "./state.js";
+import { EMPTY_AUDIT, type Reduced, type OpenApproval } from "./record.js";
 import type { SessionView, SuspendedStep } from "#harness/session-machine/view.js";
 import { hitlStepKey } from "./record.js";
 

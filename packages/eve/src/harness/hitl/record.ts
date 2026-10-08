@@ -1,3 +1,6 @@
+import type { SessionView } from "#harness/session-machine/view.js";
+import type { Command } from "./command.js";
+import type { InputRequest } from "#shared/input.js";
 import type { InputResponse } from "#shared/input.js";
 import type { StepCoordinates } from "#harness/session-machine/view.js";
 import type { InputOption } from "#shared/input.js";
@@ -138,3 +141,46 @@ export function hasHitlRecord(record: HitlRecord | undefined): boolean {
 export function hitlStepKey(at: StepCoordinates): string {
   return JSON.stringify([at.turnId, at.sequence, at.stepIndex]);
 }
+
+/** What a rule leaves: the state, and the events it reports, in order. */
+export interface Reduced<S = SessionView> {
+  readonly events: readonly Command[];
+  readonly state: S;
+}
+
+/** An open approval, as the session stores it. */
+export interface OpenApproval {
+  readonly kind: "tool-approval";
+  readonly at: StepCoordinates;
+  readonly request: InputRequest;
+  readonly requester: SessionAuthContext | null;
+  /** What a `once()` approval grants: the tool's approval key, else its name. */
+  readonly approvalKey: string;
+  /** An answer that arrived before the rest of the step's approvals were answered. */
+  readonly answer?: InputResponse;
+  /** Its tool's `approval.response` policy decides who may answer (see candidates). */
+  readonly responsePolicy?: true;
+}
+
+/** An open authorization, as the session stores it. */
+export interface OpenAuthorization {
+  readonly kind: "authorization";
+  readonly at: StepCoordinates;
+  readonly challenge: AuthorizationChallenge;
+}
+
+/** A relayed request, as the session stores it until it is answered or withdrawn. */
+export interface OpenRelayed {
+  readonly kind: "relayed";
+  /** The coordinates of the child batch's `input.requested`, which its `input.resolved` repeats. */
+  readonly at: StepCoordinates;
+  readonly request: InputRequest;
+  readonly route: RelayRoute;
+}
+
+export const EMPTY_AUDIT: ApprovalAudit = {
+  activeCandidates: {},
+  candidateHistory: [],
+  nextCandidateSequence: 0,
+  settlements: {},
+};

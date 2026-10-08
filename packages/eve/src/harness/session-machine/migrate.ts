@@ -1,7 +1,7 @@
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import { sameStep, type StepCoordinates, type SuspendedStep } from "./view.js";
-import { hitlStepKey } from "#harness/hitl/record.js";
-import type { HumanInputState, OpenApproval } from "#harness/hitl/state.js";
+import { hitlStepKey, type OpenApproval } from "#harness/hitl/record.js";
+import type { HumanInputState } from "#harness/session-machine/migrate-legacy.js";
 import { readTurnState, type TurnState } from "#harness/session-machine/state.js";
 import { SESSION_PROJECTION_STATE_KEY, storedProjection } from "#harness/session-machine/view.js";
 import { getSessionUsage } from "#harness/turn-tag-state.js";

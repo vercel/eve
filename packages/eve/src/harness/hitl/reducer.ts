@@ -48,7 +48,7 @@ import {
   requireAuthorizations,
   authorizationRequested,
 } from "./authorization.js";
-import { type Reduced } from "./state.js";
+import { type Reduced } from "./record.js";
 import { typedAnswers } from "./input-typed-reply.js";
 import { cleanupHitl } from "./record.js";
 import { type AuthorizationChallenge } from "#harness/authorization.js";

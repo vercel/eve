@@ -33,8 +33,8 @@ import type {
   OpenApproval,
   ResponderIdentity,
   Settlement,
-} from "#harness/hitl/state.js";
-import { EMPTY_AUDIT } from "#harness/hitl/state.js";
+} from "#harness/hitl/record.js";
+import { EMPTY_AUDIT } from "#harness/hitl/record.js";
 import { completed, authorizationRequested } from "#harness/hitl/authorization.js";
 import {
   createApprovalCandidateEvent,

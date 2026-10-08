@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { beforeStep, afterStep } from "#harness/hitl/reducer.js";
 import { LEGACY_PARKING_KEYS } from "#harness/session-machine/migrate-legacy.js";
 import { HumanInput } from "#internal/testing/hitl-observer.js";
-import type { HumanInputState } from "#harness/hitl/state.js";
+import type { HumanInputState } from "#harness/session-machine/migrate-legacy.js";
 import type { InputRequest } from "#shared/input.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { SessionStateMap } from "#harness/types.js";

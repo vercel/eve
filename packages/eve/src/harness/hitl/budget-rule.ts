@@ -11,7 +11,7 @@ import type { StepCoordinates } from "#harness/session-machine/state.js";
  */
 import type { Command } from "#harness/hitl/command.js";
 import type { Input } from "#harness/hitl/input.js";
-import type { Reduced } from "#harness/hitl/state.js";
+import type { Reduced } from "#harness/hitl/record.js";
 import {
   SESSION_LIMIT_CONTINUE_OPTION_ID,
   SESSION_LIMIT_STOP_OPTION_ID,

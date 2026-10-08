@@ -20,7 +20,7 @@ import { authorizationEventFields } from "#harness/authorization-event-fields.js
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { Command } from "#harness/hitl/command.js";
 import type { RequestAt } from "#harness/hitl/input.js";
-import type { Reduced, OpenAuthorization } from "#harness/hitl/state.js";
+import type { Reduced, OpenAuthorization } from "#harness/hitl/record.js";
 import {
   createAuthorizationCompletedEvent,
   createAuthorizationRequiredEvent,
