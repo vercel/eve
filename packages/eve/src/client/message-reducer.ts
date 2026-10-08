@@ -30,7 +30,12 @@ import {
 } from "#client/message-reducer-primitives.js";
 import { messageRun } from "#client/message-run-parts.js";
 import type { AuthorizationCompletedStreamEvent } from "#protocol/message.js";
-import { foldSession, initialSessionProjection } from "#protocol/session-projection.js";
+import {
+  foldSession,
+  initialSessionProjection,
+  reportedCallStatus,
+  type SessionProjection,
+} from "#protocol/session-projection.js";
 import { toolPartState } from "#client/tool-part-state.js";
 
 export type {
@@ -232,6 +237,15 @@ function reduceContent(data: EveMessageData, event: EveAgentReducerEvent): EveMe
       // A task call's result is only its start receipt, which can arrive after the task settled.
       if (conversationProjection(data).calls[event.data.result.callId]?.taskId !== undefined)
         return data;
+      // A retried model-call attempt's calls never ran; the replacement attempt re-requests them.
+      if (event.data.error?.code === "MODEL_CALL_ATTEMPT_RETRIED") {
+        return updateAssistantMessage(data, event.data.turnId, (message) => ({
+          ...message,
+          parts: message.parts.filter(
+            (part) => part.type !== "dynamic-tool" || part.toolCallId !== event.data.result.callId,
+          ),
+        }));
+      }
       const existing = findToolPart(data, event.data.result.callId);
       const descriptor = normalizeActionResult(event.data.result);
       const succeeded =
@@ -363,7 +377,10 @@ function reduceContent(data: EveMessageData, event: EveAgentReducerEvent): EveMe
       return updateAssistantMessage(data, event.data.turnId, (message) => ({
         ...message,
         metadata: { ...message.metadata, status: "complete" },
-        parts: removeStreamingToolParts(closeStreamingRuns(message.parts)),
+        parts: removeUnsettledToolParts(
+          closeStreamingRuns(message.parts),
+          conversationProjection(data),
+        ),
       }));
     }
 
@@ -425,8 +442,26 @@ function closeStreamingRuns(
   );
 }
 
-function removeStreamingToolParts(parts: readonly EveMessagePart[]): readonly EveMessagePart[] {
-  return parts.filter((part) => part.type !== "dynamic-tool" || part.state !== "input-streaming");
+/**
+ * Drops tool parts a finished turn left without a result: input that never finished streaming,
+ * and validated requests whose call never ran. A task call outlives its turn, a call awaiting
+ * input still has a pending request, and a call the projection doesn't know keeps its state.
+ */
+function removeUnsettledToolParts(
+  parts: readonly EveMessagePart[],
+  projection: SessionProjection,
+): readonly EveMessagePart[] {
+  return parts.filter((part) => {
+    if (part.type !== "dynamic-tool") return true;
+    if (part.state === "input-streaming") return false;
+    if (part.state !== "input-available") return true;
+    const call = projection.calls[part.toolCallId];
+    return (
+      call === undefined ||
+      call.taskId !== undefined ||
+      reportedCallStatus(projection, call) !== "running"
+    );
+  });
 }
 
 function updateAssistantMessage(

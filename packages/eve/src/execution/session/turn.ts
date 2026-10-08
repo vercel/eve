@@ -63,7 +63,7 @@ export function hasDelegatedCallerContext(serializedContext: Record<string, unkn
 
 const NO_INPUT_CAPABILITY_ERROR_MESSAGE =
   "This session cannot request human input, so it cannot wait for a tool approval or question. " +
-  "Sessions started without `capabilities.requestInput`, such as schedules, must not use approval-gated tools.";
+  "Configure unattended tools with an approval policy that does not require human input.";
 
 export interface SessionExecutionInput {
   readonly capabilities?: SessionCapabilities;

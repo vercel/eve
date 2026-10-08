@@ -32,6 +32,7 @@ import {
 } from "#harness/prompt-cache.js";
 import { estimateRequestEnvelope } from "#harness/request-envelope.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
+import { discardAttempt } from "#harness/session-machine/transitions.js";
 import { activeTurnId } from "#harness/session-machine/view.js";
 import type { Step } from "#harness/step/context.js";
 import {
@@ -149,12 +150,22 @@ export class ModelCaller {
 
   /** Calls the model, retrying transient failures. */
   async call(options: ModelCallOptions): Promise<HarnessStepResult> {
+    // Calls the current attempt announced that haven't received a result yet, by tool name.
+    let unsettledActionToolNames = new Map<string, string>();
     return await runModelCallWithRetries(
-      (attempt) =>
-        this.attempt({
-          ...options,
-          suppressStepStartedEmission: attempt === 1 ? options.suppressStepStartedEmission : true,
-        }),
+      async (attempt) => {
+        if (attempt > 1) {
+          await this.settleRetriedActions(unsettledActionToolNames);
+          unsettledActionToolNames = new Map<string, string>();
+        }
+        return await this.attempt(
+          {
+            ...options,
+            suppressStepStartedEmission: attempt === 1 ? options.suppressStepStartedEmission : true,
+          },
+          unsettledActionToolNames,
+        );
+      },
       {
         canRetry: () => this.compactionFailure === undefined,
         sessionId: this.step.session.sessionId,
@@ -162,6 +173,19 @@ export class ModelCaller {
       },
       this.input.generation.signal,
     );
+  }
+
+  /**
+   * Answers the calls a discarded attempt announced, so none stays open once the replacement
+   * attempt starts. The replacement re-requests whatever the model still wants to run.
+   */
+  private async settleRetriedActions(unsettled: Map<string, string>): Promise<void> {
+    // One call per transition: publishing isn't atomic, so a publish that fails partway leaves
+    // only the calls it didn't reach for the next attempt to settle.
+    for (const [callId, toolName] of unsettled) {
+      await this.step.apply(discardAttempt(this.step.view(), { calls: [{ callId, toolName }] }));
+      unsettled.delete(callId);
+    }
   }
 
   /** A failed compaction fails the step, whatever recovery the call attempted. */
@@ -283,7 +307,10 @@ export class ModelCaller {
     return await this.prepare(options);
   }
 
-  private async attempt(options: ModelCallOptions): Promise<HarnessStepResult> {
+  private async attempt(
+    options: ModelCallOptions,
+    unsettledActionToolNames: Map<string, string>,
+  ): Promise<HarnessStepResult> {
     const { step } = this;
     const { generation, model } = this.input;
     const tools = await this.compact(options, await this.prepare(options));
@@ -371,7 +398,13 @@ export class ModelCaller {
       const result =
         step.emit === undefined
           ? await this.generate(agent, callMessages, hooks.stepResult)
-          : await this.stream(agent, callMessages, hooks.stepResult, tools);
+          : await this.stream(
+              agent,
+              callMessages,
+              hooks.stepResult,
+              tools,
+              unsettledActionToolNames,
+            );
       await attempt?.complete();
       return result;
     } catch (error) {
@@ -388,6 +421,7 @@ export class ModelCaller {
     messages: ModelMessage[],
     stepResultPromise: Promise<HarnessStepResult>,
     tools: ModelTools,
+    unsettledActionToolNames: Map<string, string>,
   ): Promise<HarnessStepResult> {
     const { step } = this;
     const { generation } = this.input;
@@ -407,6 +441,7 @@ export class ModelCaller {
         excludedActionToolNames,
         hidesHeldText: this.input.hidesHeldText && workingTaskIds(step.session).length > 0,
         tools: tools.presentationTools,
+        unsettledActionToolNames,
       },
     );
     throwIfTurnAborted(step.config.abortSignal);

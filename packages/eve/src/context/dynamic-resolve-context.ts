@@ -12,6 +12,7 @@ import {
 } from "#context/keys.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getAdapterKind } from "#channel/adapter.js";
+import { readSessionSchedule } from "#context/session-schedule.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
 
 type ReadableContext = Pick<AlsContext, "get">;
@@ -38,6 +39,7 @@ export function buildResolveContext(
     model: effectiveModel === null ? null : { id: effectiveModel.reference.id },
     session: {
       id: sessionId,
+      schedule: readSessionSchedule(ctx),
       auth: {
         current: currentAuth,
         initiator: initiatorAuth,

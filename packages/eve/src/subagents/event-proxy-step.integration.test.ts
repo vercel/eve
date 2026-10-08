@@ -181,6 +181,70 @@ describe("proxied stream hooks", () => {
     ]);
   });
 
+  const at = { sequence: 7, stepIndex: 2, turnId: "child-turn" };
+  it.each([
+    [
+      "settles it as a responder",
+      {
+        data: {
+          ...at,
+          outcome: "approved",
+          requestId: "approval-1",
+          responderPrincipalId: "alice",
+        },
+        type: "approval.settled",
+      },
+    ],
+    [
+      "resolves it",
+      {
+        data: {
+          ...at,
+          resolutions: [{ kind: "tool-approval", outcome: "approved", requestId: "approval-1" }],
+        },
+        type: "input.resolved",
+      },
+    ],
+  ] as const)("closes a relayed approval when the child %s", async (_, event) => {
+    const f = fixture();
+    const approval = {
+      action: { callId: "deploy-1", input: {}, kind: "tool-call" as const, toolName: "deploy" },
+      kind: "tool-approval" as const,
+      options: [
+        { id: "approve", label: "Approve" },
+        { id: "cancel", label: "Cancel" },
+      ],
+      prompt: "Approve deploy?",
+      requestId: "approval-1",
+    };
+    const relayed = await emitProxiedSubagentEvent({
+      ...f,
+      hookPayload: { ...f.hookPayload, event: { ...f.hookPayload.event, requests: [approval] } },
+    });
+    const parked = relayed.sessionState.snapshot.session;
+    const answer = { payload: { message: "approve" }, resolveMessage: true };
+    expect(routeDeliverPayload({ ...answer, state: parked.state }).forChildren).toHaveLength(1);
+
+    const closed = await emitProxiedSubagentEvent({
+      ...f,
+      durableSession: parked,
+      hookPayload: {
+        callId: "child-call",
+        childSessionId: "child-session",
+        event,
+        kind: "subagent-authorization-event",
+        subagentName: "child",
+      },
+    });
+    expect(f.events.at(-1)).toMatchObject({ data: event.data, type: event.type });
+    const after = closed.sessionState.snapshot.session.state;
+    expect(getProxyInputRequests(after).has("approval-1")).toBe(false);
+    expect(routeDeliverPayload({ ...answer, state: after })).toMatchObject({
+      forChildren: [],
+      forSelf: { message: "approve" },
+    });
+  });
+
   it("forwards a remote session's own input without asking on its channel", async () => {
     const f = fixture();
     f.ctx.set(SessionCallbackKey, {

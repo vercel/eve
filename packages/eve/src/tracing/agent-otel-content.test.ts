@@ -6,6 +6,7 @@ import {
   genAiInputMessagesAttribute,
   genAiOutputMessagesAttribute,
   genAiSystemInstructionsAttribute,
+  genAiToolDefinitionsAttribute,
   toolResultsContentAttribute,
 } from "#tracing/agent-otel-content.js";
 
@@ -192,6 +193,47 @@ describe("GenAI message attributes", () => {
         role: "assistant",
       },
     ]);
+  });
+});
+
+describe("genAiToolDefinitionsAttribute", () => {
+  it("maps AI SDK input schemas to GenAI parameters", () => {
+    expect(
+      genAiToolDefinitionsAttribute([
+        {
+          description: "Get the current weather.",
+          inputSchema: {
+            properties: { city: { type: "string" } },
+            required: ["city"],
+            type: "object",
+          },
+          name: "get_weather",
+        },
+      ]),
+    ).toBe(
+      '[{"name":"get_weather","description":"Get the current weather.","parameters":{"properties":{"city":{"type":"string"}},"required":["city"],"type":"object"}}]',
+    );
+  });
+
+  it("drops trailing definitions to keep oversized content valid JSON", () => {
+    const attribute = genAiToolDefinitionsAttribute([
+      { inputSchema: { type: "object" }, name: "first" },
+      {
+        description: "x".repeat(CONTENT_ATTRIBUTE_LIMIT),
+        inputSchema: { type: "object" },
+        name: "oversized",
+      },
+      { inputSchema: { type: "object" }, name: "last" },
+    ]);
+
+    expect(attribute).toBeDefined();
+    expect(attribute!.length).toBeLessThanOrEqual(CONTENT_ATTRIBUTE_LIMIT);
+    expect(JSON.parse(attribute!)).toEqual([{ name: "first", parameters: { type: "object" } }]);
+  });
+
+  it("returns undefined when no tool definitions are available", () => {
+    expect(genAiToolDefinitionsAttribute([])).toBeUndefined();
+    expect(genAiToolDefinitionsAttribute(undefined)).toBeUndefined();
   });
 });
 

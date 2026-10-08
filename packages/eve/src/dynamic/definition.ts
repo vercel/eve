@@ -53,6 +53,7 @@ export interface DynamicResolveContext {
   readonly session: {
     readonly id: string;
     readonly auth: SessionAuth;
+    readonly schedule?: import("#context/session-schedule.js").SessionSchedule;
   };
   /** Channel metadata for the request that triggered this resolve. */
   readonly channel: {

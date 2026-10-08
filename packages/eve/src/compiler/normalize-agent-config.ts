@@ -48,6 +48,7 @@ export async function compileAgentConfig(
           displayPath: configModulePath,
           kind: "agent config",
           loadNamespace: createCompiledBindingNamespaceLoader({
+            appRoot: manifest.appRoot,
             bindings: { [configModule.sourceId]: options.binding },
             registries: context.registries,
           }),

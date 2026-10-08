@@ -176,8 +176,8 @@ receive only the projected text.
 
 ### Durable waits
 
-Every tool call finishes before its turn continues. The definition decides whether the executor
-can wait durably while the call is pending:
+A tool call with an `execute` entry point finishes before the model continues. The definition
+decides whether the executor can wait durably while the call is pending:
 
 | Definition           | Durable waits inside `execute`                           | Result delivered to the model      |
 | -------------------- | -------------------------------------------------------- | ---------------------------------- |
@@ -191,11 +191,15 @@ the call returns a receipt at once, and the workflow's output reaches the model 
 [resumable task](/docs/tools/workflows#resumable-tasks-serve), which the model can send more calls
 by its `taskId`.
 
+Built-in, declared local, and remote subagent tools run as resumable tasks: each call returns a
+receipt at once, and the child's reply reaches the model later in a `task.result` message.
+Inside an authored workflow, awaiting a [`ctx.agent` session's `response.result()`](/docs/tools/workflows#delegate-work-ctxagent)
+waits for the child's turn to end instead.
+
 The `TaskExec` argument and `task.postMessage` have been removed. Return the result. In a workflow
 body, keep values needed after a wait in local variables; workflow replay reconstructs them across
 durable waits. Use [`ctx.ask`](/docs/tools/workflows#ask-a-human-ctxask) when the body needs an
-answer from the human. Built-in, declared local, and remote subagent calls also block: each call
-returns the child's reply as its tool result.
+answer from the human.
 
 ### Yield and return
 

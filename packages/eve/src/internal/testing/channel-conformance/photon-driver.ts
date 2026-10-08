@@ -104,6 +104,7 @@ export function photonDriver(): ChannelDriver {
 
   return {
     name: "photon",
+    personId: PERSON,
     capabilities: ["attachments", "text-replies"],
     surface: "private",
     createChannel(record) {
@@ -172,7 +173,7 @@ export function photonDriver(): ChannelDriver {
     dispose() {
       restore?.();
     },
-    message: webhook,
+    message: (text, _person, files) => webhook(text, files),
     findOptions(call, prompt) {
       const text = postedText(call);
       if (text === undefined || !text.includes(prompt)) return undefined;

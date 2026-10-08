@@ -56,7 +56,11 @@ function expectFiveReviewers(started: EveEvalTurn) {
 
 function expectReviewSummary(turn: EveEvalTurn) {
   assert(turn.message?.trim(), "parent reports the completed reviews");
-  turn.event("step.completed", { data: { finishReason: "stop" }, count: 1 });
+  // The task prompt lets the parent tell the person the reviews have started before the summary.
+  turn.event("step.completed", {
+    data: { finishReason: "stop" },
+    count: (count) => count === 1 || count === 2,
+  });
   turn.notEvent("compaction.completed");
 }
 

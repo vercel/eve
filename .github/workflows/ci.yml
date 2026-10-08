@@ -187,7 +187,7 @@ jobs:
       - name: Build framework fixtures against the workspace eve dist
         run: pnpm test:framework-fixtures
 
-  test-browser:
+  test-webchat:
     runs-on: ubuntu-latest
 
     steps:
@@ -211,8 +211,8 @@ jobs:
       - name: Install Chromium
         run: pnpm --filter eve exec playwright-core install --with-deps chromium-headless-shell
 
-      - name: Run browser tests
-        run: pnpm test:browser
+      - name: Run web chat tests
+        run: pnpm test:webchat
 
   test-templates:
     runs-on: ubuntu-latest

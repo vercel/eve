@@ -902,6 +902,68 @@ describe("registry commands", () => {
     });
   });
 
+  it("returns setup blocked on a prerequisite after install as unfinished, not failed", async () => {
+    const fake = createFakePrompter();
+    const prerequisite = {
+      kind: "command" as const,
+      code: "vercel-login",
+      message: "The Vercel CLI is not logged in.",
+      command: "vercel login",
+    };
+    const runSetup = vi.fn(async () => ({
+      kind: "blocked" as const,
+      blocker: { status: "prerequisite_required" as const, prerequisite },
+    }));
+    getRegistryItems.mockResolvedValue([
+      {
+        meta: { eve: { setup: [{ package: "eve", bin: "eve", args: ["integration", "setup"] }] } },
+      },
+    ]);
+
+    await expect(
+      installRegistryItem(
+        "/project",
+        "connection/notion",
+        { prompter: fake.prompter, silent: true },
+        { loadSetupCommandRunner: async () => runSetup },
+      ),
+    ).resolves.toEqual({
+      output: [],
+      setupIncomplete: {
+        resumeCommand: "eve add connection/notion --skip-install",
+        reason: "The Vercel CLI is not logged in.",
+        prerequisite,
+      },
+    });
+    expect(addRegistryItems).toHaveBeenCalled();
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("keeps the CLI's setup failure message and resume hint", async () => {
+    const logger = createLogger();
+    const runSetup = vi.fn(async () => {
+      throw new Error("vercel connect list exited with code 1.");
+    });
+    getRegistryItems.mockResolvedValue([
+      {
+        meta: { eve: { setup: [{ package: "@acme/slack", bin: "eve-slack", args: ["setup"] }] } },
+      },
+    ]);
+
+    await runAddCommand(
+      logger,
+      "/project",
+      "channel/slack",
+      { yes: true },
+      { loadSetupCommandRunner: async () => runSetup },
+    );
+
+    expect(logger.errors).toEqual([
+      "vercel connect list exited with code 1. Try again with `eve add channel/slack --skip-install`.",
+    ]);
+    expect(process.exitCode).toBe(1);
+  });
+
   it("runs setup directly without installing the item", async () => {
     const logger = createLogger();
     const runSetup = vi.fn(async () => ({ kind: "completed" as const, facts: [] }));
