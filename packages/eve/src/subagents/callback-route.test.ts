@@ -133,7 +133,7 @@ describe("session callback route", () => {
     ]);
   });
 
-  it.each(["approval.candidate", "approval.settled"])(
+  it.each(["approval.candidate", "approval.settled", "input.resolved"])(
     "rejects a malformed %s callback before it reaches the parent channel",
     async (type) => {
       const response = await handleSessionCallbackRequest(
@@ -154,19 +154,21 @@ describe("session callback route", () => {
     },
   );
 
-  it("relays a well-formed approval settlement", async () => {
-    resumeHookMock.mockResolvedValue(undefined);
-    const event = {
+  const at = { sequence: 0, stepIndex: 1, turnId: "child-turn" };
+  it.each([
+    {
       type: "approval.settled",
+      data: { ...at, outcome: "approved", requestId: "approval-1", responderPrincipalId: "alice" },
+    },
+    {
+      type: "input.resolved",
       data: {
-        outcome: "approved",
-        requestId: "approval-1",
-        responderPrincipalId: "alice",
-        sequence: 0,
-        stepIndex: 1,
-        turnId: "child-turn",
+        ...at,
+        resolutions: [{ kind: "tool-approval", outcome: "approved", requestId: "approval-1" }],
       },
-    };
+    },
+  ])("relays a well-formed $type", async (event) => {
+    resumeHookMock.mockResolvedValue(undefined);
     const payload = {
       callId: "call-2",
       childSessionId: "remote-session",

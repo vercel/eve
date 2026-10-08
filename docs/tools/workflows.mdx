@@ -107,10 +107,12 @@ channel or schedule, use the [channel operations](/docs/channels/custom#channel-
 or [schedule handler](/docs/schedules#handler-form-run) APIs.
 
 Workflow imports resolve `paths` aliases from your application's `tsconfig.json` or
-`jsconfig.json`, including when the application is a workspace package. eve includes only
-workflow and step modules reachable from the agent's runtime modules. Unrelated workflows
-in the host application stay outside the agent bundle. An unresolved workflow import fails
-the build with the missing import in the error.
+`jsconfig.json`, including when the application is a workspace package. A member of an
+[agent workspace](/docs/concepts/project-structure#several-root-agents) can also import
+workflow and step modules from the shared root package, such as a root `lib/` directory.
+eve includes only workflow and step modules reachable from the agent's runtime modules.
+Unrelated workflows in the host application stay outside the agent bundle. An unresolved
+workflow import fails the build with the missing import in the error.
 
 ### Add a runtime-generated workflow tool
 
@@ -345,10 +347,14 @@ described in [Tasks](/docs/tools/tasks). What differs:
   share one identity, so don't keep per-person data for them. Any caller in the session can
   continue or cancel the task; see [Tasks](/docs/tools/tasks#ownership-and-limits).
 - **Agents belong to the call that opened them:** a session the body opens with `ctx.agent` while
-  serving a call is that call's child. Its `session.parent` names the call's `callId` and turn, and
-  its trace continues from the call's tool span. The session keeps that lineage for its later
-  messages, even after the task receives another call. Auth belongs to each message instead: a
-  message carries the auth of the call being served when it's sent.
+  serving a call is that call's child. Its `session.parent` names the call's `callId` and turn.
+  The first turn of a local child uses the call's tool span as its parent when trace context is
+  available. A remote child starts its own trace; its first turn links to the call's tool span
+  with `eve.link.type=agent.dispatch` when trace context is available. Later child turns start new
+  traces. Parent session lineage stays tied to the opening call, even after the task receives
+  another call; a remote receiver accepts that lineage only from a trusted forwarder. Each message
+  uses the auth of the call being served; remote identity follows the
+  [forwarding rules](../guides/remote-agents#forwarding-the-caller-identity).
 - **Results:** `ctx.reply(output)` settles every call received so far with `output`, all at once.
   Each settled call reports its own `task.settled`, and the model receives the reply once. The task
   then goes idle until its next call. A reply with
@@ -539,9 +545,13 @@ client's `MessageResult` fields, plus `error` when the turn failed:
 | `error`   | `{ message }` with the reason the turn failed, present only when `status` is `"failed"`.                                                                                                                            |
 
 Every `ctx.agent(name)` call returns a new session that only the workflow run can address. The model
-does not see it; it sees what the tool returns. The session runs as the caller's principal with the
-caller's capabilities, and a person answers its questions and sign-ins at the root session, as for
-any subagent. The session ends when the run finishes, which cancels any turn still running.
+does not see it; it sees what the tool returns. A local child runs as the caller's principal with the
+caller's capabilities. A remote child does not inherit the caller's session principal by default;
+the receiving deployment determines its identity from the outbound request. To forward the caller's
+identity, set `forwardPrincipal: true` on the remote agent and configure the receiver's
+`trustedForwarders` (see [Forwarding the caller identity](../guides/remote-agents#forwarding-the-caller-identity)).
+A person answers the child's questions and sign-ins at the root session, as for any subagent.
+The session ends when the run finishes, which cancels any turn still running.
 
 The parent stream announces each session with `agent.started`, which carries the `callId` and
 `turnId` of the tool call the run is serving when it opens the session (for a `serve` task, the

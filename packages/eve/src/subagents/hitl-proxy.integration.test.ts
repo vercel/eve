@@ -273,6 +273,7 @@ describe("subagent HITL proxy → Slack-style text-approve regression (Finding #
           childContinuationToken: "subagent:parent:call-1",
           event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
           kind: "tool-approval",
+          reply: { options: approvalRequest.options },
         },
       ],
     ]);
@@ -344,17 +345,8 @@ describe("subagent HITL proxy → Slack-style text-approve regression (Finding #
         payload: {
           inputResponses: [{ optionId: "approve", requestId: "req-approve-1" }],
         },
-        resolved: {
-          event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
-          resolutions: [
-            {
-              kind: "tool-approval",
-              outcome: "approved",
-              requestId: "req-approve-1",
-              response: { optionId: "approve", requestId: "req-approve-1" },
-            },
-          ],
-        },
+        // The child decides the approval, so it stays open here until the child settles it.
+        resolved: { event: { sequence: 0, stepIndex: 0, turnId: "turn_0" }, resolutions: [] },
       },
     ]);
   });

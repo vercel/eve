@@ -31,7 +31,7 @@ import type { HandleEventFn } from "#harness/types.js";
 import type { PersistedDynamicToolMetadata } from "#context/dynamic-tool-metadata.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
-import type { SandboxAccess } from "#sandbox/state.js";
+import type { SandboxAccess, SandboxSessionEndReason } from "#sandbox/state.js";
 import type { HistoryViewProjector } from "#shared/history-view.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
@@ -103,8 +103,10 @@ export interface LocalDevRequestProvenance {
 export const LocalDevRequestKey = new ContextKey<LocalDevRequestProvenance>(
   "eve.internal.localDevRequest",
 );
+export const OccurrenceIdKey = new ContextKey<string>("eve.scheduleOccurrenceId");
 /** Authored schedule whose dispatch created this session. */
 export const ScheduleIdKey = new ContextKey<string>("eve.scheduleId");
+export const ScheduleInstanceKey = new ContextKey<string>("eve.scheduleInstance");
 /** Display title derived from the session's initial input. */
 export const SessionTitleKey = new ContextKey<string>("eve.sessionTitle");
 export const ChannelDeliveryKey = new ContextKey<ChannelDeliveryMetadata>("eve.channelDelivery");
@@ -169,6 +171,9 @@ export const LegacyRemoteAgentCallerKey = new ContextKey<LegacyRemoteAgentCaller
 
 export const SessionKey = new ContextKey<Session>("eve.session");
 export const SandboxKey = new ContextKey<SandboxAccess>("eve.sandbox");
+export const SandboxTerminalCleanupKey = new ContextKey<
+  (reason: SandboxSessionEndReason) => Promise<void>
+>("eve.internal.sandboxTerminalCleanup");
 export const HandleEventKey = new ContextKey<HandleEventFn>("eve.internal.handleEvent");
 
 // ---------------------------------------------------------------------------

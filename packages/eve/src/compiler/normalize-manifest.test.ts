@@ -22,6 +22,9 @@ import { defineMcpClientConnection } from "#public/definitions/connections/mcp.j
 import { defineHook } from "#public/definitions/hook.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
+import { defineDynamicSchedules } from "#public/schedules/subscription.js";
+import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
+import { z } from "#compiled/zod/index.js";
 import { defineSkill } from "#public/definitions/skill.js";
 import { resolveAgent } from "#runtime/resolve-agent.js";
 import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
@@ -400,6 +403,76 @@ describe("compileAgentManifest source graph", () => {
     expect(order).toContain("tool");
   });
 
+  it("materializes schedule factories once per compile", async () => {
+    const staticFactory = vi.fn(() =>
+      defineSchedule({ cron: "0 9 * * *", markdown: "Run the report." }),
+    );
+    const sourceRegistry = registry([
+      {
+        logicalPath: "agent.ts",
+        loadNamespace: async () => ({ default: defineAgent({ model: "openai/gpt-5.4" }) }),
+      },
+      {
+        logicalPath: "schedules/daily.ts",
+        loadNamespace: async () => ({ default: staticFactory }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] });
+    expect(compiled.schedules).toHaveLength(1);
+    expect(staticFactory).toHaveBeenCalledOnce();
+  });
+
+  it("keeps nested collection identity but flattens generated management tool names", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "schedules/billing/requests.ts",
+        loadNamespace: async () => ({
+          default: defineDynamicSchedules({
+            provider: inMemoryScheduleProvider(),
+            inputSchema: z.object({ task: z.string() }),
+            auth: () => null,
+            run: async () => {},
+          }),
+        }),
+      },
+    ]);
+    const compiled = await compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] });
+    expect(compiled.scheduleCollections).toContainEqual(
+      expect.objectContaining({ name: "billing/requests" }),
+    );
+    const wrapper = compiled.dynamicTools.find(
+      (tool) => tool.logicalPath === "tools/schedule__billing-requests.ts",
+    )!;
+    expect(wrapper).toMatchObject({ slug: "schedule__billing-requests" });
+    const moduleMap = await createProgrammaticCompiledModuleMap(compiled, [
+      frameworkAgentSourceRegistry,
+      sourceRegistry,
+    ]);
+    const namespace = moduleMap.nodes.__root__!.modules[wrapper.sourceId]!;
+    const tools = await (namespace.default as ReturnType<typeof defineDynamic>).events[
+      "turn.started"
+    ]!(undefined, {
+      model: null,
+      session: { id: "session", auth: { current: null, initiator: null } },
+      channel: {},
+      messages: [],
+    });
+    expect(Object.keys(tools as object).sort()).toEqual(
+      ["create", "delete", "disable", "enable", "get", "invoke", "list"].map(
+        (operation) => `schedule__billing-requests__${operation}`,
+      ),
+    );
+    const entries = tools as Record<string, import("#tools/dynamic.js").DynamicToolEntry>;
+    expect(
+      entries["schedule__billing-requests__create"]!.label?.start({ name: "daily-digest" }),
+    ).toBe("Create schedule: daily-digest");
+    expect(entries["schedule__billing-requests__list"]!.label?.start({})).toBe("List schedules");
+    expect(
+      entries["schedule__billing-requests__delete"]!.label?.start({ name: "daily-digest" }),
+    ).toBe("Delete schedule: daily-digest");
+  });
+
   it("classifies compile and runtime usage from normalized authored semantics", async () => {
     const sourceRegistry = registry([
       {
@@ -525,7 +598,7 @@ describe("compileAgentManifest source graph", () => {
       "instructions/dynamic.ts": { compile: true, runtimeEntry: true },
       "instructions/static.ts": { compile: true, runtimeEntry: false },
       "schedules/handler.ts": { compile: true, runtimeEntry: true },
-      "schedules/prompt.ts": { compile: true, runtimeEntry: false },
+      "schedules/prompt.ts": { compile: true, runtimeEntry: true },
       "skills/dynamic.ts": { compile: true, runtimeEntry: true },
       "skills/static.ts": { compile: true, runtimeEntry: false },
       "tools/dynamic.ts": { compile: true, runtimeEntry: true },

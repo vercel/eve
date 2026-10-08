@@ -7,6 +7,7 @@ import type {
 } from "#channel/types.js";
 import type { LocalDevRequestProvenance } from "#context/keys.js";
 import { STUB_CONTEXT_KEY, type StubScope } from "#tool-stubs/types.js";
+import { readSerializedSessionSchedule, type SessionSchedule } from "#context/session-schedule.js";
 import type { DynamicSubagentSelections } from "#execution/agent-sessions/target.js";
 import type { PreparedCoordinationDispatch } from "#execution/coordination-dispatch-shared.js";
 import {
@@ -40,6 +41,7 @@ export interface AgentSessionContext {
   readonly bundle: AgentSessionBundle;
   /** Forwarded unchanged, so a session asks a person only when its caller can. */
   readonly capabilities?: SessionCapabilities;
+  readonly schedule?: SessionSchedule;
   readonly channelMetadata?: ChannelInstrumentationProjection;
   readonly conversation?: ConversationContext;
   /** Dynamic agents the calling turn selected, by node id. */
@@ -116,6 +118,7 @@ export function captureAgentSessionContext(
       source: serializeDurableCompiledArtifactsSource(caller.bundle.compiledArtifactsSource),
     },
     capabilities: caller.capabilities,
+    schedule: readSerializedSessionSchedule(caller.serializedContext),
     channelMetadata: caller.channelMetadata,
     conversation: caller.inheritedConversation,
     dynamicSelections: caller.dynamicSubagentSelections,

@@ -238,7 +238,7 @@ describe("toProxyInputRequestEntries", () => {
     );
   });
 
-  it("records shared batch and approval metadata on every route", () => {
+  it("records batch, approval, and reply metadata on every route", () => {
     const requests = [
       createRequest("question-1", "question"),
       createRequest("approval-1", "tool-approval"),
@@ -263,7 +263,7 @@ describe("toProxyInputRequestEntries", () => {
           childContinuationToken: "child-a",
           event: { sequence: 3, stepIndex: 2, turnId: "turn-1" },
           kind: "question",
-          question: {},
+          reply: {},
         },
       ],
       [
@@ -276,6 +276,7 @@ describe("toProxyInputRequestEntries", () => {
           childContinuationToken: "child-a",
           event: { sequence: 3, stepIndex: 2, turnId: "turn-1" },
           kind: "tool-approval",
+          reply: {},
         },
       ],
     ]);

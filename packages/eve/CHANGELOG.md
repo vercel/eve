@@ -1,5 +1,21 @@
 # eve
 
+## 0.74.0
+
+### Minor Changes
+
+- bc101b5: Add experimental `defineDynamicSchedules` with direct operation tools, optional `preparePayload` creation preparation, top-level per-operation approval, and creator-bound execution. Create approval receives prepared data and rejects changed results before writing; `ctx.session.schedule` exposes scheduled-turn provenance without auth attributes.
+
+### Patch Changes
+
+- 51648e3: Manual compaction now resolves step-scoped dynamic models before summarizing a session.
+- 880dd8b: Record offered tool definitions on GenAI chat spans and expose them to lifecycle handlers when input capture is enabled.
+- f528669: Settle tool calls when a model call is retried and remove unresolved tool parts when a turn ends.
+- 8751775: The experimental Vercel schedule provider includes Schedules SDK alpha.11 in the published package without adding a runtime dependency. Provider requests receive the operation's abort signal, and failed disable calls after inactive creation report that the schedule may remain active.
+- b9470fe: `Shift+Enter` now inserts a newline in the `eve dev` prompt in Warp, which sends a bare line feed for it. `Ctrl+J` inserts a newline too, instead of sending the message.
+- 8751775: Schedule subscriptions default to Vercel Schedules in production and process-local storage under `eve dev`, so an explicit `provider` is no longer required. Pass a provider to override the backend, or use `vercelScheduleProvider` from `eve/experimental/schedules/vercel` to customize the Vercel endpoint.
+- 0b5bb5b: Workflow tools in an `agents/<name>/` workspace member now compile with the workflow ID that the deployment registers, so calls no longer fail with "is not registered as a workflow in this deployment". Members can also import workflow and step modules from the shared root package, such as `lib/`, and `eve dev` rebuilds when shared modules imported from outside the agent directory change.
+
 ## 0.73.0
 
 ### Minor Changes

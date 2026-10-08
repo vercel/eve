@@ -42,6 +42,7 @@ describe("registryCommandOutcome", () => {
             {
               kind: "incomplete",
               title: "channel/slack",
+              address: "channel/slack",
               resumeCommand: "eve add channel/slack --skip-install",
             },
           ],
@@ -54,6 +55,27 @@ describe("registryCommandOutcome", () => {
       message:
         "Finish with `eve add channel/slack --skip-install`\n" +
         "⚠ Wait for the Slack request to expire before retrying.",
+    });
+  });
+
+  it("reports setup that failed after install as unfinished, with its reason", () => {
+    expect(
+      registryCommandOutcome({
+        outcomes: [
+          {
+            kind: "incomplete",
+            title: "connection/notion",
+            address: "connection/notion",
+            resumeCommand: "eve add connection/notion --skip-install",
+            reason: "The Vercel CLI is not logged in.",
+          },
+        ],
+      }),
+    ).toEqual({
+      failed: false,
+      summary: "Added connection/notion · setup not finished",
+      message:
+        "The Vercel CLI is not logged in.\nFinish with `eve add connection/notion --skip-install`",
     });
   });
 

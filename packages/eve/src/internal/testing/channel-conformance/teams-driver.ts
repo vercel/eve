@@ -145,6 +145,7 @@ export function teamsDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
 
   return {
     name: personal ? "teams-dm" : "teams",
+    personId: PERSON.id,
     capabilities: personal
       ? ["attachments", "buttons", "text-replies"]
       : ["attachments", "another-person", "buttons", "text-replies"],
@@ -154,14 +155,15 @@ export function teamsDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
         api: { fetch: recordingFetch(record, decode) },
         credentials: { tokenProvider: () => "test-token", webhookVerifier: () => true },
       }),
-    message: (text, files = []) =>
+    message: (text, person, files = []) =>
       personal
-        ? activity({ attachments: attached(files), text, type: "message" })
+        ? activity({ attachments: attached(files), from: PEOPLE[person], text, type: "message" })
         : // In a channel the default policy hears only mentions, so a person mentions the bot
           // each time, on its own line so the test model's line-based directives still read it.
           activity({
             attachments: attached(files),
             entities: [{ mentioned: BOT, text: MENTION, type: "mention" }],
+            from: PEOPLE[person],
             text: `${text}\n${MENTION}`,
             textFormat: "xml",
             type: "message",

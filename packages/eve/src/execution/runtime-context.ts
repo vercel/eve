@@ -13,9 +13,11 @@ import {
   ConversationIdKey,
   DynamicSubagentAgentConfigKey,
   InitiatorAuthKey,
+  OccurrenceIdKey,
   ParentSessionKey,
   ParentTraceContextKey,
   ScheduleIdKey,
+  ScheduleInstanceKey,
   SessionCallbackKey,
   LegacyRemoteAgentCallerKey,
   SessionTitleKey,
@@ -67,6 +69,9 @@ export function buildRunContext(input: {
     ctx.set(ContinuationTokenKey, run.continuationToken);
     ctx.set(ContinuationHookTokensKey, [run.continuationToken]);
   }
+  const occurrenceId =
+    run.schedule?.occurrenceId ?? contextStorage.getStore()?.get(OccurrenceIdKey);
+  if (occurrenceId !== undefined) ctx.set(OccurrenceIdKey, occurrenceId);
   ctx.set(AuthKey, auth);
   if (run.toolStubs !== undefined) ctx.set(ToolStubsKey, run.toolStubs);
   if (run.initiatorAuth !== undefined || run.input.message !== undefined) {
@@ -85,7 +90,9 @@ export function buildRunContext(input: {
     ctx.set(ChannelRequestIdKey, run.requestId);
   }
 
-  const scheduleId = contextStorage.getStore()?.get(ScheduleIdKey);
+  const instance = run.schedule?.instance ?? contextStorage.getStore()?.get(ScheduleInstanceKey);
+  if (instance !== undefined) ctx.set(ScheduleInstanceKey, instance);
+  const scheduleId = run.schedule?.definition ?? contextStorage.getStore()?.get(ScheduleIdKey);
   if (scheduleId !== undefined) {
     ctx.set(ScheduleIdKey, scheduleId);
   }

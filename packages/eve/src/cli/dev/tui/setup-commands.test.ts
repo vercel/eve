@@ -76,14 +76,13 @@ function run(input: {
   agentRoot?: string;
   useDefaultPrompter?: boolean;
   upgradeChoice?: "upgrade" | "later";
+  loginChoice?: "login" | "later";
   withExclusiveTerminal?: TuiSetupCommandInput["withExclusiveTerminal"];
   initialRegistryAddress?: string;
   initialLoginConnection?: TuiSetupCommandInput["initialLoginConnection"];
 }) {
-  const { upgradeChoice } = input;
-  const fake = createFakePrompter(
-    upgradeChoice === undefined ? {} : { single: () => upgradeChoice },
-  );
+  const choice = input.upgradeChoice ?? input.loginChoice;
+  const fake = createFakePrompter(choice === undefined ? {} : { single: () => choice });
   const commandInput: TuiSetupCommandInput = {
     command: input.command,
     appRoot: APP_ROOT,
@@ -209,6 +208,74 @@ describe("runTuiSetupCommand", () => {
     );
   });
 
+  describe("setup blocked on a logged-out Vercel CLI", () => {
+    const blocked = registryResult({
+      outcomes: [
+        {
+          kind: "incomplete",
+          title: "connection/notion",
+          address: "connection/notion",
+          resumeCommand: "eve add connection/notion --skip-install",
+          reason: "The Vercel CLI is not logged in.",
+          prerequisite: {
+            kind: "command",
+            code: "vercel-login",
+            message: "The Vercel CLI is not logged in.",
+            command: "vercel login",
+          },
+        },
+      ],
+    });
+
+    it("logs in to the Vercel CLI and resumes only the item's setup", async () => {
+      const runRegistryFlow = vi
+        .fn<TuiSetupFlows["runRegistryFlow"]>()
+        .mockResolvedValueOnce(blocked)
+        .mockResolvedValueOnce(
+          registryResult({
+            outcomes: [{ kind: "installed", title: "connection/notion", facts: [], output: [] }],
+          }),
+        );
+      const runLoginFlow = vi.fn<NonNullable<TuiSetupFlows["runLoginFlow"]>>(async () => ({
+        kind: "logged-in",
+      }));
+
+      const outcome = await run({
+        command: "add",
+        initialRegistryAddress: "connection/notion",
+        flows: fakeFlows({ runRegistryFlow, runLoginFlow }),
+        loginChoice: "login",
+      });
+
+      expect(runLoginFlow).toHaveBeenCalledWith(expect.objectContaining({ appRoot: APP_ROOT }));
+      expect(runRegistryFlow).toHaveBeenLastCalledWith(
+        expect.objectContaining({ initialAddress: "connection/notion", skipInstall: true }),
+      );
+      expect(outcome).toMatchObject({ summary: "Added connection/notion" });
+      expect(outcome.failed).toBeUndefined();
+    });
+
+    it("leaves the item installed with setup unfinished when login is declined", async () => {
+      const runRegistryFlow = vi.fn<TuiSetupFlows["runRegistryFlow"]>(async () => blocked);
+      const runLoginFlow = vi.fn<NonNullable<TuiSetupFlows["runLoginFlow"]>>();
+
+      const outcome = await run({
+        command: "add",
+        initialRegistryAddress: "connection/notion",
+        flows: fakeFlows({ runRegistryFlow, runLoginFlow }),
+        loginChoice: "later",
+      });
+
+      expect(runLoginFlow).not.toHaveBeenCalled();
+      expect(runRegistryFlow).toHaveBeenCalledOnce();
+      expect(outcome).toMatchObject({
+        summary: "Added connection/notion · setup not finished",
+        message:
+          "The Vercel CLI is not logged in.\nFinish with `eve add connection/notion --skip-install`",
+      });
+    });
+  });
+
   it("keeps flow warnings only as notes on the add outcome", async () => {
     const renderer = fakePanelRenderer();
     const runRegistryFlow = vi.fn<TuiSetupFlows["runRegistryFlow"]>(async ({ prompter }) => {
@@ -218,6 +285,7 @@ describe("runTuiSetupCommand", () => {
           {
             kind: "incomplete",
             title: "channel/slack",
+            address: "channel/slack",
             resumeCommand: "eve add channel/slack --skip-install",
           },
         ],

@@ -149,6 +149,7 @@ export async function sendAgentSessionMessageStep(
   const result = await dispatchWorkflowSessionCommand({
     command: {
       auth: input.auth.current,
+      schedule: context.schedule,
       caller: {
         callId: context.parent.callId,
         replyTo: { kind: "hook", token: input.replyTo },
@@ -234,6 +235,7 @@ async function startLocalSession(
     action,
     auth: auth.current,
     capabilities: context.capabilities,
+    schedule: context.schedule,
     channelMetadata: context.channelMetadata,
     continuationKey: input.key,
     graph: bundle.graph,

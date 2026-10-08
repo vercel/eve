@@ -574,7 +574,7 @@ function createHandle(input: {
       createVercelInternalSandboxSession(sandbox),
       createVercelNetworkPolicySetter(sandbox),
     ),
-    async onSessionDelete(options) {
+    async onSandboxDelete(options) {
       await deleteVercelSandbox({
         createOptions: input.createOptions,
         loadDeleteSandboxModule: input.loadDeleteSandboxModule,
@@ -582,7 +582,7 @@ function createHandle(input: {
         signal: options?.abortSignal,
       });
     },
-    async onSessionStop() {
+    async onSandboxStop() {
       await stopVercelSandbox(sandbox);
     },
     async onRuntimeShutdown() {

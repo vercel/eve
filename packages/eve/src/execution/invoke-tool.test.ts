@@ -60,8 +60,8 @@ function sandboxes(options: { readonly startGate?: Promise<void> } = {}) {
       handle: {
         sandbox: sandbox.session,
         onRuntimeShutdown: shutdown,
-        onSessionDelete: deleted,
-        onSessionStop: async () => {},
+        onSandboxDelete: deleted,
+        onSandboxStop: async () => {},
       },
       state: null,
     };
@@ -117,8 +117,8 @@ function keyedSandboxes(options: { readonly failSelector?: () => boolean } = {})
     const handle = {
       sandbox: entry.sandbox.session,
       onRuntimeShutdown: async () => {},
-      onSessionDelete: async () => deleted(sessionId),
-      onSessionStop: stopped,
+      onSandboxDelete: async () => deleted(sessionId),
+      onSandboxStop: stopped,
     };
     handles.push(handle);
     return handle;

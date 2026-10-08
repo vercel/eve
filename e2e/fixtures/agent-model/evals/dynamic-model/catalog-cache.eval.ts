@@ -1,6 +1,6 @@
 import { defineEval } from "eve/evals";
 
-const model = process.env.EVE_E2E_MODEL ?? "openai/gpt-6-sol";
+const model = process.env.EVE_E2E_MODEL ?? "openai/gpt-6.1-sol";
 
 export default defineEval({
   tags: ["real-model"],
