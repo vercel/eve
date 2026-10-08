@@ -76,7 +76,8 @@ export async function parkOnApprovals(
   });
   await step.apply(transition, [...step.session.history, ...(transition.commit ?? [])]);
   if (input.waitsOnRuntime) {
-    if (input.tasks.length > 0) await step.apply(hold(step.view(), { on: "tasks" }));
+    if (input.tasks.some((task) => task.entry.entryPoint === "execute"))
+      await step.apply(hold(step.view(), { on: "tasks" }));
     return { next: null, session: step.session };
   }
   if (hasRunnableQueue(step.view())) return { next: step.runStep, session: step.session };

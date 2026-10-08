@@ -282,7 +282,9 @@ export async function dispatchApprovedWorkflows(step: Step, work: ApprovedWork):
   await step.apply(
     dispatch(step.view(), { approvers: approversOf(approved, step.session.state), tasks }),
   );
-  await step.apply(hold(step.view(), { on: "tasks" }));
+  if (tasks.some((task) => task.entry.entryPoint === "execute")) {
+    await step.apply(hold(step.view(), { on: "tasks" }));
+  }
   return true;
 }
 
