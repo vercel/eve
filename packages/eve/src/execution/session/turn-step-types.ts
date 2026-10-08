@@ -39,7 +39,8 @@ export interface TurnStepInput {
   readonly history: HarnessModelMessage[];
 }
 
-interface DurableStepResultFields {
+/** The session state every step result carries. */
+export interface DurableStepResultFields {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly history: HarnessModelMessage[];
@@ -50,7 +51,7 @@ export type DurableStepResult =
   /** The turn goes on with its next step. */
   (
     | { readonly action: "continue" }
-    /** The turn waits for everything `awaiting` lists, then goes on. */
+    /** The turn waits on what it paused on, then goes on. */
     | ({ readonly action: "paused" } & TurnPause)
     /** The turn ended and the session parks. `settled` is its answer to a delegated caller. */
     | { readonly action: "parked"; readonly settled?: SettledTurn }
