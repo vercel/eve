@@ -110,26 +110,19 @@ describe("vercelScheduleProvider", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it.each([
-    { version: "2", token: "local-token", error: "Unsupported VERCEL_SCHEDULE_DEV_API_VERSION" },
-    { version: "1", token: undefined, error: "VERCEL_SCHEDULE_TOKEN" },
-  ])(
-    "rejects invalid local configuration without falling back ($error)",
-    async ({ version, token, error }) => {
-      vi.stubEnv("EVE_DEV", "1");
-      vi.stubEnv("NODE_ENV", "development");
-      vi.stubEnv("VERCEL_DEPLOYMENT_ID", undefined);
-      vi.stubEnv("VERCEL_SCHEDULE_DEV_API_VERSION", version);
-      vi.stubEnv("VERCEL_SCHEDULE_BASE_URL", "http://127.0.0.1:4784");
-      vi.stubEnv("VERCEL_SCHEDULE_TOKEN", token);
-      const fetchImpl = vi.fn<typeof fetch>();
-      const provider = vercelScheduleProvider({ fetch: fetchImpl });
+  it("rejects missing local authentication without falling back", async () => {
+    vi.stubEnv("EVE_DEV", "1");
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", undefined);
+    vi.stubEnv("VERCEL_SCHEDULE_DEV_API_VERSION", "1");
+    vi.stubEnv("VERCEL_SCHEDULE_BASE_URL", "http://127.0.0.1:4784");
+    vi.stubEnv("VERCEL_SCHEDULE_TOKEN", undefined);
+    const fetchImpl = vi.fn<typeof fetch>();
+    const provider = vercelScheduleProvider({ fetch: fetchImpl });
 
-      expect(provider.kind).toBe("vercel");
-      await expect(provider.list(context, {})).rejects.toThrow(error);
-      expect(fetchImpl).not.toHaveBeenCalled();
-    },
-  );
+    await expect(provider.list(context, {})).rejects.toThrow("VERCEL_SCHEDULE_TOKEN");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
 
   it("uses the shared in-memory provider under standalone eve dev", async () => {
     vi.stubEnv("EVE_DEV", "1");

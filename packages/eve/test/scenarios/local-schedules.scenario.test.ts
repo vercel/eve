@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 
@@ -12,21 +12,7 @@ import { fetchAgentInfo, startEveDev, waitForCondition } from "./dev-server-harn
 import { DEV_SERVER_SCENARIO_TIMEOUT_MS } from "./dev-server-descriptors.js";
 
 const scenarioApp = useScenarioApp();
-
-afterEach(() => vi.unstubAllEnvs());
-
-describe("local Vercel schedule delivery", () => {
-  it(
-    "consumes and acknowledges a broker occurrence through the authored collection",
-    async () => {
-      const app = await scenarioApp({
-        name: "local-schedules",
-        dependencies: { zod: "4.5.4" },
-        installDependencies: true,
-        files: {
-          "agent/instructions.md": "Help Alice review her daily reports.\n",
-          "agent/agent.ts": 'export default { model: "openai/gpt-5.4-mini" };\n',
-          "agent/schedules/requests.ts": `import { appendFile } from "node:fs/promises";
+const collectionSource = `import { appendFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { defineDynamicSchedules } from "eve/experimental/schedules";
@@ -45,7 +31,52 @@ export default defineDynamicSchedules({
       JSON.stringify({ task: payload.task, creator: auth.principalId }) + "\\n");
   },
 });
-`,
+`;
+
+afterEach(() => vi.unstubAllEnvs());
+
+describe("local Vercel schedule delivery", () => {
+  it(
+    "boots a static-only agent without local queue configuration",
+    async () => {
+      const app = await scenarioApp({
+        name: "local-static-schedules",
+        installDependencies: true,
+        files: {
+          "agent/instructions.md": "Help Alice review her daily reports.\n",
+          "agent/agent.ts": 'export default { model: "openai/gpt-5.4-mini" };\n',
+          "agent/schedules/heartbeat.ts": 'export default { cron: "* * * * *", run() {} };\n',
+        },
+      });
+      const server = await startEveDev(app.appRoot, {
+        env: {
+          NODE_ENV: "development",
+          VERCEL_DEPLOYMENT_ID: undefined,
+          VERCEL_SCHEDULE_DEV_API_VERSION: "1",
+          VERCEL_QUEUE_BASE_URL: undefined,
+          VERCEL_QUEUE_TOKEN: undefined,
+        },
+      });
+      try {
+        expect((await fetchAgentInfo(server.url)).agent.name).toBe("local-static-schedules");
+      } finally {
+        await server.stop();
+      }
+    },
+    DEV_SERVER_SCENARIO_TIMEOUT_MS,
+  );
+
+  it(
+    "consumes and acknowledges an occurrence after hot-adding the first dynamic collection",
+    async () => {
+      const app = await scenarioApp({
+        name: "local-schedules",
+        dependencies: { zod: "4.5.4" },
+        installDependencies: true,
+        files: {
+          "agent/instructions.md": "Help Alice review her daily reports.\n",
+          "agent/agent.ts": 'export default { model: "openai/gpt-5.4-mini" };\n',
+          "agent/schedules/heartbeat.ts": 'export default { cron: "* * * * *", run() {} };\n',
         },
       });
       let stored: Record<string, unknown> | undefined;
@@ -118,6 +149,7 @@ export default defineDynamicSchedules({
         const server = await startEveDev(app.appRoot, { env });
         try {
           const application = (await fetchAgentInfo(server.url)).agent.name;
+          await writeFile(join(app.appRoot, "agent", "schedules", "requests.ts"), collectionSource);
           for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
           vi.stubEnv("EVE_DEV", "1");
           const provider = vercelScheduleProvider();
