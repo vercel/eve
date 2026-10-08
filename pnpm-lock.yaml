@@ -1665,6 +1665,9 @@ importers:
       '@ai-sdk/google':
         specifier: 'catalog:'
         version: 4.0.88(zod@4.5.4)
+      '@ai-sdk/harness':
+        specifier: 1.0.139
+        version: 1.0.139(ws@8.21.3(bufferutil@4.1.0))(zod@4.5.4)
       '@ai-sdk/mcp':
         specifier: 'catalog:'
         version: 2.0.67(zod@4.5.4)
@@ -2068,6 +2071,16 @@ packages:
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/harness@1.0.139':
+    resolution: {integrity: sha512-Ug5xPyKyAZjKIaGtPDTMGAD3bszsgAGShiBzmao4sDw4LqwT0g09D4DjCqmnP2v0ezLBk7szwTux/FPOJdOtIQ==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      ws: ^8.21.0
+      zod: ^3.25.76 || ^4.1.8
+    peerDependenciesMeta:
+      ws:
+        optional: true
 
   '@ai-sdk/mcp@2.0.67':
     resolution: {integrity: sha512-cMEif3Lbvh+FozPpBM5UPy6QQhH8v8L/u1kcR2UXp+86EfIDXIaIeOaH+wYCk2CfloFccUn1K8LJuPXqZMZsfw==}
@@ -15160,6 +15173,15 @@ snapshots:
       '@ai-sdk/provider-utils': 3.0.37(zod@4.4.3)
       zod: 4.4.3
     optional: true
+
+  '@ai-sdk/harness@1.0.139(ws@8.21.3(bufferutil@4.1.0))(zod@4.5.4)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.22
+      '@ai-sdk/provider-utils': 5.0.54(zod@4.5.4)
+      ai: 7.0.128(zod@4.5.4)
+      zod: 4.5.4
+    optionalDependencies:
+      ws: 8.21.3(bufferutil@4.1.0)
 
   '@ai-sdk/mcp@2.0.67(zod@4.5.4)':
     dependencies:

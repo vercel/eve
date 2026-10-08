@@ -1,0 +1,20 @@
+{
+  "name": "@vercel/agent-tracing",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./delegation": "./delegation.ts",
+    "./otel": "./otel.ts",
+    "./ai-sdk": "./ai-sdk.ts"
+  },
+  "peerDependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "ai": "^7.0.0"
+  },
+  "peerDependenciesMeta": {
+    "ai": {
+      "optional": true
+    }
+  }
+}
