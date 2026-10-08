@@ -160,7 +160,7 @@ export const templateManifest: TemplateManifestEntry[] = [
   },
   {
     slug: "openinstinct-eve-template",
-    title: "iMessage Agent As A Service",
+    title: "iMessage Agent as a Service",
     setupPrompt:
       "I want to build a multi-tenant iMessage agent service with eve, using OpenInstinct at https://github.com/Merit-Systems/OpenInstinct. Read its README and follow its deployment instructions. Preserve the existing project if my workspace is not empty. Explain the required Linq, Kernel, database, storage, and model provider setup, and distinguish optional account integrations from required services. Call out the repository's warning that the application is not intended for production use.",
     description:
@@ -320,7 +320,7 @@ export const templateManifest: TemplateManifestEntry[] = [
   },
   {
     slug: "eve-llm-council-template",
-    title: "Council Of Agents",
+    title: "Council of Agents",
     unlisted: true,
     setupPrompt:
       "Set up the LLM council template in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/eve-llm-council-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
