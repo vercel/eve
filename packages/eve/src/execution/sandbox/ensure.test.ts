@@ -16,7 +16,7 @@ vi.mock("#runtime/sandbox/prepared-artifacts.js", () => ({
   loadSandboxPreparedArtifact: vi.fn(async () => null),
 }));
 
-function fixture(setup?: () => void, returnCopy = false) {
+function fixture(setup?: () => void, returnCopy = false, onSessionEnd?: () => Promise<void>) {
   const deleteSandbox = vi.fn(async () => {});
   const stopSandbox = vi.fn(async () => {});
   const shutdownSandbox = vi.fn(async () => {});
@@ -32,11 +32,16 @@ function fixture(setup?: () => void, returnCopy = false) {
   const start = vi.fn(async () => ({ handle: await create(), state: null }));
   const provider = defineSandboxProvider({
     name: "test",
-    environment: () => ({
-      prepare: async () => null,
-      resume: create,
-      start,
-    }),
+    environment: () => {
+      const implementation = {
+        prepare: async () => null,
+        resume: create,
+        start,
+      };
+      return onSessionEnd === undefined
+        ? implementation
+        : Object.assign(implementation, { onSessionEnd });
+    },
   });
   const environment = provider.environment();
   const selector = defineSandbox(async () => {
@@ -58,7 +63,15 @@ function fixture(setup?: () => void, returnCopy = false) {
       workspaceResourceRoot: { logicalPath: "", rootEntries: [] },
     },
   };
-  return { create, deleteSandbox, registry, shutdownSandbox, start, stopSandbox };
+  return {
+    create,
+    deleteSandbox,
+    onSessionEnd,
+    registry,
+    shutdownSandbox,
+    start,
+    stopSandbox,
+  };
 }
 async function open(
   registry: RuntimeSandboxRegistry,
@@ -290,5 +303,68 @@ describe("ensureSandboxAccess", () => {
     await access.get();
     expect(value.deleteSandbox).toHaveBeenCalledOnce();
     expect(value.create).toHaveBeenCalledTimes(2);
+  });
+
+  it("passes terminal cleanup to the provider from durable state", async () => {
+    const onSessionEnd = vi.fn(async () => {});
+    const value = fixture(undefined, false, onSessionEnd);
+    const { access } = await open(value.registry);
+
+    await access.end?.("expired");
+
+    expect(onSessionEnd).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ session: expect.objectContaining({ id: "session-1" }) }),
+      null,
+      null,
+      { reason: "expired" },
+    );
+    expect(value.deleteSandbox).not.toHaveBeenCalled();
+    await expect(access.captureState()).resolves.toEqual({ session: null });
+  });
+
+  it("falls back to resumed handle deletion when the provider has no terminal hook", async () => {
+    const value = fixture();
+    const { access } = await open(value.registry);
+
+    await access.end?.("completed");
+
+    expect(value.deleteSandbox).toHaveBeenCalledOnce();
+    await expect(access.captureState()).resolves.toEqual({ session: null });
+  });
+
+  it("does not start a sandbox just to end a session that never opened one", async () => {
+    const value = fixture();
+    const access = await ensureSandboxAccess({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      nodeId: "__root__",
+      registry: value.registry,
+      sessionId: "unused",
+      state: null,
+    });
+
+    await access.end?.("expired");
+
+    expect(value.start).not.toHaveBeenCalled();
+    expect(value.create).not.toHaveBeenCalled();
+  });
+
+  it("does not end a sandbox borrowed from another session", async () => {
+    const onSessionEnd = vi.fn(async () => {});
+    const value = fixture(undefined, false, onSessionEnd);
+    const access = await ensureSandboxAccess({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      nodeId: "__root__",
+      ownsSandbox: false,
+      registry: value.registry,
+      sessionId: "child",
+      state: {
+        session: { providerName: "test", state: null, stateProtocolVersion: 1 },
+      },
+    });
+
+    await access.end?.("completed");
+
+    expect(onSessionEnd).not.toHaveBeenCalled();
+    expect(value.create).not.toHaveBeenCalled();
   });
 });

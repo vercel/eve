@@ -134,6 +134,16 @@ export interface SandboxProviderImplementation<
   SessionState,
   Session extends SandboxSession = SandboxSession,
 > {
+  /**
+   * Permanently releases resources owned by a durable session after its terminal outcome.
+   * Implementations must be idempotent because the cleanup step may retry.
+   */
+  onSessionEnd?(
+    context: SandboxProviderSessionContext,
+    artifact: Readonly<PreparedArtifact>,
+    state: Readonly<SessionState>,
+    options: { readonly reason: "completed" | "expired" | "failed" },
+  ): Promise<void>;
   prepare(context: SandboxProviderPrepareContext): Promise<PreparedArtifact>;
   resume(
     context: SandboxProviderSessionContext,

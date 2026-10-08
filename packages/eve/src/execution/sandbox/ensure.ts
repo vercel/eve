@@ -17,7 +17,12 @@ import {
 } from "#runtime/compiled-artifacts-source.js";
 import { loadSandboxPreparedArtifact } from "#runtime/sandbox/prepared-artifacts.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
-import type { SandboxAccess, SandboxSessionState, SandboxState } from "#sandbox/state.js";
+import type {
+  SandboxAccess,
+  SandboxSessionEndReason,
+  SandboxSessionState,
+  SandboxState,
+} from "#sandbox/state.js";
 import {
   getSandboxEnvironmentRuntime,
   runWithSandboxConstructorRuntime,
@@ -44,6 +49,8 @@ interface EnsureSandboxAccessInput {
 
 /** The access `ensureSandboxAccess` builds, with what the opener may do beyond the sandbox API. */
 export interface EnsuredSandboxAccess extends SandboxAccess {
+  /** Permanently releases provider resources when the owning session ends. */
+  end(reason: SandboxSessionEndReason): Promise<void>;
   /**
    * Lets go of the handle this access opened, if any, without stopping or
    * deleting the sandbox, and returns it so the caller can free what it
@@ -88,6 +95,7 @@ export async function ensureSandboxAccess(
       async detach() {
         return undefined;
       },
+      async end() {},
       async get() {
         return null;
       },
@@ -371,6 +379,66 @@ export async function ensureSandboxAccess(
       opening = undefined;
       requiring = undefined;
       return current.handle;
+    },
+    async end(reason: SandboxSessionEndReason) {
+      if (input.ownsSandbox === false || persisted === null) return;
+      const inherited = registered.inheritance;
+      const definition = inherited?.definition ?? registered.definition;
+      if (definition.kind !== "independent")
+        throw new Error(`Sandbox "${definition.logicalPath}" has no environment.`);
+      const provider = getSandboxEnvironmentRuntime(definition.environment);
+      if (
+        persisted.providerName !== provider.providerName ||
+        persisted.stateProtocolVersion !== provider.stateProtocolVersion
+      ) {
+        throw new Error(
+          `Sandbox session state is incompatible with provider "${provider.providerName}".`,
+        );
+      }
+      const artifact = await loadSandboxPreparedArtifact({
+        compiledArtifactsSource: input.compiledArtifactsSource,
+        nodeId: inherited?.nodeId ?? input.nodeId,
+        providerName: provider.providerName,
+      });
+      if (artifact === undefined) {
+        throw new SandboxTemplateNotProvisionedError({
+          providerName: provider.providerName,
+          templateKey: inherited?.nodeId ?? input.nodeId,
+        });
+      }
+      const activeSession =
+        contextStorage.getStore() === undefined
+          ? {
+              auth: { current: null, initiator: null },
+              id: input.sessionId,
+              turn: { id: "sandbox-cleanup", sequence: 0 },
+            }
+          : buildCallbackContext().session;
+      const context: SandboxProviderSessionContext = {
+        host: createSandboxProviderHost(appRoot),
+        session: { ...activeSession, id: input.sessionId },
+        storagePath: resolveSandboxCacheDirectory(appRoot),
+      };
+      const current = opened;
+      if (provider.implementation.onSessionEnd !== undefined) {
+        await provider.implementation.onSessionEnd(context, artifact, persisted.state, { reason });
+      } else if (current !== undefined) {
+        await current.handle.onSessionDelete();
+      } else {
+        const resumed = await provider.implementation.resume(context, artifact, persisted.state);
+        await resumed.onSessionDelete();
+      }
+      if (current !== undefined) {
+        untrackActiveSandboxHandle({
+          handle: current.handle,
+          providerName: current.providerName,
+          sessionId: input.sessionId,
+        });
+      }
+      opened = undefined;
+      opening = undefined;
+      persisted = null;
+      requiring = undefined;
     },
     async get() {
       await requireHandle();

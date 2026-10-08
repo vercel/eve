@@ -169,6 +169,9 @@ export const LegacyRemoteAgentCallerKey = new ContextKey<LegacyRemoteAgentCaller
 
 export const SessionKey = new ContextKey<Session>("eve.session");
 export const SandboxKey = new ContextKey<SandboxAccess>("eve.sandbox");
+export const SandboxTerminalCleanupKey = new ContextKey<
+  (reason: import("#sandbox/state.js").SandboxSessionEndReason) => Promise<void>
+>("eve.internal.sandboxTerminalCleanup");
 export const HandleEventKey = new ContextKey<HandleEventFn>("eve.internal.handleEvent");
 
 // ---------------------------------------------------------------------------
