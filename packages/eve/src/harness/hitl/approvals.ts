@@ -35,7 +35,7 @@ import {
   type SessionProjection,
 } from "#protocol/session-projection.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
-import type { InputRequest } from "#shared/input.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { Transition } from "#harness/session-machine/commit.js";
 import { signInWithdrawn } from "#harness/session-machine/events.js";
 import {
@@ -187,6 +187,12 @@ export interface Answered extends Transition {
   readonly resolved: readonly ResolvedInputBatch[];
   /** A decision on the session-limit prompt. */
   readonly limit?: { readonly granted: boolean };
+  /**
+   * New answers to open requests that passed the response policies, in order, including those
+   * that wait: a partial answer, or one behind another policy pass or a sign-in. An answer is
+   * admitted once; merged back in from the queue, it isn't admitted again.
+   */
+  readonly admitted: readonly InputResponse[];
 }
 
 /**
@@ -226,25 +232,39 @@ export function answer(
     ...reportApprovalProgress(projection, policy.audit, policy.challengesAtStart),
   ];
   let turn: TurnState = input.takeQueued ? { ...view.turn, queued: undefined } : view.turn;
-  const done = (answered: Omit<Answered, "events" | "turn" | "resolved"> & Partial<Answered>) =>
-    ({ events, resolved: [], turn, ...answered }) satisfies Answered;
+  let admitted: readonly InputResponse[] = [];
+  const done = (
+    answered: Omit<Answered, "admitted" | "events" | "turn" | "resolved"> & Partial<Answered>,
+  ) => ({ admitted, events, resolved: [], turn, ...answered }) satisfies Answered;
   const queue = (queued: StepInput | undefined) => {
     turn = withQueued(turn, queued);
   };
 
   if (policy.kind === "park") return done({ next: "park" });
-  if (policy.kind === "continue-coordination") {
-    queue(policy.stepInput);
-    return done({ next: "repeat" });
-  }
-  if (policy.challenges.length > 0) return done({ next: "sign-in" });
-
   const delivery = input.delivery;
   const limit = openInputs(projection).find(
     (open) =>
       open.request.kind === "session-limit" && ownOpenRequestIds(view).has(open.request.requestId),
   );
   const answerable = turn.suspended.filter((step) => step.requests.length > 0);
+  // Every path below that queues an answer admits it first, so a queued answer is a replay.
+  const open = new Set(answerable.flatMap((step) => step.requests.map((r) => r.requestId)));
+  if (limit !== undefined) open.add(limit.request.requestId);
+  const replayed = new Set(view.turn.queued?.inputResponses?.map(({ requestId }) => requestId));
+  const admit = (responses: readonly InputResponse[] | undefined) => {
+    admitted = canonicalize(responses ?? []).filter(
+      ({ requestId }) => open.has(requestId) && !replayed.has(requestId),
+    );
+  };
+  if (policy.kind === "continue-coordination") {
+    admit(policy.stepInput?.inputResponses);
+    queue(policy.stepInput);
+    return done({ next: "repeat" });
+  }
+  if (policy.challenges.length > 0) {
+    admit(delivery?.inputResponses);
+    return done({ next: "sign-in" });
+  }
   if (limit === undefined && answerable.length === 0) {
     return done({ input: delivery, next: "continue" });
   }
@@ -254,6 +274,7 @@ export function answer(
     limit === undefined ? delivery : resolveTextInput({ requests: [limit.request] }, delivery);
   const responses = canonicalize(resolved?.inputResponses ?? []);
   const byId = new Map(responses.map((response) => [response.requestId, response]));
+  admit(responses);
   const answered = answerable.filter((step) =>
     step.requests.every((request) => byId.has(request.requestId)),
   );

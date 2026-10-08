@@ -548,6 +548,103 @@ describe("answers", () => {
     expect(grantedApprovalKeys(machine.view(), key)).toEqual(new Set());
   });
 
+  it("admits a partial answer once, when it first arrives", async () => {
+    const machine = createMachine();
+    await parkOnApprovals(machine, "call-1", "call-2");
+    const first = { optionId: "approve", requestId: "approval-call-1" };
+
+    const partial = await respond(machine, { inputResponses: [first] });
+    expect(partial.next).toBe("park");
+    expect(partial.admitted).toEqual([first]);
+
+    // The queue merges the same answer back in, alone and re-sent: neither admits it again.
+    expect((await respond(machine, {})).admitted).toEqual([]);
+    expect((await respond(machine, { inputResponses: [first] })).admitted).toEqual([]);
+
+    const second = { optionId: "approve", requestId: "approval-call-2" };
+    const rest = await respond(machine, { inputResponses: [second] });
+    expect(rest.next).toBe("continue");
+    expect(rest.admitted).toEqual([second]);
+  });
+
+  it("admits an answer once when it waits behind a responder's sign-in", async () => {
+    const machine = createMachine();
+    await parkOnApprovals(machine, "call-1");
+    const response = { optionId: "approve", requestId: "approval-call-1" };
+    const challenge: AuthorizationChallenge = {
+      attemptId: "attempt-1",
+      challenge: { instructions: "Sign in to Google." },
+      hookUrl: "https://example.test/callback",
+      name: "google",
+    };
+    const delivery = { inputResponses: [response] };
+    const waiting = answer(machine.view(), {
+      approvalKey: () => undefined,
+      delivery,
+      policy: { ...noPolicy(delivery), challenges: [challenge] },
+      searchable: () => false,
+      takeQueued: true,
+    });
+    expect(waiting.next).toBe("sign-in");
+    expect(waiting.admitted).toEqual([response]);
+    await machine.apply(waiting);
+    // As the intake does: the delivery waits in the queue for the sign-in.
+    await machine.apply(
+      requireSignIn(machine.view(), { challenges: [challenge], queued: delivery }),
+    );
+    await machine.apply(completeSignIn(machine.view(), { completions: [challenge] }));
+
+    const resumed = await respond(machine, {});
+    expect(resumed.resolved[0]?.inputs[0]?.outcome).toBe("approved");
+    expect(resumed.admitted).toEqual([]);
+  });
+
+  it("admits a repeated answer once on the coordination and sign-in paths", async () => {
+    const machine = createMachine();
+    await parkOnApprovals(machine, "call-1");
+    const response = { optionId: "approve", requestId: "approval-call-1" };
+    const repeated = { inputResponses: [response, response] };
+    const challenge: AuthorizationChallenge = {
+      attemptId: "attempt-1",
+      challenge: { instructions: "Sign in to Google." },
+      hookUrl: "https://example.test/callback",
+      name: "google",
+    };
+
+    const coordination = answer(machine.view(), {
+      approvalKey: () => undefined,
+      delivery: repeated,
+      policy: { ...noPolicy(repeated), kind: "continue-coordination" },
+      searchable: () => false,
+      takeQueued: true,
+    });
+    expect(coordination.next).toBe("repeat");
+    expect(coordination.admitted).toEqual([response]);
+
+    const signIn = answer(machine.view(), {
+      approvalKey: () => undefined,
+      delivery: repeated,
+      policy: { ...noPolicy(repeated), challenges: [challenge] },
+      searchable: () => false,
+      takeQueued: true,
+    });
+    expect(signIn.next).toBe("sign-in");
+    expect(signIn.admitted).toEqual([response]);
+  });
+
+  it("admits nothing a response policy holds", async () => {
+    const machine = createMachine();
+    await parkOnApprovals(machine, "call-1");
+    const decision = answer(machine.view(), {
+      approvalKey: () => undefined,
+      delivery: { inputResponses: [{ optionId: "approve", requestId: "approval-call-1" }] },
+      policy: { ...noPolicy(), kind: "park" },
+      searchable: () => false,
+      takeQueued: true,
+    });
+    expect(decision.admitted).toEqual([]);
+  });
+
   it("turns an answer to a closed request into text, which authorizes nothing", async () => {
     const machine = createMachine();
     await parkOnApprovals(machine, "call-1");
