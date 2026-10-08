@@ -10,6 +10,7 @@ import {
   ensureSessionProjection,
   recordPublishedEvent,
   saveProjection,
+  stepProjection,
 } from "#harness/session-machine/current.js";
 import {
   SESSION_PROJECTION_STATE_KEY,
@@ -27,7 +28,7 @@ import {
   createTurnStartedEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
-import { foldSession, initialSessionProjection } from "#protocol/session-projection.js";
+import { initialSessionProjection } from "#protocol/session-projection.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { InputRequest } from "#shared/input.js";
 
@@ -40,7 +41,9 @@ export function withPublished(
   session: HarnessSession,
   events: readonly UnstampedMessageStreamEvent[],
 ): HarnessSession {
-  return saveProjection(session, events.reduce(foldSession, storedProjection(session.state)));
+  const projection = stepProjection(undefined, session.state);
+  for (const event of events) projection.record(event);
+  return saveProjection(session, projection.read());
 }
 
 /** The session with `position`'s turn open, at its step. */

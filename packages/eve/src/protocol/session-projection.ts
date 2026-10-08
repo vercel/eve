@@ -132,6 +132,8 @@ export interface SessionProjection {
   /** The session ended with `session.completed` or `session.failed`. */
   readonly ended?: true;
   readonly activeTurnId?: string;
+  /** The most recent turn, open or closed. Pruning keeps it, so the session's end can name it. */
+  readonly latestTurn?: Pick<SessionTurn, "sequence" | "turnId">;
   /** The sequence the next turn takes. */
   readonly nextSequence: number;
   readonly turns: Readonly<Record<string, SessionTurn>>;
@@ -291,6 +293,10 @@ export function foldSession<S extends SessionProjection>(
       return {
         ...state,
         activeTurnId: turnId,
+        latestTurn:
+          state.latestTurn !== undefined && state.latestTurn.sequence > sequence
+            ? state.latestTurn
+            : { turnId, sequence },
         nextSequence: Math.max(state.nextSequence, sequence + 1),
         turns: {
           ...state.turns,
