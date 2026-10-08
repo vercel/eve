@@ -52,3 +52,25 @@ it("rejects the unsigned-metadata v1 scheme", () => {
   headers.set("x-world-hub-signature", headers.get("x-world-hub-signature")!.replace("v2=", "v1="));
   expect(verifyWorldHubRequest("secret", "GET", "/", "", headers)).toBe(false);
 });
+
+it("uses the SDK session stream name", async () => {
+  const { sessionStreamName } = await import("./server.js");
+  expect(sessionStreamName("wrun_abc")).toBe("strm_abc_user");
+});
+it("round trips stored NDJSON session events", async () => {
+  const { decodeSessionStreamChunk } = await import("./server.js");
+  const { getSerializeStream, getWorkflowReducers } =
+    await import("#compiled/@workflow/core/serialization.js");
+  const event = { type: "text-delta", text: "hello \u4e16\u754c" };
+  const source = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(JSON.stringify(event) + "\n"));
+      controller.close();
+    },
+  });
+  const serialized = source.pipeThrough(
+    getSerializeStream(getWorkflowReducers(globalThis), undefined),
+  );
+  for await (const chunk of serialized)
+    expect(await decodeSessionStreamChunk(chunk)).toEqual([event]);
+});

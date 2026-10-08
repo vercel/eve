@@ -244,6 +244,7 @@ export default {
   chunkGroup: "workflow",
   plugins: [stubCoreWorldFactories(), stubCoreQuickJSEntrypoint(), guardInlineStepExecution()],
   entries: [
+    { entry: "dist/util.js", outputPath: "util" },
     { entry: "dist/serialization.js", outputPath: "serialization" },
     { entry: "dist/runtime/helpers.js", outputPath: "runtime/helpers" },
     {
