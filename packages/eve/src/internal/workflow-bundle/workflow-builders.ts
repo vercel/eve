@@ -113,6 +113,8 @@ function isPackageTestFixtureModule(absolutePath: string): boolean {
 }
 
 export function isAuthoredApplicationModule(absolutePath: string, appRoot: string): boolean {
+  // Bundler virtual ids such as `\0rolldown/runtime.js` would otherwise resolve against the cwd.
+  if (!isAbsolute(absolutePath)) return false;
   const normalizedRoot = toRealPath(appRoot).replace(/\\/g, "/").replace(/\/$/, "");
   const normalizedPath = toRealPath(absolutePath).replace(/\\/g, "/");
   if (isInNodeModules(normalizedPath)) return false;
