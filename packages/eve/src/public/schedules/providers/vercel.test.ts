@@ -72,26 +72,6 @@ describe("vercelScheduleProvider", () => {
     expect(new Headers(init?.headers).get("Authorization")).toBe(`Bearer ${oidcToken}`);
   });
 
-  it("reports when creating an inactive schedule leaves it active after disable fails", async () => {
-    vi.stubEnv("VERCEL", "1");
-    vi.stubEnv("VERCEL_ENV", "production");
-    vi.stubEnv("VERCEL_OIDC_TOKEN", oidcToken);
-    const fetchImpl = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(Response.json(schedule()))
-      .mockResolvedValueOnce(new Response("disable failed", { status: 500 }));
-    const provider = vercelScheduleProvider({ fetch: fetchImpl });
-
-    await expect(
-      provider.create(context, {
-        expression: { type: "cron", cron: "0 12 * * *", timezone: "UTC" },
-        payload: "Review PRs",
-        name: "review-prs-daily",
-        state: "inactive",
-      }),
-    ).rejects.toThrow("was created active, but disabling it failed; it may remain active");
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
-  });
   it("omits a blank first-page cursor", async () => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_ENV", "production");

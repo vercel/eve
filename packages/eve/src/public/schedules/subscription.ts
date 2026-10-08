@@ -127,7 +127,6 @@ export interface ScheduleCreate<TPayload> {
   readonly expression: ScheduleExpression;
   readonly payload: TPayload;
   readonly name: string;
-  readonly state?: ScheduleState;
 }
 export interface ScheduleList {
   readonly cursor?: string;

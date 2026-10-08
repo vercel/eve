@@ -48,7 +48,7 @@ export function inMemoryScheduleProvider(
           state:
             schedule.expression.type === "single" && Date.parse(schedule.expression.at) <= timestamp
               ? "completed"
-              : (schedule.state ?? "active"),
+              : "active",
           target: context.target,
           updatedAt: timestamp,
         };

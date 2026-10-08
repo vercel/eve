@@ -42,7 +42,7 @@ export function vercelScheduleProvider(
     kind: "vercel",
     async create(context, input) {
       const schedules = await client(context.abortSignal);
-      let schedule: VercelSchedule = await schedules.create({
+      const schedule: VercelSchedule = await schedules.create({
         expression: toVercelExpression(input.expression),
         jitter: input.expression.type === "cron" ? input.expression.jitter : undefined,
         name: input.name,
@@ -51,16 +51,6 @@ export function vercelScheduleProvider(
         target: { topic: deriveEveScheduleQueueTopic(context.target.key) },
         timezone: input.expression.timezone,
       });
-      if (input.state === "inactive") {
-        try {
-          schedule = await schedules.disable({ name: input.name, namespace: context.namespace });
-        } catch (error) {
-          throw new Error(
-            `Schedule ${JSON.stringify(input.name)} was created active, but disabling it failed; it may remain active.`,
-            { cause: error },
-          );
-        }
-      }
       return fromVercelSchedule(schedule);
     },
     async list(context, input): Promise<SchedulePage> {
