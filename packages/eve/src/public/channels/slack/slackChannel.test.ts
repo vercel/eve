@@ -3812,13 +3812,14 @@ describe("slackChannel() generic Events API pipeline", () => {
     expect(compact).toHaveBeenCalledWith("C01:1700000000.000001");
   });
 
-  it("binds Slack state and title on a generic event send", async () => {
+  it("binds Slack state, title, and history on a generic event send", async () => {
     const send = vi.fn().mockResolvedValue({ id: "s1" });
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
       async onEvent(ctx) {
         await ctx.send("follow up", {
           auth: null,
+          history: [{ content: "Earlier question", role: "user" }],
           target: { channelId: "C01", threadTs: "1700000000.000001" },
           title: "Reaction follow-up",
         });
@@ -3830,6 +3831,7 @@ describe("slackChannel() generic Events API pipeline", () => {
 
     expect(send).toHaveBeenCalledWith("C01:1700000000.000001", {
       auth: null,
+      history: [{ content: "Earlier question", role: "user" }],
       message: "follow up",
       state: {
         channelId: "C01",

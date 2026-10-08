@@ -360,6 +360,8 @@ export interface SlackInitialMessage {
  */
 export interface SlackEventSendOptions {
   readonly auth: SessionAuthContext | null;
+  /** Prior conversation added as user and assistant turns before the message. */
+  readonly history?: readonly SessionHistoryMessage[];
   readonly target: SlackReceiveTarget;
   /** Overrides the workflow run title without changing the message sent to the model. */
   readonly title?: string;
@@ -973,6 +975,7 @@ function defaultOnInputResponse(ctx: SlackInputResponseContext): SlackInputRespo
 async function receiveOnSlack(
   input: {
     readonly auth: SessionAuthContext | null;
+    readonly history?: readonly SessionHistoryMessage[];
     readonly message: string | UserContent;
     readonly target: SlackReceiveTarget;
     readonly title?: string;
@@ -1054,7 +1057,7 @@ async function receiveOnSlack(
 
   return deps
     .from(slackContinuationToken(channelId, continuationThreadTs))
-    .send(input.message, { auth: input.auth, state, title: input.title });
+    .send(input.message, { auth: input.auth, history: input.history, state, title: input.title });
 }
 
 function shouldDropSlackHttpTimeoutRetry(headers: Headers): boolean {
@@ -1379,9 +1382,9 @@ async function dispatchSlackEvent(input: {
           typeof input.envelope.event.user === "string" ? input.envelope.event.user : undefined,
         ),
       }),
-    send: (message, { auth, target, title }) =>
+    send: (message, { auth, history, target, title }) =>
       receiveOnSlack(
-        { auth, message, target, title },
+        { auth, history, message, target, title },
         {
           from: input.from,
           api: input.api,
