@@ -1,5 +1,27 @@
 # eve
 
+## 0.75.0
+
+### Minor Changes
+
+- 32af96d: Rename custom sandbox provider handle hooks from `onSessionStop()` and `onSessionDelete()` to `onSandboxStop()` and `onSandboxDelete()` so handle lifecycle names describe the sandbox resource they operate on.
+
+### Patch Changes
+
+- 84793ed: Schedule creation no longer accepts an initial state: schedules are created active by default (or completed if a one-time schedule is already past). Use the existing enable and disable operations to change a schedule's state after creation.
+- a3c2f40: Add explicitly authorized, session-scoped JSON tool stubs with argument matching and outcome sequences that continue across turns within the same session. Each rule specifies `outcome` or nonempty `outcomes`, with a JSON `response` in each outcome; eve's internal workflow recovery reuses recorded outcomes without consuming another entry.
+  
+  Rules use first-match-wins ordering and explicit slash-separated paths for local child tools. Grant replacement permission on individual `vercelOidc` subject entries or in a custom authenticator's result; existing sessions follow normal channel authentication.
+  
+  Invalid static tool paths and unsupported matcher features fail session creation. Unused rules produce eval warnings. Deployment handoffs use a new checkpoint version for all sessions, so sessions cannot hand off to deployments running an older version.
+- 20c1317: Keep a tool approval answered before a cancelled response resolved, instead of restoring it and resolving it again on the next message. An approved call the cancellation interrupts while it runs gets an interrupted result and is not run again, and a message sent with the answer is kept once.
+- 04d47bc: A typed reply now answers a tool approval or session-limit prompt proxied from a subagent, the same way it answers a subagent's `ctx.ask()` question. On text-only channels such as Linq, Twilio, and Linear, replying `approve` or `continue` resumes the subagent instead of reaching the parent model while the subagent stays parked. When a subagent raises several prompts at once, each reply answers the first open one.
+- bf82cfa: Keep conversation sessions available after a dynamic connection resolver fails, so a later message can retry once the dependency recovers.
+- 89704cb: When a registry item's setup needs a logged-in Vercel CLI, `/add` in `eve dev` now offers to run `vercel login` and then finishes setup without reinstalling the item. Items whose setup fails after their files are installed now show as "setup not finished" with the reason, instead of "Couldn't add". `eve add --non-interactive` reports a `vercel login` prerequisite (exit 2) instead of a raw `vercel connect` failure. eve now detects a logged-out Vercel CLI from `vercel whoami --format json`, so newer CLIs that print only "Logged out." are no longer misreported as a transient error. The self-modification agent no longer describes an item as added before its setup panel has run.
+- 6ab30a5: A subagent's tool approval now stays open on the parent until the subagent settles it. If the subagent's response policy refuses the person who answered, someone else can still answer it, by text or button, instead of the prompt disappearing while the subagent waits. The parent closes the prompt when it relays the subagent's own `input.resolved`, so channels such as Telegram and Discord clear its buttons.
+- 33a95cf: Invoke sandbox provider cleanup when a durable session completes, expires, or fails. Custom providers can implement `onSessionEnd()` to release session-owned resources directly from persisted state.
+- 1cfb212: Tool stubs can now throw an error immediately or mix errors and responses in an outcome sequence. Evals can assert expected tool failures and recovery without treating injected errors as broken stubs.
+
 ## 0.74.0
 
 ### Minor Changes
