@@ -98,17 +98,18 @@ body:
     validations:
       required: true
   - type: textarea
-    id: implementation-prompt
+    id: implementation-plan
     attributes:
-      label: Suggested implementation prompt
-      description: Optionally provide a prompt a maintainer or coding agent could use to fix this bug after it is accepted. Include the expected behavior, constraints, and acceptance criteria rather than prescribing unnecessary implementation details.
+      label: Suggested implementation plan
+      description: If you have a fix in mind, outline a plan the team can run with its own coding agents. Include relevant code, proposed changes, constraints, and validation steps. A plan is appreciated but not required to report a bug.
       placeholder: |
-        Fix ...
-
-        Requirements:
+        Proposed changes:
         - ...
 
-        Acceptance criteria:
+        Constraints and trade-offs:
+        - ...
+
+        Validation:
         - ...
     validations:
       required: false

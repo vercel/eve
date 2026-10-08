@@ -17,17 +17,18 @@ body:
     validations:
       required: true
   - type: textarea
-    id: implementation-prompt
+    id: implementation-plan
     attributes:
-      label: Suggested implementation prompt
-      description: Optionally provide a prompt a maintainer or coding agent could use to implement this proposal after it is accepted. Include the intended behavior, constraints, and acceptance criteria rather than prescribing unnecessary implementation details.
+      label: Suggested implementation plan
+      description: Outline a plan the team can review and run with its own coding agents if the proposal is accepted. Include relevant code or docs, proposed changes, constraints, and validation steps. Share what you know even if the plan is incomplete.
       placeholder: |
-        Implement ...
-
-        Requirements:
+        Proposed changes:
         - ...
 
-        Acceptance criteria:
+        Constraints and trade-offs:
+        - ...
+
+        Validation:
         - ...
     validations:
       required: false
