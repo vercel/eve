@@ -162,15 +162,16 @@ export class ConnectionEventActions {
         })),
         {
           name: LIST,
-          description: "List this caller's event subscriptions created in this session.",
+          description:
+            "List this caller's event subscriptions created in this session. status is Connect's last-known state; retired=true means eve accepts no new event work for this subscription, regardless of status.",
           inputSchema: { type: "object", properties: {}, additionalProperties: false },
         },
         ...[GET, STOP].map((name) => ({
           name,
           description:
             name === GET
-              ? "Get one of this caller's subscriptions in this session."
-              : "Stop one of this caller's subscriptions in this session.",
+              ? "Get one of this caller's subscriptions in this session and refresh its Connect status. retired=true means eve accepts no new event work for this subscription, regardless of status."
+              : "Stop one of this caller's subscriptions in this session. eve retires it before requesting cancellation from Connect; retired=true does not confirm upstream cancellation.",
           inputSchema: {
             type: "object",
             properties: { id: { type: "string" } },
@@ -211,16 +212,7 @@ export class ConnectionEventActions {
       }));
     if (name === LIST)
       return {
-        subscriptions: Object.values(currentState().bindings)
-          .filter(owned)
-          .map(
-            (binding) =>
-              binding.subscription ?? {
-                id: binding.id,
-                name: binding.request.name,
-                status: "pending",
-              },
-          ),
+        subscriptions: Object.values(currentState().bindings).filter(owned).map(subscriptionResult),
       };
     if (name === GET || name === STOP) {
       let binding = Object.values(currentState().bindings).find(
@@ -250,8 +242,9 @@ export class ConnectionEventActions {
       const subscription = await (name === STOP
         ? events.unsubscribe({ id: binding.subscription!.id, options: { timeout: 30_000 } })
         : events.getSubscription({ id: binding.subscription!.id, options: { timeout: 30_000 } }));
-      save({ ...binding, retired: name === STOP ? true : binding.retired, subscription });
-      return subscription;
+      binding = { ...binding, retired: name === STOP ? true : binding.retired, subscription };
+      save(binding);
+      return subscriptionResult(binding);
     }
     return this.withClient(async (events) => {
       const definition = (await this.catalog(events)).find(
@@ -314,15 +307,27 @@ export class ConnectionEventActions {
       }
       if (!owned(binding) || binding.retired)
         throw new Error("Subscription binding is no longer active.");
-      if (binding.subscription !== undefined) return binding.subscription;
+      if (binding.subscription !== undefined) return subscriptionResult(binding);
       const subscription = await events.subscribe({
         ...binding.request,
         options: { signal: options.abortSignal, timeout: 30_000 },
       });
-      save({ ...binding, subscription });
-      return subscription;
+      binding = { ...binding, subscription };
+      save(binding);
+      return subscriptionResult(binding);
     });
   }
+}
+
+function subscriptionResult(binding: EventBinding) {
+  return {
+    ...(binding.subscription ?? {
+      id: binding.id,
+      name: binding.request.name,
+      status: "pending",
+    }),
+    retired: binding.retired ?? false,
+  };
 }
 
 function actionName(eventName: string): string {

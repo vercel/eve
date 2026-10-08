@@ -11,7 +11,7 @@ import { SessionExecution } from "#execution/session/turn.js";
 import type { SessionInboxHandle, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { AuthKey, SessionIdKey } from "#context/keys.js";
-import { serializeContext } from "#context/serialize.js";
+import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { ConnectionEventActions } from "#runtime/connections/events/actions.js";
@@ -402,7 +402,7 @@ it("does not authorize delivery based on its context, connection name, or event 
 });
 
 it("persists termination before its callback and does not execute later normal events", async () => {
-  await watch();
+  expect(await watch()).toMatchObject({ id: "sub_0", status: "active", retired: false });
   initial = { ...initial, serializedContext: serializeContext(ctx) };
   const normal = payload();
   const { event: _event, ...envelope } = normal.delivery as Extract<
@@ -427,6 +427,24 @@ it("persists termination before its callback and does not execute later normal e
     (await prepare({ ...normal, delivery: { ...normal.delivery, deliveryId: "next" } })).accepted,
   ).toBe(false);
   expect(callback).not.toHaveBeenCalled();
+  ctx = await deserializeContext(initial.serializedContext);
+  vi.mocked(adapter.getSubscription).mockResolvedValue(saved.values().next().value!);
+  await contextStorage.run(ctx, async () => {
+    const expected = { id: "sub_0", status: "active", retired: true };
+    expect(
+      await actions.execute("events_list_subscriptions", {}, { callId: "list" }),
+    ).toMatchObject({
+      subscriptions: [expected],
+    });
+    expect(
+      await actions.execute("events_get_subscription", { id: "sub_0" }, { callId: "get" }),
+    ).toMatchObject(expected);
+    expect(
+      await actions.execute("events_list_subscriptions", {}, { callId: "list-again" }),
+    ).toMatchObject({
+      subscriptions: [expected],
+    });
+  });
 });
 
 it("keeps failed callbacks pending for durable retry and prevents a duplicate successful dispatch", async () => {

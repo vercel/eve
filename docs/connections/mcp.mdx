@@ -253,6 +253,13 @@ inputs. The framework binds the account, session, receiver path, and idempotency
 key itself. Lists and ID-based operations only expose subscriptions created by
 that caller in the current session. A session can create at most 100 bindings.
 
+Subscription action results include `retired`, which reports eve's local state,
+alongside `status`, which reports Connect's last-known state. `retired: true`
+means eve accepts no new event work for that binding, even if `status` is still
+`active`. Termination and stop retire the binding; retirement alone does not
+confirm upstream cancellation. List uses cached Connect status; get refreshes
+it without clearing local retirement. An already accepted callback can still retry.
+
 The compiler mounts `POST /eve/v1/hooks/:connectionName` for opted-in root-agent
 connections. Named-agent and custom public mount prefixes also apply to the
 registered destination. No authored channel file is needed. This first version
