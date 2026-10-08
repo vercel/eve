@@ -627,6 +627,72 @@ describe("step catalog in the harness (real AI SDK)", () => {
     ]);
   });
 
+  it("runs a listed tool named through eve__tool exactly as a direct call", async () => {
+    const ctx = createSessionContext();
+    ctx.set(BundleKey, catalogBundle());
+    const driver = createDriver(
+      ctx,
+      toolMap(
+        inlineTool("lookup_order", {
+          schema: {
+            type: "object",
+            properties: { orderId: { type: "string" } },
+            required: ["orderId"],
+          },
+        }),
+        inlineTool("archive_account", { approval: always() }),
+        workflowTool("deploy_service"),
+        inlineTool("refund_invoice", { deferred: true }),
+      ),
+    );
+
+    driver.reply(
+      calls(call("lookup", CALL_TOOL_NAME, { input: { orderId: "o_1" }, name: "lookup_order" })),
+      text("Found order o_1."),
+    );
+    await driver.drive({ message: "Alice asks about order o_1." });
+    expect(toolResult(driver.requests()[1]!, "lookup")).toEqual({
+      input: { orderId: "o_1" },
+      ran: "lookup_order",
+    });
+    expect(
+      driver.events.flatMap((event) =>
+        event.type === "actions.requested" ? event.data.actions : [],
+      ),
+    ).toContainEqual(
+      expect.objectContaining({
+        callId: "lookup",
+        input: { orderId: "o_1" },
+        toolName: "lookup_order",
+      }),
+    );
+
+    // An approval is asked for, and the call runs, under the listed tool's own name.
+    driver.reply(calls(call("archive", CALL_TOOL_NAME, { name: "archive_account" })));
+    const parked = await driver.drive({ message: "Alice asks to archive Bob's account." });
+    const [approval] = parkedSteps(parked.session).flatMap((step) => step.requests);
+    expect(approval?.action).toEqual(
+      expect.objectContaining({ callId: "archive", toolName: "archive_account" }),
+    );
+    driver.reply(text("Archived Bob's account."));
+    await driver.drive({
+      inputResponses: [{ optionId: "approve", requestId: approval!.requestId }],
+    });
+    expect(toolResult(driver.requests().at(-1)!, "archive")).toEqual({
+      input: {},
+      ran: "archive_account",
+    });
+
+    // A listed workflow tool is dispatched after the step, as a direct call is.
+    driver.reply(
+      calls(call("deploy", CALL_TOOL_NAME, { input: { service: "api" }, name: "deploy_service" })),
+    );
+    const deploying = await driver.drive({ message: "Alice asks to deploy the api service." });
+    expect(
+      parkedSteps(deploying.session).flatMap((step) => step.tasks.map((task) => task.toolName)),
+    ).toEqual(["deploy_service"]);
+  });
+
   it("names the entry, not eve__tool, when a deferred entry returns a result that isn't JSON", async () => {
     const logs = captureLogRecords();
     const ctx = createSessionContext();

@@ -14,7 +14,7 @@ import { buildDynamicSubagentTools } from "#context/dynamic-subagent-lifecycle.j
 import type { ContextReader } from "#context/key.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { startsTasks } from "#execution/tasks/tool-entry-point.js";
-import { withTaskTools } from "#execution/tasks/model-step.js";
+import { isWorkflowTool, withTaskTools } from "#execution/tasks/model-step.js";
 import { runEntryCall } from "#harness/execute-call.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { checkToolCallInput } from "#harness/tool-call-io.js";
@@ -187,7 +187,9 @@ export function buildStepCatalog(input: {
       if (toolCall.toolName === CALL_TOOL_NAME && catalogTools.tools) {
         const name = targetName(toolCall.input);
         const definition = name === undefined ? undefined : toolEntry(name);
-        if (name === undefined || definition?.deferred !== true) return undefined;
+        if (name === undefined || definition === undefined || !callableByName(definition)) {
+          return undefined;
+        }
         return { call: asEntryCall(toolCall, name), definition };
       }
       if (toolCall.toolName === SKILL_TOOL_NAME && catalogTools.skills) {
@@ -379,6 +381,21 @@ function runResolved(
   return runEntryCall(resolved, options);
 }
 
+/**
+ * Whether `eve__tool` runs `definition`: a deferred entry, or a listed tool eve
+ * runs itself. A model that routes a listed tool through `eve__tool` then gets
+ * the same result as a direct call instead of a wasted step; nothing it reads
+ * says this works. eve's own tools, and tools a provider or client runs, stay
+ * direct-only.
+ */
+function callableByName(definition: HarnessToolDefinition): boolean {
+  return (
+    definition.deferred === true ||
+    (definition.frameworkTool !== true &&
+      (definition.execute !== undefined || isWorkflowTool(definition)))
+  );
+}
+
 interface ToolInput {
   readonly input?: unknown;
   readonly name: string;
@@ -391,7 +408,7 @@ async function resolveToolInput(
 ): Promise<StandardSchemaV1.Result<ToolInput>> {
   const definition = toolEntry(name);
   if (definition === undefined) return failure("name", unknownEntryMessage(name, catalog));
-  if (definition.deferred !== true) {
+  if (!callableByName(definition)) {
     return failure("name", `"${name}" is in your tool list; call it directly.`);
   }
   const checked = await checkToolCallInput(definition, input, "");
