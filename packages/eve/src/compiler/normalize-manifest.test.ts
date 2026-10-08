@@ -1214,3 +1214,62 @@ describe("compileAgentManifest source graph", () => {
     expect(binding.backing.kind).toBe("programmatic");
   });
 });
+
+it("rejects subagent event connections whose receiver cannot resolve their scope", async () => {
+  const root = manifest();
+  const child = createAgentSourceManifest({
+    agentId: "child",
+    agentRoot: `${root.agentRoot}/subagents/child`,
+    appRoot: root.appRoot,
+  });
+  root.subagents.push(
+    createLocalSubagentSourceRef({
+      entryPath: child.agentRoot,
+      logicalPath: "subagents/child",
+      manifest: child,
+      rootPath: child.agentRoot,
+      subagentId: "child",
+    }),
+  );
+  const source = defineProgrammaticAgentSource({
+    id: "test:events",
+    revision: "v1",
+    modules: [
+      {
+        logicalPath: "connections/issues.ts",
+        loadNamespace: async () => ({
+          default: defineMcpClientConnection({
+            url: "https://issues.example/mcp",
+            description: "Issues",
+            auth: {
+              getToken: async () => ({ token: "credential" }),
+              vercelConnect: {
+                connector: "oauth/issues",
+                experimental_events: {
+                  createAdapter: vi.fn(),
+                  verify: vi.fn(),
+                },
+              },
+            },
+            experimental_events: { onEvent() {} },
+          }),
+        }),
+      },
+    ],
+  });
+  await expect(
+    compileAgentManifest(root, {
+      sourceRegistries: [
+        registry([
+          {
+            logicalPath: "agent.ts",
+            loadNamespace: async () => ({
+              default: defineAgent({ model: "openai/gpt-5.4" }),
+            }),
+          },
+        ]),
+        createAgentSourceRegistry([{ applyTo: "all-local-nodes", source }]),
+      ],
+    }),
+  ).rejects.toThrow("root-agent connection");
+});

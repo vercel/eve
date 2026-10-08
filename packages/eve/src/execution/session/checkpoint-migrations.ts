@@ -36,6 +36,8 @@ interface UpgradeEffects {
 const CHECKPOINT_UPGRADES: Readonly<
   Record<number, (checkpoint: CheckpointRecord, effects: UpgradeEffects) => CheckpointRecord>
 > = {
+  // Managed event bindings must not move to an owner that discards their state.
+  12: (checkpoint) => checkpoint,
   // Run mode was removed (eve 0.67).
   8: (checkpoint) => {
     const { mode: _mode, ...rest } = checkpoint;

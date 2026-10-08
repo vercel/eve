@@ -242,3 +242,64 @@ subscription operation.
 payloads never select the execution principal. Callback code chooses whether
 to send input to an existing session. A session attachment never creates a
 replacement session.
+
+### Subscription and delivery flow
+
+With the matching runtime, `connection_search` exposes one typed subscribe action
+for each webhook event in the current account's catalog, plus list, get, and stop
+actions. `connection_execute` applies the connection's usual approval and auth
+gates. Event arguments and an explicit `expiresAt` deadline (or `null`) are model
+inputs. The framework binds the account, session, receiver path, and idempotency
+key itself. Lists and ID-based operations only expose subscriptions created by
+that caller in the current session. A session can create at most 100 bindings.
+
+Subscription action results include `retired`, which reports eve's local state,
+alongside `status`, which reports Connect's last-known state. `retired: true`
+means eve accepts no new event work for that binding, even if `status` is still
+`active`. Termination and stop retire the binding; retirement alone does not
+confirm upstream cancellation. List uses cached Connect status; get refreshes
+it without clearing local retirement. An already accepted callback can still retry.
+
+The compiler mounts `POST /eve/v1/hooks/:connectionName` for opted-in root-agent
+connections. Named-agent and custom public mount prefixes also apply to the
+registered destination. No authored channel file is needed. This first version
+does not support event subscriptions in subagent connections.
+
+Connect owns upstream subscriptions, verification, renewal, and cancellation.
+eve uses the AI SDK to discover the account-specific catalog and create managed
+subscriptions through the Connect adapter. Catalog discovery currently requires
+a Streamable HTTP MCP endpoint. There is no AI SDK event store.
+Event arguments use eve's normal tool-schema validation and defaults. Schemas
+that eve cannot validate locally remain the upstream server's responsibility,
+as with other remote tool inputs.
+
+The receiver authenticates Connect's delivery-purpose OIDC bearer token and
+validates the JSON envelope, then durably queues
+an internal session message before responding with `202`. The token authenticates
+Connect for the destination over HTTPS; it does not sign the body. Context locates the
+inbox; it does not authorize execution. After the current turn settles, eve
+checks its saved binding against the verified subscription ID, connection
+instance, event name, and originating principal. A lost subscribe response is
+reconciled using the saved request and original idempotency key. Retired sessions
+receive no replacement, and retired bindings start no new event work.
+
+Gap and termination state is saved before the corresponding callback runs.
+Callbacks run in an eve context scoped to the subscription creator, so authored
+`defineState()` reads and updates persist with the callback step. This scope
+does not replace the session's most recent conversational caller.
+Callbacks run as durable steps and can retry after failure. Exhausting workflow
+step retries can fail the session; monitor failed steps and recover them. Use `deliveryId` as
+an idempotency key for external side effects: a crash after an external write but
+before the step commits can invoke the callback again. Completed deliveries are
+deduplicated against the latest 1,000 completed receipts in the session. Older
+redeliveries can invoke the callback again; use durable application idempotency
+for effects that must remain deduplicated beyond that window. Callback code explicitly decides when to queue
+a new model turn through `attachSession(...).send(...)`.
+
+When a session ends, eve attempts to cancel its managed subscriptions through
+durable cleanup. An unavailable provider or Connect API can delay or fail that
+cleanup; inspect the workflow's failed step before treating the upstream watch
+as stopped. `expiresAt: null` removes the Connect monitoring deadline; it does
+not keep an ended eve session alive.
+Subscription cleanup failures do not prevent child-task termination or hide an
+existing session failure from its waiting caller.

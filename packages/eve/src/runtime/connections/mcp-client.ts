@@ -1,3 +1,4 @@
+import { ConnectionEventActions, isEventAction } from "#runtime/connections/events/actions.js";
 import { createMCPClient, type MCPClient } from "#compiled/@ai-sdk/mcp/index.js";
 import type { ToolSet } from "ai";
 
@@ -60,9 +61,16 @@ export class McpConnectionClient implements ConnectionClient {
   #connection: ResolvedConnectionDefinition;
   /** Whether the current transport connected without a bearer because none was available yet. */
   #anonymous = false;
+  #events: ConnectionEventActions | undefined;
 
   constructor(connection: ResolvedConnectionDefinition) {
     this.#connection = connection;
+    if (connection.experimental_events !== undefined)
+      this.#events = new ConnectionEventActions(
+        connection,
+        () => resolveHeaders(connection),
+        this.#forwardingFetch(),
+      );
   }
 
   /**
@@ -153,7 +161,19 @@ export class McpConnectionClient implements ConnectionClient {
    */
   async getToolMetadata(): Promise<readonly ConnectionToolMetadata[]> {
     const cache = await this.#ensureTools();
-    return cache.metadata;
+    if (this.#events === undefined) return cache.metadata;
+    if (cache.metadata.some((tool) => isEventAction(tool.name)))
+      throw new Error("MCP server tools conflict with eve's reserved events_ actions.");
+    let events;
+    try {
+      events = await this.#events.metadata();
+    } catch (error) {
+      return await this.#rethrowClassified(error);
+    }
+    return [
+      ...cache.metadata,
+      ...events.filter((tool) => passesToolFilter(tool.name, this.#connection.tools)),
+    ];
   }
 
   /**
@@ -173,6 +193,11 @@ export class McpConnectionClient implements ConnectionClient {
   ): Promise<unknown> {
     let result: unknown;
     try {
+      if (this.#events !== undefined && isEventAction(toolName)) {
+        if (!passesToolFilter(toolName, this.#connection.tools))
+          throw new Error("Event action is blocked by this connection's tool filter.");
+        return await this.#events.execute(toolName, args, options);
+      }
       const { tools } = await this.#ensureTools();
 
       const sdkTool = tools[toolName];

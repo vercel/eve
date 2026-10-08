@@ -1,3 +1,4 @@
+import type { ConnectionEventInboxPayload } from "#runtime/connections/events/delivery.js";
 import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
 import type {
   SessionControl,
@@ -10,6 +11,7 @@ import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 
 export type NextTurnInstruction =
+  | { readonly kind: "connection-event"; readonly payload: ConnectionEventInboxPayload }
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage }
   | { readonly kind: SessionControl }
   | { readonly kind: "closed" }
@@ -36,6 +38,7 @@ export async function nextTurnDelivery(input: {
     const selected = queue.takeNext({
       freshSequence: inbox.hasPending() ? undefined : freshSequence,
     });
+    if (selected?.kind === "connection-event") return selected;
     if (selected?.kind === "control") return { kind: selected.control };
     if (selected?.kind === "turn") {
       const routed = await routeSelectedDelivery(selected, cursor);

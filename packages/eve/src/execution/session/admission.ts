@@ -29,6 +29,10 @@ export async function admitSessionInboxPayload(
     readonly queue: SessionInputQueue;
   },
 ): Promise<SessionAdmission> {
+  if (value.kind === "connection-event") {
+    input.queue.enqueueConnectionEvent(value);
+    return { kind: "consumed" };
+  }
   if (value.kind === "runtime-action-result")
     return { kind: "runtime-action-result", payload: value };
   if (isWorkflowMessage(value)) return { kind: "workflow", message: value };

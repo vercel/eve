@@ -499,8 +499,15 @@ class AgentGraphCompiler {
             binding: binding!,
             loadNamespace,
           });
-          if (result.kind === "connection") connections.push(result.definition);
-          else {
+          if (result.kind === "connection") {
+            if (
+              result.definition.experimental_events === true &&
+              input.nodeId !== ROOT_COMPILED_AGENT_NODE_ID
+            ) {
+              throw new Error("experimental_events currently requires a root-agent connection.");
+            }
+            connections.push(result.definition);
+          } else {
             dynamicConnections.push(withExtensionNamespace(result.definition, candidate.owner));
           }
           state.evaluation.requireRuntimeEntry(candidate.sourceId);

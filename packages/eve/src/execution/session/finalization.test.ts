@@ -1,3 +1,4 @@
+import { stopConnectionEventStep } from "#runtime/connections/events/cleanup-step.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { finalizeSession } from "#execution/session/finalization.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
@@ -8,6 +9,10 @@ import type { HarnessSession } from "#harness/types.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { notifyTurnCallerStep } from "#subagents/parent-notification.js";
+
+vi.mock("#runtime/connections/events/cleanup-step.js", () => ({
+  stopConnectionEventStep: vi.fn(),
+}));
 
 vi.mock("#execution/terminate-child-sessions-step.js", () => ({
   terminateChildSessionsStep: vi.fn(),
@@ -154,4 +159,56 @@ describe("session finalization with an unsettled caller", () => {
     expect(result).toMatchObject({ isError: false, output: "" });
     expect(notifyTurnCallerStep).not.toHaveBeenCalled();
   });
+});
+
+it("attempts every subscription cleanup even when one cancellation fails", async () => {
+  const failure = new Error("Connect unavailable");
+  vi.mocked(stopConnectionEventStep).mockRejectedValueOnce(failure).mockResolvedValueOnce();
+  await expect(
+    finalizeSession(
+      { kind: "expired" },
+      {
+        caller: undefined,
+        cursor: {
+          serializedContext: { "eve.connectionEvents": { bindings: { first: {}, second: {} } } },
+          sessionState: sessionWithTaskRun(),
+        },
+        sessionWritable: new WritableStream(),
+      },
+    ),
+  ).rejects.toBe(failure);
+  expect(vi.mocked(stopConnectionEventStep).mock.calls.map(([input]) => input.bindingId)).toEqual([
+    "first",
+    "second",
+  ]);
+  expect(terminateChildSessionsStep).toHaveBeenCalledTimes(1);
+});
+
+it("reports the original session failure even when subscription cleanup also fails", async () => {
+  vi.mocked(stopConnectionEventStep).mockRejectedValueOnce(new Error("Connect unavailable"));
+  const error = new Error("Owner failed");
+  const caller = {
+    callId: "delegate",
+    subagentName: "detector",
+    replyTo: { kind: "hook" as const, token: "parent" },
+  };
+  const result = await finalizeSession(
+    { kind: "failed", error },
+    {
+      caller,
+      cursor: {
+        serializedContext: { "eve.connectionEvents": { bindings: { first: {} } } },
+        sessionState: sessionWithTaskRun(),
+      },
+      sessionWritable: new WritableStream(),
+    },
+  );
+  expect(result).toMatchObject({ isError: true });
+  expect(terminateChildSessionsStep).toHaveBeenCalledTimes(1);
+  expect(emitTerminalSessionFailureStep).toHaveBeenCalledWith(
+    expect.objectContaining({ error: expect.objectContaining({ message: "Owner failed" }) }),
+  );
+  expect(notifyTurnCallerStep).toHaveBeenCalledWith(
+    expect.objectContaining({ caller, settled: expect.objectContaining({ isError: true }) }),
+  );
 });

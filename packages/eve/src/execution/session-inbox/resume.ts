@@ -1,3 +1,4 @@
+import type { ConnectionEventInboxPayload } from "#runtime/connections/events/delivery.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type {
   DeliverHookPayload,
@@ -38,7 +39,11 @@ export interface ResumedSessionInboxHook {
  */
 export async function resumeSessionInbox(
   address: string | SessionInboxAddress,
-  command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload,
+  command:
+    | DeliverHookPayload
+    | SessionCommand
+    | SessionTimeoutHookPayload
+    | ConnectionEventInboxPayload,
 ): Promise<ResumedSessionInboxHook> {
   const token = logicalToken(address);
   const deadline = Date.now() + HANDOFF_RETRY_WINDOW_MS;
@@ -49,6 +54,7 @@ export async function resumeSessionInbox(
     } catch (error) {
       if (!HookNotFoundError.is(error)) throw error;
       if (await isHandoffInProgress(token, deadline)) continue;
+      if (command.kind === "connection-event") throw error;
       return await resumeLegacyInbox(token, command).catch(rethrowUnsupportedAsNotFound);
     }
     let identity: Promise<string> | undefined;

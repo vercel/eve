@@ -1,3 +1,4 @@
+import { connectionEventRoute } from "#runtime/connections/events/path.js";
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import type { ChannelRouteMethod } from "#public/definitions/channel.js";
@@ -28,6 +29,12 @@ export interface ApplicationChannelPreflightRoute {
 }
 
 export type ApplicationRouteRegistration =
+  | {
+      readonly kind: "connection-event";
+      readonly method: "POST";
+      readonly path: string;
+      readonly connectionName: string;
+    }
   | ApplicationChannelPreflightRoute
   | ApplicationChannelRoute
   | {
@@ -54,7 +61,8 @@ export interface ApplicationRouteRegistry {
 
 interface ApplicationRouteRegistryHost {
   readonly compileResult: {
-    readonly manifest: Pick<CompiledAgentManifest, "channelRoutes">;
+    readonly manifest: Pick<CompiledAgentManifest, "channelRoutes"> &
+      Partial<Pick<CompiledAgentManifest, "connections">>;
   };
 }
 
@@ -84,6 +92,18 @@ export function createApplicationRouteRegistry(
     })),
   ];
   const routes: ApplicationRouteRegistration[] = [...channelRoutes];
+  for (const connection of preparedHost.compileResult.manifest.connections ?? []) {
+    if (connection.experimental_events !== true) continue;
+    const path = connectionEventRoute(connection.connectionName);
+    if (routes.some((route) => route.path === path))
+      throw new Error(`Connection event receiver conflicts with an existing route: ${path}`);
+    routes.push({
+      kind: "connection-event",
+      method: "POST",
+      path,
+      connectionName: connection.connectionName,
+    });
+  }
 
   if (options.development === true) {
     routes.push(

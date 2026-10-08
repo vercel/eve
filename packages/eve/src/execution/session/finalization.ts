@@ -1,3 +1,5 @@
+import type { ConnectionEventsState } from "#runtime/connections/events/state.js";
+import { stopConnectionEventStep } from "#runtime/connections/events/cleanup-step.js";
 import type { TurnCaller } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
@@ -43,6 +45,16 @@ export async function finalizeSession(
   ) {
     await terminateChildSessionsStep({ sessionState });
   }
+  const eventState = serializedContext["eve.connectionEvents"] as ConnectionEventsState | undefined;
+  const cleanups = await Promise.allSettled(
+    Object.keys(eventState?.bindings ?? {}).map((bindingId) =>
+      stopConnectionEventStep({ serializedContext, bindingId }),
+    ),
+  );
+  const failedCleanup = cleanups.find((result) => result.status === "rejected");
+  // A cleanup failure enters the owner's existing failure finalization path.
+  // That path must still report its original error and settle the waiting caller.
+  if (failedCleanup?.status === "rejected" && outcome.kind !== "failed") throw failedCleanup.reason;
   const session = sessionState?.snapshot.session;
   const usage = session === undefined ? undefined : getSessionUsage(session);
   if (outcome.kind === "expired") {
