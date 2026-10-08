@@ -766,7 +766,7 @@ describe("createVercelSandbox", () => {
     vi.mocked(sessionSandbox.runCommand).mockResolvedValue(createMockDetachedCommand() as never);
     vi.mocked(sessionSandbox.runCommand).mockClear();
 
-    await handle.onSessionStop();
+    await handle.onSandboxStop();
     await handle.sandbox.run({ command: "printf resumed" });
 
     expect(sessionSandbox.stop).toHaveBeenCalledTimes(1);
@@ -812,7 +812,7 @@ describe("createVercelSandbox", () => {
     });
     const abortSignal = new AbortController().signal;
 
-    await expect(handle.onSessionDelete({ abortSignal })).resolves.toBeUndefined();
+    await expect(handle.onSandboxDelete({ abortSignal })).resolves.toBeUndefined();
 
     expect(order).toEqual(["stop", "sandbox-get", "sandbox-delete"]);
     expect(stableGet).toHaveBeenCalledWith({
@@ -860,7 +860,7 @@ describe("createVercelSandbox", () => {
     const { handle, sessionSandbox } = await createTestVercelSession();
     sessionSandbox.stop.mockRejectedValueOnce(new Error("provider unreachable"));
 
-    await expect(handle.onSessionStop()).rejects.toThrow("provider unreachable");
+    await expect(handle.onSandboxStop()).rejects.toThrow("provider unreachable");
   });
 
   it("applies the open-time policy after template-less base setup", async () => {

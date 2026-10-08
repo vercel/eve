@@ -5,6 +5,7 @@ import {
   drainDynamicInstructionUserMessages,
   prepareDynamicInstructionPreamble,
 } from "#context/dynamic-instruction-lifecycle.js";
+import { isDynamicConnectionResolutionError } from "#context/dynamic-connection-lifecycle.js";
 import { isDynamicModelSelectionError } from "#context/dynamic-model-lifecycle.js";
 import { ParentSessionKey, SessionCallbackKey } from "#context/keys.js";
 import { drainMemoryCommit, prepareMemoryPreamble } from "#context/memory-lifecycle.js";
@@ -158,12 +159,40 @@ export async function openTurn(
   return undefined;
 }
 
-/** A lifecycle event failed to publish: only a dynamic model selection failure is reported. */
+/**
+ * A lifecycle event failed to publish: a dynamic model selection failure ends the session, and a
+ * dynamic connection resolver failure parks it. Anything else throws.
+ */
 export async function failBoundaryEvent(step: Step, error: unknown): Promise<StepResult> {
   throwIfTurnAborted(step.config.abortSignal);
   if (isTurnCancellation(error)) throw error;
   if (isDynamicModelSelectionError(error)) return failModelSelection(step, error);
+  if (isDynamicConnectionResolutionError(error)) return failConnectionResolution(step, error);
   throw error;
+}
+
+/** A dynamic connection resolver threw: the session parks so the next message can retry. */
+export async function failConnectionResolution(step: Step, error: unknown): Promise<StepResult> {
+  if (step.emit === undefined) throw error;
+  step.instrumentation?.recordError(error);
+
+  const errorId = createErrorId();
+  const message = toErrorMessage(error);
+  log.error("dynamic connection resolver failed — parking session", {
+    error,
+    errorId,
+    sessionId: step.session.sessionId,
+    turnId: activeTurnId(step.position()),
+  });
+  await step.apply(
+    fail(step.view(), { code: "EVENT_HANDLER_FAILED", details: { errorId }, message }),
+  );
+  step.session = { ...step.session, outputSchema: undefined };
+  return {
+    next: null,
+    session: step.session,
+    settledTurn: { isError: true, output: message },
+  };
 }
 
 /** No model can serve the turn: the session fails. */

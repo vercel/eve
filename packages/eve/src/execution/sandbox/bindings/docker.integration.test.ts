@@ -441,7 +441,7 @@ describe("Docker provider create", () => {
 
       // An authored stop releases the container; filesystem state survives
       // for the next `create` to restart from.
-      await handle.onSessionStop();
+      await handle.onSandboxStop();
       expect(findCall(calls, (args) => args[0] === "stop")?.args).toEqual([
         "stop",
         "-t",

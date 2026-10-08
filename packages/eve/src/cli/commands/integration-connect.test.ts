@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
+import { HumanActionRequiredError } from "#setup/human-action.js";
 import { WizardCancelledError } from "#setup/step.js";
 
 import { runIntegrationConnect, runIntegrationConnectCommand } from "./integration-connect.js";
@@ -20,6 +21,7 @@ function dependencies(overrides: Record<string, unknown> = {}) {
     createPrompter: () => fake.prompter,
     ensureVercelProject: vi.fn(async () => PROJECT),
     readProjectLink: vi.fn(async () => PROJECT),
+    requireAuth: vi.fn(async () => {}),
     setupConnectionConnector: vi.fn(async () => ({
       kind: "existing" as const,
       connectorUid: "linear/real",
@@ -154,6 +156,41 @@ describe("runIntegrationConnect", () => {
       prerequisite: { code: "vercel-project-link", command: "eve link" },
     });
     expect(process.exitCode).toBe(2);
+  });
+
+  it("reports a logged-out CLI on a linked project as a vercel login prerequisite", async () => {
+    const output = {
+      errors: [] as string[],
+      log: vi.fn(),
+      error: vi.fn((message) => output.errors.push(message)),
+    };
+    const deps = dependencies({
+      requireAuth: vi.fn(async () => {
+        throw new HumanActionRequiredError({
+          kind: "vercel-login",
+          command: "vercel login",
+          reason: "The Vercel CLI is not logged in.",
+        });
+      }),
+    });
+
+    await runIntegrationConnectCommand(
+      output,
+      "/project",
+      "notion",
+      "mcp.notion.com",
+      undefined,
+      { nonInteractive: true },
+      deps,
+    );
+
+    expect(JSON.parse(output.errors[0]!)).toMatchObject({
+      type: "blocked",
+      status: "prerequisite_required",
+      prerequisite: { kind: "command", code: "vercel-login", command: "vercel login" },
+    });
+    expect(process.exitCode).toBe(2);
+    expect(deps.setupConnectionConnector).not.toHaveBeenCalled();
   });
 
   it("does not create an interactive prompter for a non-interactive command", async () => {

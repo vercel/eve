@@ -20,8 +20,10 @@ export class NodeModuleEvaluationContext {
     mountSourceId?: (binding: AgentModuleBinding) => string | undefined,
     mounts?: Parameters<typeof createCompiledBindingNamespaceLoader>[0]["mounts"],
     evaluationId?: string,
+    appRoot?: string,
   ) {
     this.loadNamespace = createCompiledBindingNamespaceLoader({
+      appRoot,
       mountSourceId,
       mounts,
       evaluationId,

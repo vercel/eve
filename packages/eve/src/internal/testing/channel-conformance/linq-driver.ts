@@ -88,6 +88,7 @@ export function linqDriver(surface: Exclude<Surface, "public"> = "shared"): Chan
 
   return {
     name: group ? "linq" : "linq-dm",
+    personId: PERSON.id,
     capabilities: ["attachments", "text-replies"],
     surface,
     createChannel(record) {
@@ -141,7 +142,7 @@ export function linqDriver(surface: Exclude<Surface, "public"> = "shared"): Chan
     dispose() {
       restoreFetch?.();
     },
-    message: signedMessage,
+    message: (text, _person, files) => signedMessage(text, files),
     findOptions(call, prompt) {
       if (!call.method.endsWith("/messages") || !postedText(call)?.includes(prompt))
         return undefined;

@@ -439,9 +439,11 @@ describe("TerminalRenderer (inline scrollback)", () => {
     input.type("line one");
     input.send("\x1b[27;2;13~"); // Shift+Enter (xterm modifyOtherKeys)
     input.type("line two");
+    input.send("\n"); // Shift+Enter in Warp, or Ctrl+J (#4404)
+    input.type("line three");
     input.enter();
 
-    expect(await prompt).toBe("line one\nline two");
+    expect(await prompt).toBe("line one\nline two\nline three");
     renderer.shutdown();
   });
 

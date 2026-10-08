@@ -357,7 +357,8 @@ describe("runtime results", () => {
             answerToken,
             {
               runId: "run-1",
-              workflowAsk: { control: "control", question: {} },
+              workflowAsk: { control: "control" },
+              reply: {},
               childContinuationToken: answerToken,
               event: REQUEST_EVENT,
               kind: "question",

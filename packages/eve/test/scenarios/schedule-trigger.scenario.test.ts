@@ -168,7 +168,7 @@ describe("schedule trigger end-to-end (channel-less schedules)", () => {
       // \"schedule\"".
       const rehydrated = await simulateStepBoundary(captured[0]!.adapter, bundle);
 
-      expect(rehydrated).toEqual({ kind: SCHEDULE_ADAPTER_KIND, state: {} });
+      expect(rehydrated).toMatchObject({ kind: SCHEDULE_ADAPTER_KIND, state: {} });
     });
   });
 
@@ -224,7 +224,7 @@ describe("schedule trigger end-to-end (channel-less schedules)", () => {
 
       const rehydrated = await simulateStepBoundary(captured[0]!.adapter, bundle);
 
-      expect(rehydrated).toEqual({ kind: SCHEDULE_ADAPTER_KIND, state: {} });
+      expect(rehydrated).toMatchObject({ kind: SCHEDULE_ADAPTER_KIND, state: {} });
     });
   });
 

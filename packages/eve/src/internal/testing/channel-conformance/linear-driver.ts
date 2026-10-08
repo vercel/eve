@@ -13,6 +13,9 @@ import { signLinearWebhookBody } from "#public/channels/linear/verify.js";
 const SECRET = "linear-conformance-secret";
 let nextConversation = 0;
 
+// Anyone in the workspace can reply in an issue's agent session.
+const PEOPLE = { alice: "user_1", bob: "user_2" } as const;
+
 /** Drives Linear Agent Session webhooks and Agent Activity GraphQL mutations. */
 export function linearDriver(): ChannelDriver {
   nextConversation += 1;
@@ -84,7 +87,8 @@ export function linearDriver(): ChannelDriver {
 
   return {
     name: "linear",
-    capabilities: ["attachments", "text-replies"],
+    personId: PEOPLE.alice,
+    capabilities: ["another-person", "attachments", "text-replies"],
     // An agent session lives on an issue the whole workspace can see.
     surface: "shared",
     createChannel: (record) =>
@@ -92,13 +96,14 @@ export function linearDriver(): ChannelDriver {
         api: { fetch: recordingFetch(record, decode) },
         credentials: { accessToken: "linear-token", webhookSecret: SECRET },
       }),
-    message: (words, files = []) => {
+    message: (words, person, files = []) => {
       const text = withUploads(words, files);
+      const user = PEOPLE[person];
       if (delivery === 0) {
         return webhook({
           action: "created",
           agentSession: {
-            creator: { id: "user_1" },
+            creator: { id: user },
             id: sessionId,
             issue: { id: issueId, identifier: issueIdentifier, title: "Conformance test" },
             issueId,
@@ -112,8 +117,8 @@ export function linearDriver(): ChannelDriver {
         agentActivity: {
           content: { body: text, type: "prompt" },
           id: `prompt-${delivery}`,
-          user: { id: "user_1" },
-          userId: "user_1",
+          user: { id: user },
+          userId: user,
         },
       });
     },

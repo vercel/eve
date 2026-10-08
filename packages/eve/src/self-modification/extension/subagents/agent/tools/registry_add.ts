@@ -110,8 +110,10 @@ export function handoffMessage(input: {
   readonly title: string;
 }): { readonly message: string; readonly nextCommand?: string } {
   if (input.interactiveClient) {
+    // The panel opens only after this turn ends, so nothing has happened yet.
+    // The model must not report the item as added, connected, or opened.
     return {
-      message: `${input.title} was not installed by this tool. ${input.reason} Continue in the setup panel that opens here; do not ask the developer to run another command.`,
+      message: `${input.title} has not been installed yet. ${input.reason} Its setup panel opens after this reply, asks for anything setup needs, and reports whether setup succeeded; tell the developer to complete it there, and do not describe ${input.title} as added, connected, or set up. Do not ask the developer to run another command.`,
     };
   }
   const nextCommand = `eve add ${input.address}`;

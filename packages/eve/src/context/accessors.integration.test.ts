@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { loadContext } from "#context/container.js";
+import { AuthKey, ScheduleIdKey, ScheduleInstanceKey, OccurrenceIdKey } from "#context/keys.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
@@ -45,6 +47,29 @@ describe("buildCallbackContext – session", () => {
         id: "turn_public_session_001",
         sequence: 1,
       },
+    });
+  });
+
+  it("exposes framework schedule provenance without trusting auth attributes", async () => {
+    const runtime = await createTestRuntime();
+    await runtime.runAsSession(undefined, async () => {
+      const ctx = loadContext();
+      ctx.set(AuthKey, {
+        attributes: { "eve.scheduled_run": "true" },
+        authenticator: "fixture",
+        principalId: "alice",
+        principalType: "user",
+      });
+      expect(buildCallbackContext().session.schedule).toBeUndefined();
+      ctx.set(ScheduleIdKey, "tasks");
+      expect(buildCallbackContext().session.schedule).toMatchObject({ definition: "tasks" });
+      ctx.set(ScheduleInstanceKey, "daily-report--id");
+      ctx.set(OccurrenceIdKey, "exec-1");
+      expect(buildCallbackContext().session.schedule).toEqual({
+        definition: "tasks",
+        instance: "daily-report--id",
+        occurrenceId: "exec-1",
+      });
     });
   });
 

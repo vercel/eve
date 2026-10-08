@@ -235,8 +235,9 @@ describe("addLocalRegistryItem", () => {
     });
 
     expect(result.nextCommand).toBeUndefined();
-    expect(result.message).toContain("setup panel");
-    expect(result.message).toContain("do not ask the developer to run another command");
+    expect(result.message).toContain("has not been installed yet");
+    expect(result.message).toContain("opens after this reply");
+    expect(result.message).toContain("Do not ask the developer to run another command");
   });
 
   it("installs an exact item from a configured registry without restricting its address", async () => {

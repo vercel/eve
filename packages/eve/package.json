@@ -1,6 +1,6 @@
 {
   "name": "eve",
-  "version": "0.73.0",
+  "version": "0.74.0",
   "private": false,
   "description": "Filesystem-first framework for durable backend AI agents that run anywhere.",
   "keywords": [
@@ -424,6 +424,24 @@
       "import": "./dist/src/public/server/index.js",
       "default": "./dist/src/public/server/index.js"
     },
+    "./experimental/schedules/testing": {
+      "eve-source": "./src/public/experimental/schedules/testing.ts",
+      "types": "./dist/src/public/experimental/schedules/testing.d.ts",
+      "import": "./dist/src/public/experimental/schedules/testing.js",
+      "default": "./dist/src/public/experimental/schedules/testing.js"
+    },
+    "./experimental/schedules": {
+      "eve-source": "./src/public/experimental/schedules/index.ts",
+      "types": "./dist/src/public/experimental/schedules/index.d.ts",
+      "import": "./dist/src/public/experimental/schedules/index.js",
+      "default": "./dist/src/public/experimental/schedules/index.js"
+    },
+    "./experimental/schedules/vercel": {
+      "eve-source": "./src/public/experimental/schedules/vercel.ts",
+      "types": "./dist/src/public/experimental/schedules/vercel.d.ts",
+      "import": "./dist/src/public/experimental/schedules/vercel.js",
+      "default": "./dist/src/public/experimental/schedules/vercel.js"
+    },
     "./channels": {
       "types": "./dist/src/public/channels/index.d.ts",
       "import": "./dist/src/public/channels/index.js",
@@ -527,7 +545,7 @@
     "dev": "pnpm run build:compiled && node ./scripts/copy-runtime-assets.mjs && tsc -p tsconfig.dev.json --watch --preserveWatchOutput",
     "prepack": "pnpm run build && node ../../scripts/copy-package-license.mjs .",
     "test": "pnpm run test:unit && pnpm run test:integration",
-    "test:browser": "pnpm run build:js && vitest run --config vitest.browser.config.ts",
+    "test:webchat": "pnpm run build:js && vitest run --config vitest.browser.config.ts",
     "test:framework-fixtures": "pnpm run build:compiled && vitest run --config vitest.framework-fixtures.config.ts",
     "test:integration": "pnpm run build:js && vitest run --config vitest.integration.config.ts",
     "test:scenario": "pnpm run build:compiled && vitest run --config vitest.scenario.config.ts",
@@ -579,7 +597,9 @@
     "@vercel/detect-agent": "1.2.3",
     "@vercel/oidc": "3.8.0",
     "@vercel/otel": "catalog:",
+    "@vercel/queue": "0.5.1",
     "@vercel/sandbox": "catalog:",
+    "@vercel/schedules": "0.0.0-alpha.11",
     "@vercel/sdk": "1.28.8",
     "@workflow/core": "5.1.0",
     "@workflow/errors": "5.0.2",

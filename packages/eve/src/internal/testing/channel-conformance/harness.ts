@@ -16,7 +16,10 @@ import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import { askQuestion } from "#tools/provided/ask-question.js";
 import { defineWorkflowTool } from "#public/tools/index.js";
-import { askDayAndTimeWorkflow } from "#internal/testing/channel-conformance/two-questions-workflow.js";
+import {
+  askDayAndTimeWorkflow,
+  askRetroDayWorkflow,
+} from "#internal/testing/channel-conformance/question-workflows.js";
 import { getWorld } from "#internal/workflow/runtime.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import {
@@ -122,6 +125,8 @@ export type Surface =
  */
 export interface ChannelDriver {
   readonly name: string;
+  /** The platform's id for Alice, which the principal eve derives for her must name. */
+  readonly personId: string;
   readonly capabilities: readonly ChannelCapability[];
   readonly surface: Surface;
   /**
@@ -131,8 +136,12 @@ export interface ChannelDriver {
   createChannel(record: (call: PlatformCall) => void): unknown;
   /** Undoes anything `createChannel` installed outside the channel, such as a global `fetch`. */
   dispose?(): void;
-  /** A webhook request carrying a person's message. */
-  message(text: string, files?: readonly SentFile[]): Request;
+  /**
+   * A webhook request carrying `person`'s message, with `files` attached if
+   * given. Drivers with the `another-person` capability must send as `"bob"`
+   * when asked.
+   */
+  message(text: string, person: Person, files?: readonly SentFile[]): Request;
   /**
    * The options a person can see in one outbound call that posts the question:
    * `undefined` when the call isn't the question, `[]` when it shows no options.
@@ -185,8 +194,8 @@ export interface SentFile {
 
 /** What a person can do and see in one channel conversation. Contract rules use only this. */
 export interface ChannelConversation {
-  /** The person sends a plain-text message, with `files` attached if given. */
-  say(text: string, files?: readonly SentFile[]): Promise<void>;
+  /** `person`, Alice unless given, sends a plain-text message, with `files` attached if given. */
+  say(text: string, person?: Person, files?: readonly SentFile[]): Promise<void>;
   /** Waits for the bot to post `prompt` with choices, returning them. */
   waitForQuestion(prompt: string): Promise<readonly RenderedOption[]>;
   /**
@@ -240,7 +249,15 @@ export interface ChannelConversation {
   shownPrompt(prompt: string): Promise<ShownMessage>;
   /** How the person appears in the platform's text, in any form. */
   readonly personShownAs: readonly string[];
+  /** Alice's id on the platform, or as the client authenticates her. */
+  readonly personId: string;
   runsOf(tool: CountedTool): number;
+  /**
+   * The caller each run of `tool` saw, in order, as one string per principal,
+   * or `null` for no caller. Equal strings are the same principal. Each is JSON
+   * that begins with the principal id.
+   */
+  callersOf(tool: typeof PLAIN_TOOL): readonly (string | null)[];
 }
 
 /**
@@ -261,8 +278,8 @@ export interface ClientDriver {
 
 /** A running client, as a person sees and uses it. */
 export interface ClientView {
-  /** The person sends a plain-text message, with `files` attached if given. */
-  say(text: string, files?: readonly SentFile[]): Promise<void>;
+  /** `person` sends a plain-text message, with `files` attached if given. */
+  say(text: string, person: Person, files?: readonly SentFile[]): Promise<void>;
   /**
    * Waits for the client to show one of `prompts`, returning which one and its
    * choices. A client may show several pending requests one at a time.
@@ -276,6 +293,8 @@ export interface ClientView {
   shownPrompt?(prompt: string): ShownMessage | Promise<ShownMessage>;
   /** How the person appears in the client's text, in any form. */
   readonly personShownAs?: readonly string[];
+  /** Alice's id on the platform; a client authenticates her as {@link CLIENT_PERSON}. */
+  readonly personId?: string;
   /** See {@link ChannelDriver.nextAddress}. */
   nextAddress?(): string | undefined;
   /** Everything the client shows now that a person can read or open, one entry per message. */
@@ -380,6 +399,9 @@ export interface ConversationOptions {
 
 /** The test agent's tool that asks {@link DAY_PROMPT} and {@link TIME_PROMPT} at once. */
 export const TWO_QUESTIONS_TOOL = "plan_review";
+
+/** The test agent's tool that asks {@link RETRO_PROMPT}, which takes no free text. */
+export const RETRO_DAY_TOOL = "pick_retro_day";
 
 /** What a person sees once a tool call settles. */
 export type ToolOutcome =
@@ -487,7 +509,7 @@ function webhookView(
   const promptsFrom = new Map<string, number>();
 
   return {
-    say: (text, files) => post(driver.message(text, files)),
+    say: (text, person, files) => post(driver.message(text, person, files)),
     press: (option, person) => post(driver.press(option, person)),
     waitForQuestion: (prompts) =>
       wait(
@@ -526,6 +548,7 @@ function webhookView(
         .at(-1)!;
     },
     personShownAs: driver.personShownAs ?? [],
+    personId: driver.personId,
     nextAddress: driver.nextAddress?.bind(driver),
     shown: () =>
       calls.flatMap((call) => {
@@ -584,6 +607,7 @@ async function converse(
 ): Promise<void> {
   if (!isCompiledChannel(created)) throw new Error(`${label} is not a compiled channel.`);
   const channel: CompiledChannel = created;
+  const callers: (string | null)[] = [];
   const runs: Record<CountedTool, number> = {
     [GATED_TOOL]: 0,
     [REQUESTER_GATED_TOOL]: 0,
@@ -637,8 +661,9 @@ async function converse(
         loadNamespace: async () => ({
           default: defineTool({
             description: `Looks up meeting notes. Only call when asked to use ${PLAIN_TOOL}.`,
-            execute: async () => {
+            execute: async (_input, ctx) => {
               runs[PLAIN_TOOL] += 1;
+              callers.push(callerKey(ctx.session.auth.current));
               return { notes: "Bob's review notes" };
             },
             inputSchema: z.object({}),
@@ -681,6 +706,16 @@ async function converse(
         },
         () => ({ status: "allowed" }),
       ),
+      {
+        logicalPath: `tools/${RETRO_DAY_TOOL}.ts`,
+        loadNamespace: async () => ({
+          default: defineWorkflowTool({
+            description: `Schedules a retro. Only call when asked to use ${RETRO_DAY_TOOL}.`,
+            execute: askRetroDayWorkflow,
+            inputSchema: z.object({}),
+          }),
+        }),
+      },
       {
         logicalPath: `tools/${TWO_QUESTIONS_TOOL}.ts`,
         loadNamespace: async () => ({
@@ -792,12 +827,12 @@ async function converse(
     let signInsCompleted = 0;
 
     const conversation: ChannelConversation = {
-      async say(text, files) {
+      async say(text, person = "alice", files) {
         await waitForStepsToFinish([...sessions.values()], wait);
         // A step can be done before its aliases are claimed; see waitForAddress.
         const address = view.nextAddress?.();
         if (address !== undefined) await waitForAddress(address);
-        await view.say(text, files);
+        await view.say(text, person, files);
       },
       press: (option, person = "alice") => view.press(option, person),
       async waitForQuestion(prompt) {
@@ -888,12 +923,14 @@ async function converse(
         await deliverSignInCallback(callbackUrl);
       },
       runsOf: (tool) => runs[tool],
+      callersOf: () => callers,
       waitForRest: () => waitForRest([...sessions.values()], wait),
       async shownPrompt(prompt) {
         if (view.shownPrompt === undefined) throw new Error(`${label} cannot read shown messages.`);
         return await view.shownPrompt(prompt);
       },
       personShownAs: view.personShownAs ?? [],
+      personId: view.personId ?? CLIENT_PERSON.principalId,
     };
 
     /**
@@ -1152,6 +1189,12 @@ function gatedTool(
       }),
     }),
   };
+}
+
+function callerKey(auth: SessionAuthContext | null): string | null {
+  if (auth === null) return null;
+  // The id first, so a truncated assertion message still shows who it was.
+  return JSON.stringify([auth.principalId, auth.principalType, auth.authenticator, auth.issuer]);
 }
 
 function samePrincipal(a: SessionAuthContext, b: SessionAuthContext): boolean {

@@ -160,6 +160,7 @@ export function telegramDriver(surface: Exclude<Surface, "public"> = "shared"): 
 
   return {
     name: group ? "telegram" : "telegram-dm",
+    personId: String(PERSON.id),
     capabilities: !group
       ? ["attachments", "buttons", "text-replies"]
       : ["attachments", "another-person", "buttons", "text-replies"],
@@ -170,11 +171,11 @@ export function telegramDriver(surface: Exclude<Surface, "public"> = "shared"): 
         botUsername: BOT.username,
         credentials: { botToken: "bot-token", webhookSecretToken: SECRET },
       }),
-    message: (text, files = []) => {
+    message: (text, person, files = []) => {
       const message: Record<string, unknown> = {
         chat: CHAT,
         date: 0,
-        from: PERSON,
+        from: PEOPLE[person],
         message_id: 1000 + updateId,
         ...addressed(text),
       };

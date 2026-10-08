@@ -390,12 +390,12 @@ function createHandle(
   );
   return {
     sandbox: session,
-    async onSessionDelete() {
+    async onSandboxDelete() {
       await sandbox.shutdown();
       await sandbox.removePersisted();
       onShutdown?.();
     },
-    async onSessionStop() {
+    async onSandboxStop() {
       await sandbox.stop();
       onShutdown?.();
     },
