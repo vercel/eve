@@ -42,9 +42,8 @@ import { workflowToolRunFailureOutput } from "#execution/tools/workflow/owner-in
 import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { sessionView } from "#harness/session-machine/commit.js";
 import { finishRun, settleTask } from "#harness/session-machine/transitions.js";
-import { runtimeWait, storedProjection, turnPosition } from "#harness/session-machine/view.js";
-import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
-import { stopRuns, type RunStopTarget } from "#execution/stop-runs.js";
+import { storedProjection } from "#harness/session-machine/view.js";
+import { stopRuns, waitedCallRuns, type RunStopTarget } from "#execution/stop-runs.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import type { TaskCancelReason, UnstampedMessageStreamEvent } from "#protocol/message.js";
 
@@ -154,6 +153,7 @@ async function cancelTasks(
   const outcome: TaskOutcome = { reason: input.reason, status: "cancelled" };
   const targets: RunStopTarget[] = [];
   const taskOfRun = new Map<string, string>();
+  const calls = input.turnCalls === true ? waitedCallRuns(session) : [];
   for (const taskId of input.taskIds) {
     const record = findTask(table, taskId);
     const cancelled = cancelTask(table, taskId);
@@ -175,9 +175,7 @@ async function cancelTasks(
   const published = await publishSessionEvents({ ...input, ...relayed }, events);
   const [cancelledOutright] = await Promise.all([
     stopRuns(targets, { kind: "cancel", reason: TASK_CANCEL_REASON }),
-    input.turnCalls === true
-      ? stopRuns(waitedCallRuns(session), { kind: "cancel", reason: TURN_CANCEL_REASON })
-      : [],
+    stopRuns(calls, { kind: "cancel", reason: TURN_CANCEL_REASON }),
   ]);
   // A run cancelled outright never reports its outcome, so its task forgets it now.
   const forgotten = cancelledOutright.flatMap((runId) => {
@@ -191,17 +189,6 @@ async function cancelTasks(
     readTaskTable(current.state),
   );
   return { ...published, sessionState: saveTable(published.sessionState, current, finished) };
-}
-
-/** The workflow tool runs the turn waits on; each run is one call, which a cancel ends. */
-function waitedCallRuns(session: DurableSession): RunStopTarget[] {
-  const turnId =
-    runtimeWait(session.state)?.event.turnId ??
-    turnPosition(storedProjection(session.state)).turnId;
-  return getBlockingWorkflowToolRuns(session.state, turnId).map((run) => ({
-    ends: true,
-    run: run.address,
-  }));
 }
 
 /** The `task.settled` events for a task's settled calls; calls only settle on a known task. */
