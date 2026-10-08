@@ -11,7 +11,7 @@ import {
   type HarnessModelMessage,
   type UserModelMessage,
 } from "#harness/messages.js";
-import { type AnthropicCacheMarker, applySystemCacheBreakpoint } from "#harness/prompt-cache.js";
+import { applySystemCacheBreakpoint } from "#harness/prompt-cache.js";
 import type { Step } from "#harness/step/context.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
 
@@ -57,7 +57,7 @@ export function requestMessages(
 export function modelInstructions(input: {
   readonly session: HarnessSession;
   readonly systemMessages: readonly SystemModelMessage[];
-  readonly marker: AnthropicCacheMarker | undefined;
+  readonly anthropicCache: boolean;
   readonly extraSystemNote?: string;
 }): SystemModelMessage | string | undefined {
   const { session } = input;
@@ -72,7 +72,7 @@ export function modelInstructions(input: {
     : [];
   const instructions = [...extra, ...base, ...input.systemMessages];
   return mergeSystemInstructions(
-    input.marker ? applySystemCacheBreakpoint(instructions, input.marker) : instructions,
+    input.anthropicCache ? applySystemCacheBreakpoint(instructions) : instructions,
   );
 }
 

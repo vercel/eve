@@ -25,12 +25,8 @@ import {
 import type { TurnPosition } from "#harness/session-machine/view.js";
 import { normalizeAssistantStepFinishReason } from "#harness/finish-reason.js";
 import { extractToolApprovalInputRequests } from "#harness/input-extraction.js";
-import {
-  type AnthropicCacheMarker,
-  applyConversationCacheControl,
-  mergeGatewayAutoCaching,
-  type PromptCachePath,
-} from "#harness/prompt-cache.js";
+import type { ModelProfile } from "#harness/model-profile.js";
+import { applyConversationCacheControl, mergeGatewayAutoCaching } from "#harness/prompt-cache.js";
 import { resolveCallProviderOptions } from "#harness/provider-safety.js";
 import {
   collectActionPresentation,
@@ -84,13 +80,12 @@ export type HarnessStepResult = Pick<
  */
 interface StepHooksInput {
   readonly auth?: import("#channel/types.js").SessionAuthContext | null;
-  readonly cachePath: PromptCachePath;
+  readonly profile: ModelProfile;
   /**
    * Starts the model step the SDK is about to run. Omitted when the step already started, as
    * it has for a retry of the same step.
    */
   readonly startStep?: (messages: readonly ModelMessage[]) => Promise<void>;
-  readonly marker: AnthropicCacheMarker | undefined;
   readonly session: HarnessSession;
 }
 
@@ -169,26 +164,20 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
   // session history — no prepareStep snapshot required.
   // -------------------------------------------------------------------------
 
-  const prepareStep: PrepareStepFunction<ToolSet> = async ({ messages, model }) => {
-    let processed = messages;
-
-    if (input.cachePath.kind === "anthropic-direct" && input.marker) {
-      processed = applyConversationCacheControl([...messages], input.marker);
-    }
-
+  const prepareStep: PrepareStepFunction<ToolSet> = async ({ messages }) => {
+    const { profile } = input;
     const stepResult: NonNullable<Awaited<ReturnType<PrepareStepFunction<ToolSet>>>> = {
-      messages: processed,
+      messages: profile.anthropicCache ? applyConversationCacheControl(messages) : messages,
     };
 
     const modelReference = requireSessionModelReference(session);
     const providerOptions = resolveCallProviderOptions({
       auth: input.auth ?? contextStorage.getStore()?.get(AuthKey) ?? null,
       conversationId: resolveConversationId(session.rootSessionId ?? session.sessionId),
-      model,
-      modelReference,
+      profile,
       providerOptions: modelReference.providerOptions,
     });
-    if (input.cachePath.kind === "gateway-auto") {
+    if (profile.gateway) {
       stepResult.providerOptions = mergeGatewayAutoCaching(providerOptions) as NonNullable<
         typeof stepResult.providerOptions
       >;

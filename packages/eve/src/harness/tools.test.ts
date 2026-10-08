@@ -1,4 +1,5 @@
-import { asSchema, type JSONSchema7, jsonSchema } from "ai";
+import { asSchema, type JSONSchema7, jsonSchema, type LanguageModel } from "ai";
+import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
@@ -7,7 +8,7 @@ import { SessionKey, type Session } from "#context/keys.js";
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 import { always, never, once } from "#tools/approval/policies.js";
 
-import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
+import { resolveModelProfile } from "#harness/model-profile.js";
 import {
   WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA,
   WEB_SEARCH_EXA_OUTPUT_SCHEMA,
@@ -29,6 +30,10 @@ import { toInputSchema, UNSPECIFIED_INPUT_SCHEMA } from "#tools/schema.js";
 
 function getJsonSchema(tool: unknown): unknown {
   return (tool as { inputSchema: { jsonSchema: unknown } }).inputSchema.jsonSchema;
+}
+
+function directModel(provider: string): LanguageModel {
+  return new MockLanguageModelV3({ provider });
 }
 
 function getOutputJsonSchema(tool: unknown): unknown {
@@ -499,51 +504,15 @@ describe("buildToolSet", () => {
   });
 
   it.each([
-    [{ id: "openai/gpt-5.4" }, "gateway.chat", WEB_SEARCH_EXA_OUTPUT_SCHEMA],
-    [{ id: "anthropic/claude-opus-4.6" }, "gateway.chat", WEB_SEARCH_EXA_OUTPUT_SCHEMA],
-    [
-      {
-        id: "openai.chat/gpt-5.4",
-        source: {
-          exportName: "model",
-          logicalPath: "agent.ts",
-          sourceId: "agent.ts",
-          sourceKind: "module",
-        },
-      },
-      "openai.chat",
-      WEB_SEARCH_OPENAI_OUTPUT_SCHEMA,
-    ],
-    [
-      {
-        id: "anthropic.messages/claude-opus-4.6",
-        source: {
-          exportName: "model",
-          logicalPath: "agent.ts",
-          sourceId: "agent.ts",
-          sourceKind: "module",
-        },
-      },
-      "anthropic.messages",
-      WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA,
-    ],
-    [
-      {
-        id: "google.generative-ai/gemini-3.1-pro",
-        source: {
-          exportName: "model",
-          logicalPath: "agent.ts",
-          sourceId: "agent.ts",
-          sourceKind: "module",
-        },
-      },
-      "google.generative-ai",
-      WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA,
-    ],
-    [{ id: "mistral/mistral-large" }, "gateway.chat", WEB_SEARCH_EXA_OUTPUT_SCHEMA],
-  ] satisfies Array<readonly [RuntimeModelReference, string, JsonObject]>)(
+    ["openai/gpt-5.4", WEB_SEARCH_EXA_OUTPUT_SCHEMA],
+    ["anthropic/claude-opus-4.6", WEB_SEARCH_EXA_OUTPUT_SCHEMA],
+    [directModel("openai.chat"), WEB_SEARCH_OPENAI_OUTPUT_SCHEMA],
+    [directModel("anthropic.messages"), WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA],
+    [directModel("google.generative-ai"), WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA],
+    ["mistral/mistral-large", WEB_SEARCH_EXA_OUTPUT_SCHEMA],
+  ] satisfies Array<readonly [LanguageModel, JsonObject]>)(
     "injects the selected web_search provider output schema",
-    async (modelReference, modelProvider, expectedOutputSchema) => {
+    async (model, expectedOutputSchema) => {
       const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
         [
           "web_search",
@@ -560,8 +529,7 @@ describe("buildToolSet", () => {
       ]);
 
       const result = await buildToolSetWithProviderTools({
-        modelReference,
-        modelProvider,
+        profile: resolveModelProfile(model),
         tools,
       });
 
@@ -586,8 +554,7 @@ describe("buildToolSet", () => {
     ]);
 
     const result = await buildToolSetWithProviderTools({
-      modelReference: { id: "openai/gpt-5.4" },
-      modelProvider: "gateway.chat",
+      profile: resolveModelProfile("openai/gpt-5.4"),
       tools,
     });
 
@@ -610,8 +577,7 @@ describe("buildToolSet", () => {
       ],
     ]);
     const result = await buildToolSetWithProviderTools({
-      modelReference: { id: "openai/gpt-5.4" },
-      modelProvider: "gateway.chat",
+      profile: resolveModelProfile("openai/gpt-5.4"),
       tools,
     });
     const search = result.web_search!;
@@ -630,16 +596,14 @@ describe("buildToolSet", () => {
     ).resolves.toMatchObject({ success: true });
 
     const disabled = await buildToolSetWithProviderTools({
-      modelReference: { id: "openai/gpt-5.4" },
-      modelProvider: "gateway.chat",
+      profile: resolveModelProfile("openai/gpt-5.4"),
       tools,
       disabledProviderTools: new Set(["web_search"]),
     });
     expect(disabled.web_search).toBeUndefined();
 
     const direct = await buildToolSetWithProviderTools({
-      modelReference: { id: "gpt-5.4" },
-      modelProvider: "openai.chat",
+      profile: resolveModelProfile(directModel("openai.chat")),
       tools,
     });
     expect(direct.web_search).toMatchObject({ id: "openai.web_search" });
@@ -662,16 +626,7 @@ describe("buildToolSet", () => {
     ]);
 
     const result = await buildToolSetWithProviderTools({
-      modelReference: {
-        id: "some-provider/some-model",
-        source: {
-          exportName: "model",
-          logicalPath: "agent.ts",
-          sourceId: "agent.ts",
-          sourceKind: "module",
-        },
-      },
-      modelProvider: "some-provider",
+      profile: resolveModelProfile(directModel("some-provider")),
       tools,
     });
 

@@ -24,12 +24,7 @@ import {
   ContentFilteredModelResponseError,
   EmptyModelResponseError,
 } from "#harness/model-call/errors.js";
-import {
-  type AnthropicCacheMarker,
-  detectPromptCachePath,
-  getAnthropicCacheMarker,
-  type PromptCachePath,
-} from "#harness/prompt-cache.js";
+import { type ModelProfile, resolveModelProfile } from "#harness/model-profile.js";
 import { estimateRequestEnvelope } from "#harness/request-envelope.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { discardAttempt } from "#harness/session-machine/transitions.js";
@@ -111,8 +106,7 @@ interface ModelCallerInput {
  * may first compact the prompt, which rewrites the durable messages the step later commits.
  */
 export class ModelCaller {
-  readonly cachePath: PromptCachePath;
-  readonly marker: AnthropicCacheMarker | undefined;
+  readonly profile: ModelProfile;
   private readonly attributionHeaders: Record<string, string> | undefined;
   /** The prompt as the model reads it, projected for its history view. */
   private projectedMessages: HarnessModelMessage[];
@@ -137,11 +131,9 @@ export class ModelCaller {
     this.prompt = prompt;
     this.input = input;
 
-    this.cachePath = detectPromptCachePath(input.model);
-    this.marker =
-      this.cachePath.kind === "anthropic-direct" ? getAnthropicCacheMarker() : undefined;
+    this.profile = resolveModelProfile(input.model);
     this.attributionHeaders = buildGatewayAttributionHeaders(
-      input.model,
+      this.profile,
       step.config.runtimeIdentity,
     );
     this.projectedMessages = input.projectedMessages;
@@ -240,8 +232,8 @@ export class ModelCaller {
 
   private instructions(extraSystemNote: string | undefined) {
     return modelInstructions({
+      anthropicCache: this.profile.anthropicCache,
       extraSystemNote,
-      marker: this.marker,
       session: this.step.session,
       systemMessages: this.request.systemMessages,
     });
@@ -249,11 +241,10 @@ export class ModelCaller {
 
   private async prepare(options: ModelCallOptions): Promise<ModelTools> {
     const tools = await prepareModelTools(this.step, {
-      model: this.input.model,
       approvedTools: this.input.approvedTools,
       disabledProviderTools: options.disabledProviderTools,
       generation: this.input.generation,
-      marker: this.marker,
+      profile: this.profile,
     });
     this.tools = tools;
     this.request = this.buildRequest(tools.coordinationTools);
@@ -324,11 +315,7 @@ export class ModelCaller {
     generation.begin();
     // Hydrate `eve-sandbox:` file refs for this call only; history keeps the refs.
     this.modelMessages = await hydrateSandboxAttachments(this.request.nonSystemMessages);
-    if (
-      typeof this.input.model !== "string" &&
-      typeof this.input.model.provider === "string" &&
-      this.input.model.provider.endsWith(".chat")
-    ) {
+    if (this.profile.filesOutsideToolResults) {
       this.modelMessages = moveToolResultFilesToUserMessages(this.modelMessages);
     }
     const instructions = this.instructions(options.extraSystemNote);
@@ -357,8 +344,7 @@ export class ModelCaller {
 
     const hooks = buildStepHooks({
       auth: step.ctx?.get(AuthKey) ?? null,
-      cachePath: this.cachePath,
-      marker: this.marker,
+      profile: this.profile,
       session: step.session,
       startStep: options.suppressStepStartedEmission === true ? undefined : this.input.startStep,
     });

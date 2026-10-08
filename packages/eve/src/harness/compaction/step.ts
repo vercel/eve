@@ -34,6 +34,7 @@ import {
 } from "#protocol/message.js";
 import { drainMemoryCommit, prepareMemoryCompaction } from "#context/memory-lifecycle.js";
 import { gatewayModelId } from "#harness/model-call/usage.js";
+import { resolveModelProfile } from "#harness/model-profile.js";
 import { getRequestEnvelopeTokens } from "#harness/request-envelope.js";
 import { idle } from "#harness/session-machine/transitions.js";
 import { resolveCallProviderOptions } from "#harness/provider-safety.js";
@@ -169,13 +170,11 @@ export async function maybeCompact(input: {
     modelReference: requireSessionModelReference(session),
     resolveModel: input.resolveModel,
   });
-  const compactionModelReference =
-    session.agent.compactionModelReference ?? requireSessionModelReference(session);
+  const profile = resolveModelProfile(compaction.model);
   const providerOptions = resolveCallProviderOptions({
     auth: input.auth,
     conversationId: resolveConversationId(session.rootSessionId ?? session.sessionId),
-    model: compaction.model,
-    modelReference: compactionModelReference,
+    profile,
     providerOptions: compaction.providerOptions,
   }) as Parameters<typeof compactMessages>[3];
 
@@ -227,7 +226,7 @@ export async function maybeCompact(input: {
         historyCompaction,
         providerOptions,
         input.telemetry,
-        buildGatewayAttributionHeaders(compaction.model, input.runtimeIdentity),
+        buildGatewayAttributionHeaders(profile, input.runtimeIdentity),
         input.abortSignal,
         input.force === true,
         input.requestEnvelopeTokens === undefined

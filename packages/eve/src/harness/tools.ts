@@ -1,6 +1,6 @@
 import { type ToolApprovalConfiguration, type ToolApprovalStatus, type ToolSet, tool } from "ai";
 
-import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
+import type { ModelProfile } from "#harness/model-profile.js";
 import { isObject } from "#shared/guards.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { resolveApprovalPolicy, type ApprovalStatus } from "#approval/definition.js";
@@ -193,8 +193,7 @@ function normalizeToolExecuteOutput(
 export async function buildToolSetWithProviderTools(input: {
   readonly approvedTools?: ReadonlySet<string>;
   readonly disabledProviderTools?: ReadonlySet<string>;
-  readonly modelReference: RuntimeModelReference;
-  readonly modelProvider?: string;
+  readonly profile: ModelProfile;
   readonly tools: HarnessToolMap;
 }): Promise<ToolSet> {
   const disabled = input.disabledProviderTools;
@@ -213,11 +212,7 @@ export async function buildToolSetWithProviderTools(input: {
       definition.execute === undefined &&
       !disabled?.has(definition.name)
     ) {
-      const backend = resolveWebSearchBackend(
-        input.modelReference,
-        handling.provider,
-        input.modelProvider,
-      );
+      const backend = resolveWebSearchBackend(input.profile, handling.provider);
       if (backend === null) {
         delete tools[definition.name];
       } else {

@@ -1,125 +1,16 @@
-import { createGateway, type LanguageModel, type ModelMessage, type ToolSet } from "ai";
+import type { ModelMessage, ToolSet } from "ai";
 import { describe, expect, it } from "vitest";
 
 import {
   applyConversationCacheControl,
   applyLastToolCacheBreakpoint,
-  detectPromptCachePath,
-  getAnthropicCacheMarker,
   mergeGatewayAutoCaching,
 } from "#harness/prompt-cache.js";
 
-function makeObjectModel(provider: string, modelId = "test-model"): LanguageModel {
-  return {
-    provider,
-    modelId,
-    specificationVersion: "v3",
-  } as unknown as LanguageModel;
-}
-
-describe("detectPromptCachePath", () => {
-  it("keeps automatic caching for Gateway provider objects used by local auth", () => {
-    const model = createGateway({ apiKey: "test-key" })("anthropic/claude-opus-5");
-    expect(detectPromptCachePath(model)).toEqual({ kind: "gateway-auto" });
-  });
-
-  it("recognizes namespaced Gateway providers", () => {
-    expect(detectPromptCachePath(makeObjectModel("gateway.language-model"))).toEqual({
-      kind: "gateway-auto",
-    });
-  });
-
-  it("returns gateway-auto for any string model id", () => {
-    expect(detectPromptCachePath("anthropic/claude-sonnet-4-5")).toEqual({
-      kind: "gateway-auto",
-    });
-    expect(detectPromptCachePath("bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0")).toEqual({
-      kind: "gateway-auto",
-    });
-    expect(detectPromptCachePath("vertex/claude-sonnet-4-5")).toEqual({
-      kind: "gateway-auto",
-    });
-    expect(detectPromptCachePath("openai/gpt-5")).toEqual({ kind: "gateway-auto" });
-  });
-
-  it("returns anthropic-direct for a direct Anthropic provider instance", () => {
-    expect(detectPromptCachePath(makeObjectModel("anthropic.messages"))).toEqual({
-      kind: "anthropic-direct",
-    });
-  });
-
-  it("returns anthropic-direct for the Bedrock Anthropic subpath", () => {
-    expect(detectPromptCachePath(makeObjectModel("bedrock.anthropic"))).toEqual({
-      kind: "anthropic-direct",
-    });
-  });
-
-  it("returns anthropic-direct for the Vertex Anthropic subpath", () => {
-    expect(detectPromptCachePath(makeObjectModel("vertex.anthropic"))).toEqual({
-      kind: "anthropic-direct",
-    });
-  });
-
-  it("returns anthropic-direct regardless of case", () => {
-    expect(detectPromptCachePath(makeObjectModel("Anthropic.Messages"))).toEqual({
-      kind: "anthropic-direct",
-    });
-  });
-
-  it("returns none for a direct OpenAI provider instance", () => {
-    expect(detectPromptCachePath(makeObjectModel("openai.chat"))).toEqual({ kind: "none" });
-  });
-
-  it("returns none for a direct Google Gemini provider instance", () => {
-    expect(detectPromptCachePath(makeObjectModel("google.generative-ai"))).toEqual({
-      kind: "none",
-    });
-  });
-
-  it("returns none for generic Bedrock Converse (no anthropic subpath)", () => {
-    expect(detectPromptCachePath(makeObjectModel("bedrock"))).toEqual({ kind: "none" });
-  });
-
-  it("returns anthropic-direct for a Bedrock Converse model whose id is Anthropic", () => {
-    // `@ai-sdk/amazon-bedrock` reports provider `amazon-bedrock` and carries
-    // the Anthropic identity in the model id.
-    expect(
-      detectPromptCachePath(
-        makeObjectModel("amazon-bedrock", "anthropic.claude-3-5-sonnet-20241022-v2:0"),
-      ),
-    ).toEqual({ kind: "anthropic-direct" });
-  });
-
-  it("matches the Bedrock Anthropic model id regardless of case", () => {
-    expect(
-      detectPromptCachePath(makeObjectModel("amazon-bedrock", "ANTHROPIC.CLAUDE-3-5-SONNET")),
-    ).toEqual({ kind: "anthropic-direct" });
-  });
-
-  it("returns none for a non-Anthropic Bedrock Converse model id", () => {
-    expect(
-      detectPromptCachePath(makeObjectModel("amazon-bedrock", "amazon.nova-pro-v1:0")),
-    ).toEqual({ kind: "none" });
-  });
-});
-
-describe("getAnthropicCacheMarker", () => {
-  it("returns the Anthropic cache marker shape", () => {
-    expect(getAnthropicCacheMarker()).toEqual({
-      anthropic: { cacheControl: { type: "ephemeral" } },
-      bedrock: { cachePoint: { type: "default" } },
-    });
-  });
-
-  it("returns a deeply frozen object", () => {
-    const marker = getAnthropicCacheMarker();
-    expect(Object.isFrozen(marker)).toBe(true);
-    expect(Object.isFrozen(marker.anthropic)).toBe(true);
-    expect(Object.isFrozen(marker.anthropic.cacheControl)).toBe(true);
-    expect(Object.isFrozen(marker.bedrock)).toBe(true);
-    expect(Object.isFrozen(marker.bedrock.cachePoint)).toBe(true);
-  });
-});
+const marker = {
+  anthropic: { cacheControl: { type: "ephemeral" } },
+  bedrock: { cachePoint: { type: "default" } },
+};
 
 describe("mergeGatewayAutoCaching", () => {
   it("creates a fresh gateway block when base is undefined", () => {
@@ -159,11 +50,9 @@ describe("mergeGatewayAutoCaching", () => {
 });
 
 describe("applyLastToolCacheBreakpoint", () => {
-  const marker = getAnthropicCacheMarker();
-
   it("is a no-op for an empty tool set", () => {
     const tools = {} as ToolSet;
-    expect(applyLastToolCacheBreakpoint(tools, marker)).toEqual({});
+    expect(applyLastToolCacheBreakpoint(tools)).toEqual({});
   });
 
   it("attaches the marker only to the last tool", () => {
@@ -173,7 +62,7 @@ describe("applyLastToolCacheBreakpoint", () => {
       gamma: { description: "third" },
     } as unknown as ToolSet;
 
-    const result = applyLastToolCacheBreakpoint(tools, marker) as Record<
+    const result = applyLastToolCacheBreakpoint(tools) as Record<
       string,
       { description: string; providerOptions?: unknown }
     >;
@@ -194,7 +83,7 @@ describe("applyLastToolCacheBreakpoint", () => {
       },
     } as unknown as ToolSet;
 
-    const result = applyLastToolCacheBreakpoint(tools, marker) as Record<
+    const result = applyLastToolCacheBreakpoint(tools) as Record<
       string,
       { providerOptions: Record<string, unknown> } | undefined
     >;
@@ -213,24 +102,22 @@ describe("applyLastToolCacheBreakpoint", () => {
       two: { description: "second" },
     } as unknown as ToolSet;
     const snapshot = JSON.parse(JSON.stringify(tools));
-    applyLastToolCacheBreakpoint(tools, marker);
+    applyLastToolCacheBreakpoint(tools);
     expect(tools).toEqual(snapshot);
   });
 });
 
 describe("applyConversationCacheControl", () => {
-  const marker = getAnthropicCacheMarker();
-
   it("returns a fresh empty array for empty input", () => {
     const input: readonly ModelMessage[] = [];
-    const out = applyConversationCacheControl(input, marker);
+    const out = applyConversationCacheControl(input);
     expect(out).toEqual([]);
     expect(out).not.toBe(input);
   });
 
   it("marks a sole user message", () => {
     const messages: ModelMessage[] = [{ role: "user", content: "hi" }];
-    const out = applyConversationCacheControl(messages, marker);
+    const out = applyConversationCacheControl(messages);
     expect(out[0]).toEqual({
       role: "user",
       content: "hi",
@@ -245,7 +132,7 @@ describe("applyConversationCacheControl", () => {
       { role: "user", content: "hi2" },
       { role: "assistant", content: "yo2" },
     ];
-    const out = applyConversationCacheControl(messages, marker);
+    const out = applyConversationCacheControl(messages);
 
     expect(out[0]).toEqual({ role: "user", content: "hi" });
     expect(out[1]).toEqual({
@@ -280,7 +167,7 @@ describe("applyConversationCacheControl", () => {
         ],
       },
     ];
-    const out = applyConversationCacheControl(messages, marker);
+    const out = applyConversationCacheControl(messages);
 
     // The trailing tool-result message carries the final breakpoint.
     expect((out[2] as { providerOptions?: unknown }).providerOptions).toEqual({ ...marker });
@@ -300,7 +187,7 @@ describe("applyConversationCacheControl", () => {
         providerOptions: { openai: { someKey: "someValue" } },
       },
     ];
-    const out = applyConversationCacheControl(messages, marker);
+    const out = applyConversationCacheControl(messages);
     expect((out[0] as { providerOptions: Record<string, unknown> }).providerOptions).toEqual({
       openai: { someKey: "someValue" },
       ...marker,
@@ -316,7 +203,7 @@ describe("applyConversationCacheControl", () => {
     const originalRef0 = messages[0];
     const originalRef1 = messages[1];
 
-    const out = applyConversationCacheControl(messages, marker);
+    const out = applyConversationCacheControl(messages);
 
     expect(messages).toEqual(snapshot);
     expect(messages[0]).toBe(originalRef0);

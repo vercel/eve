@@ -1,4 +1,3 @@
-import { resolveModelProvider } from "#internal/gateway.js";
 import type { ToolSet } from "ai";
 
 import { buildDynamicTools } from "#context/build-dynamic-tools.js";
@@ -8,11 +7,12 @@ import { getAdvertisedTools } from "#harness/advertised-tools.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { buildFinalOutputTool, FINAL_OUTPUT_TOOL_NAME } from "#harness/final-output.js";
 import type { GenerationSteering } from "#harness/generation-steering.js";
-import { type AnthropicCacheMarker, applyLastToolCacheBreakpoint } from "#harness/prompt-cache.js";
+import type { ModelProfile } from "#harness/model-profile.js";
+import { applyLastToolCacheBreakpoint } from "#harness/prompt-cache.js";
 import type { Step } from "#harness/step/context.js";
 import { buildToolSetFromDefinitions, buildToolSetWithProviderTools } from "#harness/tools.js";
 import { isTurnCancellation } from "#harness/turn-cancellation.js";
-import { type HarnessToolMap, requireSessionModelReference } from "#harness/types.js";
+import type { HarnessToolMap } from "#harness/types.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { toModelSchema } from "#tools/schema.js";
 
@@ -40,14 +40,13 @@ export async function prepareModelTools(
   step: Step,
   input: {
     readonly approvedTools: ReadonlySet<string>;
-    readonly model: import("ai").LanguageModel;
     readonly disabledProviderTools?: ReadonlySet<string>;
     readonly generation: GenerationSteering;
-    readonly marker: AnthropicCacheMarker | undefined;
+    readonly profile: ModelProfile;
   },
 ): Promise<ModelTools> {
   const { ctx } = step;
-  const { approvedTools, disabledProviderTools, marker } = input;
+  const { approvedTools, disabledProviderTools, profile } = input;
   const coordinationTools = withTaskTools(
     getAdvertisedTools({
       session: step.session,
@@ -58,8 +57,7 @@ export async function prepareModelTools(
   const flatTools = await buildToolSetWithProviderTools({
     approvedTools,
     disabledProviderTools,
-    modelProvider: resolveModelProvider(input.model),
-    modelReference: requireSessionModelReference(step.session),
+    profile,
     tools: coordinationTools,
   });
 
@@ -120,7 +118,9 @@ export async function prepareModelTools(
     }
   }
 
-  const effectiveTools = marker ? applyLastToolCacheBreakpoint(modelTools, marker) : modelTools;
+  const effectiveTools = profile.anthropicCache
+    ? applyLastToolCacheBreakpoint(modelTools)
+    : modelTools;
   for (const tool of Object.values(effectiveTools)) {
     // Whatever produced this tool, the AI SDK must only receive its own
     // schema type; see toModelSchema.

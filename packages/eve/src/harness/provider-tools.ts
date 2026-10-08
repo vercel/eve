@@ -1,6 +1,6 @@
 import { jsonSchema, type JSONSchema7, type ToolSet } from "ai";
 
-import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
+import type { ModelProfile } from "#harness/model-profile.js";
 import {
   WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA,
   WEB_SEARCH_EXA_OUTPUT_SCHEMA,
@@ -71,45 +71,21 @@ export function resolveWebSearchOutputSchema(
 }
 
 /**
- * Determines the web search backend for a model reference.
- *
- * - All AI Gateway models: the configured search provider (Exa by default)
- * - Direct/BYO OpenAI models: native OpenAI search
- * - Direct/BYO Anthropic models: native Anthropic search
- * - Direct/BYO Google models: native Google search grounding
- * - Other BYO models: not available (returns `null`)
- *
- * `modelProvider` is the provider of the resolved AI SDK model. It is needed
- * for live dynamic selections because their runtime reference has no source
- * metadata to distinguish a direct provider from AI Gateway.
+ * Determines the web search backend for a model: the configured search provider (Exa by
+ * default) on AI Gateway, the provider's native search for direct OpenAI, Anthropic, and Google
+ * models, and none (`null`) for any other direct model.
  */
 export function resolveWebSearchBackend(
-  modelRef: RuntimeModelReference,
+  profile: ModelProfile,
   gatewayProvider: WebSearchProvider = "exa",
-  modelProvider?: string,
 ): WebSearchBackend | null {
-  const providerId =
-    modelProvider?.split(".")[0] ??
-    (modelRef.source === undefined ? "gateway" : (modelRef.id.split("/")[0] ?? ""));
-
-  if (providerId === "gateway") {
-    return gatewayProvider;
-  }
-
-  if (providerId === "openai" || providerId.startsWith("openai.")) {
-    return "openai";
-  }
-
-  if (providerId === "anthropic" || providerId.startsWith("anthropic.")) {
-    return "anthropic";
-  }
-
-  if (providerId === "google" || providerId.startsWith("google.")) {
-    return "google";
-  }
-
-  return null;
+  if (profile.gateway) return gatewayProvider;
+  return NATIVE_WEB_SEARCH_PROVIDERS.has(profile.provider)
+    ? (profile.provider as WebSearchBackend)
+    : null;
 }
+
+const NATIVE_WEB_SEARCH_PROVIDERS: ReadonlySet<string> = new Set(["anthropic", "google", "openai"]);
 
 /**
  * Constructs the AI SDK provider tool for web search based on the resolved
