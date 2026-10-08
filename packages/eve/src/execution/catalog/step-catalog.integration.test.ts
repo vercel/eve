@@ -10,9 +10,9 @@ import { CALL_TOOL_NAME, SEARCH_TOOL_NAME, SKILL_TOOL_NAME } from "#protocol/cat
 import { TASK_CANCEL_TOOL_NAME, TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
-import { dispatchDynamicSubagentEvent } from "#context/dynamic-subagent-lifecycle.js";
-import { dispatchDynamicToolEvent } from "#context/dynamic-tool-lifecycle.js";
+import { resolveDynamicSkills } from "#context/dynamic-skill-lifecycle.js";
+import { resolveDynamicSubagents } from "#context/dynamic-subagent-lifecycle.js";
+import { resolveDynamicTools } from "#context/dynamic-tool-lifecycle.js";
 import { SessionIdKey, StaticModelReferenceKey } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { mockModel } from "#evals/mock-model.js";
@@ -249,7 +249,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
     const mark = () => driver.requests().length;
     let tenantSyncAvailable = true;
     const resolveTenantTools = () =>
-      dispatchDynamicToolEvent({
+      resolveDynamicTools({
         ctx,
         event: createSessionStartedEvent(),
         messages: [],
@@ -387,7 +387,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
     await drive({ message: "Alice asks whether the product catalog is up." });
 
     // A dynamic deferred subagent appears and the dynamic tool disappears.
-    await dispatchDynamicSubagentEvent({
+    await resolveDynamicSubagents({
       ctx,
       event: createSessionStartedEvent(),
       messages: [],
@@ -428,7 +428,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
     // A tool and a skill share a name; skills load deferred or not, including
     // a dynamic deferred skill that appears when the turn starts. It joins the
     // listed `ops` namespace, so the listing doesn't change.
-    await dispatchDynamicSkillEvent({
+    await resolveDynamicSkills({
       ctx,
       event: createTurnStartedEvent({ sequence: 9, turnId: "turn_9" }),
       messages: [],

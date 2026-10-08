@@ -12,7 +12,7 @@ import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { DynamicModelSelectionError } from "#context/dynamic-model-lifecycle.js";
-import { dispatchDynamicInstructionEvent } from "#context/dynamic-instruction-lifecycle.js";
+import { resolveDynamicInstructions } from "#context/dynamic-instruction-lifecycle.js";
 import {
   AuthKey,
   ChannelInstrumentationKey,
@@ -81,7 +81,12 @@ import {
   getSessionTokenUsage,
   setTurnUsageState,
 } from "#harness/turn-tag-state.js";
-import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
+import type {
+  HarnessEmitFn,
+  HarnessSession,
+  StepParticipants,
+  ToolLoopHarnessConfig,
+} from "#harness/types.js";
 import {
   createInstrumentationHooks,
   type InstrumentationContextRunner,
@@ -1059,9 +1064,9 @@ describe("createToolLoopHarness", () => {
     const dynamicModelMessages: Array<readonly ModelMessage[]> = [];
     const runStep = createToolLoopHarness(
       createTestConfig(handleEvent, {
-        dispatchDynamicModelEvent: async ({ messages }) => {
+        participants: modelParticipants(async ({ messages }) => {
           dynamicModelMessages.push(messages);
-        },
+        }),
         historyProjector: projector,
       }),
     );
@@ -1102,10 +1107,10 @@ describe("createToolLoopHarness", () => {
 
   it("stops before lifecycle callbacks and the model when history projection fails", async () => {
     const handleEvent = vi.fn();
-    const dispatchDynamicModelEvent = vi.fn();
+    const resolveDynamicModel = vi.fn();
     const runStep = createToolLoopHarness(
       createTestConfig(handleEvent, {
-        dispatchDynamicModelEvent,
+        participants: modelParticipants(resolveDynamicModel),
         historyProjector: () => {
           throw new Error("projection failed");
         },
@@ -1116,7 +1121,7 @@ describe("createToolLoopHarness", () => {
       "projection failed",
     );
     expect(handleEvent).not.toHaveBeenCalled();
-    expect(dispatchDynamicModelEvent).not.toHaveBeenCalled();
+    expect(resolveDynamicModel).not.toHaveBeenCalled();
     expect(ToolLoopAgent).not.toHaveBeenCalled();
   });
 
@@ -1348,13 +1353,10 @@ describe("createToolLoopHarness", () => {
         provider: "openai.chat",
       });
       const resolveModel = vi.fn().mockResolvedValue("fallback-model" as LanguageModel);
-      const dispatchDynamicModelEvent: NonNullable<
-        ToolLoopHarnessConfig["dispatchDynamicModelEvent"]
-      > = vi.fn(async ({ ctx, event, messages }) => {
-        expect(event.type).toBe("step.started");
+      const resolveDynamicModel: StepParticipants["selectModel"] = vi.fn(async ({ messages }) => {
         expect(messages.at(-1)).toEqual({ content: "Hi", kind: "user" as const, role: "user" });
 
-        ctx.setVirtualContext(LiveStepDynamicModelSelectionKey, {
+        contextStorage.getStore()!.setVirtualContext(LiveStepDynamicModelSelectionKey, {
           model: selectedModel,
           reference: {
             contextWindowTokens: 200_000,
@@ -1365,7 +1367,7 @@ describe("createToolLoopHarness", () => {
         });
       });
       const config = createTestConfig(undefined, {
-        dispatchDynamicModelEvent,
+        participants: modelParticipants(resolveDynamicModel),
         resolveModel,
       });
       const runStep = createToolLoopHarness(config);
@@ -1397,7 +1399,7 @@ describe("createToolLoopHarness", () => {
         steps: [],
       });
       expect(prepared.providerOptions).toEqual({ openai: { parallelToolCalls: false } });
-      expect(dispatchDynamicModelEvent).toHaveBeenCalledTimes(1);
+      expect(resolveDynamicModel).toHaveBeenCalledTimes(1);
       expect(resolveModel).not.toHaveBeenCalled();
       expect(result.session.agent.modelReference).toEqual({
         contextWindowTokens: 200_000,
@@ -6367,18 +6369,19 @@ describe("createToolLoopHarness", () => {
       toolResults: [],
     });
 
-    const dispatchDynamicModelEvent = vi.fn();
+    const resolveDynamicModel = vi.fn();
     const { emit } = createEventCollector();
     const harness = createToolLoopHarness(
-      createTestConfig(emit, { dispatchDynamicModelEvent, tools: new Map() }),
+      createTestConfig(emit, {
+        participants: modelParticipants(resolveDynamicModel),
+        tools: new Map(),
+      }),
     );
 
     await contextStorage.run(new ContextContainer(), () => harness(createTestSession()));
 
-    expect(dispatchDynamicModelEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        event: expect.objectContaining({ data: expect.objectContaining({ turnId: "turn_0" }) }),
-      }),
+    expect(resolveDynamicModel).toHaveBeenCalledWith(
+      expect.objectContaining({ at: expect.objectContaining({ turnId: "turn_0" }) }),
     );
   });
 
@@ -8025,9 +8028,9 @@ describe("createToolLoopHarness", () => {
     };
     const runStep = createToolLoopHarness(
       createTestConfig(emit, {
-        dispatchDynamicModelEvent: async ({ messages }) => {
+        participants: modelParticipants(async ({ messages }) => {
           preCompactionModelViews.push(messages);
-        },
+        }),
         historyProjector: ({ messages }) => messages.filter((message) => message !== hidden),
         resolveModel: vi
           .fn()
@@ -8177,11 +8180,8 @@ describe("createToolLoopHarness", () => {
       modelId: "gpt-5",
       provider: "openai.chat",
     });
-    const dispatchDynamicModelEvent: NonNullable<
-      ToolLoopHarnessConfig["dispatchDynamicModelEvent"]
-    > = vi.fn(async ({ ctx, event }) => {
-      expect(event.type).toBe("step.started");
-      ctx.setVirtualContext(LiveStepDynamicModelSelectionKey, {
+    const resolveDynamicModel: StepParticipants["selectModel"] = vi.fn(async () => {
+      contextStorage.getStore()!.setVirtualContext(LiveStepDynamicModelSelectionKey, {
         model: selectedModel,
         reference: {
           contextWindowTokens: 200_000,
@@ -8193,7 +8193,7 @@ describe("createToolLoopHarness", () => {
     const runStep = createToolLoopHarness(
       createTestConfig(emit, {
         compactOnly: true,
-        dispatchDynamicModelEvent,
+        participants: modelParticipants(resolveDynamicModel),
       }),
     );
     const session = createTestSession({
@@ -8213,7 +8213,7 @@ describe("createToolLoopHarness", () => {
 
     expect(result.next).toBeNull();
     expect(result.session.history).toEqual(compactedHistory);
-    expect(dispatchDynamicModelEvent).toHaveBeenCalledOnce();
+    expect(resolveDynamicModel).toHaveBeenCalledOnce();
     expect(getCompatibilityEventTypes(events)).toEqual([
       "compaction.requested",
       "compaction.completed",
@@ -10965,7 +10965,8 @@ describe("createToolLoopHarness", () => {
         sourceKind: "module",
       };
       const handleEvent: HarnessEmitFn = async (event, messages) => {
-        await dispatchDynamicInstructionEvent({
+        if (event.type !== "session.started" && event.type !== "turn.started") return;
+        await resolveDynamicInstructions({
           ctx,
           event,
           messages: messages ?? [],
@@ -11263,3 +11264,8 @@ describe("boundary event failures", () => {
     ).rejects.toBe(cancellation);
   });
 });
+
+/** Participants that only choose the model, through `selectModel`. */
+function modelParticipants(selectModel: StepParticipants["selectModel"]): StepParticipants {
+  return { restoreStep: async () => {}, selectModel };
+}

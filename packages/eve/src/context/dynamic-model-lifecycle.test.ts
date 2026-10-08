@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { ContextContainer } from "#context/container.js";
-import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
+import { resolveDynamicModel } from "#context/dynamic-model-lifecycle.js";
 import { getEffectiveModelSelection } from "#context/effective-model.js";
 import {
   StaticModelReferenceKey,
@@ -52,7 +52,7 @@ describe("dynamic model lifecycle", () => {
       },
     });
     await expect(
-      dispatchDynamicModelEvent({
+      resolveDynamicModel({
         abortSignal: controller.signal,
         ctx,
         dynamicModel: DYNAMIC_MODEL_SOURCE,
@@ -84,7 +84,7 @@ describe("dynamic model lifecycle", () => {
       },
     });
 
-    await dispatchDynamicModelEvent({
+    await resolveDynamicModel({
       ctx,
       dynamicModel: DYNAMIC_MODEL_SOURCE,
       event: createSessionStartedEvent(),
@@ -143,7 +143,7 @@ describe("dynamic model lifecycle", () => {
       },
     });
 
-    await dispatchDynamicModelEvent({
+    await resolveDynamicModel({
       ctx,
       dynamicModel: DYNAMIC_MODEL_SOURCE,
       event: createTurnStartedEvent({ sequence: 0, turnId: "turn_0" }),
@@ -171,7 +171,7 @@ describe("dynamic model lifecycle", () => {
     });
 
     const dispatch = (sequence: number) =>
-      dispatchDynamicModelEvent({
+      resolveDynamicModel({
         ctx,
         dynamicModel: DYNAMIC_MODEL_SOURCE,
         event: createTurnStartedEvent({ sequence, turnId: `turn_${sequence}` }),
@@ -204,7 +204,7 @@ describe("dynamic model lifecycle", () => {
       },
     });
 
-    await dispatchDynamicModelEvent({
+    await resolveDynamicModel({
       ctx,
       dynamicModel: DYNAMIC_MODEL_SOURCE,
       event: createStepStartedEvent({
@@ -244,7 +244,7 @@ describe("dynamic model lifecycle", () => {
       },
     });
 
-    await dispatchDynamicModelEvent({
+    await resolveDynamicModel({
       ctx,
       dynamicModel: DYNAMIC_MODEL_SOURCE,
       event: createStepStartedEvent({
@@ -295,7 +295,7 @@ describe("dynamic model lifecycle", () => {
         },
       });
 
-      await dispatchDynamicModelEvent({
+      await resolveDynamicModel({
         ctx,
         dynamicModel: DYNAMIC_MODEL_SOURCE,
         event: createStepStartedEvent({
@@ -337,7 +337,7 @@ describe("dynamic model lifecycle", () => {
     });
 
     await expect(
-      dispatchDynamicModelEvent({
+      resolveDynamicModel({
         ctx,
         dynamicModel: DYNAMIC_MODEL_SOURCE,
         event: createSessionStartedEvent(),
@@ -368,7 +368,7 @@ describe("dynamic model lifecycle", () => {
     });
 
     await expect(
-      dispatchDynamicModelEvent({
+      resolveDynamicModel({
         ctx,
         dynamicModel: DYNAMIC_MODEL_SOURCE,
         event: createTurnStartedEvent({ sequence: 0, turnId: "turn_0" }),
@@ -394,7 +394,7 @@ describe("dynamic model lifecycle", () => {
       },
     });
     const dispatch = () =>
-      dispatchDynamicModelEvent({
+      resolveDynamicModel({
         ctx,
         dynamicModel: DYNAMIC_MODEL_SOURCE,
         event: createSessionStartedEvent(),

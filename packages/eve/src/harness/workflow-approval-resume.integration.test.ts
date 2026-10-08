@@ -2,7 +2,7 @@ import { jsonSchema } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { dispatchDynamicInstructionEvent } from "#context/dynamic-instruction-lifecycle.js";
+import { resolveDynamicInstructions } from "#context/dynamic-instruction-lifecycle.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
 import { SessionIdKey, StepDynamicToolMetadataKey } from "#context/keys.js";
 import { applyTransition, sessionView } from "#harness/session-machine/commit.js";
@@ -181,7 +181,8 @@ describe("workflow approval resume (real AI SDK)", () => {
       handleEvent: async (event, messages) => {
         const ctx = contextStorage.getStore();
         if (!(ctx instanceof ContextContainer)) throw new Error("Missing test context.");
-        await dispatchDynamicInstructionEvent({
+        if (event.type !== "session.started" && event.type !== "turn.started") return;
+        await resolveDynamicInstructions({
           ctx,
           event,
           messages: messages ?? [],
@@ -285,31 +286,33 @@ describe("workflow approval resume (real AI SDK)", () => {
         },
       ],
       {
-        prepareApprovalTurn: async (event) => {
-          preparedTurns.push(event.turnId);
-        },
-        resolveStepDynamicTools: async ({ ctx }) => {
-          registerDurableDynamicCallback({
-            owner: {
-              sessionId: ctx.require(SessionIdKey),
-              scope: "step",
-              resolverSlug: "notifications",
-              entryKey: "notify",
-              name: "notify",
-            },
-            phase: "execute",
-            callback: execute,
-          });
-          ctx.set(StepDynamicToolMetadataKey, [
-            {
-              name: "notify",
-              description: "Notify Bob.",
-              inputSchema: { type: "object" },
-              resolverSlug: "notifications",
-              entryKey: "notify",
-              callbacks: { execute: { closure: {} } },
-            },
-          ]);
+        participants: {
+          selectModel: async () => {},
+          restoreStep: async ({ at, parked }) => {
+            if (parked) preparedTurns.push(at.turnId);
+            const ctx = contextStorage.getStore()!;
+            registerDurableDynamicCallback({
+              owner: {
+                sessionId: ctx.require(SessionIdKey),
+                scope: "step",
+                resolverSlug: "notifications",
+                entryKey: "notify",
+                name: "notify",
+              },
+              phase: "execute",
+              callback: execute,
+            });
+            ctx.set(StepDynamicToolMetadataKey, [
+              {
+                name: "notify",
+                description: "Notify Bob.",
+                inputSchema: { type: "object" },
+                resolverSlug: "notifications",
+                entryKey: "notify",
+                callbacks: { execute: { closure: {} } },
+              },
+            ]);
+          },
         },
       },
     );

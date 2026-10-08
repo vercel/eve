@@ -621,7 +621,7 @@ describe("compileAgentManifest source graph", () => {
     await expect(
       compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
     ).rejects.toThrow(
-      'Dynamic connections support only "session.started" and "turn.started" handlers.',
+      'Dynamic connection resolvers support only "session.started" and "turn.started" handlers.',
     );
   });
 
