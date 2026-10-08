@@ -236,6 +236,8 @@ const stubs = [
 
 `throw.message` is required. `throw.name` is optional and defaults to `"Error"`. eve creates an ordinary JavaScript `Error` with that name and message; it does not instantiate custom error classes. `TimeoutError` reports a timeout immediately, without delaying the call or testing an actual deadline.
 
+Ordinary tools and connection operations expose the error message to the model, without the error name. Workflow task errors also retain the name. Put any details the model needs to act on in `message`.
+
 Use `outcome: { throw: { message: "Service unavailable" } }` to fail every matching call. A sequence consumes one entry per new call, whether it returns or throws, and repeats its final entry. Workflow replay reuses the same recorded outcome.
 
 An injected exception follows the tool's normal error handling. Ordinary and blocking workflow calls are recorded as failed; background tasks report failure when they settle. The model can report the failure or try again. Assert the failed call explicitly:

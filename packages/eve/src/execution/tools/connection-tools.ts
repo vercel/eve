@@ -372,19 +372,20 @@ async function executeConnectionTool(
   const toolName = qualifiedToolName(target);
   const stub = await connectionToolStub(toolName, input, ctx.callId);
   if (stub.kind === "error") throw new Error(stub.error);
-  if (stub.kind === "stub") {
-    const output = toolStubOutput(stub.outcome);
-    reportNestedToolAction(ctx.callId, { input, output, toolName });
-    return output;
-  }
   let raw: unknown;
   try {
+    if (stub.kind === "stub") {
+      const output = toolStubOutput(stub.outcome);
+      reportNestedToolAction(ctx.callId, { input, output, toolName });
+      return output;
+    }
     raw = await client.executeTool(tool.name, input, {
       abortSignal: ctx.abortSignal,
       callId: ctx.callId,
     });
   } catch (error) {
-    if (isConnectionAuthorizationRequiredError(error)) return await auth.handleError(error, scoped);
+    if (stub.kind === "real" && isConnectionAuthorizationRequiredError(error))
+      return await auth.handleError(error, scoped);
     reportNestedToolAction(ctx.callId, {
       input,
       isError: true,

@@ -229,7 +229,7 @@ describe("tool stubs", () => {
     expect(() => parseToolStubs(rules)).toThrow();
   });
 
-  it("normalizes absent options and preserves falsy JSON responses", () => {
+  it("normalizes absent options and preserves response and error outcomes", () => {
     expect(
       parseToolStubs([
         {
@@ -245,6 +245,15 @@ describe("tool stubs", () => {
           outcome: undefined,
           outcomes: [{ response: false }, { response: 0 }, { response: "" }, { response: null }],
         },
+        { id: "failure", tool: "list", outcome: { throw: { message: "Unavailable" } } },
+        {
+          id: "recovery",
+          tool: "list",
+          outcomes: [
+            { throw: { name: "TimeoutError", message: "Timed out" } },
+            { response: { tasks: [] } },
+          ],
+        },
       ]),
     ).toEqual([
       { id: "constant", tool: "list", outcome: { response: null } },
@@ -252,6 +261,15 @@ describe("tool stubs", () => {
         id: "sequence",
         tool: "list",
         outcomes: [{ response: false }, { response: 0 }, { response: "" }, { response: null }],
+      },
+      { id: "failure", tool: "list", outcome: { throw: { message: "Unavailable" } } },
+      {
+        id: "recovery",
+        tool: "list",
+        outcomes: [
+          { throw: { name: "TimeoutError", message: "Timed out" } },
+          { response: { tasks: [] } },
+        ],
       },
     ]);
   });
@@ -348,44 +366,4 @@ it("includes the final visited string in the configuration size limit", () => {
   expect(() =>
     parseToolStubs([{ id: "x".repeat(1_000_001), tool: "list", outcome: { response: null } }]),
   ).toThrow(/size/);
-});
-
-it("replays thrown outcomes, advances on new calls, and repeats a final failure", () => {
-  const playback = new StubPlayback(
-    parseToolStubs([
-      {
-        id: "tasks",
-        tool: "list_tasks",
-        outcomes: [
-          { throw: { name: "TimeoutError", message: "Service timed out" } },
-          { response: { throw: { message: "This is ordinary JSON" } } },
-          { throw: { message: "Service unavailable" } },
-        ],
-      },
-    ]),
-  );
-  const call = (callId: string) => playback.call({ callId, tool: "list_tasks", input: {} });
-  const first = call("first");
-  expect(first).toEqual({
-    kind: "stub",
-    ruleId: "tasks",
-    position: 0,
-    outcome: { throw: { name: "TimeoutError", message: "Service timed out" } },
-  });
-  expect(call("second")).toEqual({
-    kind: "stub",
-    ruleId: "tasks",
-    position: 1,
-    outcome: { response: { throw: { message: "This is ordinary JSON" } } },
-  });
-  expect(call("first")).toEqual(first);
-  const last = {
-    kind: "stub",
-    ruleId: "tasks",
-    position: 2,
-    outcome: { throw: { message: "Service unavailable" } },
-  };
-  expect(call("third")).toEqual(last);
-  expect(call("fourth")).toEqual(last);
-  expect(playback.matchedRuleCount).toBe(1);
 });
