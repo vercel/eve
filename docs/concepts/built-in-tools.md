@@ -218,6 +218,16 @@ export default webSearch({ provider: "browserbase" });
 
 Use a [Gateway model ID](../agent-config#set-the-model) to route searches through Browserbase. AI Gateway executes the search using `AI_GATEWAY_API_KEY` or Vercel project OIDC credentials; no `BROWSERBASE_API_KEY` is needed. See [Browserbase Search on AI Gateway](https://vercel.com/docs/ai-gateway/models-and-providers/web-search#using-browserbase-search).
 
+Select OpenAI's hosted web search for an OpenAI model routed through AI Gateway:
+
+```ts title="agent/tools/web_search.ts"
+import { webSearch } from "eve/tools/web_search";
+
+export default webSearch({ provider: "openai" });
+```
+
+OpenAI runs the search server-side and returns URL citations, and AI Gateway uses its usual credentials, so no `OPENAI_API_KEY` is needed. OpenAI hosted search serves only OpenAI models: any other Gateway model, including one picked by a dynamic model resolver, uses Exa instead.
+
 The `provider` setting applies only to AI Gateway models. Unsupported direct providers omit `web_search`.
 
 Replace provider-managed search with an authored implementation:

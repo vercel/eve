@@ -115,7 +115,7 @@ describe("normalizeToolDefinition", () => {
     expect(entry).toEqual({ kind: "disabled" });
   });
 
-  it.each(["exa", "parallel", "browserbase"] as const)(
+  it.each(["exa", "parallel", "browserbase", "openai"] as const)(
     "normalizes the %s web search provider",
     (provider) => {
       expect(normalizeToolDefinition(webSearch({ provider }), FAILURE_MESSAGE)).toEqual({

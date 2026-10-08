@@ -92,7 +92,10 @@ describe("resolveWebSearchBackend", () => {
   it.each([
     ["openai/gpt-5.4", undefined, "exa"],
     ["openai/gpt-5.4", "parallel", "parallel"],
+    ["openai/gpt-5.4", "openai", "openai"],
     ["anthropic/claude-opus-4.6", undefined, "exa"],
+    // OpenAI's hosted search serves only OpenAI models.
+    ["anthropic/claude-opus-4.6", "openai", "exa"],
   ] as const)("uses Gateway search for Gateway model %s", (model, provider, expected) => {
     expect(resolveWebSearchBackend(resolveModelProfile(model), provider)).toBe(expected);
   });

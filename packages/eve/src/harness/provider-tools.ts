@@ -79,7 +79,10 @@ export function resolveWebSearchBackend(
   profile: ModelProfile,
   gatewayProvider: WebSearchProvider = "exa",
 ): WebSearchBackend | null {
-  if (profile.gateway) return gatewayProvider;
+  if (profile.gateway) {
+    // OpenAI's hosted search serves only OpenAI models; any other Gateway model keeps the default.
+    return gatewayProvider === "openai" && profile.provider !== "openai" ? "exa" : gatewayProvider;
+  }
   return NATIVE_WEB_SEARCH_PROVIDERS.has(profile.provider)
     ? (profile.provider as WebSearchBackend)
     : null;

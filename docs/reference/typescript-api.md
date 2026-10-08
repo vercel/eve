@@ -61,7 +61,7 @@ Tool-wide authoring helpers and types such as `defineTool`, `defineWorkflowTool`
 
 `AgentReasoningDefinition` is exported from `eve` for the top-level `defineAgent({ reasoning })` setting. `AgentLimitsDefinition` is exported for `defineAgent({ limits })`. `AgentWorkflowDefinition`, `AgentWorkflowRetentionDefinition`, and `AgentWorkflowWorldDefinition` are exported from `eve` for the `defineAgent({ experimental: { workflow } })` config shape. `WebSearchToolInput` and `WebSearchProvider` are exported from `eve/tools/web_search`.
 
-`webSearch({ provider })` selects `"exa"`, `"parallel"`, or `"browserbase"` for AI Gateway search using the Gateway model's credentials. Direct provider models keep their native search implementation when supported. See [Built-in tools](../concepts/built-in-tools#web_search) for setup and provider behavior.
+`webSearch({ provider })` selects `"exa"`, `"parallel"`, `"browserbase"`, or `"openai"` for AI Gateway search using the Gateway model's credentials. `"openai"` applies to OpenAI models; other Gateway models use Exa. Direct provider models keep their native search implementation when supported. See [Built-in tools](../concepts/built-in-tools#web_search) for setup and provider behavior.
 
 `defineInstructions` accepts `{ content: string, role?: "system" | "user" }`; omitted `role` means `"system"`. Its `eve/instructions` version of `defineDynamic` accepts only `session.started` and `turn.started` handlers returning `defineInstructions(...)` or `null`. The legacy `{ markdown: string }` definition remains available as a deprecated system-role form.
 

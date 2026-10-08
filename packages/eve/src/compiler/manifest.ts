@@ -22,6 +22,7 @@ import type {
   SkillPackageSourceRef,
 } from "#shared/source-ref.js";
 import type { NamedSkillDefinition } from "#shared/skill-definition.js";
+import { WEB_SEARCH_PROVIDERS } from "#shared/web-search.js";
 import {
   AGENT_WORKFLOW_RETENTION_VALUES,
   type InternalAgentDefinition,
@@ -847,7 +848,7 @@ const compiledToolBehaviorSchema: z.ZodType<CompiledToolBehavior> = z
         z
           .object({
             kind: z.literal("provider-tool"),
-            provider: z.enum(["exa", "parallel", "browserbase"]),
+            provider: z.enum(WEB_SEARCH_PROVIDERS),
           })
           .strict(),
         z

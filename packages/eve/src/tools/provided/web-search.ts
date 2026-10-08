@@ -7,7 +7,10 @@ const WEB_SEARCH_TOOL_KIND = "eve:web-search-tool";
 
 /** Configuration accepted by {@link webSearch}. */
 export interface WebSearchToolInput {
-  /** Provider to use when the agent model is routed through AI Gateway. */
+  /**
+   * Provider to use when the agent model is routed through AI Gateway. `"openai"` selects
+   * OpenAI's hosted search, which serves only OpenAI models; other Gateway models use Exa.
+   */
   readonly provider: WebSearchProvider;
 }
 

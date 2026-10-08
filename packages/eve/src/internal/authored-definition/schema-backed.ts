@@ -9,7 +9,7 @@ import { isObject } from "#shared/guards.js";
 import type { JsonObject } from "#shared/json.js";
 import { isDisabledToolSentinel } from "#tools/definition.js";
 import { isWebSearchToolDefinition } from "#tools/provided/web-search.js";
-import type { WebSearchProvider } from "#shared/web-search.js";
+import { WEB_SEARCH_PROVIDERS, type WebSearchProvider } from "#shared/web-search.js";
 import {
   expectBoolean,
   expectFunction,
@@ -108,8 +108,10 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
     const record = expectObjectRecord(value, message);
     expectOnlyKnownKeys(record, ["kind", "provider"], message);
     const provider = expectString(record.provider, message);
-    if (provider !== "exa" && provider !== "parallel" && provider !== "browserbase") {
-      throw new Error(`${message} Expected "provider" to be one of: exa, parallel, browserbase.`);
+    if (!isWebSearchProvider(provider)) {
+      throw new Error(
+        `${message} Expected "provider" to be one of: ${WEB_SEARCH_PROVIDERS.join(", ")}.`,
+      );
     }
     return { kind: "web-search-tool", provider };
   }
@@ -265,4 +267,8 @@ function assertNoOwnTaskIdInput(inputSchema: JsonObject | null, message: string)
   throw new Error(
     `${message} inputSchema declares "${TASK_ID_INPUT}", which eve adds to a serve tool's model input to send a call to a running task. Rename the field.`,
   );
+}
+
+function isWebSearchProvider(value: string): value is WebSearchProvider {
+  return (WEB_SEARCH_PROVIDERS as readonly string[]).includes(value);
 }
