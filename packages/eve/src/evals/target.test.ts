@@ -39,7 +39,10 @@ describe("resolveEvalTargetHandle", () => {
     });
 
     expect(target.url).toBe("http://127.0.0.1:3000");
-    expect(target.capabilities).toEqual({ devRoutes: true });
+    expect(target.capabilities).toEqual({
+      devRoutes: true,
+      tools: { dynamic: false, static: [] },
+    });
     const { dispatchSchedule } = target;
     await expect(dispatchSchedule("heartbeat")).resolves.toEqual({
       scheduleId: "heartbeat",

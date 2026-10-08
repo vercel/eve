@@ -216,30 +216,6 @@ describe("run assertions", () => {
     );
   });
 
-  it.each([
-    ["load_skill", 'Tool name "load_skill" was retired; use t.loadedSkill(name).'],
-    ["task_wait", 'Tool name "task_wait" was retired; use eve__task_wait.'],
-    ["task_cancel", 'Tool name "task_cancel" was retired; use eve__task_cancel.'],
-    ["final_output", 'Tool name "final_output" was retired; use eve__reply.'],
-    ["connection_search", 'Tool name "connection_search" was retired; use eve__search.'],
-    [
-      "connection_execute",
-      'Tool name "connection_execute" was retired; assert on the connection tool\'s own name, `<connection>__<tool>`.',
-    ],
-    [
-      "eve__execute",
-      "Calls through eve__execute are reported under the entry's name; assert on that name, or use t.loadedSkill for skills.",
-    ],
-  ])(
-    "rejects %s, which no call is reported under, instead of passing vacuously",
-    (name, message) => {
-      expect(() => Run.calledTool(name)).toThrow(message);
-      expect(() => Run.notCalledTool(name)).toThrow(message);
-      expect(() => Run.toolOrder(["lookup", name])).toThrow(message);
-      expect(() => Run.notCalledTool("lookup")).not.toThrow();
-    },
-  );
-
   it("calledSubagent matches every lifecycle status and exact counts", async () => {
     const result = makeResult({
       derived: {

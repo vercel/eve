@@ -161,6 +161,10 @@ function createHandle(input: {
 function capabilitiesFromInfo(info: AgentInfoResult): EveEvalTargetCapabilities {
   return {
     devRoutes: info.capabilities?.devRoutes ?? info.mode === "development",
+    tools: {
+      dynamic: info.tools.dynamic.length > 0,
+      static: info.tools.static.map((tool) => tool.name),
+    },
   };
 }
 

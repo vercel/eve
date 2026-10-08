@@ -59,7 +59,7 @@ interface ExecuteTaskResult {
 export async function executeTask(options: ExecuteTaskOptions): Promise<ExecuteTaskResult> {
   const { client, evaluation, target, timeoutMs } = options;
   const signal = timeoutMs !== undefined ? AbortSignal.timeout(timeoutMs) : neverAbortSignal();
-  const collector = new AssertionCollector();
+  const collector = new AssertionCollector(target.capabilities.tools);
   const manager = new EvalSessionManager({
     client,
     collector,

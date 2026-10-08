@@ -1,6 +1,7 @@
 import { EXECUTE_TOOL_NAME, SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import { TASK_CANCEL_TOOL_NAME, TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
+import type { EveEvalTargetCapabilities } from "#evals/types.js";
 
 /** Framework tool names eve no longer uses, with what to assert instead. */
 const RETIRED_TOOL_NAMES = new Map([
@@ -13,17 +14,21 @@ const RETIRED_TOOL_NAMES = new Map([
 ]);
 
 /**
- * Throws for a tool name no call is ever reported under, so an assertion on it
- * can't pass or fail without saying why.
+ * Throws for a tool name no call is reported under, so an assertion on it can't
+ * pass or fail without saying why. A retired name is still an ordinary tool
+ * name, so it passes when the root agent declares a tool by that name or has a
+ * dynamic tool resolver that might return one.
  */
-export function assertReportedToolName(name: string): void {
+export function assertReportedToolName(
+  name: string,
+  tools: EveEvalTargetCapabilities["tools"],
+): void {
   if (name === EXECUTE_TOOL_NAME) {
     throw new TypeError(
-      `Calls through ${EXECUTE_TOOL_NAME} are reported under the entry's name; assert on that name, or use t.loadedSkill for skills.`,
+      `Calls through ${EXECUTE_TOOL_NAME} are reported under the entry's name; assert on the tool or agent it reaches, or use t.loadedSkill for skills.`,
     );
   }
   const replacement = RETIRED_TOOL_NAMES.get(name);
-  if (replacement !== undefined) {
-    throw new TypeError(`Tool name "${name}" was retired; ${replacement}.`);
-  }
+  if (replacement === undefined || tools?.dynamic === true || tools?.static.includes(name)) return;
+  throw new TypeError(`Tool name "${name}" was retired; ${replacement}.`);
 }

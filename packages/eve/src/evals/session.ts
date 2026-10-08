@@ -568,7 +568,7 @@ class EvalTurn implements EveEvalTurn {
     name: string,
     options: Omit<EveEvalToolCallMatchOptions, "count"> = {},
   ): EveEvalToolCall {
-    assertReportedToolName(name);
+    assertReportedToolName(name, this.#collector.tools);
     const matching = this.toolCalls.filter(
       (call) => call.name === name && toolCallMatches(call, options),
     );
