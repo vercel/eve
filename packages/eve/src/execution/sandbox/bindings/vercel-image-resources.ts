@@ -18,6 +18,7 @@ import type { SandboxProviderResourceTree } from "#shared/sandbox-provider.js";
 const DRIVE_UPLOAD_PATH = "/eve/upload";
 const DRIVE_MANIFEST_PATH = `${DRIVE_UPLOAD_PATH}/.eve-resource.json`;
 const RESOURCE_MANIFEST_FILE = ".eve-resource.json";
+const RESOURCE_FORMAT_VERSION = 2;
 
 interface ResourceManifest {
   readonly files: readonly { readonly path: string; readonly sha256: string }[];
@@ -375,6 +376,8 @@ function sha256(value: string | Uint8Array): string {
 
 function resourceDriveName(region: string, resourceKey: string): string {
   return `eve-sbx-res-${createHash("sha256")
+    .update(String(RESOURCE_FORMAT_VERSION))
+    .update("\0")
     .update(region)
     .update("\0")
     .update(resourceKey)
