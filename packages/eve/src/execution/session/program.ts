@@ -8,6 +8,8 @@ import {
   resolveInitialTurnCallerStep,
 } from "#subagents/parent-notification.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { storedProjection } from "#harness/session-machine/view.js";
+import { turnCoordinates } from "#protocol/session-projection.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import { nextTurnDelivery, type NextTurnInstruction } from "#execution/session/next-input.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
@@ -89,7 +91,7 @@ interface SessionProgress {
   /** Delegated caller whose awaited reply is still unsettled. */
   caller: TurnCaller | undefined;
   terminalEmitted: boolean;
-  /** Last dispatched turn; a crash between turns is attributed to it. */
+  /** The turn a running turn step runs; a crash outside one is attributed to the latest turn. */
   turnId?: string;
 }
 
@@ -252,7 +254,6 @@ async function runSessionLoop(
 
   let turnControl =
     boot.initialTurnControl ?? (boot.anchor.kind === "self" ? createTurnControl() : undefined);
-  let turnIndex = 0;
   // Set when a turn compacts and kept until the session moves to a fresh run,
   // so this run's event log does not keep growing.
   let compactionHandoffDue = false;
@@ -260,8 +261,14 @@ async function runSessionLoop(
     const caller = progress.caller;
     const control = turnControl;
     turnControl = undefined;
-    progress.turnId = `turn_${String(turnIndex++)}`;
+    // A step that fails can leave the turn it opened out of the cursor, so the turn is read
+    // before the step runs. Controls run between turns.
+    progress.turnId =
+      payload?.control === undefined
+        ? turnCoordinates(storedProjection(cursor.sessionState.snapshot.session.state)).turnId
+        : undefined;
     const outcome = await execution.runTurn(payload, { caller, control });
+    progress.turnId = undefined;
     if (outcome.caller !== undefined) progress.caller = outcome.caller;
     if (outcome.compacted === true) compactionHandoffDue = true;
     return outcome;
