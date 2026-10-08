@@ -44,6 +44,9 @@ jobs:
       - name: Guard mechanical code invariants
         run: pnpm guard:invariants
 
+      - name: Test the human-input state reader guard
+        run: node --test scripts/hitl-state-readers.test.mjs
+
       - name: Validate /docs/public frontmatter and nav
         run: pnpm docs:check
 

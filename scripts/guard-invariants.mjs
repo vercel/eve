@@ -136,6 +136,14 @@
  *             events, so nothing changes without readers hearing it. The model
  *             step's streamed content (its calls and their inline results) is
  *             built where it streams.
+ *   rule 52 — No new readers of human-in-the-loop request state outside
+ *             `harness/hitl/`: the turn state, response-policy candidates,
+ *             pending sign-ins and relay routes, through their accessors or
+ *             their session-state keys, called by name or through an alias.
+ *             Today's readers are baselined per file; an allowance may only
+ *             shrink from origin/main's (`hitl-state-readers.mjs`). A new
+ *             reader belongs behind
+ *             `harness/hitl/index.ts` or the machine's view.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -147,6 +155,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { load as loadYaml } from "js-yaml";
 import { checkExtensionCapabilityContracts } from "./extension-capability-contracts.mjs";
+import { allowanceGrowth, baseAllowances, countHitlStateReads } from "./hitl-state-readers.mjs";
 
 const require = createRequire(import.meta.url);
 const extractorRequire = createRequire(require.resolve("@microsoft/api-extractor/package.json"));
@@ -257,6 +266,7 @@ function isTsLike(relPath) {
  *   rule48: Violation[];
  *   rule50: Violation[];
  *   rule51: Violation[];
+ *   rule52: { baseline: Record<string, number>; current: Map<string, number> };
  *   symlinks: string[];
  * }} state
  */
@@ -292,6 +302,7 @@ async function scanRepo(state) {
     checkRule48(posix, lines, state.rule48);
     checkRule50(posix, lines, state.rule50);
     checkRule51(posix, lines, state.rule51);
+    checkRule52(posix, lines, state.rule52);
   }
 }
 
@@ -575,6 +586,33 @@ function checkRule51(posix, lines, violations) {
       });
     }
   });
+}
+
+// ---------- Rule 52: human-in-the-loop request state stays in harness/hitl/ ----------
+
+/** The modules that define the records; they read them by definition. */
+const HITL_STATE_DEFINITION_FILES = new Set([
+  "packages/eve/src/harness/authorization.ts",
+  "packages/eve/src/harness/proxy-input-requests.ts",
+  "packages/eve/src/harness/session-machine/state.ts",
+]);
+/**
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {{ baseline: Record<string, number>; current: Map<string, number> }} state
+ */
+function checkRule52(posix, lines, state) {
+  if (
+    !posix.startsWith("packages/eve/src/") ||
+    posix.startsWith(HUMAN_INPUT_DIR) ||
+    posix.startsWith("packages/eve/src/internal/testing/") ||
+    HITL_STATE_DEFINITION_FILES.has(posix) ||
+    /\.(?:test|integration\.test|scenario\.test)\.ts$/.test(posix) ||
+    posix.includes("/test/")
+  )
+    return;
+  const count = countHitlStateReads(lines.join("\n"));
+  if (count > 0) state.current.set(posix, count);
 }
 
 // ---------- Rule 48: remote agent protocol 1 stays compartmentalized ----------
@@ -1702,6 +1740,7 @@ async function main() {
     rule48: /** @type {Violation[]} */ ([]),
     rule50: /** @type {Violation[]} */ ([]),
     rule51: /** @type {Violation[]} */ ([]),
+    rule52: { baseline: baseline.rule52_hitlStateReadersByFile ?? {}, current: new Map() },
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1819,6 +1858,27 @@ async function main() {
   violations.push(...(await checkFrameworkActionIdentity()));
   violations.push(...state.rule50);
   violations.push(...state.rule51);
+  for (const { file, was, now } of diffCounts(state.rule52.current, state.rule52.baseline)) {
+    violations.push({
+      rule: 52,
+      file,
+      message: `${now} read${now === 1 ? "" : "s"} of human-in-the-loop request state outside harness/hitl/ (baseline: ${was}). The turn state, candidates, pending sign-ins and relay routes are hitl's private records: read what you need through \`#harness/hitl/index.js\` or the machine's view (\`sessionView\`), or move the logic into harness/hitl/. The baseline may shrink, never grow.`,
+    });
+  }
+  for (const { file, was, now } of allowanceGrowth(
+    state.rule52.baseline,
+    baseAllowances(
+      REPO_ROOT,
+      "scripts/guard-invariants-baseline.json",
+      "rule52_hitlStateReadersByFile",
+    ),
+  )) {
+    violations.push({
+      rule: 52,
+      file,
+      message: `guard-invariants-baseline.json allows ${now} read${now === 1 ? "" : "s"} of human-in-the-loop request state here; its base allows ${was} (origin/main's, or the commit that introduced them). The allowance may shrink, never grow: move the reader into harness/hitl/ instead.`,
+    });
+  }
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

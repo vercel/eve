@@ -50,5 +50,20 @@
     "packages/eve/src/tools/provided/web-search.ts",
     "packages/eve/src/tools/provided/workflow.ts",
     "packages/eve/src/tools/provided/write-file.ts"
-  ]
+  ],
+  "rule52_hitlStateReadersByFile": {
+    "packages/eve/src/execution/durable-session-store.ts": 1,
+    "packages/eve/src/execution/proxied-deliver-step.ts": 3,
+    "packages/eve/src/execution/session/checkpoint-migrations.ts": 6,
+    "packages/eve/src/execution/session/handoff-steps.ts": 3,
+    "packages/eve/src/execution/session/pending-turn-state.ts": 1,
+    "packages/eve/src/execution/session/turn-step.ts": 2,
+    "packages/eve/src/execution/tasks/steps.ts": 1,
+    "packages/eve/src/execution/tools/workflow/withdraw-step.ts": 1,
+    "packages/eve/src/harness/coordination.ts": 1,
+    "packages/eve/src/harness/session-machine/commit.ts": 8,
+    "packages/eve/src/harness/session-machine/view.ts": 5,
+    "packages/eve/src/subagents/event-proxy-step.ts": 2,
+    "packages/eve/src/subagents/hitl-proxy.ts": 1
+  }
 }
