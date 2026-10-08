@@ -21,8 +21,10 @@ during beta. All plans include 30-day Agent Runs retention during beta.
 
 ## Enable tracing on Vercel
 
-When `eve deploy` creates a new Vercel project, it configures 100% trace
-sampling for all environments. Existing Vercel projects need a sampling rule
+When eve creates a new Vercel project during setup, `eve link`, or `eve deploy`,
+it configures 100% trace sampling for all environments. Pass
+`eve deploy --no-trace-sampling` to skip this setting during deployment.
+Existing Vercel projects need a sampling rule
 configured to collect traces. To enable tracing for an existing project, select
 your team and project, then open
 [**Settings → Tracing**](https://vercel.com/d?to=%2F%5Bteam%5D%2F%5Bproject%5D%2Fsettings%2Ftracing&title=Go+to+Tracing+settings):

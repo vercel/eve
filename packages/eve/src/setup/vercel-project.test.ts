@@ -627,6 +627,7 @@ describe("linkProject", () => {
     ).resolves.toEqual({ projectId: "prj_existing", projectName: "my-agent" });
 
     expect(mockedCaptureVercel).not.toHaveBeenCalled();
+    expect(mockedConfigureTraceSampling).not.toHaveBeenCalled();
     expect(mockedRunVercel).toHaveBeenCalledWith(
       ["link", "--project", "prj_existing", "--scope", "team-a", "--yes"],
       expect.objectContaining({ cwd: "/tmp/eve-agent", nonInteractive: true }),
@@ -691,7 +692,6 @@ describe("linkProject", () => {
         "/tmp/eve-agent",
         { kind: "new", project: "my-agent", team: "team-a" },
         createPromptCommandOutput(prompter.log),
-        { traceSampling: true },
       ),
     ).resolves.toEqual({ projectId: "prj_new", projectName: "my-agent" });
     expect(mockedCaptureVercel).toHaveBeenCalledTimes(2);
@@ -717,36 +717,33 @@ describe("linkProject", () => {
     );
   });
 
-  it.each([undefined, false])(
-    "does not configure sampling without an explicit true value (%s)",
-    async (traceSampling) => {
-      mockedCaptureVercel
-        .mockResolvedValueOnce(
-          failedCapture(
-            JSON.stringify({ error: { code: "not_found", message: "Project not found" } }),
-          ),
-        )
-        .mockResolvedValueOnce(captured({ framework: "eve" }));
-      mockedReadProjectLink.mockResolvedValueOnce({
-        orgId: "team-a",
-        projectId: "prj_new",
-        projectName: "my-agent",
-      });
-      const { prompter } = createFakePrompter();
-
-      await expect(
-        linkProject(
-          prompter,
-          "/tmp/eve-agent",
-          { kind: "new", project: "my-agent", team: "team-a" },
-          createPromptCommandOutput(prompter.log),
-          { traceSampling },
+  it("does not configure sampling when explicitly disabled", async () => {
+    mockedCaptureVercel
+      .mockResolvedValueOnce(
+        failedCapture(
+          JSON.stringify({ error: { code: "not_found", message: "Project not found" } }),
         ),
-      ).resolves.toEqual({ projectId: "prj_new", projectName: "my-agent" });
+      )
+      .mockResolvedValueOnce(captured({ framework: "eve" }));
+    mockedReadProjectLink.mockResolvedValueOnce({
+      orgId: "team-a",
+      projectId: "prj_new",
+      projectName: "my-agent",
+    });
+    const { prompter } = createFakePrompter();
 
-      expect(mockedConfigureTraceSampling).not.toHaveBeenCalled();
-    },
-  );
+    await expect(
+      linkProject(
+        prompter,
+        "/tmp/eve-agent",
+        { kind: "new", project: "my-agent", team: "team-a" },
+        createPromptCommandOutput(prompter.log),
+        { traceSampling: false },
+      ),
+    ).resolves.toEqual({ projectId: "prj_new", projectName: "my-agent" });
+
+    expect(mockedConfigureTraceSampling).not.toHaveBeenCalled();
+  });
 
   it("uses the requested project name when Vercel's link metadata omits the name", async () => {
     mockedCaptureVercel

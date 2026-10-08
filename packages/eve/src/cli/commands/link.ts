@@ -1,6 +1,7 @@
 import { isEveProject } from "#setup/scaffold/index.js";
 import { runLinkFlow, type LinkFlowDeps } from "#setup/flows/link.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
+import { configureTraceSampling } from "#setup/vercel-trace-sampling.js";
 
 import { hasInteractiveTerminal, validateWorkspaceProjectCommand } from "./preconditions.js";
 import {
@@ -53,7 +54,17 @@ export async function runLinkCommand(
     return;
   }
   if (isNonInteractiveProjectCommand(options)) {
-    await runNonInteractiveLink({ logger, appRoot, options });
+    const prompter = dependencies.createPrompter?.() ?? createPrompter();
+    await runNonInteractiveLink({
+      logger,
+      appRoot,
+      options,
+      onCreatedProject: (link) => configureTraceSampling(link, prompter),
+      onProjectCreationUnknown: () =>
+        prompter.log.warning(
+          "Could not verify the Vercel project for trace sampling, so it was not configured. Check the project settings if you need traces in Agent Runs.",
+        ),
+    });
     return;
   }
   if (!dependencies.hasInteractiveTerminal()) {
