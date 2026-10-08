@@ -29,8 +29,12 @@ type SlackConnectorCreateResult =
       ref: SlackConnectorRef;
       workspace: SlackWorkspaceConnection;
     }
-  /** `detail` is the CLI's own error line, when it printed one. */
-  | { state: "failed"; detail?: string }
+  /**
+   * `detail` is the CLI's own error line, when it printed one. `rejected`
+   * proves no connector exists: the CLI reported an error before it printed
+   * the browser URL, the only flow that can create a managed connector.
+   */
+  | { state: "failed"; detail?: string; rejected: boolean }
   | { state: "unresolved" };
 
 type Phase = <T>(message: string, task: () => Promise<T>) => Promise<T>;
@@ -42,8 +46,9 @@ const CREATED_CONNECTOR_PROGRESS = /\bConnector created:\s*(scl_[A-Za-z0-9]+)\b/
 /**
  * The CLI prints these once Connect hands back the browser URL. Connect
  * creates a managed connector only inside that browser flow, so a run that
- * fails before either line (or a `Connector created` line) cannot have
- * created one.
+ * reports its own error before either line (or a `Connector created` line)
+ * cannot have created one. Any other run fails closed, so a reworded CLI
+ * line costs a cleanup warning rather than an orphaned connector.
  */
 const BROWSER_FLOW_STARTED = /^(Opening browser for |If the browser doesn't open, visit:)/;
 
@@ -99,8 +104,6 @@ export async function createSlackConnector(input: {
   signal: AbortSignal | undefined;
   phase: Phase;
   onCreated: (ref: SlackConnectorRef) => void;
-  /** Fires once the CLI opens the browser flow that can create a connector. */
-  onBrowserStarted: () => void;
   waitForWorkspace: (
     ref: SlackConnectorRef,
     signal: AbortSignal,
@@ -136,6 +139,7 @@ export async function createSlackConnector(input: {
     resolveWorkspace = resolve;
     rejectWorkspace = reject;
   });
+  let browserStarted = false;
   let progressLookup: Promise<SlackConnectorRef | undefined> | undefined;
   let workspaceWork: Promise<SlackWorkspaceConnection | undefined> | undefined;
   const startWorkspaceLookup = (ref: SlackConnectorRef): void => {
@@ -154,7 +158,7 @@ export async function createSlackConnector(input: {
     input.onOutput(line);
     const connectorId = line.text.match(CREATED_CONNECTOR_PROGRESS)?.[1];
     if (connectorId !== undefined || BROWSER_FLOW_STARTED.test(line.text.trim())) {
-      input.onBrowserStarted();
+      browserStarted = true;
     }
     if (connectorId === undefined || progressLookup !== undefined) return;
     progressLookup = pollCreatedSlackConnector(
@@ -218,7 +222,8 @@ export async function createSlackConnector(input: {
     if (workspaceWork !== undefined) await workspaceWork;
     input.signal?.throwIfAborted();
     const detail = vercelErrorDetail(created.result.stderr);
-    return detail === undefined ? { state: "failed" } : { state: "failed", detail };
+    if (detail === undefined) return { state: "failed", rejected: false };
+    return { state: "failed", detail, rejected: !browserStarted };
   }
 
   const finalRef = parseCreatedSlackConnector(created.result.stdout);

@@ -627,6 +627,21 @@ describe("provisionSlackbot", () => {
     expect(connect.commands.filter((command) => command.includes("slack%2F"))).toHaveLength(1);
   });
 
+  it("fails closed when create fails without proving it stopped before the browser flow", async () => {
+    const connect = fakeConnect([]);
+    // No recognized browser line and no CLI error: the browser may still create one.
+    mockedRunVercelCaptureStdout.mockResolvedValue({ ok: false, stdout: "", stderr: "" });
+    const log = createTestLog();
+
+    await expect(provisionSlackbot(log, ROOT, "my-agent", connect.deps)).resolves.toEqual({
+      state: "cleanup-failed",
+      connectorUids: [],
+    });
+    expect(log.warning).toHaveBeenCalledWith(
+      expect.stringContaining("couldn't confirm the Slack request in your browser was cancelled"),
+    );
+  });
+
   it("names a new connector around one another project already uses", async () => {
     const connect = fakeConnect([
       connector({ uid: "slack/my-agent", projects: [{ id: "prj_other", name: "other" }] }),

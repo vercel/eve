@@ -154,11 +154,11 @@ type ExistingAttemptSource = Extract<AttemptSource, { state: "existing" }>;
 
 /**
  * What one new-connector attempt observed, so cleanup removes exactly what it
- * created and knows whether the browser flow could have created anything.
+ * created and skips cleanup only when the CLI proved nothing was created.
  */
 interface CreateAttemptTrace {
   createdRef?: SlackConnectorRef;
-  browserStarted: boolean;
+  rejected: boolean;
 }
 type NewAttemptSource = Extract<AttemptSource, { state: "new" }>;
 
@@ -274,7 +274,8 @@ export function connectorInUseMessage(candidate: SlackConnectorInUse): string {
  * Routing runs only the mutation the destinations still need, so an attempt
  * over an already-configured connector changes nothing.
  * `trace` records a fresh connector the instant it exists, and whether the
- * browser flow started, so an aborted attempt can remove exactly what it made. The `phase` seam lets each caller route
+ * CLI rejected the request before its browser flow, so an aborted attempt can
+ * remove exactly what it made. The `phase` seam lets each caller route
  * progress through its own transient status surface.
  */
 async function runAttempt(input: {
@@ -326,9 +327,6 @@ async function runAttempt(input: {
       onCreated: (createdRef) => {
         input.trace.createdRef = createdRef;
       },
-      onBrowserStarted: () => {
-        input.trace.browserStarted = true;
-      },
       waitForWorkspace: async (createdRef, workspaceSignal) => {
         const result = await pollSlackWorkspace(
           deps,
@@ -342,6 +340,7 @@ async function runAttempt(input: {
       },
     });
     if (created.state === "failed") {
+      input.trace.rejected = created.rejected;
       return created.detail === undefined
         ? { state: "create-failed" }
         : { state: "create-failed", detail: created.detail };
@@ -710,7 +709,7 @@ export async function provisionSlackbot(
     return cleanupCreatedAttempt(cleanupContext, {
       expectedUid: `slack/${attempt.name}`,
       createdRef: trace.createdRef,
-      browserStarted: trace.browserStarted,
+      rejected: trace.rejected,
     });
   };
 
@@ -768,7 +767,7 @@ export async function provisionSlackbot(
           outerSignal: options.signal,
           run: (signal) =>
             runAttempt({
-              ...attemptInput(attempt, { browserStarted: false }),
+              ...attemptInput(attempt, { rejected: false }),
               signal,
               phase: (_m, task) => task(),
             }),
@@ -783,7 +782,7 @@ export async function provisionSlackbot(
     }
 
     const outcome = await runAttempt({
-      ...attemptInput(attempt, { browserStarted: false }),
+      ...attemptInput(attempt, { rejected: false }),
       signal: options.signal,
       phase: (message, task) => withPhase(log, message, task),
     });
@@ -793,7 +792,7 @@ export async function provisionSlackbot(
   async function runUncontrolledAttempt(
     attempt: NewAttemptSource,
   ): Promise<ProvisionSlackbotResult> {
-    const trace: CreateAttemptTrace = { browserStarted: false };
+    const trace: CreateAttemptTrace = { rejected: false };
     const cleanupCurrentAttempt = () => cleanupNewAttempt(attempt, trace);
     // No interactive surface (plain/headless): run the new request to a
     // terminal outcome with per-step spinners; abort/retry are unavailable.
@@ -820,7 +819,7 @@ export async function provisionSlackbot(
     attempt: NewAttemptSource,
     awaitChoice: ChannelSetupAwaitChoice,
   ): Promise<InteractiveAttemptDecision> {
-    const trace: CreateAttemptTrace = { browserStarted: false };
+    const trace: CreateAttemptTrace = { rejected: false };
     const cleanupCurrentAttempt = () => cleanupNewAttempt(attempt, trace);
     // Interactive: one prompt races the whole create → attach attempt,
     // so "Try again" / "Cancel" are live even while `connect create` parks on

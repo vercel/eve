@@ -525,9 +525,9 @@ async function cleanupConnectorUids(
 }
 
 /**
- * Removes the exact connector returned by `connect create`. A run that never
- * reached the browser flow cannot have created a connector, so there is
- * nothing to remove. Otherwise, when no UID was returned, ownership cannot be
+ * Removes the exact connector returned by `connect create`. A run the CLI
+ * rejected before its browser flow cannot have created a connector, so there
+ * is nothing to remove. Otherwise, when no UID was returned, ownership cannot be
  * proven: the browser page may still create one, and a concurrent or
  * eventually-consistent connector looks the same as this attempt's. So
  * cleanup fails closed. It removes nothing and instead surfaces
@@ -539,13 +539,14 @@ export async function cleanupCreatedAttempt(
   input: {
     expectedUid: string;
     createdRef: SlackConnectorRef | undefined;
-    browserStarted: boolean;
+    /** The CLI reported its own error before printing the browser URL. */
+    rejected: boolean;
   },
 ): Promise<SlackConnectorCleanupResult> {
   if (input.createdRef) {
     return cleanupConnectorUids(context, [input.createdRef.uid]);
   }
-  if (!input.browserStarted) return { state: "clean" };
+  if (input.rejected) return { state: "clean" };
 
   context.log.warning(
     "eve couldn't confirm the Slack request in your browser was cancelled. Wait for it to expire before retrying.",
