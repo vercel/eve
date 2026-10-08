@@ -7,10 +7,10 @@
   </a>
   <h1>eve</h1>
 
-<a href="https://vercel.com"><img alt="Vercel logo" src="https://img.shields.io/badge/MADE%20BY%20Vercel-000000.svg?style=for-the-badge&logo=Vercel&labelColor=000"></a>
-<a href="https://www.npmjs.com/package/eve"><img alt="NPM version" src="https://img.shields.io/npm/v/eve.svg?style=for-the-badge&labelColor=000000"></a>
-<a href="https://github.com/vercel/eve/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/npm/l/eve.svg?style=for-the-badge&labelColor=000000"></a>
-<a href="https://github.com/vercel/eve/discussions"><img alt="Join the community on GitHub" src="https://img.shields.io/badge/Join%20the%20community-blueviolet.svg?style=for-the-badge&logo=Github&labelColor=000000&logoWidth=20"></a>
+<a href="https://vercel.com"><picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/Made_by-Vercel.svg?variant=branded&logo=vercel&mode=dark"><img alt="Made by Vercel" src="https://shieldcn.dev/badge/Made_by-Vercel.svg?variant=branded&logo=vercel&mode=light"></picture></a>
+<a href="https://www.npmjs.com/package/eve"><picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/npm/v/eve.svg?variant=branded&logo=npm&mode=dark"><img alt="NPM version" src="https://shieldcn.dev/npm/v/eve.svg?variant=branded&logo=npm&mode=light"></picture></a>
+<a href="https://github.com/vercel/eve/blob/main/LICENSE"><img alt="License" src="https://shieldcn.dev/github/license/vercel/eve.svg?color=6b7280"></a>
+<a href="https://github.com/vercel/eve/discussions"><img alt="Join the community on GitHub" src="https://shieldcn.dev/badge/Join_the-community.svg?color=43179E&logo=github"></a>
 
 </div>
 
