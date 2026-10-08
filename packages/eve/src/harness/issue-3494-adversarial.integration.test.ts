@@ -402,12 +402,8 @@ it("keeps a message waiting behind a budget prompt and runs it after the grant",
 
   const waitingStart = f.events.length;
   expect((await f.drive({ message: "Also say goodbye." })).held).toEqual({ kind: "request" });
-  // The message is received into a turn that holds on the prompt; the grant resumes it.
-  expect(f.events.slice(waitingStart).map((event) => event.type)).toEqual([
-    "turn.started",
-    "message.received",
-    "turn.waiting",
-  ]);
+  // The message waits for the grant in the held turn.
+  expect(f.events.slice(waitingStart).map((event) => event.type)).toEqual(["turn.waiting"]);
   expect(f.pending().map((r) => r.kind)).toEqual(["session-limit"]);
 
   f.script.push(calls("read"), "FINAL");
