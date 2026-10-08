@@ -14,14 +14,15 @@ Dynamic resolvers (`defineDynamic({ events })`) and memory providers key their h
 
 That happens for two reasons:
 
-- **Two moments have no event.** Resolvers that pick the model and tools must run before each model call, but the event that records the call, `step.started`, already carries the chosen model. And when a newer deployment takes a session over, session-scoped resolvers refresh with nothing on the stream to say so.
-- **Results are re-derived instead of recorded.** Restores, rebinding after a redeploy, and parked steps re-run resolvers on hand-built events.
+- **One moment has no event.** Resolvers that pick the model and tools must run before each model call, but the event that records the call, `step.started`, already carries the chosen model.
+- **Re-runs use hand-built events.** Restores, the refresh after a redeploy, and parked steps re-run resolvers on events rebuilt by hand, with approximate fields, instead of the events that were actually published.
 
 This doc proposes making participants actual consumers of the stream:
 
-- [`session-event-lifecycle.md`](./session-event-lifecycle.md) adds the two missing events: `model.requested`, written before the model is chosen, and `session.redeployed`.
+- [`session-event-lifecycle.md`](./session-event-lifecycle.md) adds the missing event, `model.requested`, written before the model is chosen. Redeploys need no event: eve re-runs session-scoped participants with the session's original `session.started`.
 - **Each participant is one function per action** over committed events: `resolve(event, ctx)` for dynamic resolvers, and `recall(event, ctx)` and `capture(event, ctx)` for memory.
-- **Each kind of participant receives a fixed set of events,** narrowed by eve. Memory, for example, sees only completed compactions, never clears. Authors branch only to tell those events apart.
+- **A dynamic resolver declares its `scope`:** once per session, per turn, or per model call. That decides which events it receives, so a resolver never runs more often than it asked to.
+- **Memory receives a fixed set of moments,** narrowed by eve: it sees completed compactions, never clears. Authors branch only to tell those moments apart.
 - Participants run in one pipeline, and their results are recorded so restores reuse them.
 
 The pipeline can land first. The new API ships with the event break, so authors migrate once.
@@ -125,30 +126,31 @@ The pattern is as old as dynamic model selection (#581), which had to choose the
 
 ### The API
 
-Each participant is one function per action. It receives a committed event and `ctx`, and returns its result, or nothing for no change:
+Each participant is one function per action. It receives a committed event and `ctx`, and returns its result, or nothing for no change. A dynamic resolver also declares how often it runs:
 
 ```ts
 // agent/tools/catalog.ts
 import { defineDynamic, defineTool } from "eve/tools";
 
 export default defineDynamic({
-  async resolve(event, ctx) {
-    switch (event.type) {
-      case "session.started":
-        return { search: defineTool({/* … */}) };
-      case "model.requested":
-        return toolsForMessages(ctx.messages);
-    }
-  },
+  scope: "session",
+  resolve: (_event, ctx) => ({ search: defineTool({/* … */}) }),
 });
 ```
+
+The rare resolver that needs two frequencies declares both and branches on the event:
 
 ```ts
 // agent/agent.ts
 export default defineAgent({
   model: defineDynamic({
+    scope: ["session", "model"],
     resolve: (event, ctx) =>
-      event.type === "session.started" ? modelForPlan(ctx.session.auth) : undefined,
+      event.type === "session.started"
+        ? modelForPlan(ctx.session.auth)
+        : hasImages(ctx.messages)
+          ? visionModel
+          : undefined,
   }),
 });
 ```
@@ -188,24 +190,31 @@ export default defineMemoryProvider({
 });
 ```
 
+- **`scope` is required.** A default of `"session"` would leave turn-level resolvers stale without saying so, and a default of `"turn"` would quietly run session resolvers every turn. One word up front avoids both.
 - **`event` is typed to what the participant receives,** and narrows by `type`. On memory's `context.settled` branch, `event.data.kind` is literally `"compaction"`. `ctx` (`DynamicResolveContext`, or memory's context) is unchanged, and eve builds it lazily, so branching first costs little.
-- **Restrictions are type errors.** A skill resolver that writes `case "model.requested"` doesn't compile, because that comparison can't match the type it receives. `eve/skills` and the subagent form of `eve`'s `defineDynamic` get their own typed variants.
+- **Restrictions are type errors.** A skill resolver that declares `scope: "model"` doesn't compile. `eve/skills` and the subagent form of `eve`'s `defineDynamic` get their own typed variants.
 - **`recall` is required and `capture` is optional,** as today.
 - **Guards from `eve/events`** (`isCompaction`, `isCompleted`, `hasKind`, `hasOutcome`) are there for hooks, channels, and view code. Participants rarely need them, because eve has already narrowed what they receive.
 
 ### What each participant receives
 
-| Participant                                  | Receives                                                                          |
-| -------------------------------------------- | --------------------------------------------------------------------------------- |
-| Dynamic model and tools                      | `session.started`, `turn.started`, and `model.requested` for runs owned by a turn |
-| Instructions, skills, connections, subagents | `session.started` and `turn.started`                                              |
-| Memory `recall`                              | `turn.started`, and `context.settled` for completed compactions                   |
-| Memory `capture`                             | `turn.settled` for completed turns, and `context.started` for compactions         |
-| Memory tools                                 | `turn.started`                                                                    |
+| Scope       | Receives                                    | Results last   | Accepted by                                                        |
+| ----------- | ------------------------------------------- | -------------- | ------------------------------------------------------------------ |
+| `"session"` | `session.started`, again after a redeploy   | The session    | Dynamic model, tools, instructions, skills, connections, subagents |
+| `"turn"`    | `turn.started`                              | The turn       | The same                                                           |
+| `"model"`   | `model.requested`, for runs owned by a turn | One model call | Dynamic model and tools                                            |
+
+Memory has no `scope`; eve fixes its moments:
+
+| Memory function | Receives                                                                  |
+| --------------- | ------------------------------------------------------------------------- |
+| `recall`        | `turn.started`, and `context.settled` for completed compactions           |
+| `capture`       | `turn.settled` for completed turns, and `context.started` for compactions |
+| `tools`         | `turn.started`                                                            |
 
 - **`model.requested`** lands in the commit that makes the next model call necessary: the turn's start, the last call result, an answer, steering, or a completed sign-in. Participants run after it, and `model.started` records the model they chose. It doesn't run again for provider retries inside one run, and a run that replaces an abandoned one reuses that run's decision.
 - **Summary runs.** A compaction's summary run uses `compactionModel` if one is configured, otherwise the model the turn's current run chose. Between turns, the dynamic model runs on the summary run's `model.requested`, as manual compaction's synthetic `step.started` does today. Tool participants never see summary runs.
-- **Redeploys re-run the session's start.** After the commit with `session.redeployed`, eve calls every session-scoped participant again with the session's original `session.started`: a real event at its real position, re-run against the new code. A resolver that handles only `session.started` still refreshes correctly. `session.redeployed` stays on the wire for observers and readers.
+- **Redeploys re-run the session's start.** A newer deployment takes a session over only while it's idle. Before the next turn's participants run, eve calls every session-scoped participant again with the session's original `session.started`: a real event at its real position, re-run against the new code. The trigger is the revision check eve makes today (`VERCEL_DEPLOYMENT_ID`, or the compiled artifacts' key locally), so nothing new goes on the stream. Turn and model-call resolvers need nothing: the next turn or model call runs them on the new code anyway.
 - **A fresh process on the same deployment isn't a redeploy.** It rebuilds code from recorded results without deciding them again.
 - **Failed and cancelled turns** don't reach `capture`, as today. If providers ask, capturing them can come later as an explicit opt-in on the provider.
 - **Framework work moves onto events too.** The skill and connection announcements and the framework connection tools run on `model.requested` as built-in participants, instead of as special cases on `step.started`.
@@ -213,14 +222,14 @@ export default defineMemoryProvider({
 ### What a handler returns
 
 - **A result, or nothing.** Nothing means no change, and nothing is recorded.
-- **A result's scope comes from its event:** session for `session.started`, turn for `turn.started`, and step for `model.requested`. That's today's `event.type.split(".")[0]` mapping, with `model.requested` mapped to the stored `step` scope, so a session that spans the deploy restores its locked tools.
-- **Results are recorded as today,** in the same durable keys, so a restore reuses locked identities instead of resolving again against the current configuration. There's no `entry` field: a restore rebuilds code from recorded results using the original event, and a redeploy re-runs the original `session.started`. Resolvers should stay idempotent, as the docs already ask.
+- **A result lasts for the scope of the event it answered:** the session for `session.started`, the turn for `turn.started`, and one model call for `model.requested`. Persisted callback scopes stay `session`, `turn`, and `step`, with `"model"` stored as `step`, so a session that spans the deploy restores its locked tools.
+- **Results are recorded as today,** in the same durable keys, so a restore reuses locked identities instead of resolving again against the current configuration. There's no `entry` field: a restore rebuilds code from recorded results using the original event, and a redeploy re-runs the original `session.started`. Both call the resolver again, which is why resolvers should stay idempotent. The docs already ask for that.
 
 ### One pipeline
 
 ```text
 harness/participants/
-  receives.ts   which events each kind of participant receives, and how eve narrows them
+  receives.ts   which events each scope and memory function receives, and how eve narrows them
   registry.ts   the bundle's participants, built once
   run.ts        runParticipants(commit, ctx): calls participants for each event they receive, in fact order, and records results
 ```
@@ -245,7 +254,7 @@ Today memory runs between the write and the hooks, while the dynamic resolvers r
 
 Every dynamic resolver and memory provider changes shape, mechanically. It ships in the same release as the event break ([`session-event-lifecycle.md`](./session-event-lifecycle.md#compatibility-at-the-break)), so authors migrate once.
 
-- **A codemod rewrites each map as a function:** `events: {a: f, b: g}` becomes `resolve(event, ctx)` with a `switch`, and memory's `recall` and `capture` maps become functions the same way. Along the way it renames `step.started` to `model.requested`, memory's `compaction.requested` to `context.started`, `compaction.completed` to `context.settled`, and `turn.completed` to `turn.settled`, and drops the conditions eve now applies.
+- **A codemod rewrites each map as a function:** `events: {a: f, b: g}` becomes `resolve(event, ctx)`, with a `scope` derived from the keys and a `switch` only when there are several. Memory's `recall` and `capture` maps become functions the same way. Of the 209 files that use `defineDynamic` today, 115 key `session.started`, 81 `turn.started`, and 20 `step.started`; only 10 use more than one key, so almost every resolver gets a single scope and no `switch`. Along the way it renames `step.started` to `model.requested`, memory's `compaction.requested` to `context.started`, `compaction.completed` to `context.settled`, and `turn.completed` to `turn.settled`, and drops the conditions eve now applies.
 - **The old shape fails the build with the fix.** A `defineDynamic` with `events`, or a memory provider with maps, gets an error that points at the codemod. It's an error, not an alias, and it can be removed after a release or two.
 - **Handler payloads become typed.** The first argument is `unknown` today.
 - **Running sessions aren't affected.** Key names aren't persisted, and stored scope names stay as they are.
@@ -267,7 +276,7 @@ Every dynamic resolver and memory provider changes shape, mechanically. It ships
 
    This part changes nothing for authors and can land on its own.
 
-3. **In the event break's release:** the single-function API, typed entry points, `eve/events`, the build errors, the codemod, and the repo migration.
+3. **In the event break's release:** the single-function API with `scope`, typed entry points, `eve/events`, the build errors, the codemod, and the repo migration.
 4. **Switch the docs.**
 
 **Size:** a small net reduction, not measured. The dispatch and synthetic-event code it removes is a few hundred lines across `turn-event-handler.ts` (140), `resolver-events.ts` (29), `memory-event-lifecycle.ts` (76), and the filtering parts of the six `context/dynamic-*-lifecycle.ts` files. The pipeline adds back something smaller.

@@ -8,7 +8,7 @@ last_updated: "2026-10-08"
 
 Companion docs:
 
-- [`dynamic-participants.md`](./dynamic-participants.md) makes dynamic resolvers and memory providers functions over real events, using two events this proposal adds. Its pipeline is independent of this proposal; its API change ships with it.
+- [`dynamic-participants.md`](./dynamic-participants.md) makes dynamic resolvers and memory providers functions over real events, using an event this proposal adds. Its pipeline is independent of this proposal; its API change ships with it.
 - [`session-machine-simplification.md`](./session-machine-simplification.md) covers structural cleanup in the session machine. Two of its items help this proposal land.
 
 ## Introduction
@@ -30,7 +30,7 @@ This proposal replaces the vocabulary at the next stream-version break (v27). Th
 - **One commit per stream line** Multiple facts that happen atomically share a single stream line, and the session projection retains its own counter for stream position. This means events no longer need to be stamped with ULIDs (instead they get literal stream indicies) and readers resume exactly.
 - **Additive evolution after the break** New kinds, fields, and families don't need a version bump, and older readers stay correct ([Future proofing](#future-proofing)).
 
-The proposed catalog has 31 types (28 facts and 3 progress types), down from 34. Compatibility is cut on purpose: v27 clients read v27 streams only, and sessions don't cross the break.
+The proposed catalog has 30 types (27 facts and 3 progress types), down from 34. Compatibility is cut on purpose: v27 clients read v27 streams only, and sessions don't cross the break.
 
 ### Where the contract lives
 
@@ -176,14 +176,13 @@ Terminal outcome sets are closed for the life of the major version:
 
 ## Event catalog
 
-### The 31 types
+### The 30 types
 
 `~` marks progress: streamed between commits and never folded into the lifecycle tables.
 
 | Type                  | Entity         | Role                 | Replaces in v26                                                 |
 | --------------------- | -------------- | -------------------- | --------------------------------------------------------------- |
 | `session.started`     | Session        | Introduces           | `session.started`                                               |
-| `session.redeployed`  | Session        | Updates              | **New** (an implicit resolver refresh before)                   |
 | `session.ended`       | Session        | Terminal             | `session.completed`, `session.failed`                           |
 | `delivery.admitted`   | Delivery       | Introduces           | **New** (only `meta.deliveryIds` before)                        |
 | `delivery.consumed`   | Delivery       | Updates              | `message.received`                                              |
@@ -227,7 +226,6 @@ Each new type records something v26 left for readers to infer:
 - **`call.started`:** the call was cleared and began running, and what cleared it, or which task serves it. Before, a call waiting for approval looked like a running one, an auto-approved call looked like one a grant cleared, and "the call was handed to a task" was conflated with "the call completed" in the receipt.
 - **`task.ended`:** the task itself stopped. v26 settled each call a task served, but the task had no end, so "is this subagent still alive?" was a guess.
 - **`response.submitted`, `.admitted`, and `.settled`:** every answer to an interaction, from submission through its checks to whether it decided the interaction. Before, policy-gated answers were candidates, partial batch answers lived only in private state and a client overlay, and sign-in completions were callbacks outside the delivery model.
-- **`session.redeployed`:** a newer deployment took the session over. Session-scoped resolvers refresh after it, re-run with the session's original `session.started`; before, they re-ran on a hand-built one, and nothing told readers why the agent's tools or instructions changed.
 - **`usage.recorded`:** the only carrier of usage, attributed to the run, call, or context change that spent it, or to nothing, as for cache warming. Before, usage rode on step, turn, and session events, and delegated usage was easy to count twice.
 - **`context.started` and `.settled`:** one lifecycle for operations on what the model sees next. v26 gave compaction a start and a success, but no failure and no usage for its summary call (#3483), and recorded a clear on its own. Future rewinds, branch switches, and context edits become new kinds, not new families.
 
@@ -237,7 +235,6 @@ Each new type records something v26 left for readers to infer:
 ```text
 v26                              v27
 session.started ───────────────▶ session.started        parent?: {sessionId, callId}
-(an implicit resolver refresh) ▶ session.redeployed     {revision}
 session.completed ─┬───────────▶ session.ended          {completed | failed}
 session.failed ────┘
 session.waiting ───────────────▶ ✕ removed: the idle selector; observers use delivery.settled, turn.settled, or idle(ctx.view)
@@ -295,14 +292,13 @@ authorization.completed ─┘
 
 ```text
 session.started     { parent?: {sessionId, callId} }
-session.redeployed  { revision }
 session.ended       { outcome: completed | failed, cause?, error? }
 ```
 
 - Every reader stops at `session.ended`. Nothing after it counts.
-- **`session.redeployed`** comes first in the first commit after a newer deployment takes the session over, which happens only while the session is idle. `revision` is the runtime revision eve already compares: the deployment ID, or the compiled artifacts' key locally. Session-scoped resolvers refresh on it, re-run with the session's original `session.started` ([`dynamic-participants.md`](./dynamic-participants.md)). A fresh process on the same deployment isn't a redeploy.
+- **Redeploys write nothing.** When a newer deployment takes an idle session over, eve re-runs session-scoped resolvers with the session's original `session.started` ([`dynamic-participants.md`](./dynamic-participants.md)). A marker for readers can come later as a minor ([Directions that fit](#directions-that-fit)).
 - A failed session references what failed, for example `cause: {turnId}`; the error details live on that entity.
-- The ending commit settles every delivery that was accepted but not settled, with `failed` and `reason: "session-ended"`, and settles any open context change `interrupted`. Inbox payloads that were never read were never introduced, so `session.ended` is their only signal.
+- The ending commit settles every delivery that was admitted but not settled, with `failed` and `reason: "session-ended"`, and settles any open context change `interrupted`. Inbox payloads that were never read were never introduced, so `session.ended` is their only signal.
 - A reset ends the session, not the channel's conversation. Following the conversation into its next session is the channel's job, outside the stream contract.
 
 </details>
@@ -840,7 +836,7 @@ The fold that produces the tables is shared by the client, the server, and anyon
 
 ```text
 SessionView @ position
-├─ session        status · parent? · revision?
+├─ session        status · parent?
 ├─ deliveries     [deliveryId]     principal? · source? · status · turnId? · outcome?
 ├─ turns          [turnId]         cause · follows · status · awaiting? · reply?
 ├─ runs           [runId]          owner · modelId? · status · finishReason?
@@ -1151,7 +1147,7 @@ After the break, and through 1.x, the stream should evolve without breaking anyo
 These are just hypothetical. Each would land as a minor, using a mechanism the contract already has.
 
 <details>
-<summary>Twenty-one directions, and how each lands</summary>
+<summary>Twenty-two directions, and how each lands</summary>
 
 | Direction                                            | How it lands                                                                                                                                                                      |
 | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1162,6 +1158,7 @@ These are just hypothetical. Each would land as a minor, using a mechanism the c
 | Deadlines and escalation on `ctx.ask` (#3546)        | `expiresAt` on `interaction.opened`; the interaction settles `expired`, and a new interaction opens for another audience                                                          |
 | Stop requests                                        | `turn.stopping` and `task.stopping` updates between a cancel decision and the terminal, so readers can show "Stopping…"                                                           |
 | Session metadata                                     | `agent`, `deployment`, and `title` on `session.started`                                                                                                                           |
+| A deployment marker                                  | `session.redeployed`, or an optional `revision` on `turn.started`, so readers can show that the agent was updated mid-session                                                     |
 | What a run could use                                 | A per-run summary on `model.started`, such as the names of the tools and skills it was offered                                                                                    |
 | Visible compaction summaries                         | An optional `summary` on `context.settled`, since the handoff note is written for a model, not a person                                                                           |
 | Who signed in                                        | `account` on a sign-in's `interaction.settled.response`, when the connection reports it, visible to the same readers as the challenge fields                                      |
@@ -1318,7 +1315,7 @@ This is an estimate from reading `main` at `285d4e09b`, to within a few hundred 
 
 | Area                       | Today                                                                                          | Change                                                                                                               | Net  |
 | -------------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ---- |
-| Contract                   | `protocol/message.ts` 2,018 lines with 34 builders; event IDs and dedupe 60                    | Zod schemas for 31 types, envelope, runtime catalog, checker; builders become typed literals at owners               | −900 |
+| Contract                   | `protocol/message.ts` 2,018 lines with 34 builders; event IDs and dedupe 60                    | Zod schemas for 30 types, envelope, runtime catalog, checker; builders become typed literals at owners               | −900 |
 | Emitters                   | 87 builder calls in 18 files; coordinate plumbing                                              | Scope stamped centrally; run and part IDs; no `sequence` or `stepIndex`                                              | −100 |
 | Publisher                  | `publish-session-events.ts` 511, ordered emitter 278                                           | A commit as one line; position counter; write → channels → hooks; observer `ctx`; no `session.waiting`               | +100 |
 | Route and transport        | `eve-channel/request.ts` 684, `open-stream.ts` 387, `ndjson.ts` 162                            | Catch-up filtering with markers; `stream.ended`; idle budget and version branches removed                            | +70  |
@@ -1336,7 +1333,7 @@ This is an estimate from reading `main` at `285d4e09b`, to within a few hundred 
 | Files                      | AI SDK part types; `data:` URLs                                                                | eve-owned parts, refs, the file content kind                                                                         | +60  |
 | Instrumentation bridge     | `instrumentation/native-events.ts` 403                                                         | Facts mapped onto its unchanged vocabulary                                                                           | +30  |
 
-- **Source:** about −400 lines net, out of roughly 10,000 touched across about 160 source files. The plausible range is +300 to −1,200. The types added in review (`model.requested`, `call.started`, responses, `usage.recorded`, `session.redeployed`) mostly ride existing code paths and stay within each row's precision. Deletions are inference code and coordinate plumbing; additions are deliveries, recovery, catch-up, and closure, which are new guarantees rather than reshuffled code. Interactions are the least certain row, because HumanInput's final shape isn't settled.
+- **Source:** about −400 lines net, out of roughly 10,000 touched across about 160 source files. The plausible range is +300 to −1,200. The types added in review (`model.requested`, `call.started`, responses, `usage.recorded`) mostly ride existing code paths and stay within each row's precision. Deletions are inference code and coordinate plumbing; additions are deliveries, recovery, catch-up, and closure, which are new guarantees rather than reshuffled code. Interactions are the least certain row, because HumanInput's final shape isn't settled.
 - **Removed by the compatibility cut, beyond that:**
   - the v21–v26 normalization (258 lines, plus client handling);
   - hook and channel epoch fixtures (71 files, about 850 lines);
