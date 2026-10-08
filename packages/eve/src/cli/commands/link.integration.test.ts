@@ -10,34 +10,11 @@ import type { LinkProjectDeps } from "#setup/boxes/link-project.js";
 import type { ResolveProvisioningDeps } from "#setup/boxes/resolve-provisioning.js";
 import type { LinkFlowDeps } from "#setup/flows/link.js";
 import { isEveProject } from "#setup/scaffold/index.js";
-import * as vercelCliAuth from "#internal/model-auth/vercel-cli.js";
-import * as vercelPrimitives from "#setup/primitives/index.js";
-import * as vercelEnvironment from "#setup/run-vercel-link.js";
-import * as projectResolution from "#setup/project-resolution.js";
-import * as vercelProject from "#setup/vercel-project.js";
+import { readVercelCliToken } from "#internal/model-auth/vercel-cli.js";
 
 import { runLinkCommand, type LinkCliLogger } from "./link.js";
+import type { NonInteractiveLinkDependencies } from "./vercel-non-interactive.js";
 
-vi.mock("#setup/primitives/index.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("#setup/primitives/index.js")>()),
-  runVercel: vi.fn(),
-  captureVercel: vi.fn(async () => {
-    throw new Error("Unexpected Vercel subprocess in link test");
-  }),
-}));
-vi.mock("#setup/run-vercel-link.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("#setup/run-vercel-link.js")>()),
-  runVercelEnvPull: vi.fn(),
-}));
-vi.mock("#setup/vercel-project.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("#setup/vercel-project.js")>()),
-  resolveTeam: vi.fn(),
-  resolveProjectByNameOrId: vi.fn(),
-}));
-vi.mock("#setup/project-resolution.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("#setup/project-resolution.js")>()),
-  readProjectLink: vi.fn(),
-}));
 vi.mock("#internal/model-auth/vercel-cli.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#internal/model-auth/vercel-cli.js")>()),
   readVercelCliToken: vi.fn(),
@@ -145,7 +122,7 @@ function createFlowDeps(): Partial<LinkFlowDeps> {
 }
 
 afterEach(() => {
-  vi.restoreAllMocks();
+  vi.clearAllMocks();
   vi.unstubAllGlobals();
   process.exitCode = undefined;
 });
@@ -161,21 +138,25 @@ describe("runLinkCommand", () => {
       const projectRoot = await createAgentProject();
       const logger = new TestLogger();
       const fake = createFakePrompter();
-      vi.spyOn(vercelPrimitives, "runVercel").mockResolvedValue(true);
-      vi.spyOn(vercelEnvironment, "runVercelEnvPull").mockResolvedValue(true);
-      vi.spyOn(vercelProject, "resolveTeam").mockResolvedValue("acme");
-      const lookup = vi.spyOn(vercelProject, "resolveProjectByNameOrId");
+      const lookup = vi.fn<NonInteractiveLinkDependencies["resolveProjectByNameOrId"]>();
       if (existing === "unknown") lookup.mockRejectedValue(new Error("Access denied"));
       else
         lookup.mockResolvedValue(
           existing ? { projectId: "prj_existing", projectName: "my-agent" } : null,
         );
-      vi.spyOn(projectResolution, "readProjectLink").mockResolvedValue({
-        orgId: "team_123",
-        projectId: "prj_new",
-        projectName: "my-agent",
-      });
-      vi.spyOn(vercelCliAuth, "readVercelCliToken").mockResolvedValue("vercel-token");
+      const linkDeps: NonInteractiveLinkDependencies = {
+        isEveProject,
+        runVercel: vi.fn(async () => true),
+        runVercelEnvPull: vi.fn(async () => true),
+        resolveTeam: vi.fn(async () => "acme"),
+        resolveProjectByNameOrId: lookup,
+        readProjectLink: vi.fn(async () => ({
+          orgId: "team_123",
+          projectId: "prj_new",
+          projectName: "my-agent",
+        })),
+      };
+      vi.mocked(readVercelCliToken).mockResolvedValue("vercel-token");
       const fetch = vi.fn(async () => new Response(null, { status: 200 }));
       vi.stubGlobal("fetch", fetch);
 
@@ -185,6 +166,7 @@ describe("runLinkCommand", () => {
         {
           createPrompter: () => fake.prompter,
           hasInteractiveTerminal: () => false,
+          nonInteractiveLinkDeps: linkDeps,
         },
         { nonInteractive: true, project: "my-agent", team: "acme" },
       );

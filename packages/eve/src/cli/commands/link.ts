@@ -1,12 +1,12 @@
 import { isEveProject } from "#setup/scaffold/index.js";
 import { runLinkFlow, type LinkFlowDeps } from "#setup/flows/link.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
-import { configureTraceSampling } from "#setup/vercel-trace-sampling.js";
 
 import { hasInteractiveTerminal, validateWorkspaceProjectCommand } from "./preconditions.js";
 import {
   isNonInteractiveProjectCommand,
   runNonInteractiveLink,
+  type NonInteractiveLinkDependencies,
   type VercelProjectCliOptions,
 } from "./vercel-non-interactive.js";
 
@@ -21,6 +21,7 @@ export interface LinkCommandDependencies {
   isEveProject?: typeof isEveProject;
   /** Test seam into the flow's detection and box effects. */
   flowDeps?: Partial<LinkFlowDeps>;
+  nonInteractiveLinkDeps?: NonInteractiveLinkDependencies;
 }
 
 const defaultDependencies: LinkCommandDependencies = {
@@ -59,7 +60,8 @@ export async function runLinkCommand(
       logger,
       appRoot,
       options,
-      onCreatedProject: (link) => configureTraceSampling(link, prompter),
+      prompter,
+      dependencies: dependencies.nonInteractiveLinkDeps,
     });
     return;
   }

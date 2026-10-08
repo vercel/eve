@@ -305,13 +305,7 @@ describe("runDeployCommand", () => {
       if (traceSampling === false) {
         expect(linkDeps.resolveProjectByNameOrId).not.toHaveBeenCalled();
       }
-      if (existing === "unknown") {
-        expect(fake.prompter.log.warning).toHaveBeenCalledWith(
-          expect.stringContaining("so it was not configured"),
-        );
-      } else {
-        expect(fake.prompter.log.warning).not.toHaveBeenCalled();
-      }
+      expect(fake.prompter.log.warning).not.toHaveBeenCalled();
     },
   );
 });

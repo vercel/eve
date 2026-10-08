@@ -1,7 +1,6 @@
 import { isEveProject } from "#setup/scaffold/index.js";
 import { runDeployFlow, type DeployFlowDeps } from "#setup/flows/deploy.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
-import { configureTraceSampling } from "#setup/vercel-trace-sampling.js";
 
 import { hasInteractiveTerminal, validateWorkspaceProjectCommand } from "./preconditions.js";
 import {
@@ -70,18 +69,8 @@ export async function runDeployCommand(
           logger,
           appRoot,
           options,
+          prompter,
           dependencies: dependencies.nonInteractiveLinkDeps,
-          onCreatedProject:
-            options.traceSampling === false
-              ? undefined
-              : (link) => configureTraceSampling(link, prompter),
-          onProjectCreationUnknown:
-            options.traceSampling === false
-              ? undefined
-              : () =>
-                  prompter.log.warning(
-                    "Could not verify the Vercel project for trace sampling, so it was not configured. Check the project settings if you need traces in Agent Runs.",
-                  ),
         }))
       )
         return;
