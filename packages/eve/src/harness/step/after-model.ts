@@ -159,6 +159,11 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
       return false;
     });
 
+  const authorizationInterrupt = resolveInlineAuthorizationInterrupt({
+    messages: [...promptMessages, ...responseMessages],
+    toolResults: result.toolResults,
+  });
+
   // --- Park on approvals or runtime calls ----------------------------------
 
   if (deferredToolCalls.length > 0 || approvalRequests.length > 0) {
@@ -178,22 +183,32 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
       tasks: deferred.workflowRequests,
     };
     if (approvalRequests.length > 0) {
-      return parkOnApprovals(step, {
+      const parkedResult = await parkOnApprovals(step, {
         ...parked,
         requests: approvalRequests,
-        waitsOnRuntime: deferredToolCalls.length > 0,
+        waitsOnRuntime: deferredToolCalls.length > 0 || authorizationInterrupt !== undefined,
       });
+      // Approval only precedes sign-in for the same call, not an executing sibling.
+      if (authorizationInterrupt) {
+        return stopForToolSignIn(step, {
+          ...authorizationInterrupt,
+          history: step.session.history,
+        });
+      }
+      return parkedResult;
     }
     await step.apply(suspendStep(step.view(), parked));
+    if (authorizationInterrupt) {
+      return stopForToolSignIn(step, {
+        ...authorizationInterrupt,
+        history: step.session.history,
+      });
+    }
     return { next: null, session: step.session };
   }
 
   // --- Park on authorization request ------------------------------------------
 
-  const authorizationInterrupt = resolveInlineAuthorizationInterrupt({
-    messages: [...promptMessages, ...responseMessages],
-    toolResults: result.toolResults,
-  });
   if (authorizationInterrupt) return stopForToolSignIn(step, authorizationInterrupt);
 
   // --- Continue or terminate ------------------------------------------------
