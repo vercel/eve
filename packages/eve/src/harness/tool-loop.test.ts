@@ -2058,8 +2058,7 @@ describe("createToolLoopHarness", () => {
       "message.received",
       "step.started",
       "input.requested",
-      "turn.completed",
-      "session.waiting",
+      "turn.waiting",
     ]);
     const requested = events.find((event) => event.type === "input.requested");
     expect(requested?.data).toMatchObject({
@@ -2247,12 +2246,8 @@ describe("createToolLoopHarness", () => {
     const beforeQueued = events.length;
     const reparked = await runStep(parked.session, { message: "also do this other thing" });
 
-    // The message is received into a real turn, which holds for the prompt.
-    expect(events.slice(beforeQueued).map((event) => event.type)).toEqual([
-      "turn.started",
-      "message.received",
-      "turn.waiting",
-    ]);
+    // The message waits behind the question without starting another turn.
+    expect(events.slice(beforeQueued).map((event) => event.type)).toEqual(["turn.waiting"]);
     const waiting = events.at(-1);
     expect(waiting).toMatchObject({ data: { on: "input" }, type: "turn.waiting" });
     const turnId = waiting?.type === "turn.waiting" ? waiting.data.turnId : undefined;
@@ -2261,17 +2256,17 @@ describe("createToolLoopHarness", () => {
     expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
     expect(events.filter((event) => event.type === "input.requested")).toHaveLength(1);
     const asked = { content: "also do this other thing", kind: "user" as const, role: "user" };
-    expect(reparked.session.history).toContainEqual(asked);
+    expect(reparked.session.history).not.toContainEqual(asked);
 
     const beforeGrant = events.length;
     const resumed = await runStep(reparked.session, {
       inputResponses: [{ optionId: "continue", requestId: LIMIT_REQUEST_ID }],
     });
 
-    // The grant resumes that turn; the message was received once, and the model reads it once.
+    // The grant resumes that turn and receives the queued message once.
     const resumedEvents = events.slice(beforeGrant);
     expect(resumedEvents.some((event) => event.type === "turn.started")).toBe(false);
-    expect(resumedEvents.some((event) => event.type === "message.received")).toBe(false);
+    expect(resumedEvents.filter((event) => event.type === "message.received")).toHaveLength(1);
     expect(resumedEvents.find((event) => event.type === "step.started")?.data.turnId).toBe(turnId);
     expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(1);
     expect(

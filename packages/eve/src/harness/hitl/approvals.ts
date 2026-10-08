@@ -43,17 +43,14 @@ import { signInWithdrawn } from "#harness/session-machine/events.js";
 import {
   canonicalize,
   compactInput,
-  hasInput,
   isEmptyInput,
   resolveTextInput,
   withoutResponses,
-  withoutTurnInput,
   type ResolvedStepInput,
 } from "./delivery.js";
 import type { StepCoordinates, SuspendedStep, TurnState } from "#harness/session-machine/view.js";
 import { withoutCalls } from "#harness/inline-tool-authorization.js";
 import {
-  finishTurn,
   hold,
   ownOpenRequestIds,
   settle,
@@ -279,16 +276,7 @@ export function answer(
 
   if (limit !== undefined) {
     const response = byId.get(limit.request.requestId);
-    if (response === undefined) {
-      if (!hasInput(delivery)) {
-        queue(compactInput(resolved));
-        return done({ next: "park" });
-      }
-      // The message is received now, into the turn that holds for the prompt: only answers to
-      // other requests wait for the grant. What waits in the queue was never received.
-      queue(withoutTurnInput(resolved));
-      return done({ input: resolved, next: "defer-message" });
-    }
+    if (response === undefined) return park();
     const batch: ResolvedInputBatch = {
       event: { sequence: limit.sequence, stepIndex: limit.stepIndex, turnId: limit.turnId },
       inputs: [
@@ -472,6 +460,13 @@ function reportApprovalProgress(
 export function hasRunnableQueue(view: SessionView): boolean {
   const queued = view.turn.queued;
   if (queued === undefined) return false;
+  const responses = [
+    ...(queued.inputResponses ?? []),
+    ...(queued.attributedInputResponses ?? []).map(({ response }) => response),
+  ];
+  const answered = new Set(responses.map((response) => response.requestId));
+  const limit = openInputs(view.projection).find((open) => open.request.kind === "session-limit");
+  if (limit !== undefined) return answered.has(limit.request.requestId);
   if (
     queued.message !== undefined ||
     (queued.context?.length ?? 0) > 0 ||
@@ -481,14 +476,7 @@ export function hasRunnableQueue(view: SessionView): boolean {
   ) {
     return true;
   }
-  const responses = [
-    ...(queued.inputResponses ?? []),
-    ...(queued.attributedInputResponses ?? []).map(({ response }) => response),
-  ];
   if (responses.length === 0) return false;
-  const answered = new Set(responses.map((response) => response.requestId));
-  const limit = openInputs(view.projection).find((open) => open.request.kind === "session-limit");
-  if (limit !== undefined) return answered.has(limit.request.requestId);
   return view.turn.suspended.some(
     (step) =>
       step.requests.length > 0 && step.requests.every((request) => answered.has(request.requestId)),
@@ -559,7 +547,7 @@ export function withdrawSignIns(view: SessionView, reason: string): Transition {
 
 /**
  * The session spent its budget: it asks whether to continue instead of calling the model, and
- * the turn ends. The prompt is the projection's open request; `answer` grants a
+ * the turn holds for input. The prompt is the projection's open request; `answer` grants a
  * fresh budget or declines it.
  */
 export function requestLimit(
@@ -575,7 +563,7 @@ export function requestLimit(
         stepIndex: position.stepIndex,
         turnId: position.turnId,
       }),
-      ...finishTurn(view).events,
+      ...hold(view, { on: "input" }).events,
     ],
     turn: view.turn,
   };
