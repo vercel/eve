@@ -41,6 +41,7 @@ import {
   completeConnectionSignIn,
   listConnectionTools,
   listingFailureMessage,
+  listToolMetadata,
 } from "./connection-auth.js";
 import { closestNames } from "./rank.js";
 import { connectionToolSignature } from "./signatures.js";
@@ -177,7 +178,10 @@ async function checkInput(
 ): Promise<StandardSchemaV1.Result<unknown>> {
   let tools: readonly ConnectionToolMetadata[];
   try {
-    tools = await registry.getClient(connection.connectionName).getToolMetadata();
+    tools = await listToolMetadata(
+      connection.connectionName,
+      registry.getClient(connection.connectionName),
+    );
   } catch (error) {
     // Only the call itself can start the sign-in that makes its tools listable.
     if (isConnectionAuthorizationRequiredError(error)) return { value: input };

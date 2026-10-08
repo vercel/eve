@@ -64,7 +64,7 @@ export async function listConnectionTools(
 ): Promise<ConnectionListing> {
   const name = connection.connectionName;
   try {
-    return { tools: await client.getToolMetadata() };
+    return { tools: await listToolMetadata(name, client) };
   } catch (error) {
     if (!isConnectionAuthorizationRequiredError(error)) {
       log.warn("failed to load connection tools", { connection: name, error });
@@ -83,8 +83,42 @@ export async function listConnectionTools(
   }
 }
 
+/** How long a connection may take to list its tools before it counts as unavailable. */
+const LISTING_TIMEOUT_MS = 10_000;
+
+class ListingTimeoutError extends Error {}
+
+/**
+ * A connection's tools, or a timeout error once listing them takes longer than
+ * {@link LISTING_TIMEOUT_MS}, so one hung server can't stall a step. Clients
+ * share one in-flight listing and take no signal, so this stops waiting rather
+ * than cancelling: a late result fills only that client's cache, and the race
+ * handles a late rejection.
+ */
+export async function listToolMetadata(
+  connectionName: string,
+  client: ConnectionClient,
+): Promise<readonly ConnectionToolMetadata[]> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(
+        new ListingTimeoutError(
+          `"${connectionName}" did not list its tools within ${LISTING_TIMEOUT_MS / 1000}s. Try again later.`,
+        ),
+      );
+    }, LISTING_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([client.getToolMetadata(), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Why a connection's tools could not be listed, for a failure other than a needed sign-in. */
 export function listingFailureMessage(connectionName: string, error: unknown): string {
+  if (error instanceof ListingTimeoutError) return error.message;
   return isConnectionAuthorizationFailedError(error)
     ? `Authorization failed for "${connectionName}": ${error.message}`
     : `Failed to load tools for "${connectionName}": ${toErrorMessage(error)}`;

@@ -558,6 +558,16 @@ today.
     `{ tool: "linear", description: "Sign in to use the Linear tools: …" }`.
   - `unavailable` reports only connections that failed to list or can't
     start an interactive sign-in.
+  - Listing a connection's tools stops waiting after 10 seconds. Every
+    unscoped search lists every connection, so without a bound a search for
+    a local tool would wait on the slowest server, and a hung one would stall
+    the step. The connection is reported in `unavailable` with
+    `"<connection>" did not list its tools within 10s. Try again later.`, and
+    an `eve__execute` call on its tools fails with the same error. The
+    bound covers listing only, not sign-in or tool calls. Clients share one
+    in-flight listing and take no signal, so eve stops waiting instead of
+    cancelling; a late result fills only that step's client, and the
+    registry is rebuilt every step.
 - **Ranking.** Matches rank in tiers, and an exact name always ranks first:
   1. the query's words equal the entry's full name, such as
      `linear__create_issue`;

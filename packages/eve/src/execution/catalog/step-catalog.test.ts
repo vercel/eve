@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { EXECUTE_TOOL_NAME, SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { TASK_CANCEL_TOOL_NAME, TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 
@@ -419,6 +419,39 @@ describe("buildStepCatalog", () => {
         resolved?.definition.execute?.(resolved.call.input, { messages: [], toolCallId: "call-1" }),
       );
       expect(linear.calls).toEqual([{ input: { limit: 20, team: "core" }, tool: "list_issues" }]);
+    });
+
+    it("fails a call whose connection doesn't list its tools within 10 seconds, when validating and when calling", async () => {
+      vi.useFakeTimers();
+      try {
+        const { catalog, linear, run } = linearCatalog();
+        const listing = vi.spyOn(linear.client, "getToolMetadata");
+        const timedOut = '"linear" did not list its tools within 10s. Try again later.';
+        const call = { input: { team: "core" }, tool: "linear__list_issues" };
+
+        listing.mockReturnValueOnce(new Promise(() => {}));
+        const validating = validateExecute(catalog, call);
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(await validating).toEqual({
+          issues: [expect.objectContaining({ message: timedOut })],
+        });
+
+        const { value } = (await validateExecute(catalog, call)) as { value: unknown };
+        const resolved = catalog.resolve({ input: value, toolName: EXECUTE_TOOL_NAME });
+        listing.mockReturnValueOnce(new Promise(() => {}));
+        const calling = run(() =>
+          resolved?.definition.execute?.(resolved.call.input, {
+            messages: [],
+            toolCallId: "call-1",
+          }),
+        );
+        const rejected = expect(calling).rejects.toThrow(timedOut);
+        await vi.advanceTimersByTimeAsync(10_000);
+        await rejected;
+        expect(linear.calls).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("validates input against the connection's schema before the call can run", async () => {

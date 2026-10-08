@@ -238,6 +238,41 @@ describe("search", () => {
         expect.objectContaining({ level: "warn", message: "failed to load connection tools" }),
       );
     });
+
+    it("reports a connection that doesn't list its tools within 10 seconds as unavailable, while other results return, and settles late without an unhandled rejection", async () => {
+      const unhandled = vi.fn();
+      process.on("unhandledRejection", unhandled);
+      vi.useFakeTimers();
+      try {
+        const crm = fakeConnection({ name: "crm", tools: [] });
+        let settleLate!: (error: Error) => void;
+        vi.spyOn(crm.client, "getToolMetadata").mockReturnValue(
+          new Promise((_, reject) => {
+            settleLate = reject;
+          }),
+        );
+        let settled = false;
+        const pending = searchFor(tools, { connections: [linear(), crm] })({ query: "issues" });
+        void pending.then(() => (settled = true));
+
+        await vi.advanceTimersByTimeAsync(9_999);
+        expect(settled).toBe(false);
+        await vi.advanceTimersByTimeAsync(1);
+        const output = await pending;
+
+        expect(names(output)).toContain("linear__list_issues");
+        expect(output.unavailable).toEqual([
+          { connection: "crm", error: '"crm" did not list its tools within 10s. Try again later.' },
+        ]);
+        vi.useRealTimers();
+        settleLate(new Error("the server answered after the timeout"));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(unhandled).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+        process.off("unhandledRejection", unhandled);
+      }
+    });
   });
 
   describe("ranking", () => {
