@@ -73,10 +73,10 @@ const CONSUMED_MESSAGE_KEYS: ReadonlySet<string> = new Set(["context", "message"
 /**
  * Splits a deliver payload into parent-local and proxied-child buckets.
  *
- * With `resolveMessage`, a plain-text message is also resolved against the
- * first open request when a child asked it, whether a `ctx.ask()` question, a
- * tool approval, or a session-limit prompt: a matching option or permitted free
- * text answers that one request, and the message is consumed along with its
+ * With `resolveMessage`, a plain-text message is also resolved against a
+ * request a child asked, whether a `ctx.ask()` question, a tool approval, or a
+ * session-limit prompt, when it is the sole open relay: a matching option or
+ * permitted free text answers it, and the message is consumed along with its
  * `context`. Otherwise the message stays with the parent.
  */
 export function routeDeliverPayload(input: {
@@ -276,8 +276,8 @@ function resolveMessageAgainstFirstRequest(input: {
   const requestId =
     firstOpenInput(storedProjection(input.state), answered)?.request.requestId ??
     [...input.entries.keys()].find((id) => !answered(id));
-  // Text answers a relayed request only while it is the sole one open.
-  if ([...input.entries.keys()].filter((id) => !answered(id)).length !== 1) return none;
+  const openRelays = [...input.entries].filter(([id, route]) => input.routable(id, route));
+  if (openRelays.length !== 1) return none;
   const reply = requestId === undefined ? undefined : input.entries.get(requestId)?.reply;
   // A request recorded without reply metadata cannot be matched at all.
   if (requestId === undefined || reply === undefined) return none;
