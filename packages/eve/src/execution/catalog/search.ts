@@ -85,6 +85,20 @@ type SearchCandidate = RankCandidate & {
   readonly result: () => SearchResult;
 };
 
+/** People see what the model searched for and, once it returns, how much it found. */
+const SEARCH_LABEL = {
+  start: (input: unknown) => `Search tools${labelQuery(input)}`,
+  complete: (input: unknown, output: unknown) => {
+    const found = (output as SearchOutput).results.length;
+    return `Searched tools${labelQuery(input)}, found ${found === 0 ? "nothing" : String(found)}`;
+  },
+};
+
+function labelQuery(input: unknown): string {
+  const query = (input as SearchInput).query?.trim();
+  return query ? ` for “${query}”` : "";
+}
+
 /**
  * Builds `eve__search` over one step's deferred entries and skills and the
  * connections in `registry`. `describe` returns an entry's description as the
@@ -101,7 +115,7 @@ export function createSearchTool(input: {
     execute: (rawInput: unknown) => search(input, rawInput as SearchInput),
     frameworkTool: true,
     inputSchema: SEARCH_INPUT_SCHEMA,
-    label: { start: () => "Search tools" },
+    label: SEARCH_LABEL,
     name: SEARCH_TOOL_NAME,
   };
 }

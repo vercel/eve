@@ -16,6 +16,7 @@ import { assertWithinLimit } from "#internal/attachments/limited-read.js";
 import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
 import type { InputResolution, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { FetchFileResult } from "#shared/channel-definition.js";
+import { actionLabel, visibleActions } from "#shared/action-label.js";
 import type { InputRequest } from "#shared/input.js";
 import {
   type InputResponse,
@@ -447,10 +448,11 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
         await safeStartTyping(channel.thread, truncate(buffered));
         return;
       }
-      const labels = event.actions.map((action) =>
-        action.kind === "tool-call" ? action.toolName : action.kind,
+      const labels = visibleActions(event.actions).map((action) =>
+        actionLabel(action, event.presentation),
       );
-      await safeStartTyping(channel.thread, truncate(`Running ${labels.join(", ")}...`));
+      if (labels.length === 0) return;
+      await safeStartTyping(channel.thread, truncate(`${labels.join(", ")}...`));
     },
     async "message.appended"(event, channel, _ctx) {
       if (!channel.thread || !canStream(channel)) return;

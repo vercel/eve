@@ -147,6 +147,9 @@ describe("buildStepCatalog", () => {
       });
 
       expect(resolved?.call).toEqual({ input: { skill: "pdf-forms" }, toolName: "eve:load-skill" });
+      expect(resolved?.definition.label?.start?.(resolved.call.input)).toBe(
+        "Loaded skill pdf-forms",
+      );
       expect(
         await resolved?.definition.execute?.(resolved.call.input, { messages: [], toolCallId: "" }),
       ).toBe("# PDF forms");
@@ -401,7 +404,7 @@ describe("buildStepCatalog", () => {
       const { catalog, connect, finishSignIn, notion, run, signIn } = notionCatalog();
 
       expect(signIn.call.toolName).toBe("notion");
-      expect(signIn.definition.label?.start?.({})).toBe("Connect Notion");
+      expect(signIn.definition.label?.start?.({})).toBe("Sign in to Notion");
       expect(signIn.definition.approval).toBeUndefined();
       const parked = await connect();
       expect(isAuthorizationSignal(parked)).toBe(true);

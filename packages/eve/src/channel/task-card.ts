@@ -1,5 +1,5 @@
-import { isTaskControlTool } from "#protocol/task-tools.js";
 import type { TaskCancelReason, UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { visibleActions } from "#shared/action-label.js";
 import { actionRequestName } from "#shared/action-request-name.js";
 import type { RuntimeActionRequest } from "#shared/action-types.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
@@ -213,10 +213,8 @@ function trackTurnEvent(
       const { turnId } = event.data;
       const current = turns[turnId] ?? { calls: [], ended: false };
       const known = new Set(current.calls.map((call) => call.callId));
-      const requested = event.data.actions.filter(
-        (action) =>
-          !known.has(action.callId) &&
-          !(action.kind === "tool-call" && isTaskControlTool(action.toolName)),
+      const requested = visibleActions(event.data.actions).filter(
+        (action) => !known.has(action.callId),
       );
       if (requested.length === 0) return undefined;
       const calls = requested.map((action) =>

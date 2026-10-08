@@ -575,6 +575,9 @@ today.
 - **Description.** Fixed for each eve version. It names no entry. It says
   that `eve__search` finds the agent's own tools and services, not web pages, so
   the model doesn't use it in place of `web_search`.
+- **Label.** People see `Search tools for “<query>”`, then
+  `Searched tools for “<query>”, found <n>` when it returns, never the tool's
+  name.
 
 **`eve__execute`**
 
@@ -607,7 +610,7 @@ today.
   same way a call to one of its tools does, and parks until the user signs
   in. It then says the connection's tools can be searched. When the tools
   are already listable, it only confirms. It has no approval, and its label
-  is `Connect Linear`. Every path that finishes a sign-in, whether in
+  is `Sign in to Linear`. Every path that finishes a sign-in, whether in
   `eve__search`, a tool call, or this entry, goes through one helper.
 - **Description.** Fixed for each eve version. It tells the model to use
   names exactly as `eve__search` returns them, to load skills with `skill`, and to
@@ -680,8 +683,8 @@ looks a call up by name. Model history is the only place that keeps
 - **Skill entries run the `load-skill` action.** `eve__execute({ skill })` becomes
   the same runtime action `load_skill` produces today
   (`kind: "load-skill"`). So protocol events, activation, package files
-  under the skills root, the `Load skill: …` label, and `t.loadedSkill(...)`
-  are unchanged. History holds an `eve__execute` call whose result is the skill's
+  under the skills root, and `t.loadedSkill(...)` are unchanged. Its label
+  reads `Loaded skill <name>`, since the skill loads within the step. History holds an `eve__execute` call whose result is the skill's
   markdown. Loading needs no approval, as today.
 - **No nested actions.** Every entry, including a connection tool, is
   reported as the call itself. The nested-action helper and the tool-call
