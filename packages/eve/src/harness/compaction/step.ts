@@ -15,7 +15,6 @@ import type { Publish } from "#harness/session-machine/commit.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { Step } from "#harness/step/context.js";
 import { activeTurnId, type TurnPosition } from "#harness/session-machine/view.js";
-import { stepStartedForResolvers } from "#harness/session-machine/resolver-events.js";
 import {
   buildGatewayAttributionHeaders,
   resolveEffectiveRuntimeModel,
@@ -61,17 +60,12 @@ export async function compactHistory(step: Step): Promise<StepResult> {
   const { config } = step;
   if (step.session.history.length > 0) {
     try {
-      if (step.ctx !== undefined && config.dispatchDynamicModelEvent !== undefined) {
+      if (config.participants !== undefined) {
         const position = step.position();
-        await config.dispatchDynamicModelEvent({
-          ctx: step.ctx,
-          event: stepStartedForResolvers({
-            modelId: step.session.agent.modelReference?.id ?? "dynamic",
-            sequence: position.sequence,
-            stepIndex: position.stepIndex,
-            turnId: activeTurnId(position),
-          }),
+        await config.participants.selectModel({
+          at: { ...position, turnId: activeTurnId(position) },
           messages: validateHarnessModelMessages(step.projectHistory(step.session.history)),
+          modelId: step.session.agent.modelReference?.id ?? "dynamic",
         });
       }
       const resolvedModel = await resolveEffectiveRuntimeModel({

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ContextContainer } from "#context/container.js";
 import {
   buildDynamicSubagentTools,
-  dispatchDynamicSubagentEvent,
+  resolveDynamicSubagents,
   getDynamicSubagentSelection,
   refreshDynamicSessionSubagentsForRuntimeRevision,
 } from "#context/dynamic-subagent-lifecycle.js";
@@ -32,7 +32,7 @@ describe("dynamic subagent lifecycle", () => {
     const ctx = createContext();
     const { resolver } = createResolver({ handler: () => null });
 
-    await dispatchDynamicSubagentEvent({
+    await resolveDynamicSubagents({
       ctx,
       event: createSessionStartedEvent(),
       messages: [],
@@ -55,7 +55,7 @@ describe("dynamic subagent lifecycle", () => {
       },
     };
 
-    await dispatchDynamicSubagentEvent({
+    await resolveDynamicSubagents({
       ctx,
       event: createSessionStartedEvent(),
       messages: [],
@@ -73,7 +73,7 @@ describe("dynamic subagent lifecycle", () => {
       events: { "session.started": () => created.agentConfig },
     };
 
-    await dispatchDynamicSubagentEvent({
+    await resolveDynamicSubagents({
       ctx,
       event: createSessionStartedEvent(),
       messages: [],
@@ -105,7 +105,7 @@ describe("dynamic subagent lifecycle", () => {
       },
     };
 
-    await dispatchDynamicSubagentEvent({
+    await resolveDynamicSubagents({
       ctx,
       event: createSessionStartedEvent(),
       messages: [],
@@ -125,7 +125,7 @@ describe("dynamic subagent lifecycle", () => {
       tool: false,
     };
 
-    await dispatchDynamicSubagentEvent({
+    await resolveDynamicSubagents({
       ctx,
       event: createSessionStartedEvent(),
       messages: [],
@@ -149,7 +149,7 @@ describe("dynamic subagent lifecycle", () => {
       },
     };
 
-    await dispatchDynamicSubagentEvent({
+    await resolveDynamicSubagents({
       ctx,
       event: createSessionStartedEvent(),
       messages: [],
@@ -157,7 +157,7 @@ describe("dynamic subagent lifecycle", () => {
     });
     expect(buildDynamicSubagentTools(ctx)).toHaveLength(1);
 
-    await dispatchDynamicSubagentEvent({
+    await resolveDynamicSubagents({
       ctx,
       event: createTurnStartedEvent({ sequence: 0, turnId: "turn-1" }),
       messages: [],
@@ -187,7 +187,7 @@ describe("dynamic subagent lifecycle", () => {
       },
     };
 
-    await dispatchDynamicSubagentEvent({
+    await resolveDynamicSubagents({
       ctx,
       event: createSessionStartedEvent(),
       messages: [],
@@ -197,7 +197,7 @@ describe("dynamic subagent lifecycle", () => {
       "workflow//eve//agentToolServeWorkflow",
     );
 
-    await dispatchDynamicSubagentEvent({
+    await resolveDynamicSubagents({
       ctx,
       event: createTurnStartedEvent({ sequence: 0, turnId: "turn-1" }),
       messages: [],
@@ -223,7 +223,7 @@ describe("dynamic subagent lifecycle", () => {
       },
     };
 
-    await dispatchDynamicSubagentEvent({
+    await resolveDynamicSubagents({
       ctx,
       event: createSessionStartedEvent(),
       messages: [],
@@ -258,7 +258,7 @@ describe("dynamic subagent lifecycle", () => {
       },
     };
 
-    await dispatchDynamicSubagentEvent({
+    await resolveDynamicSubagents({
       ctx,
       event: createSessionStartedEvent(),
       messages: [],
@@ -270,7 +270,7 @@ describe("dynamic subagent lifecycle", () => {
       sessionSelection?.kind === "subagent" ? sessionSelection.agentConfig.model.id : null,
     ).toBe("anthropic/claude-sonnet-4.5");
 
-    await dispatchDynamicSubagentEvent({
+    await resolveDynamicSubagents({
       ctx,
       event: createTurnStartedEvent({ sequence: 0, turnId: "turn-1" }),
       messages: [],
@@ -293,7 +293,7 @@ describe("dynamic subagent lifecycle", () => {
     });
     const created = createResolver({ handler: () => selected });
 
-    await dispatchDynamicSubagentEvent({
+    await resolveDynamicSubagents({
       ctx,
       event: createSessionStartedEvent(),
       messages: [],
@@ -331,7 +331,7 @@ describe("dynamic subagent lifecycle", () => {
       },
     };
 
-    await dispatchDynamicSubagentEvent({
+    await resolveDynamicSubagents({
       ctx,
       event: createSessionStartedEvent(),
       messages: [],
@@ -374,7 +374,7 @@ describe("dynamic subagent lifecycle", () => {
     });
     const created = createResolver({ handler: () => remoteAgent });
 
-    await dispatchDynamicSubagentEvent({
+    await resolveDynamicSubagents({
       ctx,
       event: createSessionStartedEvent(),
       messages: [],
@@ -396,7 +396,7 @@ describe("dynamic subagent lifecycle", () => {
     });
     const created = createResolver({ handler: () => remoteAgent });
 
-    await dispatchDynamicSubagentEvent({
+    await resolveDynamicSubagents({
       ctx,
       event: createSessionStartedEvent(),
       messages: [],
@@ -415,7 +415,7 @@ describe("dynamic subagent lifecycle", () => {
       handler: () => false,
     });
 
-    await dispatchDynamicSubagentEvent({
+    await resolveDynamicSubagents({
       ctx,
       event: createSessionStartedEvent(),
       messages: [],
@@ -490,7 +490,7 @@ describe("dynamic subagent names", () => {
       },
       name: input.name ?? created.resolver.name,
     };
-    await dispatchDynamicSubagentEvent({
+    await resolveDynamicSubagents({
       ctx,
       event: createSessionStartedEvent(),
       messages: [],

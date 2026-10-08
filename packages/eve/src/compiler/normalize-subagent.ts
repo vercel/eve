@@ -7,14 +7,13 @@ import {
   expectString,
 } from "#internal/authored-module.js";
 import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
-import { isDynamicSentinel, type DynamicToolEventName } from "#dynamic/definition.js";
+import {
+  assertDynamicResolverEvents,
+  isDynamicSentinel,
+  type DynamicToolEventName,
+} from "#dynamic/definition.js";
 import type { LocalSubagentSourceRef } from "#discover/manifest.js";
 import type { AgentToolExposure } from "#shared/agent-definition.js";
-
-const ALLOWED_DYNAMIC_SUBAGENT_EVENTS = new Set<DynamicToolEventName>([
-  "session.started",
-  "turn.started",
-]);
 
 export type NormalizedSubagentConfig =
   | {
@@ -39,16 +38,9 @@ export function normalizeSubagentConfig(value: unknown, message: string): Normal
     const record = expectObjectRecord(value, message);
     expectOnlyKnownKeys(record, ["build", "events", "kind"], message);
     const rawEvents = expectObjectRecord(record.events, message);
-    const eventNames: DynamicToolEventName[] = [];
-    for (const [eventName, handler] of Object.entries(rawEvents)) {
-      if (!ALLOWED_DYNAMIC_SUBAGENT_EVENTS.has(eventName as DynamicToolEventName)) {
-        throw new Error(
-          `${message} Dynamic subagents support only "session.started" and "turn.started" handlers.`,
-        );
-      }
-      expectFunction(handler, message);
-      eventNames.push(eventName as DynamicToolEventName);
-    }
+    const eventNames = Object.keys(rawEvents) as DynamicToolEventName[];
+    assertDynamicResolverEvents("subagent", eventNames, message);
+    for (const handler of Object.values(rawEvents)) expectFunction(handler, message);
     const build =
       record.build === undefined ? undefined : normalizeDynamicSubagentBuild(record.build, message);
     return build === undefined

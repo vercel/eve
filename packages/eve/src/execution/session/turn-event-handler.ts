@@ -1,19 +1,8 @@
-import { dispatchDynamicInstructionEvent } from "#context/dynamic-instruction-lifecycle.js";
-import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
-import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
-import { dispatchDynamicSubagentEvent } from "#context/dynamic-subagent-lifecycle.js";
-import { dispatchDynamicToolEvent } from "#context/dynamic-tool-lifecycle.js";
-import type { ContextContainer } from "#context/container.js";
-import { dispatchMemoryLifecycleEvent } from "#context/memory-event-lifecycle.js";
-import type { bindDynamicConnections } from "#execution/dynamic-connections.js";
-import type { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
+import type { SessionParticipants } from "#execution/participants.js";
 import type { SessionEventPublisher } from "#execution/publish-session-events.js";
 import { throwIfTurnAborted, TurnCancelledError } from "#harness/turn-cancellation.js";
 import type { HandleEventFn } from "#harness/types.js";
 import type { HookEventType } from "#public/definitions/hook.js";
-import type { ExecutionInstrumentation } from "#instrumentation/runtime.js";
-import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
-
 /**
  * Whether `ctx.cancel()` from a hook on each event may stop the running turn.
  * Total over hook events, so a new event must be classified before it compiles.
@@ -62,79 +51,26 @@ export function isHookCancellableEvent(type: string): boolean {
 }
 
 /**
- * Publishes one turn event, then runs memory, hooks, and model preparation for it.
- * A hook's `ctx.cancel()` aborts the turn signal at once; the event's remaining
- * hooks still run, then the handler stops the turn before the next model call.
+ * Publishes one turn event, runs its hooks, then the participants that receive it. A hook's
+ * `ctx.cancel()` aborts the turn signal at once; the event's remaining hooks still run, then the
+ * turn stops before its participants or its next model call.
  */
 export function createTurnEventHandler(input: {
-  readonly abortSignal: AbortSignal;
-  readonly bundle: CompiledBundle;
   /** False for clear and compact requests, which run outside any turn. */
   readonly canCancelTurn: boolean;
   readonly hookCancellation: AbortController;
-  readonly ctx: ContextContainer;
-  readonly dynamicConnections: ReturnType<typeof bindDynamicConnections>;
-  readonly effectiveAgent: ReturnType<typeof resolveEffectiveAgentRuntime>;
-  readonly effectiveNode: CompiledBundle["graph"]["root"];
-  readonly instrumentation: ExecutionInstrumentation | undefined;
+  readonly participants: SessionParticipants;
   readonly publisher: SessionEventPublisher;
 }): HandleEventFn {
-  const { abortSignal, bundle, ctx, effectiveAgent, effectiveNode } = input;
-  const { publisher } = input;
+  const { participants, publisher } = input;
   return async (event, messages) => {
-    // An event's memory lifecycle runs after its write and before its hooks, so
-    // a turn emits the event and runs its hooks itself instead of calling `publish`.
     const emitted = await publisher.emit(event);
-    const lifecycleMessages = await dispatchMemoryLifecycleEvent({
-      abortSignal,
-      appRoot: effectiveNode.agent?.metadata?.appRoot ?? "",
-      ctx,
-      event,
-      instrumentation: input.instrumentation?.memory,
-      memories: effectiveNode.agent?.memories ?? [],
-      messages,
-      nodeId: bundle.nodeId ?? "__root__",
-    });
     const cancelTurn =
       input.canCancelTurn && isHookCancellableEvent(emitted.type)
         ? () => input.hookCancellation.abort(new TurnCancelledError())
         : undefined;
     await publisher.dispatcher.runHooks(emitted, cancelTurn);
-    if (emitted.type !== "step.started") {
-      await dispatchDynamicModelEvent({
-        abortSignal,
-        ctx,
-        dynamicModel: effectiveAgent.turnAgent.dynamicModel,
-        event: emitted,
-        messages: lifecycleMessages,
-        scope: { moduleMap: bundle.moduleMap, nodeId: bundle.nodeId },
-      });
-    }
-    await input.dynamicConnections.dispatch(emitted);
-    await dispatchDynamicSubagentEvent({
-      ctx,
-      resolvers: bundle.subagentRegistry.dynamicResolvers ?? [],
-      event: emitted,
-      messages: lifecycleMessages,
-    });
-    await dispatchDynamicToolEvent({
-      ctx,
-      resolvers: bundle.resolvedAgent.dynamicToolResolvers ?? [],
-      event: emitted,
-      messages: lifecycleMessages,
-    });
-    await dispatchDynamicSkillEvent({
-      ctx,
-      resolvers: bundle.resolvedAgent.dynamicSkillResolvers ?? [],
-      event: emitted,
-      messages: lifecycleMessages,
-    });
-    await dispatchDynamicInstructionEvent({
-      ctx,
-      resolvers: bundle.resolvedAgent.dynamicInstructionsResolvers ?? [],
-      event: emitted,
-      messages: lifecycleMessages,
-    });
     if (cancelTurn !== undefined) throwIfTurnAborted(input.hookCancellation.signal);
+    await participants.receive(emitted, messages);
   };
 }

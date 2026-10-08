@@ -22,10 +22,7 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { always } from "#tools/approval/policies.js";
-import { bindDynamicConnections } from "#execution/dynamic-connections.js";
-import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
-import { ConnectionRegistryImpl } from "#runtime/connections/registry.js";
-import { createAuthorizationRequiredEvent, createTurnStartedEvent } from "#protocol/message.js";
+import { createAuthorizationRequiredEvent } from "#protocol/message.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 
 // The harness runs outside a workflow body here, where run attributes cannot
@@ -152,28 +149,11 @@ function fixture(
   const restoredTurns: string[] = [];
   const recorder = createProjectionRecorder();
   const harness = createToolLoopHarness({
-    prepareApprovalTurn: async (event) => {
-      const ctx = new ContextContainer();
-      ctx.set(ConnectionRegistryKey, new ConnectionRegistryImpl([]));
-      await bindDynamicConnections(ctx, {
-        dynamicConnectionResolvers: [
-          {
-            slug: "notes",
-            sourceId: "notes",
-            sourceKind: "module",
-            logicalPath: "connections/notes.ts",
-            eventNames: ["turn.started"],
-            events: {
-              "turn.started": (event) => {
-                restoredTurns.push(
-                  (event as ReturnType<typeof createTurnStartedEvent>).data.turnId,
-                );
-                return null;
-              },
-            },
-          },
-        ],
-      }).dispatch(createTurnStartedEvent(event));
+    participants: {
+      selectModel: async () => {},
+      restoreStep: async ({ at, parked }) => {
+        if (parked) restoredTurns.push(at.turnId);
+      },
     },
     capabilities: { requestInput: true },
     tools,

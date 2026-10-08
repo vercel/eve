@@ -2,7 +2,6 @@ import { buildStepCatalog } from "#execution/catalog/step-catalog.js";
 import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { collectWorkflowCalls } from "#harness/coordination.js";
 import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
-import { stepStartedForResolvers } from "#harness/session-machine/resolver-events.js";
 import {
   approvedCalls,
   completeSignIn,
@@ -99,19 +98,12 @@ export async function acceptHumanInput(
     const key = `${at.turnId}:${at.stepIndex}`;
     const restored = restoredTools.get(key);
     if (restored !== undefined && restoredStep === key) return restored;
-    if (parked !== undefined) await config.prepareApprovalTurn?.(parked.event);
-    if (ctx !== undefined) {
-      await config.resolveStepDynamicTools?.({
-        ctx,
-        event: stepStartedForResolvers({
-          modelId: step.session.agent.modelReference?.id ?? "dynamic",
-          sequence: at.sequence,
-          stepIndex: at.stepIndex,
-          turnId: at.turnId,
-        }),
-        messages: step.projectHistory(step.session.history),
-      });
-    }
+    await config.participants?.restoreStep({
+      at: { sequence: at.sequence, stepIndex: at.stepIndex, turnId: at.turnId },
+      messages: step.projectHistory(step.session.history),
+      modelId: step.session.agent.modelReference?.id ?? "dynamic",
+      parked: parked !== undefined,
+    });
     const tools = buildStepCatalog({
       agentTools: config.tools,
       ctx,

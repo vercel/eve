@@ -1,3 +1,4 @@
+import type { DynamicScopeEvent } from "#dynamic/definition.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { defineInstructions } from "#public/definitions/instructions.js";
@@ -10,7 +11,7 @@ vi.mock("#context/build-callback-context.js", () => ({
 
 const {
   buildDynamicInstructionMessages,
-  dispatchDynamicInstructionEvent,
+  resolveDynamicInstructions,
   drainDynamicInstructionUserMessages,
   prepareDynamicInstructionPreamble,
 } = await import("#context/dynamic-instruction-lifecycle.js");
@@ -23,7 +24,6 @@ import {
   SessionIdKey,
 } from "#context/keys.js";
 import type { ResolvedDynamicInstructionsResolver } from "#runtime/types.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { DynamicResolveContext } from "#dynamic/definition.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 
@@ -53,18 +53,18 @@ function createCtx(): ContextContainer {
   return ctx;
 }
 
-function makeEvent(type: string): UnstampedMessageStreamEvent {
-  return { type, data: {} } as UnstampedMessageStreamEvent;
+function makeEvent(type: string): Exclude<DynamicScopeEvent, { type: "step.started" }> {
+  return { type, data: {} } as Exclude<DynamicScopeEvent, { type: "step.started" }>;
 }
 
-describe("dispatchDynamicInstructionEvent", () => {
+describe("resolveDynamicInstructions", () => {
   it("stores session-scoped instructions on durable key", async () => {
     const ctx = createCtx();
     const resolver = createResolver("context", ["session.started"], () =>
       defineInstructions({ markdown: "You are a helpful assistant." }),
     );
 
-    await dispatchDynamicInstructionEvent({
+    await resolveDynamicInstructions({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -85,7 +85,7 @@ describe("dispatchDynamicInstructionEvent", () => {
       defineInstructions({ markdown: "Turn context." }),
     );
 
-    await dispatchDynamicInstructionEvent({
+    await resolveDynamicInstructions({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -104,7 +104,7 @@ describe("dispatchDynamicInstructionEvent", () => {
       defineInstructions({ content: "Dynamic user context.", role: "user" }),
     );
 
-    await dispatchDynamicInstructionEvent({
+    await resolveDynamicInstructions({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -135,13 +135,13 @@ describe("dispatchDynamicInstructionEvent", () => {
       return defineInstructions({ content: "Turn user.", role: "user" });
     });
 
-    await dispatchDynamicInstructionEvent({
+    await resolveDynamicInstructions({
       ctx,
       resolvers: [sessionResolver],
       messages: [],
       event: makeEvent("session.started"),
     });
-    await dispatchDynamicInstructionEvent({
+    await resolveDynamicInstructions({
       ctx,
       resolvers: [turnResolver],
       messages: [],
@@ -160,7 +160,7 @@ describe("dispatchDynamicInstructionEvent", () => {
     const handler = vi.fn(() => defineInstructions({ markdown: "nope" }));
     const resolver = createResolver("context", ["session.started"], handler);
 
-    await dispatchDynamicInstructionEvent({
+    await resolveDynamicInstructions({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -174,7 +174,7 @@ describe("dispatchDynamicInstructionEvent", () => {
     const ctx = createCtx();
     const resolver = createResolver("context", ["session.started"], () => null);
 
-    await dispatchDynamicInstructionEvent({
+    await resolveDynamicInstructions({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -191,7 +191,7 @@ describe("dispatchDynamicInstructionEvent", () => {
       markdown: "not branded",
     }));
 
-    await dispatchDynamicInstructionEvent({
+    await resolveDynamicInstructions({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -215,7 +215,7 @@ describe("dispatchDynamicInstructionEvent", () => {
       throw new Error("resolver exploded");
     });
 
-    await dispatchDynamicInstructionEvent({
+    await resolveDynamicInstructions({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -240,7 +240,7 @@ describe("dispatchDynamicInstructionEvent", () => {
       defineInstructions({ markdown: "From B." }),
     );
 
-    await dispatchDynamicInstructionEvent({
+    await resolveDynamicInstructions({
       ctx,
       resolvers: [r1, r2],
       messages: [],
@@ -260,7 +260,7 @@ describe("dispatchDynamicInstructionEvent", () => {
       defineInstructions({ markdown: version }),
     );
 
-    await dispatchDynamicInstructionEvent({
+    await resolveDynamicInstructions({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -270,7 +270,7 @@ describe("dispatchDynamicInstructionEvent", () => {
     expect(buildDynamicInstructionMessages(ctx)).toEqual([{ role: "system", content: "v1" }]);
 
     version = "v2";
-    await dispatchDynamicInstructionEvent({
+    await resolveDynamicInstructions({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -292,7 +292,7 @@ describe("dispatchDynamicInstructionEvent", () => {
       });
     });
 
-    await dispatchDynamicInstructionEvent({
+    await resolveDynamicInstructions({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -304,7 +304,7 @@ describe("dispatchDynamicInstructionEvent", () => {
 
     prepareDynamicInstructionPreamble(ctx, []);
     result = "user";
-    await dispatchDynamicInstructionEvent({
+    await resolveDynamicInstructions({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -316,7 +316,7 @@ describe("dispatchDynamicInstructionEvent", () => {
     ]);
 
     result = "throw";
-    await dispatchDynamicInstructionEvent({
+    await resolveDynamicInstructions({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -340,14 +340,14 @@ describe("dispatchDynamicInstructionEvent", () => {
       return defineInstructions({ content: "Durable session context." });
     });
 
-    await dispatchDynamicInstructionEvent({
+    await resolveDynamicInstructions({
       ctx,
       resolvers: [resolver],
       messages: [],
       event: makeEvent("session.started"),
     });
     throws = true;
-    await dispatchDynamicInstructionEvent({
+    await resolveDynamicInstructions({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -372,7 +372,7 @@ describe("dispatchDynamicInstructionEvent", () => {
       defineInstructions({ content: "  \n", role: "user" }),
     );
 
-    await dispatchDynamicInstructionEvent({
+    await resolveDynamicInstructions({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -390,7 +390,7 @@ describe("dispatchDynamicInstructionEvent", () => {
       enabled ? defineInstructions({ markdown: "Instructions." }) : null,
     );
 
-    await dispatchDynamicInstructionEvent({
+    await resolveDynamicInstructions({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -400,7 +400,7 @@ describe("dispatchDynamicInstructionEvent", () => {
     expect(buildDynamicInstructionMessages(ctx)).toHaveLength(1);
 
     enabled = false;
-    await dispatchDynamicInstructionEvent({
+    await resolveDynamicInstructions({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -417,7 +417,7 @@ describe("dispatchDynamicInstructionEvent", () => {
       defineInstructions({ markdown: "Session context." }),
     );
 
-    await dispatchDynamicInstructionEvent({
+    await resolveDynamicInstructions({
       ctx,
       resolvers: [resolver],
       messages: [],
@@ -442,13 +442,13 @@ describe("dispatchDynamicInstructionEvent", () => {
       defineInstructions({ markdown: "Turn." }),
     );
 
-    await dispatchDynamicInstructionEvent({
+    await resolveDynamicInstructions({
       ctx,
       resolvers: [sessionResolver],
       messages: [],
       event: makeEvent("session.started"),
     });
-    await dispatchDynamicInstructionEvent({
+    await resolveDynamicInstructions({
       ctx,
       resolvers: [turnResolver],
       messages: [],
@@ -461,43 +461,13 @@ describe("dispatchDynamicInstructionEvent", () => {
     ]);
   });
 
-  it("rejects step.started events for instructions", async () => {
-    const ctx = createCtx();
-    const handler = vi.fn(() => defineInstructions({ markdown: "nope" }));
-    const resolver = createResolver("context", ["step.started"], handler);
-
-    await dispatchDynamicInstructionEvent({
-      ctx,
-      resolvers: [resolver],
-      messages: [],
-      event: makeEvent("step.started"),
-    });
-
-    expect(handler).not.toHaveBeenCalled();
-  });
-
-  it("ignores events outside the allowed set", async () => {
-    const ctx = createCtx();
-    const handler = vi.fn(() => defineInstructions({ markdown: "nope" }));
-    const resolver = createResolver("context", ["message.completed"], handler);
-
-    await dispatchDynamicInstructionEvent({
-      ctx,
-      resolvers: [resolver],
-      messages: [],
-      event: makeEvent("message.completed"),
-    });
-
-    expect(handler).not.toHaveBeenCalled();
-  });
-
   it("stores durable messages that survive serialization", async () => {
     const ctx = createCtx();
     const resolver = createResolver("ctx", ["session.started"], () =>
       defineInstructions({ markdown: "Durable." }),
     );
 
-    await dispatchDynamicInstructionEvent({
+    await resolveDynamicInstructions({
       ctx,
       resolvers: [resolver],
       messages: [],
