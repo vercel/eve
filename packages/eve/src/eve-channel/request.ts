@@ -300,11 +300,20 @@ export async function createSessionStreamResponse(
   const includeTailIndex = parseIncludeTailIndex(request);
 
   try {
-    // The event stream opens its durable source lazily, so an unknown or
-    // unreachable session would otherwise answer 200 and then fail mid-body.
-    // Resolving the tail first surfaces that before any bytes are committed.
-    const tailIndex = await session.getStreamTailIndex();
-    const events = await session.getEventStream({ startIndex });
+    // An unknown or unreachable session would otherwise answer 200 and then
+    // fail mid-body, so the tail must resolve before any bytes are committed.
+    // The event stream opens alongside it to save a round trip.
+    const eventsPromise = session.getEventStream({ startIndex });
+    // Handled below; this keeps an early rejection from being reported as unhandled.
+    eventsPromise.catch(() => {});
+    let tailIndex: number;
+    try {
+      tailIndex = await session.getStreamTailIndex();
+    } catch (error) {
+      void eventsPromise.then((events) => events.cancel()).catch(() => {});
+      throw error;
+    }
+    const events = await eventsPromise;
     const controlVersion =
       new URL(request.url).searchParams.get(EVE_STREAM_CONTROL_VERSION_QUERY) ===
       EVE_STREAM_CONTROL_VERSION
