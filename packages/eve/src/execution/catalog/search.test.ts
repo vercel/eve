@@ -134,7 +134,7 @@ describe("search", () => {
     await expect(search({})).rejects.toThrow(needsWords);
   });
 
-  it("returns the best matches up to limit, 20 by default, and takes no paging", async () => {
+  it("returns the best matches up to limit, 10 by default, and takes no paging", async () => {
     const many = Array.from({ length: 60 }, (_, index) =>
       inlineTool(`report_${String(index).padStart(2, "0")}`, { deferred: true }),
     );
@@ -144,7 +144,7 @@ describe("search", () => {
     expect(best).toHaveLength(50);
     // A smaller limit keeps the best matches, in rank order.
     expect(names(await search({ limit: 3, query: "report" }))).toEqual(best.slice(0, 3));
-    expect(names(await search({ query: "report" }))).toEqual(best.slice(0, 20));
+    expect(names(await search({ query: "report" }))).toEqual(best.slice(0, 10));
 
     // The model's calls are checked against the schema, which caps limit at 50 and has no offset.
     const schema = catalogContext({ tools: many }).catalog.advertised.get(SEARCH_TOOL_NAME)!

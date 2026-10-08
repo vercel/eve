@@ -22,7 +22,7 @@ through two fixed tools, `eve__search` and `eve__execute`:
 ```ts
 eve__search(opts: {
   query: string;
-  limit?: number;
+  limit?: number; // default 10, at most 50
 }): Promise<{
   results: Array<
     | { tool: string; description: string; signature: string }
@@ -504,7 +504,10 @@ today.
 **`eve__search`**
 
 - **Input:** `{ query, limit? }`.
-  - `limit` defaults to 20 and is capped at 50.
+  - `limit` defaults to 10 and is capped at 50. Results stay in history for
+    the rest of the session, so the default stays small: at 20, results
+    averaged about 660 tokens, and 15 of 32 benchmark queries returned all 20,
+    mostly weak matches, while every expected tool ranked in the top 5.
   - `query` is required and must contain a word. Deferred entries are found
     by what they do or by namespace, not browsed. A connection's name as the
     query, such as `linear`, lists that connection's tools first.

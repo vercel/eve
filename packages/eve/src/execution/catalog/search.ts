@@ -25,7 +25,7 @@ import { closestNames, isEmptyQuery, rankCandidates, type RankCandidate } from "
 import { connectionToolSignature, entrySignature } from "./signatures.js";
 import type { CatalogSkill } from "./skills.js";
 
-const DEFAULT_LIMIT = 20;
+const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 50;
 
 const SEARCH_DESCRIPTION = [
