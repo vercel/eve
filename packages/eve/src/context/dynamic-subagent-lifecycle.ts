@@ -15,7 +15,7 @@ import { createPreparedWorkflowToolHarnessDefinition } from "#execution/tools/wo
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createLogger } from "#internal/logging.js";
 import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
-import type { DynamicScopeEvent } from "#dynamic/definition.js";
+import type { DynamicSessionOrTurnEvent } from "#dynamic/definition.js";
 import type { SessionStartedStreamEvent } from "#protocol/message.js";
 import type { ResolvedDynamicSubagentResolver } from "#runtime/subagents/registry.js";
 import { createPreparedRuntimeSubagentTool } from "#runtime/subagents/registry.js";
@@ -29,11 +29,10 @@ const log = createLogger("dynamic-subagents");
 
 type DynamicSubagentSelections = Readonly<Record<string, DurableDynamicSubagentSelection>>;
 /** The scopes a subagent resolver answers. */
-type SubagentScopeEvent = Exclude<DynamicScopeEvent, { type: "step.started" }>;
 
 async function resolveSelections(input: {
   readonly ctx: ContextContainer;
-  readonly event: SubagentScopeEvent;
+  readonly event: DynamicSessionOrTurnEvent;
   readonly messages: readonly ModelMessage[];
   readonly resolvers: readonly ResolvedDynamicSubagentResolver[];
 }): Promise<DynamicSubagentSelections> {
@@ -163,7 +162,7 @@ function isRemoteAgentDefinition(value: unknown): boolean {
 /** Runs the dynamic subagent resolvers for a session or a turn. */
 export async function resolveDynamicSubagents(input: {
   readonly ctx: ContextContainer;
-  readonly event: SubagentScopeEvent;
+  readonly event: DynamicSessionOrTurnEvent;
   readonly messages: readonly ModelMessage[];
   readonly resolvers: readonly ResolvedDynamicSubagentResolver[];
 }): Promise<void> {
