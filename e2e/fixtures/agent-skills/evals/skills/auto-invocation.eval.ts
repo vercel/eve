@@ -5,7 +5,7 @@ const ECHO_MARKER_TOKEN = "skill-echo-marker-ok-V8Y2";
 /**
  * Skill smoke eval:
  * a flat markdown skill (skills/echo-marker.md) is advertised, loaded on
- * demand with `execute({ skill })`, and its body shapes the reply: the skill
+ * demand with `eve__execute({ skill })`, and its body shapes the reply: the skill
  * instructs an exact-token response.
  */
 export default defineEval({
