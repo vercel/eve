@@ -1,7 +1,7 @@
 import { performance } from "node:perf_hooks";
 import { setTimeout as sleep } from "node:timers/promises";
 
-import type { ProcessOutputHandler } from "#setup/primitives/process-output.js";
+import { vercelErrorDetail, type ProcessOutputHandler } from "#setup/primitives/process-output.js";
 import type { captureVercel, runVercelCaptureStdout } from "#setup/primitives/run-vercel.js";
 
 import {
@@ -29,7 +29,8 @@ type SlackConnectorCreateResult =
       ref: SlackConnectorRef;
       workspace: SlackWorkspaceConnection;
     }
-  | { state: "failed" }
+  /** `detail` is the CLI's own error line, when it printed one. */
+  | { state: "failed"; detail?: string }
   | { state: "unresolved" };
 
 type Phase = <T>(message: string, task: () => Promise<T>) => Promise<T>;
@@ -38,6 +39,13 @@ const CREATE_TIMEOUT_MS = 10 * 60_000;
 const LOOKUP_REQUEST_TIMEOUT_MS = 10_000;
 const LOOKUP_POLL_INTERVAL_MS = 3_000;
 const CREATED_CONNECTOR_PROGRESS = /\bConnector created:\s*(scl_[A-Za-z0-9]+)\b/;
+/**
+ * The CLI prints these once Connect hands back the browser URL. Connect
+ * creates a managed connector only inside that browser flow, so a run that
+ * fails before either line (or a `Connector created` line) cannot have
+ * created one.
+ */
+const BROWSER_FLOW_STARTED = /^(Opening browser for |If the browser doesn't open, visit:)/;
 
 const realDelay = (ms: number, signal?: AbortSignal): Promise<void> =>
   sleep(ms, undefined, { signal });
@@ -91,6 +99,8 @@ export async function createSlackConnector(input: {
   signal: AbortSignal | undefined;
   phase: Phase;
   onCreated: (ref: SlackConnectorRef) => void;
+  /** Fires once the CLI opens the browser flow that can create a connector. */
+  onBrowserStarted: () => void;
   waitForWorkspace: (
     ref: SlackConnectorRef,
     signal: AbortSignal,
@@ -143,6 +153,9 @@ export async function createSlackConnector(input: {
   const createOutput: ProcessOutputHandler = (line) => {
     input.onOutput(line);
     const connectorId = line.text.match(CREATED_CONNECTOR_PROGRESS)?.[1];
+    if (connectorId !== undefined || BROWSER_FLOW_STARTED.test(line.text.trim())) {
+      input.onBrowserStarted();
+    }
     if (connectorId === undefined || progressLookup !== undefined) return;
     progressLookup = pollCreatedSlackConnector(
       input.deps,
@@ -204,7 +217,8 @@ export async function createSlackConnector(input: {
     workspaceController.abort();
     if (workspaceWork !== undefined) await workspaceWork;
     input.signal?.throwIfAborted();
-    return { state: "failed" };
+    const detail = vercelErrorDetail(created.result.stderr);
+    return detail === undefined ? { state: "failed" } : { state: "failed", detail };
   }
 
   const finalRef = parseCreatedSlackConnector(created.result.stdout);
