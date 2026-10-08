@@ -11,21 +11,33 @@ Use this integration when Next.js owns the application's development and deploym
 
 - The `eve` package installed in your project (`npm install eve@latest`).
 - An existing eve agent directory. If you don't have one, start from [Getting Started](../../getting-started).
-- A Next.js app, or a single-agent project where you want to generate one below.
+- A Next.js app, or an eve project where you want to generate one below.
 
 ## Add the generated Web Chat app
 
-For a single-agent project, install the generated Next.js Web Chat app:
+Install the generated Next.js Web Chat app from a standalone agent project:
 
 ```bash
 eve add channel/web
 ```
 
-The installer adds a Next.js application and wraps `next.config.ts` with `withEve()`. The generated chat calls the unnamed agent through same-origin `/eve/v1/*` routes.
+For an agent workspace, select the member the chat should call:
+
+```bash
+eve add channel/web --agent support
+```
+
+The installer adds a shared Next.js application at `apps/web` and configures the chat for the
+selected agent. Choose **Next.js** during setup to wrap `next.config.ts` with `withEve()` and let
+Next.js host the integration. The generated chat uses same-origin `/eve/v1/*` routes for a
+standalone agent or `/eve/<name>/v1/*` routes for a workspace member. Running the installer from a
+workspace root without selecting a member is not supported.
 
 Before accepting production browser traffic, replace the generated placeholder authorization policy. See [Authenticate browser requests](./overview#authenticate-browser-requests).
 
-The Web Chat installer does not support eve agent workspaces. If you want Next.js to host the integration, create a root Next.js application and follow the steps below; `withEve(nextConfig)` discovers workspace members but does not generate a chat UI. To keep the frontend as a peer application instead, follow the [workspace layout guidance](/docs/concepts/project-structure#configure-a-web-deployment).
+To integrate an existing Next.js application without generating a chat UI, follow the steps below.
+To deploy the frontend and agents as separate Vercel services, choose **Vercel services** during
+setup instead; see the [workspace layout guidance](/docs/concepts/project-structure#configure-a-web-deployment).
 
 ## Wrap the Next.js config
 

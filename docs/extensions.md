@@ -178,7 +178,7 @@ A mount gives the extension's contributions a namespace. Updating the package up
 
 ### Install the package
 
-Install the extension with the package manager already used by the consumer's agent project. Fresh eve projects use pnpm:
+Install the extension with the package manager already used by the consumer's agent project. For example, in a pnpm project:
 
 ```bash
 pnpm add @acme/crm
