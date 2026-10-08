@@ -49,7 +49,6 @@ const EveConfigSchema = z.looseObject({
       projectSalt: z.string().optional(),
       internalTeamId: z.string().optional(),
       internal: z.boolean().optional(),
-      internalCheckedAt: z.number().optional(),
     })
     .optional(),
 });
@@ -133,7 +132,6 @@ export async function markEveTelemetryNotified(): Promise<void> {
 type EveTelemetryInternalTeam = {
   readonly teamId: string;
   readonly internal: boolean;
-  readonly checkedAt: number;
 };
 
 export async function readEveTelemetryInternalTeam(): Promise<
@@ -143,18 +141,10 @@ export async function readEveTelemetryInternalTeam(): Promise<
     const telemetry = EveConfigSchema.safeParse(
       JSON.parse(await readFile(eveConfigPath(), "utf8")) as unknown,
     ).data?.telemetry;
-    if (
-      telemetry?.internalTeamId === undefined ||
-      telemetry.internal === undefined ||
-      telemetry.internalCheckedAt === undefined
-    ) {
+    if (telemetry?.internalTeamId === undefined || telemetry.internal === undefined) {
       return undefined;
     }
-    return {
-      teamId: telemetry.internalTeamId,
-      internal: telemetry.internal,
-      checkedAt: telemetry.internalCheckedAt,
-    };
+    return { teamId: telemetry.internalTeamId, internal: telemetry.internal };
   } catch {
     return undefined;
   }
@@ -166,6 +156,5 @@ export async function writeEveTelemetryInternalTeam(
   await updateEveTelemetryPreference({
     internalTeamId: entry.teamId,
     internal: entry.internal,
-    internalCheckedAt: entry.checkedAt,
   });
 }
