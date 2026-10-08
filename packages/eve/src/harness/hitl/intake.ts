@@ -1,5 +1,5 @@
-import { buildStepCatalog, catalogToolsFor } from "#execution/catalog/step-catalog.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { buildStepCatalog } from "#execution/catalog/step-catalog.js";
+import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { collectWorkflowCalls } from "#harness/coordination.js";
 import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
 import { stepStartedForResolvers } from "#harness/session-machine/resolver-events.js";
@@ -144,7 +144,8 @@ export async function acceptHumanInput(
         .get(request.action.toolName)
         ?.approvalKey?.(request.action.input),
     delivery: coordinated.stepInput,
-    searchable: catalogToolsFor(config.tools, ctx?.get(BundleKey)).search,
+    searchable: (request) =>
+      toolsOf(stepForRequest(step.view(), request.requestId)).get(SEARCH_TOOL_NAME) !== undefined,
     policy: {
       ...coordinated,
       audit: getApprovalAuditState(step.session.state),

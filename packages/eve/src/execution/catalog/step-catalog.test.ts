@@ -55,6 +55,16 @@ describe("buildStepCatalog", () => {
       );
     }
 
+    it("counts only the deferred tools the session sees, so a delegated session doesn't search for root-only ones", () => {
+      const tools = [inlineTool("archive", { availableInSubagents: false, deferred: true })];
+
+      expect(names(catalogContext({ tools }).catalog.advertised)).toEqual([
+        SEARCH_TOOL_NAME,
+        EXECUTE_TOOL_NAME,
+      ]);
+      expect(names(catalogContext({ session: CHILD, tools }).catalog.advertised)).toEqual([]);
+    });
+
     it("gives an agent with nothing to find or load neither tool", () => {
       const { catalog } = catalogContext({ tools: [inlineTool("add")] });
 

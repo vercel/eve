@@ -85,7 +85,7 @@ const EXECUTE_INPUT_SCHEMA: JsonObject = {
 };
 
 /** Which of `eve__search` and `eve__execute` an agent gets. */
-export interface CatalogTools {
+interface CatalogTools {
   readonly execute: boolean;
   readonly search: boolean;
 }
@@ -99,8 +99,8 @@ export interface CatalogTools {
  * fixed for a deployment and never changes within a session. An agent with
  * none of these has neither tool, and pays nothing for the catalog.
  */
-export function catalogToolsFor(
-  agentTools: HarnessToolMap,
+function catalogToolsFor(
+  agentTools: readonly HarnessToolDefinition[],
   bundle: CompiledBundle | undefined,
 ): CatalogTools {
   const agent = bundle?.resolvedAgent;
@@ -112,7 +112,7 @@ export function catalogToolsFor(
     bundle?.subagentRegistry.dynamicResolvers,
   ];
   const search =
-    [...agentTools.values()].some((definition) => definition.deferred === true) ||
+    agentTools.some((definition) => definition.deferred === true) ||
     skills.some((skill) => skill.deferred === true) ||
     (agent?.connections ?? []).length > 0 ||
     resolvers.some((declared) => (declared?.length ?? 0) > 0);
@@ -159,7 +159,9 @@ export function buildStepCatalog(input: {
 }): StepCatalog {
   const visible = (definition: HarnessToolDefinition) => isVisible(definition, input.session);
   const bundle = input.ctx?.get(BundleKey);
-  const catalogTools = catalogToolsFor(input.agentTools, bundle);
+  // Only the tools this session sees count, so a delegated session of the same
+  // agent doesn't search for root-only entries it can't reach.
+  const catalogTools = catalogToolsFor([...input.agentTools.values()].filter(visible), bundle);
   const offersTasks =
     (bundle?.subagentRegistry.dynamicResolvers.length ?? 0) > 0 ||
     [...input.agentTools.values()].some(

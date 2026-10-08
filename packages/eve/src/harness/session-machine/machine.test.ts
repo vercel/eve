@@ -146,7 +146,7 @@ async function respond(machine: Machine, input: StepInput) {
       approvalKey: () => undefined,
       delivery: typed,
       policy: noPolicy(typed),
-      searchable: false,
+      searchable: () => false,
       takeQueued: delivered.takeQueued,
     }),
   );
@@ -536,7 +536,7 @@ describe("answers", () => {
         approvalKey: (request) => `deploy:${String(request.action.input.service)}`,
         delivery: { inputResponses: [{ optionId: "approve", requestId: "approval-call-1" }] },
         policy: noPolicy(),
-        searchable: false,
+        searchable: () => false,
         takeQueued: false,
       }),
     );

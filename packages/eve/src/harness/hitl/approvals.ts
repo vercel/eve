@@ -218,8 +218,11 @@ export function answer(
     /** The delivery merged the queue in, so the queue empties. */
     readonly takeQueued: boolean;
     readonly approvalKey: (request: InputRequest) => string | undefined;
-    /** Whether the agent has `eve__search`, which a call whose tool is gone can use to find another. */
-    readonly searchable: boolean;
+    /**
+     * Whether the request's restored step has `eve__search`, which a call whose
+     * tool is gone can use to find another.
+     */
+    readonly searchable: (request: InputRequest) => boolean;
   },
 ): Answered {
   const { policy } = input;
@@ -339,7 +342,7 @@ export function answer(
       if (unavailable.has(request.requestId)) {
         const failed = failedCall({
           callId,
-          message: unavailableToolMessage(toolName, input.searchable),
+          message: unavailableToolMessage(toolName, input.searchable(request)),
           toolName,
         });
         messages = withResult(messages, failed.part);

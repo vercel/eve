@@ -24,7 +24,7 @@ export default defineAgent({
 
 This turns off the optional defaults described below. Add back only the tools the agent needs with the command in each tool's section. Existing files under `agent/tools/` remain available, including same-name replacements such as `agent/tools/bash.ts`.
 
-`defaultTools` doesn't affect [`eve__search` and `eve__execute`](#eve__search-and-eve__execute): an agent has them whenever it has deferred entries, connections, or skills for them to reach.
+`defaultTools` doesn't affect [`eve__search` and `eve__execute`](#eve__search-and-eve__execute): eve adds them from what the agent declares, as listed in that section.
 
 ### `bash`
 
