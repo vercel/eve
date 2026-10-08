@@ -44,11 +44,17 @@ export async function createWorldHubWorld(options: WorldHubOptions): Promise<Wor
     const response = await fetch(new URL(path, options.url), {
       method,
       body: method === "GET" ? undefined : body,
-      headers: {
-        ...signWorldHubRequest(options.secret, method, path, body),
-        "x-world-hub-deployment-id": deploymentId,
-        "x-world-hub-deployment-url": deploymentUrl,
-      },
+      headers: signWorldHubRequest(
+        options.secret,
+        method,
+        path,
+        body,
+        undefined,
+        new Headers({
+          "x-world-hub-deployment-id": deploymentId,
+          "x-world-hub-deployment-url": deploymentUrl,
+        }),
+      ),
     });
     if (!response.ok) {
       const text = await response.text();
