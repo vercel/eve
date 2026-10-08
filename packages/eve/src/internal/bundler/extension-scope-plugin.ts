@@ -45,14 +45,6 @@ function shimSource(mountId: string): string {
   ].join("\n");
 }
 
-function extensionShimSource(mountId: string): string {
-  return [
-    `import { defineExtension as define } from "eve/extension";`,
-    `export const defineExtension = (options) => define(options, ${JSON.stringify(mountId)});`,
-    "",
-  ].join("\n");
-}
-
 /**
  * Builds the resolveId/load hook pair shared by both plugin modes. `mountFor`
  * returns the owning mount for an importer, or `undefined` to leave the
@@ -65,22 +57,12 @@ function scopeHooks(
   return {
     name,
     resolveId(source: string, importer: string | undefined) {
-      if (
-        (source !== "eve/context" && source !== "eve/extension") ||
-        importer === undefined ||
-        importer.startsWith("\0")
-      ) {
+      if (source !== "eve/context" || importer === undefined || importer.startsWith("\0")) {
         return undefined;
       }
       const mountId = mountFor(importer);
       if (mountId === undefined) return undefined;
-      if (source === "eve/extension") {
-        return `${VIRTUAL_PREFIX}extension:${encodeURIComponent(mountId)}`;
-      }
-      if (source === "eve/context") {
-        return `${VIRTUAL_PREFIX}context:${encodeURIComponent(mountId)}`;
-      }
-      return undefined;
+      return `${VIRTUAL_PREFIX}context:${encodeURIComponent(mountId)}`;
     },
     load(id: string) {
       if (!id.startsWith(VIRTUAL_PREFIX)) {
@@ -88,16 +70,9 @@ function scopeHooks(
       }
       const descriptor = id.slice(VIRTUAL_PREFIX.length);
       const separatorIndex = descriptor.indexOf(":");
-      const kind = descriptor.slice(0, separatorIndex);
-      if (kind !== "context" && kind !== "extension") return undefined;
+      if (descriptor.slice(0, separatorIndex) !== "context") return undefined;
       const mountId = decodeURIComponent(descriptor.slice(separatorIndex + 1));
-      if (kind === "context") {
-        return { code: shimSource(mountId), moduleType: "js" as const };
-      }
-      if (kind === "extension") {
-        return { code: extensionShimSource(mountId), moduleType: "js" as const };
-      }
-      return undefined;
+      return { code: shimSource(mountId), moduleType: "js" as const };
     },
   };
 }
@@ -105,7 +80,7 @@ function scopeHooks(
 /**
  * Path-containment scope plugin for the whole-application bundle (the production
  * build). Any module physically under an extension's source root has its
- * `eve/context` and `eve/extension` imports redirected to mount-owned shims.
+ * `eve/context` imports redirected to a mount-owned state shim.
  *
  * Returns `null` when there are no extensions, so consumer-only builds carry no
  * extra plugin and their output is byte-identical to a non-extension build.

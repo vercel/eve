@@ -26,7 +26,6 @@ export async function dispatchScheduledOccurrence(input: {
       compiledArtifactsSource: input.bundle.compiledArtifactsSource,
     }),
     channels: input.bundle.graph.root.channels,
-    extensionConfigs: input.bundle.graph.root.extensionConfigs,
   }).triggerCollection({
     collectionId: input.collection,
     definition: input.definition,

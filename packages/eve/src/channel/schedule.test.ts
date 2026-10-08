@@ -12,7 +12,7 @@ import {
   ScheduleDispatcher,
 } from "#channel/schedule.js";
 import { contextStorage } from "#context/container.js";
-import { ExtensionConfigsKey, ScheduleIdKey } from "#context/keys.js";
+import { ScheduleIdKey } from "#context/keys.js";
 import type { RunHandle, Runtime, SessionAuthContext } from "#channel/types.js";
 import { slackChannel } from "#public/channels/slack/slackChannel.js";
 import { isScheduleAuth } from "#public/schedules/index.js";
@@ -20,10 +20,8 @@ import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import { defineDynamicSchedules } from "#public/schedules/subscription.js";
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
 import { createScheduleCollectionPayload } from "#runtime/schedules/payload.js";
-import "#runtime/extension-mount-configs.js";
 import { z } from "#compiled/zod/index.js";
 import { defineChannel } from "#public/definitions/channel.js";
-import { defineExtension } from "#public/definitions/extension.js";
 
 function createMockRunHandle(): RunHandle {
   return { events: new ReadableStream<MessageStreamEvent>(), sessionId: "mock-session-id" };
@@ -83,9 +81,6 @@ describe("ScheduleDispatcher", () => {
     function setup(auth: typeof creator | null = creator) {
       const runtime = createMockRuntime();
       const targets: string[] = [];
-      const extensionConfigs = new Map([["@acme/crm", { apiKey: "sk-root" }]]);
-      const crm = defineExtension({ config: z.object({ apiKey: z.string() }) }, "@acme/crm");
-      const observedExtensionConfigs: Array<unknown> = [];
       const channel = defineChannel<undefined, void, { channelId: string }>({
         routes: [],
         async receive(input, context) {
@@ -102,8 +97,6 @@ describe("ScheduleDispatcher", () => {
           auth: SessionAuthContext;
           waitUntil: (task: Promise<unknown>) => void;
         }) => {
-          observedExtensionConfigs.push(contextStorage.getStore()?.get(ExtensionConfigsKey));
-          observedExtensionConfigs.push(crm.config);
           const channelId =
             args.payload.destination === "my-dm" ? `dm-${args.auth.principalId}` : "team-channel";
           args.waitUntil(args.to(channel, { channelId }).send(args.payload.task));
@@ -141,7 +134,6 @@ describe("ScheduleDispatcher", () => {
             fetch: async () => new Response(),
           },
         ],
-        extensionConfigs,
       });
       const input = {
         collectionId: "requests",
@@ -149,15 +141,7 @@ describe("ScheduleDispatcher", () => {
         occurrence,
         payload,
       };
-      return {
-        dispatcher,
-        input,
-        extensionConfigs,
-        observedExtensionConfigs,
-        runtime,
-        run,
-        targets,
-      };
+      return { dispatcher, input, runtime, run, targets };
     }
 
     it("derives a destination from payload intent and starts fresh unattended work as the creator", async () => {
@@ -177,12 +161,6 @@ describe("ScheduleDispatcher", () => {
       expect(started[0]!.continuationToken).not.toBe(started[1]!.continuationToken);
       expect(started[0]!.continuationConflictCommand).toBeUndefined();
       expect(runtime.dispatchContinuation).not.toHaveBeenCalled();
-    });
-
-    it("runs occurrence handlers with the root extension configs", async () => {
-      const { dispatcher, input, extensionConfigs, observedExtensionConfigs } = setup();
-      await dispatcher.triggerCollection(input);
-      expect(observedExtensionConfigs).toEqual([extensionConfigs, { apiKey: "sk-root" }]);
     });
 
     it.each([null, { ...creator, principalId: "bob" }])(
@@ -222,11 +200,7 @@ describe("ScheduleDispatcher", () => {
   describe("markdown form", () => {
     it("starts a Session via runtime.createSession with the SCHEDULE_ADAPTER", async () => {
       const runtime = createMockRuntime();
-      const dispatcher = new ScheduleDispatcher({
-        runtime,
-        channels: [],
-        extensionConfigs: new Map(),
-      });
+      const dispatcher = new ScheduleDispatcher({ runtime, channels: [] });
       const result = await dispatcher.trigger({
         scheduleId: "heartbeat",
         markdown: "Run heartbeat task.",
@@ -247,7 +221,7 @@ describe("ScheduleDispatcher", () => {
       const runtime = createMockRuntime();
       runtime.createSession = vi.fn().mockRejectedValue(new Error("boom"));
       await expect(
-        new ScheduleDispatcher({ runtime, channels: [], extensionConfigs: new Map() }).trigger({
+        new ScheduleDispatcher({ runtime, channels: [] }).trigger({
           scheduleId: "heartbeat",
           markdown: "x",
         }),
@@ -262,11 +236,7 @@ describe("ScheduleDispatcher", () => {
       vi.stubEnv("SLACK_SIGNING_SECRET", "test-secret");
       try {
         const { definition, resolved } = makeSlackChannelEntry();
-        const dispatcher = new ScheduleDispatcher({
-          runtime,
-          channels: [resolved],
-          extensionConfigs: new Map(),
-        });
+        const dispatcher = new ScheduleDispatcher({ runtime, channels: [resolved] });
         let observed = false;
         const result = await dispatcher.trigger({
           scheduleId: "daily-digest",
@@ -292,11 +262,7 @@ describe("ScheduleDispatcher", () => {
     });
     it("collects waitUntil promises", async () => {
       const runtime = createMockRuntime();
-      const result = await new ScheduleDispatcher({
-        runtime,
-        channels: [],
-        extensionConfigs: new Map(),
-      }).trigger({
+      const result = await new ScheduleDispatcher({ runtime, channels: [] }).trigger({
         scheduleId: "background-job",
         async run({ waitUntil }) {
           waitUntil(Promise.resolve("done"));
@@ -318,11 +284,7 @@ describe("ScheduleDispatcher", () => {
       vi.stubEnv("SLACK_SIGNING_SECRET", "test-secret");
       try {
         const { definition, resolved } = makeSlackChannelEntry();
-        const result = await new ScheduleDispatcher({
-          runtime,
-          channels: [resolved],
-          extensionConfigs: new Map(),
-        }).trigger({
+        const result = await new ScheduleDispatcher({ runtime, channels: [resolved] }).trigger({
           scheduleId: "dynamic-tasks",
           run({ to, waitUntil }) {
             waitUntil(
@@ -353,11 +315,7 @@ describe("ScheduleDispatcher", () => {
         adapter: { kind: "x" },
       } satisfies CompiledChannel;
       await expect(
-        new ScheduleDispatcher({
-          runtime: createMockRuntime(),
-          channels: [],
-          extensionConfigs: new Map(),
-        }).trigger({
+        new ScheduleDispatcher({ runtime: createMockRuntime(), channels: [] }).trigger({
           scheduleId: "stranger",
           async run({ to }) {
             await to(stranger, {}).send("x", { auth: null });
@@ -369,11 +327,7 @@ describe("ScheduleDispatcher", () => {
 
   it("isScheduleAuth recognizes the app principal schedules dispatch with, and only it", async () => {
     const runtime = createMockRuntime();
-    const dispatcher = new ScheduleDispatcher({
-      runtime,
-      channels: [],
-      extensionConfigs: new Map(),
-    });
+    const dispatcher = new ScheduleDispatcher({ runtime, channels: [] });
     let appAuth: SessionAuthContext | undefined;
 
     await dispatcher.trigger({ scheduleId: "heartbeat", markdown: "Run heartbeat task." });
@@ -397,32 +351,9 @@ describe("ScheduleDispatcher", () => {
     expect(isScheduleAuth(null)).toBe(false);
   });
 
-  it("runs the handler with the root extension configs in scope", async () => {
-    const extensionConfigs = new Map([["@acme/crm", { apiKey: "sk-root" }]]);
-    const dispatcher = new ScheduleDispatcher({
-      runtime: createMockRuntime(),
-      channels: [],
-      extensionConfigs,
-    });
-    let seen: unknown;
-
-    await dispatcher.trigger({
-      scheduleId: "sync",
-      async run() {
-        seen = contextStorage.getStore()?.get(ExtensionConfigsKey);
-      },
-    });
-
-    expect(seen).toBe(extensionConfigs);
-  });
-
   it("throws when neither run nor markdown is provided", async () => {
     await expect(
-      new ScheduleDispatcher({
-        runtime: createMockRuntime(),
-        channels: [],
-        extensionConfigs: new Map(),
-      }).trigger({
+      new ScheduleDispatcher({ runtime: createMockRuntime(), channels: [] }).trigger({
         scheduleId: "empty",
       }),
     ).rejects.toThrow(/has neither "run" nor "markdown"/);

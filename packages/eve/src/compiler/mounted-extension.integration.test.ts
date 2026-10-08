@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 
 import { compileAgent } from "#compiler/compile-agent.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { ExtensionConfigsKey } from "#context/keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { loadCompiledModuleMapFromAuthoredSource } from "#internal/authored-module-map-loader.js";
@@ -14,7 +13,6 @@ import { useTemporaryAppRoots } from "#internal/testing/use-temporary-app-roots.
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
-import { withExtensionConfigs } from "#runtime/extension-mount-configs.js";
 
 const createAppRoot = useTemporaryAppRoots();
 
@@ -94,7 +92,7 @@ describe("mounted extension via authored-source loader", () => {
           'import ext from "@acme/crm";',
           'import prompt from "./prompt.md?raw";',
           'import asset from "./badge.svg";',
-          'export default { description: "Read account", inputSchema: {}, execute: () => ({ account: ext.config.account, prompt, asset }) };',
+          "const account = ext.config.account; export default { description: account, inputSchema: {}, execute: () => ({ account, prompt, asset }) };",
         ].join("\n"),
         "node_modules/@acme/crm/extension/tools/prompt.md": "Account prompt",
         "node_modules/@acme/crm/extension/tools/badge.svg": "<svg/>",
@@ -106,40 +104,43 @@ describe("mounted extension via authored-source loader", () => {
     expect(first.manifest.tools.map((tool) => [tool.name, tool.description])).toEqual(
       expect.arrayContaining([
         ["one__account", "Read overridden account"],
-        ["two__account", "Read account"],
+        ["two__account", "two"],
       ]),
     );
+    const otherCompilation = await compileAgent({ startPath: app.appRoot });
+    expect(
+      otherCompilation.manifest.tools.find((tool) => tool.name === "two__account")?.description,
+    ).toBe("two");
     await writeFile(
       join(app.appRoot, "agent/extensions/two.mjs"),
       'import ext from "@acme/crm"; export default ext({ account: "updated" });',
     );
-    const second = await compileRuntimeGraph(app.appRoot);
-    const read = (
-      compiled: typeof first,
-      name: string,
-      moduleMap: typeof first.moduleMap = compiled.moduleMap,
-    ) => {
-      const tool = compiled.manifest.tools.find((entry) => entry.name === `${name}__account`)!;
-      const execute = () =>
-        (
-          moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules[tool.sourceId]!.default as {
-            execute: () => unknown;
-          }
-        ).execute();
-      const context = contextStorage.getStore();
-      if (context !== undefined) {
-        context.setVirtualContext(ExtensionConfigsKey, compiled.graph.root.extensionConfigs);
-        return execute();
-      }
-      return withExtensionConfigs(compiled.graph.root.extensionConfigs, execute);
+    const refreshed = await compileAgent({ startPath: app.appRoot });
+    expect(refreshed.manifest.tools.find((tool) => tool.name === "two__account")?.description).toBe(
+      "updated",
+    );
+    await writeFile(
+      join(app.appRoot, "agent/extensions/two.mjs"),
+      'import ext from "@acme/crm"; export default ext({ account: "two" });',
+    );
+    const second = await loadCompiledModuleMapFromAuthoredSource({
+      compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(app.appRoot),
+    });
+    const read = (map: typeof first.moduleMap, name: string) => {
+      const tool = first.manifest.tools.find((entry) => entry.name === `${name}__account`)!;
+      return (
+        map.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules[tool.sourceId]!.default as {
+          execute: () => unknown;
+        }
+      ).execute();
     };
     const accountResult = {
       account: "two",
       prompt: "Account prompt",
       asset: "data:image/svg+xml;base64,PHN2Zy8+",
     };
-    expect(read(first, "two")).toEqual(accountResult);
-    expect(read(second, "two")).toEqual({ ...accountResult, account: "updated" });
+    expect(read(first.moduleMap, "two")).toEqual(accountResult);
+    expect(read(second, "two")).toEqual(accountResult);
     const helper = first.manifest.subagents.find((node) => node.name === "one__helper")!;
     const peek = helper.agent.tools.find((tool) => tool.name === "peek")!;
     expect(
@@ -151,7 +152,7 @@ describe("mounted extension via authored-source loader", () => {
     ).toBe("one");
     const context = new ContextContainer();
     contextStorage.run(context, () => {
-      expect(read(first, "one")).toEqual({ account: "one", count: 1 });
+      expect(read(first.moduleMap, "one")).toEqual({ account: "one", count: 1 });
       expect(read(second, "one")).toEqual({ account: "one", count: 2 });
     });
     expect(Object.keys(serializeContext(context))).toContain("override-count");
@@ -169,20 +170,16 @@ describe("mounted extension via authored-source loader", () => {
     const generated = (await import(`${moduleMapPath}?test=independent-config`)) as {
       default: typeof first.moduleMap;
     };
-    expect(read(first, "two", generated.default)).toEqual(accountResult);
+    expect(read(generated.default, "two")).toEqual(accountResult);
     for (const name of ["research", "support"]) {
       const subagent = first.manifest.subagents.find((entry) => entry.name === name)!;
       const tool = subagent.agent.tools.find((entry) => entry.name === "crm__account")!;
-      expect(tool.description).toBe("Read account");
-      for (const map of [first.moduleMap, second.moduleMap, generated.default]) {
+      expect(tool.description).toBe(name);
+      for (const map of [first.moduleMap, second, generated.default]) {
         const definition = map.nodes[subagent.nodeId]!.modules[tool.sourceId]!.default as {
           execute: () => { account: string; asset: string; prompt: string };
         };
-        const node = first.graph.nodesByNodeId.get(subagent.nodeId)!;
-        expect(withExtensionConfigs(node.extensionConfigs, () => definition.execute())).toEqual({
-          ...accountResult,
-          account: name,
-        });
+        expect(definition.execute()).toEqual({ ...accountResult, account: name });
       }
     }
   });
@@ -248,7 +245,7 @@ describe("mounted extension via authored-source loader", () => {
           'import code from "eve/extensions/code"; export default code({ worker: { model: "openai/gpt-5.4", reasoning: "low" } });',
       },
     });
-    const { graph, manifest, moduleMap } = await compileRuntimeGraph(app.appRoot);
+    const { manifest, moduleMap } = await compileRuntimeGraph(app.appRoot);
     const workers = ["one", "two"].map((name) =>
       manifest.subagents.find((subagent) => subagent.name === `${name}__worker`)!,
     );
@@ -259,10 +256,7 @@ describe("mounted extension via authored-source loader", () => {
       const definition = moduleMap.nodes[worker.nodeId]!.modules[configSourceId]!.default as {
         model: { events: { "session.started": () => { reasoning: string } } };
       };
-      return withExtensionConfigs(
-        graph.nodesByNodeId.get(worker.nodeId)!.extensionConfigs,
-        () => definition.model.events["session.started"]().reasoning,
-      );
+      return definition.model.events["session.started"]().reasoning;
     });
     expect(reasoning).toEqual(["high", "low"]);
     const second = await loadCompiledModuleMapFromAuthoredSource({
@@ -274,10 +268,7 @@ describe("mounted extension via authored-source loader", () => {
         .default as {
         model: { events: { "session.started": () => { reasoning: string } } };
       };
-      return withExtensionConfigs(
-        graph.nodesByNodeId.get(worker.nodeId)!.extensionConfigs,
-        () => definition.model.events["session.started"]().reasoning,
-      );
+      return definition.model.events["session.started"]().reasoning;
     });
     expect(secondReasoning).toEqual(["high", "low"]);
   });
@@ -504,11 +495,9 @@ describe("mounted extension via authored-source loader", () => {
 
     const tool = graph.root.agent.tools.find((entry) => entry.name === "crm__crm_echo");
     expect(tool).toBeDefined();
-    await expect(
-      withExtensionConfigs(graph.root.extensionConfigs, () =>
-        tool?.execute?.({}, { messages: [], toolCallId: "call_1" }),
-      ),
-    ).resolves.toEqual({ apiKey: "sk-authored" });
+    await expect(tool?.execute?.({}, { messages: [], toolCallId: "call_1" })).resolves.toEqual({
+      apiKey: "sk-authored",
+    });
   });
 });
 
@@ -679,11 +668,9 @@ describe("mounted extension via directory form with override", () => {
 
     const echo = graph.root.agent.tools.find((entry) => entry.name === "crm__crm_echo");
     expect(echo).toBeDefined();
-    await expect(
-      withExtensionConfigs(graph.root.extensionConfigs, () =>
-        echo?.execute?.({}, { messages: [], toolCallId: "call_1" }),
-      ),
-    ).resolves.toEqual({ apiKey: "sk-dir" });
+    await expect(echo?.execute?.({}, { messages: [], toolCallId: "call_1" })).resolves.toEqual({
+      apiKey: "sk-dir",
+    });
 
     const status = graph.root.agent.tools.find((entry) => entry.name === "crm__crm_status");
     expect(status).toBeDefined();
