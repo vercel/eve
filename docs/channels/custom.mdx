@@ -132,8 +132,8 @@ await session.getEventStream({ startIndex: 12 });
 ```
 
 `respond()` accepts exact response literals directly. If responses have already
-been widened to `InputResponse[]`—for example, after decoding a platform
-payload—validate them with eve's strict schema before delivery. The validated
+been widened to `InputResponse[]` (for example, after decoding a platform
+payload), validate them with eve's strict schema before delivery. The validated
 type preserves that proof across channel wrappers:
 
 ```ts

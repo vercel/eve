@@ -3,7 +3,7 @@ title: "Guard the Spend"
 description: "Part 7 of the Build an Agent tutorial. Gate expensive queries with cost-based approval. The agent pauses, asks, and resumes."
 ---
 
-Use the sample dataset to practice an approval before a tool runs. The example assigns a simulated scan cost to each query; it does not incur warehouse charges. Make the analytics assistant stop and check with you before a query exceeds that threshold. The agent pauses, asks you, and resumes with your answer. That's human-in-the-loop, and you wire it up with one field on the tool.
+Use the sample dataset to practice an approval before a tool runs. The example assigns a simulated scan cost to each query; it does not incur warehouse charges. Make the analytics assistant stop and check with you before a query exceeds that threshold. The agent pauses, asks you, and resumes with your answer. This is human-in-the-loop, and you wire it up with one field on the tool.
 
 `approval` runs before `execute`. Return `"user-approval"` and the turn parks on an approval request; you answer, and the run picks up from that exact step. The function gets the tool input, so you can make the decision cost-based.
 
@@ -53,7 +53,7 @@ Total revenue across all customers, all time, broken out by day.
 
 The model proposes the query, `approval` returns `"user-approval"`, and the turn parks. The stream emits `input.requested`, then `turn.waiting` with `on: "input"`, and the turn stays open until someone answers. How the prompt looks depends on the channel, whether buttons in the TUI, Block Kit in Slack, or a UI control on the web. Approve it and the run resumes from exactly that step, then the query runs. Deny it and the tool is skipped, with the model told why.
 
-Each session has exactly one active continuation. Answer an approval against a stale handle and it's rejected, so there's no way to double-resume the same parked turn.
+Each session has exactly one active continuation. Answer an approval against a stale handle and it's rejected, so the same parked turn can't be resumed twice.
 
 The same machinery backs the opt-in `ask_question` tool, where the model asks you mid-turn, and per-connection approval via `approval: once()`. See [Tools and human-in-the-loop](../tools).
 

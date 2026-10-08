@@ -148,7 +148,7 @@ model: mockModel({
 
 ## Three assertion surfaces
 
-Each surface matches a genuinely different kind of judgment:
+Each surface matches a different kind of judgment:
 
 - **Scoped methods** read the final whole run on `t`, snapshot one independent session when invoked there, or inspect one immutable `EveEvalTurn`. See [Assertions](./assertions).
 - **`t.check(value, assertion)`** grades an explicit value with a deterministic builder from `eve/evals/expect`, such as `t.check(turn.message, includes("sunny"))`. Grade `turn.message`, an intermediate draft, parsed JSON, or anything else. See [Assertions](./assertions).
@@ -189,8 +189,6 @@ Exit code `0` means every eval passed its gates. See [Running evals](./running) 
 Most apps do fine with a few small smoke evals. Assert behavior with `t.succeeded()` plus one or two content checks, keep dataset fixtures in `evals/data/`, and reach for a judge or Braintrust only when you need fuzzy grading or shared result review. In CI, run `eve eval --strict` so soft threshold misses fail the build too.
 
 ## What to read next
-
-The rest of this section covers each piece:
 
 - [Cases](./cases): single-turn evals, scripted multi-turn evals, and dataset fan-out
 - [Assertions](./assertions): run-level methods and `t.check` value assertions, with matchers and severity

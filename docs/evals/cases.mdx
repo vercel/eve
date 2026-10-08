@@ -30,7 +30,7 @@ export default defineEval({
 });
 ```
 
-Some evals only care about behavior, not text. Assert on the run and skip the content check entirely:
+Some evals only check behavior. Assert on the run and skip the content check:
 
 ```ts title="evals/weather/no-tools-for-greetings.eval.ts"
 import { defineEval } from "eve/evals";
@@ -60,7 +60,7 @@ evals/
 
 ## Multi-turn evals
 
-Drive several turns in sequence for branching, HITL approvals, structured output, attachments, or multiple sessions. Because assertions live in the function, an intermediate value is a local variable. Keep each turn in a local variable and continue through its `.session`.
+Drive several turns in sequence for branching, HITL approvals, structured output, attachments, or multiple sessions. Because assertions live in the function, keep each turn in a local variable and continue through its `.session`.
 
 ```ts title="evals/draft-then-send.eval.ts"
 import { defineEval } from "eve/evals";

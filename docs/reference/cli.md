@@ -56,7 +56,7 @@ After scaffolding in an interactive human terminal, eve opens the TUI directly. 
 | ----------------------- | ------ | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `--model <model>`       | string | `openai/gpt-6-luna-fast`                             | Set the root agent's AI Gateway model ID.                                                                                |
 | `--reasoning <effort>`  | enum   | `high` without `--model`; otherwise provider default | Set reasoning to `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. `provider-default` leaves the field unauthored. |
-| `--channel-web-nextjs`  | flag   | off                                                  | Add the Web Chat app (Next.js). Not for existing projects — run `eve add channel/web` there instead.                     |
+| `--channel-web-nextjs`  | flag   | off                                                  | Add the Web Chat app (Next.js). Not for existing projects; run `eve add channel/web` there instead.                      |
 | `-n, --non-interactive` | flag   | off                                                  | Scaffold and install dependencies without starting development.                                                          |
 
 ## `eve extension`
@@ -366,13 +366,13 @@ eve logs --dump     # prepend the log's environment dump
 eve logs --events   # interleave session events from the local workflow store
 ```
 
-Each interactive `eve dev` process writes a private diagnostic log under `.eve/logs/` capturing stderr, stdout (including sandbox and rebuild lines), tool failures, workflow errors, and eve framework log records — regardless of what the transcript shows. The file is JSON Lines — every line is one JSON record with `at` and `source` fields. `eve logs` reads those files back.
+Each interactive `eve dev` process writes a private diagnostic log under `.eve/logs/` capturing stderr, stdout (including sandbox and rebuild lines), tool failures, workflow errors, and eve framework log records, regardless of what the transcript shows. The file is JSON Lines: every line is one JSON record with `at` and `source` fields. `eve logs` reads those files back.
 
-A log id is the file name without `.log` (for example `dev-2026-07-15T12-00-00.000Z-123`). `eve logs show <logid>` also accepts the file name, the `.eve/logs/...` path printed in the dev transcript, or any unambiguous prefix of the id with or without the `dev-` lead — so `eve logs 2026-07-15` works when a single log matches. An ambiguous prefix fails and lists the candidates.
+A log id is the file name without `.log` (for example `dev-2026-07-15T12-00-00.000Z-123`). `eve logs show <logid>` also accepts the file name, the `.eve/logs/...` path printed in the dev transcript, or any unambiguous prefix of the id with or without the `dev-` lead, so `eve logs 2026-07-15` works when a single log matches. An ambiguous prefix fails and lists the candidates.
 
-`eve logs` prints nothing but records — no path banner on either stream — so `eve logs 2>&1 | jq -c .` always parses. Discover ids and file paths with `eve logs list`; `eve logs list --json` emits a machine-readable array with `id`, `path`, `startedAt`, and `sizeBytes`.
+`eve logs` prints nothing but records, with no path banner on either stream, so `eve logs 2>&1 | jq -c .` always parses. Discover ids and file paths with `eve logs list`; `eve logs list --json` emits a machine-readable array with `id`, `path`, `startedAt`, and `sizeBytes`.
 
-`eve logs --events` resolves session events (`session.started`, `turn.failed`, message deltas, …) from the local workflow store (`.eve/.workflow-data`) at query time and interleaves them into the output by timestamp as `source: "event"` records — the log file itself never stores them, so nothing is duplicated at capture time. Selection is by the log's time window (its start through the next log's start), so events from concurrently running `eve dev` processes may appear.
+`eve logs --events` resolves session events (`session.started`, `turn.failed`, message deltas, …) from the local workflow store (`.eve/.workflow-data`) at query time and interleaves them into the output by timestamp as `source: "event"` records. The log file itself never stores them, so nothing is duplicated at capture time. Selection is by the log's time window (its start through the next log's start), so events from concurrently running `eve dev` processes may appear.
 
 Each log has a same-named `.dump` sibling holding environment diagnostics and session stats as one JSON document. `eve logs --dump` (with or without a log id) prepends that document to the JSONL log body; the combined output is a valid JSON value stream (`eve logs --dump | jq -c .`), one self-contained report to attach to an issue. When a log has no dump, the flag is silently a no-op.
 
@@ -389,7 +389,7 @@ eve traces --json          # dump the full trace as JSON
 
 Reads the immutable OTLP/JSON segments under `.eve/traces/v1`, so `eve dev` need not be running. Accepts a full trace id, a `gen_ai.conversation.id`, or an unambiguous prefix of either. Malformed segments are skipped without hiding valid spans from the same trace.
 
-Span rows carry inline metrics when the span recorded them — `↑input`/`↓output` token counts, gateway cost, and the tool name for `execute_tool` spans. The header lists models across the trace, sums token usage and cost from step spans, and counts all error-bearing spans. `--verbose` expands each span under its tree row: status (with the error message on failures), timing, ids, every attribute (prompts, responses, and tool payloads as transcripts or pretty-printed JSON), and every span event with its offset from span start. `--json` prints the same records as JSON, one object per selected trace.
+Span rows carry inline metrics when the span recorded them: `↑input`/`↓output` token counts, gateway cost, and the tool name for `execute_tool` spans. The header lists models across the trace, sums token usage and cost from step spans, and counts all error-bearing spans. `--verbose` expands each span under its tree row: status (with the error message on failures), timing, ids, every attribute (prompts, responses, and tool payloads as transcripts or pretty-printed JSON), and every span event with its offset from span start. `--json` prints the same records as JSON, one object per selected trace.
 
 With local caller trace context, the first local subagent turn uses the caller's trace. Its span is a child of the dispatch span. A remote child starts a separate root trace and links its first turn to the dispatch with `eve.link.type=agent.dispatch`. Remote requests use W3C `tracestate` to identify that dispatch span if platform HTTP handling changes `traceparent`. Later child turns start new traces. All related sessions have the same `gen_ai.conversation.id`. `agent.subagent.name` identifies the subagent.
 

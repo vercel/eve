@@ -23,7 +23,7 @@ eve eval --skip-report         # skip config and eval-defined reporters (e.g. Br
 
 Positional ids match exactly or by directory prefix: `eve eval weather` runs `evals/weather.eval.ts`, every eval under `evals/weather/`, and every entry of an array-exported `weather.eval.ts`.
 
-Tag filters compose: `--tag` keeps evals carrying at least one listed tag, then `--exclude-tag` drops any eval carrying an excluded tag. A `--tag` filter that matches nothing is a configuration error (exit `2`), but a run where `--exclude-tag` removes every match succeeds with nothing executed — exclusion expresses "this suite does not apply here."
+Tag filters compose: `--tag` keeps evals carrying at least one listed tag, then `--exclude-tag` drops any eval carrying an excluded tag. A `--tag` filter that matches nothing is a configuration error (exit `2`), but a run where `--exclude-tag` removes every match succeeds with nothing executed; exclusion expresses "this suite does not apply here."
 
 ## Exit codes
 
@@ -41,7 +41,7 @@ With `--verbose`, eve prefixes each line with its eval ID. It streams authored `
 
 ## Artifacts
 
-Each run drops artifacts under `.eve/evals/<timestamp>/`: a run `summary.json`, a `results.jsonl` index, and per-eval assertion results, verdicts, captured event streams, and `t.log` lines under `evals/`. The console output stays tight on purpose; when an eval fails, the artifact has the full story.
+Each run drops artifacts under `.eve/evals/<timestamp>/`: a run `summary.json`, a `results.jsonl` index, and per-eval assertion results, verdicts, captured event streams, and `t.log` lines under `evals/`. The console output is brief on purpose; when an eval fails, the artifact has the full details.
 
 ## CI
 

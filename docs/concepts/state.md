@@ -71,8 +71,7 @@ Every [subagent](../subagents) starts with its own fresh state, whether it's a b
 
 `defineState` holds conversation-scoped working memory that lives and dies with
 the session, including counters, the current plan, and what the user has told
-you this conversation. It is the agent's short-term memory, persisted durably
-for the life of the session. For context that must outlive a session, configure
+you this conversation. For context that must outlive a session, configure
 a first-class [memory provider](../memory). Use the built-in file provider, a
 third-party provider, or a custom provider for application-specific storage and
 retrieval. Use a general [connection](../connections) instead when the data

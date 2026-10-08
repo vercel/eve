@@ -146,7 +146,7 @@ Run `eve set model --reasoning high` to update this field from the command line.
 
 ## Compaction
 
-Compaction summarizes older turns as you approach the context window. It's on by default, so you only tune when it kicks in. eve adds the estimated fixed checkpoint-prompt envelope to the trigger count, so compaction starts sooner than the conversation-only estimate. Lower `thresholdPercent` to compact sooner:
+Compaction summarizes older turns as you approach the context window. It's on by default, so you only tune when it triggers. eve adds the estimated fixed checkpoint-prompt envelope to the trigger count, so compaction starts sooner than the conversation-only estimate. Lower `thresholdPercent` to compact sooner:
 
 ```ts title="agent/agent.ts"
 export default defineAgent({
@@ -192,10 +192,10 @@ arrives after the call completes. Before the next model call, eve pauses the
 session and sends a deterministic continuation prompt with two options:
 **Approve** grants a fresh window of each configured size, and **Stop**
 cancels the in-flight turn through the standard cancellation path
-(`turn.cancelled` → `session.waiting`) — a user decision, not an error. The session stays resumable; because it is
+(`turn.cancelled` → `session.waiting`), which is a user decision, not an error. The session stays resumable; because it is
 still over budget, the next message re-raises the prompt. Declining a
 delegated child's prompt cancels the root turn, which cascades to the whole
-delegation tree — the delegating parent never receives an error result it
+delegation tree. The delegating parent never receives an error result it
 could retry against a fresh quota share. A reply that answers neither option
 is queued while the existing prompt stays pending; eve does not raise another
 copy. The reply is processed once the budget is granted.

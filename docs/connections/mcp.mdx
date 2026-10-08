@@ -22,7 +22,7 @@ export default defineMcpClientConnection({
 });
 ```
 
-The `url` must speak Streamable HTTP or SSE. Write the `description` for the model, not for yourself: eve lists it next to the connection name, and it is the main signal the model uses to decide which connection to search.
+The `url` must speak Streamable HTTP or SSE. Write the `description` for the model. eve lists it next to the connection name, and it is the main signal the model uses to decide which connection to search.
 
 ## Configure protocol discovery
 
@@ -115,9 +115,9 @@ Use the shared `approval` option to gate every tool served by an MCP connection.
 
 ### Gate specific tools by name or input
 
-A remote MCP server usually mixes read tools with destructive or publishing ones, so a blanket `always()` would prompt on every harmless call. Pass a custom policy instead — the same [`Approval`](/docs/human-in-the-loop#approvals) shape authored tools use — to gate only the calls that matter. The policy receives `{ session, toolName, toolInput, approvedTools, callId, abortSignal }` and returns an approval status, synchronously or as a promise.
+A remote MCP server usually mixes read tools with destructive or publishing ones, so a blanket `always()` would prompt on every harmless call. Pass a custom policy instead (the same [`Approval`](/docs/human-in-the-loop#approvals) shape authored tools use) to gate only the calls that matter. The policy receives `{ session, toolName, toolInput, approvedTools, callId, abortSignal }` and returns an approval status, synchronously or as a promise.
 
-This connection always gates deletes, gates a publish only when the call actually schedules a post, and lets everything else through:
+This connection always gates deletes, gates a publish only when the call schedules a post, and lets everything else through:
 
 ```ts title="agent/connections/social.ts"
 import { defineMcpClientConnection } from "eve/connections";
@@ -153,7 +153,7 @@ export default defineMcpClientConnection({
 Two details are specific to connection tools:
 
 - **`toolName` arrives qualified**, not as the bare remote name. An MCP tool surfaces to the policy as `<connection>__<tool>` (e.g. `social__delete_draft`), so match the bare tool name with `.includes()` or `.endsWith()` rather than `===`.
-- **`toolInput` is the raw input the model produced**, typed as `Record<string, unknown> | undefined`. With an authored tool you define the `inputSchema`, so its approval policy gets input typed and checked against your schema; a connection tool's schema is published by the remote MCP server, not you, so the shape is one you neither own nor can rely on. It is also `undefined` whenever the model's input isn't an object. Read nested fields defensively — as `publishesNow` does — instead of trusting the shape.
+- **`toolInput` is the raw input the model produced**, typed as `Record<string, unknown> | undefined`. With an authored tool you define the `inputSchema`, so its approval policy gets input typed and checked against your schema; a connection tool's schema is published by the remote MCP server, not you, so the shape is one you neither own nor can rely on. It is also `undefined` whenever the model's input isn't an object. Read nested fields defensively, as `publishesNow` does, instead of trusting the shape.
 
 Return `"user-approval"` (or `true`) to pause for a person and `"not-applicable"` (or `false`) to run without a prompt; return `"approved"` or `"denied"` to decide automatically without involving anyone.
 

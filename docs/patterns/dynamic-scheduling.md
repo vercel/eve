@@ -10,7 +10,7 @@ Authored eve schedules are static files discovered at build time. You can build 
 3. the handler atomically claims due rows;
 4. `receive(...)` starts a normal durable agent session for each row.
 
-PostgreSQL or a durable KV store can back the adapter. The important storage capability is an atomic lease, not a particular schema.
+PostgreSQL or a durable KV store can back the adapter. The store must support an atomic lease; any schema works.
 
 ```text
 agent/
@@ -254,5 +254,3 @@ Convert the first run to ISO 8601 with an explicit offset. Use everyMinutes only
 for repeating work and null for a one-time run. List schedules before changing
 an ambiguous one.
 ```
-
-The eve-specific core is small: four tools, one one-minute `defineSchedule`, and proactive `receive`. Storage and recurrence policy stay behind the application's adapter.

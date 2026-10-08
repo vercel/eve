@@ -25,7 +25,7 @@ interface ScheduleHandlerArgs {
 }
 ```
 
-`defineSchedule` is a type-level pass-through. The compiler is what enforces the one-of rule.
+`defineSchedule` is a type-level pass-through; the compiler enforces the one-of rule.
 
 A TypeScript schedule with `markdown` is compile-only because eve stores the prompt in the manifest. A schedule with `run` remains a runtime entry so the handler can execute. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).
 
@@ -58,7 +58,7 @@ Sweep stale workflow state.
 
 ## Handler form (`run`)
 
-Use a handler when the schedule needs to deliver to a channel, branch on conditions, or compute its arguments at fire time. The handler is in full control. It has no channel of its own, so it selects a channel target with `to(...)` and sends through the returned handle.
+Use a handler when the schedule needs to deliver to a channel, branch on conditions, or compute its arguments at fire time. The handler is in full control and has no channel of its own, so it selects a channel target with `to(...)` and sends through the returned handle.
 
 ```ts title="agent/schedules/critical-alerts.ts"
 import { defineSchedule } from "eve/schedules";
@@ -114,7 +114,7 @@ curl -X POST http://localhost:2000/eve/v1/dev/schedules/heartbeat
 # -> { "scheduleId": "heartbeat", "sessionIds": ["..."] }
 ```
 
-`:scheduleId` is the path-derived schedule name (`agent/schedules/heartbeat.ts` → `heartbeat`; URL-encode the `/` in nested names). It runs the exact dispatch path the production cron handler uses and returns the started session ids as JSON, so you can subscribe to each one's [stream](./concepts/sessions-runs-and-streaming) at `GET /eve/v1/session/:sessionId/stream`. An unknown id comes back `404` with `availableScheduleIds`, listing the schedules the app actually defines.
+`:scheduleId` is the path-derived schedule name (`agent/schedules/heartbeat.ts` → `heartbeat`; URL-encode the `/` in nested names). It runs the exact dispatch path the production cron handler uses and returns the started session ids as JSON, so you can subscribe to each one's [stream](./concepts/sessions-runs-and-streaming) at `GET /eve/v1/session/:sessionId/stream`. An unknown id comes back `404` with `availableScheduleIds`, listing the schedules the app defines.
 
 The route is dev-only. Production builds never mount it, and it needs no auth since the dev server is local-only.
 
@@ -130,7 +130,7 @@ Vercel evaluates cron expressions in UTC. Confirm discovery under **Settings →
 
 Production builds register schedules as Nitro scheduled tasks. On Vercel, Nitro's Vercel preset wires those task registrations into Vercel Cron for you. Outside Vercel, the standard `eve build && eve start` path serves Nitro's Node output and starts Nitro's schedule runner, so the tasks fire on their cron cadence while that process is running.
 
-The gotcha is custom hosting. If you adapt the generated output to a process manager, container platform, or Nitro preset that only serves HTTP and does not start Nitro's scheduled task runner, the schedule definitions still compile, but they will not fire automatically. In that case, run eve through `eve start`, use a host that supports Nitro scheduled tasks, or trigger the same work from your own scheduler through an authenticated route, channel handoff, or application-specific job runner. The dev dispatch route above is only for `eve dev`; production builds do not mount it.
+On custom hosting, if you adapt the generated output to a process manager, container platform, or Nitro preset that only serves HTTP and does not start Nitro's scheduled task runner, the schedule definitions still compile, but they will not fire automatically. In that case, run eve through `eve start`, use a host that supports Nitro scheduled tasks, or trigger the same work from your own scheduler through an authenticated route, channel handoff, or application-specific job runner. The dev dispatch route above is only for `eve dev`; production builds do not mount it.
 
 ## What to read next
 

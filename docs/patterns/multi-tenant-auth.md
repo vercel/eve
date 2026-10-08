@@ -9,7 +9,7 @@ eve carries verified inbound identity into every turn. Authored tools and connec
 - OpenAPI and MCP `auth` may be async functions of `ctx`;
 - connection headers may be an async map or async individual values.
 
-That is the entire pattern. Your application still owns tenant membership and credential storage; eve ensures the model never needs to see or choose those credentials.
+Your application still owns tenant membership and credential storage; eve ensures the model never needs to see or choose those credentials.
 
 ## Establish the tenant scope
 
@@ -293,4 +293,4 @@ The provider must fail closed for unknown tenants, avoid returning secrets in lo
 
 Also enforce tenant ownership for session create, continue, and stream routes. Route authentication identifies the caller, but your application owns the ACL that decides which session ids that caller may access.
 
-No framework-native tenant object is involved. The implementation is the composition of route auth, `ctx.session`, tool execution, and async connection auth/header resolvers.
+eve has no framework-native tenant object; the pattern composes route auth, `ctx.session`, tool execution, and async connection auth/header resolvers.

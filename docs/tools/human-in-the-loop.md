@@ -6,10 +6,10 @@ url: /human-in-the-loop
 
 Human-in-the-loop (HITL) is any point where the agent durably pauses and waits for a person. Two things trigger it, and both ride the same pause-and-resume protocol:
 
-- **Approvals** — a tool policy allows, denies, or pauses a call for a person to review. The agent decides to call the tool; the policy decides whether it runs automatically or needs a human decision.
-- **Questions** — the agent itself asks the user a clarifying question or a choice mid-turn, and parks until they answer.
+- **Approvals**: a tool policy allows, denies, or pauses a call for a person to review. The agent decides to call the tool; the policy decides whether it runs automatically or needs a human decision.
+- **Questions**: the agent itself asks the user a clarifying question or a choice mid-turn, and parks until they answer.
 
-Both keep the turn open, and the stream reports `turn.waiting`. The run waits durably, for as long as it takes — seconds or days — and picks back up exactly where it left off once the answer arrives. Channels render the request for you.
+Both keep the turn open, and the stream reports `turn.waiting`. The run waits durably, for as long as it takes, whether seconds or days, and picks back up exactly where it left off once the answer arrives. Channels render the request for you.
 
 ## Approvals
 
@@ -226,7 +226,7 @@ Each request includes a `kind` discriminator: `tool-approval`, `question`, or
 `requestId` identifies the request to answer, and `action.callId` identifies the
 tool call that raised it; neither encodes the request's semantics.
 
-The run picks back up exactly where it parked. Because the pause is durable, nothing is held in memory while it waits — the process can restart and the parked turn survives.
+The run picks back up exactly where it parked. Because the pause is durable, nothing is held in memory while it waits. The process can restart and the parked turn survives.
 
 When a subagent requests input, eve emits the same `input.requested` event on its parent session. Answering through that parent session routes the response directly to the blocked child without invoking the parent model.
 
@@ -248,9 +248,9 @@ See [Sessions, runs & streaming](/docs/concepts/sessions-runs-and-streaming) for
 
 ## Answering from a client or channel
 
-Channels turn requests into native UI: the Slack adapter renders approvals as buttons and questions as select menus, and writes the user's choice back as the answer. You get this for free on every [channel](/docs/channels/overview).
+Channels turn requests into native UI: the Slack adapter renders approvals as buttons and questions as select menus, and writes the user's choice back as the answer. This applies to every [channel](/docs/channels/overview).
 
-From your own frontend, scan all messages for pending requests and answer through the same session — see [Building a frontend](/docs/guides/frontend/overview#human-in-the-loop-prompts) for the client-side reducer and `inputResponses` shape.
+From your own frontend, scan all messages for pending requests and answer through the same session. See [Building a frontend](/docs/guides/frontend/overview#human-in-the-loop-prompts) for the client-side reducer and `inputResponses` shape.
 
 You can answer while a turn is running, such as the second approval of a batch while the first answer is still settling. The default message reducer waits for server confirmation before marking any input request answered. A submitted answer marks its request `responded` in `data.inputs` until `approval.settled` or `input.resolved` arrives; submitting a response alone does not resolve an approval, question, or session-limit prompt. Answering a request that is no longer open rejects without a server request. The `client.input.responded` event remains a submission notification for custom reducers, not confirmation that the server accepted the answer.
 

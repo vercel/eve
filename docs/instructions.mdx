@@ -60,7 +60,7 @@ A flat `agent/instructions.md` (or `.ts`) at the agent root and the directory ca
 
 ## Instructions vs skills
 
-Instructions and [skills](./skills) both feed text into the model's context. The difference is timing:
+Instructions and [skills](./skills) both feed text into the model's context but differ in timing:
 
 |                          | Loaded                                             | Use for                                                  |
 | ------------------------ | -------------------------------------------------- | -------------------------------------------------------- |
@@ -70,7 +70,7 @@ Instructions and [skills](./skills) both feed text into the model's context. The
 
 Keep instructions short and stable. Long or situational procedures belong in [skills](./skills), where they only enter context when the request calls for them.
 
-Static instructions never run code at runtime. When you need typed executable behavior, reach for a [tool](./tools).
+Static instructions never run code at runtime. When you need typed executable behavior, use a [tool](./tools).
 
 ## Dynamic instructions
 

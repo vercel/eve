@@ -3,7 +3,7 @@ title: "Connect a Warehouse (Optional)"
 description: "Optional follow-up to the Build an Agent tutorial. Let each user connect their own warehouse over an OAuth MCP via Vercel Connect."
 ---
 
-Complete [the tutorial with sample data](./first-agent) first. When you have a warehouse with an MCP server, you can connect it to the analytics assistant and let each user sign in through their browser. That's what a connection is for. It's an MCP server the model reaches through tools, with auth that eve drives for you.
+Complete [the tutorial with sample data](./first-agent) first. When you have a warehouse with an MCP server, you can connect it to the analytics assistant and let each user sign in through their browser. A connection is an MCP server the model reaches through tools, with auth that eve drives for you.
 
 [Vercel Connect is generally available](https://vercel.com/changelog/vercel-connect-secure-access-to-external-services-for-your-agents). You can complete the tutorial with the [sample dataset](./query-sample-data); Connect is only needed for the OAuth integration shown on this page.
 
@@ -28,7 +28,7 @@ npx vercel@latest link
 npx vercel@latest connect create "https://your-warehouse.example/mcp" --name warehouse
 ```
 
-Follow the provider-specific registration prompts. Copy the **connector UID returned by the CLI**. The display name `warehouse` is not the connector UID. Attach the returned connector to this project, then pull the local environment:
+Follow the provider-specific registration prompts. Copy the connector UID returned by the CLI. The display name `warehouse` is not the connector UID. Attach the returned connector to this project, then pull the local environment:
 
 ```bash
 npx vercel@latest connect attach "<returned-connector-uid>" --yes

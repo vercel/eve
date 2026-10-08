@@ -121,19 +121,17 @@ npx eve remote connect --url https://your-analytics-app.vercel.app
 
 For a production deployment, add the username, password, and model credential to the Production environment too, then run `npx vercel@latest deploy --prod`. Missing Basic credentials keep browser access closed.
 
-The private assistant queries the sample data, runs analysis in a sandbox, charts the results, remembers definitions, loads the Growth playbook, and asks before an expensive query.
-
 ## What you learned
 
 Across the eight steps you built and shipped one agent, and along the way you used:
 
-- **Tools** to give the model typed actions (`run_sql`, `chart_series`, `define_metric`).
-- **The sandbox** to compute and chart beyond SQL in an isolated `/workspace`.
-- **State** (`defineState`) to remember the team's glossary across turns.
-- **Dynamic skills** (`defineDynamic`) to load the right team playbook per caller.
-- **Human-in-the-loop** approval (`approval`) to gate expensive queries.
-- **Channel auth** to turn a request into an authenticated principal.
-- **Deployment** to Vercel, with the runtime behind your web app.
+- Tools to give the model typed actions (`run_sql`, `chart_series`, `define_metric`).
+- The sandbox to compute and chart beyond SQL in an isolated `/workspace`.
+- State (`defineState`) to remember the team's glossary across turns.
+- Dynamic skills (`defineDynamic`) to load the right team playbook per caller.
+- Human-in-the-loop approval (`approval`) to gate expensive queries.
+- Channel auth to turn a request into an authenticated principal.
+- Deployment to Vercel, with the runtime behind your web app.
 
 ## Next steps
 

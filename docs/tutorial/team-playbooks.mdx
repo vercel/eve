@@ -77,9 +77,9 @@ export default eveChannel({
 
 Restart with `npm run dev` and ask "Summarize May 2026 revenue using our team's playbook." The model calls `load_skill`, queries the sample data, and applies Growth's daily and plan groupings. Switch `team` to `"finance"`, restart, and start a new session before asking again. The resolver runs at `session.started`, so changing the team does not replace the playbook in an existing session. The same question in the new session uses Finance's reconciliation rules.
 
-Because the team comes from authenticated claims, not from the message, one tenant can't borrow another's playbook through the message content.
+Because the team comes from authenticated claims rather than from the message, one tenant can't borrow another's playbook through the message content.
 
-The same `defineDynamic` resolver drives dynamic tools and instructions too. For the full mechanism, see [Dynamic capabilities](../guides/dynamic-capabilities).
+The same `defineDynamic` resolver also handles dynamic tools and instructions. For the full mechanism, see [Dynamic capabilities](../guides/dynamic-capabilities).
 
 → Next: [Guard the spend](./guard-the-spend)
 

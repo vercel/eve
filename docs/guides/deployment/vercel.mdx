@@ -55,7 +55,7 @@ A Next.js-centered project uses [`withEve` in `next.config.ts`](../frontend/next
 
 ### Compose agents with other Vercel services
 
-Use `withEve` from `eve/vercel` when the agents and other applications are peer services. The helper contributes workspace agents to a Vercel service graph; it does not manage or require a particular frontend framework. Unlike `eve/next`, this keeps the project lifecycle separate from Next.js. Both integrations deploy the agent services together in one Vercel project.
+Use `withEve` from `eve/vercel` when the agents and other applications are peer services. The helper contributes workspace agents to a Vercel service graph; it neither manages nor requires a particular frontend framework. Unlike `eve/next`, it keeps the project lifecycle separate from Next.js. Both integrations deploy the agent services together in one Vercel project.
 
 For a standalone agent or workspace with a peer Next.js frontend under `apps/web/`, replace `vercel.json` with a root `vercel.ts`. The frontend uses an ordinary Next.js config without `eve/next`:
 

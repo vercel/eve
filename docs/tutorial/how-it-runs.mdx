@@ -13,7 +13,7 @@ The analytics assistant sent one message and got one answer. Three terms describ
 
 The session runs as one durable workflow, and eve saves each turn's progress at every step. Completed steps never re-run; eve replays the recorded result. A step interrupted mid-execution re-runs, so make non-idempotent side effects like charges or emails idempotent, or gate them with approval. A turn that's waiting on you (an approval, a question) resumes whenever you answer, even if that's much later.
 
-That's why the features in the rest of this tutorial work the way they do:
+The features in the rest of this tutorial depend on this model:
 
 - The metric glossary in Step 5 survives across turns. State is checkpointed at step boundaries, so it sticks.
 - The spend approval in Step 7 pauses the turn on your yes/no, then picks up exactly where it left off.

@@ -7,7 +7,7 @@ Extensions package eve tools, channels, connections, skills, schedules, subagent
 
 Ready-made extensions can also be distributed through an eve integration registry. See [Add Integrations](./install-integrations) to discover and add one with `eve add`; this page explains how extension packages are authored, mounted, configured, and overridden.
 
-This enables sharing many different capability sets. A browser extension might include several tools for navigating a site. A self-improving extension could pair hooks with dynamic instructions.
+A browser extension might include several tools for navigating a site, and a self-improving extension could pair hooks with dynamic instructions.
 
 ## Author: create an extension
 

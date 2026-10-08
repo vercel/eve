@@ -5,7 +5,7 @@ description: "Send a notification to another platform without starting an agent 
 
 `ctx.to(channel, target).send(...)` hands a message to another channel and starts or resumes an agent session there. eve does not currently provide a direct cross-channel message queue or provider outbox. To post a notification without a model call, use the destination platform's API instead. When the notification must survive a crash, record the intent in an application-owned outbox before attempting delivery.
 
-An application-owned outbox is the current pattern for durable provider notifications. It provides at-least-once processing. It does not by itself guarantee exactly-once delivery: if the provider accepts a request but the response is lost, the dispatcher cannot know whether to retry. Use a provider idempotency key when one is available. Otherwise, make duplicates harmless or reconcile the destination before retrying an ambiguous request.
+An application-owned outbox is the current pattern for durable provider notifications. It provides at-least-once processing but does not by itself guarantee exactly-once delivery: if the provider accepts a request but the response is lost, the dispatcher cannot know whether to retry. Use a provider idempotency key when one is available. Otherwise, make duplicates harmless or reconcile the destination before retrying an ambiguous request.
 
 This example posts to Slack and requires `SLACK_REVIEW_CHANNEL_ID` and `SLACK_BOT_TOKEN`. If your channel uses Vercel Connect, pass the connector's `botToken` resolver to `callSlackApi` instead.
 

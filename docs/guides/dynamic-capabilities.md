@@ -3,7 +3,7 @@ title: "Dynamic Capabilities"
 description: "Resolve models, subagents, connections, tools, skills, and instructions at runtime with defineDynamic resolver events."
 ---
 
-`defineDynamic` resolves the model, subagents, connections, tools, skills, and instructions at runtime from a session event instead of declaring them up front. Reach for it when the right capability isn't known until the session starts, because it hinges on who the caller is, what tenant they belong to, feature flags, or external data. The [subagents](../subagents), [connections](../connections), [tools](../tools), [skills](../skills), and [instructions](../instructions) guides each point here for their dynamic form.
+`defineDynamic` resolves the model, subagents, connections, tools, skills, and instructions at runtime from a session event instead of declaring them up front. Use it when the right capability isn't known until the session starts, because it depends on who the caller is, what tenant they belong to, feature flags, or external data. The [subagents](../subagents), [connections](../connections), [tools](../tools), [skills](../skills), and [instructions](../instructions) guides each point here for their dynamic form.
 
 eve evaluates a dynamic definition module once during compilation to classify and validate it, then retains that module as a runtime entry so its event handlers can run. Its top-level code therefore runs in both phases; keep caller-specific work inside the handlers. See [Authored module lifecycle](../reference/typescript-api#authored-module-lifecycle).
 
@@ -13,7 +13,7 @@ The `model` field in `agent.ts` accepts `defineDynamic({ events })`. Resolvers
 run at `session.started`, `turn.started`, or `step.started` (precedence: step >
 turn > session). Every matching handler must return a concrete model. A
 missing, invalid, or throwing selection fails the turn before model-dependent
-work begins. Prefer `session.started` — prompt caches are per model, so
+work begins. Prefer `session.started`: prompt caches are per model, so
 switching mid-session re-ingests the conversation at uncached prices. See
 [agent configuration](../agent-config#choose-the-model-dynamically) for the
 full contract.
@@ -141,7 +141,7 @@ also call a selected subagent through `ctx.agent`. A generated program can call 
 provided `workflow` tool. eve checks availability again before starting the child, so a stale or
 manually constructed call fails: a subagent tool call with `SUBAGENT_UNAVAILABLE`, and a
 `ctx.agent` session's first `send()` with an error saying the subagent is not available. Treat conditional
-availability as capability composition, not as the only authorization
+availability as capability composition rather than the only authorization
 boundary: sensitive child tools still need their own authorization and
 approval checks.
 
@@ -344,11 +344,11 @@ A recovery rebind is not a new lifecycle event, but it can run resolver code aga
 | single `defineTool`     | `agent/tools/analytics.ts` | `analytics`       |
 | map `{ export, query }` | `agent/tools/tenant.ts`    | `export`, `query` |
 
-A single return produces one tool named after the file slug, identical to a static tool. A map names each entry by its **bare key** — there is no automatic slug prefix. If a bare name might collide, namespace the key yourself by including the prefix in the key (e.g. return `{ "tenant__export": … }` to get `tenant__export`).
+A single return produces one tool named after the file slug, identical to a static tool. A map names each entry by its bare key, with no automatic slug prefix. If a bare name might collide, namespace the key yourself by including the prefix in the key (e.g. return `{ "tenant__export": … }` to get `tenant__export`).
 
 ### Conflicts
 
-A dynamic connection, tool, or skill whose name matches an **authored** one **overrides** it — a per-caller resolver can replace a static capability by name. Two **dynamic** resolvers of the same capability type emitting the same name is a genuine ambiguity and throws; namespace one of the keys manually to resolve it.
+A dynamic connection, tool, or skill whose name matches an authored one overrides it, so a per-caller resolver can replace a static capability by name. Two dynamic resolvers of the same capability type emitting the same name is ambiguous and throws; namespace one of the keys manually to resolve it.
 
 ### Events
 

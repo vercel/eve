@@ -113,7 +113,7 @@ A connection credential can belong to the agent or to the person using it. This 
 | User             | Each end-user should authorize and use their own third-party account.          | `connect("linear/myagent")`, `connect({ connector: "linear/myagent", principalType: "user" })`, or `auth: { credentialOwner: "user", getToken }`.            |
 | User from a job  | Background work should use the same user's OAuth grant that started the work.  | Start or resume the session through a channel whose route auth resolved that user, or pass an explicit user auth context when dispatching through a channel. |
 
-`credentialOwner: "user"` does not mean "ask any human later." It means "key this credential to the authenticated user already attached to the eve session." If the run was started by a schedule, a same-project runtime token, `localDev()`, or another internal runtime path without an end-user principal, a user-scoped connection fails with `reason: "principal_required"` instead of starting OAuth. In that case, either authenticate the inbound channel as a user or configure the connection as app-scoped.
+`credentialOwner: "user"` keys the credential to the authenticated user already attached to the eve session; it does not ask any human later. If the run was started by a schedule, a same-project runtime token, `localDev()`, or another internal runtime path without an end-user principal, a user-scoped connection fails with `reason: "principal_required"` instead of starting OAuth. In that case, either authenticate the inbound channel as a user or configure the connection as app-scoped.
 
 `credentialOwner` is eve's field for raw getToken-only connection auth. Existing non-interactive raw `principalType` definitions still work, but are deprecated. Interactive auth and `connect()` from `@vercel/connect/eve` continue to use `principalType: "user"`; that field also remains correct for route-auth session identities.
 
@@ -369,7 +369,7 @@ export default defineTool({
 
 ### Authorization and approval together
 
-A tool can require both sign-in (`auth`) and a human approval. The model's approval gate runs before the tool's `execute`, so the order the user sees is **approve, then sign in**. eve records the approval on session state the moment it's granted, and that record survives the sign-in park, so when the turn resumes after authorization the tool is not put through approval again. You get one approval and one sign-in, never a double prompt.
+A tool can require both sign-in (`auth`) and a human approval. The model's approval gate runs before the tool's `execute`, so the order the user sees is approve, then sign in. eve records the approval on session state the moment it's granted, and that record survives the sign-in park, so when the turn resumes after authorization the tool is not put through approval again.
 
 ## What to read next
 

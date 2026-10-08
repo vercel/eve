@@ -266,7 +266,7 @@ export default defineTool({
 });
 ```
 
-Approval is one half of eve's [human-in-the-loop](./human-in-the-loop) model — the page covers the `auto`/`always`/`once`/`never` helpers, input-dependent policies, and how a gated call pauses and resumes durably.
+Approval is one half of eve's [human-in-the-loop](./human-in-the-loop) model. That page covers the `auto`/`always`/`once`/`never` helpers, input-dependent policies, and how a gated call pauses and resumes durably.
 
 ## Shape what the model sees with `toModelOutput`
 
@@ -284,7 +284,7 @@ Tool outputs must be JSON-serializable. Return plain objects, arrays, strings, n
 
 ### Send images to the model with content parts
 
-A tool that produces an image — a screenshot, a rendered chart — can hand the pixels to a vision-capable model by returning a `content` output from `toModelOutput`. Build outputs with the `toolOutput` helpers and parts with the `toolOutputPart` helpers, both from `eve/tools`:
+A tool that produces an image (a screenshot or a rendered chart) can hand the pixels to a vision-capable model by returning a `content` output from `toModelOutput`. Build outputs with the `toolOutput` helpers and parts with the `toolOutputPart` helpers, both from `eve/tools`:
 
 ```ts
 import { defineTool, toolOutput, toolOutputPart } from "eve/tools";
@@ -307,7 +307,7 @@ export default defineTool({
 
 The `toolOutput.text` and `toolOutput.json` builders construct the other two output shapes; hand-written literals remain valid everywhere.
 
-File payloads must be base64 strings — raw bytes (`Uint8Array`, `Buffer`) are rejected because they do not survive eve's durable JSON boundary. eve warns above 3 MiB. Sending image parts to a model without vision support fails with that provider's error, the same as image parts in user messages.
+File payloads must be base64 strings; raw bytes (`Uint8Array`, `Buffer`) are rejected because they do not survive eve's durable JSON boundary. eve warns above 3 MiB. Sending image parts to a model without vision support fails with that provider's error, the same as image parts in user messages.
 
 eve writes each returned file to the session sandbox and keeps only a reference in session history, so the file's bytes are not stored again on every workflow step. Every later model call sends the same file, which keeps it visible on later turns and keeps the provider's prompt cache valid. See [Inbound attachments](/docs/sandbox#inbound-attachments). Compaction counts an image at roughly what providers bill for it rather than its base64 length.
 

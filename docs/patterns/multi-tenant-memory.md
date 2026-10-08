@@ -3,7 +3,7 @@ title: "Multi-Tenant Memory"
 description: "Bind an eve memory provider to an authenticated tenant and caller scope."
 ---
 
-Multi-tenant memory is a scope decision, not a storage implementation. Bind any
+Multi-tenant memory is a scope decision. Bind any
 [memory provider](../memory) to a trusted tenant and caller tuple, and eve
 passes the resulting locked scope key to every provider operation.
 

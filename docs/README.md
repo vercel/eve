@@ -4,7 +4,7 @@ This folder is for app authors using eve as a framework.
 
 If you want to understand how to build agents with eve, start here.
 
-Important naming note:
+Names used in these docs:
 
 - The framework is called eve.
 - The current published package name is `eve`.

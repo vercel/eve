@@ -11,13 +11,13 @@ eve scans the files under `agent/skills/` and exposes each one's description to 
 
 Listing skills and loading their instructions do not require a sandbox: `load_skill` returns static instructions from the compiled agent and dynamic instructions from session state. Only access to supporting package files requires a sandbox. Builds may also prewarm sandbox templates that contain static package files. Supporting files are available under `$HOME/.agents/skills/<skill>/`, with `/workspace/skills/<skill>/` as the fallback when `$HOME` is unavailable. Sibling references inside `SKILL.md`, such as `references/checklist.md`, are relative to the directory containing that specific `SKILL.md`.
 
-The description is a routing hint, not a label. Write it as the task that should trigger activation:
+The description is a routing hint. Write it as the task that should trigger activation:
 
 ```md
 Use when the user needs a release checklist or changelog workflow.
 ```
 
-Loading a skill adds instructions, never a new execution surface. Tools stay visible whether a skill is loaded or not. If you need typed runtime behavior, reach for a [tool](./tools) instead.
+Loading a skill adds instructions, never a new execution surface. Tools stay visible whether a skill is loaded or not. If you need typed runtime behavior, use a [tool](./tools) instead.
 
 ## Markdown vs `defineSkill`
 

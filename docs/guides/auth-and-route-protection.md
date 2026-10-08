@@ -32,7 +32,7 @@ export default eveChannel({
 });
 ```
 
-`vercelOidc()` is a convenience for Vercel-hosted agents and Vercel-to-Vercel callers, not a requirement. If your app already has users, sessions, API keys, or an identity provider, put that authenticator in the `auth` walk instead. Custom `AuthFn` entries are first-class and can fully replace Vercel OIDC.
+`vercelOidc()` is an optional convenience for Vercel-hosted agents and Vercel-to-Vercel callers. If your app already has users, sessions, API keys, or an identity provider, put that authenticator in the `auth` walk instead. A custom `AuthFn` can replace Vercel OIDC entirely.
 
 ## The ordered auth walk
 
@@ -42,7 +42,7 @@ export default eveChannel({
 - returns `null` / `undefined`: skip to the next entry
 - **throws**: reject with a specific status
 
-If every entry skips, the request gets a `401` whose `WWW-Authenticate` header advertises the challenge scheme(s) the configured entries declare — `Basic` for `httpBasic()`, `Bearer` for the token-based helpers (`jwtHmac`, `jwtEcdsa`, `oidc`, `vercelOidc`), both when you mix them, and `Bearer` as a fallback for entries that don't declare a scheme (custom `AuthFn`s, or an empty array). See [`withAuthChallenges`](#custom-verifiers) to declare a scheme on a custom `AuthFn`.
+If every entry skips, the request gets a `401` whose `WWW-Authenticate` header advertises the challenge scheme(s) the configured entries declare: `Basic` for `httpBasic()`, `Bearer` for the token-based helpers (`jwtHmac`, `jwtEcdsa`, `oidc`, `vercelOidc`), both when you mix them, and `Bearer` as a fallback for entries that don't declare a scheme (custom `AuthFn`s, or an empty array). See [`withAuthChallenges`](#custom-verifiers) to declare a scheme on a custom `AuthFn`.
 
 ```ts
 import { type AuthFn, localDev, vercelOidc } from "eve/channels/auth";
@@ -97,7 +97,7 @@ Any other thrown error follows the normal channel failure path. When building a 
 | `jwtEcdsa(...)`  | You verify asymmetric JWTs minted by another system.                                               |
 | `oidc(...)`      | You want eve to verify OIDC-issued tokens from an arbitrary issuer.                                |
 
-`httpBasic(credentials, { realm })` accepts an optional `realm`, rendered on the `WWW-Authenticate: Basic` challenge (e.g. `Basic realm="agent", charset="UTF-8"`) so browsers label their native login prompt. It defaults to `"eve"`, ensuring every Basic challenge includes the required realm. Usernames and passwords are normalized to Unicode NFC before comparison, matching the advertised UTF-8 credential encoding.
+`httpBasic(credentials, { realm })` accepts an optional `realm`, rendered on the `WWW-Authenticate: Basic` challenge (e.g. `Basic realm="agent", charset="UTF-8"`) so browsers label their native login prompt. It defaults to `"eve"`, so every Basic challenge includes the required realm. Usernames and passwords are normalized to Unicode NFC before comparison, which matches the advertised UTF-8 credential encoding.
 
 Exercise caution for agents that process non-public, sensitive, regulated, or production data unless you have implemented other access controls.
 
@@ -132,7 +132,7 @@ vercelOidc({
 
 ### Custom verifiers
 
-When none of the shipped helpers fit, write your own `AuthFn` (the array example above) or call the low-level verifiers directly. Each verifier is the pure function sitting behind the matching strategy helper, and returns `{ ok: true, sessionAuth }` or `{ ok: false }`:
+When none of the shipped helpers fit, write your own `AuthFn` (the array example above) or call the low-level verifiers directly. Each verifier is the pure function behind the matching strategy helper, and returns `{ ok: true, sessionAuth }` or `{ ok: false }`:
 
 A custom `AuthFn` doesn't declare a `WWW-Authenticate` scheme by default, so `routeAuth` falls back to `Bearer` for it. Wrap it with `withAuthChallenges(fn, challenges)` to declare the scheme(s) it actually satisfies, so a mixed `auth` array produces an accurate 401:
 
@@ -223,7 +223,7 @@ Keep secret values (`ROUTE_AUTH_BASIC_PASSWORD`, signing keys) in environment va
 
 ## Accepting forwarded identity from another deployment
 
-A `defineRemoteAgent({ forwardPrincipal: true })` caller (see [Remote agents](./remote-agents#forwarding-the-caller-identity)) asserts its end user's principal on create and continuation requests as a `forwardedPrincipal` body field. By default every such assertion is rejected with `403` — accepting someone else's word for who the user is requires naming exactly which forwarders you trust. Do that with `trustedForwarders` on `eveChannel`:
+A `defineRemoteAgent({ forwardPrincipal: true })` caller (see [Remote agents](./remote-agents#forwarding-the-caller-identity)) asserts its end user's principal on create and continuation requests as a `forwardedPrincipal` body field. By default every such assertion is rejected with `403`, because accepting someone else's word for who the user is requires naming exactly which forwarders you trust. Name them with `trustedForwarders` on `eveChannel`:
 
 ```ts title="agent/channels/eve.ts"
 import { eveChannel } from "eve/channels/eve";
@@ -273,7 +273,7 @@ export default eveChannel({
 
 When the predicate accepts a create request, `ctx.session.auth.current` and `.initiator` carry the forwarded user exactly as if they had called your deployment directly. On continuation, only `auth.current` is replaced; `auth.initiator` remains the session creator. User-scoped connections, local subagents, and further `forwardPrincipal` hops therefore see the active turn's caller.
 
-The forwarder is recorded on accepted contexts as the `eve:forwarded-by` attribute (always overwritten by the receiver, so a forwarder cannot falsify it). Forwarded identity rejections fail loud: a forwarded body without `trustedForwarders` configured, or with a forwarder or assertion the predicate refuses, is a `403`, and a malformed payload is a `400`. Only principal metadata is ever accepted — tokens and credentials never cross the hop.
+The forwarder is recorded on accepted contexts as the `eve:forwarded-by` attribute (always overwritten by the receiver, so a forwarder cannot falsify it). Forwarded identity rejections fail loud: a forwarded body without `trustedForwarders` configured, or with a forwarder or assertion the predicate refuses, is a `403`, and a malformed payload is a `400`. Only principal metadata is ever accepted. Tokens and credentials never cross the hop.
 
 Trusted parent session lineage populates `ctx.session.parent` and preserves the root session across the delegation chain. Untrusted lineage is ignored, and accepted lineage does not remove the normal root-session token cap.
 
@@ -377,7 +377,7 @@ export default defineTool({
 });
 ```
 
-This same inline shape naturally handles tools that need more than one credential:
+The same inline shape handles tools that need more than one credential:
 
 ```ts title="agent/tools/sync_ticket.ts"
 import { connect } from "@vercel/connect/eve";

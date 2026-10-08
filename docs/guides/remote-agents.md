@@ -72,7 +72,7 @@ the agent without that subagent.
 
 ## Runtime URLs
 
-A string `url` is read at compile time and frozen into the build. When the target comes from a runtime env var — known only once the deployment runs — pass a function instead. eve calls it when it resolves the agent graph at runtime, so it can read `process.env`:
+A string `url` is read at compile time and frozen into the build. When the target comes from a runtime env var (known only once the deployment runs), pass a function instead. eve calls it when it resolves the agent graph at runtime, so it can read `process.env`:
 
 ```ts title="agent/subagents/weather.ts"
 import { defineRemoteAgent } from "eve";
@@ -122,7 +122,7 @@ If [Vercel Deployment Protection](https://vercel.com/docs/deployment-protection)
 
 ## Forwarding the caller identity
 
-Outbound auth authenticates your _deployment_ to the remote, so by default the remote session runs as your calling app — not as the end user who is talking to your agent. That breaks per-user workloads on the remote deployment, most directly per-user [Vercel Connect](./auth-and-route-protection#tool-and-connection-auth), which requires an authenticated `user` principal on the session.
+Outbound auth authenticates your _deployment_ to the remote, so by default the remote session runs as your calling app, not as the end user who is talking to your agent. That breaks per-user workloads on the remote deployment, most directly per-user [Vercel Connect](./auth-and-route-protection#tool-and-connection-auth), which requires an authenticated `user` principal on the session.
 
 Set `forwardPrincipal: true` to forward the dispatching turn's session principal across the hop:
 
@@ -138,7 +138,7 @@ export default defineRemoteAgent({
 });
 ```
 
-The create-session request carries the parent turn's `session.auth.current` and `session.auth.initiator` as a `forwardedPrincipal` body field (`initiator` is optional on the wire; when absent, the receiver seeds both from `current`). A continuation by `taskId` carries the `session.auth.current` of the call that continues the task; the remote session keeps its original `auth.initiator`. Only principal metadata crosses the wire — never tokens or credentials. The receiving deployment resolves its own per-user credentials through its own connections.
+The create-session request carries the parent turn's `session.auth.current` and `session.auth.initiator` as a `forwardedPrincipal` body field (`initiator` is optional on the wire; when absent, the receiver seeds both from `current`). A continuation by `taskId` carries the `session.auth.current` of the call that continues the task; the remote session keeps its original `auth.initiator`. Only principal metadata crosses the wire, never tokens or credentials. The receiving deployment resolves its own per-user credentials through its own connections.
 
 This makes caller authority turn-scoped even when the remote child session is persistent. If Alice starts the child and Bob later continues it with its `taskId`, the follow-up runs with Bob as `auth.current`, not Alice. If the parent turn's auth is `null`, a local child clears `auth.current`, while a remote child uses the freshly verified transport principal; neither inherits Alice. eve's in-step bearer cache is also keyed by the resolved principal and is not serialized across steps. The external authorization provider may preserve each user's server-side OAuth grant, but a later turn can resolve only the grant belonging to its own `auth.current` principal.
 

@@ -15,7 +15,7 @@ Add eve, the Chat SDK core (`chat`), an adapter, and a state adapter. The exampl
 npm install eve@latest chat @resend/chat-sdk-adapter @chat-adapter/state-memory
 ```
 
-Swap in whichever adapter matches your surface — `@chat-adapter/slack`, `@chat-adapter/discord`, `@chat-adapter/telegram`, and so on. Any Chat SDK adapter works.
+Swap in whichever adapter matches your surface (`@chat-adapter/slack`, `@chat-adapter/discord`, `@chat-adapter/telegram`, and so on). Any Chat SDK adapter works.
 
 ## Add the channel
 
@@ -51,7 +51,7 @@ bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
 export default channel;
 ```
 
-`adapters` is a map of adapter name to adapter instance; each entry mounts its own webhook (see below). `state` takes any Chat SDK state adapter: `createMemoryState()` is fine for local development, but use a durable adapter (Redis, Upstash, etc.) in production so thread subscriptions and inbound deduplication survive restarts. `send` accepts a plain string or an AI SDK `UserContent` array, and must be called from inside a Chat SDK handler — it dispatches the turn on the webhook that is currently running.
+`adapters` is a map of adapter name to adapter instance; each entry mounts its own webhook (see below). `state` takes any Chat SDK state adapter: `createMemoryState()` is fine for local development, but use a durable adapter (Redis, Upstash, etc.) in production so thread subscriptions and inbound deduplication survive restarts. `send` accepts a plain string or an AI SDK `UserContent` array, and must be called from inside a Chat SDK handler, because it dispatches the turn on the webhook that is currently running.
 
 Deploy once the channel file is in place:
 
@@ -138,9 +138,9 @@ This policy controls overlapping eve turns. Chat SDK's separate `concurrency` op
 
 ### Delivery
 
-The default handlers post the agent's reply back to the thread — no `events` override required. Completed assistant messages are posted as markdown (`{ markdown: … }`) so adapters render rich text and email HTML rather than a raw string.
+The default handlers post the agent's reply back to the thread without an `events` override. Completed assistant messages are posted as markdown (`{ markdown: … }`) so adapters render rich text and email HTML rather than a raw string.
 
-Streaming is on by default: the channel posts an initial message and edits it as tokens arrive (`message.appended`), throttled by `streamingEditIntervalMs` (default `1000`). Set `streaming: false` for surfaces that deliver one message per turn — email, for example — so the reply posts once on completion instead of editing:
+Streaming is on by default: the channel posts an initial message and edits it as tokens arrive (`message.appended`), throttled by `streamingEditIntervalMs` (default `1000`). Set `streaming: false` for surfaces that deliver one message per turn (email, for example) so the reply posts once on completion instead of editing:
 
 ```ts
 chatSdkChannel({
@@ -179,7 +179,7 @@ chatSdkChannel({
 
 ### Human-in-the-loop (HITL)
 
-HITL prompts render as a Chat SDK `Card` with buttons. Button clicks resume the parked session automatically — the channel wires `bot.onAction` to `respond` for you. Adapters that can't render cards, such as Photon iMessage, get fallback text with the options numbered. A reply forwarded through `send` with an option's number or label answers the pending request, so `1` or `approve` runs an approval-gated tool and `2` or `cancel` stops it. If the question allows a custom answer, or has no options, the message asks for a typed reply and any other text is taken as that answer. Change the action-id prefix with `inputActionPrefix` (default `eve_input:`) if your app already uses it, and provide `resolveInputAuth` to carry user or tenant auth across the resume:
+HITL prompts render as a Chat SDK `Card` with buttons. Button clicks resume the parked session automatically because the channel wires `bot.onAction` to `respond` for you. Adapters that can't render cards, such as Photon iMessage, get fallback text with the options numbered. A reply forwarded through `send` with an option's number or label answers the pending request, so `1` or `approve` runs an approval-gated tool and `2` or `cancel` stops it. If the question allows a custom answer, or has no options, the message asks for a typed reply and any other text is taken as that answer. Change the action-id prefix with `inputActionPrefix` (default `eve_input:`) if your app already uses it, and provide `resolveInputAuth` to carry user or tenant auth across the resume:
 
 ```ts
 chatSdkChannel({

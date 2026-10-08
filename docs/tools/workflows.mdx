@@ -418,7 +418,7 @@ The workflow body calls `await readRepository(ctx, repository)`.
 
 When sign-in is required, the step attempt ends and the workflow waits on its own callback hook,
 without holding compute. The channel renders the sign-in challenge. After the callback, eve retries
-**the whole interrupted step**, resolves the token, and continues. Previously completed steps are
+the whole interrupted step, resolves the token, and continues. Previously completed steps are
 not rerun. Resolve auth before other side effects in that step, and make operations before
 `requireAuth` safe to retry. A token rejected immediately after sign-in fails instead of prompting
 again. Provider declarations can be shared imports, but context must be passed directly, not nested
@@ -449,8 +449,8 @@ const answer = await ctx.ask(
 // | { status: "unavailable" }
 ```
 
-`ctx.ask` publishes an `input.requested` event on the session — rendered the way channels render
-tool approvals — and returns an awaitable answer. Awaiting it suspends the run until a response arrives.
+`ctx.ask` publishes an `input.requested` event on the session (rendered the way channels render
+tool approvals) and returns an awaitable answer. Awaiting it suspends the run until a response arrives.
 The `ask_question` tool is a workflow tool built on `ctx.ask`.
 
 The answer's `status` tells the body what happened:
@@ -853,7 +853,7 @@ and the agent receives the outcome as the tool result.
 
 ## Semantics
 
-One call, one result. A workflow tool call resolves once, with the return value, the error, or a
+A workflow tool call resolves once, with the return value, the error, or a
 cancellation.
 
 While an `execute` call runs, the turn is parked. A `queue` message waits for it. A `steer` message
