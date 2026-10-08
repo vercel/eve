@@ -185,6 +185,9 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
         history: step.session.history,
       });
     }
+    if (dispatched.workflowRequests.length > 0) {
+      await step.apply(hold(step.view(), { on: "tasks" }));
+    }
     return { next: null, session: step.session };
   }
 
