@@ -20,6 +20,7 @@ import {
   isVercelResourceMissingError,
   isVercelResourcePendingError,
 } from "#execution/sandbox/bindings/vercel-errors.js";
+import { deleteVercelSandbox } from "#execution/sandbox/bindings/vercel-lifecycle.js";
 import { getNamedVercelSandbox } from "#execution/sandbox/bindings/vercel-lookup.js";
 import {
   createVercelInternalSandboxSession,
@@ -277,7 +278,14 @@ export function createVercelImageSandboxProvider(
         sandboxModule: module,
         sandboxName: state.sandboxName,
       });
-      if (sandbox !== null) await sandbox.delete({ signal: createOptions.signal });
+      if (sandbox !== null) {
+        await deleteVercelSandbox({
+          createOptions,
+          loadDeleteSandboxModule: async () => module,
+          sandbox,
+          signal: createOptions.signal,
+        });
+      }
 
       await deleteForks(module, state.forks, createOptions.signal);
     },
