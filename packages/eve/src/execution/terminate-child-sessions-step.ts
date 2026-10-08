@@ -1,5 +1,6 @@
 import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
-import { liveRuns, stopRuns } from "#execution/stop-runs.js";
+import { stopRuns } from "#execution/stop-runs.js";
+import { liveRuns } from "#execution/tasks/table.js";
 import { createLogger, logError } from "#internal/logging.js";
 
 const log = createLogger("execution.terminate-child-sessions");

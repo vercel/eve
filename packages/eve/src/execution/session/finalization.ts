@@ -7,7 +7,7 @@ import {
 } from "#execution/session/end-sandbox-step.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
-import { liveTaskRuns, readTaskTable } from "#execution/tasks/table.js";
+import { liveRuns } from "#execution/tasks/table.js";
 import type { TurnOutcome } from "#execution/session/turn-step-types.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
@@ -31,6 +31,15 @@ interface SessionFinalizationContext {
   readonly sessionWritable: WritableStream<Uint8Array>;
 }
 
+/** Whether the session may have runs to stop; the step reports state it can't read. */
+function mayHaveLiveRuns(sessionState: DurableSessionState): boolean {
+  try {
+    return liveRuns(sessionState.snapshot?.session?.state).length > 0;
+  } catch {
+    return true;
+  }
+}
+
 /**
  * Terminates descendants, emits the terminal protocol event when the turn has
  * not already done so, then settles the parked caller waiting on this session.
@@ -40,11 +49,8 @@ export async function finalizeSession(
   context: SessionFinalizationContext,
 ): Promise<WorkflowEntryResult> {
   const { serializedContext, sessionState } = context.cursor;
-  // Most sessions end with no task run, so the step that would find nothing to stop is skipped.
-  if (
-    sessionState !== undefined &&
-    liveTaskRuns(readTaskTable(sessionState.snapshot?.session?.state)).length > 0
-  ) {
+  // Most sessions end with no run to stop, so the step that would find nothing is skipped.
+  if (sessionState !== undefined && mayHaveLiveRuns(sessionState)) {
     await terminateChildSessionsStep({ sessionState });
   }
   if (sessionState !== undefined) {
