@@ -17,13 +17,14 @@ describe("World hub transport", () => {
     const close = vi.fn(async () => {});
     const queue = vi.fn(async () => ({ messageId: "msg-test" }));
     const onDeployment = vi.fn();
+    const remoteDeploymentId = vi.fn(async () => "remote");
     const server = createServer(
       createWorldHubServer({
         secret: "secret",
         onDeployment,
         world: {
           specVersion: 8,
-          getDeploymentId: async () => "deployment",
+          getDeploymentId: remoteDeploymentId,
           queue,
           streams: { writeMulti, close },
           runs: { get: async () => ({ createdAt: new Date(0) }) },
@@ -41,6 +42,12 @@ describe("World hub transport", () => {
       streamFlushIntervalMs: 1000,
     });
     try {
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+      expect(await client.getDeploymentId()).toBe("deployment");
+      expect(await client.getDeploymentId()).toBe("deployment");
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(remoteDeploymentId).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
       for (const chunk of ["a", "b", "c"]) await client.streams.write("run", "stream", chunk);
       expect(writeMulti).not.toHaveBeenCalled();
       await client.streams.close("run", "stream");
