@@ -352,9 +352,9 @@ described in [Tasks](/docs/tools/tasks). What differs:
   available. A remote child starts its own trace; its first turn links to the call's tool span
   with `eve.link.type=agent.dispatch` when trace context is available. Later child turns start new
   traces. Parent session lineage stays tied to the opening call, even after the task receives
-  another call; a remote receiver accepts that lineage only from a trusted forwarder. Auth belongs
-  to each message instead: a local child receives the auth of the call being served when the
-  message is sent, while remote identity follows the [forwarding rules](../guides/remote-agents#forwarding-the-caller-identity).
+  another call; a remote receiver accepts that lineage only from a trusted forwarder. Each message
+  uses the auth of the call being served; remote identity follows the
+  [forwarding rules](../guides/remote-agents#forwarding-the-caller-identity).
 - **Results:** `ctx.reply(output)` settles every call received so far with `output`, all at once.
   Each settled call reports its own `task.settled`, and the model receives the reply once. The task
   then goes idle until its next call. A reply with
@@ -546,10 +546,10 @@ client's `MessageResult` fields, plus `error` when the turn failed:
 
 Every `ctx.agent(name)` call returns a new session that only the workflow run can address. The model
 does not see it; it sees what the tool returns. A local child runs as the caller's principal with the
-caller's capabilities. A remote child uses the outbound transport's authenticated principal by
-default, not the caller's session principal. To forward the caller's identity, set
-`forwardPrincipal: true` on the remote agent and configure the receiver's `trustedForwarders`;
-see [Forwarding the caller identity](../guides/remote-agents#forwarding-the-caller-identity).
+caller's capabilities. A remote child does not inherit the caller's session principal by default;
+the receiving deployment determines its identity from the outbound request. To forward the caller's
+identity, set `forwardPrincipal: true` on the remote agent and configure the receiver's
+`trustedForwarders` (see [Forwarding the caller identity](../guides/remote-agents#forwarding-the-caller-identity)).
 A person answers the child's questions and sign-ins at the root session, as for any subagent.
 The session ends when the run finishes, which cancels any turn still running.
 

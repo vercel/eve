@@ -27,11 +27,12 @@ For an agent workspace, select the member the chat should call:
 eve add channel/web --agent support
 ```
 
-The installer adds a shared Next.js application at `apps/web` and configures the chat for the
-selected agent. Choose **Next.js** during setup to wrap `next.config.ts` with `withEve()` and let
-Next.js host the integration. The generated chat uses same-origin `/eve/v1/*` routes for a
-standalone agent or `/eve/<name>/v1/*` routes for a workspace member. Running the installer from a
-workspace root without selecting a member is not supported.
+The installer configures the chat for the selected agent. By default, it adds a shared Next.js
+application under `apps/web`; if a root Web Chat app already exists, it configures that app instead.
+For Next.js hosting, the installer wraps `next.config.ts` with `withEve()`. When setting up a new
+app, choose **Next.js** to host the integration. The generated chat uses same-origin `/eve/v1/*`
+routes for a standalone agent or `/eve/<name>/v1/*` routes for a workspace member. Running the
+installer from a workspace root without selecting a member is not supported.
 
 Before accepting production browser traffic, replace the generated placeholder authorization policy. See [Authenticate browser requests](./overview#authenticate-browser-requests).
 
