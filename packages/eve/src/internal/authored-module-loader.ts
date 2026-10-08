@@ -309,6 +309,8 @@ export async function bundleExtensionDistributionGraph(input: {
 export interface AuthoredModuleMapBundle {
   readonly authoredWorkflowModules: AuthoredWorkflowModules;
   readonly code: string;
+  /** Application modules in the graph, including shared workspace modules outside the app root. */
+  readonly sourceModules: readonly string[];
   /** Fingerprint of the sources that also feed the driver and step registry; a change rebuilds the host. */
   readonly workflowSourceFingerprint: string | undefined;
 }
@@ -403,6 +405,7 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
     return {
       authoredWorkflowModules: workflowSources.modules(),
       code: removeRolldownModuleRegionComments(chunk.code),
+      sourceModules: workflowSources.sourceModules().filter((id) => id !== input.moduleMapPath),
       workflowSourceFingerprint: workflowSources.fingerprint(),
     };
   } catch (error) {
@@ -455,6 +458,10 @@ class AuthoredWorkflowSourceRecorder {
 
   workflowFunctions(id: string): ReadonlySet<string> | undefined {
     return this.#workflowFunctions.get(id);
+  }
+
+  sourceModules(): readonly string[] {
+    return [...this.#sources.keys()].sort();
   }
 
   graphPlugin(): Record<string, unknown> {

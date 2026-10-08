@@ -116,13 +116,13 @@ export function isAuthoredApplicationModule(absolutePath: string, appRoot: strin
   const normalizedRoot = toRealPath(appRoot).replace(/\\/g, "/").replace(/\/$/, "");
   const normalizedPath = toRealPath(absolutePath).replace(/\\/g, "/");
   if (isInNodeModules(normalizedPath)) return false;
-  // A workspace member shares the root package without a package.json of its
-  // own, so that package's modules outside the member are application code too.
-  if (
-    !normalizedPath.startsWith(`${normalizedRoot}/`) &&
-    findPackageRoot(dirname(normalizedPath)) !== findPackageRoot(normalizedRoot)
-  ) {
-    return false;
+  if (!normalizedPath.startsWith(`${normalizedRoot}/`)) {
+    // An app root without its own package.json, such as a workspace member,
+    // shares the enclosing package, so that package's other modules are application code.
+    const appPackageRoot = findPackageRoot(normalizedRoot);
+    if (appPackageRoot === null || findPackageRoot(dirname(normalizedPath)) !== appPackageRoot) {
+      return false;
+    }
   }
   return findPackageJson(normalizedPath)?.name !== EVE_PACKAGE_NAME;
 }

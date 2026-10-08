@@ -11,6 +11,7 @@ import {
   type DevelopmentRuntimeArtifactsActivation,
   type DevelopmentRuntimeArtifactsSnapshot,
 } from "#internal/nitro/dev-runtime-artifacts.js";
+import { isPathInsideOrEqual } from "#internal/nitro/dev-runtime-source-snapshot-local-roots.js";
 
 export interface DevelopmentGeneration extends DevelopmentRuntimeArtifactsSnapshot {
   readonly authoredWorkflowModules?: AuthoredWorkflowModules;
@@ -59,18 +60,22 @@ export async function stageDevelopmentGeneration(
       runtimeAppRoot: snapshot.runtimeAppRoot,
     });
 
+    const generation = {
+      ...snapshot,
+      authoredWorkflowModules: prepared.authoredWorkflowModules,
+      fingerprint: materialized.fingerprint,
+      // The watcher covers the agent root; shared modules imported from elsewhere
+      // in the package, such as a workspace's root lib/, need their own entries.
+      sourceWatchPaths: [
+        ...(snapshot.sourceWatchPaths ?? []),
+        ...prepared.sourceModules.filter(
+          (path) => !isPathInsideOrEqual(path, compileResult.project.agentRoot),
+        ),
+      ],
+    };
     return prepared.workflowSourceFingerprint === undefined
-      ? {
-          ...snapshot,
-          authoredWorkflowModules: prepared.authoredWorkflowModules,
-          fingerprint: materialized.fingerprint,
-        }
-      : {
-          ...snapshot,
-          authoredWorkflowModules: prepared.authoredWorkflowModules,
-          fingerprint: materialized.fingerprint,
-          workflowSourceFingerprint: prepared.workflowSourceFingerprint,
-        };
+      ? generation
+      : { ...generation, workflowSourceFingerprint: prepared.workflowSourceFingerprint };
   } catch (error) {
     try {
       await rm(snapshot.snapshotRoot, { force: true, recursive: true });

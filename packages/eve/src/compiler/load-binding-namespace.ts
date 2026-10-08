@@ -32,8 +32,11 @@ function ancestorMountEntries(mounts: ReadonlyMap<string, ExtensionCompileMount>
 
 /** Loads one node's selected bindings with dependency ordering and per-phase caching. */
 export function createCompiledBindingNamespaceLoader(input: {
-  /** Selected app root; application modules stamp Workflow ids relative to it. */
-  readonly appRoot?: string;
+  /**
+   * Selected app root; application modules stamp Workflow ids relative to it. Required so
+   * no caller silently falls back to the package root, which differs in workspace members.
+   */
+  readonly appRoot: string | undefined;
   readonly bindings?: Readonly<Record<string, AgentModuleBinding>>;
   readonly mounts?: ReadonlyMap<string, ExtensionCompileMount>;
   readonly evaluationId?: string;
@@ -84,7 +87,7 @@ export function createCompiledBindingNamespaceLoader(input: {
 }
 
 async function loadCompiledBindingNamespace(input: {
-  readonly appRoot?: string;
+  readonly appRoot: string | undefined;
   readonly binding: AgentModuleBinding;
   readonly loadDependency: CompiledBindingNamespaceLoader;
   readonly mounts?: ReadonlyMap<string, ExtensionCompileMount>;
