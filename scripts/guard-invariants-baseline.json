@@ -64,6 +64,6 @@
     "packages/eve/src/harness/session-machine/commit.ts": 8,
     "packages/eve/src/harness/session-machine/view.ts": 5,
     "packages/eve/src/subagents/event-proxy-step.ts": 2,
-    "packages/eve/src/subagents/hitl-proxy.ts": 1
+    "packages/eve/src/subagents/hitl-proxy.ts": 2
   }
 }

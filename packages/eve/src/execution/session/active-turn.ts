@@ -327,3 +327,7 @@ function splitAnswers(delivery: DeliverHookPayload): {
     rest: rest.length === 0 ? undefined : { ...delivery, payloads: rest },
   };
 }
+
+// Scratch: an aliased reader with no allowance.
+import { readTurnState as turnOf } from "#harness/session-machine/state.js";
+export const scratchTurnOf = (state: Parameters<typeof turnOf>[0]) => turnOf(state);

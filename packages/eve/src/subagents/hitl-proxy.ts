@@ -311,3 +311,7 @@ function sameBatch(
     route.batch.requestIds.every((requestId, index) => requestId === input.batch.requestIds[index])
   );
 }
+
+// Scratch: a named reader whose allowance is raised to match.
+export const scratchRoutes = (state: Parameters<typeof getProxyInputRequests>[0]) =>
+  getProxyInputRequests(state);
