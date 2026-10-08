@@ -13,6 +13,7 @@ import { SessionKey } from "#context/keys.js";
 import { createProjectionRecorder } from "#internal/testing/session-projection-recorder.js";
 import { runtimeWait, storedProjection, suspendedSteps } from "#harness/session-machine/view.js";
 import { openInputs } from "#protocol/session-projection.js";
+import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
@@ -286,9 +287,9 @@ for (const beside of ["workflow", "gateA"] as const) {
       type: "object",
     };
     const f = fixture(`final-output-beside-${beside}`, false, undefined, schema);
-    f.script.push([{ toolName: beside }, { toolName: "final_output", input: { title: "Early" } }]);
+    f.script.push([{ toolName: beside }, { toolName: REPLY_TOOL_NAME, input: { title: "Early" } }]);
     await f.drive({ message: "Run it, then report." });
-    f.script.push([{ toolName: "final_output", input: { title: "Done" } }]);
+    f.script.push([{ toolName: REPLY_TOOL_NAME, input: { title: "Done" } }]);
     const result =
       beside === "workflow" ? await f.finishRuntime() : await f.drive(f.respond("gateA"));
 
@@ -296,7 +297,7 @@ for (const beside of ["workflow", "gateA"] as const) {
     expect(suspendedSteps(f.session.state)).toEqual([]);
     const rereads = JSON.stringify(f.prompts.at(-1));
     expect(rereads).toContain(beside === "workflow" ? "runtime-RESULT" : "gateA-RESULT");
-    expect(rereads).toContain("Your final output wasn't delivered");
+    expect(rereads).toContain("Your reply wasn't delivered");
   });
 }
 
