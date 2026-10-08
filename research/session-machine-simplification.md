@@ -418,7 +418,7 @@ The cuts above keep state in checkpoints, consistent through one commit path. Th
 - **Steps pass positions, not state.** Today every step journals the complete `SessionStepState`. With a log, a step receives a position and a snapshot reference, folds the suffix, acts, and commits.
 - **Checkpoints become snapshots,** `{position, foldVersion, state}`, written periodically and at handoff. A fold-version mismatch folds again from an earlier snapshot.
 - **Recovery reads the truth.** A retried step sees exactly what it committed, and the projection's counter can't drift from the stream. Zombie writers can still interleave; a conditional append ("expected position N") would be the natural fence if Workflow offers one.
-- **Participants record results as entries.** Restores rebuild code from them, and redeploys re-run session-scoped participants with the original `session.started` ([`dynamic-participants.md`](./dynamic-participants.md)).
+- **Participants record results as entries.** Restores rebuild code from their recorded selections, and redeploys re-resolve at the next turn's change points ([`dynamic-participants.md`](./dynamic-participants.md)).
 - **Compaction stops being destructive,** because raw history stays in the log. That's what rewinding past a compaction needs.
 
 **After 1.0, without breaking clients.** The public view keeps producing exactly the v27 facts, so clients, hooks, and channels see nothing change.
@@ -431,7 +431,7 @@ The cuts above keep state in checkpoints, consistent through one commit path. Th
 1. **Deriving model history exactly.** It has to reproduce the same provider input, or prompt caching misses (`harness/prompt-cache.ts`), including provider metadata, `toModelOutput` transforms, announcements, and today's compaction behavior.
 2. **Snapshots on Workflow:** where they live, and what reading a log suffix costs per step.
 3. **Volume:** about 55 framework context keys, and about 235 non-test `ctx.get`, `set`, and `require` call sites.
-4. **Behavior authors notice.** Resolvers run less often, because restores stop running them again.
+4. **Behavior authors notice.** Resolvers run less often: only when their selection changes, and on restores only to rebuild code.
 
 As a judgment, not an estimate from reading code line by line, this is comparable to the event break in lines touched, spread across releases. Meanwhile, new private state should be entry-shaped: it goes through the commit path as records that could become entries, even while it's stored in checkpoints. Each new ad hoc context key is a future migration.
 

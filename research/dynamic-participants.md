@@ -6,7 +6,7 @@ last_updated: "2026-10-08"
 
 # Dynamic participants
 
-Read on `main` at `285d4e09b`, with the redeploy and compaction paths re-checked at `bf82cfa88`. Nothing was prototyped.
+Read on `main` at `285d4e09b`, with the redeploy and compaction paths re-checked at `bf82cfa88`, and the resolver context and handlers' `ctx` reads re-checked at `d43a449a7`. Nothing was prototyped.
 
 ## Summary
 
@@ -17,28 +17,30 @@ That happens for two reasons:
 - **One moment has no event.** Resolvers that pick the model and tools must run before each model call, but the event that records the call, `step.started`, already carries the chosen model.
 - **Re-runs use hand-built events.** Restores, the refresh after a redeploy, and parked steps re-run resolvers on events rebuilt by hand, with approximate fields, instead of the events that were actually published.
 
-This doc proposes making participants actual consumers of the stream:
+The keys also fix when a resolver runs, not what its answer depends on. A resolver keyed on `session.started` that reads the caller keeps the first caller's answer for the whole session. One keyed on `step.started` runs in full before every model call, even when its answer can't change.
 
-- [`session-event-lifecycle.md`](./session-event-lifecycle.md) adds the missing event, `model.requested`, written before the model is chosen. Redeploys need no event: eve re-runs session-scoped participants with the session's original `session.started`.
-- **Each participant is one function per action** over committed events: `resolve(event, ctx)` for dynamic resolvers, and `recall(event, ctx)` and `capture(event, ctx)` for memory.
-- **A dynamic resolver declares its `scope`:** once per session, per turn, or per model call. That decides which events it receives, so a resolver never runs more often than it asked to.
-- **Memory receives a fixed set of moments,** narrowed by eve: it sees completed compactions, never clears. Authors branch only to tell those moments apart.
-- Participants run in one pipeline, and their results are recorded so restores reuse them.
+This doc proposes that participants stop consuming events and decide from session state instead:
 
-The pipeline can land first. The new API ships with the event break, so authors migrate once.
+- **A dynamic resolver declares what its decision depends on.** `select(view, ctx)` reads a small value from the session view, and `resolve(selected)` turns it into a result. eve calls `resolve` only when the selection changes.
+- **eve owns when each capability can change:** the model and tools before each model call, and everything else at the start of each turn. [`session-event-lifecycle.md`](./session-event-lifecycle.md) adds `model.requested`, so the view has a position before the model is chosen.
+- **Memory keeps fixed moments,** named by eve instead of by event types: `recall(view, ctx)` and `capture(view, ctx)`, with `ctx.moment` telling them apart.
+- **Decisions are recorded with their selection.** Restores rebuild code from the recorded selection, and redeploys re-resolve at the next change point, so nothing replays or rebuilds an event.
+- Participants run in one pipeline.
+
+The pipeline can land first. The new API ships with the event break, so authors migrate once. After it, participants name no events, so later catalog changes don't reach them.
 
 ## Participants versus observers
 
-|                  | Observers                                    | Participants                                                                    |
-| ---------------- | -------------------------------------------- | ------------------------------------------------------------------------------- |
-| Who              | Hooks, channel handlers                      | Dynamic model, tools, instructions, skills, connections, subagents; memory      |
-| Run on           | Committed events                             | Committed events, before the work that depends on them continues                |
-| Can change state | No; they react to what was decided           | Yes; their results feed the model call, and are recorded so restores reuse them |
-| Receive          | Every event they subscribe to                | Only the events their kind accepts, narrowed by eve                             |
-| Unknown values   | Branch on them, with a fallback              | Never see them: a new kind reaches a participant only if eve adds it            |
-| Shape            | A handler per event type, plus `*` for hooks | One function per action                                                         |
+|                  | Observers                                    | Participants                                                                            |
+| ---------------- | -------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Who              | Hooks, channel handlers                      | Dynamic model, tools, instructions, skills, connections, subagents; memory              |
+| Run on           | Committed events                             | Change points eve defines, after the commit that reaches them and before dependent work |
+| Can change state | No; they react to what was decided           | Yes; their results feed the model call, and are recorded so restores reuse them         |
+| Receive          | The event, plus `ctx.view`                   | The view pinned at the change point, and no event                                       |
+| Unknown values   | Branch on them, with a fallback              | Never see events; selectors over the view handle open kinds                             |
+| Shape            | A handler per event type, plus `*` for hooks | `select` and `resolve` for dynamic resolvers; one function per action for memory        |
 
-The rule for authors: **observers render whatever arrives; participants handle the few moments that matter to them.**
+The rule for authors: **observers react to what happened; participants decide from where things stand.**
 
 ## Today
 
@@ -113,7 +115,7 @@ The pattern is as old as dynamic model selection (#581), which had to choose the
 
 ### What that costs
 
-- **The names promise stream facts that aren't there.** Model selection shows it most clearly, and the proposal changes what the resolver receives rather than when it runs:
+- **The names promise stream facts that aren't there.** Model selection shows it most clearly:
 
   ```text
   today     build step.started {modelId: "dynamic"}   unpublished, no meta
@@ -122,15 +124,19 @@ The pattern is as old as dynamic model selection (#581), which had to choose the
             → provider call
 
   proposed  commit model.requested {runId, owner}     published at position N
-            → the resolver receives that exact fact
+            → each model and tool participant selects from the view at N
+            → resolve runs only where the selection changed
             → commit model.started {runId, modelId}   the decision lands on the next fact
             → provider call
   ```
 
-  - **Today the resolver's input depends on its own answer,** so `modelId` is a placeholder and the event can't be published first. `model.requested` holds nothing the resolver decides, so it's written first and handed over as is.
-  - **Replays change the same way.** Restores, the refresh after a redeploy, and parked steps pass the real `session.started`, `turn.started`, or `model.requested`, rebuilt exactly from the fold with their positions, instead of approximations from the v26 builders.
+  - **Today the resolver's input depends on its own answer,** so `modelId` is a placeholder and the event can't be published first. The view at N holds nothing the participants decide, so it's complete before they run.
+  - **Re-runs need no event.** Restores call `resolve` with the recorded selection, and a redeploy re-resolves at the next change point. Neither rebuilds `session.started`, `turn.started`, or `step.started` by hand.
   - **Two things do move earlier.** Readers see a model call coming before the model is chosen, which lets clients show "preparing" and evals time resolution. Hooks see `model.requested` before participants run, since participants run after a commit's observers; hooks never saw the synthetic event, so they lose nothing.
 
+- **Keys fix when a resolver runs, not what it depends on:**
+  - The team playbook example in `docs/guides/dynamic-capabilities.md` reads `auth.current` on `session.started`, so the first caller's team applies for the whole session. In a shared session, the next caller gets the wrong playbook, and nothing in the definition says so.
+  - A `step.started` resolver runs in full, async work included, before every model call, even when its answer can't change.
 - **Some keys name events that are going away.** v27 removes `step.started`, `turn.completed`, and the `compaction.*` events, so those keys would name facts that no longer exist.
 - **Dispatch is scattered:**
   - six type-filtered dispatch calls, run for every published event, deltas included;
@@ -143,32 +149,64 @@ The pattern is as old as dynamic model selection (#581), which had to choose the
 
 ### The API
 
-Each participant is one function per action. It receives a committed event and `ctx`, and returns its result, or nothing for no change. A dynamic resolver also declares how often it runs:
+A dynamic resolver says what its decision depends on, then turns that into a result:
 
 ```ts
-// agent/tools/catalog.ts
-import { defineDynamic, defineTool } from "eve/tools";
+// agent/skills/team_playbook.ts
+import { defineDynamic, defineSkill } from "eve/skills";
+import { PLAYBOOKS } from "../lib/playbooks";
 
 export default defineDynamic({
-  scope: "session",
-  resolve: (_event, ctx) => ({ search: defineTool({/* … */}) }),
+  select: (_view, ctx) => ctx.session.auth.current?.attributes.team ?? null,
+  resolve: (team) => {
+    const markdown = team ? PLAYBOOKS[team] : undefined;
+    return markdown ? defineSkill({ markdown }) : null;
+  },
 });
 ```
 
-The rare resolver that needs two frequencies declares both and branches on the event:
+When a caller from another team takes a turn, the selection changes and the playbook is resolved again at that turn's start. A resolver whose answer doesn't depend on the session omits `select`:
+
+```ts
+// agent/tools/catalog.ts
+import { defineDynamic } from "eve/tools";
+import { loadCatalogTools } from "../lib/catalog";
+
+export default defineDynamic({
+  resolve: () => loadCatalogTools(),
+});
+```
+
+One selection can combine inputs that change at different rates, which replaces a resolver keyed on two events:
 
 ```ts
 // agent/agent.ts
 export default defineAgent({
   model: defineDynamic({
-    scope: ["session", "model"],
-    resolve: (event, ctx) =>
-      event.type === "session.started"
-        ? modelForPlan(ctx.session.auth)
-        : hasImages(ctx.messages)
-          ? visionModel
-          : undefined,
+    select: (_view, ctx) => ({
+      pro: ctx.session.auth.current?.attributes.plan === "pro",
+      images: hasImages(ctx.messages),
+    }),
+    resolve: ({ pro, images }) => (images ? visionModel : pro ? proModel : defaultModel),
   }),
+});
+```
+
+Expensive work belongs in `resolve`. Selecting the turn redoes it once per turn:
+
+```ts
+// agent/tools/orders.ts
+import { activeTurn } from "eve/events";
+import { defineDynamic } from "eve/tools";
+import { checkStock, placeOrder } from "../lib/order-tools";
+import { fetchWarehouseStatus } from "../lib/warehouse";
+
+export default defineDynamic({
+  select: (view) => activeTurn(view)?.turnId ?? null,
+  async resolve(_turnId, { abortSignal }) {
+    const status = await fetchWarehouseStatus({ signal: abortSignal });
+    return status.acceptingOrders ? { checkStock, placeOrder } : { checkStock };
+  },
 });
 ```
 
@@ -177,103 +215,99 @@ Memory providers keep two actions. Most do the same thing at both of their momen
 ```ts
 export default defineMemoryProvider({
   // At the start of each turn, and after a compaction.
-  recall: async (_event, ctx) => store.search(ctx.memory.scope, latestUserText(ctx.messages)),
+  recall: async (_view, ctx) => store.search(ctx.memory.scope, latestUserText(ctx.messages)),
 
   // After each completed turn, and before a compaction.
-  capture: async (_event, ctx) => store.save(ctx.memory.scope, ctx.messages),
+  capture: async (_view, ctx) => store.save(ctx.memory.scope, ctx.messages),
 });
 ```
 
-A provider that wants different behavior switches on the type. Each type it receives is exactly one moment:
+A provider that wants different behavior switches on `ctx.moment`:
 
 ```ts
 export default defineMemoryProvider({
-  async recall(event, ctx) {
-    switch (event.type) {
-      case "turn.started":
+  async recall(_view, ctx) {
+    switch (ctx.moment) {
+      case "turn": // a turn is starting
         return recallForTurn(ctx);
-      case "context.settled": // a compaction just completed
+      case "compaction": // a compaction just completed
         return restoreAfterCompaction(ctx);
     }
   },
-  async capture(event, ctx) {
-    switch (event.type) {
-      case "turn.settled": // a turn just completed
+  async capture(_view, ctx) {
+    switch (ctx.moment) {
+      case "turn": // a turn just completed
         return captureTurn(ctx);
-      case "context.started": // a compaction is about to start
+      case "compaction": // a compaction is about to start
         return captureBeforeCompaction(ctx);
     }
   },
 });
 ```
 
-- **`scope` is required.** A default of `"session"` would leave turn-level resolvers stale without saying so, and a default of `"turn"` would quietly run session resolvers every turn. One word up front avoids both.
-- **`event` is typed to what the participant receives,** and narrows by `type`. On memory's `context.settled` branch, `event.data.kind` is literally `"compaction"`. `ctx` (`DynamicResolveContext`, or memory's context) is unchanged, and eve builds it lazily, so branching first costs little.
-- **Restrictions are type errors.** A skill resolver that declares `scope: "model"` doesn't compile. `eve/skills` and the subagent form of `eve`'s `defineDynamic` get their own typed variants.
-- **`recall` is required and `capture` is optional,** as today.
-- **Guards from `eve/events`** (`isCompaction`, `isCompleted`, `hasKind`, `hasOutcome`) are there for hooks, channels, and view code. Participants rarely need them, because eve has already narrowed what they receive.
+- **`select` declares the inputs.** It's synchronous and deterministic, and returns a small JSON value under a size cap. An async `select` is a type error, and an oversized or non-JSON selection fails with an error that names the participant. A clock read is the usual mistake, so development mode evaluates `select` twice to catch it.
+- **`resolve` receives only the selection,** plus services such as `abortSignal`. It can't read the view, so it can't depend on session state it didn't select. Data from outside eve needs an explicit dependency, such as the turn.
+- **Omitting `select` means a constant selection.** eve resolves once and reuses the decision until a redeploy.
+- **`view` is the `SessionView` that observers get as `ctx.view`,** pinned at the change point, in operational retention ([tables, selectors, and retention](./session-event-lifecycle.md#tables-selectors-and-retention)). It keeps the open turn, open work, and aggregates such as usage, and prunes closed rows, so a selection reads what's open or aggregated. `ctx` is today's `DynamicResolveContext`, narrowed per kind as today: connections don't receive messages.
+- **Select the fact, not the data.** `hasImages(ctx.messages)` changes once, while `ctx.messages.length` changes at every model call and makes `resolve` run every time. Development mode warns when a participant re-resolves at most of its change points.
+- **There's no timing to get wrong.** A skill has no model-call change point, so the skill keyed on `step.started` that compiles and never runs can't be written. The entry points per kind (`eve/tools`, `eve/skills`, and so on) type `ctx` and the result, not timing.
+- **Memory isn't memoized.** Recall and capture are meant to run at every moment, so they have no `select`. `ctx.moment` is a closed set: a new moment reaches providers only if eve adds it. `recall` is required and `capture` is optional, as today.
 
-### What each participant receives
+### When participants run
 
-| Scope       | Receives                                    | Results last   | Accepted by                                                        |
-| ----------- | ------------------------------------------- | -------------- | ------------------------------------------------------------------ |
-| `"session"` | `session.started`, again after a redeploy   | The session    | Dynamic model, tools, instructions, skills, connections, subagents |
-| `"turn"`    | `turn.started`                              | The turn       | The same                                                           |
-| `"model"`   | `model.requested`, for runs owned by a turn | One model call | Dynamic model and tools                                            |
+| Change point | Reached by                                                   | Participants                                         |
+| ------------ | ------------------------------------------------------------ | ---------------------------------------------------- |
+| Turn start   | The commit with `turn.started`                               | Dynamic instructions, skills, connections, subagents |
+| Model call   | Each commit with `model.requested` for a run owned by a turn | Dynamic model and tools                              |
 
-Memory has no `scope`; eve fixes its moments:
+Memory has no `select`; eve fixes its moments:
 
-| Memory function | Receives                                                                  |
-| --------------- | ------------------------------------------------------------------------- |
-| `recall`        | `turn.started`, and `context.settled` for completed compactions           |
-| `capture`       | `turn.settled` for completed turns, and `context.started` for compactions |
-| `tools`         | `turn.started`                                                            |
+| Memory function | `ctx.moment`   | Runs                                                 |
+| --------------- | -------------- | ---------------------------------------------------- |
+| `recall`        | `"turn"`       | At each turn start                                   |
+| `recall`        | `"compaction"` | After a compaction completes (`context.settled`)     |
+| `capture`       | `"turn"`       | After a turn completes (`turn.settled`, `completed`) |
+| `capture`       | `"compaction"` | Before a compaction starts (`context.started`)       |
+| `tools`         | none           | At each turn start                                   |
 
-- **`model.requested`** lands in the commit that makes the next model call necessary: the turn's start, the last call result, an answer, steering, or a completed sign-in. Participants run after it, and `model.started` records the model they chose. It doesn't run again for provider retries inside one run, and a run that replaces an abandoned one reuses that run's decision.
-- **Summary runs.** A compaction's summary run uses `compactionModel` if one is configured, otherwise the model the turn's current run chose. Between turns, the dynamic model runs on the summary run's `model.requested`, as manual compaction's synthetic `step.started` does today. Tool participants never see summary runs.
-- **Redeploys re-run the session's start.** A newer deployment takes a session over only while it's idle. Before the next turn's participants run, eve calls every session-scoped participant again with the session's original `session.started`: a real event at its real position, re-run against the new code. The trigger is the revision check eve makes today (`VERCEL_DEPLOYMENT_ID`, or the compiled artifacts' key locally), so nothing new goes on the stream. Turn and model-call resolvers need nothing: the next turn or model call runs them on the new code anyway.
-- **A fresh process on the same deployment isn't a redeploy.** It rebuilds code from recorded results without deciding them again.
+- **At each change point, eve evaluates `select` for each participant there.** It calls `resolve` only when the selection differs from the current decision's, or that decision came from an older revision. Work started at the change point uses the decisions current then. View changes between change points, including every streamed delta, call nothing.
+- **`model.requested`** lands in the commit that makes the next model call necessary: the turn's start, the last call result, an answer, steering, or a completed sign-in. Participants run after it, and `model.started` records the model they chose. Provider retries inside one run aren't change points, and a run that replaces an abandoned one reuses that run's decisions.
+- **There's no session change point.** A resolver whose selection never changes resolves at its first change point and keeps that decision.
+- **Summary runs.** A compaction's summary run uses `compactionModel` if one is configured, otherwise the model the turn's current run chose. Between turns, the dynamic model is evaluated at the summary run's `model.requested`, as manual compaction's synthetic `step.started` does today. Tool participants never see summary runs.
+- **Redeploys re-resolve at the next turn.** A newer deployment takes a session over only while it's idle. Decisions made under the older revision are stale, so the next turn's change points call `resolve` again, even for unchanged selections. The trigger is the revision check eve makes today (`VERCEL_DEPLOYMENT_ID`, or the compiled artifacts' key locally), so nothing new goes on the stream.
+- **A fresh process on the same deployment isn't a redeploy.** It rebuilds code from recorded decisions without deciding them again.
 - **Failed and cancelled turns** don't reach `capture`, as today. If providers ask, capturing them can come later as an explicit opt-in on the provider.
-- **Framework work moves onto events too.** The skill and connection announcements and the framework connection tools run on `model.requested` as built-in participants, instead of as special cases on `step.started`.
+- **Framework work moves onto change points too.** The skill and connection announcements and the framework connection tools become built-in participants at the model-call change point, instead of special cases on `step.started`.
 
-### Why not keep the maps and filter them
+### Why not `scope`, events, or tracked reads
 
-An alternative keeps today's shape and has eve filter what reaches each key:
+- **`scope`, from an earlier draft of this doc,** declared whether a resolver ran per session, per turn, or per model call. That one word answered four questions: when the resolver runs, how long its result lasts, which result wins when scopes layer (`scope: ["session", "model"]`), and which capabilities may change mid-turn. Only the first belongs to the author, and it still hid the dependency: a session-scoped resolver that reads the caller goes stale when the caller changes. With `select`, the dependency is the declaration, and eve owns the other three.
+- **Event keys filtered by eve** would keep today's shape, with eve narrowing what reaches each key: `capture: {"turn.settled": f}` would receive only completed turns. The event model condenses outcomes and kinds into values on fewer types, so a filtered key hides what the event means: `"turn.settled"` reads as every settled turn. Making the filter visible needs keys that exist nowhere on the wire, such as `"turn.settled:completed"`. And keys tie participants to the catalog.
+- **Tracking reads automatically,** as signals do, would re-run a resolver whenever something it read changed. It misses reads of `ctx` and of data outside eve, it's hard to record durably, and it hides why something re-resolved. Skipping `select` when nothing it read has changed could come later as an optimization, not as the contract.
+- **The split has precedent.** [Reselect](https://redux.js.org/reselect/api/development-only-checks) separates input selectors from a result function, and runs the same development checks. [TanStack Query](https://tanstack.com/query/latest/docs/eslint/exhaustive-deps) requires a query key to hold everything the fetch depends on. [Temporal](https://docs.temporal.io/develop/typescript/workflows/basics) keeps workflow code deterministic and records activity results for replay, as `select` and recorded decisions do here.
 
-```ts
-defineMemoryProvider({
-  capture: {
-    "turn.settled": captureTurn, // only completed turns arrive
-    "context.started": captureBeforeCompaction, // only compactions arrive
-  },
-});
-```
+### What `resolve` returns
 
-- **The event model condenses information into fewer types.** One terminal per entity carries the outcome as a value, and one family per operation carries the kind. That serves most readers: one fact to handle, closed outcome sets, generic handling, and older readers that stay correct when a kind is added. But a distinction that used to be a type is now data, and a key can only name a type.
-- **So a filtered key hides what the event means.** `"turn.settled"` reads as every settled turn, and a reviewer would assume failed turns are captured. This repeats the problem this doc started with, moved from the event to its filter.
-- **Making the filter visible means more technical types:** qualified keys that exist nowhere on the wire, such as `"turn.settled:completed"`, or refinements in handler types, such as `TurnSettled & {data: {outcome: "completed"}}`.
-- **Filters on one type don't compose:** handling completed and failed turns differently would need two keys for one type.
-
-Instead, an author who names an event gets every instance of it, as hooks and channels do. eve filters only where it defines the moment and names it as one: a resolver's `scope`, and memory's fixed moments, whose `event` types state the filter.
-
-### What a handler returns
-
-- **A result, or nothing.** Nothing means no change, and nothing is recorded.
-- **A result lasts for the scope of the event it answered:** the session for `session.started`, the turn for `turn.started`, and one model call for `model.requested`. Persisted callback scopes stay `session`, `turn`, and `step`, with `"model"` stored as `step`, so a session that spans the deploy restores its locked tools.
-- **Results are recorded as today,** in the same durable keys, so a restore reuses locked identities instead of resolving again against the current configuration. There's no `entry` field: a restore rebuilds code from recorded results using the original event, and a redeploy re-runs the original `session.started`. Both call the resolver again, which is why resolvers should stay idempotent. The docs already ask for that.
+- **A result, or nothing.** Nothing keeps the current decision, and eve records that this selection was checked, so a failing source isn't retried at every change point until the selection changes. A first resolution has nothing to keep: optional capabilities contribute nothing, and a model resolver must return a model.
+- **Throwing never keeps the previous decision.** Each capability's failure rule applies as today: for example, a model failure fails the turn, a failing subagent is logged and omitted, and system instructions contribute nothing rather than leaking an older value.
+- **Equal results change nothing.** eve compares results by their serialized declarations: names, descriptions, schemas, and durable callback references with their captures. A re-resolve that returns the same tools doesn't re-announce skills or connections or change the provider request. An unstable value, such as a timestamp in a description, makes every re-resolve a change.
+- **A user-role instruction result is appended to history each time a new selection resolves to it.** A resolver that selects the turn appends every turn, as `turn.started` does today. An equal result after a redeploy isn't appended again.
+- **Decisions are recorded per participant:** the selection, the revision, the view position, and the result. The selection stays in the session's private execution state, never on the stream, because it often holds auth attributes. A restore calls `resolve` with the recorded selection to rebuild code, and keeps the recorded identities instead of deciding again. That's why resolvers should stay idempotent, which the docs already ask.
+- **Calls keep the decision they started under.** A parked call's tools come from the decision recorded at its model call, even if the current decision has changed since. This replaces the parked-step `step.started` rebuild.
 
 ### One pipeline
 
 ```text
 harness/participants/
-  receives.ts   which events each scope and memory function receives, and how eve narrows them
-  registry.ts   the bundle's participants, built once
-  run.ts        runParticipants(commit, ctx): calls participants for each event they receive, in fact order, and records results
+  change-points.ts  which participants each change point runs, and memory's moments
+  registry.ts       the bundle's participants, built once
+  run.ts            runParticipants(commit, ctx): evaluates selections at the change points the commit reaches, resolves what changed, and records decisions
 ```
 
 - **The step that writes a commit calls `runParticipants`** after the commit's observers. Progress never reaches participants.
-- **One fixed order per event:** memory first, then the dynamic model, connections, subagents, tools, skills, and instructions, which is today's order. Today's failure rules stay; for example, a throwing `recall` on `turn.started` fails the turn before the model runs.
-- **Restores reuse recorded results.** They call into the pipeline only to rebuild code, with the original event.
+- **One fixed order:** memory first, then the dynamic model, connections, subagents, tools, skills, and instructions, which is today's order. A participant may select outputs of participants earlier in the order through `ctx`, such as a subagent selecting `ctx.model`, and never later ones, so there's no dependency graph to solve.
+- **Today's failure rules stay.** For example, a throwing `recall` at turn start fails the turn before the model runs.
+- **Restores reuse recorded decisions.** They call into the pipeline only to rebuild code from recorded selections.
 
 **Deleted:**
 
@@ -281,7 +315,7 @@ harness/participants/
 - the six type-filtered dispatch calls in `turn-event-handler.ts`;
 - the memory type checks in `context/memory-event-lifecycle.ts`;
 - the `step.started` skip and special cases in the model, tool, skill, and connection dispatchers;
-- the `ALLOWED_DYNAMIC_*` sets in the runtime and the compiler, replaced by the table of what each participant receives.
+- the `ALLOWED_DYNAMIC_*` sets in the runtime and the compiler, replaced by the table of change points.
 
 ### One ordering change
 
@@ -289,12 +323,17 @@ Today memory runs between the write and the hooks, while the dynamic resolvers r
 
 ## Compatibility
 
-Every dynamic resolver and memory provider changes shape, mechanically. It ships in the same release as the event break ([`session-event-lifecycle.md`](./session-event-lifecycle.md#compatibility-at-the-break)), so authors migrate once.
+Every dynamic resolver and memory provider changes shape. It ships in the same release as the event break ([`session-event-lifecycle.md`](./session-event-lifecycle.md#compatibility-at-the-break)), so authors migrate once.
 
-- **A codemod rewrites each map as a function:** `events: {a: f, b: g}` becomes `resolve(event, ctx)`, with a `scope` derived from the keys and a `switch` only when there are several. Memory's `recall` and `capture` maps become functions the same way. Of the 209 files that use `defineDynamic` today, 115 key `session.started`, 81 `turn.started`, and 20 `step.started`; only 10 use more than one key, so almost every resolver gets a single scope and no `switch`. Along the way it renames `step.started` to `model.requested`, memory's `compaction.requested` to `context.started`, `compaction.completed` to `context.settled`, and `turn.completed` to `turn.settled`, and drops the conditions eve now applies.
+- **A codemod keeps today's timing.** Each key maps to the selection that resolves exactly as often: `session.started` to no `select`, `turn.started` to the turn's ID, and `step.started` to the requested run's ID.
+  - Handlers that read nothing from `ctx` convert mechanically.
+  - Of the roughly 210 files that use `defineDynamic`, about half read `ctx` in a handler (a rough grep, not a parse). The codemod moves simple reads into the selection. For example, `ctx.session.auth.current` in a `session.started` handler becomes a selection of `auth.initiator`, which is the same caller at session start.
+  - It leaves a TODO where it can't, chiefly the dozen or so files that read `ctx.messages`, which need to select a fact instead.
+  - Authors can then narrow selections by hand, for example a turn resolver that depends only on the caller. The codemod can't know what data outside eve a resolver depends on.
+- **Memory's maps become `recall` and `capture` functions,** with a `switch` on `ctx.moment` only when a map has several keys: `turn.started` and `turn.completed` become `"turn"`, and `compaction.requested` and `compaction.completed` become `"compaction"`. The codemod drops the conditions eve now applies.
 - **The old shape fails the build with the fix.** A `defineDynamic` with `events`, or a memory provider with maps, gets an error that points at the codemod. It's an error, not an alias, and it can be removed after a release or two.
-- **Handler payloads become typed.** The first argument is `unknown` today.
-- **Running sessions aren't affected.** Key names aren't persisted, and stored scope names stay as they are.
+- **The untyped payload goes away.** Participants receive the typed view instead of an `unknown` event.
+- **Running sessions don't cross the break,** so recorded decisions can change shape there. The pipeline PR on `main` keeps today's durable keys.
 - **Extension contracts.** Retained epochs whose fixtures author `defineDynamic({ events })` are dropped with a reason: 57 for dynamic tools, 29 for instructions, 28 for skills, 9 for subagents, and 5 for connections. Each capability gets a new epoch.
 - **Third-party extensions and memory providers** built against the old API break until they update.
 - **In this repo,** the migration covers:
@@ -306,18 +345,22 @@ Every dynamic resolver and memory provider changes shape, mechanically. It ships
 
 Two PRs in the overall plan ([`session-event-lifecycle.md`](./session-event-lifecycle.md#phases)):
 
-1. **On `main`, now: the pipeline behind today's API.** What each participant receives, the registry, and `runParticipants`, with today's maps adapted onto it internally. Dispatch moves onto it one participant at a time, with scenario tests pinning order and timing:
+1. **On `main`, now: the pipeline behind today's API.** The change points, the registry, and `runParticipants`, with today's maps adapted internally onto the selections the codemod would write: none for `session.started`, the turn for `turn.started`, and the run for `step.started`. Dispatch moves onto it one participant at a time, with scenario tests pinning order and timing:
    - memory recall before the first model call;
    - dynamic model selection per model call, and for a manual compaction;
    - the refresh after a redeploy;
-   - restoring a parked step's tools.
+   - restoring a parked step's tools from its recorded decision.
 
    It changes nothing for authors. It touches `execution/session/turn-step.ts`, `harness/model-call/run.ts`, and `harness/hitl/intake.ts`, which HumanInput (#4342–#4344) also changes, so whichever lands second rebases rather than waiting.
 
-2. **On the integration branch, after the conversation slice: the API.** The single function with `scope`, memory's moments, typed entry points, the `eve/events` export, the build errors, the codemod, the repo migration, and the docs. Its tests come with the rest of the v27 suite at the end of the break.
+2. **On the integration branch, after the conversation slice: the API.** `select` and `resolve`, memory's moments, recorded selections, the development checks, typed entry points, the `eve/events` export with its selectors, the build errors, the codemod, the repo migration, and the docs. Its tests come with the rest of the v27 suite at the end of the break.
 
-**Size:** a small net reduction, not measured. The dispatch and synthetic-event code it removes is a few hundred lines across `turn-event-handler.ts` (140), `resolver-events.ts` (29), `memory-event-lifecycle.ts` (76), and the filtering parts of the six `context/dynamic-*-lifecycle.ts` files. The pipeline adds back something smaller.
+**Size:** a small net reduction, not measured. The dispatch and synthetic-event code it removes is a few hundred lines across `turn-event-handler.ts` (140), `resolver-events.ts` (29), `memory-event-lifecycle.ts` (76), and the filtering parts of the six `context/dynamic-*-lifecycle.ts` files. The pipeline, selection comparison, and recording add back something smaller.
 
 ## Open questions
 
 1. **Is the ordering change acceptable?** The alternative is for the turn step to run memory between the write and the hooks, as today. That keeps a second, special-cased path into the pipeline.
+2. **Revisions per participant.** A redeploy re-resolves every participant in every session that takes it over, so every external source gets called at once after a deploy. A fingerprint per participant module, instead of the deployment ID, would re-resolve only participants whose code changed. Can the bundle provide a stable one?
+3. **Mid-turn tool changes and prompt caching.** Tools can change at any model call. [Anthropic](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) invalidates the whole cache when tool definitions change, and [OpenAI](https://developers.openai.com/api/docs/guides/prompt-caching) recommends stable tools with `allowed_tools`. Should the harness keep the decision separate from the request, removing tools only at turn start and masking or appending mid-turn where a provider supports it?
+4. **History beyond the operational view.** `ctx.view` prunes closed calls and turns, so a selection can't count earlier deploys or failures. Should participants be able to declare folded aggregates that survive pruning, like `extendConversation` does for clients, or should they derive such facts from `ctx.messages`?
+5. **Periodic refresh.** Selecting the turn refreshes every turn. "At most every ten minutes" needs a committed time in the view, such as the `at` of the turn's start commit, and rows don't carry one today.
