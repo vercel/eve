@@ -41,6 +41,7 @@ import type {
   EveEvalWaitForEventOptions,
 } from "#evals/types.js";
 import type { EveEvalInputRequestMatchOptions, EveEvalToolCallMatchOptions } from "#evals/match.js";
+import { assertReportedToolName } from "#evals/reported-tool-name.js";
 
 /* oxlint-disable typescript/no-unsafe-declaration-merging */
 
@@ -567,6 +568,7 @@ class EvalTurn implements EveEvalTurn {
     name: string,
     options: Omit<EveEvalToolCallMatchOptions, "count"> = {},
   ): EveEvalToolCall {
+    assertReportedToolName(name);
     const matching = this.toolCalls.filter(
       (call) => call.name === name && toolCallMatches(call, options),
     );

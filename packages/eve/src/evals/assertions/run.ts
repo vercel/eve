@@ -13,6 +13,7 @@ import {
 } from "#evals/match.js";
 import type { EveEvalEventMatch } from "#evals/match.js";
 import type { AssertionOutcome, RunAssertion } from "#evals/assertions/collector.js";
+import { assertReportedToolName } from "#evals/reported-tool-name.js";
 
 /** Minimal captured scope consumed by deterministic eval assertions. */
 export interface EveEvalAssertionSubject {
@@ -89,6 +90,7 @@ export function messageIncludes(token: string | RegExp): RunAssertion {
  * matches with either an exact number or a predicate.
  */
 export function calledTool(name: string, options: EveEvalToolCallMatchOptions = {}): RunAssertion {
+  assertReportedToolName(name);
   validateCount(options.count);
   return {
     name: `calledTool(${name})`,
@@ -144,6 +146,7 @@ export function loadedSkill(
  * Asserts no tool call with `name` happened.
  */
 export function notCalledTool(name: string): RunAssertion {
+  assertReportedToolName(name);
   return {
     name: `notCalledTool(${name})`,
     evaluate(result) {
@@ -159,6 +162,7 @@ export function notCalledTool(name: string): RunAssertion {
  * other calls may interleave).
  */
 export function toolOrder(names: readonly string[]): RunAssertion {
+  names.forEach(assertReportedToolName);
   return {
     name: `toolOrder(${names.join(" → ")})`,
     evaluate(result) {

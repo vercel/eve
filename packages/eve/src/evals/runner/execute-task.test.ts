@@ -801,6 +801,35 @@ describe("executeTask", () => {
     ]);
   });
 
+  it("fails with an authoring error when an eval requires a retired tool name", async () => {
+    const server = createScriptedServer([
+      {
+        sessionId: "session_1",
+        events: [
+          turnStarted("turn_1"),
+          messageCompleted("done", "turn_1"),
+          turnCompleted("turn_1"),
+          sessionCompleted(),
+        ],
+      },
+    ]);
+    vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
+
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        const turn = await t.send("run");
+        turn.requireToolCall("load_skill");
+      }, "retired-tool"),
+    });
+
+    expect(String(outcome.error)).toContain(
+      'Tool name "load_skill" was retired; use t.loadedSkill(name).',
+    );
+    expect(outcome.assertions).toEqual([]);
+  });
+
   it("captures an explicit skip without an execution error", async () => {
     const outcome = await executeTask({
       client: new Client({ host: target.url }),

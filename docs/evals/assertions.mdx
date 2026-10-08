@@ -48,6 +48,8 @@ attached.messageIncludes("Sunny");
 
 `t.calledTool` and `t.usedNoTools` are mutually exclusive; assert one or the other, never both in the same run.
 
+A call through [`eve__execute`](../concepts/built-in-tools#eve__search-and-eve__execute) is reported under the name and input of the entry it reaches, such as `linear__list_issues`, so assert on that entry; `eve__search` calls count as tool calls in `t.usedNoTools()` and `t.maxToolCalls(n)`, and skill loads don't. The tool-name assertions and `turn.requireToolCall` throw for `eve__execute` and for retired names such as `load_skill`, and say what to assert instead.
+
 ## Value assertions with `t.check`
 
 `t.check(value, assertion)` grades an explicit value against a builder from `eve/evals/expect`. The value can be a turn’s `.message`, parsed JSON, or any local you computed:
