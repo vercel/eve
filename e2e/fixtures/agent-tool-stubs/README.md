@@ -3,7 +3,10 @@
 This fixture runs consumer evals with every real model in the `e2e-local`
 matrix (`modelMatrix: full`). The tasks journey uses a semantic judge to
 distinguish acknowledging a completed task from listing it as still open;
-it carries the `real-model` tag. Matching and cross-turn playback also run
+it carries the `real-model` tag. The error-recovery eval also carries that tag:
+one ordinary lookup request must lead the model to recover from a tool timeout
+and return the record marker, without instructions to retry or a follow-up prompt.
+Matching and cross-turn playback also run
 with the shared scripted responder in the Postgres and Vercel world suites.
 A passing scripted world run is transport/durability evidence, not live-model evidence.
 
@@ -14,7 +17,7 @@ A passing scripted world run is transport/durability evidence, not live-model ev
 | Overlapping rules select the first match                                                         | `evals/matching.eval.ts`: a specific rule precedes a broader matching fallback                                                                                  |
 | Several calls to one tool within a turn, then continuation on a later turn                       | `evals/matching.eval.ts`: pending → first result → next result                                                                                                  |
 | An unmatched call invokes the real executor                                                      | `evals/matching.eval.ts`: distinct live marker                                                                                                                  |
-| Report an injected tool failure and recover on a later retry                                     | `evals/errors.eval.ts`: failed-call assertion, error message, successful retry, and recovered marker                                                            |
+| Recover from an injected timeout without a retry instruction                                     | `evals/errors.eval.ts`: one user turn, failed call, successful retry, and recovered marker                                                                      |
 | Supported matcher shapes and setup rejection                                                     | `packages/eve/src/tool-stubs/schema.test.ts`: representative matching, rejected keywords and values, no coercion/default mutation                               |
 | Independent rule sequences, first-match precedence, replay, persistent-tool restrictions, bounds | `packages/eve/src/tool-stubs/rules.test.ts` and existing runtime integration tests                                                                              |
 | Root, child, and nested child paths stay distinct                                                | `execution/tool-stubs/execution.integration.test.ts` and `test/scenarios/nested-tool-stubs.scenario.test.ts`: ordinary and workflow tools through compiled HTTP |
