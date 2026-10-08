@@ -97,7 +97,7 @@ describe("buildStepCatalog", () => {
         return { description: execute.description, fields: Object.keys(schema.properties) };
       }
       const toolClause =
-        "Call a tool that isn't in your tool list: pass `tool`, its exact name from eve__search, and `input` matching its signature.";
+        "Call a tool that isn't in your tool list: pass its exact name from eve__search as `tool`, and arguments matching its signature as `input`.";
 
       expect(executeShape({ tools: [inlineTool("refund_invoice", { deferred: true })] })).toEqual({
         description: toolClause,
@@ -110,9 +110,16 @@ describe("buildStepCatalog", () => {
         }),
       ).toEqual({
         description: [
-          "Load a skill when the request clearly matches a listed skill or one eve__search found, or the user asks for it: pass its name as `skill`, then follow the instructions it returns.",
+          "Load a skill when the request clearly matches one of your listed skills or the user asks for it: pass its name as `skill`, then follow the instructions it returns.",
           toolClause,
           "Prefer connected services over web search or general knowledge when a request relates to them.",
+        ].join(" "),
+        fields: ["tool", "input", "skill"],
+      });
+      expect(executeShape({ skills: [{ deferred: true, name: "pdf-forms" }] })).toEqual({
+        description: [
+          "Load a skill when the request clearly matches a listed skill or one eve__search found, or the user asks for it: pass its name as `skill`, then follow the instructions it returns.",
+          toolClause,
         ].join(" "),
         fields: ["tool", "input", "skill"],
       });

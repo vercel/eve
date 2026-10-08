@@ -190,6 +190,8 @@ function setup(
   const resolvedAgent: Partial<CompiledBundle["resolvedAgent"]> = {
     connections: [],
     dynamicConnectionResolvers,
+    dynamicSkillResolvers: [],
+    dynamicToolResolvers: [],
   };
   const sandboxRegistry: {
     sandbox: CompiledBundle["graph"]["root"]["sandboxRegistry"]["sandbox"] | null;

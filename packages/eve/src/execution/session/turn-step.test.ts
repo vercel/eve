@@ -262,7 +262,7 @@ function createTurnStepTestBundle(modelCallsPerStep?: number) {
     },
     hookRegistry: createRuntimeHookRegistry([]),
     moduleMap: { nodes: {} },
-    resolvedAgent: { config },
+    resolvedAgent: { config, dynamicSkillResolvers: [], dynamicToolResolvers: [] },
     subagentRegistry: { dynamicResolvers: [] },
     toolRegistry: {},
     turnAgent: TestTurnAgent,

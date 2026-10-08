@@ -615,8 +615,8 @@ today.
   are already listable, it only confirms. It has no approval, and its label
   is `Sign in to Linear`. Every path that finishes a sign-in, whether in
   `eve__search`, a tool call, or this entry, goes through one helper.
-- **Description.** Fixed for each eve version and built from what the agent
-  declares, so it never changes within a deployment. Loading a skill comes
+- **Description.** Fixed for a deployment: it's built from what the agent
+  declares. Loading a skill comes
   first, with `load_skill`'s trigger: load one when the request clearly matches
   a listed skill, or one `eve__search` found, or the user asks for it. An audit
   found that a skill clause placed after the generic call-a-tool text left only

@@ -117,6 +117,8 @@ export function catalogBundle(
     resolvedAgent: {
       config: { name: "test-agent" },
       connections: input.connections ?? [],
+      dynamicSkillResolvers: [],
+      dynamicToolResolvers: [],
       skills: (input.skills ?? []).map((skill) => ({
         deferred: skill.deferred,
         description: skill.description ?? `${skill.name} skill`,

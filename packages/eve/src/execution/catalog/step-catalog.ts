@@ -53,7 +53,7 @@ const ENDS_TURN_TOOL_NOTE =
 const LISTED_SKILL_CLAUSE =
   "Load a skill when the request clearly matches one of your listed skills or the user asks for it: pass its name as `skill`, then follow the instructions it returns.";
 const SEARCHABLE_SKILL_CLAUSE = `Load a skill when the request clearly matches a listed skill or one ${SEARCH_TOOL_NAME} found, or the user asks for it: pass its name as \`skill\`, then follow the instructions it returns.`;
-const TOOL_CLAUSE = `Call a tool that isn't in your tool list: pass \`tool\`, its exact name from ${SEARCH_TOOL_NAME}, and \`input\` matching its signature.`;
+const TOOL_CLAUSE = `Call a tool that isn't in your tool list: pass its exact name from ${SEARCH_TOOL_NAME} as \`tool\`, and arguments matching its signature as \`input\`.`;
 const CONNECTIONS_CLAUSE =
   "Prefer connected services over web search or general knowledge when a request relates to them.";
 
@@ -63,6 +63,8 @@ interface CatalogTools {
   readonly connections: boolean;
   readonly execute: boolean;
   readonly search: boolean;
+  /** A deferred skill or a dynamic skill resolver, which `eve__search` can find. */
+  readonly searchableSkills: boolean;
   /** A static skill or a dynamic skill resolver. */
   readonly skills: boolean;
 }
@@ -75,7 +77,11 @@ interface CatalogTools {
  */
 function executeDescription(tools: CatalogTools): string {
   return [
-    tools.skills ? (tools.search ? SEARCHABLE_SKILL_CLAUSE : LISTED_SKILL_CLAUSE) : undefined,
+    tools.skills
+      ? tools.searchableSkills
+        ? SEARCHABLE_SKILL_CLAUSE
+        : LISTED_SKILL_CLAUSE
+      : undefined,
     tools.search ? TOOL_CLAUSE : undefined,
     tools.connections ? CONNECTIONS_CLAUSE : undefined,
   ]
@@ -88,7 +94,7 @@ function executeDescription(tools: CatalogTools): string {
 function executeInputSchema(tools: CatalogTools): JsonObject {
   const skill = {
     type: "string",
-    description: tools.search
+    description: tools.searchableSkills
       ? `A skill's name, from your listed skills or ${SEARCH_TOOL_NAME}.`
       : "A skill's name, from your listed skills.",
   };
@@ -132,21 +138,24 @@ function catalogToolsFor(
 ): CatalogTools {
   const agent = bundle?.resolvedAgent;
   const skills = agent?.skills ?? [];
-  const resolvers = [
-    agent?.dynamicToolResolvers,
-    agent?.dynamicSkillResolvers,
-    agent?.dynamicConnectionResolvers,
-    bundle?.subagentRegistry.dynamicResolvers,
-  ];
+  const dynamicSkills = (agent?.dynamicSkillResolvers.length ?? 0) > 0;
   const connections =
     (agent?.connections ?? []).length > 0 || (agent?.dynamicConnectionResolvers?.length ?? 0) > 0;
+  const searchableSkills = dynamicSkills || skills.some((skill) => skill.deferred === true);
   const search =
-    agentTools.some((definition) => definition.deferred === true) ||
-    skills.some((skill) => skill.deferred === true) ||
+    searchableSkills ||
     connections ||
-    resolvers.some((declared) => (declared?.length ?? 0) > 0);
-  const declaresSkills = skills.length > 0 || (agent?.dynamicSkillResolvers?.length ?? 0) > 0;
-  return { connections, execute: search || declaresSkills, search, skills: declaresSkills };
+    agentTools.some((definition) => definition.deferred === true) ||
+    (agent?.dynamicToolResolvers.length ?? 0) > 0 ||
+    (bundle?.subagentRegistry.dynamicResolvers.length ?? 0) > 0;
+  const declaresSkills = skills.length > 0 || dynamicSkills;
+  return {
+    connections,
+    execute: search || declaresSkills,
+    search,
+    searchableSkills,
+    skills: declaresSkills,
+  };
 }
 
 export interface StepCatalog extends HarnessToolLookup {
