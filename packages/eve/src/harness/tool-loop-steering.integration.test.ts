@@ -1,7 +1,7 @@
 import { jsonSchema } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
-import { EXECUTE_TOOL_NAME } from "#protocol/catalog-tools.js";
+import { CALL_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import {
   inlineTool,
@@ -488,16 +488,16 @@ describe("generation steering with the real AI SDK", () => {
   it.each([
     ["a workflow tool directly", workflowTool("deploy_service"), "deploy_service", {}],
     [
-      "a workflow tool through execute",
+      "a workflow tool through eve__tool",
       workflowTool("deploy_service", "execute", { deferred: true }),
-      EXECUTE_TOOL_NAME,
-      { tool: "deploy_service" },
+      CALL_TOOL_NAME,
+      { name: "deploy_service" },
     ],
     [
-      "an agent through execute",
+      "an agent through eve__tool",
       subagentTool("billing_specialist", { deferred: true }),
-      EXECUTE_TOOL_NAME,
-      { input: { message: "Review Bob's dispute." }, tool: "billing_specialist" },
+      CALL_TOOL_NAME,
+      { input: { message: "Review Bob's dispute." }, name: "billing_specialist" },
     ],
   ] as const)(
     "interrupts a step that calls %s, since it runs only after the step",
@@ -537,7 +537,7 @@ describe("generation steering with the real AI SDK", () => {
     },
   );
 
-  it("does not interrupt a step once an inline entry called through execute is running", async () => {
+  it("does not interrupt a step once an inline entry called through eve__tool is running", async () => {
     const steering = new AbortController();
     const executing = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
@@ -553,8 +553,8 @@ describe("generation steering with the real AI SDK", () => {
             controller.enqueue({
               type: "tool-call",
               toolCallId: "refund-1",
-              toolName: EXECUTE_TOOL_NAME,
-              input: JSON.stringify({ input: {}, tool: "refund_invoice" }),
+              toolName: CALL_TOOL_NAME,
+              input: JSON.stringify({ input: {}, name: "refund_invoice" }),
             });
             controller.enqueue({
               type: "finish",

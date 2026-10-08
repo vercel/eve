@@ -14,7 +14,7 @@ import {
 import { buildSerializedContext } from "#internal/testing/entry-test-helpers.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { start } from "#internal/workflow/runtime.js";
-import { EXECUTE_TOOL_NAME } from "#protocol/catalog-tools.js";
+import { CALL_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { STUB_CONTEXT_KEY, type ToolStub } from "#tool-stubs/types.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
@@ -27,8 +27,8 @@ async function settle(output: unknown): Promise<unknown> {
   return last;
 }
 
-describe("tool stubs through eve__execute", () => {
-  it("match the entry an eve__execute call reaches, by its name and input, and leave other calls live", async () => {
+describe("tool stubs through eve__tool", () => {
+  it("match the entry an eve__tool call reaches, by its name and input, and leave other calls live", async () => {
     const rules: readonly ToolStub[] = [
       {
         id: "refund",
@@ -98,22 +98,22 @@ describe("tool stubs through eve__execute", () => {
           describe: (definition) => definition.description,
           resolve: catalog.resolve,
           tools: catalog.advertised,
-        })[EXECUTE_TOOL_NAME]!.execute as (input: unknown, options: ToolExecuteOptions) => unknown;
+        })[CALL_TOOL_NAME]!.execute as (input: unknown, options: ToolExecuteOptions) => unknown;
         const call = (toolCallId: string, input: Record<string, unknown>) =>
           inSession(async () => await settle(execute(input, { messages: [], toolCallId })));
 
         expect(
-          await call("refund-1", { tool: "refund_invoice", input: { invoiceId: "inv_1" } }),
+          await call("refund-1", { name: "refund_invoice", input: { invoiceId: "inv_1" } }),
         ).toEqual({ refunded: "stubbed" });
         expect(
-          await call("refund-2", { tool: "refund_invoice", input: { invoiceId: "inv_2" } }),
+          await call("refund-2", { name: "refund_invoice", input: { invoiceId: "inv_2" } }),
         ).toEqual({ input: { invoiceId: "inv_2" }, ran: "refund_invoice" });
 
         expect(
-          await call("issues-1", { tool: "linear__list_issues", input: { status: "open" } }),
+          await call("issues-1", { name: "linear__list_issues", input: { status: "open" } }),
         ).toEqual({ issues: ["Fix login"] });
         expect(linear.calls).toEqual([]);
-        await call("issues-2", { tool: "linear__list_issues", input: { status: "closed" } });
+        await call("issues-2", { name: "linear__list_issues", input: { status: "closed" } });
         expect(linear.calls).toEqual([{ input: { status: "closed" }, tool: "list_issues" }]);
       } finally {
         await run.cancel();

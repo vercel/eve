@@ -36,7 +36,7 @@ import {
 import { createJsonSchemaSample } from "#runtime/agent/mock-structured-output.js";
 import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import { readTaskResults } from "#execution/tasks/render.js";
-import { EXECUTE_TOOL_NAME } from "#protocol/catalog-tools.js";
+import { SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
 
 const MOCK_RUNTIME_MODEL_PROVIDER = "eve-runtime-mock";
 const SKILL_LOAD_CALL_ID = "call_execute_skill";
@@ -200,13 +200,13 @@ function createSkillLoadResult(
 
   return createToolCallGenerateResult({
     input: {
-      skill: skill.name,
+      name: skill.name,
     },
     inputTokens: estimateTokenCount(getPromptText(prompt)),
     modelId,
     outputTokens: estimateTokenCount(skill.name),
     toolCallId: SKILL_LOAD_CALL_ID,
-    toolName: EXECUTE_TOOL_NAME,
+    toolName: SKILL_TOOL_NAME,
   });
 }
 
@@ -642,7 +642,7 @@ function findRelevantTool(
   message: string,
 ): AvailableBootstrapTool | null {
   const normalizedMessage = normalizeText(message);
-  // Skills load through `eve__execute` only by skill-relevance selection.
+  // Skills load through `eve__skill` only by skill-relevance selection.
   const explicitTool = tools.find(
     (tool) => tool.name !== "agent" && normalizedMessage.includes(normalizeText(tool.name)),
   );

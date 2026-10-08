@@ -6,8 +6,8 @@ import { displayTitle } from "#shared/display-name.js";
 
 /**
  * How a call reads to people on every surface: the label its entry's definition
- * gives it, or the entry's display title. A call made through `eve__execute`
- * arrives as the call to its entry, so it reads like a direct call.
+ * gives it, or the entry's display title. A call made through `eve__tool` or
+ * `eve__skill` arrives as the call to its entry, so it reads like a direct call.
  */
 export function actionLabel(
   action: RuntimeActionRequest,

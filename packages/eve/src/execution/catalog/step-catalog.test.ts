@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { EXECUTE_TOOL_NAME, SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
+import { CALL_TOOL_NAME, SEARCH_TOOL_NAME, SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { TASK_CANCEL_TOOL_NAME, TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
@@ -27,19 +27,42 @@ const CHILD = { rootSessionId: "root-session" };
 
 const names = (tools: ReadonlyMap<string, HarnessToolDefinition>) => [...tools.keys()];
 
-/** Validates `input` against the `execute` schema, which every call passes before it runs. */
-function validateExecute(catalog: StepCatalog, input: unknown) {
-  const schema = catalog.advertised.get(EXECUTE_TOOL_NAME)!.inputSchema as StandardSchemaV1;
+/** Validates `input` against a catalog tool's schema, which every call passes before it runs. */
+function validate(catalog: StepCatalog, tool: string, input: unknown) {
+  const schema = catalog.advertised.get(tool)!.inputSchema as StandardSchemaV1;
   return schema["~standard"].validate(input);
 }
+const validateTool = (catalog: StepCatalog, input: unknown) =>
+  validate(catalog, CALL_TOOL_NAME, input);
+const validateSkill = (catalog: StepCatalog, input: unknown) =>
+  validate(catalog, SKILL_TOOL_NAME, input);
+
+/** A catalog tool's description and input fields, as the model reads them. */
+function shape(catalog: StepCatalog, tool: string) {
+  const definition = catalog.advertised.get(tool)!;
+  const schema = serializeInputSchema(definition.inputSchema as ToolSchemaSource) as {
+    properties: Record<string, unknown>;
+    required?: string[];
+  };
+  return {
+    description: definition.description,
+    fields: Object.keys(schema.properties),
+    required: schema.required,
+  };
+}
+
+const LISTED_SKILL_DESCRIPTION =
+  "Load a skill's instructions when the request clearly matches one of your listed skills or the user asks for it, then follow them.";
+const CALL_DESCRIPTION =
+  "Call a tool that isn't in your tool list by its exact name from eve__search, with `input` matching its signature.";
 
 describe("buildStepCatalog", () => {
-  it("lists direct entries, then search and execute, and keeps deferred entries out of the tool list", () => {
+  it("lists direct entries, then the catalog tools, and keeps deferred entries out of the tool list", () => {
     const { catalog } = catalogContext({
       tools: [inlineTool("add"), inlineTool("refund_invoice", { deferred: true })],
     });
 
-    expect(names(catalog.advertised)).toEqual(["add", SEARCH_TOOL_NAME, EXECUTE_TOOL_NAME]);
+    expect(names(catalog.advertised)).toEqual(["add", SEARCH_TOOL_NAME, CALL_TOOL_NAME]);
     expect(names(catalog.deferred)).toEqual(["refund_invoice"]);
   });
 
@@ -61,91 +84,113 @@ describe("buildStepCatalog", () => {
 
       expect(names(catalogContext({ tools }).catalog.advertised)).toEqual([
         SEARCH_TOOL_NAME,
-        EXECUTE_TOOL_NAME,
+        CALL_TOOL_NAME,
       ]);
       expect(names(catalogContext({ session: CHILD, tools }).catalog.advertised)).toEqual([]);
     });
 
-    it("gives an agent with nothing to find or load neither tool", () => {
+    it("gives an agent with nothing to find, call, or load no catalog tools", () => {
       const { catalog } = catalogContext({ tools: [inlineTool("add")] });
 
       expect(names(catalog.advertised)).toEqual(["add"]);
     });
 
-    it("gives an agent with only listed skills an execute that loads them and never mentions search", async () => {
+    it("gives an agent with only listed skills eve__skill alone, which never mentions search", async () => {
       const { catalog } = catalogContext({ skills: [{ name: "house-rules" }] });
-      const execute = catalog.advertised.get(EXECUTE_TOOL_NAME)!;
 
-      expect(names(catalog.advertised)).toEqual([EXECUTE_TOOL_NAME]);
-      expect(execute.description).toBe(
-        "Load a skill when the request clearly matches one of your listed skills or the user asks for it: pass its name as `skill`, then follow the instructions it returns.",
-      );
-      expect(await validateExecute(catalog, { skill: "house-rules" })).toEqual({
-        value: { skill: "house-rules" },
+      expect(names(catalog.advertised)).toEqual([SKILL_TOOL_NAME]);
+      expect(shape(catalog, SKILL_TOOL_NAME)).toEqual({
+        description: LISTED_SKILL_DESCRIPTION,
+        fields: ["name"],
+        required: ["name"],
       });
-      const unknown = JSON.stringify(await validateExecute(catalog, { skill: "house_rules" }));
+      expect(await validateSkill(catalog, { name: "house-rules" })).toEqual({
+        value: { name: "house-rules" },
+      });
+      const unknown = JSON.stringify(await validateSkill(catalog, { name: "house_rules" }));
       expect(unknown).toContain('No skill named \\"house_rules\\"');
       expect(unknown).not.toContain(SEARCH_TOOL_NAME);
     });
 
-    it("leads execute with when to load a skill, and adds each part only for what the agent declares", () => {
-      function executeShape(declared: Parameters<typeof catalogContext>[0]) {
-        const execute = catalogContext(declared).catalog.advertised.get(EXECUTE_TOOL_NAME)!;
-        const schema = serializeInputSchema(execute.inputSchema as ToolSchemaSource) as {
-          properties: Record<string, unknown>;
-        };
-        return { description: execute.description, fields: Object.keys(schema.properties) };
-      }
-      const toolClause =
-        "Call a tool that isn't in your tool list: pass its exact name from eve__search as `tool`, and arguments matching its signature as `input`.";
+    it("gives an agent with deferred skills search and eve__skill, which mentions search", () => {
+      const { catalog } = catalogContext({ skills: [{ deferred: true, name: "pdf-forms" }] });
 
-      expect(executeShape({ tools: [inlineTool("refund_invoice", { deferred: true })] })).toEqual({
-        description: toolClause,
-        fields: ["tool", "input"],
+      expect(names(catalog.advertised)).toEqual([SEARCH_TOOL_NAME, SKILL_TOOL_NAME]);
+      expect(shape(catalog, SKILL_TOOL_NAME).description).toBe(
+        "Load a skill's instructions when the request clearly matches a listed skill or one eve__search found, or the user asks for it, then follow them.",
+      );
+    });
+
+    it("describes eve__tool with input optional, preferring connected services only with connections", () => {
+      const tools = catalogContext({ tools: [inlineTool("refund_invoice", { deferred: true })] });
+      const connected = catalogContext({
+        connections: [fakeConnection({ name: "linear", tools: [] })],
+        skills: [{ name: "house-rules" }],
       });
+
+      expect(shape(tools.catalog, CALL_TOOL_NAME)).toEqual({
+        description: CALL_DESCRIPTION,
+        fields: ["name", "input"],
+        required: ["name"],
+      });
+      expect(names(connected.catalog.advertised)).toEqual([
+        SEARCH_TOOL_NAME,
+        CALL_TOOL_NAME,
+        SKILL_TOOL_NAME,
+      ]);
+      expect(shape(connected.catalog, CALL_TOOL_NAME).description).toBe(
+        `${CALL_DESCRIPTION} Prefer connected services over web search or general knowledge when a request relates to them.`,
+      );
+      expect(shape(connected.catalog, SKILL_TOOL_NAME).description).toBe(LISTED_SKILL_DESCRIPTION);
+    });
+
+    it("tells search's results apart by the catalog tool that takes them, naming only tools the agent has", () => {
+      const searchText = (declared: Parameters<typeof catalogContext>[0]) =>
+        catalogContext(declared).catalog.advertised.get(SEARCH_TOOL_NAME)!.description;
+      const toolResults =
+        "A result with `tool` has the exact name, description, and TypeScript signature: call it with eve__tool({ name, input }).";
+      const skillResults =
+        "A result with `skill` has the name and description: load it with eve__skill({ name }).";
+      const signIn =
+        "A connection that needs sign-in appears as a tool named after the connection: calling it with eve__tool({ name }) asks the user to sign in.";
+
+      const skillsOnly = searchText({ skills: [{ deferred: true, name: "pdf-forms" }] });
+      expect(skillsOnly).toContain(skillResults);
+      expect(skillsOnly).not.toContain(CALL_TOOL_NAME);
+
+      const toolsOnly = searchText({ tools: [inlineTool("refund_invoice", { deferred: true })] });
+      expect(toolsOnly).toContain(toolResults);
+      expect(toolsOnly).not.toContain(SKILL_TOOL_NAME);
+      expect(toolsOnly).not.toContain(signIn);
+
       expect(
-        executeShape({
-          connections: [fakeConnection({ name: "linear", tools: [] })],
-          skills: [{ name: "house-rules" }],
-        }),
-      ).toEqual({
-        description: [
-          "Load a skill when the request clearly matches one of your listed skills or the user asks for it: pass its name as `skill`, then follow the instructions it returns.",
-          toolClause,
-          "Prefer connected services over web search or general knowledge when a request relates to them.",
-        ].join(" "),
-        fields: ["tool", "input", "skill"],
-      });
-      expect(executeShape({ skills: [{ deferred: true, name: "pdf-forms" }] })).toEqual({
-        description: [
-          "Load a skill when the request clearly matches a listed skill or one eve__search found, or the user asks for it: pass its name as `skill`, then follow the instructions it returns.",
-          toolClause,
-        ].join(" "),
-        fields: ["tool", "input", "skill"],
-      });
+        searchText({ connections: [fakeConnection({ name: "linear", tools: [] })] }),
+      ).toContain(signIn);
     });
 
     it.each([
       ["a deferred tool", { tools: [inlineTool("refund_invoice", { deferred: true })] }],
       ["a deferred agent", { tools: [subagentTool("researcher", { deferred: true })] }],
-      ["a deferred skill", { skills: [{ deferred: true, name: "pdf-forms" }] }],
       ["a connection", { connections: [fakeConnection({ name: "linear", tools: [] })] }],
       ["a dynamic subagent resolver", { dynamicSubagents: ["helper"] }],
-    ])("gives an agent with %s both tools", (_, declared) => {
+    ])("gives an agent with %s search and eve__tool", (_, declared) => {
       // A subagent also brings the task tools; the catalog tools come last.
       expect(names(catalogContext(declared).catalog.advertised).slice(-2)).toEqual([
         SEARCH_TOOL_NAME,
-        EXECUTE_TOOL_NAME,
+        CALL_TOOL_NAME,
       ]);
     });
 
     it.each([
-      "dynamicToolResolvers",
-      "dynamicSkillResolvers",
-      "dynamicConnectionResolvers",
-    ] as const)("gives an agent with %s both tools, whatever they resolve", (kind) => {
-      expect(advertisedWithResolver(kind)).toEqual([SEARCH_TOOL_NAME, EXECUTE_TOOL_NAME]);
-    });
+      ["dynamicToolResolvers", [SEARCH_TOOL_NAME, CALL_TOOL_NAME]],
+      ["dynamicConnectionResolvers", [SEARCH_TOOL_NAME, CALL_TOOL_NAME]],
+      ["dynamicSkillResolvers", [SEARCH_TOOL_NAME, SKILL_TOOL_NAME]],
+    ] as const)(
+      "gives an agent with %s its catalog tools, whatever they resolve",
+      (kind, tools) => {
+        expect(advertisedWithResolver(kind)).toEqual(tools);
+      },
+    );
   });
 
   it("hides root-only entries, direct or deferred, from delegated sessions", async () => {
@@ -169,7 +214,7 @@ describe("buildStepCatalog", () => {
       TASK_WAIT_TOOL_NAME,
       TASK_CANCEL_TOOL_NAME,
       SEARCH_TOOL_NAME,
-      EXECUTE_TOOL_NAME,
+      CALL_TOOL_NAME,
     ]);
     expect(names(root.deferred)).toEqual(["archive", "researcher"]);
 
@@ -180,13 +225,13 @@ describe("buildStepCatalog", () => {
       TASK_WAIT_TOOL_NAME,
       TASK_CANCEL_TOOL_NAME,
       SEARCH_TOOL_NAME,
-      EXECUTE_TOOL_NAME,
+      CALL_TOOL_NAME,
     ]);
     expect(names(child.deferred)).toEqual(["researcher"]);
-    // A hidden entry can't be reached through execute either.
-    expect(await validateExecute(child, { tool: "archive" })).toEqual({
+    // A hidden entry can't be reached through eve__tool either.
+    expect(await validateTool(child, { name: "archive" })).toEqual({
       issues: [
-        { message: 'No tool named "archive". Find tools with eve__search.', path: ["tool"] },
+        { message: 'No tool named "archive". Find tools with eve__search.', path: ["name"] },
       ],
     });
   });
@@ -234,11 +279,11 @@ describe("buildStepCatalog", () => {
       tools: [add, refundInvoice, subagentTool("billing_specialist", { deferred: true })],
     });
 
-    it("resolves a call through execute to the entry it names, keeping the model's call id", () => {
+    it("resolves an eve__tool call to the entry it names, keeping the model's call id", () => {
       const call = {
-        input: { input: { invoiceId: "in_1" }, tool: "refund_invoice" },
+        input: { input: { invoiceId: "in_1" }, name: "refund_invoice" },
         toolCallId: "call-1",
-        toolName: EXECUTE_TOOL_NAME,
+        toolName: CALL_TOOL_NAME,
       };
 
       expect(catalog.resolve(call)).toEqual({
@@ -246,16 +291,12 @@ describe("buildStepCatalog", () => {
         definition: refundInvoice,
       });
       expect(
-        catalog.resolve({ input: { tool: "billing_specialist" }, toolName: EXECUTE_TOOL_NAME })
-          ?.call,
+        catalog.resolve({ input: { name: "billing_specialist" }, toolName: CALL_TOOL_NAME })?.call,
       ).toEqual({ input: {}, toolName: "billing_specialist" });
     });
 
-    it("resolves execute({ skill }) to the skill loader, which returns the skill's markdown", async () => {
-      const resolved = catalog.resolve({
-        input: { skill: "pdf-forms" },
-        toolName: EXECUTE_TOOL_NAME,
-      });
+    it("resolves an eve__skill call to the skill loader, which returns the skill's markdown", async () => {
+      const resolved = catalog.resolve({ input: { name: "pdf-forms" }, toolName: SKILL_TOOL_NAME });
 
       expect(resolved?.call).toEqual({ input: { skill: "pdf-forms" }, toolName: "eve:load-skill" });
       const label = resolved?.definition.label;
@@ -269,13 +310,14 @@ describe("buildStepCatalog", () => {
     it("resolves a direct call only to a listed tool", () => {
       expect(catalog.resolve({ input: {}, toolName: "add" })?.definition).toBe(add);
       expect(catalog.resolve({ input: {}, toolName: "refund_invoice" })).toBeUndefined();
+      expect(catalog.resolve({ input: { name: "add" }, toolName: CALL_TOOL_NAME })).toBeUndefined();
       expect(
-        catalog.resolve({ input: { tool: "add" }, toolName: EXECUTE_TOOL_NAME }),
+        catalog.resolve({ input: { name: "refund_invoice" }, toolName: SKILL_TOOL_NAME }),
       ).toBeUndefined();
     });
   });
 
-  describe("execute validation", () => {
+  describe("eve__tool and eve__skill validation", () => {
     const { catalog } = catalogContext({
       connections: [fakeConnection({ name: "linear", tools: [] })],
       skills: [
@@ -302,80 +344,70 @@ describe("buildStepCatalog", () => {
     it.each([
       [
         "an unknown tool, with the closest names",
-        { tool: "refund_invoce" },
-        "tool",
+        "refund_invoce",
         'No tool named "refund_invoce". Closest tools: refund_invoice, refund_payment.',
       ],
       [
         "an unknown tool with no close names",
-        { tool: "weather" },
-        "tool",
+        "weather",
         'No tool named "weather". Find tools with eve__search.',
       ],
+      ["a tool in the model's tool list", "add", '"add" is in your tool list; call it directly.'],
       [
-        "a tool in the model's tool list",
-        { tool: "add" },
-        "tool",
-        '"add" is in your tool list; call it directly.',
-      ],
-      [
-        "eve__execute itself",
-        { tool: EXECUTE_TOOL_NAME },
-        "tool",
-        `"${EXECUTE_TOOL_NAME}" is in your tool list; call it directly.`,
+        "eve__tool itself",
+        CALL_TOOL_NAME,
+        `"${CALL_TOOL_NAME}" is in your tool list; call it directly.`,
       ],
       [
         "a skill named as a tool when no tool has its name",
-        { tool: "release_notes" },
-        "tool",
-        '"release_notes" is a skill; load it with eve__execute({ skill: "release_notes" }).',
+        "release_notes",
+        '"release_notes" is a skill; load it with eve__skill({ name: "release_notes" }).',
       ],
+    ])("eve__tool rejects %s", async (_case, name, message) => {
+      expect(await validateTool(catalog, { name })).toEqual({
+        issues: [{ message, path: ["name"] }],
+      });
+    });
+
+    it.each([
       [
         "an unknown skill, with the closest names",
-        { skill: "release" },
-        "skill",
+        "release",
         'No skill named "release". Closest skills: release-checklist, release_notes.',
       ],
       [
         "a skill named like a connection",
-        { skill: "Linear" },
-        "skill",
+        "Linear",
         'No skill named "Linear". Find skills with eve__search. "linear" is a connection, not a skill. Find its tools with eve__search({ query: "linear__" }).',
       ],
-      ["neither tool nor skill", {}, "tool", "Pass `tool`, or `skill` to load a skill."],
       [
-        "both tool and skill",
-        { skill: "release_notes", tool: "refund_payment" },
-        "skill",
-        "Pass either `tool` or `skill`, not both.",
+        "a deferred tool's name",
+        "refund_payment",
+        '"refund_payment" is a tool, not a skill; call it with eve__tool({ name: "refund_payment" }).',
       ],
       [
-        "input with a skill",
-        { input: { page: 2 }, skill: "release_notes" },
-        "input",
-        "A skill takes no `input`; pass `input` only with `tool`.",
+        "a listed tool's name",
+        "add",
+        '"add" is a tool in your tool list, not a skill; call it directly.',
       ],
-    ])("rejects %s", async (_case, input, path, message) => {
-      expect(await validateExecute(catalog, input)).toEqual({
-        issues: [{ message, path: [path] }],
+    ])("eve__skill rejects %s", async (_case, name, message) => {
+      expect(await validateSkill(catalog, { name })).toEqual({
+        issues: [{ message, path: ["name"] }],
       });
     });
 
-    it("accepts an empty input with a skill, since input defaults to {}", async () => {
-      expect(await validateExecute(catalog, { input: {}, skill: "release_notes" })).toEqual({
-        value: { skill: "release_notes" },
-      });
-    });
-
-    it("runs a tool that shares a skill's name, since tools and skills have separate names", async () => {
+    it("calls the tool and loads the skill that share a name, since tools and skills have separate names", async () => {
       expect(
-        await validateExecute(catalog, { input: { invoiceId: "in_1" }, tool: "refund_invoice" }),
-      ).toEqual({ value: { input: { invoiceId: "in_1" }, tool: "refund_invoice" } });
+        await validateTool(catalog, { input: { invoiceId: "in_1" }, name: "refund_invoice" }),
+      ).toEqual({ value: { input: { invoiceId: "in_1" }, name: "refund_invoice" } });
+      expect(await validateSkill(catalog, { name: "refund_invoice" })).toEqual({
+        value: { name: "refund_invoice" },
+      });
     });
 
     it("reports invalid input as the entry's own issues under input, with its signature", async () => {
       expect(
-        await validateExecute(catalog, { input: { invoice: 1 }, tool: "refund_invoice" }),
+        await validateTool(catalog, { input: { invoice: 1 }, name: "refund_invoice" }),
       ).toEqual({
         issues: [
           { message: 'Unrecognized key: "invoice"', path: ["input"] },
@@ -407,12 +439,12 @@ describe("buildStepCatalog", () => {
 
     it("resolves a name under a connection's prefix to that connection's tool, filling schema defaults", async () => {
       const { catalog, linear, run } = linearCatalog();
-      const validated = { input: { limit: 20, team: "core" }, tool: "linear__list_issues" };
+      const validated = { input: { limit: 20, team: "core" }, name: "linear__list_issues" };
 
       expect(
-        await validateExecute(catalog, { input: { team: "core" }, tool: "linear__list_issues" }),
+        await validateTool(catalog, { input: { team: "core" }, name: "linear__list_issues" }),
       ).toEqual({ value: validated });
-      const resolved = catalog.resolve({ input: validated, toolName: EXECUTE_TOOL_NAME });
+      const resolved = catalog.resolve({ input: validated, toolName: CALL_TOOL_NAME });
       expect(resolved?.call.toolName).toBe("linear__list_issues");
       expect(resolved?.definition.label?.start?.({})).toBe("Linear: List issues");
       await run(() =>
@@ -427,17 +459,17 @@ describe("buildStepCatalog", () => {
         const { catalog, linear, run } = linearCatalog();
         const listing = vi.spyOn(linear.client, "getToolMetadata");
         const timedOut = '"linear" did not list its tools within 10s. Try again later.';
-        const call = { input: { team: "core" }, tool: "linear__list_issues" };
+        const call = { input: { team: "core" }, name: "linear__list_issues" };
 
         listing.mockReturnValueOnce(new Promise(() => {}));
-        const validating = validateExecute(catalog, call);
+        const validating = validateTool(catalog, call);
         await vi.advanceTimersByTimeAsync(10_000);
         expect(await validating).toEqual({
           issues: [expect.objectContaining({ message: timedOut })],
         });
 
-        const { value } = (await validateExecute(catalog, call)) as { value: unknown };
-        const resolved = catalog.resolve({ input: value, toolName: EXECUTE_TOOL_NAME });
+        const { value } = (await validateTool(catalog, call)) as { value: unknown };
+        const resolved = catalog.resolve({ input: value, toolName: CALL_TOOL_NAME });
         listing.mockReturnValueOnce(new Promise(() => {}));
         const calling = run(() =>
           resolved?.definition.execute?.(resolved.call.input, {
@@ -458,7 +490,7 @@ describe("buildStepCatalog", () => {
       const { catalog, linear } = linearCatalog();
 
       expect(
-        await validateExecute(catalog, { input: { team: 7 }, tool: "linear__list_issues" }),
+        await validateTool(catalog, { input: { team: 7 }, name: "linear__list_issues" }),
       ).toEqual({
         issues: [
           {
@@ -490,7 +522,7 @@ describe("buildStepCatalog", () => {
       const { catalog } = linearCatalog(listing);
       const tool = listing === undefined ? "linear__list_issue" : "linear__list_issues";
 
-      expect(await validateExecute(catalog, { tool })).toEqual({
+      expect(await validateTool(catalog, { name: tool })).toEqual({
         issues: [{ message, path: ["input"] }],
       });
     });
@@ -499,8 +531,8 @@ describe("buildStepCatalog", () => {
       const { catalog } = linearCatalog("sign-in");
 
       expect(
-        await validateExecute(catalog, { input: { team: 7 }, tool: "linear__list_issues" }),
-      ).toEqual({ value: { input: { team: 7 }, tool: "linear__list_issues" } });
+        await validateTool(catalog, { input: { team: 7 }, name: "linear__list_issues" }),
+      ).toEqual({ value: { input: { team: 7 }, name: "linear__list_issues" } });
     });
   });
 
@@ -521,8 +553,8 @@ describe("buildStepCatalog", () => {
       });
       const context = catalogContext({ connections: [notion] });
       const signIn = context.catalog.resolve({
-        input: { tool: "notion" },
-        toolName: EXECUTE_TOOL_NAME,
+        input: { name: "notion" },
+        toolName: CALL_TOOL_NAME,
       })!;
       return {
         ...context,

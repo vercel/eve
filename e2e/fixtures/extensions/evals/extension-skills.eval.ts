@@ -4,13 +4,12 @@ import { defineEval } from "eve/evals";
 const TOOLKIT_INCIDENT_TOKEN = "toolkit-incident-dynamic-ok-7T2X";
 
 /**
- * Extension skills load through eve__execute({ skill }) under their mount prefix:
+ * Extension skills load through eve__skill({ name }) under their mount prefix:
  * a packaged static skill, and a dynamic map entry that composes under each
  * mount (`toolkit__incident`, `toolkit-alt__incident`) instead of its bare key.
  */
 export default defineEval({
-  description:
-    "eve__execute({ skill }) loads static and dynamic extension skills under their mounts.",
+  description: "eve__skill({ name }) loads static and dynamic extension skills under their mounts.",
   async test(t) {
     requireMockModel(t);
 

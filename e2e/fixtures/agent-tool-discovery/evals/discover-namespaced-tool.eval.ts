@@ -7,7 +7,7 @@ const TOOL = "sre__status_page_incidents_list";
 
 /**
  * A request for a deferred tool's capability: the model searches its catalog
- * with eve__search, then runs the tool through eve__execute.
+ * with eve__search, then runs the tool through eve__tool.
  */
 export default defineEval({
   tags: ["real-model"],

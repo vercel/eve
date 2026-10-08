@@ -31,7 +31,7 @@ export interface WorkspaceAgentDefinition {
   /**
    * How eve exposes this workspace peer to the parent model: `true` lists it
    * as a tool, `"deferred"` makes it a catalog entry the model finds with
-   * `eve__search` and calls with `eve__execute`, and `false` keeps it callable only from
+   * `eve__search` and calls with `eve__tool`, and `false` keeps it callable only from
    * workflow tools. Defaults to `true`.
    */
   readonly tool?: AgentToolExposure;

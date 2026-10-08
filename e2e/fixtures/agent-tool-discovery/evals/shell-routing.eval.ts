@@ -2,10 +2,10 @@ import { defineEval } from "eve/evals";
 
 import { calledTools, usesCatalog } from "./tool-use";
 
-/** A shell request goes to `bash`; `eve__execute` only runs catalog entries. */
+/** A shell request goes to `bash`; `eve__tool` only runs catalog entries. */
 export default defineEval({
   tags: ["real-model"],
-  description: "A request to inspect files with a shell command goes to bash, not eve__execute.",
+  description: "A request to inspect files with a shell command goes to bash, not eve__tool.",
 
   async test(t) {
     const turn = await t.send(

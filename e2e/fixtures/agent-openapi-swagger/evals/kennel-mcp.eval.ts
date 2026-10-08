@@ -15,7 +15,7 @@ export default defineEval({
         "Bob works the front desk at the Maple Street kennel. Biscuit, a boarding golden retriever,",
         "needs a grooming visit on October 14, 2026. Alice (555-0100) should be notified about it.",
         "Use `eve__search` to find the `kennel` connection's tools, look up Biscuit's pet id,",
-        "then book the visit with `eve__execute`.",
+        "then book the visit with `eve__tool`.",
         "Reply with the visit id the kennel returns.",
       ].join(" "),
     );

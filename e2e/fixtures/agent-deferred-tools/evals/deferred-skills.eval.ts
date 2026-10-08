@@ -3,7 +3,7 @@ import { defineEval } from "eve/evals";
 
 export default defineEval({
   description:
-    "eve__execute({ skill }) loads deferred skills from SKILL.md frontmatter, defineSkill, and a dynamic resolver.",
+    "eve__skill({ name }) loads deferred skills from SKILL.md frontmatter, defineSkill, and a dynamic resolver.",
 
   async test(t) {
     requireMockModel(t);

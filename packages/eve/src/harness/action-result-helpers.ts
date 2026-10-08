@@ -146,7 +146,7 @@ export function createToolResultMessagePartFromToolError(
  */
 export function createRuntimeToolResultFromMessagePart(
   part: ToolResultPart,
-  /** The entry the result's call ran, which history names `eve__execute` for a call made through it. */
+  /** The entry the result's call ran, which history names after the catalog tool for a call made through one. */
   toolName: string,
 ): RuntimeToolResultActionResult {
   return createRuntimeToolResultFromValue({

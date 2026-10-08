@@ -6,12 +6,12 @@ import { DYNAMIC_SKILL_TOKEN } from "../../agent/skills/dynamic-tenant-policy";
 import { HOUSE_RULES_OVERRIDE_TOKEN } from "../../agent/skills/house-rules-override";
 
 /**
- * eve__execute({ skill }) loads dynamic skills by name: a single resolved skill
+ * eve__skill({ name }) loads dynamic skills by name: a single resolved skill
  * under its file slug, a map entry under its bare key, and a dynamic skill
  * that overrides the authored skill of the same name.
  */
 export default defineEval({
-  description: "eve__execute({ skill }) loads dynamic skills, map entries, and dynamic overrides.",
+  description: "eve__skill({ name }) loads dynamic skills, map entries, and dynamic overrides.",
   async test(t) {
     requireMockModel(t);
 

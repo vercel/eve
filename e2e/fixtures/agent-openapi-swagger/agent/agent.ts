@@ -1,6 +1,6 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
-import { EXECUTE_TOOL, SEARCH_TOOL } from "@eve-e2e/config/catalog-tools";
-import { execute, outputOf, playScript, type ScriptedCall } from "@eve-e2e/config/mock-script";
+import { CALL_TOOL, SEARCH_TOOL } from "@eve-e2e/config/catalog-tools";
+import { callTool, outputOf, playScript, type ScriptedCall } from "@eve-e2e/config/mock-script";
 import { defineAgent } from "eve";
 import type { MockModelRequest, MockModelResponse } from "eve/evals";
 
@@ -18,15 +18,12 @@ const BISCUIT_VISIT = {
 };
 
 const KENNEL_CALLS: readonly ScriptedCall[] = [
-  execute("kennel-find", { input: { name: "Biscuit" }, tool: "kennel__find_pet" }),
-  execute("kennel-feedings", { input: { petId: 4217 }, tool: "kennel__list_feedings" }),
-  execute("kennel-photo", { input: { petId: 4217 }, tool: "kennel__pet_photo" }),
-  execute("kennel-discharge", { input: { petId: 4217 }, tool: "kennel__discharge_pet" }),
-  execute("kennel-bad-input", {
-    input: { petId: "4217", visit: { kind: "bath" } },
-    tool: "kennel__book_visit",
-  }),
-  execute("kennel-unknown", { tool: "kennel__find_pets" }),
+  callTool("kennel-find", "kennel__find_pet", { name: "Biscuit" }),
+  callTool("kennel-feedings", "kennel__list_feedings", { petId: 4217 }),
+  callTool("kennel-photo", "kennel__pet_photo", { petId: 4217 }),
+  callTool("kennel-discharge", "kennel__discharge_pet", { petId: 4217 }),
+  callTool("kennel-bad-input", "kennel__book_visit", { petId: "4217", visit: { kind: "bath" } }),
+  callTool("kennel-unknown", "kennel__find_pets"),
   {
     id: "kennel-book",
     // Corrects the misshapen booking from the signature its error returned.
@@ -34,9 +31,9 @@ const KENNEL_CALLS: readonly ScriptedCall[] = [
       input: outputOf(request, "kennel-bad-input").includes("Signature: kennel__book_visit(")
         ? BISCUIT_VISIT
         : {},
-      tool: "kennel__book_visit",
+      name: "kennel__book_visit",
     }),
-    name: EXECUTE_TOOL,
+    name: CALL_TOOL,
   },
 ];
 
@@ -87,7 +84,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
           input: () => ({ query: "petstore__" }),
           name: SEARCH_TOOL,
         },
-        execute("petstore-inventory", { input: {}, tool: "petstore__getInventory" }),
+        callTool("petstore-inventory", "petstore__getInventory", {}),
       ],
       (finished) =>
         outputOf(finished, "petstore-inventory").includes('"available":7')
@@ -98,7 +95,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   if (message.includes("PETSTORE_APPROVAL_E2E")) {
     return playScript(
       request,
-      [execute("approval-inventory", { tool: "petstore-approval__getInventory" })],
+      [callTool("approval-inventory", "petstore-approval__getInventory")],
       (finished) =>
         outputOf(finished, "approval-inventory").includes('"available":7')
           ? "inventory received"

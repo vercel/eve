@@ -3,7 +3,7 @@ import { defineEval } from "eve/evals";
 
 export default defineEval({
   description:
-    "A deferred background workflow tool called through eve__execute returns a task receipt, and its result arrives as a task result.",
+    "A deferred background workflow tool called through eve__tool returns a task receipt, and its result arrives as a task result.",
 
   async test(t) {
     requireMockModel(t);

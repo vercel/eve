@@ -169,7 +169,7 @@ that web questions go to `web_search`.
 tools: a catalog of 70 deferred tools (60 in the `sre`, `d0`, `index`, and
 `support` namespaces), a deferred skill, and a deferred agent, with no
 connections, beside the default `web_search` and `bash`. Its evals check that
-models find deferred tools with `eve__search` and run them with `eve__execute`,
+models find deferred tools with `eve__search` and run them with `eve__tool`,
 send web and shell requests to `web_search` and `bash` instead, and leave the
 catalog alone for questions they can answer themselves. Every eval in it is
 tagged `real-model`.

@@ -51,7 +51,7 @@ export interface RemoteAgentDefinition {
   /**
    * How eve exposes this remote agent to the parent model: `true` lists it as
    * a tool, `"deferred"` makes it a catalog entry the model finds with
-   * `eve__search` and calls with `eve__execute`, and `false` keeps it callable only from
+   * `eve__search` and calls with `eve__tool`, and `false` keeps it callable only from
    * workflow tools. Defaults to `true`.
    */
   readonly tool?: AgentToolExposure;

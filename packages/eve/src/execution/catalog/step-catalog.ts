@@ -1,10 +1,10 @@
 /**
  * The step's catalog: one table of every entry a model step can reach. Direct
- * entries go into the model's tool list next to `eve__search` and
- * `eve__execute` when the agent has them; deferred entries and connection
- * tools are reached through `eve__execute`, and every skill loads through it.
- * A call resolves to its entry here and then runs exactly as a direct call
- * would, so only model history ever says `eve__execute`.
+ * entries go into the model's tool list next to the catalog tools the agent
+ * has: `eve__search` finds entries, `eve__tool` calls deferred entries and
+ * connection tools, and `eve__skill` loads skills. A call resolves to its entry
+ * here and then runs exactly as a direct call would, so only model history
+ * ever names a catalog tool.
  */
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
@@ -25,13 +25,16 @@ import type {
   HarnessToolMap,
   ToolCallLike,
 } from "#harness/types.js";
-import { EXECUTE_TOOL_NAME, SEARCH_TOOL_NAME, SKILL_ENTRY_NAME } from "#protocol/catalog-tools.js";
+import {
+  CALL_TOOL_NAME,
+  SEARCH_TOOL_NAME,
+  SKILL_ENTRY_NAME,
+  SKILL_TOOL_NAME,
+} from "#protocol/catalog-tools.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
-import { skillTarget } from "#shared/action-request-name.js";
 import { isObject } from "#shared/guards.js";
-import type { JsonObject } from "#shared/json.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { refineJsonSchema } from "#tools/schema.js";
 
@@ -50,84 +53,34 @@ import {
 const ENDS_TURN_TOOL_NOTE =
   "Calling this tool ends your turn once it succeeds: do not write a reply or call other tools in the same step. If it fails, you will see the error and can continue.";
 
-const LISTED_SKILL_CLAUSE =
-  "Load a skill when the request clearly matches one of your listed skills or the user asks for it: pass its name as `skill`, then follow the instructions it returns.";
-const SEARCHABLE_SKILL_CLAUSE = `Load a skill when the request clearly matches a listed skill or one ${SEARCH_TOOL_NAME} found, or the user asks for it: pass its name as \`skill\`, then follow the instructions it returns.`;
-const TOOL_CLAUSE = `Call a tool that isn't in your tool list: pass its exact name from ${SEARCH_TOOL_NAME} as \`tool\`, and arguments matching its signature as \`input\`.`;
+const CALL_TOOL_DESCRIPTION = `Call a tool that isn't in your tool list by its exact name from ${SEARCH_TOOL_NAME}, with \`input\` matching its signature.`;
 const CONNECTIONS_CLAUSE =
   "Prefer connected services over web search or general knowledge when a request relates to them.";
+const LISTED_SKILL_DESCRIPTION =
+  "Load a skill's instructions when the request clearly matches one of your listed skills or the user asks for it, then follow them.";
+const SEARCHABLE_SKILL_DESCRIPTION = `Load a skill's instructions when the request clearly matches a listed skill or one ${SEARCH_TOOL_NAME} found, or the user asks for it, then follow them.`;
 
-/** Which of `eve__search` and `eve__execute` an agent gets, and what they reach. */
+/** Which catalog tools an agent gets, and what they reach. */
 interface CatalogTools {
   /** A static connection or a dynamic connection resolver. */
   readonly connections: boolean;
-  readonly execute: boolean;
   readonly search: boolean;
   /** A deferred skill or a dynamic skill resolver, which `eve__search` can find. */
   readonly searchableSkills: boolean;
-  /** A static skill or a dynamic skill resolver. */
+  /** Any skill, static or from a dynamic skill resolver: `eve__skill` loads it. */
   readonly skills: boolean;
+  /** Anything `eve__tool` can call: a deferred tool or agent, or a connection. */
+  readonly tools: boolean;
 }
 
 /**
- * `eve__execute`'s description. Loading a skill comes first and says when to
- * load one, so skills load as reliably as they did from a tool of their own.
- * Each clause follows from what the agent declares, so the text is fixed for a
- * deployment.
- */
-function executeDescription(tools: CatalogTools): string {
-  return [
-    tools.skills
-      ? tools.searchableSkills
-        ? SEARCHABLE_SKILL_CLAUSE
-        : LISTED_SKILL_CLAUSE
-      : undefined,
-    tools.search ? TOOL_CLAUSE : undefined,
-    tools.connections ? CONNECTIONS_CLAUSE : undefined,
-  ]
-    .filter((clause) => clause !== undefined)
-    .join(" ");
-}
-
-// Providers reject a top-level union, so with both `tool` and `skill` each is
-// optional and validation requires exactly one.
-function executeInputSchema(tools: CatalogTools): JsonObject {
-  const skill = {
-    type: "string",
-    description: tools.searchableSkills
-      ? `A skill's name, from your listed skills or ${SEARCH_TOOL_NAME}.`
-      : "A skill's name, from your listed skills.",
-  };
-  if (!tools.search) {
-    return {
-      type: "object",
-      properties: { skill },
-      required: ["skill"],
-      additionalProperties: false,
-    };
-  }
-  const properties: Record<string, JsonObject> = {
-    tool: {
-      type: "string",
-      description: `The tool's exact name, as ${SEARCH_TOOL_NAME} returns it.`,
-    },
-    input: {
-      type: "object",
-      description: "Arguments matching the tool's signature. Defaults to {}.",
-    },
-  };
-  if (tools.skills) properties.skill = skill;
-  return { type: "object", properties, additionalProperties: false };
-}
-
-/**
- * `eve__search` comes with anything it could find: a deferred tool, agent, or
- * skill, a connection, or a resolver that may add any of these at runtime.
- * `eve__execute` comes with it, or alone when skills are all there is to
- * reach, since skills load only through it. Both follow from what the agent
- * declares, never from what a step's resolvers returned, so the tool list is
- * fixed for a deployment and never changes within a session. An agent with
- * none of these has neither tool, and pays nothing for the catalog.
+ * Each catalog tool comes with what it reaches: `eve__tool` with a deferred
+ * tool or agent, a connection, or a resolver that may add one; `eve__skill`
+ * with any skill; and `eve__search` with anything it could find, which is
+ * whatever `eve__tool` calls plus deferred and dynamic skills. All follow from
+ * what the agent declares, never from what a step's resolvers returned, so the
+ * tool list is fixed for a deployment and never changes within a session. An
+ * agent with none of these has no catalog tools, and pays nothing for them.
  */
 function catalogToolsFor(
   agentTools: readonly HarnessToolDefinition[],
@@ -139,27 +92,25 @@ function catalogToolsFor(
   const connections =
     (agent?.connections ?? []).length > 0 || (agent?.dynamicConnectionResolvers?.length ?? 0) > 0;
   const searchableSkills = dynamicSkills || skills.some((skill) => skill.deferred === true);
-  const search =
-    searchableSkills ||
+  const tools =
     connections ||
     agentTools.some((definition) => definition.deferred === true) ||
     (agent?.dynamicToolResolvers.length ?? 0) > 0 ||
     (bundle?.subagentRegistry.dynamicResolvers.length ?? 0) > 0;
-  const declaresSkills = skills.length > 0 || dynamicSkills;
   return {
     connections,
-    execute: search || declaresSkills,
-    search,
+    search: tools || searchableSkills,
     searchableSkills,
-    skills: declaresSkills,
+    skills: skills.length > 0 || dynamicSkills,
+    tools,
   };
 }
 
 export interface StepCatalog extends HarnessToolLookup {
-  /** The model's tool list: direct entries, then `eve__search` and `eve__execute` when the agent has them. */
+  /** The model's tool list: direct entries, then the catalog tools the agent has. */
   readonly advertised: HarnessToolMap;
   readonly connections: readonly ResolvedConnectionDefinition[];
-  /** Entries reached only through `eve__execute`, connection tools aside. */
+  /** Entries reached only through `eve__tool`, connection tools aside. */
   readonly deferred: HarnessToolMap;
   /** Every direct and deferred entry the session sees, connection tools aside. */
   readonly entries: HarnessToolMap;
@@ -174,9 +125,9 @@ export interface StepCatalog extends HarnessToolLookup {
   /** An entry's description as the model reads it, with the notes eve appends. */
   describe(definition: HarnessToolDefinition): string;
   /**
-   * Resolves a model tool call to the entry it runs. An `eve__execute` call
-   * that names a deferred entry becomes the call to that entry, and one that
-   * names a skill becomes the call to load it; any other call runs the listed
+   * Resolves a model tool call to the entry it runs. An `eve__tool` call that
+   * names a deferred entry becomes the call to that entry, and an `eve__skill`
+   * call becomes the call to load its skill; any other call runs the listed
    * tool it names. A call that reaches none of these resolves to nothing.
    */
   readonly resolve: CallResolver;
@@ -217,8 +168,8 @@ export function buildStepCatalog(input: {
   const skills = sessionSkills(input.ctx);
   const skillLoader = createSkillLoader(skills);
   const advertised = new Map(direct);
-  // Listed tools include `eve__search` and `eve__execute`, so `eve__execute` naming one of
-  // them says to call it directly rather than that it does not exist.
+  // Listed tools include the catalog tools, so `eve__tool` naming one of them
+  // says to call it directly rather than that it does not exist.
   const toolEntry = (name: string): HarnessToolDefinition | undefined =>
     entries.get(name) ??
     advertised.get(name) ??
@@ -233,20 +184,20 @@ export function buildStepCatalog(input: {
     get: (name) => (name === SKILL_ENTRY_NAME ? skillLoader : toolEntry(name)),
     offersTasks,
     resolve: (toolCall) => {
-      if (toolCall.toolName !== EXECUTE_TOOL_NAME || !catalogTools.execute) {
-        const definition = advertised.get(toolCall.toolName);
-        return definition === undefined ? undefined : { call: toolCall, definition };
+      if (toolCall.toolName === CALL_TOOL_NAME && catalogTools.tools) {
+        const name = targetName(toolCall.input);
+        const definition = name === undefined ? undefined : toolEntry(name);
+        if (name === undefined || definition?.deferred !== true) return undefined;
+        return { call: asEntryCall(toolCall, name), definition };
       }
-      const tool = toolTarget(toolCall.input);
-      const skill = skillTarget(toolCall.input);
-      if (skill !== undefined) {
-        if (tool !== undefined || !skills.has(skill)) return undefined;
-        const call = { ...toolCall, input: { skill }, toolName: SKILL_ENTRY_NAME };
+      if (toolCall.toolName === SKILL_TOOL_NAME && catalogTools.skills) {
+        const name = targetName(toolCall.input);
+        if (name === undefined || !skills.has(name)) return undefined;
+        const call = { ...toolCall, input: { skill: name }, toolName: SKILL_ENTRY_NAME };
         return { call, definition: skillLoader };
       }
-      const definition = tool === undefined ? undefined : toolEntry(tool);
-      if (tool === undefined || definition?.deferred !== true) return undefined;
-      return { call: asEntryCall(toolCall, tool), definition };
+      const definition = advertised.get(toolCall.toolName);
+      return definition === undefined ? undefined : { call: toolCall, definition };
     },
     skills,
   };
@@ -254,23 +205,31 @@ export function buildStepCatalog(input: {
     const search = createSearchTool({
       deferred: [...deferred.values()],
       describe,
+      reach: {
+        connections: catalogTools.connections,
+        skills: catalogTools.searchableSkills,
+        tools: catalogTools.tools,
+      },
       registry,
       skills: [...skills.values()].filter((skill) => skill.deferred),
     });
     advertised.set(search.name, search);
   }
-  if (catalogTools.execute) {
-    advertised.set(EXECUTE_TOOL_NAME, createExecuteTool(catalog, toolEntry, catalogTools));
+  if (catalogTools.tools) {
+    advertised.set(CALL_TOOL_NAME, createCallTool(catalog, toolEntry, catalogTools));
+  }
+  if (catalogTools.skills) {
+    advertised.set(SKILL_TOOL_NAME, createSkillTool(catalog, toolEntry, catalogTools));
   }
   return catalog;
 }
 
-/** The tool an `eve__execute` input names, if it names one. */
-function toolTarget(input: unknown): string | undefined {
-  return isObject(input) && typeof input.tool === "string" ? input.tool : undefined;
+/** The entry an `eve__tool` or `eve__skill` input names, if it names one. */
+function targetName(input: unknown): string | undefined {
+  return isObject(input) && typeof input.name === "string" ? input.name : undefined;
 }
 
-/** `eve__execute({ tool, input })` as the call to `tool` with `input`. */
+/** `eve__tool({ name, input })` as the call to `name` with `input`. */
 function asEntryCall<T extends ToolCallLike>(toolCall: T, toolName: string): T {
   const input = (toolCall.input as { readonly input?: unknown }).input;
   return { ...toolCall, input: input ?? {}, toolName };
@@ -332,77 +291,114 @@ function connectionEntryNamed(
 }
 
 // ---------------------------------------------------------------------------
-// execute
+// eve__tool and eve__skill
 // ---------------------------------------------------------------------------
 
 /**
  * The model sees one fixed schema. Validation resolves the named entry and
  * checks `input` against that entry's own schema, so a call that reaches
- * `eve__execute` always names a catalog entry with valid input or a skill, as
- * a direct call names a listed tool. Without `eve__search` there is nothing to
- * call but skills, so the tool takes only `skill` and says nothing of tools.
+ * `eve__tool` always names a deferred entry with valid input, as a direct call
+ * names a listed tool.
  */
-function createExecuteTool(
+function createCallTool(
   catalog: StepCatalog,
   toolEntry: (name: string) => HarnessToolDefinition | undefined,
   tools: CatalogTools,
 ): HarnessToolDefinition {
   return {
-    description: executeDescription(tools),
-    execute: (input: unknown, options: ToolExecuteOptions) => {
-      const resolved = catalog.resolve({ input, toolName: EXECUTE_TOOL_NAME });
-      // Input validation resolves every call before the SDK runs it.
-      if (resolved === undefined) {
-        throw new Error(`An ${EXECUTE_TOOL_NAME} call ran without a resolved entry.`);
-      }
-      return runEntryCall(resolved, options);
-    },
+    description: tools.connections
+      ? `${CALL_TOOL_DESCRIPTION} ${CONNECTIONS_CLAUSE}`
+      : CALL_TOOL_DESCRIPTION,
+    execute: (input: unknown, options: ToolExecuteOptions) =>
+      runResolved(catalog, { input, toolName: CALL_TOOL_NAME }, options),
     frameworkTool: true,
-    inputSchema: refineJsonSchema(executeInputSchema(tools), (value) =>
-      resolveExecuteInput(catalog, toolEntry, value as ExecuteInput, tools),
+    inputSchema: refineJsonSchema(
+      {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: `The tool's exact name, as ${SEARCH_TOOL_NAME} returns it.`,
+          },
+          input: {
+            type: "object",
+            description: "Arguments matching the tool's signature. Defaults to {}.",
+          },
+        },
+        required: ["name"],
+        additionalProperties: false,
+      },
+      (value) => resolveToolInput(catalog, toolEntry, value as ToolInput),
     ),
-    name: EXECUTE_TOOL_NAME,
+    name: CALL_TOOL_NAME,
   };
 }
 
-interface ExecuteInput {
-  readonly input?: unknown;
-  readonly skill?: string;
-  readonly tool?: string;
-}
-
-async function resolveExecuteInput(
+/** Loads a skill by name; validation resolves the name, so a call always loads one. */
+function createSkillTool(
   catalog: StepCatalog,
   toolEntry: (name: string) => HarnessToolDefinition | undefined,
-  { input, skill, tool }: ExecuteInput,
   tools: CatalogTools,
-): Promise<StandardSchemaV1.Result<ExecuteInput>> {
-  if (skill !== undefined) {
-    if (tool !== undefined) return failure("skill", "Pass either `tool` or `skill`, not both.");
-    if (!isEmptyInput(input)) {
-      return failure("input", "A skill takes no `input`; pass `input` only with `tool`.");
-    }
-    if (catalog.skills.has(skill)) return { value: { skill } };
-    const connections = catalog.connections.map((connection) => connection.connectionName);
-    return failure("skill", unknownSkillMessage(skill, catalog.skills, connections, tools.search));
+): HarnessToolDefinition {
+  return {
+    description: tools.searchableSkills ? SEARCHABLE_SKILL_DESCRIPTION : LISTED_SKILL_DESCRIPTION,
+    execute: (input: unknown, options: ToolExecuteOptions) =>
+      runResolved(catalog, { input, toolName: SKILL_TOOL_NAME }, options),
+    frameworkTool: true,
+    inputSchema: refineJsonSchema(
+      {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: tools.searchableSkills
+              ? `The skill's name, from your listed skills or ${SEARCH_TOOL_NAME}.`
+              : "The skill's name, from your listed skills.",
+          },
+        },
+        required: ["name"],
+        additionalProperties: false,
+      },
+      async (value) =>
+        resolveSkillInput(catalog, toolEntry, (value as { name: string }).name, tools),
+    ),
+    name: SKILL_TOOL_NAME,
+  };
+}
+
+function runResolved(
+  catalog: StepCatalog,
+  toolCall: ToolCallLike,
+  options: ToolExecuteOptions,
+): unknown {
+  const resolved = catalog.resolve(toolCall);
+  // Input validation resolves every call before the SDK runs it.
+  if (resolved === undefined) {
+    throw new Error(`A ${toolCall.toolName} call ran without a resolved entry.`);
   }
-  if (!tools.search) return failure("skill", "Pass `skill`, the name of a listed skill.");
-  if (tool === undefined) {
-    return failure(
-      "tool",
-      tools.skills ? "Pass `tool`, or `skill` to load a skill." : "Pass `tool`.",
-    );
-  }
-  const definition = toolEntry(tool);
-  if (definition === undefined) return failure("tool", unknownEntryMessage(tool, catalog));
+  return runEntryCall(resolved, options);
+}
+
+interface ToolInput {
+  readonly input?: unknown;
+  readonly name: string;
+}
+
+async function resolveToolInput(
+  catalog: StepCatalog,
+  toolEntry: (name: string) => HarnessToolDefinition | undefined,
+  { input, name }: ToolInput,
+): Promise<StandardSchemaV1.Result<ToolInput>> {
+  const definition = toolEntry(name);
+  if (definition === undefined) return failure("name", unknownEntryMessage(name, catalog));
   if (definition.deferred !== true) {
-    return failure("tool", `"${tool}" is in your tool list; call it directly.`);
+    return failure("name", `"${name}" is in your tool list; call it directly.`);
   }
   const checked = await checkToolCallInput(definition, input, "");
   if (checked.kind === "threw") throw checked.error;
   if (checked.kind === "invalid") {
     // A connection tool's validation reports its own signature; every other entry gets one here.
-    const issues = isConnectionTool(tool, catalog.connections)
+    const issues = isConnectionTool(name, catalog.connections)
       ? checked.issues
       : [...checked.issues, { message: `Signature: ${entrySignature(definition)}` }];
     // The entry's issues rather than its message, so the SDK's report is the only wrapper.
@@ -410,7 +406,27 @@ async function resolveExecuteInput(
       issues: issues.map(({ message, path = [] }) => ({ message, path: ["input", ...path] })),
     };
   }
-  return { value: { input: checked.value, tool } };
+  return { value: { input: checked.value, name } };
+}
+
+function resolveSkillInput(
+  catalog: StepCatalog,
+  toolEntry: (name: string) => HarnessToolDefinition | undefined,
+  name: string,
+  tools: CatalogTools,
+): StandardSchemaV1.Result<{ readonly name: string }> {
+  if (catalog.skills.has(name)) return { value: { name } };
+  const connections = catalog.connections.map((connection) => connection.connectionName);
+  const tool = connections.includes(name) ? undefined : toolEntry(name);
+  if (tool !== undefined) {
+    return failure(
+      "name",
+      tool.deferred === true
+        ? `"${name}" is a tool, not a skill; call it with ${CALL_TOOL_NAME}({ name: "${name}" }).`
+        : `"${name}" is a tool in your tool list, not a skill; call it directly.`,
+    );
+  }
+  return failure("name", unknownSkillMessage(name, catalog.skills, connections, tools.search));
 }
 
 function isConnectionTool(
@@ -422,18 +438,13 @@ function isConnectionTool(
   );
 }
 
-/** `input` defaults to {}, so an empty object is the same as no input. */
-function isEmptyInput(input: unknown): boolean {
-  return input === undefined || (isObject(input) && Object.keys(input).length === 0);
-}
-
-function failure(path: keyof ExecuteInput, message: string): StandardSchemaV1.FailureResult {
+function failure(path: string, message: string): StandardSchemaV1.FailureResult {
   return { issues: [{ message, path: [path] }] };
 }
 
 function unknownEntryMessage(name: string, catalog: StepCatalog): string {
   if (catalog.skills.has(name)) {
-    return `"${name}" is a skill; load it with ${EXECUTE_TOOL_NAME}({ skill: "${name}" }).`;
+    return `"${name}" is a skill; load it with ${SKILL_TOOL_NAME}({ name: "${name}" }).`;
   }
   const candidates = [...catalog.deferred.values()].map(({ description, name }) => ({
     description,

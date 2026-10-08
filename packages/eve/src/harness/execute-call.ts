@@ -1,7 +1,7 @@
 /**
- * `eve__execute` calls in the harness. Once a step's calls enter the harness, every
- * seam reads a call through `eve__execute` as the call to the entry it names. Model
- * history keeps the model's own calls.
+ * Catalog calls in the harness. Once a step's calls enter the harness, every
+ * seam reads an `eve__tool` or `eve__skill` call as the call to the entry it
+ * names. Model history keeps the model's own calls.
  */
 
 import type { ModelMessage, Telemetry, TelemetryOptions, TextStreamPart, ToolSet } from "ai";
@@ -11,13 +11,13 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessStepResult } from "#harness/step-hooks.js";
 import { toolCallModelOutput } from "#harness/tool-call-io.js";
 import type { CallResolver, ResolvedCall, ToolCallLike } from "#harness/types.js";
-import { EXECUTE_TOOL_NAME } from "#protocol/catalog-tools.js";
+import { CALL_TOOL_NAME, SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 
 /**
  * The name each tool call has in model history, by call id. A result written
- * to history carries its call's name there, which is `eve__execute` for a call
- * made through it.
+ * to history carries its call's name there, which is the catalog tool for a
+ * call made through one.
  */
 export function historyCallNames(messages: readonly ModelMessage[]): ReadonlyMap<string, string> {
   const names = new Map<string, string>();
@@ -32,8 +32,8 @@ export function historyCallNames(messages: readonly ModelMessage[]): ReadonlyMap
 
 /**
  * The AI SDK decides per tool name whether to run a call, and it runs every
- * `eve__execute` call. A direct call to a workflow tool or agent never runs in the
- * SDK: the harness dispatches it after the step. Through `eve__execute`, such a
+ * `eve__tool` call. A direct call to a workflow tool or agent never runs in the
+ * SDK: the harness dispatches it after the step. Through `eve__tool`, such a
  * call returns this stand-in instead, which never leaves this module: it is
  * dropped from the stream, the step, and telemetry, and the harness then
  * dispatches the call as it does a direct one.
@@ -45,7 +45,7 @@ export function dispatchesAfterStep(resolved: ResolvedCall<ToolCallLike> | undef
   return resolved !== undefined && isWorkflowTool(resolved.definition);
 }
 
-/** Runs a resolved `eve__execute` call, or stands in for one the harness dispatches. */
+/** Runs a resolved catalog call, or stands in for one the harness dispatches. */
 export function runEntryCall(
   resolved: ResolvedCall<ToolCallLike>,
   options: ToolExecuteOptions,
@@ -57,7 +57,7 @@ export function runEntryCall(
 }
 
 /**
- * The call a tool stub matches. An `execute` call matches as the call to its
+ * The call a tool stub matches. An `eve__tool` call matches as the call to its
  * entry, with the entry's input, so a stub applies to it exactly as to a direct
  * call. A call the harness dispatches after the step has none here: its
  * dispatch applies the stub, as it does for a direct call.
@@ -85,7 +85,7 @@ export function entryModelOutput(
 type StepFields = { readonly [K in keyof Required<HarnessStepResult>]: HarnessStepResult[K] };
 
 /**
- * The step as the harness reads it: calls through `eve__execute` become calls to
+ * The step as the harness reads it: catalog calls become calls to
  * their entries and stand-in results are dropped. The response messages, which
  * become history, keep the model's own calls.
  */
@@ -120,8 +120,8 @@ export function toEntryStep<T extends ModelMessage>(
 
 /**
  * The stream as the harness reads it, as {@link toEntryStep} reads the step.
- * An `eve__execute` call's input stream is dropped: its entry is known only once
- * the input is complete.
+ * A catalog call's input stream is dropped: its entry is known only once the
+ * input is complete.
  */
 export async function* toEntryStream(
   stream: AsyncIterable<TextStreamPart<ToolSet>>,
@@ -129,7 +129,10 @@ export async function* toEntryStream(
 ): AsyncIterable<TextStreamPart<ToolSet>> {
   const executeInputs = new Set<string>();
   for await (const part of stream) {
-    if (part.type === "tool-input-start" && part.toolName === EXECUTE_TOOL_NAME) {
+    if (
+      part.type === "tool-input-start" &&
+      (part.toolName === CALL_TOOL_NAME || part.toolName === SKILL_TOOL_NAME)
+    ) {
       executeInputs.add(part.id);
       continue;
     }
@@ -141,8 +144,8 @@ export async function* toEntryStream(
 }
 
 /**
- * Telemetry as the harness reports it. Integrations see each call through
- * `eve__execute` as the call to its entry, and never see a stand-in run: a direct
+ * Telemetry as the harness reports it. Integrations see each catalog call as
+ * the call to its entry, and never see a stand-in run: a direct
  * call to the same entry never runs in the SDK.
  */
 export function toEntryTelemetry(

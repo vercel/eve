@@ -1,4 +1,4 @@
-import { EXECUTE_TOOL, SEARCH_TOOL } from "@eve-e2e/config/catalog-tools";
+import { CALL_TOOL, SEARCH_TOOL, SKILL_TOOL } from "@eve-e2e/config/catalog-tools";
 import type { EveEvalTurn } from "eve/evals";
 
 import { CATALOG_TOOLS } from "../agent/lib/catalog";
@@ -13,8 +13,8 @@ const CATALOG_ENTRIES = new Set([
 ]);
 
 /**
- * The tools the model called, in order. A call through `eve__execute` is reported
- * under the entry it reaches, and a skill load as `load-skill`.
+ * The tools the model called, in order. A call through `eve__tool` is reported
+ * under the entry it reaches, and an `eve__skill` load as `load-skill`.
  */
 export function calledTools(events: Events): string[] {
   return events.flatMap((event) =>
@@ -28,7 +28,8 @@ export function calledTools(events: Events): string[] {
 export function usesCatalog(name: string): boolean {
   return (
     name === SEARCH_TOOL ||
-    name === EXECUTE_TOOL ||
+    name === CALL_TOOL ||
+    name === SKILL_TOOL ||
     name === "load-skill" ||
     CATALOG_ENTRIES.has(name)
   );

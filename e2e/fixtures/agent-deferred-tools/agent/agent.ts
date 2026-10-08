@@ -1,7 +1,7 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
-import { EXECUTE_TOOL, SEARCH_TOOL, TASK_WAIT_TOOL } from "@eve-e2e/config/catalog-tools";
+import { CALL_TOOL, SEARCH_TOOL, SKILL_TOOL, TASK_WAIT_TOOL } from "@eve-e2e/config/catalog-tools";
 import {
-  execute,
+  callTool,
   latestTaskResult,
   loadSkills,
   outputOf,
@@ -15,7 +15,7 @@ import { LEDGER_REGIONS } from "./lib/ledger-regions";
 /** Every catalog listing says this, whatever kinds it names. */
 const LISTING_MARKER = `look for one with ${SEARCH_TOOL}, which searches your own catalog`;
 
-/** Entries that must reach the model only through `eve__search` and `eve__execute`. */
+/** Entries that must reach the model only through `eve__search` and `eve__tool`. */
 const DEFERRED_SAMPLES = [
   "refund_invoice",
   "deploy_service",
@@ -24,7 +24,7 @@ const DEFERRED_SAMPLES = [
   `ledger__${LEDGER_REGIONS[0]}`,
 ];
 
-/** The first tool `eve__execute` suggested in its error for the call with `id`. */
+/** The first tool `eve__tool` suggested in its error for the call with `id`. */
 function suggestedTool(request: MockModelRequest, id: string): string | undefined {
   return /Closest tools: ([A-Za-z0-9_-]+)/u.exec(outputOf(request, id))?.[1];
 }
@@ -52,31 +52,24 @@ const SCENARIOS: Record<string, (request: MockModelRequest) => MockModelResponse
     );
     return [
       `DEFERRED-IN-TOOLS: ${listed.length === 0 ? "none" : listed.join(", ")}`,
-      `CATALOG-TOOLS: ${[SEARCH_TOOL, EXECUTE_TOOL].filter((name) => request.tools.some((tool) => tool.name === name)).join(", ")}`,
+      `CATALOG-TOOLS: ${[SEARCH_TOOL, CALL_TOOL, SKILL_TOOL].filter((name) => request.tools.some((tool) => tool.name === name)).join(", ")}`,
       listing?.text ?? "NO-LISTING",
     ].join("\n");
   },
   "DEFERRED-DEPLOY": (request) =>
     playScript(
       request,
-      [execute("deploy", { tool: "deploy_service", input: { service: "billing-api" } })],
+      [callTool("deploy", "deploy_service", { service: "billing-api" })],
       (done) => `DEPLOY-RESULT ${outputOf(done, "deploy")}`,
     ),
   "DEFERRED-RESEARCH": (request) =>
-    playScript(
-      request,
-      [execute("research", { tool: "research_report", input: { topic: "refunds" } })],
-      (done) => reportTask(done, "research_report", "RESEARCH-RESULT"),
+    playScript(request, [callTool("research", "research_report", { topic: "refunds" })], (done) =>
+      reportTask(done, "research_report", "RESEARCH-RESULT"),
     ),
   "DEFERRED-SPECIALIST": (request) =>
     playScript(
       request,
-      [
-        execute("specialist", {
-          tool: "billing_specialist",
-          input: { message: "Review Bob's dispute DSP-17." },
-        }),
-      ],
+      [callTool("specialist", "billing_specialist", { message: "Review Bob's dispute DSP-17." })],
       (done) => reportTask(done, "billing_specialist", "SPECIALIST-RESULT"),
     ),
   "DEFERRED-SKILLS": (request) =>
@@ -86,14 +79,14 @@ const SCENARIOS: Record<string, (request: MockModelRequest) => MockModelResponse
     playScript(
       request,
       [
-        execute("misspelled", { tool: "refund_invoce", input: { invoiceId: "INV-2041" } }),
+        callTool("misspelled", "refund_invoce", { invoiceId: "INV-2041" }),
         {
           id: "corrected",
           input: (current) => ({
-            tool: suggestedTool(current, "misspelled"),
+            name: suggestedTool(current, "misspelled"),
             input: { invoiceId: "INV-2041" },
           }),
-          name: EXECUTE_TOOL,
+          name: CALL_TOOL,
         },
       ],
       (done) => `REFUND-RESULT ${outputOf(done, "corrected")}`,
@@ -107,12 +100,12 @@ const SCENARIOS: Record<string, (request: MockModelRequest) => MockModelResponse
         {
           id: "ledger",
           input: (current) => ({
-            tool: /"tool":"(ledger__[a-z_]+)"/u.exec(outputOf(current, "ledger-search"))?.[1],
+            name: /"tool":"(ledger__[a-z_]+)"/u.exec(outputOf(current, "ledger-search"))?.[1],
             input: { month: "2026-09" },
           }),
-          name: EXECUTE_TOOL,
+          name: CALL_TOOL,
         },
-        execute("inventory", { tool: "petstore__getInventory" }),
+        callTool("inventory", "petstore__getInventory"),
       ],
       (done) =>
         `LEDGER-RESULT ${outputOf(done, "ledger")} INVENTORY-RESULT ${outputOf(done, "inventory")}`,

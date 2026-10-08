@@ -6,7 +6,7 @@ import type {
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
-import { EXECUTE_TOOL_NAME, SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
+import { CALL_TOOL_NAME, SEARCH_TOOL_NAME, SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { TASK_CANCEL_TOOL_NAME, TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -268,11 +268,11 @@ describe("step catalog in the harness (real AI SDK)", () => {
         ],
       });
 
-    // A search, then an inline tool through execute.
+    // A search, then an inline tool through eve__tool.
     reply(
       calls(call("search-refund", SEARCH_TOOL_NAME, { query: "refund" })),
       calls(
-        call("refund", EXECUTE_TOOL_NAME, { input: { invoiceId: "in_1" }, tool: "refund_invoice" }),
+        call("refund", CALL_TOOL_NAME, { input: { invoiceId: "in_1" }, name: "refund_invoice" }),
       ),
       text("Refunded in_1."),
     );
@@ -280,7 +280,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
 
     // An approval, during which a dynamic deferred tool appears. The catalog
     // changes on the step that runs the approved call.
-    reply(calls(call("credit", EXECUTE_TOOL_NAME, { tool: "issue_credit" })));
+    reply(calls(call("credit", CALL_TOOL_NAME, { name: "issue_credit" })));
     const awaitingApproval = await drive({ message: "Alice asks for a credit for Bob." });
     const [approval] = parkedSteps(awaitingApproval.session).flatMap((step) => step.requests);
     expect(approval?.action.toolName).toBe("issue_credit");
@@ -294,9 +294,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
 
     // A foreground workflow tool parks the turn and resumes with its result.
     reply(
-      calls(
-        call("deploy", EXECUTE_TOOL_NAME, { input: { service: "api" }, tool: "deploy_service" }),
-      ),
+      calls(call("deploy", CALL_TOOL_NAME, { input: { service: "api" }, name: "deploy_service" })),
     );
     const deploying = await drive({ message: "Alice asks to deploy the api service." });
     expect(
@@ -317,10 +315,10 @@ describe("step catalog in the harness (real AI SDK)", () => {
     // A background workflow tool and a deferred subagent each start a task.
     reply(
       calls(
-        call("research", EXECUTE_TOOL_NAME, { input: { topic: "refunds" }, tool: "research" }),
-        call("delegate", EXECUTE_TOOL_NAME, {
+        call("research", CALL_TOOL_NAME, { input: { topic: "refunds" }, name: "research" }),
+        call("delegate", CALL_TOOL_NAME, {
           input: { message: "Review Bob's dispute." },
-          tool: "billing_specialist",
+          name: "billing_specialist",
         }),
       ),
     );
@@ -347,7 +345,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
     });
 
     // A connection tool parks the turn for sign-in, then runs once the user signs in.
-    reply(calls(call("items", EXECUTE_TOOL_NAME, { tool: "private__list_items" })));
+    reply(calls(call("items", CALL_TOOL_NAME, { name: "private__list_items" })));
     const signingIn = await drive({ message: "Alice wants the items in the private catalog." });
     const [challenge] = getPendingAuthorization(signingIn.session.state)?.challenges ?? [];
     expect(challenge?.name).toBe("private");
@@ -367,7 +365,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
       state: clearPendingAuthorization(driver.session.state, [challenge!.attemptId!]),
     };
     reply(
-      calls(call("items-after-sign-in", EXECUTE_TOOL_NAME, { tool: "private__list_items" })),
+      calls(call("items-after-sign-in", CALL_TOOL_NAME, { name: "private__list_items" })),
       text("The private catalog has Alice's lamp."),
     );
     await drive();
@@ -383,7 +381,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
     );
     const connectionStep = mark();
     reply(
-      calls(call("status", EXECUTE_TOOL_NAME, { tool: "products__get_status" })),
+      calls(call("status", CALL_TOOL_NAME, { name: "products__get_status" })),
       text("The product catalog is up."),
     );
     await drive({ message: "Alice asks whether the product catalog is up." });
@@ -418,7 +416,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
     await resolveTenantTools();
     const changedStep = mark();
     reply(
-      calls(call("sync-again", EXECUTE_TOOL_NAME, { tool: "tenant__sync" })),
+      calls(call("sync-again", CALL_TOOL_NAME, { name: "tenant__sync" })),
       text("The sync tool is gone."),
     );
     await drive({ message: "Alice asks to sync the tenant again." });
@@ -458,10 +456,10 @@ describe("step catalog in the harness (real AI SDK)", () => {
     reply(
       calls(call("search-notes", SEARCH_TOOL_NAME, { query: "release notes" })),
       calls(
-        call("notes", EXECUTE_TOOL_NAME, { skill: "release_notes" }),
-        call("forms", EXECUTE_TOOL_NAME, { skill: "pdf-forms" }),
-        call("playbook", EXECUTE_TOOL_NAME, { skill: "ops__playbook" }),
-        call("rules", EXECUTE_TOOL_NAME, { skill: "house-rules" }),
+        call("notes", SKILL_TOOL_NAME, { name: "release_notes" }),
+        call("forms", SKILL_TOOL_NAME, { name: "pdf-forms" }),
+        call("playbook", SKILL_TOOL_NAME, { name: "ops__playbook" }),
+        call("rules", SKILL_TOOL_NAME, { name: "house-rules" }),
       ),
       text("Loaded the skills."),
     );
@@ -502,7 +500,8 @@ describe("step catalog in the harness (real AI SDK)", () => {
       TASK_WAIT_TOOL_NAME,
       TASK_CANCEL_TOOL_NAME,
       SEARCH_TOOL_NAME,
-      EXECUTE_TOOL_NAME,
+      CALL_TOOL_NAME,
+      SKILL_TOOL_NAME,
     ]);
     for (const request of requests) expect(request.tools).toEqual(requests[0]!.tools);
 
@@ -591,13 +590,15 @@ describe("step catalog in the harness (real AI SDK)", () => {
       expect(JSON.stringify(results), callId).not.toContain("dispatched");
     }
 
-    // History keeps the model's own eve__execute calls; actions carry each entry's name.
+    // History keeps the model's own catalog calls; actions carry each entry's name.
     const historyCalls = historyBeforeCompaction.flatMap((message) =>
       message.role === "assistant" && Array.isArray(message.content)
         ? message.content.flatMap((part) => (part.type === "tool-call" ? [part.toolName] : []))
         : [],
     );
-    expect(new Set(historyCalls)).toEqual(new Set([EXECUTE_TOOL_NAME, SEARCH_TOOL_NAME]));
+    expect(new Set(historyCalls)).toEqual(
+      new Set([CALL_TOOL_NAME, SEARCH_TOOL_NAME, SKILL_TOOL_NAME]),
+    );
     expect(
       driver.events.flatMap((event) =>
         event.type === "actions.requested"
@@ -626,7 +627,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
     ]);
   });
 
-  it("names the entry, not execute, when a deferred entry returns a result that isn't JSON", async () => {
+  it("names the entry, not eve__tool, when a deferred entry returns a result that isn't JSON", async () => {
     const logs = captureLogRecords();
     const ctx = createSessionContext();
     ctx.set(BundleKey, catalogBundle());
@@ -640,7 +641,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
       ),
     );
     driver.reply(
-      calls(call("export", EXECUTE_TOOL_NAME, { tool: "export_ledger" })),
+      calls(call("export", CALL_TOOL_NAME, { name: "export_ledger" })),
       text("The ledger export failed."),
     );
 
@@ -657,12 +658,12 @@ describe("step catalog in the harness (real AI SDK)", () => {
     );
   });
 
-  it("gives an agent with only listed skills execute to load them, no search, and no listing", async () => {
+  it("gives an agent with only listed skills eve__skill to load them, no search, and no listing", async () => {
     const ctx = createSessionContext();
     ctx.set(BundleKey, catalogBundle({ skills: [{ name: "house-rules" }] }));
     const driver = createDriver(ctx, toolMap(inlineTool("add")));
     driver.reply(
-      calls(call("load-rules", EXECUTE_TOOL_NAME, { skill: "house-rules" })),
+      calls(call("load-rules", SKILL_TOOL_NAME, { name: "house-rules" })),
       calls(call("add", "add", {})),
       text("Done, following the house rules."),
     );
@@ -672,7 +673,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
     const requests = driver.requests();
     expect(requests).toHaveLength(3);
     for (const request of requests) {
-      expect(request.tools?.map((tool) => tool.name)).toEqual(["add", EXECUTE_TOOL_NAME]);
+      expect(request.tools?.map((tool) => tool.name)).toEqual(["add", SKILL_TOOL_NAME]);
       expect(catalogMessages(request)).toEqual([]);
     }
     expect(toolResult(requests[1]!, "load-rules")).toBe("# house-rules");
@@ -695,13 +696,11 @@ describe("step catalog in the harness (real AI SDK)", () => {
     ctx.set(BundleKey, catalogBundle({ connections: [crm.definition] }));
     const driver = createDriver(ctx, toolMap(inlineTool("add")));
     driver.reply(
+      calls(call("archive-unnamed", CALL_TOOL_NAME, { input: {}, name: "crm__archive_account" })),
       calls(
-        call("archive-unnamed", EXECUTE_TOOL_NAME, { input: {}, tool: "crm__archive_account" }),
-      ),
-      calls(
-        call("archive", EXECUTE_TOOL_NAME, {
+        call("archive", CALL_TOOL_NAME, {
           input: { accountId: "acct_1" },
-          tool: "crm__archive_account",
+          name: "crm__archive_account",
         }),
       ),
     );

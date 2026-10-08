@@ -1,5 +1,6 @@
 /**
- * Ranking for `eve__search` and for `eve__execute`'s suggestions when a name is unknown.
+ * Ranking for `eve__search` and for `eve__tool`'s and `eve__skill`'s suggestions when a
+ * name is unknown.
  * Query and text split into lowercase words (camelCase, acronyms, and
  * punctuation are boundaries), so `create issue`, `createIssue`, and
  * `create_issue` are the same words. Matches rank in tiers:

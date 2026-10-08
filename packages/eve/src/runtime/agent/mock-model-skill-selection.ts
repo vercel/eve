@@ -1,4 +1,4 @@
-import { EXECUTE_TOOL_NAME } from "#protocol/catalog-tools.js";
+import { SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
 import type { BootstrapPrompt } from "#runtime/agent/bootstrap-model-utils.js";
 import { getPromptContentText } from "#runtime/agent/bootstrap-model-utils.js";
 
@@ -88,7 +88,7 @@ export function getActivatedSkillIds(prompt: BootstrapPrompt): string[] {
   return [...fromSystemLabels, ...getSkillLoads(prompt).values()];
 }
 
-/** Skill loads in the history: each `eve__execute({ skill })` call's id and skill. */
+/** Skill loads in the history: each `eve__skill({ name })` call's id and skill. */
 export function getSkillLoads(prompt: BootstrapPrompt): ReadonlyMap<string, string> {
   const loads = new Map<string, string>();
 
@@ -101,7 +101,7 @@ export function getSkillLoads(prompt: BootstrapPrompt): ReadonlyMap<string, stri
       if (
         typeof part === "string" ||
         part.type !== "tool-call" ||
-        part.toolName !== EXECUTE_TOOL_NAME
+        part.toolName !== SKILL_TOOL_NAME
       ) {
         continue;
       }
@@ -122,10 +122,10 @@ function readSkillFromToolInput(input: unknown): string | undefined {
   if (
     typeof parsed === "object" &&
     parsed !== null &&
-    "skill" in parsed &&
-    typeof parsed.skill === "string"
+    "name" in parsed &&
+    typeof parsed.name === "string"
   ) {
-    return parsed.skill;
+    return parsed.name;
   }
 
   return undefined;

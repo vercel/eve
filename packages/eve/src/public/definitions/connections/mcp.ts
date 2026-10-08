@@ -107,7 +107,7 @@ export interface McpClientConnectionDefinition {
    */
   toolCall?: ConnectionToolCallDefinition;
   /**
-   * Client-side tool filter. When set, `eve__search` returns and `eve__execute`
+   * Client-side tool filter. When set, `eve__search` returns and `eve__tool`
    * calls only tools whose names pass the filter.
    *
    * Specify exactly one of `allow` or `block`.

@@ -12,7 +12,7 @@ export interface SkillPackageDefinition {
   /**
    * Keeps this skill out of the system prompt and the dynamic skill
    * announcement. The model finds it with `eve__search` and loads it with
-   * `eve__execute({ skill })`. Defaults to `false`.
+   * `eve__skill({ name })`. Defaults to `false`.
    */
   readonly deferred?: boolean;
   readonly description: string;

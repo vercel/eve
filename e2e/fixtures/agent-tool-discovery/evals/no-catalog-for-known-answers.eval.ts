@@ -5,7 +5,7 @@ import { calledTools, usesCatalog } from "./tool-use";
 /** A question the model can answer itself doesn't send it to the catalog. */
 export default defineEval({
   tags: ["real-model"],
-  description: "A plain question is answered without eve__search or eve__execute.",
+  description: "A plain question is answered without the catalog tools.",
 
   async test(t) {
     const turn = await t.send(
@@ -13,7 +13,7 @@ export default defineEval({
     );
 
     turn.expectOk();
-    turn.eventsSatisfy("neither eve__search nor eve__execute is called", (events) =>
+    turn.eventsSatisfy("no catalog tool or entry is called", (events) =>
       calledTools(events).every((name) => !usesCatalog(name)),
     );
     t.messageIncludes(/\b85\b/u);

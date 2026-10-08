@@ -19,7 +19,7 @@ import {
   type ConnectionToolMetadata,
 } from "#shared/connection-types.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { EXECUTE_TOOL_NAME } from "#protocol/catalog-tools.js";
+import { CALL_TOOL_NAME } from "#protocol/catalog-tools.js";
 
 const log = createLogger("framework.catalog-connections");
 
@@ -145,7 +145,7 @@ function assertPendingSignInInstance(connection: ResolvedConnectionDefinition): 
     if (result.name !== connection.connectionName || result.instanceId === undefined) continue;
     if (result.instanceId === connection.instanceId) continue;
     throw new Error(
-      `Authorization for "${result.name}" cannot complete because its resolved connection changed while sign-in was pending. Sign in again with ${EXECUTE_TOOL_NAME}({ tool: "${result.name}" }).`,
+      `Authorization for "${result.name}" cannot complete because its resolved connection changed while sign-in was pending. Sign in again with ${CALL_TOOL_NAME}({ name: "${result.name}" }).`,
     );
   }
 }

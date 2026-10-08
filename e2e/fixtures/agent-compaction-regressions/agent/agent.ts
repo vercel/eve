@@ -18,7 +18,7 @@ import { HANDOFF_REFERENCE, REVIEW_REFERENCE } from "../release-reports";
 const TEST_CONTEXT_WINDOW_TOKENS = 32_000;
 // eve estimates this fixture's request envelope (instructions, task system
 // block, and 10 advertised tools; with nothing deferred and no skills or
-// connections, the agent has no `eve__search` or `eve__execute`) at 2,273
+// connections, the agent has no catalog tools) at 2,273
 // tokens. This allowance sits 230.25 tokens below that estimate, the offset the
 // cases have always run with, so the threshold leaves them a ~670-token history
 // budget. When eve's fixed instructions or tools change, re-measure: log what

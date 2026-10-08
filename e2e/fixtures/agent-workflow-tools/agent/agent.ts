@@ -1,5 +1,5 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
-import { EXECUTE_TOOL, SEARCH_TOOL } from "@eve-e2e/config/catalog-tools";
+import { CALL_TOOL, SEARCH_TOOL, SKILL_TOOL } from "@eve-e2e/config/catalog-tools";
 import { latestTaskResult, outputOf, playScript } from "@eve-e2e/config/mock-script";
 import { defineAgent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
@@ -26,14 +26,14 @@ const HOOK_SCENARIO_CALLS = {
 function respondToPublicCatalog(request: MockModelRequest): MockModelResponse | string {
   const call = (id: string, tool: string) => ({
     id,
-    name: "eve__execute",
-    input: { tool: `public-catalog__${tool}`, input: {} },
+    name: CALL_TOOL,
+    input: { name: `public-catalog__${tool}`, input: {} },
   });
   const byId = new Map(request.toolResults.map((entry) => [entry.id, entry]));
   if (!byId.has("public-catalog-connect")) {
     return {
       toolCalls: [
-        { id: "public-catalog-connect", name: EXECUTE_TOOL, input: { tool: "public-catalog" } },
+        { id: "public-catalog-connect", name: CALL_TOOL, input: { name: "public-catalog" } },
       ],
     };
   }
@@ -58,9 +58,7 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
     const skillCallId = auditing ? "audit-policy" : "initial-policy";
     if (!request.toolResults.some((entry) => entry.id === skillCallId)) {
       return {
-        toolCalls: [
-          { id: skillCallId, name: "eve__execute", input: { skill: "delegation-policy" } },
-        ],
+        toolCalls: [{ id: skillCallId, name: SKILL_TOOL, input: { name: "delegation-policy" } }],
       };
     }
     const mode = (/SUBAGENT-HOOKS:(direct|background|waiting)/u.exec(hookScenario)?.[1] ??
@@ -111,12 +109,12 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
       request,
       [
         { id: "catalog-search", name: SEARCH_TOOL, input: () => ({ query: "private-catalog" }) },
-        { id: "catalog-sign-in", name: EXECUTE_TOOL, input: () => ({ tool: "private-catalog" }) },
+        { id: "catalog-sign-in", name: CALL_TOOL, input: () => ({ name: "private-catalog" }) },
         { id: "catalog-tools", name: SEARCH_TOOL, input: () => ({ query: "private-catalog__" }) },
         {
           id: "catalog-items",
-          name: EXECUTE_TOOL,
-          input: () => ({ tool: "private-catalog__list_items" }),
+          name: CALL_TOOL,
+          input: () => ({ name: "private-catalog__list_items" }),
         },
       ],
       (finished) => outputOf(finished, "catalog-items"),

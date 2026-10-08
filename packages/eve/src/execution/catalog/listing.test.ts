@@ -85,7 +85,7 @@ describe("catalogAnnouncements", () => {
 
     expect(listing).toBe(
       [
-        `You have more tools, agents, and skills ${HEADER_GUIDANCE} Call tools with eve__execute({ tool, input }) and load skills with eve__execute({ skill }).`,
+        `You have more tools, agents, and skills ${HEADER_GUIDANCE} Call tools with eve__tool({ name, input }) and load skills with eve__skill({ name }).`,
         `${NAMESPACES} d0, index, sre, support`,
         CONNECTIONS,
         "- linear: Linear issues and projects",
@@ -103,17 +103,17 @@ describe("catalogAnnouncements", () => {
     [
       "tools",
       { tools: [deferred("export_ledger")] },
-      `You have more tools ${HEADER_GUIDANCE} Call them with eve__execute({ tool, input }).`,
+      `You have more tools ${HEADER_GUIDANCE} Call them with eve__tool({ name, input }).`,
     ],
     [
       "agents",
       { tools: [subagentTool("billing_specialist", { deferred: true })] },
-      `You have more agents ${HEADER_GUIDANCE} Call them with eve__execute({ tool, input }).`,
+      `You have more agents ${HEADER_GUIDANCE} Call them with eve__tool({ name, input }).`,
     ],
     [
       "skills",
       { skills: [{ deferred: true, name: "pdf-forms" }] },
-      `You have more skills ${HEADER_GUIDANCE} Load them with eve__execute({ skill }).`,
+      `You have more skills ${HEADER_GUIDANCE} Load them with eve__skill({ name }).`,
     ],
     [
       "tools and agents, but no deferred skill",
@@ -121,12 +121,20 @@ describe("catalogAnnouncements", () => {
         skills: [{ name: "house-rules" }],
         tools: [deferred("export_ledger"), subagentTool("researcher", { deferred: true })],
       },
-      `You have more tools and agents ${HEADER_GUIDANCE} Call them with eve__execute({ tool, input }).`,
+      `You have more tools and agents ${HEADER_GUIDANCE} Call them with eve__tool({ name, input }).`,
+    ],
+    [
+      "skills beside a connection, whose tools eve__tool calls",
+      {
+        connections: [{ description: "Linear issues", name: "linear" }],
+        skills: [{ deferred: true, name: "pdf-forms" }],
+      },
+      `You have more skills ${HEADER_GUIDANCE} Call tools with eve__tool({ name, input }) and load skills with eve__skill({ name }).`,
     ],
     [
       "only connections",
       { connections: [{ description: "Linear issues", name: "linear" }] },
-      `Your connections have more tools ${HEADER_GUIDANCE} Call them with eve__execute({ tool, input }).`,
+      `Your connections have more tools ${HEADER_GUIDANCE} Call them with eve__tool({ name, input }).`,
     ],
   ])("names only the kinds present: %s", (_case, state: CatalogState, header) => {
     expect(baseline(state)?.split("\n")[0]).toBe(header);
@@ -241,7 +249,7 @@ describe("catalogAnnouncements", () => {
       const empty = announce({ tools: [inlineTool("add")] }, { catalog: synced }).catalog!;
 
       expect(empty.render(synced)).toBe(
-        "The catalog changed. It is empty now: eve__search finds nothing, and eve__execute has no tools to call.",
+        "The catalog changed. It is empty now: eve__search finds nothing.",
       );
       const returned = { tools: [deferred("tenant__export")] };
       expect(announce(returned, { catalog: empty.value }).catalog?.render(empty.value)).toBe(

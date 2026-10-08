@@ -1,6 +1,6 @@
 import type { Telemetry } from "ai";
 import { describe, expect, it } from "vitest";
-import { EXECUTE_TOOL_NAME } from "#protocol/catalog-tools.js";
+import { CALL_TOOL_NAME } from "#protocol/catalog-tools.js";
 
 import { catalogContext, inlineTool, workflowTool } from "#internal/testing/catalog-fixtures.js";
 
@@ -57,26 +57,26 @@ function setup() {
 }
 
 describe("toEntryTelemetry", () => {
-  it("hides a workflow entry reached through execute, which the harness dispatches after the step", async () => {
+  it("hides a workflow entry reached through eve__tool, which the harness dispatches after the step", async () => {
     const { integration, wrapped } = setup();
 
     const output = await reportExecution(wrapped, {
-      input: { input: { service: "api" }, tool: "deploy_service" },
+      input: { input: { service: "api" }, name: "deploy_service" },
       toolCallId: "call-deploy",
-      toolName: EXECUTE_TOOL_NAME,
+      toolName: CALL_TOOL_NAME,
     });
 
     expect(output).toBe("ran");
     expect(integration.records).toEqual([]);
   });
 
-  it("reports an inline entry reached through execute under its name, with a class integration's this bound", async () => {
+  it("reports an inline entry reached through eve__tool under its name, with a class integration's this bound", async () => {
     const { integration, wrapped } = setup();
 
     await reportExecution(wrapped, {
-      input: { input: { invoiceId: "in_1" }, tool: "refund_invoice" },
+      input: { input: { invoiceId: "in_1" }, name: "refund_invoice" },
       toolCallId: "call-refund",
-      toolName: EXECUTE_TOOL_NAME,
+      toolName: CALL_TOOL_NAME,
     });
 
     expect(integration.records).toEqual([

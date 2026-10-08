@@ -4,7 +4,7 @@ import { defineEval } from "eve/evals";
 
 export default defineEval({
   description:
-    "eve__search finds a deferred tool a session-scoped resolver returned, eve__execute runs it, and eve__execute calls an OpenAPI connection tool.",
+    "eve__search finds a deferred tool a session-scoped resolver returned, eve__tool runs it, and eve__tool calls an OpenAPI connection tool.",
 
   async test(t) {
     requireMockModel(t);

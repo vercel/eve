@@ -1,6 +1,6 @@
 /**
  * Skills in the catalog. Every skill the session can see loads through
- * `eve__execute({ skill })`, deferred or not. The call resolves to one loader entry
+ * `eve__skill({ name })`, deferred or not. The call resolves to one loader entry
  * whose name sits outside the tool namespace, because skills and tools have
  * separate names.
  */
@@ -62,7 +62,7 @@ function skillName(input: unknown): string {
   return skill === undefined ? "" : ` ${skill}`;
 }
 
-/** The entry every `eve__execute({ skill })` call resolves to. */
+/** The entry every `eve__skill` call resolves to, with its skill as `{ skill }`. */
 export function createSkillLoader(
   skills: ReadonlyMap<string, CatalogSkill>,
 ): HarnessToolDefinition {
@@ -70,7 +70,7 @@ export function createSkillLoader(
     description: "Loads a skill's instructions.",
     execute: (input: { readonly skill: string }) => {
       const skill = skills.get(input.skill);
-      // `eve__execute` validation resolves every skill before the call runs.
+      // `eve__skill` validation resolves every skill before the call runs.
       if (skill === undefined) throw new Error(`No skill named "${input.skill}".`);
       return skill.markdown;
     },
@@ -81,7 +81,7 @@ export function createSkillLoader(
   };
 }
 
-/** Why `eve__execute` can't load `name`: the closest skills, or the connection it names. */
+/** Why `eve__skill` can't load `name`: the closest skills, or the connection it names. */
 export function unknownSkillMessage(
   name: string,
   skills: ReadonlyMap<string, CatalogSkill>,

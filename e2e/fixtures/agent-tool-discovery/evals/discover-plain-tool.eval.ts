@@ -8,7 +8,7 @@ const TOOL = "release_train_schedule";
 /**
  * A deferred tool without a namespace, which the request describes but never
  * names: the model searches its catalog with eve__search, then runs the tool
- * through eve__execute.
+ * through eve__tool.
  */
 export default defineEval({
   tags: ["real-model"],

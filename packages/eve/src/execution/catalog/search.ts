@@ -8,7 +8,7 @@
 
 import { connectionToolName } from "#connections/ownership.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { EXECUTE_TOOL_NAME, SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
+import { CALL_TOOL_NAME, SEARCH_TOOL_NAME, SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import type { ConnectionToolMetadata } from "#shared/connection-types.js";
@@ -28,13 +28,35 @@ import type { CatalogSkill } from "./skills.js";
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 50;
 
-const SEARCH_DESCRIPTION = [
-  "Find your own tools, agents, skills, and connected services by keyword; this searches what you can do, not the web.",
-  `Returns each tool's exact name, description, and TypeScript signature, to call with ${EXECUTE_TOOL_NAME}({ tool, input }),`,
-  `and each skill's name and description, to load with ${EXECUTE_TOOL_NAME}({ skill }).`,
-  'When you already know a name or connection, from the catalog listing, an earlier result, or an error, search it directly: the exact name, or "<connection>__", which is faster and returns only that connection\'s tools.',
-  `A connection that needs sign-in appears as a tool named after the connection: calling it with ${EXECUTE_TOOL_NAME} asks the user to sign in.`,
-].join(" ");
+/** What an agent's search can return, from what it declares. */
+export interface SearchReach {
+  readonly connections: boolean;
+  readonly skills: boolean;
+  readonly tools: boolean;
+}
+
+/**
+ * `eve__search`'s description, saying which tool takes each kind of result.
+ * It mentions only the catalog tools the agent has, so it is fixed for a
+ * deployment.
+ */
+function searchDescription({ connections, skills, tools }: SearchReach): string {
+  return [
+    "Find your own tools, agents, skills, and connected services by keyword; this searches what you can do, not the web.",
+    tools
+      ? `A result with \`tool\` has the exact name, description, and TypeScript signature: call it with ${CALL_TOOL_NAME}({ name, input }).`
+      : undefined,
+    skills
+      ? `A result with \`skill\` has the name and description: load it with ${SKILL_TOOL_NAME}({ name }).`
+      : undefined,
+    'When you already know a name or connection, from the catalog listing, an earlier result, or an error, search it directly: the exact name, or "<connection>__", which is faster and returns only that connection\'s tools.',
+    connections
+      ? `A connection that needs sign-in appears as a tool named after the connection: calling it with ${CALL_TOOL_NAME}({ name }) asks the user to sign in.`
+      : undefined,
+  ]
+    .filter((sentence) => sentence !== undefined)
+    .join(" ");
+}
 
 const SEARCH_INPUT_SCHEMA = toInputSchema({
   type: "object",
@@ -77,7 +99,7 @@ interface SearchOutput {
 }
 
 /**
- * `fullName` is the name `eve__execute` takes and a namespace query scopes. `result`
+ * `fullName` is the name `eve__tool` takes and a namespace query scopes. `result`
  * renders only for the results returned, since signatures cost a render.
  */
 type SearchCandidate = RankCandidate & {
@@ -110,11 +132,12 @@ function labelQuery(input: unknown): string {
 export function createSearchTool(input: {
   readonly deferred: readonly HarnessToolDefinition[];
   readonly describe: (definition: HarnessToolDefinition) => string;
+  readonly reach: SearchReach;
   readonly registry: ConnectionRegistry | undefined;
   readonly skills: readonly CatalogSkill[];
 }): HarnessToolDefinition {
   return {
-    description: SEARCH_DESCRIPTION,
+    description: searchDescription(input.reach),
     execute: (rawInput: unknown) => search(input, rawInput as SearchInput),
     frameworkTool: true,
     inputSchema: SEARCH_INPUT_SCHEMA,

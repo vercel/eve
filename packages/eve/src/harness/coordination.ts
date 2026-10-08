@@ -7,7 +7,7 @@ import type {
   RuntimeWorkflowTaskRequest,
   WorkflowToolCallEntry,
 } from "#shared/action-types.js";
-import { EXECUTE_TOOL_NAME, SKILL_ENTRY_NAME } from "#protocol/catalog-tools.js";
+import { SKILL_ENTRY_NAME, SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { markRuntimeWorkflowToolAction } from "#shared/action-types.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
@@ -67,10 +67,10 @@ export async function runtimeResultCalls(
   const settled: { part: ToolResultPart; result: RuntimeActionResult }[] = [];
   for (const result of results) {
     switch (result.kind) {
-      // A skill load is always an `eve__execute` call in history.
+      // A skill load is always an `eve__skill` call in history.
       case "load-skill-result":
         settled.push({
-          part: toolResult(result, EXECUTE_TOOL_NAME, toToolResultOutput(result)),
+          part: toolResult(result, SKILL_TOOL_NAME, toToolResultOutput(result)),
           result,
         });
         continue;

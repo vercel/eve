@@ -24,7 +24,7 @@ export function requestedSkill(
   return skillTarget(action.input) ?? SKILL_ENTRY_NAME;
 }
 
-/** The skill an `eve__execute` input names, if it names one. */
+/** The skill a skill loader's input names, if it names one. */
 export function skillTarget(input: unknown): string | undefined {
   return isObject(input) && typeof input.skill === "string" ? input.skill : undefined;
 }

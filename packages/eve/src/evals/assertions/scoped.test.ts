@@ -41,12 +41,22 @@ describe("tool-name assertions", () => {
     expect(() => assertionsFor(undefined).toolOrder(["final_output"])).not.toThrow();
   });
 
-  it("always reject eve__execute, whose calls are reported under the entry they reach", () => {
-    const message =
-      "Calls through eve__execute are reported under the entry's name; assert on the tool or agent it reaches, or use t.loadedSkill for skills.";
-
-    expect(() => assertionsFor(undefined).notCalledTool("eve__execute")).toThrow(message);
-    expect(() => assertionsFor({ dynamic: true, static: [] }).calledTool("eve__execute")).toThrow(
+  it.each([
+    [
+      "eve__tool",
+      "Calls through eve__tool are reported under the entry's name; assert on the tool or agent it reaches.",
+    ],
+    [
+      "eve__skill",
+      "Calls through eve__skill are reported as skill loads; use t.loadedSkill(name).",
+    ],
+    [
+      "eve__execute",
+      'Tool name "eve__execute" was retired: it was split into eve__tool and eve__skill. Assert on the tool or agent a call reaches, or use t.loadedSkill(name) for skills.',
+    ],
+  ])("always reject %s, which no call is reported under", (name, message) => {
+    expect(() => assertionsFor(undefined).notCalledTool(name)).toThrow(message);
+    expect(() => assertionsFor({ dynamic: true, static: [name] }).calledTool(name)).toThrow(
       message,
     );
   });

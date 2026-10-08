@@ -1,6 +1,6 @@
 import { isAgentTool } from "#execution/tasks/tool-entry-point.js";
 import type { Announcement } from "#harness/announcements.js";
-import { EXECUTE_TOOL_NAME, SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
+import { CALL_TOOL_NAME, SEARCH_TOOL_NAME, SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
 
 import { compareCodeUnits } from "./rank.js";
 import type { StepCatalog } from "./step-catalog.js";
@@ -130,7 +130,7 @@ function renderCatalogAnnouncement(
   reachable: ReadonlySet<string>,
 ): string {
   if (isEmpty(current)) {
-    return `The catalog changed. It is empty now: ${SEARCH_TOOL_NAME} finds nothing, and ${EXECUTE_TOOL_NAME} has no tools to call.`;
+    return `The catalog changed. It is empty now: ${SEARCH_TOOL_NAME} finds nothing.`;
   }
   if (previous === undefined || isEmpty(previous)) return renderListing(current);
   const gone = [
@@ -148,10 +148,10 @@ function renderListing({ connections, kinds, namespaces }: CatalogListing): stri
   const subject =
     kinds.length === 0 ? "Your connections have more tools" : `You have more ${joinWords(kinds)}`;
   const call = !kinds.includes("skills")
-    ? `Call them with ${EXECUTE_TOOL_NAME}({ tool, input }).`
-    : kinds.length === 1
-      ? `Load them with ${EXECUTE_TOOL_NAME}({ skill }).`
-      : `Call tools with ${EXECUTE_TOOL_NAME}({ tool, input }) and load skills with ${EXECUTE_TOOL_NAME}({ skill }).`;
+    ? `Call them with ${CALL_TOOL_NAME}({ name, input }).`
+    : kinds.length === 1 && connections.items.length === 0
+      ? `Load them with ${SKILL_TOOL_NAME}({ name }).`
+      : `Call tools with ${CALL_TOOL_NAME}({ name, input }) and load skills with ${SKILL_TOOL_NAME}({ name }).`;
   const lines = [
     `${subject} than are loaded here. Before saying you have no tool for a task, look for one with ${SEARCH_TOOL_NAME}, which searches your own catalog, not the web. ${call}`,
   ];
