@@ -41,7 +41,12 @@ import type {
   ExperimentalVercelImageRuntimeOptions,
 } from "#public/sandbox/vercel-image-sandbox.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
-import type { MutableNetworkSandboxSession } from "#shared/sandbox-session.js";
+import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
+import type { SandboxSession } from "#shared/sandbox-session.js";
+
+type NetworkPolicySandboxSession = SandboxSession & {
+  setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
+};
 import { decodeVercelOidcTokenClaims } from "#shared/vercel-project.js";
 import {
   isSandboxPreparedArtifactRecord,
@@ -96,7 +101,7 @@ export function createVercelImageSandboxProvider(
   ExperimentalVercelImageRuntimeOptions,
   VercelImagePreparedArtifact,
   VercelImageSessionState,
-  MutableNetworkSandboxSession
+  NetworkPolicySandboxSession
 > {
   const createImagePublisher = input.createImagePublisher ?? createLazyOciImagePublisher;
   const ensureBaseRuntime = input.ensureBaseRuntime ?? ensureVercelSandboxBaseRuntime;
@@ -140,6 +145,7 @@ export function createVercelImageSandboxProvider(
           createOptions,
           module,
           mounts: artifact.mounts,
+          sandboxName,
           signal: createOptions.signal,
         });
         const {

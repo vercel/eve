@@ -24,9 +24,14 @@ function resource() {
   };
 }
 
-function createDrive(name = "drive") {
+function createDrive(
+  name = "drive",
+  options: { readonly driveId?: string; readonly parentDriveId?: string } = {},
+) {
   return {
+    driveId: options.driveId ?? `${name}-id`,
     name,
+    parentDriveId: options.parentDriveId,
     region: "iad1",
     snapshot: vi.fn(() => ({ drive: name, mode: "snapshot" as const })),
   };
@@ -147,13 +152,19 @@ describe("Vercel image resources", () => {
     ).rejects.toThrow("conflicts with existing content");
   });
 
-  it("resolves prepared Drive names with getOrCreate", async () => {
+  it("forks prepared Drives into writable session mounts", async () => {
     setCredentials();
-    const drive = createDrive("prepared-drive");
+    const fork = createDrive("session-fork", { parentDriveId: "prepared-drive-id" });
+    const source = {
+      ...createDrive("prepared-drive"),
+      fork: vi.fn(async () => fork),
+    };
+    const get = vi
+      .fn()
+      .mockResolvedValueOnce(source)
+      .mockRejectedValueOnce(Object.assign(new Error("missing"), { status: 404 }));
     const module = {
-      Drive: {
-        getOrCreate: vi.fn(async () => drive),
-      },
+      Drive: { get },
       Sandbox: { create: vi.fn() },
     };
     await expect(
@@ -168,12 +179,79 @@ describe("Vercel image resources", () => {
             resourceKey: "workspace-key",
           },
         ],
+        sandboxName: "sandbox-a",
       }),
     ).resolves.toEqual({
-      "/eve/resources/workspace": { drive: "prepared-drive", mode: "snapshot" },
+      "/eve/resources/workspace": fork,
     });
-    expect(module.Drive.getOrCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "prepared-drive", region: "iad1" }),
-    );
+    expect(get).toHaveBeenNthCalledWith(1, expect.objectContaining({ name: "prepared-drive" }));
+    expect(source.fork).toHaveBeenCalledWith({
+      name: expect.stringMatching(/^eve-sbx-fork-[a-f0-9]{32}$/u),
+      signal: undefined,
+    });
+  });
+
+  it("reuses an existing fork from the prepared Drive", async () => {
+    setCredentials();
+    const source = createDrive("prepared-drive");
+    const fork = createDrive("session-fork", { parentDriveId: source.driveId });
+    const module = {
+      Drive: { get: vi.fn().mockResolvedValueOnce(source).mockResolvedValueOnce(fork) },
+      Sandbox: { create: vi.fn() },
+    };
+
+    await expect(
+      resolveVercelImageMounts({
+        module: module as never,
+        createOptions: {},
+        mounts: [
+          {
+            driveName: source.name,
+            mountPath: "/eve/resources/skills",
+            region: source.region,
+            resourceKey: "skills-key",
+          },
+        ],
+        sandboxName: "sandbox-a",
+      }),
+    ).resolves.toEqual({ "/eve/resources/skills": fork });
+  });
+
+  it("uses the winning fork when session starts race", async () => {
+    setCredentials();
+    const fork = createDrive("session-fork", { parentDriveId: "prepared-drive-id" });
+    const source = {
+      ...createDrive("prepared-drive"),
+      fork: vi.fn(async () => {
+        throw new Error("fork already exists");
+      }),
+    };
+    const missing = Object.assign(new Error("missing"), { status: 404 });
+    const module = {
+      Drive: {
+        get: vi
+          .fn()
+          .mockResolvedValueOnce(source)
+          .mockRejectedValueOnce(missing)
+          .mockResolvedValueOnce(fork),
+      },
+      Sandbox: { create: vi.fn() },
+    };
+
+    await expect(
+      resolveVercelImageMounts({
+        module: module as never,
+        createOptions: {},
+        mounts: [
+          {
+            driveName: source.name,
+            mountPath: "/eve/resources/skills",
+            region: source.region,
+            resourceKey: "skills-key",
+          },
+        ],
+        sandboxName: "sandbox-a",
+      }),
+    ).resolves.toEqual({ "/eve/resources/skills": fork });
   });
 });

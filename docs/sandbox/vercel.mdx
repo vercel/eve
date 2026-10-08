@@ -71,7 +71,7 @@ Use the environment's `prepare` callback for immutable setup that every new sess
 
 ## Experimental Dockerfile image environment
 
-`ExperimentalVercelDockerfile` uses eve's Vercel base image by default. When `agent/sandbox/Dockerfile` exists, it builds the Dockerfile as a Linux AMD64 OCI image and publishes a digest-pinned image instead. Managed workspace and skill inputs use immutable Drive snapshots in both cases. The built-in `VercelSandbox` remains snapshot-backed; use this separate environment when the sandbox should start directly from an image.
+`ExperimentalVercelDockerfile` uses eve's Vercel base image by default. When `agent/sandbox/Dockerfile` exists, it builds the Dockerfile as a Linux AMD64 OCI image and publishes a digest-pinned image instead. Managed workspace and skill inputs use content-addressed Drives in both cases. The built-in `VercelSandbox` remains snapshot-backed; use this separate environment when the sandbox should start directly from an image.
 
 ```ts
 import { defineSandbox } from "eve/sandbox";
@@ -91,7 +91,11 @@ export default defineSandbox(() =>
 
 The build requires Vercel project credentials and an OCI builder: Docker locally or buildah in a hosted build environment. Registry credentials never appear in command arguments or prepared artifacts.
 
-This environment does not accept `prepare`. Add a Dockerfile when the eve base image is not sufficient, and put immutable software setup there. The build artifact records only the digest-pinned image reference and content-addressed Drive identities; it never records credentials. Runtime resolves each serialized Drive name with `Drive.getOrCreate()` and mounts its snapshot.
+This environment does not accept `prepare`. Add a Dockerfile when the eve base image is not sufficient, and put immutable software setup there. The build artifact records only the digest-pinned image reference and content-addressed Drive identities; it never records credentials.
+
+At runtime, eve resolves each prepared Drive with `Drive.get()`, forks it for the session, and mounts the fork read-write. Each session starts with the prepared workspace and skills but writes only to its own forks. This lets dynamic skills add or replace files under `$HOME/.agents/skills` without changing the prepared Drive or another session.
+
+This environment requires access to Vercel's [Drive forks private beta](https://vercel.com/docs/sandbox/concepts/drives#forking-a-drive), which is available on Pro and Enterprise plans.
 
 ## Network policy
 

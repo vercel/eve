@@ -29,7 +29,7 @@ describe("experimental Vercel image runtime bundling", () => {
       name: "vercel-image-runtime-pruning",
     });
 
-    const output = await buildApplication(app.appRoot, { skipVercelSandboxPrewarm: true });
+    const output = await buildApplication(app.appRoot, { skipSandboxPrewarm: true });
     const source = await readJavaScript(join(output, "functions"));
 
     expect(source).toContain("OCI images cannot be published from a hosted server runtime");

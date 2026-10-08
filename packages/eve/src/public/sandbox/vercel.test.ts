@@ -14,7 +14,9 @@ describe("VercelSandbox", () => {
     const environment = VercelSandbox.environment({ resources: { vcpus: 4 } });
     expect(environment.provider).toBe("vercel");
     expectTypeOf(environment.open).toBeFunction();
+    expectTypeOf(Drive.get).toBeFunction();
     expectTypeOf(Drive.getOrCreate).toBeFunction();
+    expectTypeOf(Drive.prototype.fork).toBeFunction();
   });
 
   it("preserves its session capabilities through getSandbox", () => {

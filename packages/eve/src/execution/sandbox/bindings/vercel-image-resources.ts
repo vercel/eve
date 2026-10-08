@@ -70,20 +70,52 @@ export async function resolveVercelImageMounts(input: {
   readonly createOptions: VercelCreateOptions;
   readonly module: VercelModule;
   readonly mounts: readonly VercelImageMountArtifact[];
+  readonly sandboxName: string;
   readonly signal?: AbortSignal;
-}): Promise<Record<string, ReturnType<VercelDrive["snapshot"]>>> {
+}): Promise<Record<string, VercelDrive>> {
   const credentials = await getVercelSandboxCredentials(input.createOptions);
   const fetch = getVercelSandboxFetch(input.createOptions);
-  const mounts: Record<string, ReturnType<VercelDrive["snapshot"]>> = {};
+  const mounts: Record<string, VercelDrive> = {};
   for (const artifact of input.mounts) {
-    const drive = await input.module.Drive.getOrCreate({
+    const source = await input.module.Drive.get({
       ...credentials,
       fetch,
       name: artifact.driveName,
-      region: artifact.region,
       signal: input.signal,
     });
-    mounts[artifact.mountPath] = drive.snapshot();
+    if (source.region !== artifact.region) {
+      throw new Error(`Prepared sandbox resource "${artifact.resourceKey}" changed regions.`);
+    }
+    const forkName = resourceForkName(input.sandboxName, artifact.resourceKey);
+    let fork: VercelDrive;
+    try {
+      fork = await input.module.Drive.get({
+        ...credentials,
+        fetch,
+        name: forkName,
+        signal: input.signal,
+      });
+    } catch (error) {
+      if (!isVercelResourceMissingError(error)) throw error;
+      try {
+        fork = await source.fork({ name: forkName, signal: input.signal });
+      } catch (forkError) {
+        try {
+          fork = await input.module.Drive.get({
+            ...credentials,
+            fetch,
+            name: forkName,
+            signal: input.signal,
+          });
+        } catch {
+          throw forkError;
+        }
+      }
+    }
+    if (fork.parentDriveId !== source.driveId) {
+      throw new Error(`Sandbox resource fork "${forkName}" has an unexpected source Drive.`);
+    }
+    mounts[artifact.mountPath] = fork;
   }
   return mounts;
 }
@@ -204,6 +236,15 @@ async function readResourceManifest(
 function resourceDriveName(region: string, resourceKey: string): string {
   return `eve-sbx-res-${createHash("sha256")
     .update(region)
+    .update("\0")
+    .update(resourceKey)
+    .digest("hex")
+    .slice(0, 32)}`;
+}
+
+function resourceForkName(sandboxName: string, resourceKey: string): string {
+  return `eve-sbx-fork-${createHash("sha256")
+    .update(sandboxName)
     .update("\0")
     .update(resourceKey)
     .digest("hex")
