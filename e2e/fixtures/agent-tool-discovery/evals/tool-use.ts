@@ -1,12 +1,9 @@
+import { EXECUTE_TOOL, SEARCH_TOOL } from "@eve-e2e/config/catalog-tools";
 import type { EveEvalTurn } from "eve/evals";
 
 import { CATALOG_TOOLS } from "../agent/lib/catalog";
 
 type Events = Parameters<Parameters<EveEvalTurn["eventsSatisfy"]>[1]>[0];
-
-/** eve's catalog tools, by the names they ship under. */
-export const SEARCH_TOOL = "eve__search";
-export const EXECUTE_TOOL = "eve__execute";
 
 /** Entries only the catalog tools reach: the deferred tools, skill, and agent. */
 const CATALOG_ENTRIES = new Set([

@@ -276,14 +276,23 @@ export function catalogContext(
   return { catalog, ctx, run: <T>(fn: () => T) => contextStorage.run(ctx, fn) };
 }
 
+/** Names in eve's namespace, which nothing authored or dynamic may take. */
+export const EVE_NAMESPACE_NAMES = ["eve", "eve__search", "eve__anything"];
+
 /**
- * The tool names eve adds to every session, each with the role a reserved-name
- * error names. No tool, subagent, or connection may take one.
+ * Names outside eve's namespace: the built-in tools' former names, which are
+ * free again, and names that only contain "eve".
  */
-export const RESERVED_TOOL_NAMES: readonly (readonly [name: string, role: string])[] = [
-  ["search", "catalog tool"],
-  ["execute", "catalog tool"],
-  ["task_wait", "task tool"],
-  ["task_cancel", "task tool"],
-  ["final_output", "final output tool"],
+export const NAMES_OUTSIDE_EVE_NAMESPACE = [
+  "search",
+  "execute",
+  "task_wait",
+  "task_cancel",
+  "final_output",
+  "steve",
+  "eve_tool",
+  "my__eve__x",
 ];
+
+/** How every reserved-name error explains the rule. */
+export const EVE_NAMESPACE_RESERVATION = 'eve reserves the "eve" namespace for its built-in tools';

@@ -2,7 +2,7 @@ import type { EveEvalTurn } from "eve/evals";
 
 /**
  * Whether every model step that asked for tools ran at least one of them. A
- * call through `execute` whose input fails validation never becomes an action,
+ * call through `eve__execute` whose input fails validation never becomes an action,
  * so a step that requested tools but produced no action had every call
  * rejected and the model had to try again.
  */

@@ -1,4 +1,5 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
+import { EXECUTE_TOOL, SEARCH_TOOL, TASK_WAIT_TOOL } from "@eve-e2e/config/catalog-tools";
 import {
   execute,
   latestTaskResult,
@@ -12,9 +13,9 @@ import type { MockModelRequest, MockModelResponse } from "eve/evals";
 import { LEDGER_REGIONS } from "./lib/ledger-regions";
 
 /** Every catalog listing says this, whatever kinds it names. */
-const LISTING_MARKER = "look for one with search, which searches your own catalog";
+const LISTING_MARKER = `look for one with ${SEARCH_TOOL}, which searches your own catalog`;
 
-/** Entries that must reach the model only through `search` and `execute`. */
+/** Entries that must reach the model only through `eve__search` and `eve__execute`. */
 const DEFERRED_SAMPLES = [
   "refund_invoice",
   "deploy_service",
@@ -23,7 +24,7 @@ const DEFERRED_SAMPLES = [
   `ledger__${LEDGER_REGIONS[0]}`,
 ];
 
-/** The first tool `execute` suggested in its error for the call with `id`. */
+/** The first tool `eve__execute` suggested in its error for the call with `id`. */
 function suggestedTool(request: MockModelRequest, id: string): string | undefined {
   return /Closest tools: ([A-Za-z0-9_-]+)/u.exec(outputOf(request, id))?.[1];
 }
@@ -36,7 +37,7 @@ function reportTask(
 ): MockModelResponse | string {
   const result = latestTaskResult(request, tool);
   return result === undefined
-    ? { toolCalls: [{ name: "task_wait", input: {} }] }
+    ? { toolCalls: [{ name: TASK_WAIT_TOOL, input: {} }] }
     : `${label} ${result}`;
 }
 
@@ -51,7 +52,7 @@ const SCENARIOS: Record<string, (request: MockModelRequest) => MockModelResponse
     );
     return [
       `DEFERRED-IN-TOOLS: ${listed.length === 0 ? "none" : listed.join(", ")}`,
-      `CATALOG-TOOLS: ${["search", "execute"].filter((name) => request.tools.some((tool) => tool.name === name)).join(", ")}`,
+      `CATALOG-TOOLS: ${[SEARCH_TOOL, EXECUTE_TOOL].filter((name) => request.tools.some((tool) => tool.name === name)).join(", ")}`,
       listing?.text ?? "NO-LISTING",
     ].join("\n");
   },
@@ -92,24 +93,24 @@ const SCENARIOS: Record<string, (request: MockModelRequest) => MockModelResponse
             tool: suggestedTool(current, "misspelled"),
             input: { invoiceId: "INV-2041" },
           }),
-          name: "execute",
+          name: EXECUTE_TOOL,
         },
       ],
       (done) => `REFUND-RESULT ${outputOf(done, "corrected")}`,
     ),
-  /** Finds a dynamic ledger tool with search and calls it, then calls the connection. */
+  /** Finds a dynamic ledger tool with eve__search and calls it, then calls the connection. */
   "DEFERRED-LEDGER": (request) =>
     playScript(
       request,
       [
-        { id: "ledger-search", input: () => ({ query: "west ledger" }), name: "search" },
+        { id: "ledger-search", input: () => ({ query: "west ledger" }), name: SEARCH_TOOL },
         {
           id: "ledger",
           input: (current) => ({
             tool: /"tool":"(ledger__[a-z_]+)"/u.exec(outputOf(current, "ledger-search"))?.[1],
             input: { month: "2026-09" },
           }),
-          name: "execute",
+          name: EXECUTE_TOOL,
         },
         execute("inventory", { tool: "petstore__getInventory" }),
       ],

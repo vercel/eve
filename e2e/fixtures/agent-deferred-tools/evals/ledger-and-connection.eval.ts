@@ -1,9 +1,10 @@
+import { SEARCH_TOOL } from "@eve-e2e/config/catalog-tools";
 import { requireMockModel } from "@eve-e2e/config/mock-script";
 import { defineEval } from "eve/evals";
 
 export default defineEval({
   description:
-    "search finds a deferred tool a session-scoped resolver returned, execute runs it, and execute calls an OpenAPI connection tool.",
+    "eve__search finds a deferred tool a session-scoped resolver returned, eve__execute runs it, and eve__execute calls an OpenAPI connection tool.",
 
   async test(t) {
     requireMockModel(t);
@@ -12,7 +13,7 @@ export default defineEval({
 
     turn.expectOk();
     turn.noFailedActions();
-    t.toolOrder(["search", "ledger__us_west", "petstore__getInventory"]);
+    t.toolOrder([SEARCH_TOOL, "ledger__us_west", "petstore__getInventory"]);
     turn.calledTool("ledger__us_west", {
       count: 1,
       output: { balance: 1000, month: "2026-09", region: "us_west" },

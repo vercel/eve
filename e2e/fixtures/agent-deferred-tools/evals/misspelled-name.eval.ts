@@ -3,7 +3,7 @@ import { defineEval } from "eve/evals";
 
 export default defineEval({
   description:
-    "execute rejects a misspelled tool name with the closest names, and the suggested name runs the tool.",
+    "eve__execute rejects a misspelled tool name with the closest names, and the suggested name runs the tool.",
 
   async test(t) {
     requireMockModel(t);

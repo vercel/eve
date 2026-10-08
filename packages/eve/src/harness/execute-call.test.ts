@@ -1,5 +1,6 @@
 import type { Telemetry } from "ai";
 import { describe, expect, it } from "vitest";
+import { EXECUTE_TOOL_NAME } from "#protocol/catalog-tools.js";
 
 import { catalogContext, inlineTool, workflowTool } from "#internal/testing/catalog-fixtures.js";
 
@@ -62,7 +63,7 @@ describe("toEntryTelemetry", () => {
     const output = await reportExecution(wrapped, {
       input: { input: { service: "api" }, tool: "deploy_service" },
       toolCallId: "call-deploy",
-      toolName: "execute",
+      toolName: EXECUTE_TOOL_NAME,
     });
 
     expect(output).toBe("ran");
@@ -75,7 +76,7 @@ describe("toEntryTelemetry", () => {
     await reportExecution(wrapped, {
       input: { input: { invoiceId: "in_1" }, tool: "refund_invoice" },
       toolCallId: "call-refund",
-      toolName: "execute",
+      toolName: EXECUTE_TOOL_NAME,
     });
 
     expect(integration.records).toEqual([

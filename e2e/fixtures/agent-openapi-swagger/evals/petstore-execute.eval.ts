@@ -1,3 +1,4 @@
+import { EXECUTE_TOOL, SEARCH_TOOL } from "@eve-e2e/config/catalog-tools";
 import { requireMockModel } from "@eve-e2e/config/mock-script";
 import { defineEval } from "eve/evals";
 
@@ -14,15 +15,15 @@ export default defineEval({
 
     turn.expectOk();
     turn.noFailedActions();
-    t.toolOrder(["search", INVENTORY_TOOL]);
-    turn.calledTool("search", {
+    t.toolOrder([SEARCH_TOOL, INVENTORY_TOOL]);
+    turn.calledTool(SEARCH_TOOL, {
       count: 1,
       input: { query: "petstore__" },
       output: (value) => JSON.stringify(value).includes(`"tool":"${INVENTORY_TOOL}"`),
     });
-    // The call is reported under the entry's name, never as a nested execute action.
+    // The call is reported under the entry's name, never as a nested eve__execute action.
     turn.calledTool(INVENTORY_TOOL, { count: 1, output: hasInventoryCounts });
-    turn.notEvent("actions.requested", { data: { actions: [{ toolName: "execute" }] } });
+    turn.notEvent("actions.requested", { data: { actions: [{ toolName: EXECUTE_TOOL }] } });
     t.messageIncludes("inventory received");
   },
 });

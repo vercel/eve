@@ -3,7 +3,7 @@ import { defineEval } from "eve/evals";
 
 export default defineEval({
   description:
-    "A deferred subagent called through execute starts a child session that records the model's call id.",
+    "A deferred subagent called through eve__execute starts a child session that records the model's call id.",
 
   async test(t) {
     requireMockModel(t);

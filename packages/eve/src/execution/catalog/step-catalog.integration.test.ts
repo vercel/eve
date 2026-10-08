@@ -6,6 +6,9 @@ import type {
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
+import { EXECUTE_TOOL_NAME, SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
+import { TASK_CANCEL_TOOL_NAME, TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
+
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
 import { dispatchDynamicSubagentEvent } from "#context/dynamic-subagent-lifecycle.js";
@@ -58,7 +61,7 @@ vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async ()
 const NAMESPACES_OPS_TENANT = /^Namespaces, .*: ops, tenant$/mu;
 
 /** Every catalog listing says this, whatever kinds it names. */
-const LISTING_MARKER = "look for one with search, which searches your own catalog";
+const LISTING_MARKER = "look for one with eve__search, which searches your own catalog";
 
 type Reply = ReturnType<typeof textStreamResult>;
 
@@ -267,28 +270,34 @@ describe("step catalog in the harness (real AI SDK)", () => {
 
     // A search, then an inline tool through execute.
     reply(
-      calls(call("search-refund", "search", { query: "refund" })),
-      calls(call("refund", "execute", { input: { invoiceId: "in_1" }, tool: "refund_invoice" })),
+      calls(call("search-refund", SEARCH_TOOL_NAME, { query: "refund" })),
+      calls(
+        call("refund", EXECUTE_TOOL_NAME, { input: { invoiceId: "in_1" }, tool: "refund_invoice" }),
+      ),
       text("Refunded in_1."),
     );
     await drive({ message: "Alice asks for a refund of invoice in_1." });
 
     // An approval, during which a dynamic deferred tool appears. The catalog
     // changes on the step that runs the approved call.
-    reply(calls(call("credit", "execute", { tool: "issue_credit" })));
+    reply(calls(call("credit", EXECUTE_TOOL_NAME, { tool: "issue_credit" })));
     const awaitingApproval = await drive({ message: "Alice asks for a credit for Bob." });
     const [approval] = parkedSteps(awaitingApproval.session).flatMap((step) => step.requests);
     expect(approval?.action.toolName).toBe("issue_credit");
     await resolveTenantTools();
     const approvalStep = mark();
     reply(
-      calls(call("search-sync", "search", { query: "sync" })),
+      calls(call("search-sync", SEARCH_TOOL_NAME, { query: "sync" })),
       text("Credited Bob and found the sync tool."),
     );
     await drive({ inputResponses: [{ optionId: "approve", requestId: approval!.requestId }] });
 
     // A foreground workflow tool parks the turn and resumes with its result.
-    reply(calls(call("deploy", "execute", { input: { service: "api" }, tool: "deploy_service" })));
+    reply(
+      calls(
+        call("deploy", EXECUTE_TOOL_NAME, { input: { service: "api" }, tool: "deploy_service" }),
+      ),
+    );
     const deploying = await drive({ message: "Alice asks to deploy the api service." });
     expect(
       parkedSteps(deploying.session).flatMap((step) => step.tasks.map((task) => task.toolName)),
@@ -308,8 +317,8 @@ describe("step catalog in the harness (real AI SDK)", () => {
     // A background workflow tool and a deferred subagent each start a task.
     reply(
       calls(
-        call("research", "execute", { input: { topic: "refunds" }, tool: "research" }),
-        call("delegate", "execute", {
+        call("research", EXECUTE_TOOL_NAME, { input: { topic: "refunds" }, tool: "research" }),
+        call("delegate", EXECUTE_TOOL_NAME, {
           input: { message: "Review Bob's dispute." },
           tool: "billing_specialist",
         }),
@@ -338,7 +347,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
     });
 
     // A connection tool parks the turn for sign-in, then runs once the user signs in.
-    reply(calls(call("items", "execute", { tool: "private__list_items" })));
+    reply(calls(call("items", EXECUTE_TOOL_NAME, { tool: "private__list_items" })));
     const signingIn = await drive({ message: "Alice wants the items in the private catalog." });
     const [challenge] = getPendingAuthorization(signingIn.session.state)?.challenges ?? [];
     expect(challenge?.name).toBe("private");
@@ -358,7 +367,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
       state: clearPendingAuthorization(driver.session.state, [challenge!.attemptId!]),
     };
     reply(
-      calls(call("items-after-sign-in", "execute", { tool: "private__list_items" })),
+      calls(call("items-after-sign-in", EXECUTE_TOOL_NAME, { tool: "private__list_items" })),
       text("The private catalog has Alice's lamp."),
     );
     await drive();
@@ -374,7 +383,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
     );
     const connectionStep = mark();
     reply(
-      calls(call("status", "execute", { tool: "products__get_status" })),
+      calls(call("status", EXECUTE_TOOL_NAME, { tool: "products__get_status" })),
       text("The product catalog is up."),
     );
     await drive({ message: "Alice asks whether the product catalog is up." });
@@ -409,7 +418,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
     await resolveTenantTools();
     const changedStep = mark();
     reply(
-      calls(call("sync-again", "execute", { tool: "tenant__sync" })),
+      calls(call("sync-again", EXECUTE_TOOL_NAME, { tool: "tenant__sync" })),
       text("The sync tool is gone."),
     );
     await drive({ message: "Alice asks to sync the tenant again." });
@@ -447,12 +456,12 @@ describe("step catalog in the harness (real AI SDK)", () => {
     });
     const skillStep = mark();
     reply(
-      calls(call("search-notes", "search", { query: "release notes" })),
+      calls(call("search-notes", SEARCH_TOOL_NAME, { query: "release notes" })),
       calls(
-        call("notes", "execute", { skill: "release_notes" }),
-        call("forms", "execute", { skill: "pdf-forms" }),
-        call("playbook", "execute", { skill: "ops__playbook" }),
-        call("rules", "execute", { skill: "house-rules" }),
+        call("notes", EXECUTE_TOOL_NAME, { skill: "release_notes" }),
+        call("forms", EXECUTE_TOOL_NAME, { skill: "pdf-forms" }),
+        call("playbook", EXECUTE_TOOL_NAME, { skill: "ops__playbook" }),
+        call("rules", EXECUTE_TOOL_NAME, { skill: "house-rules" }),
       ),
       text("Loaded the skills."),
     );
@@ -490,10 +499,10 @@ describe("step catalog in the harness (real AI SDK)", () => {
     // 1. Fixed tools: the same names, descriptions, schemas, and order on every request.
     expect(requests[0]!.tools?.map((tool) => tool.name)).toEqual([
       "add",
-      "task_wait",
-      "task_cancel",
-      "search",
-      "execute",
+      TASK_WAIT_TOOL_NAME,
+      TASK_CANCEL_TOOL_NAME,
+      SEARCH_TOOL_NAME,
+      EXECUTE_TOOL_NAME,
     ]);
     for (const request of requests) expect(request.tools).toEqual(requests[0]!.tools);
 
@@ -582,13 +591,13 @@ describe("step catalog in the harness (real AI SDK)", () => {
       expect(JSON.stringify(results), callId).not.toContain("dispatched");
     }
 
-    // History keeps the model's own execute calls; actions carry each entry's name.
+    // History keeps the model's own eve__execute calls; actions carry each entry's name.
     const historyCalls = historyBeforeCompaction.flatMap((message) =>
       message.role === "assistant" && Array.isArray(message.content)
         ? message.content.flatMap((part) => (part.type === "tool-call" ? [part.toolName] : []))
         : [],
     );
-    expect(new Set(historyCalls)).toEqual(new Set(["execute", "search"]));
+    expect(new Set(historyCalls)).toEqual(new Set([EXECUTE_TOOL_NAME, SEARCH_TOOL_NAME]));
     expect(
       driver.events.flatMap((event) =>
         event.type === "actions.requested"
@@ -598,10 +607,10 @@ describe("step catalog in the harness (real AI SDK)", () => {
           : [],
       ),
     ).toEqual([
-      "search",
+      SEARCH_TOOL_NAME,
       "refund_invoice",
       "issue_credit",
-      "search",
+      SEARCH_TOOL_NAME,
       "deploy_service",
       "research",
       "billing_specialist",
@@ -609,7 +618,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
       "private__list_items",
       "private__list_items",
       "products__get_status",
-      "search",
+      SEARCH_TOOL_NAME,
       "load-skill",
       "load-skill",
       "load-skill",
@@ -631,7 +640,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
       ),
     );
     driver.reply(
-      calls(call("export", "execute", { tool: "export_ledger" })),
+      calls(call("export", EXECUTE_TOOL_NAME, { tool: "export_ledger" })),
       text("The ledger export failed."),
     );
 
@@ -653,7 +662,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
     ctx.set(BundleKey, catalogBundle({ skills: [{ name: "house-rules" }] }));
     const driver = createDriver(ctx, toolMap(inlineTool("add")));
     driver.reply(
-      calls(call("search-empty", "search", { query: "refund" })),
+      calls(call("search-empty", SEARCH_TOOL_NAME, { query: "refund" })),
       calls(call("add", "add", {})),
       text("Nothing else is available."),
     );
@@ -663,7 +672,11 @@ describe("step catalog in the harness (real AI SDK)", () => {
     const requests = driver.requests();
     expect(requests).toHaveLength(3);
     for (const request of requests) {
-      expect(request.tools?.map((tool) => tool.name)).toEqual(["add", "search", "execute"]);
+      expect(request.tools?.map((tool) => tool.name)).toEqual([
+        "add",
+        SEARCH_TOOL_NAME,
+        EXECUTE_TOOL_NAME,
+      ]);
       expect(catalogMessages(request)).toEqual([]);
     }
     expect(toolResult(requests[1]!, "search-empty")).toEqual({ results: [] });
@@ -686,9 +699,11 @@ describe("step catalog in the harness (real AI SDK)", () => {
     ctx.set(BundleKey, catalogBundle());
     const driver = createDriver(ctx, toolMap(inlineTool("add")));
     driver.reply(
-      calls(call("archive-unnamed", "execute", { input: {}, tool: "crm__archive_account" })),
       calls(
-        call("archive", "execute", {
+        call("archive-unnamed", EXECUTE_TOOL_NAME, { input: {}, tool: "crm__archive_account" }),
+      ),
+      calls(
+        call("archive", EXECUTE_TOOL_NAME, {
           input: { accountId: "acct_1" },
           tool: "crm__archive_account",
         }),

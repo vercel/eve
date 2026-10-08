@@ -1,3 +1,4 @@
+import { SEARCH_TOOL } from "@eve-e2e/config/catalog-tools";
 import { defineEval } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
@@ -22,7 +23,7 @@ export default defineEval({
     );
 
     turn.expectOk();
-    t.toolOrder(["search", ADD_PET_TOOL]);
+    t.toolOrder([SEARCH_TOOL, ADD_PET_TOOL]);
     t.calledTool(ADD_PET_TOOL, { output: isStoredBiscuit });
     t.messageIncludes("4217");
 

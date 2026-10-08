@@ -61,7 +61,9 @@ import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import {
   connectionRegistry,
   fakeConnection,
-  RESERVED_TOOL_NAMES,
+  EVE_NAMESPACE_NAMES,
+  EVE_NAMESPACE_RESERVATION,
+  NAMES_OUTSIDE_EVE_NAMESPACE,
 } from "#internal/testing/catalog-fixtures.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
@@ -168,19 +170,29 @@ describe("dynamic tool names", () => {
     ).toEqual({ errors: [expect.stringContaining(error)], tools: [] });
   });
 
-  it.each(RESERVED_TOOL_NAMES)(
-    "skips a resolver that returns %s, the built-in %s",
-    async (name, role) => {
+  it.each(EVE_NAMESPACE_NAMES)(
+    "skips a resolver that returns %s, in eve's namespace",
+    async (name) => {
       expect(
         await resolveTools({ [name]: createReplayableTool(), sync: createReplayableTool() }),
       ).toEqual({
         errors: [
-          `Dynamic tool resolver "agent/tools/tenant.ts" returned the reserved tool name "${name}". eve reserves "${name}" for its built-in ${role}; rename the map key.`,
+          `Dynamic tool resolver "agent/tools/tenant.ts" returned the reserved tool name "${name}". ${EVE_NAMESPACE_RESERVATION}; rename the map key.`,
         ],
         tools: [],
       });
     },
   );
+
+  it("keeps tools outside eve's namespace, including the built-in tools' former names", async () => {
+    expect(
+      await resolveTools(
+        Object.fromEntries(
+          NAMES_OUTSIDE_EVE_NAMESPACE.map((name) => [name, createReplayableTool()]),
+        ),
+      ),
+    ).toEqual({ errors: [], tools: NAMES_OUTSIDE_EVE_NAMESPACE });
+  });
 
   it("lets a dynamic tool wrap a subagent hidden with tool: false", async () => {
     expect(await resolveTools({ researcher: createReplayableTool() }, false)).toEqual({
