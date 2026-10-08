@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { hashEveTelemetryProject, resolveEveTelemetryProjectId } from "#cli/telemetry/identity.js";
+import {
+  fingerprintVercelTeam,
+  hashEveTelemetryProject,
+  resolveEveTelemetryInternal,
+  resolveEveTelemetryProjectId,
+} from "#cli/telemetry/identity.js";
 
 const identity = { installationId: "installation_123", projectSalt: "project_salt_123" };
 
@@ -44,5 +49,39 @@ describe("eve CLI telemetry identity", () => {
     expect(hashEveTelemetryProject(identity, "project")).not.toBe(
       hashEveTelemetryProject({ ...identity, projectSalt: "other_salt" }, "project"),
     );
+  });
+});
+
+describe("eve CLI telemetry internal flag", () => {
+  const fingerprints = new Set([fingerprintVercelTeam("team_internal")]);
+
+  it("matches the selected team by fingerprint, not by raw ID", async () => {
+    expect(fingerprintVercelTeam("team_internal")).not.toContain("team_internal");
+    await expect(
+      resolveEveTelemetryInternal({ fingerprints, readTeam: async () => "team_internal" }),
+    ).resolves.toBe(true);
+  });
+
+  it("reports false for another team or no selected team", async () => {
+    await expect(
+      resolveEveTelemetryInternal({ fingerprints, readTeam: async () => "team_other" }),
+    ).resolves.toBe(false);
+    await expect(
+      resolveEveTelemetryInternal({ fingerprints, readTeam: async () => undefined }),
+    ).resolves.toBe(false);
+  });
+
+  it("skips the Vercel CLI config when there are no fingerprints", async () => {
+    let read = false;
+    await expect(
+      resolveEveTelemetryInternal({
+        fingerprints: new Set(),
+        readTeam: async () => {
+          read = true;
+          return "team_internal";
+        },
+      }),
+    ).resolves.toBeUndefined();
+    expect(read).toBe(false);
   });
 });
