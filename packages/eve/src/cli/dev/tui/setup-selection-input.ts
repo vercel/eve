@@ -1,11 +1,9 @@
 import type { PromptOption } from "#setup/cli/index.js";
 import {
-  filterOptions,
-  orderedSelection,
   reduceSelect,
-  selectValueAtCursor,
-  submitRowIndex,
+  submitSelect,
   type SearchActionOption,
+  type SelectContext,
   type SelectState,
 } from "#setup/cli/select-state.js";
 
@@ -82,42 +80,28 @@ function isSearchableSelect(input: SetupSelectInputState): boolean {
   return input.kind === "search" || input.kind === "searchable-multi";
 }
 
+function selectContext(input: SetupSelectInputState): SelectContext {
+  return {
+    options: input.options,
+    searchAction: input.searchAction,
+    submitRow: isMultiSelect(input) && input.plannerNavigation !== true,
+  };
+}
+
 function updatedSelect(
   input: SetupSelectInputState,
   event: Parameters<typeof reduceSelect>[1],
 ): SetupSelectInputResult {
-  return {
-    kind: "update",
-    select: reduceSelect(input.select, event, {
-      options: input.options,
-      searchAction: input.searchAction,
-      submitRow: isMultiSelect(input) && input.plannerNavigation !== true,
-    }),
-  };
+  return { kind: "update", select: reduceSelect(input.select, event, selectContext(input)) };
 }
 
 function submitSetupSelect(input: SetupSelectInputState): SetupSelectInputResult {
-  const visible = isSearchableSelect(input)
-    ? filterOptions(input.options, input.select.filter, input.searchAction)
-    : [...input.options];
-  if (isMultiSelect(input)) {
-    if (input.plannerNavigation === true) return updatedSelect(input, { type: "toggle" });
-    if (input.select.cursor !== submitRowIndex(visible)) {
-      return updatedSelect(input, { type: "toggle" });
-    }
-    if (input.required && input.select.selected.size === 0) {
-      return { kind: "error", message: "Select at least one option, then submit." };
-    }
-    return {
-      kind: "submit",
-      values: orderedSelection(input.options, input.select.selected),
-    };
-  }
-
-  const value = selectValueAtCursor(visible, input.select.cursor);
-  if (value !== undefined) return { kind: "submit", values: [value] };
-  if (visible[input.select.cursor]?.completed) return { kind: "ignore" };
-  return { kind: "error", message: "Type to match an option, then press enter." };
+  const submission = submitSelect(input.select, {
+    ...selectContext(input),
+    multiple: isMultiSelect(input),
+    required: isMultiSelect(input) && input.required,
+  });
+  return submission.kind === "toggle" ? updatedSelect(input, { type: "toggle" }) : submission;
 }
 
 function editSetupSelect(input: SetupSelectInputState): SetupSelectInputResult {
@@ -137,11 +121,7 @@ function editSetupSelect(input: SetupSelectInputState): SetupSelectInputResult {
       if (!isSearchableSelect(input)) return { kind: "ignore" };
 
       let select = input.select;
-      const context = {
-        options: input.options,
-        searchAction: input.searchAction,
-        submitRow: isMultiSelect(input) && input.plannerNavigation !== true,
-      };
+      const context = selectContext(input);
       for (const char of input.key.value.replaceAll("\n", " ")) {
         if (char >= " " && char !== "\u007f") {
           select = reduceSelect(select, { type: "char", char }, context);

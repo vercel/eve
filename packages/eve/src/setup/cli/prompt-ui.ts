@@ -9,6 +9,7 @@ import {
   resolveOptionRowState,
   UNICODE_ROW_GLYPHS,
 } from "./option-row.js";
+import { selectWindow, selectWindowSummary } from "./select-state.js";
 
 /** Terminal lifecycle state accepted by the shared prompt renderer. */
 export type PromptState = "initial" | "active" | "submit" | "cancel" | "error";
@@ -311,66 +312,57 @@ export function renderSelectPrompt<T extends PromptValue>(input: {
     case "initial":
     case "active":
     case "error": {
-      const width = labelColumnWidth(input.options);
-      const rows = input.options
-        .map((option, index) => {
-          const isCursor = index === input.cursor;
-          const row = optionRow(option, {
-            colors: input.colors,
-            isCursor,
-            isChecked: false,
-            placeholder: false,
-            hintPadding: width - option.label.length,
-          });
-          return `${row}${descriptionLine(option, isCursor, rail, input.colors)}`;
-        })
-        .join(`\n${rail}  `);
+      const rows = optionRows(input.options, {
+        colors: input.colors,
+        rail,
+        isCursor: (index) => index === input.cursor,
+        isChecked: () => false,
+        placeholder: false,
+      });
       const corner = cornerWithNote(cornerFor(input.state, input.colors), input.footerNote);
       return `${head}${rail}  ${rows}${selectHelpText(input.helpText, rail, input.colors)}\n${corner}\n`;
     }
   }
 }
 
-/** Widest label among the options, for tab-aligning the inline hint column. */
-function labelColumnWidth<T extends PromptValue>(options: readonly PromptOption<T>[]): number {
-  return options.reduce((width, option) => Math.max(width, option.label.length), 0);
-}
-
-/** Maps a `PromptOption` onto the shared single-column row painter. */
-function optionRow<T extends PromptValue>(
-  option: PromptOption<T>,
+/**
+ * Paints option rows on the shared single-column row painter, tab-aligning
+ * hints to the widest label and hanging the cursor row's description beneath it.
+ */
+function optionRows<T extends PromptValue>(
+  options: readonly PromptOption<T>[],
   input: {
     colors: PromptColors;
-    isCursor: boolean;
-    isChecked: boolean;
+    rail: string;
+    isCursor(index: number): boolean;
+    isChecked(option: PromptOption<T>): boolean;
     placeholder: boolean;
-    hintPadding: number;
   },
 ): string {
-  return renderOptionRow({
-    colors: input.colors,
-    glyphs: UNICODE_ROW_GLYPHS,
-    label: option.label,
-    hint: option.hint,
-    focusHint: option.focusHint,
-    accent: option.accent,
-    isCursor: input.isCursor,
-    state: resolveOptionRowState(option, input.isChecked),
-    placeholder: input.placeholder,
-    hintPadding: input.hintPadding,
-  });
-}
-
-/** The dimmed description line shown beneath the cursor row, when it has one. */
-function descriptionLine<T extends PromptValue>(
-  option: PromptOption<T>,
-  isCursor: boolean,
-  rail: string,
-  colors: PromptColors,
-): string {
-  return isCursor && option.description && !option.disabled
-    ? `\n${rail}  ${renderOptionRowContinuation(colors.dim(option.description))}`
-    : "";
+  const { colors, rail } = input;
+  const width = options.reduce((max, option) => Math.max(max, option.label.length), 0);
+  return options
+    .map((option, index) => {
+      const isCursor = input.isCursor(index);
+      const row = renderOptionRow({
+        colors,
+        glyphs: UNICODE_ROW_GLYPHS,
+        label: option.label,
+        hint: option.hint,
+        focusHint: option.focusHint,
+        accent: option.accent,
+        isCursor,
+        state: resolveOptionRowState(option, input.isChecked(option)),
+        placeholder: input.placeholder,
+        hintPadding: width - option.label.length,
+      });
+      const description =
+        isCursor && option.description && !option.disabled
+          ? `\n${rail}  ${renderOptionRowContinuation(colors.dim(option.description))}`
+          : "";
+      return `${row}${description}`;
+    })
+    .join(`\n${rail}  `);
 }
 
 /**
@@ -404,20 +396,13 @@ function renderMultiselectRows<T extends PromptValue>(input: {
   submitLabel?: string;
 }): string {
   const selectedSet = new Set(input.selectedValues);
-  const width = labelColumnWidth(input.options);
-  const rows = input.options
-    .map((option, index) => {
-      const isCursor = index === input.cursor;
-      const row = optionRow(option, {
-        colors: input.colors,
-        isCursor,
-        isChecked: selectedSet.has(option.value),
-        placeholder: true,
-        hintPadding: width - option.label.length,
-      });
-      return `${row}${descriptionLine(option, isCursor, input.rail, input.colors)}`;
-    })
-    .join(`\n${input.rail}  `);
+  const rows = optionRows(input.options, {
+    colors: input.colors,
+    rail: input.rail,
+    isCursor: (index) => index === input.cursor,
+    isChecked: (option) => selectedSet.has(option.value),
+    placeholder: true,
+  });
   const submit = renderSubmitRow(
     input.cursor === input.options.length,
     input.colors,
@@ -516,31 +501,21 @@ export function renderSearchableSelect<T extends PromptValue>(input: {
     filterInput = colors.dim(input.placeholder);
   }
 
-  const start = Math.max(
-    0,
-    Math.min(cursor - Math.floor(viewSize / 2), Math.max(0, input.options.length - viewSize)),
-  );
-  const end = Math.min(start + viewSize, input.options.length);
-  const window = input.options.slice(start, end);
+  const view = selectWindow(cursor, input.options.length, viewSize);
+  const { start } = view;
+  const window = input.options.slice(start, view.end);
 
-  const width = labelColumnWidth(window);
   const optionLines =
     window.length === 0
       ? colors.dim("(no matches)")
-      : window
-          .map((option, index) => {
-            const isCursor = !onSubmitRow && index + start === cursor;
-            const row = optionRow(option, {
-              colors,
-              isCursor,
-              isChecked: input.multiple && selectedSet.has(option.value),
-              // Search gates the placeholder dot off, matching the dev TUI.
-              placeholder: false,
-              hintPadding: width - option.label.length,
-            });
-            return `${row}${descriptionLine(option, isCursor, rail, colors)}`;
-          })
-          .join(`\n${rail}  `);
+      : optionRows(window, {
+          colors,
+          rail,
+          isCursor: (index) => !onSubmitRow && index + start === cursor,
+          isChecked: (option) => input.multiple && selectedSet.has(option.value),
+          // Search gates the placeholder dot off, matching the dev TUI.
+          placeholder: false,
+        });
 
   const submitLine = input.multiple
     ? `\n${rail}\n${rail}  ${renderSubmitRow(onSubmitRow, colors, input.submitLabel)}`
@@ -548,7 +523,7 @@ export function renderSearchableSelect<T extends PromptValue>(input: {
 
   const moreFooter =
     input.options.length > window.length
-      ? `\n${rail}  ${colors.dim(`↑↓ ${input.options.length} options, showing ${start + 1}–${end}`)}`
+      ? `\n${rail}  ${colors.dim(selectWindowSummary(input.options.length, view))}`
       : "";
 
   const help = searchableHelpLine(rail, colors, input.multiple);

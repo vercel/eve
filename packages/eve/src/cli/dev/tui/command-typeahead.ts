@@ -11,6 +11,7 @@ import { PROMPT_COMMANDS } from "./prompt-commands.js";
 import { sliceVisible, visibleLength } from "#cli/ui/terminal-text.js";
 import type { Theme } from "./theme.js";
 import { renderCursorRow } from "#setup/cli/option-row.js";
+import { selectWindow } from "#setup/cli/select-state.js";
 
 /**
  * The typeahead keeps the list scannable; extra matches window around the
@@ -127,12 +128,11 @@ export function renderCommandSuggestions(
 ): string[] {
   const c = theme.colors;
   const count = state.matches.length;
-  const viewSize = Math.min(count, MAX_VISIBLE_SUGGESTIONS);
-  const start = Math.max(
-    0,
-    Math.min(state.selectedIndex - Math.floor(viewSize / 2), count - viewSize),
+  const { start, end } = selectWindow(
+    state.selectedIndex,
+    count,
+    Math.min(count, MAX_VISIBLE_SUGGESTIONS),
   );
-  const end = Math.min(start + viewSize, count);
 
   const visible = state.matches.slice(start, end);
   const invocation = (spec: PromptCommandSpec): string => {

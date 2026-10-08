@@ -152,6 +152,12 @@ function stepCursor(
   return cursor;
 }
 
+/** Applies a new query and re-homes the cursor onto its first selectable match. */
+function withFilter(state: SelectState, filter: string, context: SelectContext): SelectState {
+  const visible = filterOptions(context.options, filter, context.searchAction);
+  return { ...state, filter, cursor: firstFocusableIndex(visible, context.submitRow === true) };
+}
+
 /**
  * Advances the interaction state for a single keypress.
  *
@@ -165,63 +171,28 @@ export function reduceSelect(
   event: SelectEvent,
   context: SelectContext,
 ): SelectState {
-  const submitRow = context.submitRow === true;
   switch (event.type) {
-    case "char": {
-      const filter = state.filter + event.char;
-      return {
-        ...state,
-        filter,
-        cursor: firstFocusableIndex(
-          filterOptions(context.options, filter, context.searchAction),
-          submitRow,
-        ),
-      };
-    }
-    case "backspace": {
-      if (state.filter.length === 0) return state;
-      const filter = state.filter.slice(
-        0,
-        previousGraphemeBoundary(state.filter, state.filter.length),
-      );
-      return {
-        ...state,
-        filter,
-        cursor: firstFocusableIndex(
-          filterOptions(context.options, filter, context.searchAction),
-          submitRow,
-        ),
-      };
-    }
-    case "delete-word-backward": {
-      if (state.filter.length === 0) return state;
-      const filter = state.filter.slice(0, previousWordBoundary(state.filter));
-      return {
-        ...state,
-        filter,
-        cursor: firstFocusableIndex(
-          filterOptions(context.options, filter, context.searchAction),
-          submitRow,
-        ),
-      };
-    }
-    case "clear": {
-      if (state.filter.length === 0) return state;
-      const filter = "";
-      return {
-        ...state,
-        filter,
-        cursor: firstFocusableIndex(
-          filterOptions(context.options, filter, context.searchAction),
-          submitRow,
-        ),
-      };
-    }
+    case "char":
+      return withFilter(state, state.filter + event.char, context);
+    case "backspace":
+      return state.filter.length === 0
+        ? state
+        : withFilter(
+            state,
+            state.filter.slice(0, previousGraphemeBoundary(state.filter, state.filter.length)),
+            context,
+          );
+    case "delete-word-backward":
+      return state.filter.length === 0
+        ? state
+        : withFilter(state, state.filter.slice(0, previousWordBoundary(state.filter)), context);
+    case "clear":
+      return state.filter.length === 0 ? state : withFilter(state, "", context);
     case "up":
     case "down": {
       const visible = filterOptions(context.options, state.filter, context.searchAction);
       const delta = event.type === "up" ? -1 : 1;
-      const cursor = stepCursor(visible, state.cursor, delta, submitRow);
+      const cursor = stepCursor(visible, state.cursor, delta, context.submitRow === true);
       return cursor === state.cursor ? state : { ...state, cursor };
     }
     case "toggle": {
@@ -282,4 +253,52 @@ export function orderedSelection(
   selected: ReadonlySet<string>,
 ): string[] {
   return options.filter((option) => selected.has(option.value)).map((option) => option.value);
+}
+
+/** Outcome of pressing enter on a select. */
+export type SelectSubmission =
+  | { kind: "submit"; values: string[] }
+  | { kind: "toggle" }
+  | { kind: "error"; message: string }
+  | { kind: "ignore" };
+
+/**
+ * Enter resolves an actionable single-select row; completed rows are
+ * focus-only. A multi-select resolves only from its Submit row — on any
+ * option row it toggles instead, so enter can never accidentally skip the
+ * checklist.
+ */
+export function submitSelect(
+  state: SelectState,
+  context: SelectContext & { multiple: boolean; required: boolean },
+): SelectSubmission {
+  const visible = filterOptions(context.options, state.filter, context.searchAction);
+  if (context.multiple) {
+    if (context.submitRow !== true || state.cursor !== submitRowIndex(visible)) {
+      return { kind: "toggle" };
+    }
+    if (context.required && state.selected.size === 0) {
+      return { kind: "error", message: "Select at least one option, then submit." };
+    }
+    return { kind: "submit", values: orderedSelection(context.options, state.selected) };
+  }
+  const value = selectValueAtCursor(visible, state.cursor);
+  if (value !== undefined) return { kind: "submit", values: [value] };
+  if (visible[state.cursor]?.completed) return { kind: "ignore" };
+  return { kind: "error", message: "Type to match an option, then press enter." };
+}
+
+/** Scrolls a `viewSize` window over `total` rows, keeping `cursor` centered when possible. */
+export function selectWindow(
+  cursor: number,
+  total: number,
+  viewSize: number,
+): { start: number; end: number } {
+  const start = Math.max(0, Math.min(cursor - Math.floor(viewSize / 2), total - viewSize));
+  return { start, end: Math.min(start + viewSize, total) };
+}
+
+/** Footer advertising rows scrolled out of a {@link selectWindow}. */
+export function selectWindowSummary(total: number, window: { start: number; end: number }): string {
+  return `↑↓ ${total} options, showing ${window.start + 1}–${window.end}`;
 }

@@ -4,6 +4,8 @@ import type { ChannelSetupAction, PromptOption } from "#setup/cli/index.js";
 import { renderOptionRow, resolveOptionRowState } from "#setup/cli/option-row.js";
 import {
   filterOptions,
+  selectWindow,
+  selectWindowSummary,
   submitRowIndex,
   type SearchActionOption,
   type SelectState,
@@ -839,11 +841,8 @@ export function renderSelectQuestion(
     railed,
     stacked: presentation.layout === "stacked",
   });
-  const start = Math.max(
-    0,
-    Math.min(cursor - Math.floor(viewSize / 2), Math.max(0, visible.length - viewSize)),
-  );
-  const end = Math.min(start + viewSize, visible.length);
+  const view = selectWindow(cursor, visible.length, viewSize);
+  const { start, end } = view;
   // Hints sit in a shared column: every visible row pads its label out to the
   // widest label in view so the `· hint` tab-aligns, regardless of whether the
   // hint is persistent or shown only under the cursor.
@@ -879,7 +878,7 @@ export function renderSelectQuestion(
   // The railed list scrolls silently: no count row, and Esc is the only
   // footer hint — typing, arrows, and the ↵ badge carry themselves.
   if (!railed && visible.length > end - start) {
-    rows.push(`  ${c.dim(`↑↓ ${visible.length} options, showing ${start + 1}–${end}`)}`);
+    rows.push(`  ${c.dim(selectWindowSummary(visible.length, view))}`);
   }
 
   if (!renderedTrailingTaskAction) {

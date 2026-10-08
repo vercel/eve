@@ -128,7 +128,6 @@ describe("SelectComponent enter routing", () => {
     const select = makeSelect({ multiple: true });
 
     select.optionCursor = OPTIONS.length;
-    expect(select.onSubmitRow()).toBe(true);
     expect(select.shouldSubmit()).toBe(true);
     // Submitting from the Submit row never toggles anything.
     expect(select.selectedSet.size).toBe(0);

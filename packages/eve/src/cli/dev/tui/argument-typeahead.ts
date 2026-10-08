@@ -1,5 +1,6 @@
 import { sanitizeForTerminal } from "#cli/ui/output.js";
 import { sliceVisible, visibleLength } from "#cli/ui/terminal-text.js";
+import { selectWindow } from "#setup/cli/select-state.js";
 
 import { PROMPT_COMMANDS, type ArgumentTypeaheadCommand } from "./prompt-commands.js";
 import type { Theme } from "./theme.js";
@@ -149,12 +150,12 @@ export function renderArgumentSuggestions(
   width: number,
 ): string[] {
   const c = theme.colors;
-  const viewSize = Math.min(8, state.suggestions.length);
-  const start = Math.max(
-    0,
-    Math.min(state.selectedIndex - Math.floor(viewSize / 2), state.suggestions.length - viewSize),
+  const { start, end } = selectWindow(
+    state.selectedIndex,
+    state.suggestions.length,
+    Math.min(8, state.suggestions.length),
   );
-  return state.suggestions.slice(start, start + viewSize).map((suggestion, index) => {
+  return state.suggestions.slice(start, end).map((suggestion, index) => {
     const value =
       start + index === state.selectedIndex ? c.bold(suggestion.value) : c.dim(suggestion.value);
     const row = `${" ".repeat(state.argumentStart + 2)}${value}`;

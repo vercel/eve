@@ -17,10 +17,12 @@ import {
   reduceSelect,
   searchActionQuery,
   selectValueAtCursor,
-  submitRowIndex,
+  submitSelect,
   type SearchActionOption,
+  type SelectContext,
   type SelectEvent,
   type SelectState,
+  type SelectSubmission,
 } from "./select-state.js";
 
 /**
@@ -100,11 +102,6 @@ export class SelectComponent extends Prompt<string | string[]> {
     return filterOptions(this.options, this.filter, this.searchAction);
   }
 
-  /** True when the multi-select cursor sits on the trailing Submit row. */
-  onSubmitRow(): boolean {
-    return this.multiple && this.optionCursor === submitRowIndex(this.visibleOptions());
-  }
-
   /**
    * Submit-row label: "Skip" while an optional checklist has nothing picked,
    * "Submit" as soon as one row is marked. Locked rows are mandatory rather
@@ -120,20 +117,11 @@ export class SelectComponent extends Prompt<string | string[]> {
     return picked ? "Submit" : "Skip";
   }
 
-  /**
-   * Enter resolves an actionable single-select row; completed rows are
-   * focus-only. A multi-select resolves only from its Submit row — on any
-   * option row it toggles instead, so enter can never accidentally skip the
-   * checklist.
-   */
+  /** Enter follows the shared {@link submitSelect} policy; clack then runs `validate`. */
   protected override _shouldSubmit(): boolean {
-    if (!this.multiple) {
-      const option = this.visibleOptions()[this.optionCursor];
-      return option?.completed !== true;
-    }
-    if (this.onSubmitRow()) return true;
-    this.apply({ type: "toggle" });
-    return false;
+    const submission = this.submission();
+    if (submission.kind === "toggle") this.apply({ type: "toggle" });
+    return submission.kind === "submit" || submission.kind === "error";
   }
 
   /** Values that should render as chosen: the marked set, or the cursor for single. */
@@ -164,22 +152,28 @@ export class SelectComponent extends Prompt<string | string[]> {
   }
 
   submitError(): string | undefined {
-    if (this.multiple) {
-      return this.required && this.selectedSet.size === 0
-        ? "Select at least one option, then press enter."
-        : undefined;
-    }
-    return selectValueAtCursor(this.visibleOptions(), this.optionCursor) === undefined
-      ? "Type to match an option, then press enter."
-      : undefined;
+    const submission = this.submission();
+    return submission.kind === "error" ? submission.message : undefined;
+  }
+
+  private submission(): SelectSubmission {
+    return submitSelect(this.selectState(), {
+      ...this.selectContext(),
+      multiple: this.multiple,
+      required: this.required,
+    });
+  }
+
+  private selectState(): SelectState {
+    return { filter: this.filter, cursor: this.optionCursor, selected: this.selectedSet };
+  }
+
+  private selectContext(): SelectContext {
+    return { options: this.options, searchAction: this.searchAction, submitRow: this.multiple };
   }
 
   private apply(event: SelectEvent): void {
-    const next = reduceSelect(
-      { filter: this.filter, cursor: this.optionCursor, selected: this.selectedSet },
-      event,
-      { options: this.options, searchAction: this.searchAction, submitRow: this.multiple },
-    );
+    const next = reduceSelect(this.selectState(), event, this.selectContext());
     this.filter = next.filter;
     this.optionCursor = next.cursor;
     this.selectedSet = next.selected;
