@@ -6,7 +6,7 @@ import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { SessionExecution } from "#execution/session/turn.js";
 import { createTurnControl } from "#execution/session/turn-control.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
-import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
+import { cancelTasksStep } from "#execution/tasks/steps.js";
 import { turnStep } from "#execution/session/turn-step.js";
 import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
@@ -50,8 +50,9 @@ vi.mock("#execution/coordination-dispatch-step.js", () => ({ dispatchCoordinatio
 vi.mock("#execution/session/turn-step.js", () => ({
   turnStep: vi.fn(),
 }));
-vi.mock("#execution/cancel-descendant-turns-step.js", () => ({
-  cancelDescendantTurnsStep: vi.fn(),
+vi.mock("#execution/tasks/steps.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  cancelTasksStep: vi.fn(async () => ({ stateDelta: {} })),
 }));
 vi.mock("#execution/route-child-delivery.js", () => ({
   routeDeliverToChildren: vi.fn(),
@@ -358,7 +359,7 @@ describe("SessionExecution checkpoints", () => {
         return () => {};
       },
     };
-    vi.mocked(cancelDescendantTurnsStep).mockClear();
+    vi.mocked(cancelTasksStep).mockClear();
     vi.mocked(turnStep)
       .mockReset()
       .mockImplementationOnce(
@@ -396,7 +397,7 @@ describe("SessionExecution checkpoints", () => {
     await expect(
       execution.runTurn({ delivery: { kind: "deliver", payloads: [{ message: "2026?" }] } }),
     ).resolves.toMatchObject({ kind: "done", output: "Corrected" });
-    expect(cancelDescendantTurnsStep).not.toHaveBeenCalled();
+    expect(cancelTasksStep).not.toHaveBeenCalled();
   });
 
   it("lets its caller's next message steer a turn whose input carries no caller", async () => {
@@ -548,10 +549,9 @@ describe("SessionExecution checkpoints", () => {
     ).resolves.toMatchObject({ cancelled: true, kind: "park" });
     expect(dispatchCoordinationStep).toHaveBeenCalledTimes(1);
     expect(inbox.next).not.toHaveBeenCalled();
-    expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
-      serializedContext: {},
-      sessionState,
-    });
+    expect(cancelTasksStep).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: "turn_cancelled", turnCalls: true }),
+    );
   });
 
   it("consumes the cancelling command while retaining accepted follow-ups", async () => {
@@ -803,7 +803,7 @@ describe("SessionExecution checkpoints", () => {
     };
     const completedState = state("http:completed");
     const execution = createExecution({ inbox, queue, sessionState: state("") });
-    vi.mocked(cancelDescendantTurnsStep).mockClear();
+    vi.mocked(cancelTasksStep).mockClear();
     vi.mocked(turnStep)
       .mockReset()
       .mockImplementationOnce(
@@ -823,7 +823,7 @@ describe("SessionExecution checkpoints", () => {
       settled,
     });
     expect(execution.cursor.sessionState).toEqual(completedState);
-    expect(cancelDescendantTurnsStep).not.toHaveBeenCalled();
+    expect(cancelTasksStep).not.toHaveBeenCalled();
     expect(queue.pendingCount).toBe(1);
   });
 
@@ -1017,7 +1017,7 @@ describe("SessionExecution checkpoints", () => {
         })),
       );
     vi.mocked(dispatchCoordinationStep).mockClear();
-    vi.mocked(cancelDescendantTurnsStep).mockClear();
+    vi.mocked(cancelTasksStep).mockClear();
 
     await expect(
       createExecution({ inbox, sessionState }).runTurn({
@@ -1030,7 +1030,7 @@ describe("SessionExecution checkpoints", () => {
     // Only a task tool call is pending: nothing is dispatched, and the cancel has
     // no workflow tool run to stop.
     expect(dispatchCoordinationStep).not.toHaveBeenCalled();
-    expect(cancelDescendantTurnsStep).not.toHaveBeenCalled();
+    expect(cancelTasksStep).toHaveBeenCalledWith(expect.objectContaining({ turnCalls: false }));
     expect(traceTaskToolCallStep).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -1388,7 +1388,7 @@ describe("SessionExecution checkpoints", () => {
     });
 
     const [announced] = vi.mocked(emitAgentStartedStep).mock.invocationCallOrder;
-    const [cancelled] = vi.mocked(cancelDescendantTurnsStep).mock.invocationCallOrder;
+    const [cancelled] = vi.mocked(cancelTasksStep).mock.invocationCallOrder;
     expect(announced).toBeLessThan(cancelled!);
   });
 });

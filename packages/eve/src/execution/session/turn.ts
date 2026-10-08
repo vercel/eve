@@ -1,8 +1,6 @@
 import { sleep } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
-import type { DurableSessionState } from "#execution/durable-session-store.js";
-import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import type { SessionInputQueue } from "#execution/session/input-queue.js";
 import { taskToolResult, type TaskToolCall } from "#execution/tasks/calls.js";
@@ -41,7 +39,6 @@ import { ActiveTurn } from "#execution/session/active-turn.js";
 import type { TurnControl } from "#execution/session/turn-control.js";
 import {
   findBlockingWorkflowToolRun,
-  getBlockingWorkflowToolRuns,
   isInboxToolResultFromRecordedWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
@@ -285,14 +282,7 @@ export class SessionExecution {
    * case, skips that durable step.
    */
   async cancelTurnWork(): Promise<void> {
-    const { cursor } = this.input;
-    if (mayWaitOnWorkflowToolRuns(cursor.sessionState)) {
-      await cancelDescendantTurnsStep({
-        serializedContext: cursor.serializedContext,
-        sessionState: cursor.sessionState,
-      });
-    }
-    await cancelWorkingTasks(cursor, "turn_cancelled");
+    await cancelWorkingTasks(this.input.cursor, "turn_cancelled", { turnCalls: true });
   }
 
   /** `session.cancel()` stops the turn, the calls it waits on, and every working task. */
@@ -574,13 +564,4 @@ function startTaskWait(
     timedOut: timeoutMs === 0,
     timer,
   };
-}
-
-/** An unreadable run registry counts as waiting, so the step runs and logs it. */
-function mayWaitOnWorkflowToolRuns(sessionState: DurableSessionState): boolean {
-  try {
-    return getBlockingWorkflowToolRuns(sessionState.snapshot?.session?.state).length > 0;
-  } catch {
-    return true;
-  }
 }

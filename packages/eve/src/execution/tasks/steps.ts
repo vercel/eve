@@ -42,6 +42,9 @@ import { readHitlState } from "#harness/hitl/index.js";
 import type { Transition } from "#harness/session-machine/commit.js";
 import { finishRun, settleTask } from "#harness/session-machine/transitions.js";
 import type { SessionView } from "#harness/session-machine/view.js";
+import { runtimeWait, storedProjection, turnPosition } from "#harness/session-machine/view.js";
+import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
+import { stopRuns, type RunStopTarget } from "#execution/stop-runs.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import type { TaskCancelReason } from "#protocol/message.js";
 
@@ -52,6 +55,7 @@ export type TaskRunMessage = Extract<
 >;
 
 const TASK_CANCEL_REASON = "The task was cancelled.";
+const TURN_CANCEL_REASON = "The turn that called the tool was cancelled.";
 
 /** Applies one message from a task's run: started, a reply, usage no reply carried, or the run's outcome. */
 export async function applyTaskRunMessageStep(
@@ -112,11 +116,15 @@ async function applyTaskRunMessage(
 }
 
 /**
- * Cancels tasks: their calls settle as cancelled and their runs are told to
- * stop. A run ends itself within its cleanup deadline and reports cancelled.
- * A `task()` run's cancel settles every request it relayed, so the session
- * withdraws them in the same step and accepts no answer after it. A `serve()`
- * run withdraws its stretch's questions itself, and the session decides each one.
+ * Cancels tasks, and the calls the turn waits on when `turnCalls` is set. The tasks' calls
+ * settle as cancelled and the session publishes that first; then every run the cancel ends gets
+ * until the stop deadline to finish, and one still running is cancelled outright (`stopRuns`).
+ * A resumable task's run only stops its current stretch. A run that hasn't started holds the
+ * cancel until it does.
+ *
+ * A `task()` run's cancel settles every request it relayed, so the session withdraws them in
+ * the same step and accepts no answer after it. A `serve()` run withdraws its stretch's
+ * questions itself, and the session decides each one.
  */
 export async function cancelTasksStep(
   input: SessionStepState & TaskCancellationInput,
@@ -128,6 +136,8 @@ export async function cancelTasksStep(
 interface TaskCancellationInput {
   readonly reason: TaskCancelReason;
   readonly taskIds: readonly string[];
+  /** Also stop the workflow tool runs the turn waits on. */
+  readonly turnCalls?: boolean;
 }
 
 async function cancelTasks(
@@ -138,6 +148,8 @@ async function cancelTasks(
   const settles: Decision[] = [];
   const withdraws: Decision[] = [];
   const outcome: TaskOutcome = { reason: input.reason, status: "cancelled" };
+  const targets: RunStopTarget[] = [];
+  const taskOfRun = new Map<string, string>();
   for (const taskId of input.taskIds) {
     const record = findTask(table, taskId);
     const cancelled = cancelTask(table, taskId);
@@ -149,12 +161,43 @@ async function cancelTasks(
       const requestIds = runRequestIds(session, cancelled.send.run.runId);
       withdraws.push((view) => finishRun(view, { requestIds, taskId }));
     }
-    await sendTaskRunCommands(cancelled.send);
+    targets.push({ ends: record?.resumable === false, run: cancelled.send.run });
+    taskOfRun.set(cancelled.send.run.runId, taskId);
   }
-  return await commitTaskDecisions(input, saveTable(input.sessionState, session, table), {
-    settles,
-    withdraws,
+  const committed = await commitTaskDecisions(
+    input,
+    saveTable(input.sessionState, session, table),
+    { settles, withdraws },
+  );
+  const [cancelledOutright] = await Promise.all([
+    stopRuns(targets, { kind: "cancel", reason: TASK_CANCEL_REASON }),
+    input.turnCalls === true
+      ? stopRuns(waitedCallRuns(session), { kind: "cancel", reason: TURN_CANCEL_REASON })
+      : [],
+  ]);
+  // A run cancelled outright never reports its outcome, so its task forgets it now.
+  const forgotten = cancelledOutright.flatMap((runId) => {
+    const taskId = taskOfRun.get(runId);
+    return taskId === undefined ? [] : [{ runId, taskId }];
   });
+  if (forgotten.length === 0) return committed;
+  const current = readDurableSession(committed.sessionState);
+  const finished = forgotten.reduce(
+    (next, { runId, taskId }) => finishTaskRun(next, taskId, runId),
+    readTaskTable(current.state),
+  );
+  return { ...committed, sessionState: saveTable(committed.sessionState, current, finished) };
+}
+
+/** The workflow tool runs the turn waits on; each run is one call, which a cancel ends. */
+function waitedCallRuns(session: DurableSession): RunStopTarget[] {
+  const turnId =
+    runtimeWait(session.state)?.event.turnId ??
+    turnPosition(storedProjection(session.state)).turnId;
+  return getBlockingWorkflowToolRuns(session.state, turnId).map((run) => ({
+    ends: true,
+    run: run.address,
+  }));
 }
 
 /** A transition a task step decides against the session it commits to. */
