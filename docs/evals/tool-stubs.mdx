@@ -213,7 +213,9 @@ Repeated subagent sessions at the same path share that rule's sequence. Differen
 
 Use the qualified operation name, such as `linear__list_issues` or `researcher/linear__list_issues`. Put operation arguments in `match` and its JSON result in `outcome.response`, or in each sequence entry's `response`.
 
-Connection authentication and discovery stay live so eve can validate the operation and its arguments. Stubs do not provide an offline connection. The framework's `connection_search` and `connection_execute` tools cannot themselves be replaced.
+Connection discovery stays live: eve lists the connection's tools to validate the operation and its arguments before a stub replaces the call, so stubs do not provide an offline connection.
+
+A rule names the tool itself, whether the model calls it directly or through [`eve__execute`](/docs/concepts/built-in-tools#eve__search-and-eve__execute), as it does for deferred tools and connection operations. A call through `eve__execute` matches by the name and `input` of the tool it reaches. `eve__search` and `eve__execute` cannot themselves be stubbed.
 
 Tools executed by the model provider, such as provider-hosted web search, have no eve executor to replace. A search tool implemented in your own agent can be stubbed.
 
