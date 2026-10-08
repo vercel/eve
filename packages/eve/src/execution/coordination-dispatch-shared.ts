@@ -1,4 +1,3 @@
-import type { SessionAuthContext } from "#channel/types.js";
 /** Shared owner-side dispatch context preparation. */
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
@@ -106,7 +105,7 @@ export async function prepareCoordinationDispatch(input: {
     waiting.event.turnId || activeTurnId(turnPosition(storedProjection(durableSession.state)));
   const ctx = await deserializeContext(input.serializedContext);
   const prepared = await prepareActionDispatch({
-    batch: { approvers: waiting.approvers, event: { ...waiting.event, turnId }, requests },
+    batch: { event: { ...waiting.event, turnId }, requests },
     ctx,
     durableSession,
     plan: () => requests,
@@ -116,7 +115,6 @@ export async function prepareCoordinationDispatch(input: {
 }
 
 interface DispatchBatch {
-  readonly approvers?: Readonly<Record<string, SessionAuthContext>>;
   readonly event: {
     readonly sequence: number;
     readonly stepIndex: number;

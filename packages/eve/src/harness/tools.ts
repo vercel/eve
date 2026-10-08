@@ -18,7 +18,6 @@ import { createLogger } from "#internal/logging.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { executeWithToolStub } from "#tool-stubs/execute.js";
-import { iterateAsApprover, runAsApprover } from "#harness/hitl/approved-call-callers.js";
 
 const log = createLogger("harness.tools");
 
@@ -105,19 +104,14 @@ export function wrapToolExecute(
     const run = () => execute(input, options);
     let output: unknown;
     try {
-      output = runAsApprover(options.toolCallId, () =>
-        call === undefined ? run() : executeWithToolStub(call.toolName, call.input, options, run),
-      );
+      output =
+        call === undefined ? run() : executeWithToolStub(call.toolName, call.input, options, run);
     } catch (error) {
       return Promise.reject(error);
     }
 
     if (isAsyncIterable(output)) {
-      return normalizeToolExecuteIterable(
-        iterateAsApprover(options.toolCallId, output),
-        toolName,
-        options,
-      );
+      return normalizeToolExecuteIterable(output, toolName, options);
     }
 
     return Promise.resolve(output).then((value) =>

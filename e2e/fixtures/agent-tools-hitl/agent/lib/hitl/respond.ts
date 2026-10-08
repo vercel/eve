@@ -9,6 +9,8 @@ export const SAY = {
   oauthChecked: "Alice asks for an OAuth-checked change.",
   firstEcho: "Alice asks for a guarded echo of the first note.",
   secondEcho: "Alice asks for a guarded echo of the second note.",
+  callerAccess: "Alice asks to check release access.",
+  frozen: "Alice asks for the frozen change.",
   retiring: "Alice asks for the retiring change.",
   checkAccess: "Alice asks to check her Fixture Auth access.",
   checkAndPublish: "Alice asks to check her access and publish the draft together.",
@@ -87,6 +89,13 @@ export function respond(request: MockModelRequest): MockModelResponse {
         [call("echo-second", "guarded-echo", { note: "second" })],
         () => `Second echo: ${outcome("echo-second")}.`,
       ),
+    [SAY.callerAccess]: () =>
+      run(
+        [call("caller-access", "caller-access")],
+        () => `Release access: ${outcome("caller-access")}.`,
+      ),
+    [SAY.frozen]: () =>
+      run([call("frozen", "frozen-change")], () => `Frozen change: ${outcome("frozen")}.`),
     [SAY.retiring]: () =>
       run([call("retiring", "retiring-change")], () => `Retiring change: ${outcome("retiring")}.`),
     [SAY.checkAccess]: () =>
