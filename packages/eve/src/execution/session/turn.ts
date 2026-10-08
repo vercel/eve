@@ -184,7 +184,7 @@ export class SessionExecution {
       if (result.action === "cancelled") return await this.finishCancelledTurn(turn);
       // A settled turn stands, and calls the turn waits on still report, so neither cancels here.
       const settles = result.action === "parked" && result.settled !== undefined;
-      const waitsOnCalls = result.action === "paused" && result.awaiting.callIds.length > 0;
+      const waitsOnCalls = result.action === "paused" && result.on === "calls";
       if (!settles && !waitsOnCalls && turn.signal.aborted) {
         return await this.finishCancelledTurn(turn);
       }
@@ -235,32 +235,33 @@ export class SessionExecution {
     turn: ActiveTurn,
     paused: TurnPause,
   ): Promise<TurnStepPayload | undefined | "cancelled"> {
-    const { awaiting } = paused;
     if (
-      awaiting.requestIds.length > 0 &&
+      paused.on === "person" &&
+      paused.requestIds.length > 0 &&
       this.input.capabilities?.requestInput !== true &&
       !hasDelegatedCallerContext(this.input.cursor.serializedContext)
     ) {
       throw new Error(NO_INPUT_CAPABILITY_ERROR_MESSAGE);
     }
-    const attemptIds = new Set(awaiting.attemptIds);
-    const requestIds = new Set(awaiting.requestIds);
-    const person = attemptIds.size > 0 || requestIds.size > 0;
-    const calls = awaiting.callIds.length === 0 ? undefined : await this.startCallWait(paused);
+    const person =
+      paused.on === "person"
+        ? { attemptIds: new Set(paused.attemptIds), requestIds: new Set(paused.requestIds) }
+        : undefined;
+    const calls = paused.on === "calls" ? await this.startCallWait(paused) : undefined;
     let interrupted = false;
     try {
       while (true) {
-        if (person) {
-          const callbacks = this.input.queue.takeAuthorizations(attemptIds);
+        if (person !== undefined) {
+          const callbacks = this.input.queue.takeAuthorizations(person.attemptIds);
           if (callbacks !== undefined)
             return { delivery: { kind: "deliver", payloads: callbacks } };
-          const answer = await turn.takeInputResponses(requestIds);
+          const answer = await turn.takeInputResponses(person.requestIds);
           if (answer !== undefined) return { delivery: answer };
           const steering = await turn.takeSteering({ heldOnPerson: true });
           if (steering !== undefined) return { delivery: steering };
         }
         if (
-          awaiting.taskIds.length > 0 &&
+          paused.on === "tasks" &&
           taskWaitResult(sessionTaskTable(this.input.cursor), { interrupted, timedOut: false }) !==
             undefined
         ) {
@@ -298,9 +299,11 @@ export class SessionExecution {
   }
 
   /** Starts the runs a paused step asked for, answers its task tool calls, and tracks the rest. */
-  private async startCallWait(paused: TurnPause): Promise<CallWait> {
+  private async startCallWait(
+    paused: Extract<TurnPause, { readonly on: "calls" }>,
+  ): Promise<CallWait> {
     const dispatched = paused.dispatch ? await this.dispatchRuns() : [];
-    const wait = new CallWait(this.input.cursor, paused.awaiting.callIds, dispatched);
+    const wait = new CallWait(this.input.cursor, paused.callIds, dispatched);
     await wait.answerTaskToolCalls(paused.taskToolCalls);
     return wait;
   }

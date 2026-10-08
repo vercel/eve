@@ -41,15 +41,17 @@ function parked(tasks: readonly RuntimeWorkflowTaskRequest[]): HarnessSession {
 describe("pausedOnCalls", () => {
   it("waits on a task tool call without dispatching anything", () => {
     expect(pausedOnCalls(parked([]))).toMatchObject({
-      awaiting: { callIds: ["wait-call"] },
+      callIds: ["wait-call"],
       dispatch: false,
+      on: "calls",
     });
   });
 
   it("dispatches the workflow tool runs a batch holds beside its task tool calls", () => {
     expect(pausedOnCalls(parked([deployRun]))).toMatchObject({
-      awaiting: { callIds: ["deploy-call", "wait-call"] },
+      callIds: ["deploy-call", "wait-call"],
       dispatch: true,
+      on: "calls",
     });
   });
 });

@@ -6,48 +6,45 @@ import type { TaskToolCall } from "#execution/tasks/calls.js";
 import type { HarnessSession } from "#harness/types.js";
 import { openSignIns, type SessionProjection } from "#protocol/session-projection.js";
 
-/** What a paused turn waits on, as the event lifecycle's `turn.paused.awaiting` lists it. */
-export interface TurnAwaiting {
-  /** Sign-ins whose callbacks resume the turn. */
-  readonly attemptIds: readonly string[];
-  /** Questions and approvals a person answers. */
-  readonly requestIds: readonly string[];
-  /** Calls whose results resume the turn, task tool calls included. */
-  readonly callIds: readonly string[];
+/**
+ * What a paused turn waits on, which is one kind of thing at a time. The turn keeps it to resume;
+ * the stream reports the pause as `turn.waiting`.
+ */
+export type TurnPause =
+  /** Sign-ins whose callbacks resume the turn, and questions and approvals a person answers. */
+  | {
+      readonly on: "person";
+      readonly attemptIds: readonly string[];
+      readonly requestIds: readonly string[];
+    }
   /** Working tasks. Any of them settling resumes the turn. */
-  readonly taskIds: readonly string[];
-}
-
-/** A paused turn: what it waits on, and the calls the session starts or answers for it. */
-export interface TurnPause {
-  readonly awaiting: TurnAwaiting;
-  /** Workflow tool runs to start before waiting. Task tool calls need none. */
-  readonly dispatch: boolean;
-  /** Task tool calls the session answers itself. */
-  readonly taskToolCalls: readonly TaskToolCall[];
-}
-
-const NOTHING: TurnAwaiting = { attemptIds: [], callIds: [], requestIds: [], taskIds: [] };
+  | { readonly on: "tasks"; readonly taskIds: readonly string[] }
+  /**
+   * Calls whose results resume the turn, task tool calls included. `dispatch` starts their
+   * workflow tool runs before the wait; the session answers `taskToolCalls` itself.
+   */
+  | {
+      readonly on: "calls";
+      readonly callIds: readonly string[];
+      readonly dispatch: boolean;
+      readonly taskToolCalls: readonly TaskToolCall[];
+    };
 
 /** The turn waits on the sign-ins and the answers it asked a person for. */
 export function pausedOnPerson(session: HarnessSession, projection: SessionProjection): TurnPause {
   const challenges = getPendingAuthorization(session.state)?.challenges ?? [];
   return {
-    awaiting: {
-      ...NOTHING,
-      attemptIds: challenges.flatMap((challenge) =>
-        challenge.attemptId === undefined ? [] : [challenge.attemptId],
-      ),
-      requestIds: [...ownOpenRequestIds(sessionView(projection, session.state))],
-    },
-    dispatch: false,
-    taskToolCalls: [],
+    attemptIds: challenges.flatMap((challenge) =>
+      challenge.attemptId === undefined ? [] : [challenge.attemptId],
+    ),
+    on: "person",
+    requestIds: [...ownOpenRequestIds(sessionView(projection, session.state))],
   };
 }
 
 /** The model ended the turn while tasks work, so the turn waits for one of them. */
 export function pausedOnTasks(taskIds: readonly string[]): TurnPause {
-  return { awaiting: { ...NOTHING, taskIds }, dispatch: false, taskToolCalls: [] };
+  return { on: "tasks", taskIds };
 }
 
 /** The turn waits on calls the runtime runs, or on none. */
@@ -55,8 +52,9 @@ export function pausedOnCalls(session: HarnessSession): TurnPause | undefined {
   const waiting = runtimeWait(session.state);
   if (waiting === undefined) return undefined;
   return {
-    awaiting: { ...NOTHING, callIds: waiting.callIds },
+    callIds: waiting.callIds,
     dispatch: waiting.tasks.length > 0,
+    on: "calls",
     taskToolCalls: waiting.taskToolCalls,
   };
 }
