@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MockLanguageModelV3 } from "ai/test";
 
 import { resolveModelProfile } from "#harness/model-profile.js";
+import type { WebSearchSelection } from "#shared/web-search.js";
 import {
   WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA,
   WEB_SEARCH_EXA_OUTPUT_SCHEMA,
@@ -89,15 +90,16 @@ describe("resolveWebSearchBackend", () => {
     openaiWebSearch.mockClear();
   });
 
-  it.each([
+  it.each<[string, WebSearchSelection | undefined, string | null]>([
     ["openai/gpt-5.4", undefined, "exa"],
-    ["openai/gpt-5.4", "parallel", "parallel"],
-    ["openai/gpt-5.4", "openai", "openai"],
+    ["openai/gpt-5.4", { provider: "parallel" }, "parallel"],
+    ["openai/gpt-5.4", { provider: "openai" }, "openai"],
     ["anthropic/claude-opus-4.6", undefined, "exa"],
-    // OpenAI's hosted search serves only OpenAI models.
-    ["anthropic/claude-opus-4.6", "openai", "exa"],
-  ] as const)("uses Gateway search for Gateway model %s", (model, provider, expected) => {
-    expect(resolveWebSearchBackend(resolveModelProfile(model), provider)).toBe(expected);
+    // OpenAI's hosted search serves only OpenAI models: other models use the fallback, if any.
+    ["anthropic/claude-opus-4.6", { provider: "openai" }, null],
+    ["anthropic/claude-opus-4.6", { fallback: "parallel", provider: "openai" }, "parallel"],
+  ])("uses Gateway search for Gateway model %s with %o", (model, selection, expected) => {
+    expect(resolveWebSearchBackend(resolveModelProfile(model), selection)).toBe(expected);
   });
 
   it.each([
@@ -108,7 +110,7 @@ describe("resolveWebSearchBackend", () => {
     ["some-provider", null],
   ] as const)("uses native search for direct provider %s when it has one", (provider, expected) => {
     const model = new MockLanguageModelV3({ provider });
-    expect(resolveWebSearchBackend(resolveModelProfile(model), "exa")).toBe(expected);
+    expect(resolveWebSearchBackend(resolveModelProfile(model))).toBe(expected);
   });
 
   it("uses Anthropic webSearch_20250305 to avoid the unsupported beta header", async () => {

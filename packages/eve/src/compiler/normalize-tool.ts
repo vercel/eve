@@ -74,7 +74,7 @@ export async function compileToolEntry(
       definition: {
         behavior: {
           availability: [],
-          handling: { kind: "provider-tool", provider: entry.provider },
+          handling: { kind: "provider-tool", ...entry.selection },
         },
         description:
           "Search the web for real-time information. Use this to find up-to-date information about current events, recent developments, or topics that may have changed since the knowledge cutoff.",

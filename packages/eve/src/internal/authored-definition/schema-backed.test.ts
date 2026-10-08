@@ -120,10 +120,25 @@ describe("normalizeToolDefinition", () => {
     (provider) => {
       expect(normalizeToolDefinition(webSearch({ provider }), FAILURE_MESSAGE)).toEqual({
         kind: "web-search-tool",
-        provider,
+        selection: { provider },
       });
     },
   );
+
+  it("normalizes a web search fallback provider", () => {
+    expect(
+      normalizeToolDefinition(webSearch({ fallback: "exa", provider: "openai" }), FAILURE_MESSAGE),
+    ).toEqual({ kind: "web-search-tool", selection: { fallback: "exa", provider: "openai" } });
+  });
+
+  it("rejects a fallback that can't serve every Gateway model", () => {
+    expect(() =>
+      normalizeToolDefinition(
+        { fallback: "openai", kind: "eve:web-search-tool", provider: "openai" },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('Expected "fallback" to be one of: exa, parallel, browserbase');
+  });
 
   it("rejects an unsupported web search provider", () => {
     expect(() =>

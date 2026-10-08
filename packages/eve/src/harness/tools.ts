@@ -212,7 +212,7 @@ export async function buildToolSetWithProviderTools(input: {
       definition.execute === undefined &&
       !disabled?.has(definition.name)
     ) {
-      const backend = resolveWebSearchBackend(input.profile, handling.provider);
+      const backend = resolveWebSearchBackend(input.profile, handling);
       if (backend === null) {
         delete tools[definition.name];
       } else {

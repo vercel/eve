@@ -1,4 +1,4 @@
-import type { WebSearchProvider } from "#shared/web-search.js";
+import type { WebSearchSelection } from "#shared/web-search.js";
 import type { WorkflowToolEntryPoint } from "#tools/workflow-entry-point.js";
 
 /** Session facts that can hide a selected tool without changing source composition. */
@@ -7,7 +7,7 @@ export type ToolAvailabilityCondition = "root-session";
 /** Native behavior declared by a selected compiled tool. */
 export type CompiledToolHandling =
   | { readonly kind: "dispatch"; readonly action: "self-agent" }
-  | { readonly kind: "provider-tool"; readonly provider: WebSearchProvider }
+  | ({ readonly kind: "provider-tool" } & WebSearchSelection)
   | {
       readonly kind: "workflow-tool";
       readonly entryPoint: WorkflowToolEntryPoint;

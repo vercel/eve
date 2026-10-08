@@ -9,7 +9,11 @@ import { isObject } from "#shared/guards.js";
 import type { JsonObject } from "#shared/json.js";
 import { isDisabledToolSentinel } from "#tools/definition.js";
 import { isWebSearchToolDefinition } from "#tools/provided/web-search.js";
-import { WEB_SEARCH_PROVIDERS, type WebSearchProvider } from "#shared/web-search.js";
+import {
+  WEB_SEARCH_FALLBACK_PROVIDERS,
+  WEB_SEARCH_PROVIDERS,
+  type WebSearchSelection,
+} from "#shared/web-search.js";
 import {
   expectBoolean,
   expectFunction,
@@ -78,7 +82,7 @@ type MutableNormalizedAuthoredTool = {
 type NormalizedToolEntry =
   | { readonly kind: "tool"; readonly definition: NormalizedAuthoredTool }
   | { readonly kind: "disabled" }
-  | { readonly kind: "web-search-tool"; readonly provider: WebSearchProvider }
+  | { readonly kind: "web-search-tool"; readonly selection: WebSearchSelection }
   | {
       readonly kind: "dynamic-tool";
       readonly eventNames: readonly DynamicToolEventName[];
@@ -106,14 +110,16 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   }
   if (isWebSearchToolDefinition(value)) {
     const record = expectObjectRecord(value, message);
-    expectOnlyKnownKeys(record, ["kind", "provider"], message);
-    const provider = expectString(record.provider, message);
-    if (!isWebSearchProvider(provider)) {
-      throw new Error(
-        `${message} Expected "provider" to be one of: ${WEB_SEARCH_PROVIDERS.join(", ")}.`,
-      );
-    }
-    return { kind: "web-search-tool", provider };
+    expectOnlyKnownKeys(record, ["fallback", "kind", "provider"], message);
+    const provider = expectOneOf(record.provider, WEB_SEARCH_PROVIDERS, "provider", message);
+    const fallback =
+      record.fallback === undefined
+        ? undefined
+        : expectOneOf(record.fallback, WEB_SEARCH_FALLBACK_PROVIDERS, "fallback", message);
+    return {
+      kind: "web-search-tool",
+      selection: fallback === undefined ? { provider } : { fallback, provider },
+    };
   }
 
   const record = expectObjectRecord(value, message);
@@ -269,6 +275,15 @@ function assertNoOwnTaskIdInput(inputSchema: JsonObject | null, message: string)
   );
 }
 
-function isWebSearchProvider(value: string): value is WebSearchProvider {
-  return (WEB_SEARCH_PROVIDERS as readonly string[]).includes(value);
+function expectOneOf<const T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+  field: string,
+  message: string,
+): T {
+  const text = expectString(value, message);
+  if (!(allowed as readonly string[]).includes(text)) {
+    throw new Error(`${message} Expected "${field}" to be one of: ${allowed.join(", ")}.`);
+  }
+  return text as T;
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type { WebSearchSelection } from "#shared/web-search.js";
 import {
   createAgentSourceManifest,
   createLocalSubagentSourceRef,
@@ -333,13 +334,17 @@ describe("compileAgentManifest source graph", () => {
     });
   });
 
-  it.each(["parallel", "browserbase"] as const)(
-    "preserves %s search through serialization and runtime preparation",
-    async (provider) => {
+  it.each<WebSearchSelection>([
+    { provider: "parallel" },
+    { provider: "browserbase" },
+    { fallback: "exa", provider: "openai" },
+  ])(
+    "preserves the %o search selection through serialization and runtime preparation",
+    async (selection) => {
       const sourceRegistry = registry([
         {
           logicalPath: "tools/web_search.ts",
-          loadNamespace: async () => ({ default: webSearch({ provider }) }),
+          loadNamespace: async () => ({ default: webSearch(selection) }),
         },
       ]);
       const compiled = await compileAgentManifest(manifest(), {
@@ -358,7 +363,7 @@ describe("compileAgentManifest source graph", () => {
       expect(serialized.tools.find((tool) => tool.name === "web_search")).toMatchObject({
         behavior: {
           availability: [],
-          handling: { kind: "provider-tool", provider },
+          handling: { kind: "provider-tool", ...selection },
         },
         hasExecute: false,
       });
@@ -370,7 +375,7 @@ describe("compileAgentManifest source graph", () => {
       });
       expect(graph.root.turnAgent.tools.find((tool) => tool.name === "web_search")).toMatchObject({
         behavior: {
-          handling: { kind: "provider-tool", provider },
+          handling: { kind: "provider-tool", ...selection },
         },
       });
     },
