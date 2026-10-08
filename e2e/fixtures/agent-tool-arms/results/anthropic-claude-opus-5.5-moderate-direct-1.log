@@ -1,0 +1,53 @@
+
+EVALS 10
+target http://127.0.0.1:58029/
+
+[account-billing] {"id":"account-billing","arm":"direct","size":"moderate","model":"anthropic/claude-opus-5.5","repetition":1,"success":true,"latencyMs":8879.573541999998,"modelCalls":3,"missingUsage":0,"inputTokens":23129,"cacheReadTokens":15298,"cacheWriteTokens":7823,"tools":[{"callId":"toolu_018UYxkFwAY8jAfjgNSXJwFd","input":{"company":"Acme"},"kind":"tool-call","toolName":"index__resolve_account"},{"callId":"toolu_01SBctiqf2WkMhni8PoLLHea","input":{"customer":"Acme"},"kind":"tool-call","toolName":"support__support_billing"}],"message":"I ran both lookups for Acme. Each tool sent back only a reference, with no account details or billing data.\n\n- **CRM account lookup:** `REF-INDEX--RESOLVE-ACCOUNT`\n- **Support billing lookup:** `REF-SUPPORT--SUPPORT-BILLING`\n\nBecause the account lookup didn't give back an account ID, I ran the billing lookup on the name \"Acme.\""}
+[account-billing] workflow run id (primary session): wrun_01M4E7XYYGR6ZQRTHQV6FQHPWR
+✓  account-billing  gates 2/2
+[account] {"id":"account","arm":"direct","size":"moderate","model":"anthropic/claude-opus-5.5","repetition":1,"success":true,"latencyMs":3092.309083000002,"modelCalls":2,"missingUsage":0,"inputTokens":15202,"cacheReadTokens":15000,"cacheWriteTokens":196,"tools":[{"callId":"toolu_01RuXWRB4BLc5iEtBUWwf6pg","input":{"company":"Acme"},"kind":"tool-call","toolName":"index__resolve_account"}],"message":"I resolved Acme to its CRM account. The lookup gave back only a reference, with no account name or other details: `REF-INDEX--RESOLVE-ACCOUNT`"}
+[account] workflow run id (primary session): wrun_01M4E7Y7JW79Q916YHN2Z026A6
+✓  account  gates 1/1
+[cases] {"id":"cases","arm":"direct","size":"moderate","model":"anthropic/claude-opus-5.5","repetition":1,"success":true,"latencyMs":4371.119791999998,"modelCalls":2,"missingUsage":0,"inputTokens":15190,"cacheReadTokens":14996,"cacheWriteTokens":188,"tools":[{"callId":"toolu_0178tmBk6zQ7oPdqdvMuXYq4","input":{"query":"Acme"},"kind":"tool-call","toolName":"support__search_cases"}],"message":"I searched support cases for \"Acme\". The search returned only a reference, with no case details such as IDs, subjects or statuses:\n\n**REF-SUPPORT--SEARCH-CASES**\n\nIf you need details on specific cases, I can try a narrower search, for example by product, issue type or a specific Acme domain."}
+[cases] workflow run id (primary session): wrun_01M4E7YAKF6Y2GE36SYYZJ4SKN
+✓  cases  gates 1/1
+[cost] {"id":"cost","arm":"direct","size":"moderate","model":"anthropic/claude-opus-5.5","repetition":1,"success":true,"latencyMs":4194.750667,"modelCalls":2,"missingUsage":0,"inputTokens":15204,"cacheReadTokens":15005,"cacheWriteTokens":193,"tools":[{"callId":"toolu_01VvM9xhfPtzKk4oWRFfZ13w","input":{"groupBy":"team"},"kind":"tool-call","toolName":"d0__query_cost"}],"message":"I ran the cloud cost query grouped by team, but it didn't return any cost figures. All it sent back was a reference:\n\n- Reference: `REF-D0--QUERY-COST`\n\nSo I can't give you the per-team costs. If that reference points to a saved result, you can use it to pull up the breakdown there. I can also run the query again or group it by service to see if that returns figures."}
+[cost] workflow run id (primary session): wrun_01M4E7YEW3ZS0T7NWGPBDWB456
+✓  cost  gates 1/1
+[expenses] {"id":"expenses","arm":"direct","size":"moderate","model":"anthropic/claude-opus-5.5","repetition":1,"success":true,"latencyMs":2630.6502500000024,"modelCalls":2,"missingUsage":0,"inputTokens":15198,"cacheReadTokens":14998,"cacheWriteTokens":194,"tools":[{"callId":"toolu_01UNXgyQy72Wr84kofXLpsM3","input":{"category":"meals"},"kind":"tool-call","toolName":"expense_policy_lookup"}],"message":"I looked up the expense policy for meals. The tool sent back only a reference, with no policy details like limits or rules.\n\nReference: REF-EXPENSE-POLICY-LOOKUP"}
+[expenses] workflow run id (primary session): wrun_01M4E7YJZA1A8KJD4RXGYF4ENR
+✓  expenses  gates 1/1
+[incident-cost] {"id":"incident-cost","arm":"direct","size":"moderate","model":"anthropic/claude-opus-5.5","repetition":1,"success":true,"latencyMs":4449.242542000004,"modelCalls":2,"missingUsage":0,"inputTokens":15442,"cacheReadTokens":15010,"cacheWriteTokens":426,"tools":[{"callId":"toolu_017G8SSKrHZD5nfjbK8ibxrm","input":{"status":"open"},"kind":"tool-call","toolName":"sre__status_page_incidents_list"},{"callId":"toolu_01FR287CL42zhkNNoxxNahoG","input":{"groupBy":"team"},"kind":"tool-call","toolName":"d0__query_cost"}],"message":"**Open status page incidents** (reference: `REF-SRE--STATUS-PAGE-INCIDENTS-LIST`)\n- **INC-4821**: Elevated API latency in iad1. Status: investigating.\n- **INC-4790**: Delayed webhook deliveries. Status: monitoring.\n\n**Cloud infrastructure cost by team** (reference: `REF-D0--QUERY-COST`)\n- The cost query sent back only its reference. It had no cost figures or team breakdown, so I don't have any numbers to show you."}
+[incident-cost] workflow run id (primary session): wrun_01M4E7YNHCYTEYXJ87FCJG9HRA
+✓  incident-cost  gates 2/2
+[incidents] {"id":"incidents","arm":"direct","size":"moderate","model":"anthropic/claude-opus-5.5","repetition":1,"success":true,"latencyMs":3305.8112919999985,"modelCalls":2,"missingUsage":0,"inputTokens":15280,"cacheReadTokens":14997,"cacheWriteTokens":277,"tools":[{"callId":"toolu_01NLMWKFd5Vx67QyvL3Nshcw","input":{"status":"open"},"kind":"tool-call","toolName":"sre__status_page_incidents_list"}],"message":"The company status page has 2 open incidents:\n\n| ID | Status | Title |\n|---|---|---|\n| INC-4821 | investigating | Elevated API latency in iad1 |\n| INC-4790 | monitoring | Delayed webhook deliveries |\n\nReference: `REF-SRE--STATUS-PAGE-INCIDENTS-LIST`"}
+[incidents] workflow run id (primary session): wrun_01M4E7YSWEAFTDAQ8097Z3T67T
+✓  incidents  gates 1/1
+[oncall] {"id":"oncall","arm":"direct","size":"moderate","model":"anthropic/claude-opus-5.5","repetition":1,"success":true,"latencyMs":3945.0150830000057,"modelCalls":2,"missingUsage":0,"inputTokens":15205,"cacheReadTokens":14999,"cacheWriteTokens":200,"tools":[{"callId":"toolu_01XhSDPsQA1WJXegbsxcvdfc","input":{"team":"platform"},"kind":"tool-call","toolName":"sre__oncall_schedule_get"}],"message":"The platform team's on-call person for this week didn't come back. The schedule tool returned only a reference with no name or other details, so I can't tell you who it is.\n\n- Reference: `REF-SRE--ONCALL-SCHEDULE-GET`\n\nYou may be able to look up that reference in the on-call system directly, or I can run the query again."}
+[oncall] workflow run id (primary session): wrun_01M4E7YX3TGNNHWBXQ4HPHZW7E
+✓  oncall  gates 1/1
+[release] {"id":"release","arm":"direct","size":"moderate","model":"anthropic/claude-opus-5.5","repetition":1,"success":true,"latencyMs":5369.467375,"modelCalls":1,"missingUsage":0,"inputTokens":7561,"cacheReadTokens":7447,"cacheWriteTokens":110,"tools":[{"callId":"toolu_01HCzunSadfcinnPoX1gS6mN","input":{"app":"mobile"},"kind":"tool-call","toolName":"release_train_schedule"}],"message":"The next mobile release train, **mobile-2026.42**, departs at **2026-10-14T17:00:00Z** (17:00 UTC on October 14, 2026). The release captain is **Priya Natarajan**.\n\nReference: `REF-RELEASE-TRAIN-SCHEDULE`"}
+[release] workflow run id (primary session): wrun_01M4E7Z0Z29GP37SNN6ZK2BN6N
+✓  release  gates 1/1
+[usage] {"id":"usage","arm":"direct","size":"moderate","model":"anthropic/claude-opus-5.5","repetition":1,"success":true,"latencyMs":6924.298542000004,"modelCalls":2,"missingUsage":0,"inputTokens":15229,"cacheReadTokens":15003,"cacheWriteTokens":220,"tools":[{"callId":"toolu_01AVvdm4KkRniX1s24WYz8KT","input":{"customer":"Acme","month":"2026-09"},"kind":"tool-call","toolName":"d0__usage_summary"}],"message":"The usage summary tool for Acme in 2026-09 sent back only a reference, **REF-D0--USAGE-SUMMARY**. It didn't include any usage figures, such as active users, API calls or feature adoption, so I can't summarize Acme's usage without making numbers up.\n\nIf you'd like, I can try to get the actual figures another way, for example by searching the data warehouse for Acme's 2026-09 usage tables and running a query."}
+[usage] workflow run id (primary session): wrun_01M4E7Z6A8PZBEGJW461M4AK2H
+✓  usage  gates 1/1
+
+Results: 10 passed (10 total)
+Gates: 12 passed
+
+Completed in 47.2s
+
+[WARN] Failed to replace env in config: ${SOCKET_PASSWORD_B64} in .npmrc key "_password"
+[workflow-sdk] Step execution already in flight in this process; awaiting its settlement instead of executing again
+  run    wrun_01M4E7YAKF6Y2GE36SYYZJ4SKN
+  step   step_01M4E7YAKFJJ10FT8XZY5KEW2Q
+[workflow-sdk] Step execution already in flight in this process; awaiting its settlement instead of executing again
+  run    wrun_01M4E7YEW3ZS0T7NWGPBDWB456
+  step   step_01M4E7YEW3N77JHQTCBSXCPDKH
+[workflow-sdk] Step execution already in flight in this process; awaiting its settlement instead of executing again
+  run    wrun_01M4E7YJZA1A8KJD4RXGYF4ENR
+  step   step_01M4E7YJZA24PVVKS2DNP4ETTH
+[workflow-sdk] Step execution already in flight in this process; awaiting its settlement instead of executing again
+  run    wrun_01M4E7Z0Z29GP37SNN6ZK2BN6N
+  step   step_01M4E7Z0Z23SC3SCGJ574RGXW0
