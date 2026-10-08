@@ -1,13 +1,13 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { SandboxDockerfile as SandboxDockerfileInput } from "#execution/sandbox/dockerfile.js";
 
 const OCI_PLATFORM = "linux/amd64";
 const SHA256_DIGEST = /sha256:[a-f0-9]{64}/u;
+const MAX_COMMAND_OUTPUT_BYTES = 256 * 1024;
 
 interface CommandResult {
   readonly stderr: string;
@@ -18,7 +18,12 @@ export interface OciCommandRunner {
   run(
     command: string,
     args: readonly string[],
-    options?: { readonly signal?: AbortSignal; readonly stdin?: string },
+    options?: {
+      readonly env?: Readonly<Record<string, string>>;
+      readonly signal?: AbortSignal;
+      readonly stdin?: string;
+      readonly streamOutput?: boolean;
+    },
   ): Promise<CommandResult>;
 }
 
@@ -41,19 +46,28 @@ export function createOciImagePublisher(input: {
   return {
     async publish(publishInput) {
       const engine = input.engine ?? (process.env.VERCEL ? "buildah" : "docker");
-      if (engine === "docker" || !hasRegistryAuthFile()) {
+      const directory = await mkdtemp(join(tmpdir(), "eve-oci-auth-"));
+      await chmod(directory, 0o700);
+      const env: Readonly<Record<string, string>> =
+        engine === "docker"
+          ? { DOCKER_CONFIG: directory }
+          : { REGISTRY_AUTH_FILE: join(directory, "auth.json") };
+      try {
         await login({
           authToken: input.authToken,
           engine,
+          env,
           registry: input.registry,
           runner,
           signal: publishInput.signal,
           username: input.username,
         });
+        await build({ directory, engine, env, input: publishInput, runner });
+        const digest = await push({ engine, env, input: publishInput, runner });
+        return `${stripImageTag(publishInput.imageReference)}@${digest}`;
+      } finally {
+        await rm(directory, { force: true, recursive: true });
       }
-      await build({ engine, input: publishInput, runner });
-      const digest = await push({ engine, input: publishInput, runner });
-      return `${stripImageTag(publishInput.imageReference)}@${digest}`;
     },
   };
 }
@@ -61,6 +75,7 @@ export function createOciImagePublisher(input: {
 async function login(input: {
   readonly authToken: string;
   readonly engine: "buildah" | "docker";
+  readonly env: Readonly<Record<string, string>>;
   readonly registry: string;
   readonly runner: OciCommandRunner;
   readonly signal?: AbortSignal;
@@ -70,16 +85,18 @@ async function login(input: {
     await input.runner.run(
       input.engine,
       ["login", input.registry, "--username", input.username, "--password-stdin"],
-      { signal: input.signal, stdin: input.authToken },
+      { env: input.env, signal: input.signal, stdin: input.authToken },
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(message.replaceAll(input.authToken, "[redacted]"), { cause: error });
+    throw new Error(message.replaceAll(input.authToken, "[redacted]"));
   }
 }
 
 async function build(input: {
+  readonly directory: string;
   readonly engine: "buildah" | "docker";
+  readonly env: Readonly<Record<string, string>>;
   readonly input: {
     readonly dockerfile: SandboxDockerfileInput;
     readonly imageReference: string;
@@ -97,34 +114,35 @@ async function build(input: {
     input.input.dockerfile.contextPath,
   ];
   if (input.engine === "docker") {
-    await input.runner.run("docker", ["build", ...common], { signal: input.input.signal });
+    await input.runner.run("docker", ["build", ...common], {
+      env: input.env,
+      signal: input.input.signal,
+      streamOutput: true,
+    });
     return;
   }
 
-  const directory = await mkdtemp(join(tmpdir(), "eve-oci-config-"));
-  const configPath = join(directory, "registries.conf");
-  try {
-    await writeFile(
-      configPath,
-      'unqualified-search-registries = ["docker.io"]\nshort-name-mode = "permissive"\n',
-    );
-    await input.runner.run(
-      "buildah",
-      ["--registries-conf", configPath, "build", "--layers", "--network", "host", ...common],
-      { signal: input.input.signal },
-    );
-  } finally {
-    await rm(directory, { force: true, recursive: true });
-  }
+  const configPath = join(input.directory, "registries.conf");
+  await writeFile(
+    configPath,
+    'unqualified-search-registries = ["docker.io"]\nshort-name-mode = "permissive"\n',
+  );
+  await input.runner.run(
+    "buildah",
+    ["--registries-conf", configPath, "build", "--layers", "--network", "host", ...common],
+    { env: input.env, signal: input.input.signal, streamOutput: true },
+  );
 }
 
 async function push(input: {
   readonly engine: "buildah" | "docker";
+  readonly env: Readonly<Record<string, string>>;
   readonly input: { readonly imageReference: string; readonly signal?: AbortSignal };
   readonly runner: OciCommandRunner;
 }): Promise<string> {
   if (input.engine === "docker") {
     const result = await input.runner.run("docker", ["push", input.input.imageReference], {
+      env: input.env,
       signal: input.input.signal,
     });
     const digest = `${result.stdout}\n${result.stderr}`.match(SHA256_DIGEST)?.[0];
@@ -132,7 +150,7 @@ async function push(input: {
     const inspected = await input.runner.run(
       "docker",
       ["inspect", "--format", "{{index .RepoDigests 0}}", input.input.imageReference],
-      { signal: input.input.signal },
+      { env: input.env, signal: input.input.signal },
     );
     return requireDigest(inspected.stdout);
   }
@@ -155,7 +173,7 @@ async function push(input: {
         digestPath,
         input.input.imageReference,
       ],
-      { signal: input.input.signal },
+      { env: input.env, signal: input.input.signal },
     );
     return requireDigest(await readFile(digestPath, "utf8"));
   } finally {
@@ -177,25 +195,32 @@ function stripImageTag(reference: string): string {
   return colon > slash ? reference.slice(0, colon) : reference;
 }
 
-function hasRegistryAuthFile(): boolean {
-  const explicit = process.env.REGISTRY_AUTH_FILE?.trim();
-  if (explicit !== undefined && explicit.length > 0) return existsSync(explicit);
-  const configHome = process.env.XDG_CONFIG_HOME?.trim() || join(homedir(), ".config");
-  return existsSync(join(configHome, "containers", "auth.json"));
+function appendOutputTail(current: Buffer, chunk: Buffer): Buffer {
+  if (chunk.byteLength >= MAX_COMMAND_OUTPUT_BYTES)
+    return chunk.subarray(-MAX_COMMAND_OUTPUT_BYTES);
+  const overflow = current.byteLength + chunk.byteLength - MAX_COMMAND_OUTPUT_BYTES;
+  return Buffer.concat([overflow > 0 ? current.subarray(overflow) : current, chunk]);
 }
 
-function createOciCommandRunner(): OciCommandRunner {
+export function createOciCommandRunner(): OciCommandRunner {
   return {
     run(command, args, options = {}) {
       return new Promise((resolve, reject) => {
         const child = spawn(command, args, {
+          env: { ...process.env, ...options.env },
           signal: options.signal,
           stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
         });
-        const stdout: Buffer[] = [];
-        const stderr: Buffer[] = [];
-        child.stdout?.on("data", (chunk: Buffer) => stdout.push(chunk));
-        child.stderr?.on("data", (chunk: Buffer) => stderr.push(chunk));
+        let stdout: Buffer<ArrayBufferLike> = Buffer.alloc(0);
+        let stderr: Buffer<ArrayBufferLike> = Buffer.alloc(0);
+        child.stdout?.on("data", (chunk: Buffer) => {
+          if (options.streamOutput === true) process.stdout.write(chunk);
+          stdout = appendOutputTail(stdout, chunk);
+        });
+        child.stderr?.on("data", (chunk: Buffer) => {
+          if (options.streamOutput === true) process.stderr.write(chunk);
+          stderr = appendOutputTail(stderr, chunk);
+        });
         child.on("error", (error: NodeJS.ErrnoException) => {
           reject(
             error.code === "ENOENT"
@@ -206,10 +231,7 @@ function createOciCommandRunner(): OciCommandRunner {
           );
         });
         child.on("close", (code) => {
-          const result = {
-            stderr: Buffer.concat(stderr).toString("utf8"),
-            stdout: Buffer.concat(stdout).toString("utf8"),
-          };
+          const result = { stderr: stderr.toString("utf8"), stdout: stdout.toString("utf8") };
           if (code === 0) resolve(result);
           else reject(new Error(`${command} exited with code ${String(code)}: ${result.stderr}`));
         });

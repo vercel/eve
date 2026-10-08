@@ -1,8 +1,11 @@
+import { createHash } from "node:crypto";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   forkVercelImageMounts,
   prepareVercelImageResource,
+  verifyVercelImageForks,
 } from "#execution/sandbox/bindings/vercel-image-resources.js";
 import { createFakeVercelOidcToken } from "#internal/testing/vercel-oidc-token.js";
 
@@ -13,6 +16,18 @@ function setCredentials() {
   );
   vi.stubEnv("VERCEL_ORG_ID", "team-id");
   vi.stubEnv("VERCEL_PROJECT_ID", "project-id");
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function manifestSource(key = "workspace-key", content = "seed"): string {
+  return JSON.stringify({
+    files: [{ path: "seed.txt", sha256: sha256(content) }],
+    key,
+    version: 1,
+  });
 }
 
 function resource() {
@@ -78,7 +93,7 @@ describe("Vercel image resources", () => {
       [
         { content: "seed", path: "/eve/upload/seed.txt" },
         {
-          content: JSON.stringify({ key: "workspace-key" }),
+          content: manifestSource(),
           path: "/eve/upload/.eve-resource.json",
         },
       ],
@@ -86,6 +101,7 @@ describe("Vercel image resources", () => {
     );
     expect(remove).toHaveBeenCalledOnce();
     expect(result).toMatchObject({
+      manifestDigest: sha256(manifestSource()),
       mountPath: "/eve/resources/workspace",
       region: "iad1",
       resourceKey: "workspace-key",
@@ -99,7 +115,7 @@ describe("Vercel image resources", () => {
     const writer = {
       delete: vi.fn(async () => {}),
       fs: {
-        readFile: vi.fn(async () => JSON.stringify({ key: "workspace-key" })),
+        readFile: vi.fn(async () => manifestSource()),
       },
       writeFiles: vi.fn(),
     };
@@ -137,7 +153,7 @@ describe("Vercel image resources", () => {
         create: vi.fn(async () => ({
           delete: vi.fn(async () => {}),
           fs: {
-            readFile: vi.fn(async () => JSON.stringify({ key: "different-resource" })),
+            readFile: vi.fn(async () => manifestSource("different-resource")),
           },
           writeFiles: vi.fn(),
         })),
@@ -171,6 +187,7 @@ describe("Vercel image resources", () => {
         mounts: [
           {
             driveName: "prepared-drive",
+            manifestDigest: "c".repeat(64),
             mountPath: "/eve/resources/workspace",
             region: "iad1",
             resourceKey: "workspace-key",
@@ -182,6 +199,7 @@ describe("Vercel image resources", () => {
       forks: [
         {
           driveName: expect.stringMatching(/^eve-sbx-fork-[a-f0-9]{32}$/u),
+          manifestDigest: "c".repeat(64),
           mountPath: "/eve/resources/workspace",
           resourceKey: "workspace-key",
           sourceDriveName: "prepared-drive",
@@ -195,6 +213,63 @@ describe("Vercel image resources", () => {
       name: expect.stringMatching(/^eve-sbx-fork-[a-f0-9]{32}$/u),
       signal: undefined,
     });
+  });
+
+  it("verifies exact fork bytes and removes the internal manifest", async () => {
+    const source = manifestSource();
+    const remove = vi.fn(async () => {});
+    const sandbox = {
+      fs: {
+        readFile: vi.fn(async (path: string, options?: { encoding?: string }) => {
+          if (path.endsWith("/.eve-resource.json")) return source;
+          return options?.encoding === "utf8" ? "seed" : Buffer.from("seed");
+        }),
+        readdir: vi.fn(async () => [
+          { isDirectory: () => false, isFile: () => true, name: ".eve-resource.json" },
+          { isDirectory: () => false, isFile: () => true, name: "seed.txt" },
+        ]),
+        rm: remove,
+      },
+    };
+
+    await expect(
+      verifyVercelImageForks({
+        forks: [
+          {
+            driveName: "session-fork",
+            manifestDigest: sha256(source),
+            mountPath: "/eve/resources/workspace",
+            resourceKey: "workspace-key",
+            sourceDriveName: "prepared-drive",
+          },
+        ],
+        sandbox: sandbox as never,
+      }),
+    ).resolves.toBeUndefined();
+    expect(remove).toHaveBeenCalledWith("/eve/resources/workspace/.eve-resource.json", {
+      force: true,
+      signal: undefined,
+    });
+  });
+
+  it("rejects a fork whose manifest changed after preparation", async () => {
+    const sandbox = {
+      fs: { readFile: vi.fn(async () => manifestSource("different-resource")) },
+    };
+    await expect(
+      verifyVercelImageForks({
+        forks: [
+          {
+            driveName: "session-fork",
+            manifestDigest: sha256(manifestSource()),
+            mountPath: "/eve/resources/workspace",
+            resourceKey: "workspace-key",
+            sourceDriveName: "prepared-drive",
+          },
+        ],
+        sandbox: sandbox as never,
+      }),
+    ).rejects.toThrow("unexpected content");
   });
 
   it("uses the existing fork when session start replays or races", async () => {
@@ -218,6 +293,7 @@ describe("Vercel image resources", () => {
         mounts: [
           {
             driveName: source.name,
+            manifestDigest: "d".repeat(64),
             mountPath: "/eve/resources/skills",
             region: source.region,
             resourceKey: "skills-key",

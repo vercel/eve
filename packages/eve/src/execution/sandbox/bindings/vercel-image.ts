@@ -30,6 +30,7 @@ import {
   describeVercelImageForks,
   forkVercelImageMounts,
   prepareVercelImageResource,
+  verifyVercelImageForks,
   type VercelImageForkArtifact,
   type VercelImageMountArtifact,
 } from "#execution/sandbox/bindings/vercel-image-resources.js";
@@ -70,6 +71,7 @@ const DEFAULT_SANDBOX_TIMEOUT_MS = 30 * 60 * 1_000;
 const DIGEST_PINNED_IMAGE = /^vcr\.vercel\.com\/.+@sha256:[a-f0-9]{64}$/u;
 const EVE_RESOURCE_DRIVE_NAME = /^eve-sbx-res-[a-f0-9]{32}$/u;
 const EVE_RESOURCE_FORK_NAME = /^eve-sbx-fork-[a-f0-9]{32}$/u;
+const SHA256_HEX = /^[a-f0-9]{64}$/u;
 const RESOURCE_MOUNT_PATHS = new Set(["/eve/resources/workspace", "/eve/resources/skills"]);
 
 export type VercelImagePreparedArtifact = {
@@ -233,6 +235,7 @@ export function createVercelImageSandboxProvider(
         createVercelNetworkPolicySetter(sandbox),
       );
       try {
+        await verifyVercelImageForks({ forks, sandbox, signal: createOptions.signal });
         await ensureBaseRuntime(sandbox);
         await hydrateResources(session);
       } catch (error) {
@@ -250,7 +253,13 @@ export function createVercelImageSandboxProvider(
         throw error;
       }
     } else {
+      const session = buildSandboxSession(
+        createVercelInternalSandboxSession(sandbox),
+        createVercelNetworkPolicySetter(sandbox),
+      );
+      await verifyVercelImageForks({ forks, sandbox, signal: createOptions.signal });
       await ensureBaseRuntime(sandbox);
+      await hydrateResources(session);
       await ensureVercelSandboxTags(
         sandbox,
         resolveVercelSandboxTags(createOptions.tags, nativeTags),
@@ -441,6 +450,7 @@ function requireSessionState(
       return (
         expectedFork === undefined ||
         fork.driveName !== expectedFork.driveName ||
+        fork.manifestDigest !== expectedFork.manifestDigest ||
         fork.mountPath !== expectedFork.mountPath ||
         fork.resourceKey !== expectedFork.resourceKey ||
         fork.sourceDriveName !== expectedFork.sourceDriveName
@@ -502,6 +512,7 @@ function requirePreparedArtifact(artifact: SandboxPreparedArtifact): VercelImage
     image: artifact.image,
     mounts: artifact.mounts.map((mount) => ({
       driveName: mount.driveName,
+      manifestDigest: mount.manifestDigest,
       mountPath: mount.mountPath,
       region: mount.region,
       resourceKey: mount.resourceKey,
@@ -515,6 +526,8 @@ function isForkArtifact(value: SandboxPreparedArtifact): value is VercelImageFor
     isSandboxPreparedArtifactRecord(value) &&
     typeof value.driveName === "string" &&
     EVE_RESOURCE_FORK_NAME.test(value.driveName) &&
+    typeof value.manifestDigest === "string" &&
+    SHA256_HEX.test(value.manifestDigest) &&
     typeof value.mountPath === "string" &&
     RESOURCE_MOUNT_PATHS.has(value.mountPath) &&
     typeof value.resourceKey === "string" &&
@@ -529,6 +542,8 @@ function isMountArtifact(value: SandboxPreparedArtifact): value is VercelImageMo
     isSandboxPreparedArtifactRecord(value) &&
     typeof value.driveName === "string" &&
     EVE_RESOURCE_DRIVE_NAME.test(value.driveName) &&
+    typeof value.manifestDigest === "string" &&
+    SHA256_HEX.test(value.manifestDigest) &&
     typeof value.mountPath === "string" &&
     typeof value.region === "string" &&
     value.region.length > 0 &&

@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -17,11 +19,15 @@ const artifact: VercelImagePreparedArtifact = {
   version: 1,
 };
 
+const driveManifest = JSON.stringify({ files: [], key: "skills-key", version: 1 });
+const driveManifestDigest = createHash("sha256").update(driveManifest).digest("hex");
+
 const artifactWithDrive: VercelImagePreparedArtifact = {
   ...artifact,
   mounts: [
     {
       driveName: `eve-sbx-res-${"b".repeat(32)}`,
+      manifestDigest: driveManifestDigest,
       mountPath: "/eve/resources/skills",
       region: "iad1",
       resourceKey: "skills-key",
@@ -51,6 +57,13 @@ function createProvider(
 ) {
   const sandbox = {
     delete: vi.fn(async () => {}),
+    fs: {
+      readFile: vi.fn(async () => driveManifest),
+      readdir: vi.fn(async () => [
+        { isDirectory: () => false, isFile: () => true, name: ".eve-resource.json" },
+      ]),
+      rm: vi.fn(async () => {}),
+    },
     name: "native",
     status: "running",
     stop: vi.fn(async () => {}),
@@ -92,6 +105,7 @@ function createProvider(
   );
   vi.stubEnv("VERCEL_ORG_ID", "team-id");
   vi.stubEnv("VERCEL_PROJECT_ID", "project-id");
+  const hydrateResources = vi.fn(async () => {});
   const publish = vi.fn(async () => artifact.image);
   const module = { Drive: { get: getDrive }, Sandbox: { create, get } } as never;
   const provider = createVercelImageSandboxProvider(
@@ -99,7 +113,7 @@ function createProvider(
     {
       createImagePublisher: () => ({ publish }),
       ensureBaseRuntime: vi.fn(async () => {}),
-      hydrateResources: vi.fn(async () => {}),
+      hydrateResources,
       loadDeleteModule: async () => module,
       loadModule: async () => module,
       waitForImage: vi.fn(async () => {}),
@@ -110,6 +124,7 @@ function createProvider(
     deleteFork,
     get,
     getDrive,
+    hydrateResources,
     provider,
     publish,
     sandbox,
@@ -159,6 +174,18 @@ describe("createVercelImageSandboxProvider", () => {
       second.provider.resume(context("session-a"), artifact, started.state),
     ).resolves.toBeTruthy();
     expect(second.create).not.toHaveBeenCalled();
+  });
+
+  it("rehydrates resources when recovering a named sandbox before state persisted", async () => {
+    const { hydrateResources, provider, sandbox } = createProvider({ existing: true });
+
+    await provider.start(context("session-a"), {}, artifactWithDrive);
+
+    expect(sandbox.fs.rm).toHaveBeenCalledWith("/eve/resources/skills/.eve-resource.json", {
+      force: true,
+      signal: undefined,
+    });
+    expect(hydrateResources).toHaveBeenCalledOnce();
   });
 
   it("stores the session Drive fork identity in provider state", async () => {
