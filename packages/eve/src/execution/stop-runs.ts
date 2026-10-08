@@ -2,8 +2,8 @@ import { WORKFLOW_CANCELLATION_SETTLE_MS } from "#execution/tools/workflow/cance
 import type { WorkflowToolRunControlMessage } from "#execution/tools/workflow/messages.js";
 import type { WorkflowToolRunAddress } from "#execution/tools/workflow/types.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
-import { liveTaskRuns, readTaskTable } from "#execution/tasks/table.js";
 import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
+import { runtimeWait, storedProjection, turnPosition } from "#harness/session-machine/view.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { cancelRun, getRun, getWorld, resumeHook } from "#internal/workflow/runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -24,14 +24,27 @@ export interface RunStopTarget {
 }
 
 /**
- * Every run the session started and hasn't seen finish: the calls a turn waits on, and every
- * task's run, including cancelled runs that haven't confirmed yet.
+ * The workflow tool runs the session's turn waits on; each run is one call, which a cancel ends.
+ * A cancel still commits when they can't be read, so it stops none of them.
  */
-export function liveRuns(state: SessionStateMap | undefined): readonly WorkflowToolRunAddress[] {
-  return [
-    ...getBlockingWorkflowToolRuns(state).map((run) => run.address),
-    ...liveTaskRuns(readTaskTable(state)),
-  ];
+export function waitedCallRuns(session: {
+  readonly sessionId: string;
+  readonly state?: SessionStateMap;
+}): RunStopTarget[] {
+  try {
+    const turnId =
+      runtimeWait(session.state)?.event.turnId ??
+      turnPosition(storedProjection(session.state)).turnId;
+    return getBlockingWorkflowToolRuns(session.state, turnId).map((run) => ({
+      ends: true,
+      run: run.address,
+    }));
+  } catch (error) {
+    logError(log, "failed to read the workflow tool calls a cancelled turn waits on", error, {
+      sessionId: session.sessionId,
+    });
+    return [];
+  }
 }
 
 /**
