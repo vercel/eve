@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { EXECUTE_TOOL_NAME, SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 
 import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -148,10 +149,12 @@ function setup(mode: ServerMode) {
     seen,
     startAuthorization,
     search: (query: string) =>
-      contextStorage.run(ctx, () => catalog.advertised.get("search")!.execute!({ query }, options)),
-    /** Runs `execute({ tool, input })` the way the harness runs a resolved call. */
+      contextStorage.run(ctx, () =>
+        catalog.advertised.get(SEARCH_TOOL_NAME)!.execute!({ query }, options),
+      ),
+    /** Runs `eve__execute({ tool, input })` the way the harness runs a resolved call. */
     execute: (tool: string, input: object = {}) => {
-      const resolved = catalog.resolve({ input: { input, tool }, toolName: "execute" });
+      const resolved = catalog.resolve({ input: { input, tool }, toolName: EXECUTE_TOOL_NAME });
       if (resolved === undefined) throw new Error(`execute could not resolve "${tool}".`);
       return contextStorage.run(ctx, () =>
         resolved.definition.execute!(resolved.call.input, options),
@@ -248,7 +251,7 @@ describe("MCP connections sign in only when the server asks", () => {
     expect(isAuthorizationSignal(await kennel.execute("kennel"))).toBe(true);
     kennel.finishSignIn();
     expect(await kennel.execute("kennel")).toBe(
-      'Signed in to Kennel. Find the Kennel tools with search({ query: "kennel__" }).',
+      'Signed in to Kennel. Find the Kennel tools with eve__search({ query: "kennel__" }).',
     );
     expect(await kennel.search("kennel__")).toMatchObject({
       results: [{ tool: "kennel__find_pet" }, { tool: "kennel__pet_invoice" }],

@@ -386,11 +386,11 @@ describe("dynamic connection lifecycle", () => {
     expect(registry.getConnectionNames()).toEqual([]);
   });
 
-  it("fails when a dynamic connection takes a runtime tool's name", async () => {
+  it("fails when a dynamic connection is named eve, which would own eve's namespace", async () => {
     const { ctx, registry } = createContext();
     const resolver = createResolver({
       handler: () => ({
-        execute: defineMcpClientConnection({
+        eve: defineMcpClientConnection({
           description: "Runs jobs.",
           url: "https://mcp.example.com/jobs",
         }),
@@ -404,9 +404,34 @@ describe("dynamic connection lifecycle", () => {
         resolvers: [resolver],
       }),
     ).rejects.toThrow(
-      'Dynamic connection resolver "connections/accounts.ts" returned the reserved connection name "execute". eve reserves "execute" for its built-in catalog tool; rename the connection.',
+      'Dynamic connection resolver "connections/accounts.ts" returned the reserved connection name "eve". eve reserves the "eve" namespace for its built-in tools; rename the connection.',
     );
     expect(registry.getConnectionNames()).toEqual([]);
+  });
+
+  it("registers dynamic connections outside eve's namespace, including the catalog tools' former names", async () => {
+    const { ctx, registry } = createContext();
+    const names = ["search", "execute", "steve", "eve-tools"];
+    const resolver = createResolver({
+      handler: () =>
+        Object.fromEntries(
+          names.map((name) => [
+            name,
+            defineMcpClientConnection({
+              description: name,
+              url: `https://mcp.example.com/${name}`,
+            }),
+          ]),
+        ),
+    });
+
+    await dispatchDynamicConnectionEvent({
+      ctx,
+      event: createSessionStartedEvent(),
+      resolvers: [resolver],
+    });
+
+    expect(registry.getConnectionNames().toSorted()).toEqual(names.toSorted());
   });
 
   it("fails when a dynamic connection nests under another connection's name", async () => {

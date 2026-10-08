@@ -20,7 +20,9 @@ import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import {
   connectionRegistry,
   fakeConnection,
-  RESERVED_TOOL_NAMES,
+  EVE_NAMESPACE_NAMES,
+  EVE_NAMESPACE_RESERVATION,
+  NAMES_OUTSIDE_EVE_NAMESPACE,
 } from "#internal/testing/catalog-fixtures.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
@@ -524,14 +526,23 @@ describe("dynamic subagent names", () => {
     });
   });
 
-  it.each(RESERVED_TOOL_NAMES)("omits a subagent named %s, the built-in %s", async (name, role) => {
-    const resolved = await resolveResearcher({ name });
+  it.each(
+    EVE_NAMESPACE_NAMES.flatMap((name) => [true, false].map((tool) => [name, tool] as const)),
+  )("omits a subagent named %s, in eve's namespace, with tool %s", async (name, tool) => {
+    const resolved = await resolveResearcher({ name, tool });
 
     expect(resolved.selected).toBe(false);
     expect(resolved.errors).toEqual([
-      `Dynamic subagent "${name}" from "agent.ts" uses the reserved name "${name}". eve reserves "${name}" for its built-in ${role}; rename the subagent.`,
+      `Dynamic subagent "${name}" from "agent.ts" uses the reserved name "${name}". ${EVE_NAMESPACE_RESERVATION}; rename the subagent.`,
     ]);
   });
+
+  it.each(NAMES_OUTSIDE_EVE_NAMESPACE)(
+    "selects a subagent named %s, outside eve's namespace",
+    async (name) => {
+      expect(await resolveResearcher({ name })).toMatchObject({ errors: [], selected: true });
+    },
+  );
 
   it.each([
     [

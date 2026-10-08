@@ -1,3 +1,4 @@
+import { SEARCH_TOOL } from "@eve-e2e/config/catalog-tools";
 import { defineEval } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
@@ -6,21 +7,21 @@ import { noCallRejectedWholesale } from "./first-try";
 export default defineEval({
   tags: ["real-model"],
   description:
-    "A real model finds an MCP connection's tools with search, reads a tool's structured result, and builds a nested tool input from its signature.",
+    "A real model finds an MCP connection's tools with eve__search, reads a tool's structured result, and builds a nested tool input from its signature.",
 
   async test(t) {
     const turn = await t.send(
       [
         "Bob works the front desk at the Maple Street kennel. Biscuit, a boarding golden retriever,",
         "needs a grooming visit on October 14, 2026. Alice (555-0100) should be notified about it.",
-        "Use `search` to find the `kennel` connection's tools, look up Biscuit's pet id,",
-        "then book the visit with `execute`.",
+        "Use `eve__search` to find the `kennel` connection's tools, look up Biscuit's pet id,",
+        "then book the visit with `eve__execute`.",
         "Reply with the visit id the kennel returns.",
       ].join(" "),
     );
 
     turn.expectOk();
-    t.toolOrder(["search", "kennel__find_pet", "kennel__book_visit"]);
+    t.toolOrder([SEARCH_TOOL, "kennel__find_pet", "kennel__book_visit"]);
     // The pet id comes from find_pet's structured result, not the prompt.
     t.calledTool("kennel__find_pet", { output: { petId: 4217 } });
     t.calledTool("kennel__book_visit", {

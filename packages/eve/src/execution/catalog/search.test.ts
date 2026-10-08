@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -27,7 +28,7 @@ function searchFor(
   } = {},
 ) {
   const { catalog, run } = catalogContext({ ...options, tools });
-  const search = catalog.advertised.get("search")!;
+  const search = catalog.advertised.get(SEARCH_TOOL_NAME)!;
   return (input: Record<string, unknown>) =>
     run(async () => (await search.execute!(input, OPTIONS)) as SearchOutput);
 }
@@ -91,7 +92,7 @@ describe("search", () => {
 
   it("requires a query with at least one word", async () => {
     const search = searchFor(tools, { skills });
-    const schema = catalogContext({ tools }).catalog.advertised.get("search")!
+    const schema = catalogContext({ tools }).catalog.advertised.get(SEARCH_TOOL_NAME)!
       .inputSchema as StandardSchemaV1;
     const needsWords =
       'search needs at least one word in query, such as a capability ("list open issues") or a name or connection prefix ("linear__").';
@@ -118,7 +119,7 @@ describe("search", () => {
     expect(names(await search({ query: "report" }))).toEqual(best.slice(0, 20));
 
     // The model's calls are checked against the schema, which caps limit at 50 and has no offset.
-    const schema = catalogContext({ tools: many }).catalog.advertised.get("search")!
+    const schema = catalogContext({ tools: many }).catalog.advertised.get(SEARCH_TOOL_NAME)!
       .inputSchema as StandardSchemaV1;
     expect(await schema["~standard"].validate({ limit: 51, query: "report" })).toEqual({
       issues: [expect.objectContaining({ path: ["limit"] })],
@@ -433,7 +434,7 @@ describe("search", () => {
       ["Linear__", 'No entries are named "Linear__…". Closest connections: linear.'],
       [
         "nope__x",
-        'No entries are named "nope__…". Find names in the catalog listing or your tool list, or search with plain words.',
+        'No entries are named "nope__…". Find names in the catalog listing or your tool list, or call eve__search with plain words.',
       ],
       ["archive__", 'Connection "archive" has no tools.'],
     ])("fails for %s, a namespace with no entries", async (query, message) => {

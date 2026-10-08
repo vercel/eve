@@ -1,6 +1,7 @@
 import { jsonSchema } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
+import { EXECUTE_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import {
   inlineTool,
@@ -489,13 +490,13 @@ describe("generation steering with the real AI SDK", () => {
     [
       "a workflow tool through execute",
       workflowTool("deploy_service", "execute", { deferred: true }),
-      "execute",
+      EXECUTE_TOOL_NAME,
       { tool: "deploy_service" },
     ],
     [
       "an agent through execute",
       subagentTool("billing_specialist", { deferred: true }),
-      "execute",
+      EXECUTE_TOOL_NAME,
       { input: { message: "Review Bob's dispute." }, tool: "billing_specialist" },
     ],
   ] as const)(
@@ -552,7 +553,7 @@ describe("generation steering with the real AI SDK", () => {
             controller.enqueue({
               type: "tool-call",
               toolCallId: "refund-1",
-              toolName: "execute",
+              toolName: EXECUTE_TOOL_NAME,
               input: JSON.stringify({ input: {}, tool: "refund_invoice" }),
             });
             controller.enqueue({

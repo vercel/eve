@@ -1,3 +1,4 @@
+import { SEARCH_TOOL } from "@eve-e2e/config/catalog-tools";
 import { requireMockModel } from "@eve-e2e/config/mock-script";
 import { defineEval } from "eve/evals";
 
@@ -14,7 +15,7 @@ export default defineEval({
     const turn = await t.send("DYNAMIC_CONNECTION_E2E");
 
     turn.expectOk();
-    turn.calledTool("search", {
+    turn.calledTool(SEARCH_TOOL, {
       count: 1,
       input: { query: "dynamic-catalog__" },
       output: (value) => JSON.stringify(value).includes('"tool":"dynamic-catalog__getStatus"'),

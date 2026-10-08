@@ -10,6 +10,11 @@ import {
   SandboxKey,
 } from "#context/keys.js";
 import { deserializeContext } from "#context/serialize.js";
+import {
+  EVE_NAMESPACE_NAMES,
+  EVE_NAMESPACE_RESERVATION,
+  NAMES_OUTSIDE_EVE_NAMESPACE,
+} from "#internal/testing/catalog-fixtures.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -152,6 +157,47 @@ describe("dispatchDynamicSkillEvent", () => {
     expect(ctx.get(DynamicSkillManifestKey)?.tenant?.map((skill) => skill.name)).toEqual([
       "3d-modeling",
     ]);
+  });
+
+  it.each(EVE_NAMESPACE_NAMES)(
+    "skips a resolver that returns %s, in eve's namespace",
+    async (name) => {
+      const logs = captureLogRecords();
+      const { ctx } = createCtx();
+      await dispatch(
+        ctx,
+        createResolver("tenant", () => ({
+          [name]: makeSkill("Reserved"),
+          policy: makeSkill("Tenant policy"),
+        })),
+      );
+
+      expect(ctx.get(DynamicSkillManifestKey)?.tenant).toBeUndefined();
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          fields: {
+            error: expect.stringContaining(
+              `Dynamic skill resolver "skills/tenant.ts" returned the reserved skill name "${name}". ${EVE_NAMESPACE_RESERVATION}; rename the skill.`,
+            ),
+          },
+          level: "error",
+        }),
+      );
+    },
+  );
+
+  it("keeps skills outside eve's namespace, including the built-in tools' former names", async () => {
+    const { ctx } = createCtx();
+    await dispatch(
+      ctx,
+      createResolver("tenant", () =>
+        Object.fromEntries(NAMES_OUTSIDE_EVE_NAMESPACE.map((name) => [name, makeSkill(name)])),
+      ),
+    );
+
+    expect(ctx.get(DynamicSkillManifestKey)?.tenant?.map((skill) => skill.name)).toEqual(
+      NAMES_OUTSIDE_EVE_NAMESPACE,
+    );
   });
 
   it("skips a resolver that returns an illegal skill name", async () => {

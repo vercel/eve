@@ -1,4 +1,5 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
+import { EXECUTE_TOOL, SEARCH_TOOL } from "@eve-e2e/config/catalog-tools";
 import { execute, outputOf, playScript, type ScriptedCall } from "@eve-e2e/config/mock-script";
 import { defineAgent } from "eve";
 import type { MockModelRequest, MockModelResponse } from "eve/evals";
@@ -35,7 +36,7 @@ const KENNEL_CALLS: readonly ScriptedCall[] = [
         : {},
       tool: "kennel__book_visit",
     }),
-    name: "execute",
+    name: EXECUTE_TOOL,
   },
 ];
 
@@ -68,7 +69,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
         {
           id: "dynamic-search",
           input: () => ({ query: "dynamic-catalog__" }),
-          name: "search",
+          name: SEARCH_TOOL,
         },
       ],
       (finished) =>
@@ -84,7 +85,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
         {
           id: "petstore-search",
           input: () => ({ query: "petstore__" }),
-          name: "search",
+          name: SEARCH_TOOL,
         },
         execute("petstore-inventory", { input: {}, tool: "petstore__getInventory" }),
       ],

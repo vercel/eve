@@ -1,3 +1,4 @@
+import { SEARCH_TOOL } from "@eve-e2e/config/catalog-tools";
 import { defineEval } from "eve/evals";
 import { z } from "zod";
 
@@ -16,7 +17,7 @@ const found = (value: unknown) => results.safeParse(value).data?.results ?? [];
 
 export default defineEval({
   description:
-    "A plain search finds private-catalog as its sign-in entry without prompting; executing it holds the turn for sign-in, and the resumed turn signs in, then searches the private-catalog__ namespace and calls its tool over authenticated HTTP.",
+    "A plain eve__search finds private-catalog as its sign-in entry without prompting; running it through eve__execute holds the turn for sign-in, and the resumed turn signs in, then searches the private-catalog__ namespace and calls its tool over authenticated HTTP.",
   timeoutMs: 90_000,
 
   async test(t) {
@@ -28,7 +29,7 @@ export default defineEval({
     );
     const session = started.session;
     started.expectOk();
-    started.calledTool("search", {
+    started.calledTool(SEARCH_TOOL, {
       count: 1,
       input: { query: CATALOG },
       output: (value) => {
@@ -44,7 +45,7 @@ export default defineEval({
 
     const required = started.events.find((event) => event.type === "authorization.required");
     if (required?.type !== "authorization.required") {
-      throw new Error("execute did not produce an authorization challenge.");
+      throw new Error("eve__execute did not produce an authorization challenge.");
     }
     if (session.sessionId === undefined || session.state === undefined) {
       throw new Error("The sign-in turn did not create a session.");
@@ -70,7 +71,7 @@ export default defineEval({
       count: 1,
       output: (value) => typeof value === "string" && value.startsWith("Signed in to "),
     });
-    completed.calledTool("search", {
+    completed.calledTool(SEARCH_TOOL, {
       count: 1,
       input: { query: `${CATALOG}__` },
       output: (value) => found(value).some((entry) => entry.tool === ITEMS_TOOL),

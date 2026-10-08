@@ -1,4 +1,5 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
+import { EXECUTE_TOOL, SEARCH_TOOL } from "@eve-e2e/config/catalog-tools";
 import { latestTaskResult, outputOf, playScript } from "@eve-e2e/config/mock-script";
 import { defineAgent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
@@ -32,7 +33,7 @@ function respondToPublicCatalog(request: MockModelRequest): MockModelResponse | 
   if (!byId.has("public-catalog-connect")) {
     return {
       toolCalls: [
-        { id: "public-catalog-connect", name: "execute", input: { tool: "public-catalog" } },
+        { id: "public-catalog-connect", name: EXECUTE_TOOL, input: { tool: "public-catalog" } },
       ],
     };
   }
@@ -109,12 +110,12 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
     return playScript(
       request,
       [
-        { id: "catalog-search", name: "search", input: () => ({ query: "private-catalog" }) },
-        { id: "catalog-sign-in", name: "execute", input: () => ({ tool: "private-catalog" }) },
-        { id: "catalog-tools", name: "search", input: () => ({ query: "private-catalog__" }) },
+        { id: "catalog-search", name: SEARCH_TOOL, input: () => ({ query: "private-catalog" }) },
+        { id: "catalog-sign-in", name: EXECUTE_TOOL, input: () => ({ tool: "private-catalog" }) },
+        { id: "catalog-tools", name: SEARCH_TOOL, input: () => ({ query: "private-catalog__" }) },
         {
           id: "catalog-items",
-          name: "execute",
+          name: EXECUTE_TOOL,
           input: () => ({ tool: "private-catalog__list_items" }),
         },
       ],
