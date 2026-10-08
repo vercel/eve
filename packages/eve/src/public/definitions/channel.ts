@@ -12,6 +12,7 @@ import {
 import { normalizeChannelCors, type ChannelCorsOptions } from "#channel/cors.js";
 import { HTTP_ADAPTER_KIND } from "#channel/http.js";
 import type {
+  ChannelCreateOptions,
   ChannelFrom,
   ChannelReceiveContext,
   ChannelResolveSession,
@@ -49,6 +50,7 @@ export type {
 } from "#shared/conversation-context.js";
 export type { SessionRespondOptions, SessionSendOptions } from "#channel/session.js";
 export type {
+  ChannelCreateOptions,
   ChannelFrom,
   ChannelReceiveContext,
   ChannelResolveSession,

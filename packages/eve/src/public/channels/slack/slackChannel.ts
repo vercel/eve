@@ -13,6 +13,7 @@ import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/ty
 import type { VercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
 import type { CardElement } from "#compiled/chat/index.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
+import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
 import { maxBytesOf } from "#internal/attachments/limited-read.js";
@@ -80,6 +81,7 @@ import {
 import {
   formatSlackInboundMessage,
   formatSlackThreadContext,
+  slackThreadSessionHistory,
 } from "#public/channels/slack/model-context.js";
 import { isPrivateSlackConversation } from "#public/channels/slack/privacy.js";
 import {
@@ -358,6 +360,8 @@ export interface SlackInitialMessage {
  */
 export interface SlackEventSendOptions {
   readonly auth: SessionAuthContext | null;
+  /** Prior conversation added as user and assistant turns before the message. */
+  readonly history?: readonly SessionHistoryMessage[];
   readonly target: SlackReceiveTarget;
   /** Overrides the workflow run title without changing the message sent to the model. */
   readonly title?: string;
@@ -580,12 +584,15 @@ export type SlackInputResponseResult = { readonly auth: SessionAuthContext | nul
  * Result of an `onAppMention` or `onDirectMessage` callback. Return an
  * object (auth may be `null`) to dispatch a turn, or `null` to drop the
  * inbound message. `context` strings are appended as user messages to
- * session history before the delivery message. `title` overrides the
- * workflow run title without changing the message sent to the model.
+ * session history before the delivery message. `history` entries are added as
+ * user and assistant turns before it; when present, `threadContext` keeps its
+ * transcript and never seeds. `title` overrides the workflow run title without
+ * changing the message sent to the model.
  */
 export type SlackMentionResult = {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
+  readonly history?: readonly SessionHistoryMessage[];
   readonly title?: string;
 } | null;
 
@@ -653,7 +660,9 @@ export interface SlackChannelConfig {
   /**
    * Adds earlier replies from the current Slack thread to each triggering
    * turn. Messages are rendered with their Slack sender ids attached so a
-   * multi-user transcript retains unambiguous speaker attribution. Omit this
+   * multi-user transcript retains unambiguous speaker attribution. When the
+   * message starts the thread's session, the same replies are added as
+   * history instead: this app's replies become assistant turns. Omit this
    * option to avoid fetching thread history.
    */
   readonly threadContext?: LoadThreadContextMessagesOptions;
@@ -966,6 +975,7 @@ function defaultOnInputResponse(ctx: SlackInputResponseContext): SlackInputRespo
 async function receiveOnSlack(
   input: {
     readonly auth: SessionAuthContext | null;
+    readonly history?: readonly SessionHistoryMessage[];
     readonly message: string | UserContent;
     readonly target: SlackReceiveTarget;
     readonly title?: string;
@@ -1047,7 +1057,7 @@ async function receiveOnSlack(
 
   return deps
     .from(slackContinuationToken(channelId, continuationThreadTs))
-    .send(input.message, { auth: input.auth, state, title: input.title });
+    .send(input.message, { auth: input.auth, history: input.history, state, title: input.title });
 }
 
 function shouldDropSlackHttpTimeoutRetry(headers: Headers): boolean {
@@ -1372,9 +1382,9 @@ async function dispatchSlackEvent(input: {
           typeof input.envelope.event.user === "string" ? input.envelope.event.user : undefined,
         ),
       }),
-    send: (message, { auth, target, title }) =>
+    send: (message, { auth, history, target, title }) =>
       receiveOnSlack(
-        { auth, message, target, title },
+        { auth, history, message, target, title },
         {
           from: input.from,
           api: input.api,
@@ -1453,7 +1463,15 @@ async function deliverSlackMessage(input: {
       input.threadContext === undefined
         ? []
         : await loadThreadContextMessages(thread, message, input.threadContext);
-    const threadContext = formatSlackThreadContext(priorMessages);
+    // A message that starts the thread's session carries the replies as history; a started
+    // session gets them as a transcript, as before. Authored history keeps the transcript.
+    const seedsHistory =
+      priorMessages.length > 0 &&
+      input.result.history === undefined &&
+      (await input.sessionOperations.resolveSession()) === undefined;
+    const threadContext = seedsHistory ? undefined : formatSlackThreadContext(priorMessages);
+    const history =
+      input.result.history ?? (seedsHistory ? slackThreadSessionHistory(priorMessages) : undefined);
     const fileParts = await collectInboundFileParts({
       mention: message,
       thread,
@@ -1480,9 +1498,12 @@ async function deliverSlackMessage(input: {
       ? PRIVATE_SLACK_RUN_TITLE
       : (input.result.title ?? message.markdown);
     const sendOptions: SlackSendOptions = attachInputText(
-      channelContext.length === 0
-        ? { auth: input.result.auth, title }
-        : { auth: input.result.auth, context: channelContext, title },
+      {
+        auth: input.result.auth,
+        title,
+        ...(channelContext.length > 0 && { context: channelContext }),
+        ...(history !== undefined && { history }),
+      },
       // The envelope stays model-visible; pending input matches what the person typed.
       input.resolvesTypedInput && fileParts.length === 0
         ? slackTypedText(message.text, input.botUserId)

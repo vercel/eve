@@ -32,6 +32,7 @@ const HOOK_CANCELLABLE_EVENTS = {
   "compaction.completed": true,
   "compaction.requested": true,
   "context.cleared": false,
+  "history.imported": false,
   "input.requested": true,
   "input.resolved": true,
   "message.appended": true,

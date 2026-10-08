@@ -24,11 +24,14 @@ export interface EveMessage {
  * `status` tracks this message's own lifecycle (distinct from session-level
  * status): user messages use `"submitted"` or `"failed"`, assistant messages
  * use `"streaming"` or `"complete"`. `optimistic` is set only while a
- * client-projected user message awaits server confirmation. `turnId` links the
- * message to its runtime turn; `result` holds the harness structured result
- * once the turn finalizes.
+ * client-projected user message awaits server confirmation. `imported` marks a
+ * message added through `history`, ahead of its turn's message, and carries no
+ * `turnId`. `turnId` links
+ * the message to its runtime turn; `result` holds the harness
+ * structured result once the turn finalizes.
  */
 export interface EveMessageMetadata {
+  readonly imported?: true;
   readonly optimistic?: true;
   readonly result?: unknown;
   readonly status?: "complete" | "failed" | "streaming" | "submitted";

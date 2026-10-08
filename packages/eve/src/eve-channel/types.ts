@@ -12,6 +12,7 @@ import type {
   ChannelMethod,
 } from "#public/definitions/channel.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
+import type { SessionHistoryMessage } from "#shared/session-history.js";
 
 export type { ForwardedAssertion, TrustedForwarders } from "#channel/forwarded-principal.js";
 
@@ -74,6 +75,12 @@ export interface EveMessageContext {
 export type EveMessageResult = {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
+  /**
+   * Prior conversation added as user and assistant turns before this message.
+   * Resolve it on the server and authorize the caller against the stored
+   * conversation.
+   */
+  readonly history?: readonly SessionHistoryMessage[];
   /** Sets the title when creating a workflow or sending its first message after prewarming. */
   readonly title?: string;
 };

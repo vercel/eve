@@ -20,6 +20,7 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import type { SessionInstrumentation } from "#instrumentation/runtime.js";
 import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-view.js";
+import type { SessionHistoryMessage } from "#shared/session-history.js";
 
 /**
  * Serializable tool definition stored on the session.
@@ -165,6 +166,12 @@ export interface StepInput {
    * delivery message. Populated by channels via `SendPayload.context`.
    */
   readonly context?: readonly string[];
+  /**
+   * Prior conversation from the channel delivery, added as user and assistant
+   * turns before this turn's context and message. Populated by channels via
+   * `SendPayload.history`.
+   */
+  readonly history?: readonly SessionHistoryMessage[];
   /**
    * Run-scoped schema that replaces the session's current output schema when
    * present. Omitted continuations keep the existing schema.

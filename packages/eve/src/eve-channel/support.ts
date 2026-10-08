@@ -1,6 +1,7 @@
 import type { UserContent } from "ai";
 
 import type { SessionAuthContext } from "#channel/types.js";
+import type { SessionHistoryMessage } from "#shared/session-history.js";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
@@ -143,6 +144,7 @@ function normalizeEveCorsOrigin(
 interface OnMessageOutcome {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
+  readonly history?: readonly SessionHistoryMessage[];
   readonly title?: string;
 }
 
@@ -180,7 +182,12 @@ export async function resolveOnMessage(input: {
     );
   }
 
-  return { auth: result.auth, context: result.context, title: result.title };
+  return {
+    auth: result.auth,
+    context: result.context,
+    history: result.history,
+    title: result.title,
+  };
 }
 
 function defaultOnMessage(ctx: EveMessageContext): EveMessageResult {

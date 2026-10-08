@@ -150,7 +150,7 @@ controls observability content capture, not access to the channel. See
 
 ### Message hooks
 
-Message hooks return `{ auth }` to dispatch, `null` to drop, or `{ auth, context }` to inject background into history. Public conversations use the returned `title`, or the triggering message text when `title` is omitted. DMs and private channels always use `Private message` so the run title does not expose message details.
+Message hooks return `{ auth }` to dispatch, `null` to drop, `{ auth, context }` to inject background into history, or `{ auth, history }` to add prior conversation as user and assistant turns (see [Start from prior history](./eve#start-from-prior-history)). Public conversations use the returned `title`, or the triggering message text when `title` is omitted. DMs and private channels always use `Private message` so the run title does not expose message details.
 
 - `onMessage(ctx, message)` handles newly posted Slack messages. eve drops messages authored by the installed app before this hook runs, preventing self-reply loops. Messages from other bots remain visible; check `message.author?.isBot` when those should also be ignored. `ctx.isBotMentioned()` and `ctx.isSubscribed()` support mention and active-thread policies.
 - `onAppMention(ctx, message)` handles only `app_mention` and takes precedence over `onMessage`. Its default derives workspace-scoped auth.
@@ -297,6 +297,8 @@ export default slackChannel({
 
 `threadContext` requires the matching Slack history scope. Thread helpers reuse messages already loaded within the same inbound handler, and overlapping refreshes share one `conversations.replies` request. Omit it when the agent should see only direct mentions. `loadThreadContextMessages` remains available when you need custom filtering or non-model processing of the raw thread messages.
 
+When the triggering message starts the thread's session, eve adds those replies as session history instead of a transcript. Replies from this installed app become assistant turns, and replies from people and other bots become user messages with their Slack user ids attached. If the agent posted a report and people replied to it, the new session sees that report as its own earlier turn. Slack shows rendered output rather than the model's original response, so these assistant turns can differ from what the model wrote. Later messages in the same thread keep the transcript behavior above. When a hook returns its own `history`, eve keeps the transcript and does not add thread replies as history.
+
 #### Control overlapping turns
 
 Accepted Slack messages steer by default. Before assistant answer output or local tool execution begins, steering interrupts pending model generation and continues the same turn with the correction. Executing tools finish and checkpoint their results first; after answer output starts, steering waits for the next committed workflow boundary. Reasoning and search progress do not count as answer output, and interrupted provider-managed search may run again.
@@ -352,7 +354,7 @@ Reset returns `{ status: "reset", previousSessionId }` when the thread had a ses
 
 ### Other Events API callbacks
 
-Use `onEvent` for subscribed events such as `reaction_added`, `team_join`, or `channel_created`. It receives the raw, open-ended Slack event and owns control flow. Call `ctx.send(message, { target, auth, title })` zero, one, or many times to start turns. `title` sets the run title without changing the message sent to the model. Each call returns the resulting session.
+Use `onEvent` for subscribed events such as `reaction_added`, `team_join`, or `channel_created`. It receives the raw, open-ended Slack event and owns control flow. Call `ctx.send(message, { target, auth, title, history })` zero, one, or many times to start turns. `title` sets the run title without changing the message sent to the model, and `history` adds prior conversation before the message (see [Start from prior history](./eve#start-from-prior-history)). Each call returns the resulting session.
 
 ```ts title="agent/channels/slack.ts"
 import { connectSlackCredentials } from "@vercel/connect/eve";

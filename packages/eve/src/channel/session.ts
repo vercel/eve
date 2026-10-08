@@ -33,6 +33,7 @@ import {
   type StrictInputResponses,
 } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
+import { type SessionHistoryMessage, validateSessionHistory } from "#shared/session-history.js";
 import { toChannelLocalContinuationToken } from "#shared/continuation-token.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 
@@ -71,6 +72,8 @@ interface SessionDeliveryOptions {
 
 /** Options for sending a message through a fixed session handle. */
 export type SessionSendOptions = SessionDeliveryOptions & {
+  /** Prior conversation added as user and assistant turns before this message and its `context`. */
+  readonly history?: readonly SessionHistoryMessage[];
   /** Initial workflow title for a prewarmed session. */
   readonly title?: string;
   readonly turnPolicy?: TurnPolicy;
@@ -106,12 +109,15 @@ export function createSession(
     async send(message, options) {
       const delivery = createDelivery(metadata);
       const caller = sessionCallbackToTurnCaller(options.callback);
+      const history = validateSessionHistory(options.history);
       const payload = attachClientContext<{
         context?: readonly string[];
+        history?: readonly SessionHistoryMessage[];
         message: string | UserContent | undefined;
         outputSchema?: JsonObject;
       }>({ message: serializeUrlFilePartsInMessage(message) }, readClientContext(options));
       if (options.context !== undefined) payload.context = options.context;
+      if (history !== undefined) payload.history = history;
       if (options.outputSchema !== undefined) payload.outputSchema = options.outputSchema;
       const commandWithoutCaller = {
         auth: options.auth,

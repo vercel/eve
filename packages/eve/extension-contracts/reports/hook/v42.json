@@ -1,0 +1,7 @@
+{
+  "kind": "eve-extension-capability-contract",
+  "capability": "hook",
+  "epoch": 42,
+  "sha256": "67a43022a36d619982d775b438bb3d9a038d24748ec79ea0cb8eb63b003875ab",
+  "exports": ["defineHook"]
+}

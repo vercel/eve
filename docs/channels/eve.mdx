@@ -302,6 +302,45 @@ export default eveChannel({
 
 `onMessage` must return an auth result. Return `title` alongside `auth` to set the title when the dispatch creates a session or sends the first message to a prewarmed session. A successful canonical eve HTTP message always dispatches and therefore always produces or continues a session.
 
+### Start from prior history
+
+Pass `history` to bring in conversation eve did not produce, such as a transcript your app stored, a conversation moving from another system, or a branch of an earlier exchange. The model sees each entry as a real user or assistant turn, not as a transcript inside one message.
+
+Create a session that starts from stored history and waits for its first message with `create()` on a channel address. No turn runs until a message arrives:
+
+```ts title="agent/channels/app.ts"
+import { defineChannel, POST } from "eve/channels";
+
+export default defineChannel({
+  routes: [
+    POST("/conversations/:id/session", async (req, { from, params }) => {
+      const auth = await authenticate(req);
+      // Load only conversations this caller may read.
+      const conversation = await db.conversations.findForUser(params.id!, auth);
+      const session = await from(`conversation:${conversation.id}`).create({
+        auth,
+        history: conversation.messages.map((message) => ({
+          id: message.id,
+          role: message.role, // "user" | "assistant"
+          content: message.text,
+        })),
+      });
+      return Response.json({ sessionId: session.id });
+    }),
+  ],
+});
+```
+
+The client then resumes that session by id, for example with `useEveAgent({ initialSession: { sessionId, streamIndex: 0 }, resume: true })`. When a session already owns the address, `create()` returns it unchanged. Use a new address for each new conversation or branch.
+
+`send()` accepts the same `history` option. The entries are added right before that message and its `context`, whether the send creates the session or continues it. The eve channel's `onMessage` can return `history` the same way. It applies to every message it is returned for, so return it only when the message should carry those turns.
+
+Each entry has a `role` of `"user"` or `"assistant"`, non-empty text `content`, and an optional `id` that is unique within the call. One call accepts at most 500 messages and 512 KiB of content. Invalid history throws an `InvalidSessionHistoryError` that names the entry and the rule it broke. Tool calls, files, and reasoning are not supported.
+
+eve never accepts `history` from a client request body. Resolve it on the server and authorize the caller against the stored conversation.
+
+The stream publishes added entries in `history.imported`, right before the `message.received` of the turn they join. The default client reducer renders them ahead of that turn's message with `metadata.imported` set, using your `id` values as message ids so you can rejoin your own annotations. After that, the entries are ordinary history: compaction, `clear()`, and handoffs treat them like any other turn.
+
 ## Clients
 
 The browser side of this API lives in the [Frontend](../guides/frontend/overview) docs, where `useEveAgent` drives the eve channel from React UI.
