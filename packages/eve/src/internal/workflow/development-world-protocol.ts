@@ -1,6 +1,9 @@
 import type { DevelopmentGenerationAvailability } from "#internal/workflow/development-runtime-compatibility.js";
 import type { AgentWorkflowWorldDefinition } from "#shared/agent-definition.js";
-import { resolveWorkflowWorldImport } from "#internal/workflow/world-target.js";
+import {
+  resolveConfiguredWorkflowWorld,
+  resolveWorkflowWorldImport,
+} from "#internal/workflow/world-target.js";
 
 export const DEVELOPMENT_WORKFLOW_WORLD_ROUTE = "/eve/v1/dev/internal/workflow-world";
 
@@ -15,7 +18,10 @@ export const DEVELOPMENT_WORKFLOW_WORLD_ROUTE = "/eve/v1/dev/internal/workflow-w
 export function usesParentDevelopmentWorkflowWorld(
   configuredWorld: AgentWorkflowWorldDefinition | undefined,
 ): boolean {
-  return resolveWorkflowWorldImport(configuredWorld ?? "local") === "@workflow/world-local";
+  return (
+    resolveWorkflowWorldImport(resolveConfiguredWorkflowWorld(configuredWorld) ?? "local") ===
+    "@workflow/world-local"
+  );
 }
 export const DEVELOPMENT_WORKFLOW_SECRET_ENV = "EVE_DEV_WORKFLOW_TRANSPORT_SECRET";
 export const DEVELOPMENT_WORKER_APP_ROOT_ENV = "EVE_DEV_WORKER_APP_ROOT";
