@@ -8,13 +8,17 @@ import type { HarnessSession } from "#harness/types.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { notifyTurnCallerStep } from "#subagents/parent-notification.js";
-import { endSessionSandboxStep } from "#execution/session/end-sandbox-step.js";
+import {
+  endSessionSandboxStep,
+  reportSessionSandboxCleanupFailureStep,
+} from "#execution/session/end-sandbox-step.js";
 
 vi.mock("#execution/terminate-child-sessions-step.js", () => ({
   terminateChildSessionsStep: vi.fn(),
 }));
 vi.mock("#execution/session/end-sandbox-step.js", () => ({
   endSessionSandboxStep: vi.fn(),
+  reportSessionSandboxCleanupFailureStep: vi.fn(async () => {}),
 }));
 vi.mock("#execution/terminal-session-completion-step.js", () => ({
   emitTerminalSessionCompletionStep: vi.fn(),
@@ -113,6 +117,7 @@ describe("session finalization", () => {
         },
       ),
     ).resolves.toMatchObject({ isError: false });
+    expect(reportSessionSandboxCleanupFailureStep).toHaveBeenCalledOnce();
     expect(emitTerminalSessionCompletionStep).toHaveBeenCalledOnce();
   });
 });

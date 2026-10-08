@@ -1,7 +1,10 @@
 import type { TurnCaller } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
-import { endSessionSandboxStep } from "#execution/session/end-sandbox-step.js";
+import {
+  endSessionSandboxStep,
+  reportSessionSandboxCleanupFailureStep,
+} from "#execution/session/end-sandbox-step.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
 import { liveTaskRuns, readTaskTable } from "#execution/tasks/table.js";
@@ -12,9 +15,6 @@ import type { TokenUsage } from "#shared/token-usage.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import { getSessionUsage, takeSessionUsageDelta } from "#harness/turn-tag-state.js";
 import { notifyTurnCallerStep } from "#subagents/parent-notification.js";
-import { createLogger, logError } from "#internal/logging.js";
-
-const log = createLogger("execution.session.finalization");
 
 /** The three ways a session ends. `done` already emitted its terminal event inside the turn. */
 export type SessionTerminalOutcome =
@@ -55,10 +55,11 @@ export async function finalizeSession(
         sessionState,
       });
     } catch (error) {
-      logError(log, "failed to clean up terminal session sandbox", error, {
+      await reportSessionSandboxCleanupFailureStep({
+        error: normalizeSerializableError(error),
         outcome: outcome.kind,
         sessionId: sessionState.sessionId,
-      });
+      }).catch(() => undefined);
     }
   }
   const session = sessionState?.snapshot.session;
