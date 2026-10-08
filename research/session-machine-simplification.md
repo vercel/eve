@@ -20,12 +20,11 @@ The core of a session is simple. A session is a loop of turns. A turn is a seque
 
 This doc proposes cuts that remove about 7,000–10,000 of those lines, a quarter to a third. They overlap, so the savings don't simply add up.
 
-Two of the cuts help [`session-event-lifecycle.md`](./session-event-lifecycle.md) land:
+Most of the cuts fold into the plan for [`session-event-lifecycle.md`](./session-event-lifecycle.md#phases):
 
-- **Lifecycle only in the projection** is required before interactions move to the new events.
-- **One commit path** is recommended before the event break.
-
-The rest are independent, and can land before or after it. A longer-run direction, a session log from which all state is derived, is sketched at the end ([Toward a session log](#toward-a-session-log)).
+- **On `main`, before the break,** where today's tests still cover them: turn identity, one registry for running work, and one suspension record.
+- **Inside the break:** one commit path lands with the new envelope, lifecycle only in the projection with the interactions, and the compatibility deletions at the end.
+- **In parallel:** a prototype of one executor for every call, which lands before the break only if it comes out clean. A longer-run direction, a session log from which all state is derived, is sketched at the end ([Toward a session log](#toward-a-session-log)).
 
 ## Where the lines go
 
@@ -291,11 +290,11 @@ This cluster overlaps the areas above.
 | Cut                                                                                       | Saves       | For the event lifecycle                                      |
 | ----------------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------ |
 | [Turn identity from the projection](#turn-identity-from-the-projection)                   | A bug fix   | Lands first; retry recovery relies on deterministic turn IDs |
-| [One commit path](#one-commit-path)                                                       | 800–1,200   | Recommended before the break                                 |
-| [Lifecycle only in the projection](#lifecycle-only-in-the-projection)                     | 500–1,000   | Required before interactions move                            |
-| [One suspension record](#one-suspension-record)                                           | 1,000–1,500 | Optional; makes `turn.paused.awaiting` a direct read         |
-| [One registry and protocol for running work](#one-registry-and-protocol-for-running-work) | 1,500–2,500 | Optional; the relay half lands with the event break          |
-| [One executor for every call](#one-executor-for-every-call)                               | 1,500–2,500 | Optional; makes call outcomes exact                          |
+| [One commit path](#one-commit-path)                                                       | 800–1,200   | Lands with the new envelope                                  |
+| [Lifecycle only in the projection](#lifecycle-only-in-the-projection)                     | 500–1,000   | Lands with the interactions                                  |
+| [One suspension record](#one-suspension-record)                                           | 1,000–1,500 | Before the break; makes `turn.paused.awaiting` a direct read |
+| [One registry and protocol for running work](#one-registry-and-protocol-for-running-work) | 1,500–2,500 | Registry before the break; protocol with the relay contract  |
+| [One executor for every call](#one-executor-for-every-call)                               | 1,500–2,500 | Prototyped in parallel; makes call outcomes exact            |
 | [Delete compatibility at the break](#delete-compatibility-at-the-break)                   | About 1,500 | At the break                                                 |
 
 ### Turn identity from the projection
@@ -386,18 +385,20 @@ The first two are also counted in [`session-event-lifecycle.md`](./session-event
 
 ## Sequencing
 
-1. **Now:** turn identity from the projection.
-2. **HumanInput (#4342–#4344)** lands. It's rebased onto the session-state stack and in review. What these cuts need from it:
-   - `commitSessionStep` becomes the session's commit path;
-   - no new readers of its private request state outside `hitl/`;
-   - an output for "answer admitted", which the event lifecycle publishes as `response.admitted`.
-3. **After HumanInput,** in any order:
-   - one commit path;
-   - lifecycle only in the projection, before interactions move;
-   - one suspension record;
-   - one registry;
-   - the executor prototype.
-4. **At the break:** the compatibility deletions.
+[`session-event-lifecycle.md`](./session-event-lifecycle.md#phases) lists the PRs. For these cuts:
+
+1. **On `main`, now:** turn identity from the projection, and one registry for running work. The registry overlaps HumanInput (#4342–#4344) in the task steps and relays, so whichever lands second rebases.
+2. **On `main`, stacked on HumanInput** rather than waiting for it: one suspension record.
+3. **With the new envelope:** one commit path, as the publisher becomes the session's only way to write.
+4. **With the interactions:** lifecycle only in the projection, and the relay contract with one protocol for owner messages and relays.
+5. **At the end of the break:** the compatibility deletions.
+6. **In parallel:** the executor prototype. It lands on `main` before the conversation slice if it's clean, and otherwise after the break, since it changes only the producer.
+
+What these cuts need from HumanInput:
+
+- `commitSessionStep` becomes the session's commit path;
+- no new readers of its private request state outside `hitl/`;
+- an output for "answer admitted", which the event lifecycle publishes as `response.admitted`.
 
 ## What stays
 
@@ -436,5 +437,5 @@ As a judgment, not an estimate from reading code line by line, this is comparabl
 
 ## Open questions
 
-1. **When should the executor prototype happen?** Before the event break, it would make call outcomes exact from v27.0. After it, it isn't on the critical path.
+1. **Does the executor prototype come out clean enough to land before the break?** If it does, call outcomes are exact from v27.0. If not, it isn't on the critical path.
 2. **Does any product still need the legacy session import?**

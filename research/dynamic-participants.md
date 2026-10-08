@@ -304,17 +304,17 @@ Every dynamic resolver and memory provider changes shape, mechanically. It ships
 
 ## Plan
 
-1. **Land after HumanInput (#4342–#4344).** The pipeline touches `execution/session/turn-step.ts`, `harness/model-call/run.ts`, and `harness/hitl/intake.ts`, all of which HumanInput changes.
-2. **Add the pipeline behind today's API.** What each participant receives, the registry, and `runParticipants`, with today's maps adapted onto it internally. Then move dispatch onto it one participant at a time, with today's scenario tests pinning order and timing:
+Two PRs in the overall plan ([`session-event-lifecycle.md`](./session-event-lifecycle.md#phases)):
+
+1. **On `main`, now: the pipeline behind today's API.** What each participant receives, the registry, and `runParticipants`, with today's maps adapted onto it internally. Dispatch moves onto it one participant at a time, with scenario tests pinning order and timing:
    - memory recall before the first model call;
    - dynamic model selection per model call, and for a manual compaction;
    - the refresh after a redeploy;
    - restoring a parked step's tools.
 
-   This part changes nothing for authors and can land on its own.
+   It changes nothing for authors. It touches `execution/session/turn-step.ts`, `harness/model-call/run.ts`, and `harness/hitl/intake.ts`, which HumanInput (#4342–#4344) also changes, so whichever lands second rebases rather than waiting.
 
-3. **In the event break's release:** the single-function API with `scope`, typed entry points, `eve/events`, the build errors, the codemod, and the repo migration.
-4. **Switch the docs.**
+2. **On the integration branch, after the conversation slice: the API.** The single function with `scope`, memory's moments, typed entry points, the `eve/events` export, the build errors, the codemod, the repo migration, and the docs. Its tests come with the rest of the v27 suite at the end of the break.
 
 **Size:** a small net reduction, not measured. The dispatch and synthetic-event code it removes is a few hundred lines across `turn-event-handler.ts` (140), `resolver-events.ts` (29), `memory-event-lifecycle.ts` (76), and the filtering parts of the six `context/dynamic-*-lifecycle.ts` files. The pipeline adds back something smaller.
 

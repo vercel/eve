@@ -770,6 +770,7 @@ Workflow stores one chunk whole, but makes no such promise for several chunks fl
   - After each omitted range, before the next line it sends, the server writes `{"$eve":"position","next":N}`. A reader assigns positions by counting from its requested cursor and jumps forward at each marker, so it can resume after any line it finished processing.
   - Live lines are always contiguous.
   - A full mode, which omits nothing, remains for tools such as `eve logs --events`.
+  - The server side can trail v27.0. Readers handle position markers from the start, so filtering can switch on in a minor.
 - **v27 clients talk only to v27 servers,** so leases (60 s) and heartbeat records (10 s) are always on, and the version-negotiation branches go away.
 - **How a connection ends:**
 
@@ -940,6 +941,8 @@ A model call retried after it emitted anything abandons its run, and a retried s
 2. skips facts already present that its inputs fully determine (accepts, consumes, turn starts), which works because those IDs are deterministic;
 3. closes what the dead attempt left open: runs, calls, and interactions `abandoned`;
 4. re-dispatches observers for the last recovered line only.
+
+Whole-step recovery can trail v27.0, because it changes only the producer. Until then, turn closure settles whatever a dead attempt left open.
 
 Recovery is best-effort. If the read fails, the step logs it and continues the way `main` does today, without closures. A write from the dead attempt that lands after the read is missed, as on `main`, and can leave the server's counted positions slightly behind; clients count lines themselves and aren't affected.
 
@@ -1232,46 +1235,48 @@ Model history, turn delivery IDs, grants, and limits are folds, not entries.
 
 ### Phases
 
-**1. Before the break, on `main` (v26 wire).** Each item lands on its own and makes the break smaller. None depends on HumanInput, and most don't touch the files it changes.
+Nine PRs. Structural changes land on `main` first, where today's tests still cover them. The wire and vocabulary then change on one integration branch, which adds no v27 tests until the implementation is done ([Validation](#validation)).
 
-- Read turn identity from the projection everywhere. `program.ts` restarts `turn_${n}` in each owner run, so after a handoff a failing session reports the wrong turn ([`session-machine-simplification.md`](./session-machine-simplification.md)).
-- Move Telegram's sign-in lookup and the invocation API onto the shared fold.
-- Record golden scenario streams and stream-cost metrics: lines and bytes per reply, catch-up volume, and time to first byte on reload. They size delta coalescing (#3701) and the catch-up holdback, and later serve as v27 golden inputs.
-- Count stream positions in the saved projection, and run channel handlers after the write.
-- Add the v27 contract module, its fold, tables, selectors, and `eve/events` guards, with no runtime use yet.
-- Move remote child bindings to the private side stream, keeping the scan as a fallback for older sessions until the break.
-- Route new private state through the commit path as entry-shaped records ([Toward a session log](#toward-a-session-log)).
+**On `main`, covered by today's tests:**
 
-**2. Structural prerequisites, after HumanInput.** HumanInput (#4342–#4344) is now rebased onto the session-state stack and in review. Two items from [`session-machine-simplification.md`](./session-machine-simplification.md) matter here:
+1. **Turn identity, and server readers on the shared fold.** `program.ts` restarts `turn_${n}` in each owner run, so after a handoff a failing session reports the wrong turn ([`session-machine-simplification.md`](./session-machine-simplification.md#turn-identity-from-the-projection)). Telegram's sign-in lookup scans from line 0 and takes the latest sign-in even if it completed, and the invocation API folds a 64-event window that a long reply can push a request out of. Both readers move to the shared projection, read through the session handle, which becomes `session.view()` at the break.
+2. **The participant pipeline behind today's API** ([`dynamic-participants.md`](./dynamic-participants.md#plan)), with scenario tests that pin order and timing before the wire changes underneath it.
+3. **One registry for running work** ([`session-machine-simplification.md`](./session-machine-simplification.md#one-registry-and-protocol-for-running-work)): one table keyed by `callId`, and one cancel path. Slice 7 then emits task, call, and child facts and their closures from one place.
+4. **One suspension record** ([`session-machine-simplification.md`](./session-machine-simplification.md#one-suspension-record)), stacked on HumanInput (#4342–#4344) rather than waiting for it to merge. `turn.paused` and `turn.resumed` then read from it directly.
 
-- **Lifecycle only in the projection** is required before interactions move to v27. Otherwise `hitl/` and the machine both write turn facts: HumanInput still builds `turn.waiting` and `message.completed` events.
-- **One commit path** for the small publishing steps is recommended. It makes "one transition, one commit, one line" uniform.
+**On the integration branch, released together.** The branch rebases on `main` regularly and merges once.
 
-The participant pipeline from [`dynamic-participants.md`](./dynamic-participants.md) fits here too, but nothing depends on it.
+5. **Contract module, envelope, and transport.**
+   - The catalog, schemas, checker, fold, tables, and selectors.
+   - Commit, progress, and transport records, and positions counted by the writer.
+   - The publisher as the one commit path, with channels after the write and the observer `ctx`.
+   - Heartbeats, leases, and `stream.ended`, including closing terminal streams (#3222).
 
-**3. The break.** One stream-version change, developed on a long-lived integration branch and released together.
+   v26 types ride inside `facts` until their family moves, so every reader keeps working.
 
-- The new envelope lands first and carries v26 types inside it until each family moves. Readers already ignore types they don't know, so the branch stays green.
-- Each family change then updates its producer, fold, wire readers, server observers, and docs together.
-- The integration branch rebases on `main` regularly.
+6. **Conversation slice:** sessions, deliveries (controls as deliveries, the settle rule), turns, model runs, content, calls, usage, and context changes. Producers, the server fold, and every reader of these families move together: client tables, the TUI, evals, `invoke`, ACP, built-in channels with `activity`, and the hook and channel maps. In-step abandonment lands here. The v26 reducer keeps handling the families that haven't moved yet.
+7. **Work and people slice:** tasks, interactions, responses, sign-in callbacks as deliveries, and child links, with private bindings, the relay contract, one protocol for owner messages and relays, and the remote protocol bump. Lifecycle status moves only into the projection, and `hitl/` emits interaction, response, and call facts.
+8. **Participants API:** one function per action, `scope`, memory's moments, the `eve/events` export, build errors, the codemod, and the repo migration ([`dynamic-participants.md`](./dynamic-participants.md#compatibility)).
+9. **Cleanup, docs, and tests:** the compatibility deletions ([Compatibility at the break](#compatibility-at-the-break)), the remaining v26 reader paths, docs and release notes, and the v27 test suite.
 
 ```text
-envelope · positions · catch-up · transport endings
- ├─ observer context; session.waiting removed
- ├─ session · turn · model run
- │    └─ content · reply · files
- │         └─ calls · tasks
- ├─ deliveries · controls and sign-in callbacks as deliveries
- ├─ interactions · responses             ◀── lifecycle only in the projection
- ├─ child links · relay contract · remote protocol bump
- └─ retry recovery                       ◀── runs, calls, and interactions
-participants as functions over events · eve/events guards
-client tables · selectors · activity · extendConversation · framework bindings
-compatibility deletions · docs · release notes
+main:    1  turn identity · readers on the shared fold
+         2  participant pipeline
+         3  one registry for running work
+         4  one suspension record            ◀── stacked on HumanInput
+branch:  5  contract · envelope · transport · commit path
+            ├─ 6  conversation slice
+            │     └─ 8  participants API
+            └─ 7  work and people slice      ◀── benefits from 3 and 4
+         9  cleanup · docs · v27 tests
 ```
 
-**4. After the break, as additive minors.**
+PRs 1, 2, 3, and 5 can start now. **In parallel,** a prototype of [one executor for every call](./session-machine-simplification.md#one-executor-for-every-call): if it comes out clean, it lands on `main` before slice 6 so call facts are written once against it. Otherwise it follows the break, because it changes only the producer, and the vocabulary already has requested, started, settled, and abandoned.
 
+**After the break, as additive minors.**
+
+- Whole-step retry recovery, beyond in-step abandonment ([Retries and recovery](#retries-and-recovery)).
+- Server-side catch-up filtering, if it doesn't make v27.0. Readers handle position markers from the start.
 - A general retrieval route for large non-file values.
 - A private journal of run and tool results, so retries reuse them. Plus a context change kind for completed runs lost to recovery.
 - Rewind and branch switching: new context change kinds, and raw history across compaction.
@@ -1287,20 +1292,20 @@ compatibility deletions · docs · release notes
 <details>
 <summary>PRs and issues, and the plan for each</summary>
 
-| PR or issue                        | Relation                                                   | Plan                                                                                                                                                |
-| ---------------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| #4342–#4344 HumanInput             | Rewrites `hitl/`; the interaction family follows its model | Land first. In review, ask for an "answer admitted" output for `response.admitted`, and for `commitSessionStep` to become the session's commit path |
-| #4223 first-class attachments      | Supplies the file store and retrieval route                | Ideally its store and refs land before the break, so v27.0 ships refs. Its outbound files map to file content parts                                 |
-| #4194 `fetchFile` on `eveChannel`  | Inbound web uploads by URL                                 | Compatible                                                                                                                                          |
-| #3222 close terminal streams       | Readers rely on terminal runs closing their stream         | Land                                                                                                                                                |
-| #3701 delta coalescing             | Progress granularity                                       | Land with a window measured by the golden streams                                                                                                   |
-| #4031 `meta.index` on reads        | The same positions, assigned on read                       | Compatible on v26; v27 subsumes it                                                                                                                  |
-| #4099 `clientContext`              | A display-relevant delivery attribute                      | Lands on `delivery.admitted` in v27                                                                                                                 |
-| #3785 hooks for proxied events     | Relayed requests                                           | Subsumed: relayed interactions are ordinary parent facts                                                                                            |
-| #3580, #3581 web state and history | Client readers                                             | Rebase onto the client tables, or land first and port                                                                                               |
-| #2948 deferred tail                | Tail cost and the route's handshake                        | Reconcile with catch-up filtering                                                                                                                   |
-| #1725 forward child events (#666)  | Conflicts with separate child streams                      | Close ([why](#child-sessions-and-relays))                                                                                                           |
-| #4092 stranded sessions            | Self-hosted impact of the break                            | Align the release notes                                                                                                                             |
+| PR or issue                        | Relation                                                   | Plan                                                                                                                                                                                 |
+| ---------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| #4342–#4344 HumanInput             | Rewrites `hitl/`; the interaction family follows its model | PR 4 stacks on it, and slice 7 builds on it. In review, ask for an "answer admitted" output for `response.admitted`, and for `commitSessionStep` to become the session's commit path |
+| #4223 first-class attachments      | Supplies the file store and retrieval route                | Ideally its store and refs land before the break, so v27.0 ships refs. Its outbound files map to file content parts                                                                  |
+| #4194 `fetchFile` on `eveChannel`  | Inbound web uploads by URL                                 | Compatible                                                                                                                                                                           |
+| #3222 close terminal streams       | Readers rely on terminal runs closing their stream         | Adopted into PR 5                                                                                                                                                                    |
+| #3701 delta coalescing             | Progress granularity                                       | Land with a window measured by the golden streams                                                                                                                                    |
+| #4031 `meta.index` on reads        | The same positions, assigned on read                       | Compatible on v26; v27 subsumes it                                                                                                                                                   |
+| #4099 `clientContext`              | A display-relevant delivery attribute                      | Lands on `delivery.admitted` in v27                                                                                                                                                  |
+| #3785 hooks for proxied events     | Relayed requests                                           | Subsumed: relayed interactions are ordinary parent facts                                                                                                                             |
+| #3580, #3581 web state and history | Client readers                                             | Rebase onto the client tables, or land first and port                                                                                                                                |
+| #2948 deferred tail                | Tail cost and the route's handshake                        | Reconcile with catch-up filtering                                                                                                                                                    |
+| #1725 forward child events (#666)  | Conflicts with separate child streams                      | Close ([why](#child-sessions-and-relays))                                                                                                                                            |
+| #4092 stranded sessions            | Self-hosted impact of the break                            | Align the release notes                                                                                                                                                              |
 
 </details>
 
@@ -1344,7 +1349,7 @@ This is an estimate from reading `main` at `285d4e09b`, to within a few hundred 
 
 - **Tests:** 187 test files quote v26 type names (about 2,400 references) and make about 670 builder calls. That's the largest churn: about 6,000–10,000 lines touched, roughly flat in net.
 - **Docs:** 56 pages mention v26 names (about 690 mentions). Some are participant keys, which go away in the same release when participants become functions.
-- **Phase 1** adds about 3,000–4,000 lines, mostly the contract module and tests, which the break then uses.
+- **The contract module** is about 2,000–3,000 new lines without tests, landing with the envelope in PR 5.
 
 Lifecycle records per turn, not counting progress:
 
@@ -1362,26 +1367,28 @@ v27 writes more lifecycle facts, because deliveries get explicit ends, every cal
 ### Validation
 
 <details>
-<summary>Checks for each family change, and before release</summary>
+<summary>Testing during the break, and before release</summary>
 
-- **Every family change runs:**
-  - the checker over golden streams;
-  - old-reader conformance;
+- **PRs 1–4 land on `main` with tests as usual,** since they change today's code.
+- **The integration branch adds no v27 tests until the implementation is done.** Tests that assert v26 event shapes are deleted as their family moves, and rebuilt at the end. Tests that don't depend on the wire keep running.
+- **While the branch is in progress:**
+  - typechecking, where the catalog's types and exhaustive switches catch readers that miss a family;
+  - the stream checker as a dev-mode assertion in the writer, so lifecycle mistakes surface in e2e and local runs;
+  - a few existing e2e scenarios that check visible outcomes, such as the reply or a tool's effect, rather than event shapes.
+- **Before release, the last PR adds:**
+  - the checker over golden streams from the real producer;
+  - old-reader conformance: the v27.0 fold, frozen at release, run over golden streams from the current producer;
   - the tolerance cases;
-  - every reader it touches, in the same change.
-- **Scenario suites:**
-  - cancel mid-tool;
-  - an approval batch with a revision;
-  - a sign-in callback delivery, and a repeated callback;
-  - a task outliving its turn;
-  - a child relay, local and remote;
-  - a handoff;
-  - injected step and in-step retries;
-  - a crash after a write and before dispatch, where the last line is dispatched again exactly once.
-
-  They assert observer invocations, the view at each commit, and positions.
-
-- **Cost:** the golden-stream metrics rerun after the envelope lands and before release: lines, bytes, reload time to first byte, catch-up memory high-water, and writer flush latency.
+  - scenario suites, asserting observer invocations, the view at each commit, and positions:
+    - cancel mid-tool;
+    - an approval batch with a revision;
+    - a sign-in callback delivery, and a repeated callback;
+    - a task outliving its turn;
+    - a child relay, local and remote;
+    - a handoff;
+    - injected step and in-step retries;
+    - a crash after a write and before dispatch, where the last line is dispatched again exactly once.
+- **Cost:** golden-stream metrics before release: lines, bytes, reload time to first byte, catch-up memory high-water, and writer flush latency.
 - **Scale smoke:** 32 working tasks with long progress, and a 100,000-line session reload, on world-local and world-vercel.
 
 </details>
