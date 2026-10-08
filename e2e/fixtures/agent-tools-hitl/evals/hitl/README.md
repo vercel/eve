@@ -54,16 +54,21 @@ the evals above by `expectNoModelCallWhileOpen` and
 
 - **Candidate expiry.** A candidate times out after a 10-minute wall-clock
   TTL, and e2e cannot advance the clock. Covered by
-  `harness/hitl/index.test.ts`.
+  `harness/hitl/candidates.test.ts` ("expires only candidates whose deadline
+  has passed") and `harness/hitl/coordinator.test.ts` ("completes an expired
+  candidate without executing policy").
 - **A `once()` grant hidden while an approval for its key waits.** Policies
   only run at a step's start or right before an approved call, and neither
   happens while that approval waits, so HTTP cannot observe the hiding.
-  Covered by `index.test.ts`.
+  Covered by `harness/session-machine/machine.test.ts` ("grants a once()
+  approval's key, except to a call still asking for it").
 - **An approved tool removed before the answer.** Step tools persist with
   their step, so only a redeploy between the ask and the answer removes one.
   Local e2e cannot redeploy.
 - **A fresh relayed batch replacing an older one.** This needs a child or
   remote agent to ask again from the same source while its earlier batch is
-  open. Each workflow `ctx.ask()` is its own source. Covered by `index.test.ts`.
+  open. Each workflow `ctx.ask()` is its own source. Covered by
+  `harness/proxy-input-requests.test.ts` ("replaces prior entries for the same
+  child continuation token").
 - **Handoff blocked while a request is open.** This needs a deployment
   handoff, which only the Vercel redeploy suite performs.
