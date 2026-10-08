@@ -167,7 +167,11 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
         ...parked,
         requests: approvalRequests,
         tools: input.catalog,
-        waitsOnRuntime: workflowToolCalls.length > 0 || authorizationInterrupt !== undefined,
+        waitsOn: authorizationInterrupt
+          ? "sign-in"
+          : workflowToolCalls.length > 0
+            ? "runtime"
+            : undefined,
       });
       // Approval only precedes sign-in for the same call, not an executing sibling.
       if (authorizationInterrupt) {
