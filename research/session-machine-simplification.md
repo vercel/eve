@@ -22,9 +22,10 @@ This doc proposes cuts that remove about 7,000–10,000 of those lines, a quarte
 
 Most of the cuts fold into the plan for [`session-event-lifecycle.md`](./session-event-lifecycle.md#phases):
 
-- **On `main`, before the break,** where today's tests still cover them: turn identity, one registry for running work, and one suspension record.
-- **Inside the break:** one commit path lands with the new envelope, lifecycle only in the projection with the interactions, and the compatibility deletions at the end.
-- **In parallel:** a prototype of one executor for every call, which lands before the break only if it comes out clean. A longer-run direction, a session log from which all state is derived, is sketched at the end ([Toward a session log](#toward-a-session-log)).
+- **On `main`, before the break,** where today's tests still cover them: turn identity, one stop path for running work, one waiter for a paused turn, and one executor for every call.
+- **Inside the break:** one commit path with the new envelope; the stored suspension record with `turn.paused`; lifecycle only in the projection, one registry, and one intake with the interactions; and the compatibility deletions at the end.
+
+A longer-run direction, a session log from which all state is derived, is sketched at the end ([Toward a session log](#toward-a-session-log)).
 
 ## Where the lines go
 
@@ -292,10 +293,12 @@ This cluster overlaps the areas above.
 | [Turn identity from the projection](#turn-identity-from-the-projection)                   | A bug fix   | Lands first; retry recovery relies on deterministic turn IDs |
 | [One commit path](#one-commit-path)                                                       | 800–1,200   | Lands with the new envelope                                  |
 | [Lifecycle only in the projection](#lifecycle-only-in-the-projection)                     | 500–1,000   | Lands with the interactions                                  |
-| [One suspension record](#one-suspension-record)                                           | 1,000–1,500 | Before the break; makes `turn.paused.awaiting` a direct read |
-| [One registry and protocol for running work](#one-registry-and-protocol-for-running-work) | 1,500–2,500 | Registry before the break; protocol with the relay contract  |
-| [One executor for every call](#one-executor-for-every-call)                               | 1,500–2,500 | Prototyped in parallel; makes call outcomes exact            |
+| [One suspension record](#one-suspension-record)                                           | 1,000–1,500 | Waiter before the break; record and intake inside it         |
+| [One registry and protocol for running work](#one-registry-and-protocol-for-running-work) | 1,500–2,500 | Stop path before the break; registry and protocol inside it  |
+| [One executor for every call](#one-executor-for-every-call)                               | 1,500–2,500 | Before the break; makes call outcomes exact                  |
 | [Delete compatibility at the break](#delete-compatibility-at-the-break)                   | About 1,500 | At the break                                                 |
+
+The PRs on `main` so far cut less than these estimates, because the records they would replace stay until the break: the executor removed about 250 production lines, and the stop path and the waiter came out roughly even.
 
 ### Turn identity from the projection
 
@@ -344,6 +347,8 @@ This cluster overlaps the areas above.
 
 **For the event lifecycle.** Optional. It makes `turn.paused.awaiting` a direct read instead of a translation.
 
+**Notes.** PR 4 on `main` does the waiter: five step results (continue, paused, parked, done, cancelled), and one loop where a paused turn had three waiters. The record itself waits for `turn.paused` in the conversation slice, because before then a stored copy would duplicate the suspended steps, the projection, and the sign-in record. The single intake waits for HumanInput, which rewrites all of `harness/hitl/`.
+
 ### One registry and protocol for running work
 
 **Problem.** Two registries, about 25 cancel functions, and three message vocabularies in five encodings.
@@ -357,6 +362,7 @@ This cluster overlaps the areas above.
 
 - HumanInput already folds the human-input relay paths into `harness/hitl/relay.ts`, deleting `subagents/hitl-proxy.ts` and `harness/proxy-input-requests.ts`. What remains is the registry and the other messages.
 - The relay contract between parent and child sessions, keyed by child IDs, parsed tolerantly, and under a new remote protocol version, lands with the event break, because it replaces v26 event payloads ([Child sessions and relays](./session-event-lifecycle.md#child-sessions-and-relays)).
+- PR 3 on `main` unifies the stop path: every stop signals, waits, then forces, through one function. The single table moves to the work and people slice, which writes the private bindings anyway.
 
 ### One executor for every call
 
@@ -371,6 +377,8 @@ This cluster overlaps the areas above.
 **For the event lifecycle.** Optional. It makes "calls settle by what actually happened" exact rather than best-effort. It's also the natural place for a private journal of run and tool results, so a retried step can reuse them.
 
 **Risks.** It changes how eve uses the AI SDK's multi-step loop, provider-executed tools, streaming tool input, and `toModelOutput`. Prototype it first.
+
+**Notes.** The prototype came out clean and lands on `main` before the conversation slice. One timing change: eve runs a response's local calls once the response ends, rather than as each call finishes streaming.
 
 ### Delete compatibility at the break
 
@@ -387,12 +395,11 @@ The first two are also counted in [`session-event-lifecycle.md`](./session-event
 
 [`session-event-lifecycle.md`](./session-event-lifecycle.md#phases) lists the PRs. For these cuts:
 
-1. **On `main`, now:** turn identity from the projection, and one registry for running work. The registry overlaps HumanInput (#4342–#4344) in the task steps and relays, so whichever lands second rebases.
-2. **On `main`, stacked on HumanInput** rather than waiting for it: one suspension record.
-3. **With the new envelope:** one commit path, as the publisher becomes the session's only way to write.
-4. **With the interactions:** lifecycle only in the projection, and the relay contract with one protocol for owner messages and relays.
+1. **On `main`, now:** turn identity from the projection, the stop path for running work, the waiter for a paused turn, and one executor for every call. HumanInput (#4342–#4344) lands separately, and whichever lands second rebases.
+2. **With the new envelope:** one commit path, as the publisher becomes the session's only way to write.
+3. **With the conversation slice:** the stored suspension record, as `turn.paused`.
+4. **With the interactions, on top of HumanInput:** lifecycle only in the projection, one registry, the single intake, and the relay contract with one protocol for owner messages and relays.
 5. **At the end of the break:** the compatibility deletions.
-6. **In parallel:** the executor prototype. It lands on `main` before the conversation slice if it's clean, and otherwise after the break, since it changes only the producer.
 
 What these cuts need from HumanInput:
 
@@ -437,5 +444,4 @@ As a judgment, not an estimate from reading code line by line, this is comparabl
 
 ## Open questions
 
-1. **Does the executor prototype come out clean enough to land before the break?** If it does, call outcomes are exact from v27.0. If not, it isn't on the critical path.
-2. **Does any product still need the legacy session import?**
+1. **Does any product still need the legacy session import?**

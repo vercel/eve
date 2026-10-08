@@ -1235,14 +1235,16 @@ Model history, turn delivery IDs, grants, and limits are folds, not entries.
 
 ### Phases
 
-Nine PRs. Structural changes land on `main` first, where today's tests still cover them. The wire and vocabulary then change on one integration branch, which adds no v27 tests until the implementation is done ([Validation](#validation)). The participants API is the least certain part, so it's the last PR on the branch, and the rest of the break doesn't depend on it.
+Nine PRs, plus the executor. Structural changes land on `main` first, where today's tests still cover them. The wire and vocabulary then change on one integration branch, which adds no v27 tests until the implementation is done ([Validation](#validation)). The participants API is the least certain part, so it's the last PR on the branch, and the rest of the break doesn't depend on it.
 
 **On `main`, covered by today's tests:**
 
 1. **Turn identity, and server readers on the shared fold.** `program.ts` restarts `turn_${n}` in each owner run, so after a handoff a failing session reports the wrong turn ([`session-machine-simplification.md`](./session-machine-simplification.md#turn-identity-from-the-projection)). Telegram's sign-in lookup scans from line 0 and takes the latest sign-in even if it completed, and the invocation API folds a 64-event window that a long reply can push a request out of. Both readers move to the shared projection, read through the session handle, which becomes `session.view()` at the break.
 2. **The participant pipeline behind today's API** ([`dynamic-participants.md`](./dynamic-participants.md#plan)), with tests that pin when today's resolvers and memory run. Today's API stays in place under PRs 5–8, so the pins guard it while the wire changes underneath.
-3. **One registry for running work** ([`session-machine-simplification.md`](./session-machine-simplification.md#one-registry-and-protocol-for-running-work)): one table keyed by `callId`, and one cancel path. Slice 7 then emits task, call, and child facts and their closures from one place.
-4. **One suspension record** ([`session-machine-simplification.md`](./session-machine-simplification.md#one-suspension-record)), stacked on HumanInput (#4342–#4344) rather than waiting for it to merge. `turn.paused` and `turn.resumed` then read from it directly.
+3. **One stop path for running work** ([`session-machine-simplification.md`](./session-machine-simplification.md#one-registry-and-protocol-for-running-work)): every way of stopping workflow tools, tasks, and agent runs signals, waits, then forces, through one function. The single table keyed by `callId` moves to slice 7, which writes the private bindings anyway.
+4. **One waiter for a paused turn** ([`session-machine-simplification.md`](./session-machine-simplification.md#one-suspension-record)): five step results, and one loop where a paused turn had three waiters. What the turn waits on is still derived from today's records. `turn.paused` stores it in slice 6, and the single intake waits for HumanInput (#4342–#4344) in slice 7, since HumanInput rewrites the intake code it would replace.
+
+Also on `main`, **one executor for every call** ([`session-machine-simplification.md`](./session-machine-simplification.md#one-executor-for-every-call)). The prototype came out clean, so it lands before slice 6, and call facts are written once against it.
 
 **On the integration branch, released together.** The branch rebases on `main` regularly and merges once.
 
@@ -1255,23 +1257,24 @@ Nine PRs. Structural changes land on `main` first, where today's tests still cov
    v26 types ride inside `facts` until their family moves, so every reader keeps working.
 
 6. **Conversation slice:** sessions, deliveries (controls as deliveries, the settle rule), turns, model runs, content, calls, usage, and context changes. Producers, the server fold, and every reader of these families move together: client tables, the TUI, evals, `invoke`, ACP, built-in channels with `activity`, and the hook and channel maps. In-step abandonment lands here. The v26 reducer keeps handling the families that haven't moved yet. Participants move onto the change points that v27 commits reach, still behind today's API ([`dynamic-participants.md`](./dynamic-participants.md#plan)): today's keys become names for those points, and their handlers receive a minimal private payload.
-7. **Work and people slice:** tasks, interactions, responses, sign-in callbacks as deliveries, and child links, with private bindings, the relay contract, one protocol for owner messages and relays, and the remote protocol bump. Lifecycle status moves only into the projection, and `hitl/` emits interaction, response, and call facts.
+7. **Work and people slice:** tasks, interactions, responses, sign-in callbacks as deliveries, and child links, with private bindings, the relay contract, one protocol for owner messages and relays, and the remote protocol bump. Lifecycle status moves only into the projection, and `hitl/` emits interaction, response, and call facts. The single registry for running work and the single intake for a paused turn land here, on top of HumanInput.
 8. **Cleanup, docs, and tests:** the compatibility deletions ([Compatibility at the break](#compatibility-at-the-break)), the remaining v26 reader paths, docs and release notes, and the v27 test suite. Participant surfaces wait for PR 9: their docs, their `extension-contracts` epochs, and the private payload, which keeps its own small types once the v26 builders are gone.
 9. **Participants API:** `select` and `resolve`, memory's moments, recorded selections, the development checks, typed entry points, build errors, the codemod, the repo migration, and the participants' docs, epochs, and tests ([`dynamic-participants.md`](./dynamic-participants.md#compatibility)). The aim is to release it with the break, so authors migrate once. If it isn't ready, the branch merges without it: today's keys keep working as names for change points, and the API follows in a later release.
 
 ```text
 main:    1  turn identity · readers on the shared fold
          2  participant pipeline · timing pins
-         3  one registry for running work
-         4  one suspension record            ◀── stacked on HumanInput
+         3  one stop path for running work
+         4  one waiter for a paused turn
+         ·  one executor for every call
 branch:  5  contract · envelope · transport · commit path · eve/events
             ├─ 6  conversation slice · participants on change points
-            └─ 7  work and people slice      ◀── benefits from 3 and 4
+            └─ 7  work and people slice · one registry · one intake   ◀── on HumanInput
          8  cleanup · docs · v27 tests
          9  participants API                 ◀── least certain, so last
 ```
 
-PRs 1, 2, 3, and 5 can start now. **In parallel,** a prototype of [one executor for every call](./session-machine-simplification.md#one-executor-for-every-call): if it comes out clean, it lands on `main` before slice 6 so call facts are written once against it. Otherwise it follows the break, because it changes only the producer, and the vocabulary already has requested, started, settled, and abandoned.
+PRs 1–4 and the executor are open against `main` as one stack. PR 5 can start now.
 
 **After the break, as additive minors.**
 
@@ -1292,20 +1295,20 @@ PRs 1, 2, 3, and 5 can start now. **In parallel,** a prototype of [one executor 
 <details>
 <summary>PRs and issues, and the plan for each</summary>
 
-| PR or issue                        | Relation                                                   | Plan                                                                                                                                                                                 |
-| ---------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| #4342–#4344 HumanInput             | Rewrites `hitl/`; the interaction family follows its model | PR 4 stacks on it, and slice 7 builds on it. In review, ask for an "answer admitted" output for `response.admitted`, and for `commitSessionStep` to become the session's commit path |
-| #4223 first-class attachments      | Supplies the file store and retrieval route                | Ideally its store and refs land before the break, so v27.0 ships refs. Its outbound files map to file content parts                                                                  |
-| #4194 `fetchFile` on `eveChannel`  | Inbound web uploads by URL                                 | Compatible                                                                                                                                                                           |
-| #3222 close terminal streams       | Readers rely on terminal runs closing their stream         | Adopted into PR 5                                                                                                                                                                    |
-| #3701 delta coalescing             | Progress granularity                                       | Land with a window measured by the golden streams                                                                                                                                    |
-| #4031 `meta.index` on reads        | The same positions, assigned on read                       | Compatible on v26; v27 subsumes it                                                                                                                                                   |
-| #4099 `clientContext`              | A display-relevant delivery attribute                      | Lands on `delivery.admitted` in v27                                                                                                                                                  |
-| #3785 hooks for proxied events     | Relayed requests                                           | Subsumed: relayed interactions are ordinary parent facts                                                                                                                             |
-| #3580, #3581 web state and history | Client readers                                             | Rebase onto the client tables, or land first and port                                                                                                                                |
-| #2948 deferred tail                | Tail cost and the route's handshake                        | Reconcile with catch-up filtering                                                                                                                                                    |
-| #1725 forward child events (#666)  | Conflicts with separate child streams                      | Close ([why](#child-sessions-and-relays))                                                                                                                                            |
-| #4092 stranded sessions            | Self-hosted impact of the break                            | Align the release notes                                                                                                                                                              |
+| PR or issue                        | Relation                                                   | Plan                                                                                                                                                                                                          |
+| ---------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| #4342–#4344 HumanInput             | Rewrites `hitl/`; the interaction family follows its model | Slice 7 builds on it, including the single intake PR 4 leaves for it. In review, ask for an "answer admitted" output for `response.admitted`, and for `commitSessionStep` to become the session's commit path |
+| #4223 first-class attachments      | Supplies the file store and retrieval route                | Ideally its store and refs land before the break, so v27.0 ships refs. Its outbound files map to file content parts                                                                                           |
+| #4194 `fetchFile` on `eveChannel`  | Inbound web uploads by URL                                 | Compatible                                                                                                                                                                                                    |
+| #3222 close terminal streams       | Readers rely on terminal runs closing their stream         | Adopted into PR 5                                                                                                                                                                                             |
+| #3701 delta coalescing             | Progress granularity                                       | Land with a window measured by the golden streams                                                                                                                                                             |
+| #4031 `meta.index` on reads        | The same positions, assigned on read                       | Compatible on v26; v27 subsumes it                                                                                                                                                                            |
+| #4099 `clientContext`              | A display-relevant delivery attribute                      | Lands on `delivery.admitted` in v27                                                                                                                                                                           |
+| #3785 hooks for proxied events     | Relayed requests                                           | Subsumed: relayed interactions are ordinary parent facts                                                                                                                                                      |
+| #3580, #3581 web state and history | Client readers                                             | Rebase onto the client tables, or land first and port                                                                                                                                                         |
+| #2948 deferred tail                | Tail cost and the route's handshake                        | Reconcile with catch-up filtering                                                                                                                                                                             |
+| #1725 forward child events (#666)  | Conflicts with separate child streams                      | Close ([why](#child-sessions-and-relays))                                                                                                                                                                     |
+| #4092 stranded sessions            | Self-hosted impact of the break                            | Align the release notes                                                                                                                                                                                       |
 
 </details>
 
@@ -1369,7 +1372,7 @@ v27 writes more lifecycle facts, because deliveries get explicit ends, every cal
 <details>
 <summary>Testing during the break, and before release</summary>
 
-- **PRs 1–4 land on `main` with tests as usual,** since they change today's code.
+- **PRs 1–4 and the executor land on `main` with tests as usual,** since they change today's code.
 - **The integration branch adds no v27 tests until the implementation is done.** Tests that assert v26 event shapes are deleted as their family moves, and rebuilt at the end. Tests that don't depend on the wire keep running.
 - **While the branch is in progress:**
   - typechecking, where the catalog's types and exhaustive switches catch readers that miss a family;
