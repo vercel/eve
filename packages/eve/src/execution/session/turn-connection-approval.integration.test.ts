@@ -1,6 +1,7 @@
 import { simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { EXECUTE_TOOL_NAME, SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { ContextContainer } from "#context/container.js";
 import { AuthKey, InitiatorAuthKey, SessionIdKey } from "#context/keys.js";
 import { serializeContext } from "#context/serialize.js";
@@ -58,7 +59,7 @@ const usage = {
 };
 const sessionId = "turn-connection-approval";
 const TOOL_GONE_RESULT =
-  'The tool "notes__saveNote" is no longer available, so the call didn\'t run. If the task still needs it, find an available tool with search and make a new call.';
+  'The tool "notes__saveNote" is no longer available, so the call didn\'t run. If the task still needs it, find an available tool with eve__search and make a new call.';
 
 /** A model step that saves notes through `execute`, or replies when `callId` is omitted. */
 function modelResponse(callId?: string | readonly string[], connection = "notes") {
@@ -71,7 +72,7 @@ function modelResponse(callId?: string | readonly string[], connection = "notes"
           ? callIds.map((toolCallId) => ({
               type: "tool-call" as const,
               toolCallId,
-              toolName: "execute",
+              toolName: EXECUTE_TOOL_NAME,
               input: JSON.stringify({
                 tool: `${connection}__saveNote`,
                 input: { body: { note: "hello" } },
@@ -343,7 +344,7 @@ describe("turn connection approval restoration", () => {
     );
     expect(requests.length).toBeGreaterThanOrEqual(2);
     const [first, ...later] = requests;
-    expect(first!.tools.map((tool) => tool.name)).toEqual(["search", "execute"]);
+    expect(first!.tools.map((tool) => tool.name)).toEqual([SEARCH_TOOL_NAME, EXECUTE_TOOL_NAME]);
     const system = (request: (typeof requests)[number]) =>
       request.prompt.filter((message) => message.role === "system");
     for (const request of later) {
@@ -489,7 +490,7 @@ describe("turn connection approval restoration", () => {
       expect(modelToolResult(fixture, request.action.callId)).toEqual(
         expect.objectContaining({
           output: { type: "error-text", value: TOOL_GONE_RESULT },
-          toolName: "execute",
+          toolName: EXECUTE_TOOL_NAME,
         }),
       );
       expect(suspendedSteps(state)).toEqual([]);

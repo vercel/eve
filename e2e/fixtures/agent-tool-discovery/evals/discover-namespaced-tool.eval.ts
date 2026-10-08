@@ -1,7 +1,7 @@
+import { SEARCH_TOOL } from "@eve-e2e/config/catalog-tools";
 import { defineEval } from "eve/evals";
 
 import { OPEN_INCIDENTS } from "../agent/lib/catalog";
-import { SEARCH_TOOL } from "./tool-use";
 
 const TOOL = "sre__status_page_incidents_list";
 

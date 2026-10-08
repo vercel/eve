@@ -26,7 +26,11 @@ import { defineDynamicSchedules } from "#public/schedules/subscription.js";
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
 import { z } from "#compiled/zod/index.js";
 import { defineSkill } from "#public/definitions/skill.js";
-import { RESERVED_TOOL_NAMES } from "#internal/testing/catalog-fixtures.js";
+import {
+  EVE_NAMESPACE_NAMES,
+  EVE_NAMESPACE_RESERVATION,
+  NAMES_OUTSIDE_EVE_NAMESPACE,
+} from "#internal/testing/catalog-fixtures.js";
 import { resolveAgent } from "#runtime/resolve-agent.js";
 import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
 import { compiledAgentManifestSchema } from "#compiler/manifest.js";
@@ -765,38 +769,58 @@ describe("compileAgentManifest source graph", () => {
     );
   });
 
-  it.each(RESERVED_TOOL_NAMES)(
-    "rejects an authored tool named %s, the built-in %s",
-    async (name, role) => {
-      const sourceRegistry = registry([
-        {
-          logicalPath: `tools/${name}.ts`,
-          loadNamespace: async () => ({
-            default: defineTool({
-              description: "Replacement.",
-              execute: () => null,
-              inputSchema: {},
-            }),
-          }),
-        },
+  describe("eve's namespace", () => {
+    const authoredTool = (name: string) => ({
+      logicalPath: `tools/${name}.ts`,
+      loadNamespace: async () => ({
+        default: defineTool({ description: name, execute: () => null, inputSchema: {} }),
+      }),
+    });
+    const authoredSkill = (name: string) => ({
+      logicalPath: `skills/${name}.ts`,
+      loadNamespace: async () => ({
+        default: defineSkill({ description: name, markdown: `# ${name}\n` }),
+      }),
+    });
+    const compile = (sources: Parameters<typeof registry>[0]) =>
+      compileAgentManifest(manifest(), { sourceRegistries: [registry(sources)] });
+
+    it.each(EVE_NAMESPACE_NAMES)("rejects an authored tool named %s", async (name) => {
+      await expect(compile([authoredTool(name)])).rejects.toThrow(
+        `Tool "tools/${name}.ts" uses the reserved name "${name}". Rename its path; ${EVE_NAMESPACE_RESERVATION}.`,
+      );
+    });
+
+    it("rejects disabling a built-in tool, whose name is in eve's namespace", async () => {
+      await expect(
+        compile([
+          {
+            logicalPath: "tools/eve__search.ts",
+            loadNamespace: async () => ({ default: disableTool() }),
+          },
+        ]),
+      ).rejects.toThrow(EVE_NAMESPACE_RESERVATION);
+    });
+
+    it.each(EVE_NAMESPACE_NAMES)("rejects an authored skill named %s", async (name) => {
+      await expect(compile([authoredSkill(name)])).rejects.toThrow(
+        `uses the reserved name "${name}". Rename its path; ${EVE_NAMESPACE_RESERVATION}.`,
+      );
+    });
+
+    it("accepts tools and skills outside it, including the built-in tools' former names", async () => {
+      const compiled = await compile([
+        ...NAMES_OUTSIDE_EVE_NAMESPACE.map(authoredTool),
+        ...NAMES_OUTSIDE_EVE_NAMESPACE.map(authoredSkill),
       ]);
 
-      await expect(
-        compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
-      ).rejects.toThrow(
-        `Tool "tools/${name}.ts" uses the reserved name "${name}". Rename its path; eve reserves "${name}" for its built-in ${role}.`,
+      expect(compiled.tools.map((entry) => entry.name)).toEqual(
+        expect.arrayContaining(NAMES_OUTSIDE_EVE_NAMESPACE),
       );
-    },
-  );
-
-  it("rejects disabling a catalog tool, since every agent has search and execute", async () => {
-    const sourceRegistry = registry([
-      { logicalPath: "tools/search.ts", loadNamespace: async () => ({ default: disableTool() }) },
-    ]);
-
-    await expect(
-      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
-    ).rejects.toThrow('eve reserves "search" for its built-in catalog tool.');
+      expect(compiled.skills.map((entry) => entry.name).toSorted()).toEqual(
+        NAMES_OUTSIDE_EVE_NAMESPACE.toSorted(),
+      );
+    });
   });
 
   it("rejects a deferred provider tool, which the provider has to see", async () => {
@@ -845,16 +869,28 @@ describe("compileAgentManifest source graph", () => {
       ).rejects.toThrow(message);
     });
 
-    it.each([
-      ["search", "catalog tool"],
-      ["final_output", "final output tool"],
-    ])("rejects a connection named %s, the built-in %s", async (name, role) => {
-      const sourceRegistry = registry([{ ...linear, logicalPath: `connections/${name}.ts` }]);
+    it("rejects a connection named eve, which would own eve's namespace", async () => {
+      const sourceRegistry = registry([{ ...linear, logicalPath: "connections/eve.ts" }]);
 
       await expect(
         compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
       ).rejects.toThrow(
-        `Connection "connections/${name}.ts" uses the reserved name "${name}". Rename its path; eve reserves "${name}" for its built-in ${role}.`,
+        `Connection "connections/eve.ts" uses the reserved name "eve". Rename its path; ${EVE_NAMESPACE_RESERVATION}.`,
+      );
+    });
+
+    it("accepts connections outside eve's namespace, including the catalog tools' former names", async () => {
+      const names = ["search", "execute", "steve", "eve-tools"];
+      const sourceRegistry = registry(
+        names.map((name) => ({ ...linear, logicalPath: `connections/${name}.ts` })),
+      );
+
+      const compiled = await compileAgentManifest(manifest(), {
+        sourceRegistries: [sourceRegistry],
+      });
+
+      expect(compiled.connections.map((entry) => entry.connectionName).toSorted()).toEqual(
+        names.toSorted(),
       );
     });
 

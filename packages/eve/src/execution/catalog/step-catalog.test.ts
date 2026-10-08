@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { EXECUTE_TOOL_NAME, SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
+import { TASK_CANCEL_TOOL_NAME, TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import { isAuthorizationSignal, PendingAuthorizationResultKey } from "#harness/authorization.js";
@@ -21,7 +23,7 @@ const names = (tools: ReadonlyMap<string, HarnessToolDefinition>) => [...tools.k
 
 /** Validates `input` against the `execute` schema, which every call passes before it runs. */
 function validateExecute(catalog: StepCatalog, input: unknown) {
-  const schema = catalog.advertised.get("execute")!.inputSchema as StandardSchemaV1;
+  const schema = catalog.advertised.get(EXECUTE_TOOL_NAME)!.inputSchema as StandardSchemaV1;
   return schema["~standard"].validate(input);
 }
 
@@ -31,7 +33,7 @@ describe("buildStepCatalog", () => {
       tools: [inlineTool("add"), inlineTool("refund_invoice", { deferred: true })],
     });
 
-    expect(names(catalog.advertised)).toEqual(["add", "search", "execute"]);
+    expect(names(catalog.advertised)).toEqual(["add", SEARCH_TOOL_NAME, EXECUTE_TOOL_NAME]);
     expect(names(catalog.deferred)).toEqual(["refund_invoice"]);
   });
 
@@ -53,10 +55,10 @@ describe("buildStepCatalog", () => {
       "billing",
       "agent",
       "delegate",
-      "task_wait",
-      "task_cancel",
-      "search",
-      "execute",
+      TASK_WAIT_TOOL_NAME,
+      TASK_CANCEL_TOOL_NAME,
+      SEARCH_TOOL_NAME,
+      EXECUTE_TOOL_NAME,
     ]);
     expect(names(root.deferred)).toEqual(["archive", "researcher"]);
 
@@ -64,21 +66,25 @@ describe("buildStepCatalog", () => {
     expect(names(child.advertised)).toEqual([
       "add",
       "delegate",
-      "task_wait",
-      "task_cancel",
-      "search",
-      "execute",
+      TASK_WAIT_TOOL_NAME,
+      TASK_CANCEL_TOOL_NAME,
+      SEARCH_TOOL_NAME,
+      EXECUTE_TOOL_NAME,
     ]);
     expect(names(child.deferred)).toEqual(["researcher"]);
     // A hidden entry can't be reached through execute either.
     expect(await validateExecute(child, { tool: "archive" })).toEqual({
-      issues: [{ message: 'No tool named "archive". Find tools with search.', path: ["tool"] }],
+      issues: [
+        { message: 'No tool named "archive". Find tools with eve__search.', path: ["tool"] },
+      ],
     });
   });
 
   describe("task tools", () => {
     const offered = (catalog: StepCatalog) => ({
-      advertised: catalog.advertised.has("task_wait") && catalog.advertised.has("task_cancel"),
+      advertised:
+        catalog.advertised.has(TASK_WAIT_TOOL_NAME) &&
+        catalog.advertised.has(TASK_CANCEL_TOOL_NAME),
       offersTasks: catalog.offersTasks,
     });
     const offeredFor = (...input: Parameters<typeof catalogContext>) =>
@@ -121,7 +127,7 @@ describe("buildStepCatalog", () => {
       const call = {
         input: { input: { invoiceId: "in_1" }, tool: "refund_invoice" },
         toolCallId: "call-1",
-        toolName: "execute",
+        toolName: EXECUTE_TOOL_NAME,
       };
 
       expect(catalog.resolve(call)).toEqual({
@@ -129,12 +135,16 @@ describe("buildStepCatalog", () => {
         definition: refundInvoice,
       });
       expect(
-        catalog.resolve({ input: { tool: "billing_specialist" }, toolName: "execute" })?.call,
+        catalog.resolve({ input: { tool: "billing_specialist" }, toolName: EXECUTE_TOOL_NAME })
+          ?.call,
       ).toEqual({ input: {}, toolName: "billing_specialist" });
     });
 
     it("resolves execute({ skill }) to the skill loader, which returns the skill's markdown", async () => {
-      const resolved = catalog.resolve({ input: { skill: "pdf-forms" }, toolName: "execute" });
+      const resolved = catalog.resolve({
+        input: { skill: "pdf-forms" },
+        toolName: EXECUTE_TOOL_NAME,
+      });
 
       expect(resolved?.call).toEqual({ input: { skill: "pdf-forms" }, toolName: "eve:load-skill" });
       expect(
@@ -145,7 +155,9 @@ describe("buildStepCatalog", () => {
     it("resolves a direct call only to a listed tool", () => {
       expect(catalog.resolve({ input: {}, toolName: "add" })?.definition).toBe(add);
       expect(catalog.resolve({ input: {}, toolName: "refund_invoice" })).toBeUndefined();
-      expect(catalog.resolve({ input: { tool: "add" }, toolName: "execute" })).toBeUndefined();
+      expect(
+        catalog.resolve({ input: { tool: "add" }, toolName: EXECUTE_TOOL_NAME }),
+      ).toBeUndefined();
     });
   });
 
@@ -184,7 +196,7 @@ describe("buildStepCatalog", () => {
         "an unknown tool with no close names",
         { tool: "weather" },
         "tool",
-        'No tool named "weather". Find tools with search.',
+        'No tool named "weather". Find tools with eve__search.',
       ],
       [
         "a tool in the model's tool list",
@@ -193,16 +205,16 @@ describe("buildStepCatalog", () => {
         '"add" is in your tool list; call it directly.',
       ],
       [
-        "execute itself",
-        { tool: "execute" },
+        "eve__execute itself",
+        { tool: EXECUTE_TOOL_NAME },
         "tool",
-        '"execute" is in your tool list; call it directly.',
+        `"${EXECUTE_TOOL_NAME}" is in your tool list; call it directly.`,
       ],
       [
         "a skill named as a tool when no tool has its name",
         { tool: "release_notes" },
         "tool",
-        '"release_notes" is a skill; load it with execute({ skill: "release_notes" }).',
+        '"release_notes" is a skill; load it with eve__execute({ skill: "release_notes" }).',
       ],
       [
         "an unknown skill, with the closest names",
@@ -214,7 +226,7 @@ describe("buildStepCatalog", () => {
         "a skill named like a connection",
         { skill: "Linear" },
         "skill",
-        'No skill named "Linear". Find skills with search. "linear" is a connection, not a skill. Find its tools with search({ query: "linear__" }).',
+        'No skill named "Linear". Find skills with eve__search. "linear" is a connection, not a skill. Find its tools with eve__search({ query: "linear__" }).',
       ],
       ["neither tool nor skill", {}, "tool", "Pass `tool`, or `skill` to load a skill."],
       [
@@ -286,7 +298,7 @@ describe("buildStepCatalog", () => {
       expect(
         await validateExecute(catalog, { input: { team: "core" }, tool: "linear__list_issues" }),
       ).toEqual({ value: validated });
-      const resolved = catalog.resolve({ input: validated, toolName: "execute" });
+      const resolved = catalog.resolve({ input: validated, toolName: EXECUTE_TOOL_NAME });
       expect(resolved?.call.toolName).toBe("linear__list_issues");
       expect(resolved?.definition.label?.start?.({})).toBe("Linear: List issues");
       await run(() =>
@@ -361,7 +373,10 @@ describe("buildStepCatalog", () => {
         tools: [connectionTool("search_pages")],
       });
       const context = catalogContext({ connections: [notion] });
-      const signIn = context.catalog.resolve({ input: { tool: "notion" }, toolName: "execute" })!;
+      const signIn = context.catalog.resolve({
+        input: { tool: "notion" },
+        toolName: EXECUTE_TOOL_NAME,
+      })!;
       return {
         ...context,
         notion,
@@ -395,10 +410,10 @@ describe("buildStepCatalog", () => {
 
       finishSignIn();
       expect(await connect()).toBe(
-        'Signed in to Notion. Find the Notion tools with search({ query: "notion__" }).',
+        'Signed in to Notion. Find the Notion tools with eve__search({ query: "notion__" }).',
       );
       expect(notion.signIns).toHaveLength(1);
-      const search = catalog.advertised.get("search")!;
+      const search = catalog.advertised.get(SEARCH_TOOL_NAME)!;
       expect(
         await run(() =>
           search.execute!({ query: "notion__" }, { messages: [], toolCallId: "find" }),
@@ -410,7 +425,7 @@ describe("buildStepCatalog", () => {
       const { connect, notion } = notionCatalog({ listing: "listed" });
 
       expect(await connect()).toBe(
-        'The Notion tools are available. Find them with search({ query: "notion__" }).',
+        'The Notion tools are available. Find them with eve__search({ query: "notion__" }).',
       );
       expect(notion.signIns).toEqual([]);
     });

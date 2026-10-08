@@ -54,15 +54,17 @@ describe("createRuntimeSubagentRegistry", () => {
     ).toThrow('Subagent "researcher" collides with another runtime-visible tool name.');
   });
 
-  it("rejects a model-visible subagent named after a runtime tool, but lets a tool: false one keep the name", () => {
+  it.each([true, false])("rejects a subagent in eve's namespace with tool %s", (tool) => {
     expect(() =>
-      createRuntimeSubagentRegistry({ subagents: [subagent(true, "task_wait")] }),
+      createRuntimeSubagentRegistry({ subagents: [subagent(tool, "eve__task_wait")] }),
     ).toThrow(
-      'Subagent "subagents/task_wait" uses the reserved name "task_wait". Rename its path; eve reserves "task_wait" for its built-in task tool.',
+      'Subagent "subagents/eve__task_wait" uses the reserved name "eve__task_wait". Rename its path; eve reserves the "eve" namespace for its built-in tools.',
     );
+  });
 
-    const hidden = createRuntimeSubagentRegistry({ subagents: [subagent(false, "task_wait")] });
-    expect(hidden.preparedTools).toEqual([]);
-    expect(hidden.subagentsByName.has("task_wait")).toBe(true);
+  it("lets a model-visible subagent take a built-in tool's former name", () => {
+    const registry = createRuntimeSubagentRegistry({ subagents: [subagent(true, "task_wait")] });
+
+    expect(registry.preparedTools.map((tool) => tool.name)).toEqual(["task_wait"]);
   });
 });

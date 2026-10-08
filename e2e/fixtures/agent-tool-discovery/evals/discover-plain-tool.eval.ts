@@ -1,7 +1,7 @@
+import { SEARCH_TOOL } from "@eve-e2e/config/catalog-tools";
 import { defineEval } from "eve/evals";
 
 import { NEXT_RELEASE_TRAIN } from "../agent/lib/catalog";
-import { SEARCH_TOOL } from "./tool-use";
 
 const TOOL = "release_train_schedule";
 

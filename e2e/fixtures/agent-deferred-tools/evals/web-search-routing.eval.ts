@@ -1,9 +1,9 @@
 import { defineEval } from "eve/evals";
 
-// `search` finds the agent's own tools, not web pages, so a question about the
-// world goes to `web_search` even while the catalog lists many entries. Calls
-// through `execute` are reported under their entry's name, so the check is
-// that `web_search` is the only tool called.
+// `eve__search` finds the agent's own tools, not web pages, so a question about
+// the world goes to `web_search` even while the catalog lists many entries.
+// Calls through `eve__execute` are reported under their entry's name, so the
+// check is that `web_search` is the only tool called.
 export default defineEval({
   tags: ["real-model"],
   description: "A web question goes to web_search, not the catalog.",
