@@ -109,7 +109,7 @@ function setupMockAgentSequence(results: readonly Record<string, unknown>[]): vo
   ) {
     const { onStepEnd, onStepStart, prepareStep } = settings;
 
-    const generate = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
+    const callModel = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
       const result = queue.shift();
       if (result === undefined) {
         throw new Error("No mock ToolLoopAgent result available.");
@@ -143,9 +143,8 @@ function setupMockAgentSequence(results: readonly Record<string, unknown>[]): vo
       return { ...result, responseMessages: getMockResponseMessages(result) };
     });
 
-    this.generate = generate;
     this.stream = vi.fn(async (options: { messages: unknown[] }) => {
-      const result = await generate(options);
+      const result = await callModel(options);
       return {
         fullStream: new ReadableStream({
           start(controller) {

@@ -52,10 +52,8 @@ import { resolveConversationId } from "#shared/conversation-identity.js";
 // ---------------------------------------------------------------------------
 
 /**
- * The subset of `StepResult` that the harness reads after a step completes.
- *
- * Used by both the streaming (`onStepEnd` callback) and non-streaming
- * (`generateText` result) code paths.
+ * The subset of `StepResult` that the harness reads after a step completes, captured by the
+ * `onStepEnd` callback.
  */
 export type HarnessStepResult = Pick<
   StepResult<ToolSet>,

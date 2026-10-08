@@ -370,16 +370,13 @@ export class ModelCaller {
     const agent = new ToolLoopAgent(settings);
 
     try {
-      const result =
-        step.emit === undefined
-          ? await this.generate(agent, callMessages, hooks.stepResult)
-          : await this.stream(
-              agent,
-              callMessages,
-              hooks.stepResult,
-              tools,
-              unsettledActionToolNames,
-            );
+      const result = await this.stream(
+        agent,
+        callMessages,
+        hooks.stepResult,
+        tools,
+        unsettledActionToolNames,
+      );
       await attempt?.complete();
       return result;
     } catch (error) {
@@ -471,27 +468,6 @@ export class ModelCaller {
       }),
       stepResult,
       toolResults: [...toolResultsByCallId.values()],
-    });
-  }
-
-  /** Runs the call without a listener: nothing streams. */
-  private async generate(
-    agent: ToolLoopAgent,
-    messages: ModelMessage[],
-    stepResultPromise: Promise<HarnessStepResult>,
-  ): Promise<HarnessStepResult> {
-    const { generation } = this.input;
-    const generateResult = await agent.generate({ abortSignal: generation.signal, messages });
-    throwIfTurnAborted(this.step.config.abortSignal);
-    generation.check();
-    const stepResult = await stepResultPromise;
-    assertUsableResponse(stepResult, generateResult.responseMessages, false);
-    return withAccumulatedResponseMessages({
-      responseMessages: appendMissingToolResultMessages({
-        append: answerSkippedToolCalls(stepResult, this.tools!.effectiveTools),
-        responseMessages: generateResult.responseMessages,
-      }),
-      stepResult,
     });
   }
 }
