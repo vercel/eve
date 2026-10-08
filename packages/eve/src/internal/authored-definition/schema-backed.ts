@@ -112,14 +112,21 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
     const record = expectObjectRecord(value, message);
     expectOnlyKnownKeys(record, ["fallback", "kind", "provider"], message);
     const provider = expectOneOf(record.provider, WEB_SEARCH_PROVIDERS, "provider", message);
-    const fallback =
-      record.fallback === undefined
-        ? undefined
-        : expectOneOf(record.fallback, WEB_SEARCH_FALLBACK_PROVIDERS, "fallback", message);
-    return {
-      kind: "web-search-tool",
-      selection: fallback === undefined ? { provider } : { fallback, provider },
-    };
+    if (record.fallback === undefined) {
+      return { kind: "web-search-tool", selection: { provider } };
+    }
+    if (provider !== "openai") {
+      throw new Error(
+        `${message} "fallback" applies only to provider "openai"; provider "${provider}" serves every AI Gateway model.`,
+      );
+    }
+    const fallback = expectOneOf(
+      record.fallback,
+      WEB_SEARCH_FALLBACK_PROVIDERS,
+      "fallback",
+      message,
+    );
+    return { kind: "web-search-tool", selection: { fallback, provider } };
   }
 
   const record = expectObjectRecord(value, message);

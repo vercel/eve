@@ -5,19 +5,22 @@ export type { WebSearchFallbackProvider, WebSearchProvider };
 
 const WEB_SEARCH_TOOL_KIND = "eve:web-search-tool";
 
-/** Configuration accepted by {@link webSearch}. */
-export interface WebSearchToolInput {
-  /**
-   * Provider to use when the agent model is routed through AI Gateway. `"openai"` selects
-   * OpenAI's hosted search, which serves only OpenAI models.
-   */
-  readonly provider: WebSearchProvider;
-  /**
-   * Provider to use for a Gateway model that `provider` can't serve, such as a non-OpenAI model
-   * with `provider: "openai"`. Without it, that model doesn't get `web_search`.
-   */
-  readonly fallback?: WebSearchFallbackProvider;
-}
+/**
+ * Configuration accepted by {@link webSearch}: the provider to use when the agent model is routed
+ * through AI Gateway.
+ */
+export type WebSearchToolInput =
+  | {
+      /** OpenAI's hosted search, which serves only OpenAI models. */
+      readonly provider: "openai";
+      /** Provider for non-OpenAI Gateway models. Without it, those models don't get `web_search`. */
+      readonly fallback?: WebSearchFallbackProvider;
+    }
+  | {
+      /** A search provider that AI Gateway runs for any Gateway model. */
+      readonly provider: WebSearchFallbackProvider;
+      readonly fallback?: never;
+    };
 
 /**
  * Provider-managed web search configuration.

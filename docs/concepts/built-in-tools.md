@@ -226,7 +226,7 @@ import { webSearch } from "eve/tools/web_search";
 export default webSearch({ provider: "openai" });
 ```
 
-OpenAI runs the search server-side and returns URL citations, and AI Gateway uses its usual credentials, so no `OPENAI_API_KEY` is needed. OpenAI hosted search serves only OpenAI models, so any other Gateway model, including one picked by a dynamic model resolver, doesn't get `web_search`. Set `fallback` to give those models a provider that works with any Gateway model (`"exa"`, `"parallel"`, or `"browserbase"`):
+OpenAI runs the search server-side and returns URL citations, and AI Gateway uses its usual credentials, so no `OPENAI_API_KEY` is needed. OpenAI hosted search serves only OpenAI models, so any other Gateway model, including one picked by a dynamic model resolver, doesn't get `web_search`. eve picks the search tool from the requested model, so when AI Gateway's own `models` fallback serves a call with a non-OpenAI model, that call runs without search. Set `fallback` to give those models a provider that works with any Gateway model (`"exa"`, `"parallel"`, or `"browserbase"`):
 
 ```ts title="agent/tools/web_search.ts"
 import { webSearch } from "eve/tools/web_search";

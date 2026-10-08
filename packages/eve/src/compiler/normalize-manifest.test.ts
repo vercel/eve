@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { WebSearchSelection } from "#shared/web-search.js";
 import {
   createAgentSourceManifest,
   createLocalSubagentSourceRef,
@@ -34,7 +33,7 @@ import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { defineTool, disableTool } from "#tools/definition.js";
 import { defineMemory } from "#public/memory/index.js";
 import { defineDynamic } from "#dynamic/definition.js";
-import { webSearch } from "#tools/provided/web-search.js";
+import { webSearch, type WebSearchToolInput } from "#tools/provided/web-search.js";
 import { agent as agentTool } from "#tools/framework/agent.js";
 
 function manifest() {
@@ -334,7 +333,7 @@ describe("compileAgentManifest source graph", () => {
     });
   });
 
-  it.each<WebSearchSelection>([
+  it.each<WebSearchToolInput>([
     { provider: "parallel" },
     { provider: "browserbase" },
     { fallback: "exa", provider: "openai" },

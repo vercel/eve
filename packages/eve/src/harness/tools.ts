@@ -14,6 +14,7 @@ import { isApprovedToolCall, markApprovalRecheck } from "#harness/approval-reche
 import { toModelSchema } from "#tools/schema.js";
 import { normalizeToolJsonOutput } from "#harness/tool-model-output.js";
 import { toolCallModelOutput } from "#harness/tool-call-io.js";
+import { createLogger } from "#internal/logging.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { executeWithToolStub } from "#tool-stubs/execute.js";
@@ -27,6 +28,8 @@ type ApprovalFn = (
   abortSignal: AbortSignal | undefined,
   recheck: boolean,
 ) => Promise<NativeApprovalStatus>;
+
+const log = createLogger("harness.tools");
 
 const toolApprovals = new WeakMap<object, ApprovalFn>();
 
@@ -214,6 +217,12 @@ export async function buildToolSetWithProviderTools(input: {
     ) {
       const backend = resolveWebSearchBackend(input.profile, handling);
       if (backend === null) {
+        log.debug("model has no web search backend; leaving the tool out", {
+          gateway: input.profile.gateway,
+          modelProvider: input.profile.provider,
+          searchProvider: handling.provider,
+          tool: definition.name,
+        });
         delete tools[definition.name];
       } else {
         tools[definition.name] = await resolveWebSearchProviderTool(backend);
