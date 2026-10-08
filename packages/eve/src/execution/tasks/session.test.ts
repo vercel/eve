@@ -22,7 +22,12 @@ import { createTestSessionState } from "#internal/testing/session-state.js";
 // No workflow runtime runs here: the run's cancel hook is a stub, and the
 // stream is recorded with each event's origin, since relayed input must not
 // reach the session's own instrumentation.
-vi.mock("#internal/workflow/runtime.js", () => ({ resumeHook: vi.fn(async () => {}) }));
+vi.mock("#internal/workflow/runtime.js", () => ({
+  cancelRun: vi.fn(async () => {}),
+  getRun: () => ({ status: Promise.resolve("completed") }),
+  getWorld: vi.fn(async () => ({})),
+  resumeHook: vi.fn(async () => {}),
+}));
 const { published } = vi.hoisted(() => ({ published: [] as unknown[] }));
 vi.mock("#execution/publish-session-events.js", () => {
   const publisher =
