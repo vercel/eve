@@ -18,8 +18,8 @@ import { parseToolStubs } from "#tool-stubs/rules.js";
 import { STUB_CONTEXT_KEY } from "#tool-stubs/types.js";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";
 
-it.each(["output processing", "failure reporting"])(
-  "fails an otherwise passing eval after %s fails",
+it.each(["output processing", "failure reporting", "injected error"])(
+  "verifies an eval with a failure in %s",
   async (failure) => {
     const runtime = await createTestRuntime({
       modules: [
@@ -125,11 +125,27 @@ it.each(["output processing", "failure reporting"])(
             id: "bad-task-output",
             async test(t) {
               const session = await t.session({
-                stubs: [{ id: "deploy", tool: "deploy_service", outcome: { response: "stubbed" } }],
+                stubs: [
+                  {
+                    id: "deploy",
+                    tool: "deploy_service",
+                    outcome:
+                      failure === "injected error"
+                        ? { throw: { message: "Service unavailable" } }
+                        : { response: "stubbed" },
+                  },
+                ],
               });
               const turn = await session.send('Run deploy_service with service "api"');
               turn.expectOk();
               turn.calledTool("deploy_service", { count: 1 });
+              if (failure === "injected error") {
+                turn.eventsSatisfy("the background task failed", (events) =>
+                  events.some(
+                    (event) => event.type === "task.settled" && event.data.status === "failed",
+                  ),
+                );
+              }
               if (failure === "failure reporting") {
                 await reportStubFailureStep(
                   { token: "unavailable-playback", rootSessionId: run!.runId, rules: [] },
@@ -142,7 +158,11 @@ it.each(["output processing", "failure reporting"])(
         });
         expect(outcome.result.status).toBe("waiting");
         expect(outcome.assertions.length).toBeGreaterThan(0);
-        expect(outcome.assertions.every((assertion) => assertion.passed)).toBe(true);
+        expect(outcome.assertions.filter((assertion) => !assertion.passed)).toEqual([]);
+        if (failure === "injected error") {
+          expect(outcome.error).toBeUndefined();
+          return;
+        }
         expect(outcome.error).toContain(
           failure === "output processing"
             ? 'Stubbed tool "deploy_service" failed during output processing.'

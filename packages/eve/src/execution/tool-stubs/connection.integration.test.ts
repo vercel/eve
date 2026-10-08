@@ -25,7 +25,10 @@ describe("connection operation stubs", () => {
           id: "open",
           tool: "researcher/linear__list_issues",
           match: { status: { const: "open" } },
-          outcome: { response: { issues: ["milk"] } },
+          outcomes: [
+            { throw: { name: "TimeoutError", message: "Issue service timed out" } },
+            { response: { issues: ["milk"] } },
+          ],
         },
       ];
       const token = "connection-stub-playback";
@@ -97,6 +100,12 @@ describe("connection operation stubs", () => {
               callId,
             } as ToolContext);
           await expect(call("invalid", { status: 42 })).rejects.toThrow(/Invalid input/);
+          await expect(call("failed", { status: "open" })).rejects.toMatchObject({
+            name: "TimeoutError",
+            message: "Issue service timed out",
+          });
+          expect(await readStubFailure(run.runId)).toBeUndefined();
+          expect(liveCalls).toBe(0);
           expect(await call("stubbed", { status: "open", limit: 10 })).toEqual({
             issues: ["milk"],
           });

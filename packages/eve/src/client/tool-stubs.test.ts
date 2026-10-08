@@ -19,7 +19,10 @@ it.each([undefined, "Complete the milk task."])(
         id: "milk",
         tool: "complete_task",
         match: { task_id: { const: "milk" } },
-        outcomes: [{ response: { success: true } }, { response: { success: false } }],
+        outcomes: [
+          { throw: { name: "TimeoutError", message: "Service timed out" } },
+          { response: { success: true } },
+        ],
       },
     ] satisfies ToolStub[];
     if (message === undefined) {
@@ -34,7 +37,10 @@ it.each([undefined, "Complete the milk task."])(
           id: "milk",
           tool: "complete_task",
           match: { task_id: { const: "milk" } },
-          outcomes: [{ response: { success: true } }, { response: { success: false } }],
+          outcomes: [
+            { throw: { name: "TimeoutError", message: "Service timed out" } },
+            { response: { success: true } },
+          ],
         },
       ],
     };
