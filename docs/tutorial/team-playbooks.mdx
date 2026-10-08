@@ -5,7 +5,7 @@ description: "Part 6 of the Build an Agent tutorial. Load the caller's team play
 
 The glossary from [Step 5](./remember-definitions) is per-session. But your teams have standing analysis conventions for the analytics assistant (Growth groups revenue by date, Finance reconciles customer totals), and those shouldn't bleed across tenants. Load the right team's playbook for whoever is asking.
 
-A skill is an on-demand procedure. The model pulls it in with `eve__execute({ skill })` only when a turn needs it. Make it dynamic and the skill gets decided at runtime instead of baked in. A `defineDynamic` resolver reads the session and returns a `defineSkill` (or nothing). Here you key that decision on the caller's identity in `ctx.session.auth`.
+A skill is an on-demand procedure. The model pulls it in with `eve__skill({ name })` only when a turn needs it. Make it dynamic and the skill gets decided at runtime instead of baked in. A `defineDynamic` resolver reads the session and returns a `defineSkill` (or nothing). Here you key that decision on the caller's identity in `ctx.session.auth`.
 
 ## A playbook per principal
 
@@ -75,7 +75,7 @@ export default eveChannel({
 });
 ```
 
-Restart with `npm run dev` and ask "Summarize May 2026 revenue using our team's playbook." The model loads the skill with `eve__execute`, queries the sample data, and applies Growth's daily and plan groupings. Switch `team` to `"finance"`, restart, and start a new session before asking again. The resolver runs at `session.started`, so changing the team does not replace the playbook in an existing session. The same question in the new session uses Finance's reconciliation rules.
+Restart with `npm run dev` and ask "Summarize May 2026 revenue using our team's playbook." The model loads the skill with `eve__skill`, queries the sample data, and applies Growth's daily and plan groupings. Switch `team` to `"finance"`, restart, and start a new session before asking again. The resolver runs at `session.started`, so changing the team does not replace the playbook in an existing session. The same question in the new session uses Finance's reconciliation rules.
 
 Because the team comes from authenticated claims, not from the message, one tenant can't borrow another's playbook through the message content.
 

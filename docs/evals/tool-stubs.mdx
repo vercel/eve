@@ -215,7 +215,7 @@ Use the qualified operation name, such as `linear__list_issues` or `researcher/l
 
 Connection discovery stays live: eve lists the connection's tools to validate the operation and its arguments before a stub replaces the call, so stubs do not provide an offline connection.
 
-A rule names the tool itself, whether the model calls it directly or through [`eve__execute`](/docs/concepts/built-in-tools#eve__search-and-eve__execute), as it does for deferred tools and connection operations. A call through `eve__execute` matches by the name and `input` of the tool it reaches. `eve__search` and `eve__execute` cannot themselves be stubbed.
+A rule names the tool itself, whether the model calls it directly or through [`eve__tool`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill), as it does for deferred tools and connection operations. A call through `eve__tool` matches by the name and `input` of the tool it reaches. `eve__search`, `eve__tool`, and `eve__skill` cannot themselves be stubbed.
 
 Tools executed by the model provider, such as provider-hosted web search, have no eve executor to replace. A search tool implemented in your own agent can be stubbed.
 

@@ -3,7 +3,7 @@ title: "MCP Connections"
 description: "Connect an eve agent to a remote MCP server, authorize it with Vercel Connect or static credentials, and control which tools the model can discover."
 ---
 
-MCP connections point eve at a remote MCP server you do not author. The server publishes its tools and schemas, and the model finds them with `eve__search` and calls them with `eve__execute`.
+MCP connections point eve at a remote MCP server you do not author. The server publishes its tools and schemas, and the model finds them with `eve__search` and calls them with `eve__tool`.
 
 Use MCP when the service already has an MCP server, when the server owns tool schemas dynamically, or when one connection should expose a family of related remote tools. Use an [OpenAPI connection](./openapi) instead when the service publishes an HTTP API contract and you want eve to generate one tool per operation.
 
@@ -48,8 +48,8 @@ For OAuth-backed MCP servers, use the shared [Vercel Connect flow](../connection
 
 eve asks the user to sign in only when the MCP server asks for it. When a connection has `auth` but no token yet, because its `getToken` throws `ConnectionAuthorizationRequiredError`, eve connects without an `Authorization` header and lists the server's tools. Any other error from `getToken` still fails the connection.
 
-- **The server rejects every request without a token.** Most hosted OAuth servers, such as Linear, GitHub, and Notion, answer `initialize` or `tools/list` with HTTP `401`. `eve__search` lists the connection as one result named after it, such as `linear`. Calling that name with `eve__execute({ tool: "linear" })`, or any of its tools with `eve__execute`, asks the user to sign in.
-- **The server lists tools without a token.** `eve__search` returns its tools with no prompt, and `eve__execute` runs tools the server answers anonymously. Sign-in starts only when a tool call comes back with HTTP `401`, or with an error result that carries a `WWW-Authenticate` challenge in `_meta["mcp/www_authenticate"]`.
+- **The server rejects every request without a token.** Most hosted OAuth servers, such as Linear, GitHub, and Notion, answer `initialize` or `tools/list` with HTTP `401`. `eve__search` lists the connection as one result named after it, such as `linear`. Calling that name with `eve__tool({ name: "linear" })`, or any of its tools with `eve__tool`, asks the user to sign in.
+- **The server lists tools without a token.** `eve__search` returns its tools with no prompt, and `eve__tool` runs tools the server answers anonymously. Sign-in starts only when a tool call comes back with HTTP `401`, or with an error result that carries a `WWW-Authenticate` challenge in `_meta["mcp/www_authenticate"]`.
 
 After the user signs in, the turn resumes and the model makes the call again. eve reconnects with the token and reloads the tool list, which may now include tools the server hides from anonymous callers. A connection that already has a token sends it on every request, as before.
 

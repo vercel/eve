@@ -73,7 +73,7 @@ export default defineTool({
 });
 ```
 
-A deferred tool is not in the model's tool list, and eve doesn't name it in context. The model finds its name, description, and signature with [`eve__search`](/docs/concepts/built-in-tools#eve__search-and-eve__execute) and calls it with `eve__execute({ tool: "export_report", input })`. After that, the call runs exactly like a direct call: approvals, `endsTurn`, `toModelOutput`, hooks, and stream events see `export_report`, not `execute`.
+A deferred tool is not in the model's tool list, and eve doesn't name it in context. The model finds its name, description, and signature with [`eve__search`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) and calls it with `eve__tool({ name: "export_report", input })`. After that, the call runs exactly like a direct call: approvals, `endsTurn`, `toModelOutput`, hooks, and stream events see `export_report`, not `execute`.
 
 The option works with `defineTool`, `defineWorkflowTool`, and dynamic tool entries. Provider tools such as `webSearch()` cannot be deferred, because the provider has to see their definition; the compiler rejects `deferred` on them. To defer an agent, set [`tool: "deferred"`](/docs/subagents#declared-subagents) on its `defineAgent` definition.
 
@@ -149,7 +149,7 @@ The label is presentation only. It does not replace the path-derived tool name, 
 
 Provided tools define labels for `bash`, `glob`, `grep`, `read_file`, `web_fetch`, `web_search`, and `write_file`.
 
-Calls the model makes through the [catalog](/docs/concepts/built-in-tools#eve__search-and-eve__execute) read the same way. A deferred tool, agent, or connection tool called through `eve__execute` shows its own label, exactly as a direct call would. An `eve__search` call shows `Search tools for “linear issues”`, then `Searched tools for “linear issues”, found 5` when it returns. A skill load shows `Load skill release-notes`, then `Loaded skill release-notes`, and a connection's sign-in entry shows `Sign in to Linear`.
+Calls the model makes through the [catalog](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) read the same way. A deferred tool, agent, or connection tool called through `eve__tool` shows its own label, exactly as a direct call would. An `eve__search` call shows `Search tools for “linear issues”`, then `Searched tools for “linear issues”, found 5` when it returns. A skill load shows `Load skill release-notes`, then `Loaded skill release-notes`, and a connection's sign-in entry shows `Sign in to Linear`.
 
 ### Stream preliminary tool results
 

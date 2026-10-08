@@ -74,7 +74,7 @@ export default defineAgent({
 
 The parent can alternatively export `disableTool()` from a same-named tool path, such as `agent/tools/researcher.ts`. This suppresses the derived model tool without removing `researcher` from the workflow invocation registry. A same-named authored tool replaces the model-facing surface while the workflow can still call the underlying subagent with `ctx.agent("researcher", ...)`.
 
-Set `tool: "deferred"` to keep the subagent out of the parent model's tool list while the model can still call it. eve doesn't name the subagent in the parent's context; the model finds it with [`eve__search`](/docs/concepts/built-in-tools#eve__search-and-eve__execute) and calls it with `eve__execute`. The call then runs exactly like a direct subagent call. Use this when a parent has many specialists and you want to keep its tool list short.
+Set `tool: "deferred"` to keep the subagent out of the parent model's tool list while the model can still call it. eve doesn't name the subagent in the parent's context; the model finds it with [`eve__search`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) and calls it with `eve__tool`. The call then runs exactly like a direct subagent call. Use this when a parent has many specialists and you want to keep its tool list short.
 
 A declared local or remote subagent call returns a receipt, and the child's reply arrives as the task's result. Human input requests from the child surface on the parent session while the task works. `eve__task_cancel` with the task's `taskId` cancels the child's current turn, and so does cancelling the calling turn.
 
