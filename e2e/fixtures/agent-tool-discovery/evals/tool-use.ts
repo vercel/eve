@@ -2,12 +2,14 @@ import { EXECUTE_TOOL, SEARCH_TOOL } from "@eve-e2e/config/catalog-tools";
 import type { EveEvalTurn } from "eve/evals";
 
 import { CATALOG_TOOLS } from "../agent/lib/catalog";
+import { INVOICE_DRAFT_TOOL } from "../agent/lib/invoice-draft";
 
 type Events = Parameters<Parameters<EveEvalTurn["eventsSatisfy"]>[1]>[0];
 
 /** Entries only the catalog tools reach: the deferred tools, skill, and agent. */
 const CATALOG_ENTRIES = new Set([
   ...CATALOG_TOOLS.map(({ name }) => name),
+  INVOICE_DRAFT_TOOL,
   "support__escalation-policy",
   "account_researcher",
 ]);
