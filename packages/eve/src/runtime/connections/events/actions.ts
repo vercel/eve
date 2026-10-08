@@ -2,7 +2,11 @@ import { principalOf } from "#execution/session/principal.js";
 import { z } from "zod";
 import { toInputSchema } from "#tools/schema.js";
 import { createHash } from "node:crypto";
-import { createMCPClient } from "#compiled/@ai-sdk/mcp/index.js";
+import {
+  createMCPClient,
+  type Experimental_MCPEventDefinition as EventDefinition,
+  type Experimental_ManagedMCPEvents as ManagedEvents,
+} from "#compiled/@ai-sdk/mcp/index.js";
 import { contextStorage } from "#context/container.js";
 import { AuthKey, SessionIdKey } from "#context/keys.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
@@ -11,10 +15,7 @@ import type {
   ConnectionToolExecuteOptions,
   ConnectionToolMetadata,
 } from "#shared/connection-types.js";
-import type {
-  ConnectionEventsAdapter,
-  ManagedEventSubscribeInput,
-} from "#shared/connection-events.js";
+import type { ManagedEventSubscribeInput } from "#shared/connection-events.js";
 import { parseJsonObject } from "#shared/json.js";
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
 import { connectionEventDestination } from "#runtime/connections/events/path.js";
@@ -24,20 +25,6 @@ import {
   type EventBinding,
 } from "#runtime/connections/events/state.js";
 
-type EventDefinition = {
-  name: string;
-  description?: string | null;
-  delivery: string[];
-  inputSchema: boolean | Record<string, unknown>;
-};
-// Removed when the merged managed-events release can be selected in the catalog.
-// This structural boundary keeps the public eve contract independent of SDK types.
-interface ManagedEvents extends ConnectionEventsAdapter {
-  list(input?: {
-    params?: { cursor?: string };
-    options?: { timeout?: number };
-  }): Promise<{ events: EventDefinition[]; nextCursor?: string | null }>;
-}
 const LIST = "events_list_subscriptions";
 const GET = "events_get_subscription";
 const STOP = "events_unsubscribe";
@@ -111,12 +98,7 @@ export class ConnectionEventActions {
     };
     const client = await createMCPClient(config);
     try {
-      const events = (client as typeof client & { experimental_events?: ManagedEvents })
-        .experimental_events;
-      if (events === undefined || typeof events.listSubscriptions !== "function") {
-        throw new Error("Managed events require the AI SDK release containing vercel/ai#22250.");
-      }
-      return await run(events);
+      return await run(client.experimental_events);
     } finally {
       await client.close();
     }
@@ -312,7 +294,16 @@ export class ConnectionEventActions {
         ...binding.request,
         options: { signal: options.abortSignal, timeout: 30_000 },
       });
-      binding = { ...binding, subscription };
+      binding = {
+        ...binding,
+        subscription: {
+          ...subscription,
+          // Snapshot the SDK's readonly JSON into eve's owned, mutable state.
+          arguments: structuredClone(
+            subscription.arguments,
+          ) as ManagedEventSubscribeInput["arguments"],
+        },
+      };
       save(binding);
       return subscriptionResult(binding);
     });

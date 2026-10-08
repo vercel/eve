@@ -303,3 +303,14 @@ as stopped. `expiresAt: null` removes the Connect monitoring deadline; it does
 not keep an ended eve session alive.
 Subscription cleanup failures do not prevent child-task termination or hide an
 existing session failure from its waiting caller.
+
+The runtime vendors `@ai-sdk/mcp@2.0.72`, which includes managed event operations.
+The Connect bridge binds subscriptions to the same URL as the connection and
+forwards it as `source.url`; you do not need to configure that URL a second time.
+The backend must support and authorize that endpoint before forwarding provider
+credentials. A connection URL alone does not grant permission to use it.
+
+The transport-context factory in [AI SDK #22325](https://github.com/vercel/ai/pull/22325)
+is a separate, unreleased change. Until it ships, eve passes the bridge's bound
+operations to the released SDK. After upgrading, only the internal client wiring
+needs to change; the authored connection and callbacks stay the same.

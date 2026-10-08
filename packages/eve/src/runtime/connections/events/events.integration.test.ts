@@ -175,6 +175,56 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+it("discovers through the released AI SDK and subscribes through the backend without an event store", async () => {
+  const { createMCPClient } = await vi.importActual<
+    typeof import("#compiled/@ai-sdk/mcp/index.js")
+  >("#compiled/@ai-sdk/mcp/index.js");
+  createClient.mockImplementation(createMCPClient);
+  const methods: string[] = [];
+  const transportFetch: typeof fetch = async (_url, init) => {
+    if (init?.method !== "POST") return new Response(null, { status: 405 });
+    const request = JSON.parse(String(init.body));
+    methods.push(request.method);
+    if (request.id === undefined) return new Response(null, { status: 202 });
+    let result;
+    if (request.method === "initialize") {
+      result = {
+        protocolVersion: "2025-11-25",
+        serverInfo: { name: "test-events", version: "1" },
+        capabilities: { events: {} },
+      };
+    } else if (request.method === "events/list") {
+      result = {
+        events: [
+          {
+            name: "issue.created",
+            delivery: ["webhook"],
+            inputSchema: eventSchema,
+            payloadSchema: { type: "object" },
+          },
+        ],
+      };
+    } else {
+      throw new Error(`Unexpected upstream request: ${request.method}`);
+    }
+    return Response.json({ jsonrpc: "2.0", id: request.id, result });
+  };
+  actions = new ConnectionEventActions(
+    connection,
+    async () => ({ Authorization: "Bearer test" }),
+    transportFetch,
+  );
+  await watch();
+  expect(methods.filter((method) => method === "events/list")).toHaveLength(2);
+  expect(methods).not.toContain("events/subscribe");
+  expect(subscriber).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ name: "issue.created", arguments: { project: "ABC" } }),
+  );
+  expect(Object.values(ctx.require(ConnectionEventsStateKey).bindings)[0]?.subscription?.id).toBe(
+    "sub_0",
+  );
+});
+
 it.each<SessionStart>([
   { kind: "first-message" },
   { kind: "turn", input: undefined },

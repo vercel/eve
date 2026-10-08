@@ -32,7 +32,7 @@ catalog:
   "@ai-sdk/anthropic": "^4.0.72"
   "@ai-sdk/code-mode": "^1.0.85"
   "@ai-sdk/google": "^4.0.88"
-  "@ai-sdk/mcp": "^2.0.67"
+  "@ai-sdk/mcp": "^2.0.72"
   "@ai-sdk/openai": "^4.0.84"
   "@ai-sdk/otel": "^1.0.128"
   "@ai-sdk/provider": "^4.0.22"
