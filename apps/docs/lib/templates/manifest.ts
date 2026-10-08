@@ -127,7 +127,6 @@ export const templateManifest: TemplateManifestEntry[] = [
       "agent/skills/design-knowledge/SKILL.md",
       "agent/tools/agent.ts",
       "agent/tools/bash.ts",
-      "agent/tools/todo.ts",
       "agent/tools/web_fetch.ts",
       "agent/tools/web_search.ts",
       "agent/tools/write_file.ts",
