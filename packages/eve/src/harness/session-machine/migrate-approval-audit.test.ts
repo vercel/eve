@@ -4,7 +4,7 @@ import { migrateSessionState } from "#harness/session-machine/migrate.js";
 import { initialSessionProjection } from "#protocol/session-projection.js";
 import { ALICE as alice, AT, approval, stepResponse } from "#internal/testing/hitl.js";
 import { approversOf } from "#harness/hitl/approved-call-callers.js";
-import { beforeStep } from "#harness/hitl/decisions.js";
+import { beforeStep } from "#harness/hitl/reducer.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import { writeTurnState } from "#harness/session-machine/state.js";
 

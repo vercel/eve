@@ -29,12 +29,12 @@ import { grantedApprovalKeys } from "./approval.js";
 import { runApprovedCalls } from "./approved-calls.js";
 import { approversOf, setApprovedCallCallers } from "./approved-call-callers.js";
 import type { InstrumentationAttempt } from "#instrumentation/runtime.js";
-import { beforeStep, afterStep, policyChecksBeforeStep } from "./decisions.js";
+import { beforeStep, afterStep, policyChecksBeforeStep } from "./reducer.js";
 import { applyHumanInputDecision } from "./effects.js";
 import { arrivalsOf } from "./input-arrival.js";
 import { runPolicy } from "./policy-effect.js";
 import { PendingAuthorizationResultKey } from "#harness/authorization.js";
-import type { BeforeStepArrival } from "./decisions.js";
+import type { BeforeStepArrival } from "./reducer.js";
 import type { Verdicts } from "./input.js";
 import { activeTurnId } from "#harness/session-machine/view.js";
 

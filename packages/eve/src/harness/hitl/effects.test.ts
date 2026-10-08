@@ -7,7 +7,7 @@ import { applyTransition, sessionView } from "#harness/session-machine/commit.js
 import { initialSessionProjection } from "#protocol/session-projection.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { EffectCommand } from "./command.js";
-import { beforeStep } from "./decisions.js";
+import { beforeStep } from "./reducer.js";
 import {
   applyHumanInputDecision,
   dispatchHumanInputEffects,

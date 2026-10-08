@@ -12,7 +12,7 @@ import {
   afterStep,
   policyChecksBeforeStep,
   type BeforeStepArrival,
-} from "#harness/hitl/decisions.js";
+} from "#harness/hitl/reducer.js";
 import { saveTransition, sessionView, dropClosedRecords } from "#harness/session-machine/commit.js";
 import { storedProjection, SESSION_PROJECTION_STATE_KEY } from "#harness/session-machine/view.js";
 import { migrateSessionState } from "#harness/session-machine/migrate.js";

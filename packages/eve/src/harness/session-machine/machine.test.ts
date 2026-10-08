@@ -20,7 +20,7 @@ import type { InputRequest } from "#shared/input.js";
 import { createSessionLimitContinuationRequest } from "#harness/hitl/budget-question.js";
 import { grantedApprovalKeys } from "#harness/hitl/approval.js";
 import { parkOnApprovals as parkOnApprovalsTransition } from "#internal/testing/session-machine.js";
-import { beforeStep, afterStep } from "#harness/hitl/decisions.js";
+import { beforeStep, afterStep } from "#harness/hitl/reducer.js";
 import { arrivalsOf } from "#harness/hitl/input-arrival.js";
 import { deliver } from "#harness/hitl/intake.js";
 import { applyTransition, sessionView, type Transition } from "./commit.js";

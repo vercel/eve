@@ -7,7 +7,7 @@ import type { Step } from "#harness/step/context.js";
 import type { InputResponse } from "#shared/input.js";
 import type { ToolInputResponseResponder } from "#tools/definition.js";
 import type { EffectCommand } from "./command.js";
-import { beforeStep, type BeforeStepArrival, type HumanInputDecision } from "./decisions.js";
+import { beforeStep, type BeforeStepArrival, type HumanInputDecision } from "./reducer.js";
 
 type EffectOf<T extends EffectCommand["type"]> = Extract<EffectCommand, { readonly type: T }>;
 type EffectOutcome = Promise<readonly BeforeStepArrival[] | void>;

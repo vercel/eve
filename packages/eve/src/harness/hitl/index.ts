@@ -18,7 +18,7 @@ import { hasRunnableQueue } from "./intake.js";
 import { checkSessionUsageLimit } from "./budget.js";
 import { applyHumanInputDecision } from "./effects.js";
 import { approvalsRequested } from "./approval.js";
-import { beforeStep, afterStep } from "./decisions.js";
+import { beforeStep, afterStep } from "./reducer.js";
 import { holdForInput } from "./intake.js";
 
 // The session's human-in-the-loop lifecycle, behind the few points where the rest of the harness
@@ -210,13 +210,13 @@ function currentRequester(step: Step): SessionAuthContext | null {
   return step.ctx?.get(AuthKey) ?? step.ctx?.get(SessionKey)?.auth.current ?? null;
 }
 
-export { beforeStep, afterStep } from "./decisions.js";
+export { beforeStep, afterStep } from "./reducer.js";
 
 export { applyHumanInputDecision } from "./effects.js";
 
 export type { EffectCommand } from "./command.js";
 export { dispatchHumanInputEffects, effectHandlers } from "./effects.js";
-export type { BeforeStepArrival } from "./decisions.js";
+export type { BeforeStepArrival } from "./reducer.js";
 
 export {
   isPendingApprovalsSnippet,

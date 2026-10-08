@@ -23,7 +23,7 @@ import {
   stepResponse,
 } from "#internal/testing/hitl.js";
 import { HumanInput } from "#internal/testing/hitl-observer.js";
-import { beforeStep, afterStep } from "./decisions.js";
+import { beforeStep, afterStep } from "./reducer.js";
 import { migrateSessionState } from "#harness/session-machine/migrate.js";
 import {
   LEGACY_BATCH_KEY,

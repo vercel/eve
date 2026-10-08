@@ -6,7 +6,7 @@ import { sessionView } from "#harness/session-machine/commit.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import { ALICE, AT, approval, stepResponse } from "#internal/testing/hitl.js";
 import { approversOf } from "./approved-call-callers.js";
-import { beforeStep } from "./decisions.js";
+import { beforeStep } from "./reducer.js";
 
 const request = approval("deploy");
 const LEGACY_KEY = APPROVAL_STATE_KEY;

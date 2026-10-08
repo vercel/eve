@@ -1,6 +1,6 @@
 import { CANCELLED_CALL_RESULT } from "#harness/session-machine/transitions.js";
 import { LEGACY_GRANTS_KEY } from "#harness/session-machine/migrate-legacy.js";
-import { beforeStep } from "./decisions.js";
+import { beforeStep } from "./reducer.js";
 import { arrivalsOf } from "./input-arrival.js";
 import { sessionView } from "#harness/session-machine/commit.js";
 import { storedProjection } from "#harness/session-machine/view.js";
