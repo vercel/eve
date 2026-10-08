@@ -1,4 +1,5 @@
 import { findStubTarget, stubCallId } from "#tool-stubs/target.js";
+import { toolStubOutput } from "#tool-stubs/output.js";
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import { callToolStubStep } from "#execution/tool-stubs/steps.js";
 
@@ -182,7 +183,8 @@ async function executeCallBody(
         input: input.input,
       });
       if (result.kind === "error") throw new Error(result.error);
-      if (result.kind === "stub") return { output: result.outcome.response, status: "completed" };
+      if (result.kind === "stub")
+        return { output: toolStubOutput(result.outcome), status: "completed" };
     }
     const entryPoint = resolveWorkflowEntryPoint<WorkflowCallEntryPoint>(input);
     const result = entryPoint(input.executeInput ?? input.input, ctx);

@@ -96,6 +96,102 @@ describe("tool replacement through the session runtime", () => {
     },
   );
 
+  it.each(["ordinary", "execute", "task", "serve"] as const)(
+    "reports an injected %s failure and lets a new call succeed after handoff",
+    async (entryPoint) => {
+      const live = vi.fn(() => "live");
+      const definition = {
+        description: "Deploy a service.",
+        inputSchema: {
+          type: "object" as const,
+          properties: { service: { type: "string" as const } },
+          required: ["service"],
+        },
+      };
+      const runtime = await createTestRuntime({
+        modules: [
+          {
+            logicalPath: "tools/deploy_service.ts",
+            loadNamespace: async () => {
+              switch (entryPoint) {
+                case "ordinary":
+                  return { default: defineTool({ ...definition, execute: live }) };
+                case "execute":
+                  return {
+                    default: defineWorkflowTool({ ...definition, execute: failingDeployWorkflow }),
+                  };
+                case "task":
+                  return {
+                    default: defineWorkflowTool({ ...definition, task: failingDeployWorkflow }),
+                  };
+                case "serve":
+                  return {
+                    default: defineWorkflowTool({ ...definition, serve: failingServeWorkflow }),
+                  };
+              }
+            },
+          },
+        ],
+      });
+      await runtime.run(async () => {
+        const message = 'Run deploy_service with service "api"';
+        const run = await start(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
+            input: { message },
+            serializedContext: {
+              ...buildSerializedContext({ channelKind: "http" }),
+              [STUB_CONTEXT_KEY]: {
+                token: "injected-error-playback",
+                rules: [
+                  {
+                    id: "deploy",
+                    tool: "deploy_service",
+                    outcomes: [
+                      { throw: { name: "TimeoutError", message: "Deployment service timed out" } },
+                      { response: { state: "recovered" } },
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+        ]);
+        const stream = captureTurnEvents(run);
+        try {
+          const events = await stream.nextTurn();
+          const failures =
+            entryPoint === "task" || entryPoint === "serve"
+              ? filterEventsByType(events, "task.settled").map((event) => event.data)
+              : filterEventsByType(events, "action.result").map((event) => event.data);
+          expect(failures).toContainEqual(expect.objectContaining({ status: "failed" }));
+          expect(JSON.stringify(failures)).toContain("Deployment service timed out");
+          expect(filterEventsByType(events, "turn.failed")).toEqual([]);
+          expect(await readStubFailure(run.runId)).toBeUndefined();
+          await dispatchWorkflowSessionCommand({
+            sessionId: run.runId,
+            command: handoffFollowUp("dpl_successor", message, "retry-after-injected-error"),
+          });
+          const retried = await stream.nextTurn();
+          const results =
+            entryPoint === "task" || entryPoint === "serve"
+              ? filterEventsByType(retried, "task.settled").map((event) => event.data)
+              : filterEventsByType(retried, "action.result").map((event) => event.data.result);
+          expect(results).toContainEqual(
+            expect.objectContaining({ output: { state: "recovered" } }),
+          );
+          expect(filterEventsByType(retried, "turn.failed")).toEqual([]);
+          expect(live).not.toHaveBeenCalled();
+          expect(await readStubFailure(run.runId)).toBeUndefined();
+        } finally {
+          stream.dispose();
+          await run.cancel();
+        }
+      });
+    },
+  );
+
   it.each([false, true])(
     "ends the active session when playback fails (handoff: %s)",
     async (handoff) => {

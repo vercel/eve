@@ -1,4 +1,5 @@
 import { findStubTarget, stubCallId } from "#tool-stubs/target.js";
+import { toolStubOutput } from "#tool-stubs/output.js";
 import { contextStorage } from "#context/container.js";
 import { SessionKey, ToolStubsKey } from "#context/keys.js";
 import { ToolStubPlaybackKey, type ToolStubPlayback } from "#context/providers/tool-stubs-key.js";
@@ -28,7 +29,7 @@ async function* executeStubbedTool(
   const result = await playback.call(call);
   if (result.kind === "error") throw new Error(result.error);
   if (result.kind === "stub") {
-    yield result.outcome.response;
+    yield toolStubOutput(result.outcome);
     return;
   }
   const output = await execute();

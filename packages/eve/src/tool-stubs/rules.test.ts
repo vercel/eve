@@ -196,11 +196,15 @@ describe("tool stubs", () => {
     [{ id: "a", tool: "list", outcome: {} }],
     [{ id: "a", tool: "list", outcome: { response: undefined } }],
     [{ id: "a", tool: "list", outcome: { response: null, extra: true } }],
-    [{ id: "a", tool: "list", outcome: { throw: { name: "Error", message: "Not yet" } } }],
     [{ id: "a", tool: "list", outcome: { response: null, throw: { message: "Not yet" } } }],
+    [{ id: "a", tool: "list", outcome: { throw: {} } }],
+    [{ id: "a", tool: "list", outcome: { throw: "Unavailable" } }],
+    [{ id: "a", tool: "list", outcome: { throw: { message: 42 } } }],
+    [{ id: "a", tool: "list", outcome: { throw: { message: "Unavailable", name: "" } } }],
+    [{ id: "a", tool: "list", outcome: { throw: { message: "Unavailable", delayMs: 100 } } }],
     [{ id: "a", tool: "list", outcomes: [] }],
     [{ id: "a", tool: "list", outcomes: [{ response: null }, {}] }],
-    [{ id: "a", tool: "list", outcomes: [{ response: null }, { throw: { message: "Not yet" } }] }],
+    [{ id: "a", tool: "list", outcomes: [{ response: null }, { throw: { message: false } }] }],
     [{ id: "a", tool: "list", outcome: { response: null }, outcomes: [{ response: null }] }],
     [{ id: "a", tool: "list", outcome: { response: null }, typo: true }],
     [{ id: "a", tool: "list", match: [], outcome: { response: null } }],
@@ -225,7 +229,7 @@ describe("tool stubs", () => {
     expect(() => parseToolStubs(rules)).toThrow();
   });
 
-  it("normalizes absent options and preserves falsy JSON responses", () => {
+  it("normalizes absent options and preserves response and error outcomes", () => {
     expect(
       parseToolStubs([
         {
@@ -241,6 +245,15 @@ describe("tool stubs", () => {
           outcome: undefined,
           outcomes: [{ response: false }, { response: 0 }, { response: "" }, { response: null }],
         },
+        { id: "failure", tool: "list", outcome: { throw: { message: "Unavailable" } } },
+        {
+          id: "recovery",
+          tool: "list",
+          outcomes: [
+            { throw: { name: "TimeoutError", message: "Timed out" } },
+            { response: { tasks: [] } },
+          ],
+        },
       ]),
     ).toEqual([
       { id: "constant", tool: "list", outcome: { response: null } },
@@ -248,6 +261,15 @@ describe("tool stubs", () => {
         id: "sequence",
         tool: "list",
         outcomes: [{ response: false }, { response: 0 }, { response: "" }, { response: null }],
+      },
+      { id: "failure", tool: "list", outcome: { throw: { message: "Unavailable" } } },
+      {
+        id: "recovery",
+        tool: "list",
+        outcomes: [
+          { throw: { name: "TimeoutError", message: "Timed out" } },
+          { response: { tasks: [] } },
+        ],
       },
     ]);
   });

@@ -9,6 +9,12 @@ import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { getWorld, start } from "#internal/workflow/runtime.js";
 import { workflowEntry } from "#execution/session/entry.js";
 import { resolveConnectionTools } from "#execution/tools/connection-tools.js";
+import { calledTool } from "#evals/assertions/run.js";
+import { deriveRunFacts } from "#evals/runner/derive-run-facts.js";
+import type { EveEvalTaskResult } from "#evals/types.js";
+import { emitNestedToolActions } from "#harness/nested-actions.js";
+import { stampTestEvents } from "#internal/testing/events.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { recordToolStubFailure } from "#tool-stubs/execute.js";
 import { readStubFailure } from "#execution/tool-stubs/steps.js";
 import { STUB_CONTEXT_KEY, STUB_FAILURE_NAMESPACE, type ToolStub } from "#tool-stubs/types.js";
@@ -16,7 +22,7 @@ import type { ConnectionClient } from "#shared/connection-types.js";
 import type { ToolContext } from "#tools/definition.js";
 
 describe("connection operation stubs", () => {
-  it("validates input before replacing a child-scoped connection operation and leaves unmatched calls live", async () => {
+  it("reports child-scoped failures and recovery, validates input, and executes unmatched calls", async () => {
     let liveCalls = 0;
     const runtime = await createTestRuntime();
     await runtime.run(async () => {
@@ -25,7 +31,11 @@ describe("connection operation stubs", () => {
           id: "open",
           tool: "researcher/linear__list_issues",
           match: { status: { const: "open" } },
-          outcome: { response: { issues: ["milk"] } },
+          outcomes: [
+            { throw: { name: "TimeoutError", message: "Issue service timed out" } },
+            { throw: { name: "ConnectionAuthorizationRequiredError", message: "Access denied" } },
+            { response: { issues: ["milk"] } },
+          ],
         },
       ];
       const token = "connection-stub-playback";
@@ -92,14 +102,76 @@ describe("connection operation stubs", () => {
         context.setVirtualContext(toolStubProvider.key, toolStubProvider.create(context)!.value);
         await contextStorage.run(context, async () => {
           const execute = resolveConnectionTools()!.connection_execute!.execute!;
-          const call = (callId: string, input: unknown) =>
-            execute({ connection: "linear", tool: "list_issues", input }, {
-              callId,
-            } as ToolContext);
+          const events: UnstampedMessageStreamEvent[] = [];
+          const call = async (callId: string, input: unknown) => {
+            try {
+              return await execute({ connection: "linear", tool: "list_issues", input }, {
+                callId,
+              } as ToolContext);
+            } finally {
+              await emitNestedToolActions(
+                async (event) => {
+                  events.push(event);
+                },
+                { sequence: 0, stepIndex: 0, turnId: "turn-0" },
+                callId,
+              );
+            }
+          };
+          const evalResult = (): EveEvalTaskResult => {
+            const stamped = stampTestEvents(events);
+            return {
+              events: stamped,
+              derived: deriveRunFacts(stamped),
+              status: "completed",
+              output: null,
+              finalMessage: null,
+              traceContexts: [],
+            };
+          };
           await expect(call("invalid", { status: 42 })).rejects.toThrow(/Invalid input/);
+          await expect(call("failed", { status: "open" })).rejects.toMatchObject({
+            name: "TimeoutError",
+            message: "Issue service timed out",
+          });
+          expect(
+            await calledTool("linear__list_issues", {
+              status: "failed",
+              input: { status: "open" },
+              output: "Issue service timed out",
+              count: 1,
+            }).evaluate(evalResult()),
+          ).toMatchObject({ score: 1 });
+          expect(events[0]).toMatchObject({
+            type: "actions.requested",
+            data: {
+              actions: [{ parentCallId: "failed", toolName: "linear__list_issues" }],
+            },
+          });
+          expect(await readStubFailure(run.runId)).toBeUndefined();
+          expect(liveCalls).toBe(0);
+          await expect(call("auth-named-failure", { status: "open" })).rejects.toMatchObject({
+            name: "ConnectionAuthorizationRequiredError",
+            message: "Access denied",
+          });
+          expect(
+            await calledTool("linear__list_issues", {
+              status: "failed",
+              output: "Access denied",
+              count: 1,
+            }).evaluate(evalResult()),
+          ).toMatchObject({ score: 1 });
           expect(await call("stubbed", { status: "open", limit: 10 })).toEqual({
             issues: ["milk"],
           });
+          expect(
+            await calledTool("linear__list_issues", {
+              status: "completed",
+              input: { status: "open", limit: 10 },
+              output: { issues: ["milk"] },
+              count: 1,
+            }).evaluate(evalResult()),
+          ).toMatchObject({ score: 1 });
           expect(liveCalls).toBe(0);
           await call("live", { status: "closed" });
           expect(liveCalls).toBe(1);

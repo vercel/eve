@@ -32,7 +32,7 @@ describe("durable tool stub playback", () => {
         {
           id: "list",
           tool: "list_tasks",
-          outcomes: [{ response: ["milk", "dog"] }, { response: ["dog"] }],
+          outcomes: [{ throw: { message: "Task service unavailable" } }, { response: ["dog"] }],
         },
       ] as const;
       const run = await start(workflowEntry, [

@@ -1,9 +1,16 @@
 import type { JsonObject, JsonValue } from "#shared/json.js";
 
-/** The JSON response returned for a matching tool call. */
-export interface ToolStubOutcome {
-  readonly response: JsonValue;
-}
+/** Return JSON or immediately throw an error for a matching tool call. */
+export type ToolStubOutcome =
+  | { readonly response: JsonValue; readonly throw?: never }
+  | {
+      readonly response?: never;
+      readonly throw: {
+        readonly message: string;
+        /** Defaults to Error. Sets the name, not a custom JavaScript class. */
+        readonly name?: string;
+      };
+    };
 
 /** Stub outcomes selected by tool name and input fields. */
 export type ToolStub = {

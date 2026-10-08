@@ -9,7 +9,12 @@ const ruleSchema = z.strictObject({
   match: z.record(z.string(), z.union([z.boolean(), z.record(z.string(), z.json())])).optional(),
 });
 
-const outcomeSchema = z.strictObject({ response: z.json() });
+const outcomeSchema = z.union([
+  z.strictObject({ response: z.json() }),
+  z.strictObject({
+    throw: z.strictObject({ message: z.string(), name: z.string().min(1).optional() }),
+  }),
+]);
 
 const toolStubsSchema = z
   .array(
