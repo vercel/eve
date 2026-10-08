@@ -22,8 +22,7 @@ export async function waitForParkedTurnStep(runId: string, count = 1): Promise<v
         if (!step.stepName.endsWith("//turnStep") || step.output === undefined) continue;
         const result: TurnStepResult = await hydrateStepReturnValue(step.output, runId, undefined);
         const parked =
-          result.action === "parked" ||
-          (result.action === "paused" && result.awaiting.callIds.length > 0);
+          result.action === "parked" || (result.action === "paused" && result.on === "calls");
         if (!parked) continue;
         const events = await world.events.listByCorrelationId({
           correlationId: step.stepId,
