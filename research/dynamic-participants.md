@@ -236,6 +236,26 @@ Memory has no `scope`; eve fixes its moments:
 - **Failed and cancelled turns** don't reach `capture`, as today. If providers ask, capturing them can come later as an explicit opt-in on the provider.
 - **Framework work moves onto events too.** The skill and connection announcements and the framework connection tools run on `model.requested` as built-in participants, instead of as special cases on `step.started`.
 
+### Why not keep the maps and filter them
+
+An alternative keeps today's shape and has eve filter what reaches each key:
+
+```ts
+defineMemoryProvider({
+  capture: {
+    "turn.settled": captureTurn, // only completed turns arrive
+    "context.started": captureBeforeCompaction, // only compactions arrive
+  },
+});
+```
+
+- **The event model condenses information into fewer types.** One terminal per entity carries the outcome as a value, and one family per operation carries the kind. That serves most readers: one fact to handle, closed outcome sets, generic handling, and older readers that stay correct when a kind is added. But a distinction that used to be a type is now data, and a key can only name a type.
+- **So a filtered key hides what the event means.** `"turn.settled"` reads as every settled turn, and a reviewer would assume failed turns are captured. This repeats the problem this doc started with, moved from the event to its filter.
+- **Making the filter visible means more technical types:** qualified keys that exist nowhere on the wire, such as `"turn.settled:completed"`, or refinements in handler types, such as `TurnSettled & {data: {outcome: "completed"}}`.
+- **Filters on one type don't compose:** handling completed and failed turns differently would need two keys for one type.
+
+Instead, an author who names an event gets every instance of it, as hooks and channels do. eve filters only where it defines the moment and names it as one: a resolver's `scope`, and memory's fixed moments, whose `event` types state the filter.
+
 ### What a handler returns
 
 - **A result, or nothing.** Nothing means no change, and nothing is recorded.
