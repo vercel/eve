@@ -106,21 +106,18 @@ function executeInputSchema(tools: CatalogTools): JsonObject {
       additionalProperties: false,
     };
   }
-  return {
-    type: "object",
-    properties: {
-      tool: {
-        type: "string",
-        description: `The tool's exact name, as ${SEARCH_TOOL_NAME} returns it.`,
-      },
-      input: {
-        type: "object",
-        description: "Arguments matching the tool's signature. Defaults to {}.",
-      },
-      ...(tools.skills ? { skill } : {}),
+  const properties: Record<string, JsonObject> = {
+    tool: {
+      type: "string",
+      description: `The tool's exact name, as ${SEARCH_TOOL_NAME} returns it.`,
     },
-    additionalProperties: false,
+    input: {
+      type: "object",
+      description: "Arguments matching the tool's signature. Defaults to {}.",
+    },
   };
+  if (tools.skills) properties.skill = skill;
+  return { type: "object", properties, additionalProperties: false };
 }
 
 /**
