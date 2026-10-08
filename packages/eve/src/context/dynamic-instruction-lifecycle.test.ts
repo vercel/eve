@@ -1,4 +1,4 @@
-import type { DynamicScopeEvent } from "#dynamic/definition.js";
+import type { DynamicSessionOrTurnEvent } from "#dynamic/definition.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { defineInstructions } from "#public/definitions/instructions.js";
@@ -53,8 +53,8 @@ function createCtx(): ContextContainer {
   return ctx;
 }
 
-function makeEvent(type: string): Exclude<DynamicScopeEvent, { type: "step.started" }> {
-  return { type, data: {} } as Exclude<DynamicScopeEvent, { type: "step.started" }>;
+function makeEvent(type: string): DynamicSessionOrTurnEvent {
+  return { type, data: {} } as DynamicSessionOrTurnEvent;
 }
 
 describe("resolveDynamicInstructions", () => {
