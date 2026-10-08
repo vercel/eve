@@ -14,7 +14,10 @@
 //                         fixtures run once on the default (first) model. A
 //                         fixture may add narrowly scoped model legs through
 //                         `additionalModels` and make selected legs non-blocking
-//                         through `optionalModels`.
+//                         through `optionalModels`. Fixtures marked
+//                         `"e2e": { "manual": true }` are excluded from every
+//                         matrix; they are run by hand (e.g. measurement
+//                         harnesses that are too costly for per-change CI).
 //   world_matrix_<world>  `{ name, dir[, world_package] }` entries for that
 //                         world's suite workflow, which runs fixtures that
 //                         select that world once with mock models
@@ -26,7 +29,9 @@ import { join } from "node:path";
 export function discoverE2eFixtures({ registry, fixtures }) {
   const models = validateNamedEntries(registry.models, "models", ["id"]);
   const worlds = validateNamedEntries(registry.worlds, "worlds", []);
-  const normalizedFixtures = fixtures.map((fixture) => normalizeFixture(fixture, worlds));
+  const normalizedFixtures = fixtures
+    .filter((fixture) => !isManualFixture(fixture))
+    .map((fixture) => normalizeFixture(fixture, worlds));
   if (normalizedFixtures.length === 0) {
     throw new Error("No e2e fixtures with an evals/ directory were found.");
   }
@@ -73,6 +78,15 @@ export function discoverE2eFixtures({ registry, fixtures }) {
     outputs.push(`world_matrix_${world.name}=${JSON.stringify(legs)}`);
   }
   return { lines: `${outputs.join("\n")}\n`, modelMatrix, worlds, fixtures: normalizedFixtures };
+}
+
+function isManualFixture({ dir, packageJson }) {
+  const manual = packageJson?.e2e?.manual;
+  if (manual === undefined) return false;
+  if (typeof manual !== "boolean") {
+    throw new Error(`${join(dir, "package.json")}: e2e.manual must be a boolean.`);
+  }
+  return manual;
 }
 
 function normalizeFixture({ name, dir, packageJson, evals = [] }, worlds) {

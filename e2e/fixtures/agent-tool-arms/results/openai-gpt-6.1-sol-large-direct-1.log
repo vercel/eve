@@ -1,0 +1,59 @@
+
+EVALS 10
+target http://127.0.0.1:55467/
+
+[account-billing] {"id":"account-billing","arm":"direct","size":"large","model":"openai/gpt-6.1-sol","repetition":1,"success":true,"latencyMs":8140.808583000001,"modelCalls":2,"missingUsage":0,"inputTokens":22165,"cacheReadTokens":11027,"cacheWriteTokens":11132,"tools":[{"callId":"call_cd1EZZiGaEcmCnrVV089a064","input":{"company":"Acme"},"kind":"tool-call","toolName":"index__resolve_account"},{"callId":"call_p3cCDIj8RDhlCE2KFXQZgYvl","input":{"customer":"Acme"},"kind":"tool-call","toolName":"support__support_billing"}],"message":"- **CRM account lookup:** `REF-INDEX--RESOLVE-ACCOUNT`\n- **Support billing lookup:** `REF-SUPPORT--SUPPORT-BILLING`\n\nBoth tools returned only references; no account or billing details were included."}
+[account-billing] workflow run id (primary session): wrun_01M4E7HPHTRD8HG8W1HS526G2Y
+✓  account-billing  gates 2/2
+[account] {"id":"account","arm":"direct","size":"large","model":"openai/gpt-6.1-sol","repetition":1,"success":true,"latencyMs":7130.517875,"modelCalls":2,"missingUsage":0,"inputTokens":22090,"cacheReadTokens":22013,"cacheWriteTokens":71,"tools":[{"callId":"call_A3nhwt8NHAOHAXRSgeKVXied","input":{"company":"Acme"},"kind":"tool-call","toolName":"index__resolve_account"}],"message":"The CRM lookup for Acme returned reference `REF-INDEX--RESOLVE-ACCOUNT`, but no account details were included."}
+[account] workflow run id (primary session): wrun_01M4E7HYGA0JMWH86A892591AA
+✓  account  gates 1/1
+[cases] {"id":"cases","arm":"direct","size":"large","model":"openai/gpt-6.1-sol","repetition":1,"success":true,"latencyMs":5985.133417000001,"modelCalls":2,"missingUsage":0,"inputTokens":22088,"cacheReadTokens":22012,"cacheWriteTokens":70,"tools":[{"callId":"call_wvxCMtwiCiEu2UESFkJ8ZNGN","input":{"query":"Acme"},"kind":"tool-call","toolName":"support__search_cases"}],"message":"The support search for **Acme** returned reference `REF-SUPPORT--SEARCH-CASES`, but no case details were included."}
+[cases] workflow run id (primary session): wrun_01M4E7J5F357PSAETVRMPKJDBW
+✓  cases  gates 1/1
+[cost] {"id":"cost","arm":"direct","size":"large","model":"openai/gpt-6.1-sol","repetition":1,"success":true,"latencyMs":7207.523041,"modelCalls":2,"missingUsage":0,"inputTokens":22095,"cacheReadTokens":22015,"cacheWriteTokens":74,"tools":[{"callId":"call_pXLvmDyZuA7WhwJ8eTVoQcgv","input":{"groupBy":"team"},"kind":"tool-call","toolName":"d0__query_cost"}],"message":"The cost tool returned no cost figures or team breakdown, so I can’t report cloud infrastructure cost grouped by team.\n\nExact reference: `REF-D0--QUERY-COST`"}
+[cost] workflow run id (primary session): wrun_01M4E7JBA24W4PCXSF3B2SKQ0V
+✓  cost  gates 1/1
+[expenses] {"id":"expenses","arm":"direct","size":"large","model":"openai/gpt-6.1-sol","repetition":1,"success":true,"latencyMs":7915.799333000003,"modelCalls":2,"missingUsage":0,"inputTokens":22092,"cacheReadTokens":22013,"cacheWriteTokens":73,"tools":[{"callId":"call_l9hZbbCvpWlKXqJox1ive0fo","input":{"category":"meals"},"kind":"tool-call","toolName":"expense_policy_lookup"}],"message":"The meals expense-policy lookup returned only a reference, with no policy details.\n\nExact reference: `REF-EXPENSE-POLICY-LOOKUP`"}
+[expenses] workflow run id (primary session): wrun_01M4E7JJB9YMAGZKTGD8P9TVX7
+✓  expenses  gates 1/1
+[incident-cost] {"id":"incident-cost","arm":"direct","size":"large","model":"openai/gpt-6.1-sol","repetition":1,"success":true,"latencyMs":8532.968958000005,"modelCalls":2,"missingUsage":0,"inputTokens":22215,"cacheReadTokens":22018,"cacheWriteTokens":191,"tools":[{"callId":"call_UzJ0ZVl4rhlSBm32z7iSaI9U","input":{"status":"open"},"kind":"tool-call","toolName":"sre__status_page_incidents_list"},{"callId":"call_zmC47LSIZTD4K3exxzCAyRdU","input":{"groupBy":"team"},"kind":"tool-call","toolName":"d0__query_cost"}],"message":"### Open status page incidents\n- **INC-4821:** Elevated API latency in iad1 — investigating\n- **INC-4790:** Delayed webhook deliveries — monitoring\n\nReference: `REF-SRE--STATUS-PAGE-INCIDENTS-LIST`\n\n### Cloud infrastructure cost by team\nThe tool returned no cost figures or team breakdown.\n\nReference: `REF-D0--QUERY-COST`"}
+[incident-cost] workflow run id (primary session): wrun_01M4E7JT2Q3DFYNB2ZW3BPR3R1
+✓  incident-cost  gates 2/2
+[incidents] {"id":"incidents","arm":"direct","size":"large","model":"openai/gpt-6.1-sol","repetition":1,"success":true,"latencyMs":7035.167708000001,"modelCalls":2,"missingUsage":0,"inputTokens":22150,"cacheReadTokens":22014,"cacheWriteTokens":130,"tools":[{"callId":"call_7b5gLe5vpwAhGgpOEGwMAmmE","input":{"status":"open"},"kind":"tool-call","toolName":"sre__status_page_incidents_list"}],"message":"Open incidents:\n- **INC-4821:** Elevated API latency in iad1 — **Investigating**\n- **INC-4790:** Delayed webhook deliveries — **Monitoring**\n\nExact reference: `REF-SRE--STATUS-PAGE-INCIDENTS-LIST`"}
+[incidents] workflow run id (primary session): wrun_01M4E7K2DA2FPD9SMKJ5EY6P80
+✓  incidents  gates 1/1
+[oncall] {"id":"oncall","arm":"direct","size":"large","model":"openai/gpt-6.1-sol","repetition":1,"success":true,"latencyMs":6812.951249999998,"modelCalls":2,"missingUsage":0,"inputTokens":22103,"cacheReadTokens":22016,"cacheWriteTokens":81,"tools":[{"callId":"call_zTdDsuarK6XPRmeoEKxWZyd1","input":{"team":"platform"},"kind":"tool-call","toolName":"sre__oncall_schedule_get"}],"message":"The tool did not return an on-call name or schedule, so I can’t confirm who is on call for the platform team this week.\n\nExact reference: `REF-SRE--ONCALL-SCHEDULE-GET`"}
+[oncall] workflow run id (primary session): wrun_01M4E7K997GM2Y4R01GRF83EGS
+✓  oncall  gates 1/1
+[release] {"id":"release","arm":"direct","size":"large","model":"openai/gpt-6.1-sol","repetition":1,"success":true,"latencyMs":6907.247916,"modelCalls":2,"missingUsage":0,"inputTokens":22134,"cacheReadTokens":22019,"cacheWriteTokens":109,"tools":[{"callId":"call_rCVphOH15CPTgRPAhNuecaSa","input":{"app":"mobile"},"kind":"tool-call","toolName":"release_train_schedule"}],"message":"The next mobile release train, **mobile-2026.42**, departs **October 14, 2026, at 17:00 UTC**. The captain is **Priya Natarajan**.\n\nExact reference: `REF-RELEASE-TRAIN-SCHEDULE`"}
+[release] workflow run id (primary session): wrun_01M4E7KFY5H2Z7SKNCPDPZA69E
+✓  release  gates 1/1
+[usage] {"id":"usage","arm":"direct","size":"large","model":"openai/gpt-6.1-sol","repetition":1,"success":true,"latencyMs":6987.571125000002,"modelCalls":2,"missingUsage":0,"inputTokens":22112,"cacheReadTokens":22019,"cacheWriteTokens":87,"tools":[{"callId":"call_3bKpoHB9WcdEQfuGvHXeKqVj","input":{"customer":"Acme","month":"2026-09"},"kind":"tool-call","toolName":"d0__usage_summary"}],"message":"The usage tool returned no product usage metrics for Acme for **2026-09**, so I can’t provide a usage summary from this result.\n\nExact reference: `REF-D0--USAGE-SUMMARY`"}
+[usage] workflow run id (primary session): wrun_01M4E7KPP1TVD1CK8TS0HTC5GB
+✓  usage  gates 1/1
+
+Results: 10 passed (10 total)
+Gates: 12 passed
+
+Completed in 1m 13s
+
+[WARN] Failed to replace env in config: ${SOCKET_PASSWORD_B64} in .npmrc key "_password"
+[workflow-sdk] Step execution already in flight in this process; awaiting its settlement instead of executing again
+  run    wrun_01M4E7HPHTRD8HG8W1HS526G2Y
+  step   step_01M4E7HPHTBSSD7REVRB2E22HV
+[workflow-sdk] Step execution already in flight in this process; awaiting its settlement instead of executing again
+  run    wrun_01M4E7HYGA0JMWH86A892591AA
+  step   step_01M4E7HYGABG4WYNMKCRMF2AN4
+[workflow-sdk] Step execution already in flight in this process; awaiting its settlement instead of executing again
+  run    wrun_01M4E7J5F357PSAETVRMPKJDBW
+  step   step_01M4E7J5F3YFBHXK1W607NVWDG
+[workflow-sdk] Step execution already in flight in this process; awaiting its settlement instead of executing again
+  run    wrun_01M4E7JBA24W4PCXSF3B2SKQ0V
+  step   step_01M4E7JBA2GNNFGZ8E6E3WGXA2
+[workflow-sdk] Step execution already in flight in this process; awaiting its settlement instead of executing again
+  run    wrun_01M4E7K997GM2Y4R01GRF83EGS
+  step   step_01M4E7K9970A6C3H7V051EQ5Q8
+[workflow-sdk] Step execution already in flight in this process; awaiting its settlement instead of executing again
+  run    wrun_01M4E7KFY5H2Z7SKNCPDPZA69E
+  step   step_01M4E7KFY58QYC1B8Y6A3QFNYV
