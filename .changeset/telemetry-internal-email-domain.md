@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-CLI telemetry now filters Vercel-internal usage.
+CLI telemetry now indicates whether usage is internal.
