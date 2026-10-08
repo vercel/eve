@@ -15,6 +15,7 @@ describe("World hub transport", () => {
   it("dispatches over HTTP, batches in order, flushes on close and rejects unknown ops", async () => {
     const writeMulti = vi.fn(async () => {});
     const close = vi.fn(async () => {});
+    const queue = vi.fn(async () => ({ messageId: "msg-test" }));
     const onDeployment = vi.fn();
     const server = createServer(
       createWorldHubServer({
@@ -23,6 +24,7 @@ describe("World hub transport", () => {
         world: {
           specVersion: 8,
           getDeploymentId: async () => "deployment",
+          queue,
           streams: { writeMulti, close },
           runs: { get: async () => ({ createdAt: new Date(0) }) },
         } as unknown as World,
@@ -34,6 +36,7 @@ describe("World hub transport", () => {
     const client = await createWorldHubWorld({
       url,
       secret: "secret",
+      deploymentId: "deployment",
       deploymentUrl: "https://deployment.test",
       streamFlushIntervalMs: 1000,
     });
@@ -45,6 +48,10 @@ describe("World hub transport", () => {
       expect(close).toHaveBeenCalledOnce();
       expect(await client.runs.get("run")).toEqual({ createdAt: new Date(0) });
       expect(onDeployment).toHaveBeenCalled();
+      await client.queue("__wkf_step_test" as never, {} as never);
+      expect(queue).toHaveBeenLastCalledWith("__wkf_step_test", {}, { deploymentId: "deployment" });
+      await client.queue("__wkf_step_test" as never, {} as never, { deploymentId: "other" });
+      expect(queue).toHaveBeenLastCalledWith("__wkf_step_test", {}, { deploymentId: "other" });
       const body = encode({ operation: "__proto__.oops", arguments: [] });
       const response = await fetch(`${url}/world/v1/rpc`, {
         method: "POST",
