@@ -266,6 +266,7 @@ export class ModelCaller {
         session: step.session,
         telemetry: step.instrumentation?.telemetry(),
       });
+      if (compaction.failure !== undefined) throw compaction.failure.error;
     } catch (error) {
       this.compactionFailure = { error };
       throw error;

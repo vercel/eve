@@ -110,7 +110,7 @@ describe("compaction summary call", () => {
     });
   });
 
-  it("keeps the history when the model returns a blank summary", async () => {
+  it("keeps the history but counts the call when the model returns a blank summary", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const model = new MockLanguageModelV3({
       doStream: async () =>
@@ -131,5 +131,6 @@ describe("compaction summary call", () => {
 
     expect(result.session.history).toHaveLength(3);
     expect(JSON.stringify(result.session.history)).not.toContain("context.compaction");
+    expect(getTurnUsageState(result.session.state)?.session).toMatchObject({ inputTokens: 120 });
   });
 });

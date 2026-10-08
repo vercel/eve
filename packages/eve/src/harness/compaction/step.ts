@@ -1,4 +1,4 @@
-import { type LanguageModel, streamText, type TelemetryOptions } from "ai";
+import { type LanguageModel, type ModelMessage, streamText, type TelemetryOptions } from "ai";
 
 import { createLogger, logError } from "#internal/logging.js";
 import { AuthKey, HistoryStateKey } from "#context/keys.js";
@@ -99,6 +99,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
         telemetry: step.instrumentation?.telemetry(),
       });
       step.session = compacted.session;
+      if (compacted.failure !== undefined) throw compacted.failure.error;
     } catch (error) {
       logError(log, "manual session compaction failed", error, {
         sessionId: step.session.sessionId,
@@ -154,6 +155,8 @@ export async function maybeCompact(input: {
   readonly telemetry?: TelemetryOptions;
 }): Promise<{
   readonly compacted: boolean;
+  /** The summary failed; `session` still counts the summary calls that finished. */
+  readonly failure?: { readonly error: unknown };
   readonly messages: HarnessModelMessage[];
   readonly session: HarnessSession;
 }> {
@@ -255,8 +258,11 @@ export async function maybeCompact(input: {
               Math.min(getRequestEnvelopeTokens(session) ?? 0, requestEnvelopeTokens),
           ),
   };
-  const compactedOrdinary = needsSummary
-    ? await compactMessages(
+  let compactedOrdinary: ModelMessage[] = [...ordinary];
+  let failure: { readonly error: unknown } | undefined;
+  try {
+    if (needsSummary) {
+      compactedOrdinary = await compactMessages(
         [...ordinary],
         historyCompaction,
         summarize,
@@ -272,13 +278,19 @@ export async function maybeCompact(input: {
                 getRequestEnvelopeTokens(session),
               ) - requestEnvelopeTokens,
             ),
-      )
-    : [...ordinary];
+      );
+    }
+  } catch (error) {
+    failure = { error };
+  }
   for (const usage of summaryUsage) {
     session =
       input.betweenTurns === true
         ? addUsageOutsideTurns(session, usage)
         : addTurnUsage(session, emissionState.turnId, usage);
+  }
+  if (failure !== undefined) {
+    return { compacted: false, failure, messages: input.messages, session };
   }
   messages = validateHarnessModelMessages([...canonical.memory, ...compactedOrdinary]);
 
