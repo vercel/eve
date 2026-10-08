@@ -1,9 +1,9 @@
 import { readDurableSession } from "#execution/durable-session-store.js";
-import {
-  relaySessionEvents,
-  type PublishedSessionEvents,
-  type SessionStepState,
+import type {
+  PublishedSessionEvents,
+  SessionStepState,
 } from "#execution/publish-session-events.js";
+import { commitSessionStep } from "#execution/session/commit-step.js";
 import {
   withSessionStateDelta,
   type SessionStateTransition,
@@ -12,9 +12,7 @@ import type { WorkflowToolRunControlMessage } from "#execution/tools/workflow/me
 import { ignoreGoneTarget } from "#execution/tasks/workflow-target.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { getProxyInputRequests, type ProxyInputRequest } from "#harness/proxy-input-requests.js";
-import { sessionView } from "#harness/session-machine/commit.js";
 import { finishRun } from "#harness/session-machine/transitions.js";
-import { storedProjection } from "#harness/session-machine/view.js";
 
 /**
  * Decides a run's request to withdraw a question. A question the session
@@ -78,6 +76,5 @@ export async function relayWithdrawnRequests(
   const requestIds = [...getProxyInputRequests(session.state)]
     .filter(([requestId, route]) => select(requestId, route))
     .map(([requestId]) => requestId);
-  const view = sessionView(storedProjection(session.state), session.state);
-  return await relaySessionEvents(input, finishRun(view, { requestIds }).events);
+  return await commitSessionStep(input, (view) => finishRun(view, { requestIds }));
 }

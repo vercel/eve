@@ -1,12 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { DurableSession } from "#execution/durable-session-store.js";
+import {
+  readDurableSession,
+  type DurableSession,
+  type DurableSessionState,
+} from "#execution/durable-session-store.js";
 import type { SessionInbox } from "#execution/session-inbox/inbox.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { answerTaskCancel } from "#execution/tasks/session.js";
 import { applyTaskRunMessageStep } from "#execution/tasks/steps.js";
 import {
   createTask,
+  findTask,
+  isTaskWorking,
   markTaskRunStarted,
   readTaskTable,
   recordTaskRun,
@@ -22,8 +28,15 @@ import { createTestSessionState } from "#internal/testing/session-state.js";
 // No workflow runtime runs here: the run's cancel hook is a stub, and the
 // stream is recorded with each event's origin, since relayed input must not
 // reach the session's own instrumentation.
-vi.mock("#internal/workflow/runtime.js", () => ({ resumeHook: vi.fn(async () => {}) }));
-const { published } = vi.hoisted(() => ({ published: [] as unknown[] }));
+const { effects, published } = vi.hoisted(() => ({
+  effects: [] as { readonly effect: string; readonly sessionState?: unknown }[],
+  published: [] as unknown[],
+}));
+vi.mock("#internal/workflow/runtime.js", () => ({
+  resumeHook: vi.fn(async (token: string) => {
+    effects.push({ effect: `resume ${token}` });
+  }),
+}));
 vi.mock("#execution/publish-session-events.js", () => {
   const publisher =
     (origin: "own" | "relayed") =>
@@ -35,6 +48,7 @@ vi.mock("#execution/publish-session-events.js", () => {
       events: readonly unknown[],
     ) => {
       published.push(...events.map((event) => ({ event, origin })));
+      effects.push({ effect: `publish ${origin}`, sessionState: target.sessionState });
       return { serializedContext: target.serializedContext, sessionState: target.sessionState };
     };
   return { publishSessionEvents: publisher("own"), relaySessionEvents: publisher("relayed") };
@@ -43,6 +57,7 @@ vi.mock("#execution/publish-session-events.js", () => {
 const REQUEST_EVENT = { sequence: 3, stepIndex: 1, turnId: "turn_1" };
 
 beforeEach(() => {
+  effects.length = 0;
   published.length = 0;
 });
 
@@ -94,6 +109,35 @@ describe("answerTaskCancel", () => {
         origin: "own",
       },
     ]);
+  });
+});
+
+describe("task steps' effect order", () => {
+  it("tells the run to stop, then publishes the withdrawals and the settlement from the saved table", async () => {
+    const research = startedTask(readTaskTable(undefined), "research");
+    const session = withQuestion(
+      writeTaskTable(
+        createTestSessionState({ sessionId: "session-1" }).snapshot.session,
+        research.table,
+      ),
+      "research-run",
+    );
+
+    await answerTaskCancel(cursorFor(session), {
+      callId: "cancel-call",
+      kind: "task_cancel",
+      taskId: research.taskId,
+    });
+
+    expect(effects.map(({ effect }) => effect)).toEqual([
+      "resume research-run-control",
+      "publish relayed",
+      "publish own",
+    ]);
+    for (const { sessionState } of effects.slice(1)) {
+      const saved = readDurableSession(sessionState as DurableSessionState);
+      expect(isTaskWorking(findTask(readTaskTable(saved.state), research.taskId)!)).toBe(false);
+    }
   });
 });
 

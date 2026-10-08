@@ -69,7 +69,7 @@ const READS_HISTORY: ReadonlySet<string> = new Set([
  * Publishes a transition's events, then saves what it changed. A transition that changes history
  * needs a session restored with it.
  */
-export async function applyTransition<T extends HarnessSessionBase>(
+export async function applyTransition<T extends Pick<HarnessSessionBase, "state">>(
   session: T,
   transition: Transition,
   publish: Publish,
