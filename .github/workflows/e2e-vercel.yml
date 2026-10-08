@@ -109,7 +109,7 @@ jobs:
 
       - name: Install Vercel CLI
         if: needs.changes.outputs.relevant == 'true'
-        run: npm install --global vercel@latest && vercel --version
+        run: pnpm add --global vercel@latest && vercel --version
 
       - name: Install dependencies
         if: needs.changes.outputs.relevant == 'true'

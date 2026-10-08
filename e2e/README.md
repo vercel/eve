@@ -94,10 +94,10 @@ One-time project setup:
 - Provide `VERCEL_TOKEN`, `VERCEL_ORG_ID`, and `VERCEL_PROJECT_ID` in CI.
 
 The repository does not install the Vercel CLI. Locally, any global `vercel`
-install works. CI installs the latest npm release:
+install works. CI installs it with pnpm:
 
 ```sh
-npm install --global vercel@latest
+pnpm add --global vercel@latest
 ```
 
 Run a fixture against Vercel from its directory:
