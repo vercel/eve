@@ -41,7 +41,11 @@ import {
   gatewayModelId,
 } from "#harness/model-call/usage.js";
 import { resolveModelProfile } from "#harness/model-profile.js";
-import { addTurnUsage, type TokenUsageDelta } from "#harness/turn-tag-state.js";
+import {
+  addTurnUsage,
+  addUsageOutsideTurns,
+  type TokenUsageDelta,
+} from "#harness/turn-tag-state.js";
 import { getRequestEnvelopeTokens } from "#harness/request-envelope.js";
 import { idle } from "#harness/session-machine/transitions.js";
 import { resolveCallProviderOptions } from "#harness/provider-safety.js";
@@ -81,6 +85,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
       const compacted = await maybeCompact({
         abortSignal: config.abortSignal,
         auth: step.ctx?.get(AuthKey) ?? null,
+        betweenTurns: true,
         emissionState: { ...position, turnId: activeTurnId(position) },
         force: true,
         historyProjector: config.historyProjector,
@@ -132,6 +137,8 @@ export function replaceSessionHistory(
 export async function maybeCompact(input: {
   readonly abortSignal?: AbortSignal;
   readonly auth: SessionAuthContext | null;
+  /** A manual compaction runs between turns, so no turn's usage reports its summary calls. */
+  readonly betweenTurns?: boolean;
   readonly emissionState: TurnPosition;
   readonly force?: boolean;
   readonly historyProjector?: HistoryViewProjector;
@@ -267,7 +274,12 @@ export async function maybeCompact(input: {
             ),
       )
     : [...ordinary];
-  for (const usage of summaryUsage) session = addTurnUsage(session, emissionState.turnId, usage);
+  for (const usage of summaryUsage) {
+    session =
+      input.betweenTurns === true
+        ? addUsageOutsideTurns(session, usage)
+        : addTurnUsage(session, emissionState.turnId, usage);
+  }
   messages = validateHarnessModelMessages([...canonical.memory, ...compactedOrdinary]);
 
   {

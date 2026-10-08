@@ -2,7 +2,7 @@ import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createToolLoopHarness } from "#harness/tool-loop.js";
-import { getTurnUsageState } from "#harness/turn-tag-state.js";
+import { getTurnUsageState, takeSessionUsageDelta } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
 
 type StreamResult = Awaited<ReturnType<MockLanguageModelV3["doStream"]>>;
@@ -61,7 +61,7 @@ async function compactWith(model: MockLanguageModelV3) {
 }
 
 describe("compaction summary call", () => {
-  it("streams the summary and counts its usage in the turn", async () => {
+  it("streams a manual summary and counts its usage outside any turn", async () => {
     const doGenerate = vi.fn(async () => {
       throw new Error("Stream must be set to true");
     });
@@ -77,9 +77,14 @@ describe("compaction summary call", () => {
       content: "Alice asked for the quarterly report.",
       role: "assistant",
     });
+    // Session limits see the summary call; a manual compaction has no turn to report it.
     expect(getTurnUsageState(result.session.state)?.session).toMatchObject({
       inputTokens: 120,
       outputTokens: 8,
+    });
+    expect(takeSessionUsageDelta(result.session).delta).toMatchObject({
+      inputTokens: 0,
+      outputTokens: 0,
     });
   });
 

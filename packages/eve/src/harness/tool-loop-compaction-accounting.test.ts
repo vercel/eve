@@ -1,4 +1,5 @@
 import { getRequestEnvelopeTokens } from "#harness/request-envelope.js";
+import { getTurnUsageState } from "#harness/turn-tag-state.js";
 import { jsonSchema, type LanguageModel, streamText, ToolLoopAgent } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -524,7 +525,7 @@ it("compacts history when dynamic instructions grow the request envelope", async
     tenant: [{ role: "system", content: dynamicInstructions }],
   });
   const runStep = createToolLoopHarness(createTestConfig());
-  await contextStorage.run(ctx, () =>
+  const result = await contextStorage.run(ctx, () =>
     runStep(
       createTestSession({
         compaction: {
@@ -542,6 +543,12 @@ it("compacts history when dynamic instructions grow the request envelope", async
     dynamicInstructions,
   );
   expect(streamText).toHaveBeenCalledOnce();
+  // The summary call is part of the turn it compacted for.
+  expect(getTurnUsageState(result.session.state)).toMatchObject({
+    inputTokens: 10,
+    outputTokens: 2,
+    turnId: "turn_0",
+  });
 });
 
 describe("final request envelope compaction", () => {
