@@ -149,6 +149,8 @@ The label is presentation only. It does not replace the path-derived tool name, 
 
 Provided tools define labels for `bash`, `glob`, `grep`, `read_file`, `web_fetch`, `web_search`, and `write_file`.
 
+Calls the model makes through the [catalog](/docs/concepts/built-in-tools#eve__search-and-eve__execute) read the same way. A deferred tool, agent, or connection tool called through `eve__execute` shows its own label, exactly as a direct call would. An `eve__search` call shows `Search tools for “linear issues”`, then `Searched tools for “linear issues”, found 5` when it returns. A skill load shows `Loaded skill release-notes`, and a connection's sign-in entry shows `Sign in to Linear`.
+
 ### Stream preliminary tool results
 
 For a `defineTool` executor, an async generator streams complete

@@ -83,6 +83,21 @@ describe("search", () => {
     });
   });
 
+  it("labels a search with its query, then with how much it found", async () => {
+    const { catalog, run } = catalogContext({ skills, tools });
+    const search = catalog.advertised.get(SEARCH_TOOL_NAME)!;
+    const label = search.label!;
+    const found = await run(() => search.execute!({ query: "refund" }, OPTIONS));
+
+    expect(label.start!({ query: "refund" })).toBe("Search tools for “refund”");
+    expect(label.complete!({ query: "refund" }, found)).toBe(
+      "Searched tools for “refund”, found 4",
+    );
+    expect(label.complete!({ query: "zebra" }, { results: [] })).toBe(
+      "Searched tools for “zebra”, found nothing",
+    );
+  });
+
   it("finds only deferred entries; direct tools and listed skills are already in context", async () => {
     const search = searchFor(tools, { skills });
 

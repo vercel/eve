@@ -19,6 +19,7 @@ import {
   mergeToolMetadata,
   normalizeActionRequest,
   normalizeActionResult,
+  settledLabel,
   stringifyUnknown,
   toMessageInputRequest,
 } from "#client/message-action-parts.js";
@@ -30,6 +31,7 @@ import {
 } from "#client/message-reducer-primitives.js";
 import { messageRun } from "#client/message-run-parts.js";
 import type { AuthorizationCompletedStreamEvent } from "#protocol/message.js";
+import { actionLabel } from "#shared/action-label.js";
 import {
   foldSession,
   initialSessionProjection,
@@ -194,7 +196,9 @@ function reduceContent(data: EveMessageData, event: EveAgentReducerEvent): EveMe
             state: "input-available",
             stepIndex: event.data.stepIndex,
             toolCallId: action.callId,
-            toolMetadata: createToolMetadata(descriptor),
+            toolMetadata: createToolMetadata(descriptor, {
+              label: actionLabel(action, event.data.presentation),
+            }),
             toolName: descriptor.toolName,
             type: "dynamic-tool",
           }),
@@ -224,6 +228,7 @@ function reduceContent(data: EveMessageData, event: EveAgentReducerEvent): EveMe
             toolCallId: request.action.callId,
             toolMetadata: createToolMetadata(descriptor, {
               inputRequest: toMessageInputRequest(request),
+              label: existing?.toolMetadata?.eve?.label ?? actionLabel(request.action, undefined),
             }),
             toolName: descriptor.toolName,
             type: "dynamic-tool",
@@ -257,7 +262,16 @@ function reduceContent(data: EveMessageData, event: EveAgentReducerEvent): EveMe
         input: existing?.input,
         stepIndex: existing?.stepIndex ?? event.data.stepIndex,
         toolCallId: event.data.result.callId,
-        toolMetadata: mergeToolMetadata(existing?.toolMetadata, createToolMetadata(descriptor)),
+        toolMetadata: mergeToolMetadata(
+          existing?.toolMetadata,
+          createToolMetadata(descriptor, {
+            label: settledLabel(
+              existing?.toolMetadata,
+              event.data.presentation?.[event.data.result.callId]?.label,
+              descriptor,
+            ),
+          }),
+        ),
         toolName: existing?.toolName ?? descriptor.toolName,
         type: "dynamic-tool" as const,
       };
@@ -286,7 +300,16 @@ function reduceContent(data: EveMessageData, event: EveAgentReducerEvent): EveMe
         state: "output-available",
         stepIndex: existing?.stepIndex ?? event.data.stepIndex,
         toolCallId: event.data.result.callId,
-        toolMetadata: mergeToolMetadata(existing?.toolMetadata, createToolMetadata(descriptor)),
+        toolMetadata: mergeToolMetadata(
+          existing?.toolMetadata,
+          createToolMetadata(descriptor, {
+            label: settledLabel(
+              existing?.toolMetadata,
+              event.data.presentation?.[event.data.result.callId]?.label,
+              descriptor,
+            ),
+          }),
+        ),
         toolName: existing?.toolName ?? descriptor.toolName,
         type: "dynamic-tool",
       } as EveDynamicToolPart);

@@ -1,5 +1,6 @@
 import { SKILL_ENTRY_NAME } from "#protocol/catalog-tools.js";
 import { actionRequestName } from "#shared/action-request-name.js";
+import { displayTitle } from "#shared/display-name.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#shared/action-types.js";
 import type { InputRequest } from "#shared/input.js";
 import type {
@@ -35,12 +36,13 @@ export function toMessageInputRequest(request: InputRequest): EveMessageInputReq
 /** Builds tool metadata for a freshly projected tool part. */
 export function createToolMetadata(
   descriptor: ActionDescriptor,
-  extra?: { readonly inputRequest?: EveMessageInputRequest },
+  extra?: { readonly inputRequest?: EveMessageInputRequest; readonly label?: string },
 ): EveMessageToolMetadata {
   return {
     eve: {
       inputRequest: extra?.inputRequest,
       kind: descriptor.kind,
+      label: extra?.label,
       name: descriptor.name,
     },
   };
@@ -65,6 +67,7 @@ export function mergeToolMetadata(
       inputRequest: next.eve?.inputRequest ?? current?.eve?.inputRequest,
       inputResponse: next.eve?.inputResponse ?? current?.eve?.inputResponse,
       kind,
+      label: next.eve?.label ?? current?.eve?.label,
       name,
     },
   };
@@ -107,6 +110,15 @@ export function normalizeActionResult(result: RuntimeActionResult): ActionDescri
         toolName: `eve:subagent:${result.subagentName}`,
       };
   }
+}
+
+/** A settling call reads as its update or completion label, else as it already did. */
+export function settledLabel(
+  current: EveMessageToolMetadata | undefined,
+  label: string | undefined,
+  descriptor: ActionDescriptor,
+): string {
+  return label ?? current?.eve?.label ?? displayTitle(descriptor.name);
 }
 
 /** Best-effort string rendering of an unknown tool output for error display. */

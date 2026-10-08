@@ -286,7 +286,7 @@ stream event, so read outcomes from `task.settled`. An `input.requested`,
 `authorization.required`, or `authorization.completed` event from a task's run carries its
 `taskId`. Hooks subscribe to the same events. The stream also carries the model's `eve__task_wait` and
 `eve__task_cancel` calls as ordinary `actions.requested` tool calls, so evals can assert on them. The
-`eve dev` terminal UI and Slack typing indicators leave those calls out; the terminal UI shows each
+`eve dev` terminal UI, channel activity such as Slack's status line, and ACP clients leave those calls out; the terminal UI shows each
 task's start and end instead. See
 [Sessions, runs, and streaming](/docs/concepts/sessions-runs-and-streaming#task-events) and
 [Follow a subagent](/docs/guides/client/streaming#follow-a-subagent).

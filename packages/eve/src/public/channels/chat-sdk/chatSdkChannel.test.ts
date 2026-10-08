@@ -9,7 +9,9 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { enterSessionProjection, recordPublishedEvent } from "#harness/session-machine/current.js";
 import { SessionKey } from "#context/keys.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
+import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 import {
   chatSdkChannel,
   isNotImplemented,
@@ -654,6 +656,49 @@ describe("chatSdkChannel", () => {
       callEvent(channelAdapter, makeEvent("turn.started", { sequence: 0, turnId: "turn-1" }), ctx),
     ).resolves.toBeDefined();
     expect(adapter.typingStatuses).toEqual(["Working..."]);
+  });
+
+  it("types a step's calls by their labels, leaving out the model's own task waits", async () => {
+    const adapter = testAdapter();
+    const bridge = chatSdkChannel({
+      adapters: { test: adapter },
+      state: memoryState(),
+      userName: "bot",
+    });
+    const channelAdapter = withState(getAdapter(bridge.channel), {
+      thread: serializedThread(),
+    });
+    const ctx = buildAdapterContext(channelAdapter, stubAccessor());
+    const requested = (actions: readonly Record<string, unknown>[], presentation?: unknown) =>
+      makeEvent("actions.requested", {
+        actions,
+        presentation,
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn-1",
+      });
+    const wait = {
+      callId: "call-wait",
+      input: {},
+      kind: "tool-call",
+      toolName: TASK_WAIT_TOOL_NAME,
+    };
+
+    await callEvent(
+      channelAdapter,
+      requested(
+        [
+          { callId: "call-search", input: {}, kind: "tool-call", toolName: SEARCH_TOOL_NAME },
+          { callId: "call-refund", input: {}, kind: "tool-call", toolName: "refund_invoice" },
+          wait,
+        ],
+        { "call-search": { label: "Search tools for “refunds”" } },
+      ),
+      ctx,
+    );
+    await callEvent(channelAdapter, requested([wait]), ctx);
+
+    expect(adapter.typingStatuses).toEqual(["Search tools for “refunds”, Refund invoice..."]);
   });
 
   it("streams assistant deltas by posting an anchor then editing it", async () => {

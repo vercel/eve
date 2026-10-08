@@ -11,7 +11,6 @@ import { skillFilePath } from "#execution/skills/instructions.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { SEARCH_TOOL_NAME, SKILL_ENTRY_NAME } from "#protocol/catalog-tools.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
-import { displayTitle } from "#shared/display-name.js";
 import { skillTarget } from "#shared/action-request-name.js";
 import { stripSkillFrontmatter } from "#shared/skill-package.js";
 import { toInputSchema } from "#tools/schema.js";
@@ -72,9 +71,10 @@ export function createSkillLoader(
   };
 }
 
+/** A skill loads within the step that asks for it, so its call reads as done. */
 function skillLoadLabel(input: unknown): string {
   const skill = skillTarget(input);
-  return skill === undefined ? "Load skill" : `Load skill: ${displayTitle(skill)}`;
+  return skill === undefined ? "Load skill" : `Loaded skill ${skill}`;
 }
 
 /** Why `eve__execute` can't load `name`: the closest skills, or the connection it names. */

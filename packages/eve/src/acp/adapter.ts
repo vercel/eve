@@ -18,7 +18,7 @@ import {
 } from "#compiled/@agentclientprotocol/sdk/index.js";
 import { Client, ClientError } from "#client/index.js";
 import type { ClientOptions, SendTurnInput, SendTurnPayload } from "#client/types.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { ActionPresentationByCallId, HandleMessageStreamEvent } from "#protocol/message.js";
 import {
   callStatus,
   foldSession,
@@ -26,6 +26,7 @@ import {
   type SessionCallStatus,
   type SessionProjection,
 } from "#protocol/session-projection.js";
+import { actionLabel, visibleActions } from "#shared/action-label.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#shared/action-types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 
@@ -378,6 +379,7 @@ export class EveAcpAdapter {
           toolCallId: callId,
           status: ACP_TOOL_STATUS[status],
           ...callOutput(event, callId),
+          ...resultTitle(event, callId),
         });
       }
     }
@@ -399,6 +401,7 @@ export class EveAcpAdapter {
       toolCallId: resultCallId,
       status: ACP_TOOL_STATUS[status],
       ...output,
+      ...resultTitle(event, resultCallId),
     });
   }
 
@@ -443,8 +446,8 @@ export class EveAcpAdapter {
         });
         return;
       case "actions.requested":
-        for (const action of event.data.actions) {
-          const toolCall = toolCallForAction(action);
+        for (const action of visibleActions(event.data.actions)) {
+          const toolCall = toolCallForAction(action, event.data.presentation);
           session.tools.set(action.callId, toolCall);
           await notifyUpdate(client, sessionId, { sessionUpdate: "tool_call", ...toolCall });
         }
@@ -571,16 +574,13 @@ function promptContent(params: PromptRequest): Array<{ type: "text"; text: strin
   return content;
 }
 
-function toolCallForAction(action: RuntimeActionRequest): ToolCall {
-  const title =
-    action.kind === "tool-call" || action.kind === "workflow-tool-call"
-      ? action.toolName
-      : action.kind === "load-skill"
-        ? "Load skill"
-        : action.name;
+function toolCallForAction(
+  action: RuntimeActionRequest,
+  presentation?: ActionPresentationByCallId,
+): ToolCall {
   return {
     toolCallId: action.callId,
-    title,
+    title: actionLabel(action, presentation),
     kind: "other",
     status: "pending",
     rawInput: action.input,
@@ -640,6 +640,13 @@ function acpRequestError(error: unknown): RequestError {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** A result's completion label retitles its call, such as a search reporting what it found. */
+function resultTitle(event: HandleMessageStreamEvent, callId: string): { title?: string } {
+  const label =
+    event.type === "action.result" ? event.data.presentation?.[callId]?.label : undefined;
+  return label === undefined ? {} : { title: label };
 }
 
 /** The output an event carries for a call, if it reports one. */

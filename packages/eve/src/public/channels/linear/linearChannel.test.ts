@@ -440,7 +440,7 @@ describe("linearChannel default event handlers", () => {
       variables: {
         input: {
           agentSessionId: "agent_session_1",
-          content: { action: "search", parameter: "{}", type: "action" },
+          content: { action: "Search", parameter: "{}", type: "action" },
           ephemeral: true,
         },
       },

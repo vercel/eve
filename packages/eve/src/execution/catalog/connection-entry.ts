@@ -106,7 +106,7 @@ export function connectionSignInEntry(
       connection.description === "" ? `${signIn}.` : `${signIn}: ${connection.description}`,
     execute: () => connect(registry, connection),
     inputSchema: defineJsonSchema({ type: "object", properties: {}, additionalProperties: false }),
-    label: { start: () => `Connect ${displayName}` },
+    label: { start: () => `Sign in to ${displayName}` },
     name: connection.connectionName,
   };
 }
