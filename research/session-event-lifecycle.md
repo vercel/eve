@@ -8,7 +8,7 @@ last_updated: "2026-10-08"
 
 Companion docs:
 
-- [`dynamic-participants.md`](./dynamic-participants.md) has dynamic resolvers and memory providers decide from the session view at change points eve defines, instead of naming events. The model-call change point is an event this proposal adds, `model.requested`. Its pipeline is independent of this proposal; its API change ships with it.
+- [`dynamic-participants.md`](./dynamic-participants.md) has dynamic resolvers and memory providers decide from the session view at change points eve defines, instead of naming events. The model-call change point is an event this proposal adds, `model.requested`. Its pipeline is independent of this proposal; its API change is the last PR of the break, and nothing else in the break depends on it.
 - [`session-machine-simplification.md`](./session-machine-simplification.md) covers structural cleanup in the session machine. Two of its items help this proposal land.
 
 ## Introduction
@@ -987,7 +987,7 @@ protocol/session-projection/   folds per family, public tables, selectors
 - **No upcaster.** Clients read v27 only, and the v21–v26 normalization (`protocol/message-version.ts`) is deleted. The CLI, ACP, and eval runners report the existing unsupported-version error against older deployments.
 - **Sessions don't cross the break.** Pre-break checkpoints are refused by v27 successors, so the deployment that owns a session keeps it until it ends ([`single-workflow-session-upgrades.md`](./single-workflow-session-upgrades.md)). Self-hosted services drain, or their channels start fresh sessions (#4092).
 - **Pre-break history isn't readable by v27 clients.** If a product needs it, a read-only upcaster can go into the stream route later without touching anything else.
-- **Hook and channel event names break.** Their retained `extension-contracts` epochs (32 hook and 39 channel fixtures) are dropped with a reason. In the same release, dynamic resolvers move from event keys to `select` and `resolve` over the session view, and memory providers to fixed moments, without aliases, migrated by a codemod ([`dynamic-participants.md`](./dynamic-participants.md)). Instrumentation keeps its own vocabulary.
+- **Hook and channel event names break.** Their retained `extension-contracts` epochs (32 hook and 39 channel fixtures) are dropped with a reason. Dynamic resolvers move from event keys to `select` and `resolve` over the session view, and memory providers to fixed moments, without aliases, migrated by a codemod ([`dynamic-participants.md`](./dynamic-participants.md)). That's PR 9, which aims for the same release; if it follows later, today's keys keep working until then. Instrumentation keeps its own vocabulary.
 - **The remote agent protocol version is bumped.** A v27 parent calling a v26 remote agent fails at call time with the existing mismatch error. Remote agent protocol 1 is deleted.
 
 ## Codepaths that change
@@ -1235,40 +1235,40 @@ Model history, turn delivery IDs, grants, and limits are folds, not entries.
 
 ### Phases
 
-Nine PRs. Structural changes land on `main` first, where today's tests still cover them. The wire and vocabulary then change on one integration branch, which adds no v27 tests until the implementation is done ([Validation](#validation)).
+Nine PRs. Structural changes land on `main` first, where today's tests still cover them. The wire and vocabulary then change on one integration branch, which adds no v27 tests until the implementation is done ([Validation](#validation)). The participants API is the least certain part, so it's the last PR on the branch, and the rest of the break doesn't depend on it.
 
 **On `main`, covered by today's tests:**
 
 1. **Turn identity, and server readers on the shared fold.** `program.ts` restarts `turn_${n}` in each owner run, so after a handoff a failing session reports the wrong turn ([`session-machine-simplification.md`](./session-machine-simplification.md#turn-identity-from-the-projection)). Telegram's sign-in lookup scans from line 0 and takes the latest sign-in even if it completed, and the invocation API folds a 64-event window that a long reply can push a request out of. Both readers move to the shared projection, read through the session handle, which becomes `session.view()` at the break.
-2. **The participant pipeline behind today's API** ([`dynamic-participants.md`](./dynamic-participants.md#plan)), with scenario tests that pin order and timing before the wire changes underneath it.
+2. **The participant pipeline behind today's API** ([`dynamic-participants.md`](./dynamic-participants.md#plan)), with tests that pin when today's resolvers and memory run. Today's API stays in place under PRs 5–8, so the pins guard it while the wire changes underneath.
 3. **One registry for running work** ([`session-machine-simplification.md`](./session-machine-simplification.md#one-registry-and-protocol-for-running-work)): one table keyed by `callId`, and one cancel path. Slice 7 then emits task, call, and child facts and their closures from one place.
 4. **One suspension record** ([`session-machine-simplification.md`](./session-machine-simplification.md#one-suspension-record)), stacked on HumanInput (#4342–#4344) rather than waiting for it to merge. `turn.paused` and `turn.resumed` then read from it directly.
 
 **On the integration branch, released together.** The branch rebases on `main` regularly and merges once.
 
 5. **Contract module, envelope, and transport.**
-   - The catalog, schemas, checker, fold, tables, and selectors.
+   - The catalog, schemas, checker, fold, tables, and selectors, and the `eve/events` export with its guards, which hooks and channels use from slice 6.
    - Commit, progress, and transport records, and positions counted by the writer.
    - The publisher as the one commit path, with channels after the write and the observer `ctx`.
    - Heartbeats, leases, and `stream.ended`, including closing terminal streams (#3222).
 
    v26 types ride inside `facts` until their family moves, so every reader keeps working.
 
-6. **Conversation slice:** sessions, deliveries (controls as deliveries, the settle rule), turns, model runs, content, calls, usage, and context changes. Producers, the server fold, and every reader of these families move together: client tables, the TUI, evals, `invoke`, ACP, built-in channels with `activity`, and the hook and channel maps. In-step abandonment lands here. The v26 reducer keeps handling the families that haven't moved yet.
+6. **Conversation slice:** sessions, deliveries (controls as deliveries, the settle rule), turns, model runs, content, calls, usage, and context changes. Producers, the server fold, and every reader of these families move together: client tables, the TUI, evals, `invoke`, ACP, built-in channels with `activity`, and the hook and channel maps. In-step abandonment lands here. The v26 reducer keeps handling the families that haven't moved yet. Participants move onto the change points that v27 commits reach, still behind today's API ([`dynamic-participants.md`](./dynamic-participants.md#plan)): today's keys become names for those points, and their handlers receive a minimal private payload.
 7. **Work and people slice:** tasks, interactions, responses, sign-in callbacks as deliveries, and child links, with private bindings, the relay contract, one protocol for owner messages and relays, and the remote protocol bump. Lifecycle status moves only into the projection, and `hitl/` emits interaction, response, and call facts.
-8. **Participants API:** `select` and `resolve`, memory's moments, recorded selections, the `eve/events` export, build errors, the codemod, and the repo migration ([`dynamic-participants.md`](./dynamic-participants.md#compatibility)).
-9. **Cleanup, docs, and tests:** the compatibility deletions ([Compatibility at the break](#compatibility-at-the-break)), the remaining v26 reader paths, docs and release notes, and the v27 test suite.
+8. **Cleanup, docs, and tests:** the compatibility deletions ([Compatibility at the break](#compatibility-at-the-break)), the remaining v26 reader paths, docs and release notes, and the v27 test suite. Participant surfaces wait for PR 9: their docs, their `extension-contracts` epochs, and the private payload, which keeps its own small types once the v26 builders are gone.
+9. **Participants API:** `select` and `resolve`, memory's moments, recorded selections, the development checks, typed entry points, build errors, the codemod, the repo migration, and the participants' docs, epochs, and tests ([`dynamic-participants.md`](./dynamic-participants.md#compatibility)). The aim is to release it with the break, so authors migrate once. If it isn't ready, the branch merges without it: today's keys keep working as names for change points, and the API follows in a later release.
 
 ```text
 main:    1  turn identity · readers on the shared fold
-         2  participant pipeline
+         2  participant pipeline · timing pins
          3  one registry for running work
          4  one suspension record            ◀── stacked on HumanInput
-branch:  5  contract · envelope · transport · commit path
-            ├─ 6  conversation slice
-            │     └─ 8  participants API
+branch:  5  contract · envelope · transport · commit path · eve/events
+            ├─ 6  conversation slice · participants on change points
             └─ 7  work and people slice      ◀── benefits from 3 and 4
-         9  cleanup · docs · v27 tests
+         8  cleanup · docs · v27 tests
+         9  participants API                 ◀── least certain, so last
 ```
 
 PRs 1, 2, 3, and 5 can start now. **In parallel,** a prototype of [one executor for every call](./session-machine-simplification.md#one-executor-for-every-call): if it comes out clean, it lands on `main` before slice 6 so call facts are written once against it. Otherwise it follows the break, because it changes only the producer, and the vocabulary already has requested, started, settled, and abandoned.
@@ -1348,7 +1348,7 @@ This is an estimate from reading `main` at `285d4e09b`, to within a few hundred 
   That's about −1,900 in total.
 
 - **Tests:** 187 test files quote v26 type names (about 2,400 references) and make about 670 builder calls. That's the largest churn: about 6,000–10,000 lines touched, roughly flat in net.
-- **Docs:** 56 pages mention v26 names (about 690 mentions). Some are participant keys, which go away in the same release when participants stop naming events.
+- **Docs:** 56 pages mention v26 names (about 690 mentions). Some are participant keys, which go away with PR 9, when participants stop naming events.
 - **The contract module** is about 2,000–3,000 new lines without tests, landing with the envelope in PR 5.
 
 Lifecycle records per turn, not counting progress:
@@ -1375,7 +1375,7 @@ v27 writes more lifecycle facts, because deliveries get explicit ends, every cal
   - typechecking, where the catalog's types and exhaustive switches catch readers that miss a family;
   - the stream checker as a dev-mode assertion in the writer, so lifecycle mistakes surface in e2e and local runs;
   - a few existing e2e scenarios that check visible outcomes, such as the reply or a tool's effect, rather than event shapes.
-- **Before release, the last PR adds:**
+- **Before release, PR 8 adds:**
   - the checker over golden streams from the real producer;
   - old-reader conformance: the v27.0 fold, frozen at release, run over golden streams from the current producer;
   - the tolerance cases;
@@ -1388,6 +1388,7 @@ v27 writes more lifecycle facts, because deliveries get explicit ends, every cal
     - a handoff;
     - injected step and in-step retries;
     - a crash after a write and before dispatch, where the last line is dispatched again exactly once.
+- **PR 9 brings the participants' tests.** The codemod moves PR 2's timing pins onto the new API, and new tests cover selections, recorded decisions, and the development checks.
 - **Cost:** golden-stream metrics before release: lines, bytes, reload time to first byte, catch-up memory high-water, and writer flush latency.
 - **Scale smoke:** 32 working tasks with long progress, and a 100,000-line session reload, on world-local and world-vercel.
 

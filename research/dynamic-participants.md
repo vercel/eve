@@ -27,7 +27,7 @@ This doc proposes that participants stop consuming events and decide from sessio
 - **Decisions are recorded with their selection.** Restores rebuild code from the recorded selection, and redeploys re-resolve at the next change point, so nothing replays or rebuilds an event.
 - Participants run in one pipeline.
 
-The pipeline can land first. The new API ships with the event break, so authors migrate once. After it, participants name no events, so later catalog changes don't reach them.
+The pipeline lands first, on `main`. The new API is the last PR of the event break, because it's the least certain part and nothing else in the break depends on it: until it lands, today's keys name change points rather than events. It aims to ship in the same release, so authors migrate once. After it, participants name no events, so later catalog changes don't reach them.
 
 ## Participants versus observers
 
@@ -323,7 +323,7 @@ Today memory runs between the write and the hooks, while the dynamic resolvers r
 
 ## Compatibility
 
-Every dynamic resolver and memory provider changes shape. It ships in the same release as the event break ([`session-event-lifecycle.md`](./session-event-lifecycle.md#compatibility-at-the-break)), so authors migrate once.
+Every dynamic resolver and memory provider changes shape. It aims to ship in the same release as the event break ([`session-event-lifecycle.md`](./session-event-lifecycle.md#compatibility-at-the-break)), so authors migrate once. It's the last PR of the break, so if it isn't ready, the break ships without it and the API follows in a later release.
 
 - **A codemod keeps today's timing.** Each key maps to the selection that resolves exactly as often: `session.started` to no `select`, `turn.started` to the turn's ID, and `step.started` to the requested run's ID.
   - Handlers that read nothing from `ctx` convert mechanically.
@@ -333,7 +333,7 @@ Every dynamic resolver and memory provider changes shape. It ships in the same r
 - **Memory's maps become `recall` and `capture` functions,** with a `switch` on `ctx.moment` only when a map has several keys: `turn.started` and `turn.completed` become `"turn"`, and `compaction.requested` and `compaction.completed` become `"compaction"`. The codemod drops the conditions eve now applies.
 - **The old shape fails the build with the fix.** A `defineDynamic` with `events`, or a memory provider with maps, gets an error that points at the codemod. It's an error, not an alias, and it can be removed after a release or two.
 - **The untyped payload goes away.** Participants receive the typed view instead of an `unknown` event.
-- **Running sessions don't cross the break,** so recorded decisions can change shape there. The pipeline PR on `main` keeps today's durable keys.
+- **Running sessions don't cross the break,** so recorded decisions can change shape there. The pipeline PR on `main` keeps today's durable keys. If the API ships in a later release, sessions do cross it: decisions recorded under today's keys count as stale, so each participant resolves again at its next change point, as after a redeploy.
 - **Extension contracts.** Retained epochs whose fixtures author `defineDynamic({ events })` are dropped with a reason: 57 for dynamic tools, 29 for instructions, 28 for skills, 9 for subagents, and 5 for connections. Each capability gets a new epoch.
 - **Third-party extensions and memory providers** built against the old API break until they update.
 - **In this repo,** the migration covers:
@@ -343,19 +343,33 @@ Every dynamic resolver and memory provider changes shape. It ships in the same r
 
 ## Plan
 
-Two PRs in the overall plan ([`session-event-lifecycle.md`](./session-event-lifecycle.md#phases)):
+Three steps in the overall plan ([`session-event-lifecycle.md`](./session-event-lifecycle.md#phases)). What's certain lands first. The API, the least certain part, is the last PR of the break, so it can be left for last.
 
-1. **On `main`, now: the pipeline behind today's API.** The change points, the registry, and `runParticipants`, with today's maps adapted internally onto the selections the codemod would write: none for `session.started`, the turn for `turn.started`, and the run for `step.started`. Dispatch moves onto it one participant at a time, with scenario tests pinning order and timing:
+1. **On `main`, now: the pipeline behind today's API.** One pipeline runs every participant in the fixed order, after the hooks, and builds the events today's handlers expect in one place. A table of the keys each kind accepts replaces the `ALLOWED_DYNAMIC_*` sets, and an unsupported key fails the build. Tests pin when today's participants run. They assert on handler calls and model input rather than event shapes, so they survive the wire change:
    - memory recall before the first model call;
    - dynamic model selection per model call, and for a manual compaction;
+   - skills and instructions only at turn start;
    - the refresh after a redeploy;
-   - restoring a parked step's tools from its recorded decision.
+   - restoring a parked step's tools.
 
    It changes nothing for authors. It touches `execution/session/turn-step.ts`, `harness/model-call/run.ts`, and `harness/hitl/intake.ts`, which HumanInput (#4342–#4344) also changes, so whichever lands second rebases rather than waiting.
 
-2. **On the integration branch, after the conversation slice: the API.** `select` and `resolve`, memory's moments, recorded selections, the development checks, typed entry points, the `eve/events` export with its selectors, the build errors, the codemod, the repo migration, and the docs. Its tests come with the rest of the v27 suite at the end of the break.
+2. **In the conversation slice: change points under today's API.** The pipeline runs at the change points v27 commits reach, from one table, instead of on v26 event types. Today's keys become names for those points:
 
-**Size:** a small net reduction, not measured. The dispatch and synthetic-event code it removes is a few hundred lines across `turn-event-handler.ts` (140), `resolver-events.ts` (29), `memory-event-lifecycle.ts` (76), and the filtering parts of the six `context/dynamic-*-lifecycle.ts` files. The pipeline, selection comparison, and recording add back something smaller.
+   | Key                    | Change point                                 |
+   | ---------------------- | -------------------------------------------- |
+   | `session.started`      | The first turn start                         |
+   | `turn.started`         | Each turn start                              |
+   | `step.started`         | Each `model.requested`                       |
+   | `turn.completed`       | `turn.settled` with `completed`              |
+   | `compaction.requested` | `context.started` for a compaction           |
+   | `compaction.completed` | `context.settled` for a completed compaction |
+
+   A handler's first argument is typed `unknown`, and the only readers in the repo take the turn's ID (`models/auto.ts`) and sequence (an e2e instruction fixture). So a minimal private payload with those fields stands in for the event, with its own types once the v26 builders are gone. Durable keys stay as they are.
+
+3. **At the top of the integration branch: the API.** `select` and `resolve`, memory's moments, recorded decisions in place of today's session, turn, and step metadata, restores from recorded selections, the development checks, typed entry points, the selectors participants need, the build errors, the codemod, the repo migration, the docs, and the tests. It deletes the private payload and the redeploy refresh and callback rebind paths. It aims to ship in the same release as the break; if it isn't ready, the break merges without it ([Compatibility](#compatibility)).
+
+**Size:** a small net reduction, not measured. The dispatch and synthetic-event code the three steps remove is a few hundred lines across `turn-event-handler.ts` (140), `resolver-events.ts` (29), `memory-event-lifecycle.ts` (76), and the filtering parts of the six `context/dynamic-*-lifecycle.ts` files. The pipeline, selection comparison, and recording add back something smaller. Step 3 also replaces the per-kind recording in `context/dynamic-*.ts` (about 1,600 lines) with one decision per participant. How much of that goes depends on how much of the durable callback and schema replay machinery survives, which isn't estimated here.
 
 ## Open questions
 
@@ -364,3 +378,7 @@ Two PRs in the overall plan ([`session-event-lifecycle.md`](./session-event-life
 3. **Mid-turn tool changes and prompt caching.** Tools can change at any model call. [Anthropic](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) invalidates the whole cache when tool definitions change, and [OpenAI](https://developers.openai.com/api/docs/guides/prompt-caching) recommends stable tools with `allowed_tools`. Should the harness keep the decision separate from the request, removing tools only at turn start and masking or appending mid-turn where a provider supports it?
 4. **History beyond the operational view.** `ctx.view` prunes closed calls and turns, so a selection can't count earlier deploys or failures. Should participants be able to declare folded aggregates that survive pruning, like `extendConversation` does for clients, or should they derive such facts from `ctx.messages`?
 5. **Periodic refresh.** Selecting the turn refreshes every turn. "At most every ten minutes" needs a committed time in the view, such as the `at` of the turn's start commit, and rows don't carry one today.
+6. **Resolvers with several keys.** Seven in this repo, including `self-modification/agent.ts`, handle two keys whose results layer today: a turn result overrides a session result of the same name. With one decision per participant, the codemod either merges them under the turn's selection, which redoes the session work every turn, or leaves a TODO. Which?
+7. **Session state read around the selection.** `resolve` runs inside the session's async context, so `defineState(...).get()` still reads session state it didn't select, and one fixture (`dynamic-overwrite.ts`) writes state from a resolver. Should `resolve` run outside the session's context, or is "`resolve` reads only its selection" a documented convention? Writes also repeat when a restore calls `resolve` again.
+8. **Restores that rebuild something different.** A restore calls `resolve` with the recorded selection, but an outside source may have changed since. When the rebuilt result lacks a recorded tool, or its schema differs, does the call fail, or does the recorded declaration win?
+9. **Revision changes mid-turn in development.** Locally the revision is the compiled artifacts' key, which changes on a rebuild, possibly while a turn is paused; today the refresh runs at any step start. Under this proposal, the model and tools re-resolve at the next model call and everything else at the next turn, with code rebuilt from recorded selections in between. Is that intended, and does "only while idle" need a local exception?
