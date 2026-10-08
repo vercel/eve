@@ -91,8 +91,8 @@ export function resolveTextInput(
 
 /**
  * Turns a typed reply into a response to the first open request when that request is one of
- * this turn's approvals. The approval coordinator then settles it, or asks its response policy
- * about the person who typed, as it does for a press. A batch's other approvals stay open for
+ * this turn's approvals without a response policy. Policy-gated approvals require a structured
+ * response identifying the responder. A batch's other approvals stay open for
  * later replies.
  */
 export function resolveTypedApproval(
@@ -112,6 +112,12 @@ export function resolveTypedApproval(
     step.requests.some((request) => request.requestId === first?.requestId),
   );
   if (first === undefined || !parked || !isApprovalRequest(first)) return stepInput;
+  if (
+    view.turn.suspended.some((step) =>
+      step.responseAuthRequiredRequestIds?.includes(first.requestId),
+    )
+  )
+    return stepInput;
   const response = resolveTextToResponse(text, first);
   if (response === undefined) return stepInput;
   return {

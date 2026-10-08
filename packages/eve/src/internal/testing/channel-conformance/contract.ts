@@ -947,13 +947,14 @@ const signInRules = [
 
 const approvalPermissionRules = [
   {
-    rule: "the requester typing approve on a requester-only approval runs the tool",
+    rule: "the requester typing approve on a policy-gated approval steers without running it",
     source: "docs/tools/human-in-the-loop.md#authorizing-approval-responses",
     requires: ["text-replies"],
     async run(conversation) {
       await askToReleaseHotfix(conversation);
       await conversation.say("approve");
-      await expectReleased(conversation);
+      await conversation.waitForReplyTo("approve");
+      expect(conversation.runsOf(REQUESTER_GATED_TOOL)).toBe(0);
     },
   },
   {
@@ -974,16 +975,16 @@ const approvalPermissionRules = [
   {
     rule: "another person typing cancel or approve doesn't settle a requester-only approval",
     source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
-    requires: ["another-person", "text-replies"],
+    requires: ["another-person", "text-replies", "buttons"],
     async run(conversation) {
-      await askToReleaseHotfix(conversation);
+      const options = await askToReleaseHotfix(conversation);
       // Today another person's message waits for the turn to end, so it never reaches the
       // response policy; the approval stays pending either way.
       await conversation.say("cancel", "bob");
       await conversation.say("approve", "bob");
       await expectStillPending(conversation);
       // A cancel taken as Alice's would settle the call as denied before this approval.
-      await conversation.say("approve");
+      await conversation.press(option(options, APPROVE_LABELS));
       await expectReleased(conversation);
     },
   },

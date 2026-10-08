@@ -80,7 +80,7 @@ export async function acceptHumanInput(
   const completions = config.signInCompletions ?? [];
   if (completions.length > 0) await step.apply(completeSignIn(step.view(), { completions }));
   const delivered = deliver(step.view(), input, options);
-  // A typed approval answers like a press, so the approval's response policy decides it.
+  // Only approvals without a response policy can be answered by text.
   const typed = resolveTypedApproval(step.view(), delivered.input);
   // A new message reaching the held turn steers it: the sign-ins it waits on end, and its
   // unanswered approvals resolve with the answers below. A typed answer is not a new message.
