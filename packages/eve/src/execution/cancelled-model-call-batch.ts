@@ -8,7 +8,7 @@ import type { DurableStepResult } from "#execution/session/turn-step-types.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import { saveSessionProjection } from "#harness/session-machine/current.js";
 import { preserveSerializedInstrumentationState } from "#instrumentation/state.js";
-import { preserveSerializedAgentTraceState } from "#tracing/agent-trace-context-store.js";
+import { preserveSerializedAgentTraceState } from "#tracing/eve/agent-trace-context-store.js";
 
 export interface CompletedModelCallCheckpoint {
   readonly result: StepResult;

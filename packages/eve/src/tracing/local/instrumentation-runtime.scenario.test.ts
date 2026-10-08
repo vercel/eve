@@ -11,7 +11,7 @@ import {
   ROOT_CONTEXT as COMPILED_ROOT_CONTEXT,
   context as runtimeContext,
   trace as runtimeTrace,
-} from "#compiled/@opentelemetry/api/index.js";
+} from "@opentelemetry/api";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { createAiSdkHookBridge } from "#instrumentation/ai-sdk-hook-bridge.js";
 import { listLocalTraces } from "#tracing/local/trace-reader.js";

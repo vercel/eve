@@ -1,11 +1,21 @@
-import type { SpanExporter } from "#compiled/@vercel/otel/index.js";
+import type { SpanExporter } from "./otel-configuration.js";
 import { context, TraceFlags } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { isTracingSuppressed } from "@opentelemetry/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { batchSpanProcessor } from "#tracing/eve/batch-span-processor.js";
-import { captureLogRecords } from "#internal/testing/log-records.js";
+import { batchSpanProcessor as createBatchSpanProcessor } from "./batch-span-processor.js";
+const diagnostics = vi.fn();
+
+function batchSpanProcessor(
+  exporter: SpanExporter,
+  options: Parameters<typeof createBatchSpanProcessor>[1] = {},
+) {
+  return createBatchSpanProcessor(exporter, {
+    ...options,
+    diagnostic: diagnostics,
+  });
+}
 
 interface RecordingExporter extends SpanExporter {
   readonly batches: readonly (readonly unknown[])[];
@@ -35,6 +45,7 @@ function batchIndexes(batches: readonly (readonly unknown[])[]): number[][] {
 
 describe("batchSpanProcessor", () => {
   afterEach(() => {
+    diagnostics.mockClear();
     vi.useRealTimers();
     context.disable();
   });
@@ -81,16 +92,13 @@ describe("batchSpanProcessor", () => {
   });
 
   it("logs a refused export rather than failing the turn that produced it", async () => {
-    const logs = captureLogRecords();
     const processor = batchSpanProcessor(recordingExporter({ fail: true }), {
       maxExportBatchSize: 1,
     });
 
     processor.onEnd(span(1));
     await expect(processor.forceFlush()).resolves.toBeUndefined();
-    expect(logs.records).toContainEqual(
-      expect.objectContaining({ level: "warn", message: "span export failed" }),
-    );
+    expect(diagnostics).toHaveBeenCalledWith("span export failed", expect.anything());
   });
 
   it("exports only sampled spans", async () => {
@@ -126,7 +134,6 @@ describe("batchSpanProcessor", () => {
   });
 
   it("does not overlap a later batch after the first times out", async () => {
-    const logs = captureLogRecords();
     vi.useFakeTimers();
     const batches: (readonly unknown[])[] = [];
     const callbacks: Array<(result: { code: number }) => void> = [];
@@ -159,16 +166,13 @@ describe("batchSpanProcessor", () => {
     expect(batchIndexes(batches)).toStrictEqual([[1], [2]]);
     callbacks[1]?.({ code: 0 });
     await flushed;
-    expect(logs.records).toContainEqual(
-      expect.objectContaining({
-        level: "warn",
-        message: "span export timed out; preserving exporter serialization",
-      }),
+    expect(diagnostics).toHaveBeenCalledWith(
+      "span export timed out; preserving exporter serialization",
+      expect.anything(),
     );
   });
 
   it("continues exporting after exporter forceFlush times out", async () => {
-    const logs = captureLogRecords();
     vi.useFakeTimers();
     const exporter = recordingExporter() as RecordingExporter & {
       forceFlush: () => Promise<void>;
@@ -188,16 +192,13 @@ describe("batchSpanProcessor", () => {
     await vi.advanceTimersByTimeAsync(0);
 
     expect(batchIndexes(exporter.batches)).toStrictEqual([[1], [2]]);
-    expect(logs.records).toContainEqual(
-      expect.objectContaining({
-        level: "warn",
-        message: "exporter flush timed out; preserving exporter serialization",
-      }),
+    expect(diagnostics).toHaveBeenCalledWith(
+      "exporter flush timed out; preserving exporter serialization",
+      expect.anything(),
     );
   });
 
   it("drains queued batches and closes the exporter after shutdown times out", async () => {
-    const logs = captureLogRecords();
     vi.useFakeTimers();
     const batches: (readonly unknown[])[] = [];
     const callbacks: Array<(result: { code: number }) => void> = [];
@@ -228,11 +229,9 @@ describe("batchSpanProcessor", () => {
     callbacks[1]?.({ code: 0 });
     await vi.advanceTimersByTimeAsync(0);
     expect(shutdown).toHaveBeenCalledOnce();
-    expect(logs.records).toContainEqual(
-      expect.objectContaining({
-        level: "warn",
-        message: "span export timed out; preserving exporter serialization",
-      }),
+    expect(diagnostics).toHaveBeenCalledWith(
+      "span export timed out; preserving exporter serialization",
+      expect.anything(),
     );
   });
 

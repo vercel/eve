@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { resolveTracePolicy, resolveTracePolicyDecision } from "#tracing/sampled-trace.js";
+import { resolveTracePolicy, resolveTracePolicyDecision } from "#shared/trace-policy.js";
 
 const contentContext = (
   audience: "public" | "private" | "unknown",

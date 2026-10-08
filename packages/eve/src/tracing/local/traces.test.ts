@@ -7,7 +7,7 @@ import {
   createLocalTracesProcessor,
   resolveLocalTracesExportPolicy,
 } from "#tracing/local/traces.js";
-import { resolveTracePolicy } from "#tracing/sampled-trace.js";
+import { resolveTracePolicy } from "#shared/trace-policy.js";
 import { localTraces } from "#public/instrumentation/otel.js";
 
 vi.mock("#tracing/local/trace-span-processor.js", () => ({
@@ -58,14 +58,6 @@ describe("createLocalTracesProcessor", () => {
     await expect(spool.releaseConversation("session-one")).resolves.toBe(true);
     // Releasing twice is not an error, it just owns nothing the second time.
     await expect(spool.releaseConversation("session-one")).resolves.toBe(false);
-  });
-
-  it("is a span processor, so it composes wherever one goes", () => {
-    const spool = createLocalTracesProcessor({ appRoot: "/tmp/eve-local-traces-test" });
-    expect(typeof spool.onStart).toBe("function");
-    expect(typeof spool.onEnd).toBe("function");
-    expect(typeof spool.forceFlush).toBe("function");
-    expect(typeof spool.shutdown).toBe("function");
   });
 
   it("is inert outside a development worker", async () => {

@@ -1,3 +1,4 @@
+import { AgentSpanIdGenerator } from "#tracing/lib/index.js";
 import type { H3Event } from "nitro";
 import {
   context as apiContext,
@@ -13,10 +14,7 @@ import {
 } from "@opentelemetry/sdk-trace-base";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  context as vendoredContext,
-  trace as vendoredTrace,
-} from "#compiled/@opentelemetry/api/index.js";
+import { context as vendoredContext, trace as vendoredTrace } from "@opentelemetry/api";
 
 import {
   CHANNEL_SENTINEL,
@@ -94,6 +92,7 @@ function createDeferred<T>() {
 function registerChannelRequestTracing(enabled: boolean): void {
   registerInstrumentationRuntime({
     forceFlush: async () => undefined,
+    idGenerator: new AgentSpanIdGenerator(),
     hooks: createInstrumentationHooks([]),
     otelSettings: {
       functionId: undefined,

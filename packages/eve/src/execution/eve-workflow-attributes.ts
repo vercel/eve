@@ -49,7 +49,7 @@ import {
   ConversationContextKey,
   normalizeConversationContext,
 } from "#shared/conversation-context.js";
-import { isSampledTrace } from "#tracing/sampled-trace.js";
+import { isSampledTrace } from "#shared/trace-policy.js";
 import { resolveForwardedTraceSeed } from "#shared/forwarded-trace-policy.js";
 
 /**

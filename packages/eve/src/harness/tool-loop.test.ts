@@ -1,4 +1,5 @@
-import { context as otelContext, trace } from "#compiled/@opentelemetry/api/index.js";
+import { AgentSpanIdGenerator } from "#tracing/lib/index.js";
+import { context as otelContext, trace } from "@opentelemetry/api";
 import {
   type FilePart,
   jsonSchema,
@@ -195,6 +196,7 @@ function declareTelemetry(
       ? undefined
       : {
           forceFlush: async () => undefined,
+          idGenerator: new AgentSpanIdGenerator(),
           hooks: createInstrumentationHooks([]),
           otelSettings: {
             ...config,
@@ -226,6 +228,7 @@ function bindHookInstrumentation(
   return bindInstrumentationRuntime(
     {
       forceFlush: async () => undefined,
+      idGenerator: new AgentSpanIdGenerator(),
       hooks,
       otelSettings: useDeclaredRuntime ? declaredRuntime?.otelSettings : undefined,
       runtimeContextResolvers: useDeclaredRuntime
@@ -10027,6 +10030,7 @@ describe("createToolLoopHarness", () => {
       };
       const authoredSpan = trace.wrapSpanContext(authoredTrace);
       const getTracerSpy = vi.spyOn(trace, "getTracer").mockReturnValue({
+        startActiveSpan: vi.fn(),
         startSpan: vi.fn(() => authoredSpan),
       } as ReturnType<typeof trace.getTracer>);
       setupMockAgent({

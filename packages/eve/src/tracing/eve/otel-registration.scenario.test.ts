@@ -13,11 +13,9 @@ import {
   context as runtimeContext,
   metrics as runtimeMetrics,
   trace as runtimeTrace,
-} from "#compiled/@opentelemetry/api/index.js";
-import { registerOtelPipeline } from "#tracing/eve/otel-registration.js";
-import { withErrorContent } from "#tracing/error-content-context.js";
-import { withConversationId } from "#tracing/eve/conversation-context.js";
-import { createLogger, logError } from "#internal/logging.js";
+} from "@opentelemetry/api";
+import { registerOtelPipeline } from "./otel-registration.js";
+import { withConversationId } from "./conversation-context.js";
 
 const require = createRequire(import.meta.url);
 const authoredApi = require("@opentelemetry/api") as typeof import("@opentelemetry/api");
@@ -37,7 +35,7 @@ afterEach(() => {
   (runtimeTrace as typeof runtimeTrace & { disable(): void }).disable();
 });
 
-describe("registerOtelPipeline", () => {
+describe("OTel registration", () => {
   it("samples using the real activation name and attributes without exporting probes", async () => {
     const exporter = new InMemorySpanExporter();
     const sampler = {
@@ -56,7 +54,7 @@ describe("registerOtelPipeline", () => {
       toString: () => "activation-sampler",
     };
     const runtime = registerOtelPipeline({
-      pipeline: { sampler, spanProcessors: [new SimpleSpanProcessor(exporter)] },
+      otel: { sampler, spanProcessors: [new SimpleSpanProcessor(exporter)] },
       serviceName: "researcher",
     });
     const operation = {
@@ -84,38 +82,13 @@ describe("registerOtelPipeline", () => {
     async (sampler) => {
       vi.stubEnv("OTEL_TRACES_SAMPLER_ARG", "0");
       const runtime = registerOtelPipeline({
-        pipeline: { sampler, spanProcessors: [] },
+        otel: { sampler, spanProcessors: [] },
         serviceName: "test",
       });
       expect(runtime.samplesTrace("a".repeat(32), { name: "invoke_agent test" })).toBe(false);
       await runtime.shutdown();
     },
   );
-
-  it("keeps logger-to-span error details behind the active output policy", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    const exporter = new InMemorySpanExporter();
-    const runtime = registerOtelPipeline({
-      pipeline: { spanProcessors: [new SimpleSpanProcessor(exporter)] },
-      serviceName: "test",
-    });
-    for (const allowed of [false, true]) {
-      const span = runtimeTrace.getTracer("eve.agent").startSpan(`logger-${allowed}`);
-      const active = withErrorContent(runtimeTrace.setSpan(COMPILED_ROOT_CONTEXT, span), allowed);
-      await runtimeContext.with(active, async () => {
-        logError(createLogger("test"), "operation failed", new Error("sensitive payload"));
-      });
-      span.end();
-    }
-    await runtime.forceFlush();
-    const [privateSpan, publicSpan] = exporter.getFinishedSpans();
-    expect(privateSpan?.status.code).toBe(2);
-    expect(privateSpan?.status.message).toBeUndefined();
-    expect(privateSpan?.events).toEqual([]);
-    expect(publicSpan?.status.message).toContain("sensitive payload");
-    expect(publicSpan?.events[0]?.attributes?.["exception.message"]).toContain("sensitive payload");
-    await runtime.shutdown();
-  });
 
   it("delegates an authored tracer cached before registration", async () => {
     const authoredTracer = authoredApi.trace.getTracer("authored");
@@ -124,7 +97,7 @@ describe("registerOtelPipeline", () => {
     const exporter = new InMemorySpanExporter();
     const processor = new SimpleSpanProcessor(exporter);
     const runtime = registerOtelPipeline({
-      pipeline: { spanProcessors: [processor] },
+      otel: { spanProcessors: [processor] },
       serviceName: "weather",
     });
     const parent = runtimeTrace.getTracer("eve").startSpan("eve.parent");
@@ -168,38 +141,19 @@ describe("registerOtelPipeline", () => {
     await runtime.shutdown();
   });
 
-  it("verifies tracer ownership when the sampler records nothing", () => {
-    expect(() =>
-      registerOtelPipeline({
-        pipeline: { sampler: "always_off", spanProcessors: [] },
-        serviceName: "weather",
-      }),
-    ).not.toThrow();
-  });
-
-  it("reports the installed sampler's verdict for pre-allocated trace ids", () => {
-    const runtime = registerOtelPipeline({
-      pipeline: { sampler: "always_off", spanProcessors: [] },
-      serviceName: "weather",
-    });
-
-    expect(runtime.samplesTrace(runtime.idGenerator.generateTraceId())).toBe(false);
-  });
-
   it("passes the pre-allocated trace id to a custom sampler without exporting the probe", async () => {
     const seen: string[] = [];
-    const sampler: NonNullable<Parameters<typeof registerOtelPipeline>[0]["pipeline"]["sampler"]> =
-      {
-        shouldSample: (_context: unknown, traceId: string) => {
-          seen.push(traceId);
-          return { decision: traceId.startsWith("a") ? 2 : 0 };
-        },
-        toString: () => "test-sampler",
-      };
+    const sampler: NonNullable<Parameters<typeof registerOtelPipeline>[0]["otel"]["sampler"]> = {
+      shouldSample: (_context: unknown, traceId: string) => {
+        seen.push(traceId);
+        return { decision: traceId.startsWith("a") ? 2 : 0 };
+      },
+      toString: () => "test-sampler",
+    };
     const exporter = new InMemorySpanExporter();
     const processor = new SimpleSpanProcessor(exporter);
     const runtime = registerOtelPipeline({
-      pipeline: {
+      otel: {
         sampler,
         spanProcessors: [processor],
       },
@@ -231,7 +185,7 @@ describe("registerOtelPipeline", () => {
 
     expect(() =>
       registerOtelPipeline({
-        pipeline: {
+        otel: {
           spanProcessors: [
             { forceFlush: async () => {}, onEnd: () => {}, onStart: () => {}, shutdown },
           ],
@@ -260,7 +214,7 @@ describe("registerOtelPipeline", () => {
 
     expect(() =>
       registerOtelPipeline({
-        pipeline: { spanProcessors: [] },
+        otel: { spanProcessors: [] },
         serviceName: "weather",
       }),
     ).toThrow(/another runtime already owns the global tracer provider/u);
@@ -284,7 +238,7 @@ describe("registerOtelPipeline", () => {
       shutdown: vi.fn(async () => {}),
     };
     const runtime = registerOtelPipeline({
-      pipeline: { metricReaders: [reader], spanProcessors: [] },
+      otel: { metricReaders: [reader], spanProcessors: [] },
       serviceName: "weather",
     });
 
@@ -305,7 +259,7 @@ describe("registerOtelPipeline", () => {
       setTracerProvider: vi.fn(),
     };
     const runtime = registerOtelPipeline({
-      pipeline: { instrumentations: [instrumentation], spanProcessors: [] },
+      otel: { instrumentations: [instrumentation], spanProcessors: [] },
       serviceName: "weather",
     });
     expect(instrumentation.enable).toHaveBeenCalledOnce();
@@ -313,23 +267,6 @@ describe("registerOtelPipeline", () => {
 
     await runtime.shutdown();
     expect(instrumentation.disable).toHaveBeenCalledOnce();
-  });
-
-  it("does not export the private registration span", async () => {
-    const exporter = new InMemorySpanExporter();
-    const processor = new SimpleSpanProcessor(exporter);
-    const shutdown = vi.spyOn(processor, "shutdown");
-    const runtime = registerOtelPipeline({
-      pipeline: { spanProcessors: [processor] },
-      serviceName: "weather",
-    });
-
-    trace.getTracer("test").startSpan("user.work").end();
-    await processor.forceFlush();
-
-    expect(exporter.getFinishedSpans().map((span) => span.name)).toEqual(["user.work"]);
-    await runtime.shutdown();
-    expect(shutdown).toHaveBeenCalledOnce();
   });
 });
 

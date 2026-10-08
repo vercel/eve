@@ -1,4 +1,4 @@
-import { createContextKey, type Context } from "#compiled/@opentelemetry/api/index.js";
+import { createContextKey, type Context } from "@opentelemetry/api";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
 
 const CHANNEL_AUDIENCE_KEY = createContextKey("eve.channel.audience");

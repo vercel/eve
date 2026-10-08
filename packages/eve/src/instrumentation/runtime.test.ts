@@ -26,8 +26,8 @@ import {
   type InstrumentationRuntime,
   type InstrumentationStepScope,
 } from "#instrumentation/runtime.js";
-import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
-import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
+import { AgentSpanIdGenerator } from "#tracing/lib/index.js";
+import { ContextAgentTraceStateStore } from "#tracing/eve/agent-trace-context-store.js";
 import type { TraceCapturePolicy } from "#tracing/eve/otel-declaration.js";
 import { readForwardedAudienceBaggage, writeForwardedAudienceBaggage } from "#protocol/baggage.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
@@ -45,6 +45,7 @@ function createRuntime(
 ): InstrumentationRuntime {
   return {
     forceFlush: async () => undefined,
+    idGenerator: new AgentSpanIdGenerator(),
     hooks,
     otelSettings: {
       recordInputs: true,
@@ -354,6 +355,7 @@ describe("initializeSessionInstrumentation", () => {
   });
 
   it("does not widen an unsampled parent with a record decision", () => {
+    registerInstrumentationRuntime(createRuntime({ capturesContent: true, publish: vi.fn() }));
     const ctx = createContext("public");
     ctx.set(ParentTraceContextKey, {
       decision: { action: "record", recordInputs: true, recordOutputs: true },
@@ -999,7 +1001,7 @@ describe("bindSessionInstrumentation", () => {
     );
     const ctx = createContext();
     contextStorage.run(ctx, () => {
-      new ContextAgentTraceStateStore().setSession("session-1", {
+      new ContextAgentTraceStateStore().set("session", "session-1", {
         context: { spanId: "1".repeat(16), traceFlags: 1, traceId: "2".repeat(32) },
         decision: { action: "record", recordInputs: false, recordOutputs: true },
         rootSessionId: "session-1",
