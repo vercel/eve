@@ -17,6 +17,18 @@ const artifact: VercelImagePreparedArtifact = {
   version: 1,
 };
 
+const artifactWithDrive: VercelImagePreparedArtifact = {
+  ...artifact,
+  mounts: [
+    {
+      driveName: `eve-sbx-res-${"b".repeat(32)}`,
+      mountPath: "/eve/resources/skills",
+      region: "iad1",
+      resourceKey: "skills-key",
+    },
+  ],
+};
+
 afterEach(() => vi.unstubAllEnvs());
 
 function context(sessionId = "session-a"): SandboxProviderSessionContext {
@@ -44,6 +56,15 @@ function createProvider(input: { readonly existing?: boolean } = {}) {
   };
   const create = vi.fn(async () => sandbox);
   const get = vi.fn(async () => (input.existing ? sandbox : null));
+  const sourceDrive = {
+    driveId: "source-drive-id",
+    fork: vi.fn(async ({ name }: { name: string }) => ({
+      name,
+      parentDriveId: "source-drive-id",
+    })),
+    region: "iad1",
+  };
+  const getDrive = vi.fn(async () => sourceDrive);
   vi.stubEnv(
     "VERCEL_OIDC_TOKEN",
     createFakeVercelOidcToken({
@@ -62,11 +83,11 @@ function createProvider(input: { readonly existing?: boolean } = {}) {
       createImagePublisher: () => ({ publish }),
       ensureBaseRuntime: vi.fn(async () => {}),
       hydrateResources: vi.fn(async () => {}),
-      loadModule: async () => ({ Sandbox: { create, get } }) as never,
+      loadModule: async () => ({ Drive: { get: getDrive }, Sandbox: { create, get } }) as never,
       waitForImage: vi.fn(async () => {}),
     },
   );
-  return { create, get, provider, publish, sandbox };
+  return { create, get, getDrive, provider, publish, sandbox, sourceDrive };
 }
 
 function prepareContext(hasDockerfile = true): SandboxProviderPrepareContext {
@@ -102,14 +123,33 @@ describe("createVercelImageSandboxProvider", () => {
     const first = createProvider();
     const started = await first.provider.start(context("session-a"), {}, artifact);
     expect(started.state).toMatchObject({
+      forks: [],
       sandboxName: expect.stringMatching(/^eve-sbx-vercel-image-/u),
-      version: 2,
+      version: 3,
     });
     const second = createProvider({ existing: true });
     await expect(
       second.provider.resume(context("session-a"), artifact, started.state),
     ).resolves.toBeTruthy();
     expect(second.create).not.toHaveBeenCalled();
+  });
+
+  it("stores the session Drive fork identity in provider state", async () => {
+    const { provider, sourceDrive } = createProvider();
+    const started = await provider.start(context("session-a"), {}, artifactWithDrive);
+
+    expect(sourceDrive.fork).toHaveBeenCalledOnce();
+    expect(started.state).toMatchObject({
+      forks: [
+        {
+          driveName: expect.stringMatching(/^eve-sbx-fork-[a-f0-9]{32}$/u),
+          mountPath: "/eve/resources/skills",
+          resourceKey: "skills-key",
+          sourceDriveName: artifactWithDrive.mounts[0]?.driveName,
+        },
+      ],
+      version: 3,
+    });
   });
 
   it("derives distinct native identity for each eve session", async () => {
@@ -124,9 +164,10 @@ describe("createVercelImageSandboxProvider", () => {
     const { provider } = createProvider();
     await expect(
       provider.resume(context("session-a"), artifact, {
+        forks: [],
         generation: "wrong",
         sandboxName: "wrong",
-        version: 2,
+        version: 3,
       }),
     ).rejects.toThrow("incompatible");
   });

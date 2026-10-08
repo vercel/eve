@@ -66,17 +66,30 @@ export async function prepareVercelImageResource(input: {
   };
 }
 
-export async function resolveVercelImageMounts(input: {
+export type VercelImageForkArtifact = {
+  readonly driveName: string;
+  readonly mountPath: string;
+  readonly resourceKey: string;
+  readonly sourceDriveName: string;
+};
+
+export async function forkVercelImageMounts(input: {
   readonly createOptions: VercelCreateOptions;
   readonly module: VercelModule;
   readonly mounts: readonly VercelImageMountArtifact[];
   readonly sandboxName: string;
   readonly signal?: AbortSignal;
-}): Promise<Record<string, VercelDrive>> {
+}): Promise<{
+  readonly forks: readonly VercelImageForkArtifact[];
+  readonly mounts: Record<string, VercelDrive>;
+}> {
   const credentials = await getVercelSandboxCredentials(input.createOptions);
   const fetch = getVercelSandboxFetch(input.createOptions);
+  const forks = describeVercelImageForks(input.mounts, input.sandboxName);
   const mounts: Record<string, VercelDrive> = {};
-  for (const artifact of input.mounts) {
+  for (const [index, artifact] of input.mounts.entries()) {
+    const forkArtifact = forks[index];
+    if (forkArtifact === undefined) throw new Error("Missing Vercel image Drive fork identity.");
     const source = await input.module.Drive.get({
       ...credentials,
       fetch,
@@ -86,38 +99,41 @@ export async function resolveVercelImageMounts(input: {
     if (source.region !== artifact.region) {
       throw new Error(`Prepared sandbox resource "${artifact.resourceKey}" changed regions.`);
     }
-    const forkName = resourceForkName(input.sandboxName, artifact.resourceKey);
     let fork: VercelDrive;
     try {
-      fork = await input.module.Drive.get({
-        ...credentials,
-        fetch,
-        name: forkName,
-        signal: input.signal,
-      });
-    } catch (error) {
-      if (!isVercelResourceMissingError(error)) throw error;
+      fork = await source.fork({ name: forkArtifact.driveName, signal: input.signal });
+    } catch (forkError) {
       try {
-        fork = await source.fork({ name: forkName, signal: input.signal });
-      } catch (forkError) {
-        try {
-          fork = await input.module.Drive.get({
-            ...credentials,
-            fetch,
-            name: forkName,
-            signal: input.signal,
-          });
-        } catch {
-          throw forkError;
-        }
+        fork = await input.module.Drive.get({
+          ...credentials,
+          fetch,
+          name: forkArtifact.driveName,
+          signal: input.signal,
+        });
+      } catch {
+        throw forkError;
       }
     }
     if (fork.parentDriveId !== source.driveId) {
-      throw new Error(`Sandbox resource fork "${forkName}" has an unexpected source Drive.`);
+      throw new Error(
+        `Sandbox resource fork "${forkArtifact.driveName}" has an unexpected source Drive.`,
+      );
     }
     mounts[artifact.mountPath] = fork;
   }
-  return mounts;
+  return { forks, mounts };
+}
+
+export function describeVercelImageForks(
+  mounts: readonly VercelImageMountArtifact[],
+  sandboxName: string,
+): readonly VercelImageForkArtifact[] {
+  return mounts.map((mount) => ({
+    driveName: resourceForkName(sandboxName, mount.resourceKey),
+    mountPath: mount.mountPath,
+    resourceKey: mount.resourceKey,
+    sourceDriveName: mount.driveName,
+  }));
 }
 
 async function findDrive(input: {

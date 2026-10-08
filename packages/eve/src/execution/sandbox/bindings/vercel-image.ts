@@ -25,8 +25,10 @@ import {
   createVercelSandboxHandle,
 } from "#execution/sandbox/bindings/vercel.js";
 import {
+  describeVercelImageForks,
+  forkVercelImageMounts,
   prepareVercelImageResource,
-  resolveVercelImageMounts,
+  type VercelImageForkArtifact,
   type VercelImageMountArtifact,
 } from "#execution/sandbox/bindings/vercel-image-resources.js";
 import type {
@@ -60,6 +62,7 @@ const OCI_REGISTRY = "vcr.vercel.com";
 const DEFAULT_SANDBOX_TIMEOUT_MS = 30 * 60 * 1_000;
 const DIGEST_PINNED_IMAGE = /^vcr\.vercel\.com\/.+@sha256:[a-f0-9]{64}$/u;
 const EVE_RESOURCE_DRIVE_NAME = /^eve-sbx-res-[a-f0-9]{32}$/u;
+const EVE_RESOURCE_FORK_NAME = /^eve-sbx-fork-[a-f0-9]{32}$/u;
 const RESOURCE_MOUNT_PATHS = new Set(["/eve/resources/workspace", "/eve/resources/skills"]);
 
 export type VercelImagePreparedArtifact = {
@@ -89,9 +92,10 @@ export interface CreateVercelImageProviderInput {
 }
 
 export type VercelImageSessionState = {
+  readonly forks: readonly VercelImageForkArtifact[];
   readonly generation: string;
   readonly sandboxName: string;
-  readonly version: 2;
+  readonly version: 3;
 };
 
 export function createVercelImageSandboxProvider(
@@ -137,17 +141,19 @@ export function createVercelImageSandboxProvider(
       sandboxName,
     });
     let created = false;
+    let forks = describeVercelImageForks(artifact.mounts, sandboxName);
     if (sandbox === null) {
       created = true;
       try {
         const credentials = await getVercelSandboxCredentials(createOptions);
-        const mounts = await resolveVercelImageMounts({
+        const forked = await forkVercelImageMounts({
           createOptions,
           module,
           mounts: artifact.mounts,
           sandboxName,
           signal: createOptions.signal,
         });
+        forks = forked.forks;
         const {
           image: _image,
           runtime: _runtime,
@@ -163,7 +169,7 @@ export function createVercelImageSandboxProvider(
               ...credentials,
               fetch: getVercelSandboxFetch(createOptions),
               image: artifact.image,
-              mounts,
+              mounts: forked.mounts,
               name: sandboxName,
               persistent: true,
               tags: resolveVercelSandboxTags(createOptions.tags, nativeTags),
@@ -209,6 +215,7 @@ export function createVercelImageSandboxProvider(
     }
     return {
       created,
+      forks,
       handle: createVercelSandboxHandle({
         createOptions,
         loadDeleteSandboxModule: loadDeleteModule,
@@ -250,7 +257,8 @@ export function createVercelImageSandboxProvider(
       return { image, mounts: preparedMounts, version: 1 };
     },
     async resume(_context, artifact, stateValue) {
-      const state = requireSessionState(stateValue);
+      const prepared = requirePreparedArtifact(artifact);
+      const state = requireSessionState(stateValue, prepared);
       if (state.generation !== imageGeneration(artifact, createOptions)) {
         throw new Error(
           "Vercel image sandbox session state is incompatible with this environment.",
@@ -278,7 +286,12 @@ export function createVercelImageSandboxProvider(
       const result = await openSession(options, artifact, nativeSession.tags, sandboxName);
       return {
         handle: result.handle,
-        state: { generation: imageGeneration(artifact, createOptions), sandboxName, version: 2 },
+        state: {
+          forks: result.forks,
+          generation: imageGeneration(artifact, createOptions),
+          sandboxName,
+          version: 3,
+        },
       };
     },
   };
@@ -346,16 +359,42 @@ function sessionName(
   }).slice(0, 32)}`;
 }
 
-function requireSessionState(state: unknown): VercelImageSessionState {
+function requireSessionState(
+  state: unknown,
+  artifact: VercelImagePreparedArtifact,
+): VercelImageSessionState {
   if (
     !isSandboxPreparedArtifactRecord(state) ||
-    state.version !== 2 ||
+    state.version !== 3 ||
     typeof state.generation !== "string" ||
-    typeof state.sandboxName !== "string"
+    typeof state.sandboxName !== "string" ||
+    !Array.isArray(state.forks) ||
+    !state.forks.every(isForkArtifact)
   ) {
     throw new Error("Invalid Vercel image sandbox session state.");
   }
-  return { generation: state.generation, sandboxName: state.sandboxName, version: 2 };
+  const expected = describeVercelImageForks(artifact.mounts, state.sandboxName);
+  if (
+    state.forks.length !== expected.length ||
+    state.forks.some((fork, index) => {
+      const expectedFork = expected[index];
+      return (
+        expectedFork === undefined ||
+        fork.driveName !== expectedFork.driveName ||
+        fork.mountPath !== expectedFork.mountPath ||
+        fork.resourceKey !== expectedFork.resourceKey ||
+        fork.sourceDriveName !== expectedFork.sourceDriveName
+      );
+    })
+  ) {
+    throw new Error("Vercel image sandbox session Drive state is incompatible.");
+  }
+  return {
+    forks: state.forks,
+    generation: state.generation,
+    sandboxName: state.sandboxName,
+    version: 3,
+  };
 }
 
 async function createImageSandboxWithRetry<T>(input: {
@@ -409,6 +448,20 @@ function requirePreparedArtifact(artifact: SandboxPreparedArtifact): VercelImage
     })),
     version: 1,
   };
+}
+
+function isForkArtifact(value: SandboxPreparedArtifact): value is VercelImageForkArtifact {
+  return (
+    isSandboxPreparedArtifactRecord(value) &&
+    typeof value.driveName === "string" &&
+    EVE_RESOURCE_FORK_NAME.test(value.driveName) &&
+    typeof value.mountPath === "string" &&
+    RESOURCE_MOUNT_PATHS.has(value.mountPath) &&
+    typeof value.resourceKey === "string" &&
+    value.resourceKey.length > 0 &&
+    typeof value.sourceDriveName === "string" &&
+    EVE_RESOURCE_DRIVE_NAME.test(value.sourceDriveName)
+  );
 }
 
 function isMountArtifact(value: SandboxPreparedArtifact): value is VercelImageMountArtifact {
