@@ -19,6 +19,7 @@ import {
 import { captureLogRecords } from "#internal/testing/log-records.js";
 
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { serializeInputSchema, type ToolSchemaSource } from "#tools/schema.js";
 
 import { buildStepCatalog, type StepCatalog } from "./step-catalog.js";
 
@@ -77,7 +78,7 @@ describe("buildStepCatalog", () => {
 
       expect(names(catalog.advertised)).toEqual([EXECUTE_TOOL_NAME]);
       expect(execute.description).toBe(
-        "Load one of your listed skills by name with `skill`, then follow the instructions it returns.",
+        "Load a skill when the request clearly matches one of your listed skills or the user asks for it: pass its name as `skill`, then follow the instructions it returns.",
       );
       expect(await validateExecute(catalog, { skill: "house-rules" })).toEqual({
         value: { skill: "house-rules" },
@@ -85,6 +86,36 @@ describe("buildStepCatalog", () => {
       const unknown = JSON.stringify(await validateExecute(catalog, { skill: "house_rules" }));
       expect(unknown).toContain('No skill named \\"house_rules\\"');
       expect(unknown).not.toContain(SEARCH_TOOL_NAME);
+    });
+
+    it("leads execute with when to load a skill, and adds each part only for what the agent declares", () => {
+      function executeShape(declared: Parameters<typeof catalogContext>[0]) {
+        const execute = catalogContext(declared).catalog.advertised.get(EXECUTE_TOOL_NAME)!;
+        const schema = serializeInputSchema(execute.inputSchema as ToolSchemaSource) as {
+          properties: Record<string, unknown>;
+        };
+        return { description: execute.description, fields: Object.keys(schema.properties) };
+      }
+      const toolClause =
+        "Call a tool that isn't in your tool list: pass `tool`, its exact name from eve__search, and `input` matching its signature.";
+
+      expect(executeShape({ tools: [inlineTool("refund_invoice", { deferred: true })] })).toEqual({
+        description: toolClause,
+        fields: ["tool", "input"],
+      });
+      expect(
+        executeShape({
+          connections: [fakeConnection({ name: "linear", tools: [] })],
+          skills: [{ name: "house-rules" }],
+        }),
+      ).toEqual({
+        description: [
+          "Load a skill when the request clearly matches a listed skill or one eve__search found, or the user asks for it: pass its name as `skill`, then follow the instructions it returns.",
+          toolClause,
+          "Prefer connected services over web search or general knowledge when a request relates to them.",
+        ].join(" "),
+        fields: ["tool", "input", "skill"],
+      });
     });
 
     it.each([

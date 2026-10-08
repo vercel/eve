@@ -50,44 +50,71 @@ import {
 const ENDS_TURN_TOOL_NOTE =
   "Calling this tool ends your turn once it succeeds: do not write a reply or call other tools in the same step. If it fails, you will see the error and can continue.";
 
-const EXECUTE_DESCRIPTION = [
-  `Call a tool that is not in your tool list, using the exact name ${SEARCH_TOOL_NAME} returns`,
-  "and `input` matching its signature, or load a skill by name with `skill`.",
-  "Prefer connected services over web search or general knowledge when a request relates to them.",
-].join(" ");
+const LISTED_SKILL_CLAUSE =
+  "Load a skill when the request clearly matches one of your listed skills or the user asks for it: pass its name as `skill`, then follow the instructions it returns.";
+const SEARCHABLE_SKILL_CLAUSE = `Load a skill when the request clearly matches a listed skill or one ${SEARCH_TOOL_NAME} found, or the user asks for it: pass its name as \`skill\`, then follow the instructions it returns.`;
+const TOOL_CLAUSE = `Call a tool that isn't in your tool list: pass \`tool\`, its exact name from ${SEARCH_TOOL_NAME}, and \`input\` matching its signature.`;
+const CONNECTIONS_CLAUSE =
+  "Prefer connected services over web search or general knowledge when a request relates to them.";
 
-const SKILL_EXECUTE_DESCRIPTION =
-  "Load one of your listed skills by name with `skill`, then follow the instructions it returns.";
-
-const SKILL_EXECUTE_INPUT_SCHEMA: JsonObject = {
-  type: "object",
-  properties: { skill: { type: "string", description: "The name of a listed skill." } },
-  required: ["skill"],
-  additionalProperties: false,
-};
-
-// Providers reject a top-level union, so `tool` and `skill` are both optional
-// here and validation requires exactly one.
-const EXECUTE_INPUT_SCHEMA: JsonObject = {
-  type: "object",
-  properties: {
-    tool: {
-      type: "string",
-      description: `The tool's exact name, as ${SEARCH_TOOL_NAME} returns it.`,
-    },
-    input: {
-      type: "object",
-      description: "Arguments matching the tool's signature. Defaults to {}.",
-    },
-    skill: { type: "string", description: "The name of a skill to load, instead of a tool." },
-  },
-  additionalProperties: false,
-};
-
-/** Which of `eve__search` and `eve__execute` an agent gets. */
+/** Which of `eve__search` and `eve__execute` an agent gets, and what they reach. */
 interface CatalogTools {
+  /** A static connection or a dynamic connection resolver. */
+  readonly connections: boolean;
   readonly execute: boolean;
   readonly search: boolean;
+  /** A static skill or a dynamic skill resolver. */
+  readonly skills: boolean;
+}
+
+/**
+ * `eve__execute`'s description. Loading a skill comes first and says when to
+ * load one, so skills load as reliably as they did from a tool of their own.
+ * Each clause follows from what the agent declares, so the text is fixed for a
+ * deployment.
+ */
+function executeDescription(tools: CatalogTools): string {
+  return [
+    tools.skills ? (tools.search ? SEARCHABLE_SKILL_CLAUSE : LISTED_SKILL_CLAUSE) : undefined,
+    tools.search ? TOOL_CLAUSE : undefined,
+    tools.connections ? CONNECTIONS_CLAUSE : undefined,
+  ]
+    .filter((clause) => clause !== undefined)
+    .join(" ");
+}
+
+// Providers reject a top-level union, so with both `tool` and `skill` each is
+// optional and validation requires exactly one.
+function executeInputSchema(tools: CatalogTools): JsonObject {
+  const skill = {
+    type: "string",
+    description: tools.search
+      ? `A skill's name, from your listed skills or ${SEARCH_TOOL_NAME}.`
+      : "A skill's name, from your listed skills.",
+  };
+  if (!tools.search) {
+    return {
+      type: "object",
+      properties: { skill },
+      required: ["skill"],
+      additionalProperties: false,
+    };
+  }
+  return {
+    type: "object",
+    properties: {
+      tool: {
+        type: "string",
+        description: `The tool's exact name, as ${SEARCH_TOOL_NAME} returns it.`,
+      },
+      input: {
+        type: "object",
+        description: "Arguments matching the tool's signature. Defaults to {}.",
+      },
+      ...(tools.skills ? { skill } : {}),
+    },
+    additionalProperties: false,
+  };
 }
 
 /**
@@ -111,12 +138,15 @@ function catalogToolsFor(
     agent?.dynamicConnectionResolvers,
     bundle?.subagentRegistry.dynamicResolvers,
   ];
+  const connections =
+    (agent?.connections ?? []).length > 0 || (agent?.dynamicConnectionResolvers?.length ?? 0) > 0;
   const search =
     agentTools.some((definition) => definition.deferred === true) ||
     skills.some((skill) => skill.deferred === true) ||
-    (agent?.connections ?? []).length > 0 ||
+    connections ||
     resolvers.some((declared) => (declared?.length ?? 0) > 0);
-  return { execute: search || skills.length > 0, search };
+  const declaresSkills = skills.length > 0 || (agent?.dynamicSkillResolvers?.length ?? 0) > 0;
+  return { connections, execute: search || declaresSkills, search, skills: declaresSkills };
 }
 
 export interface StepCatalog extends HarnessToolLookup {
@@ -224,7 +254,7 @@ export function buildStepCatalog(input: {
     advertised.set(search.name, search);
   }
   if (catalogTools.execute) {
-    advertised.set(EXECUTE_TOOL_NAME, createExecuteTool(catalog, toolEntry, catalogTools.search));
+    advertised.set(EXECUTE_TOOL_NAME, createExecuteTool(catalog, toolEntry, catalogTools));
   }
   return catalog;
 }
@@ -309,10 +339,10 @@ function connectionEntryNamed(
 function createExecuteTool(
   catalog: StepCatalog,
   toolEntry: (name: string) => HarnessToolDefinition | undefined,
-  searchable: boolean,
+  tools: CatalogTools,
 ): HarnessToolDefinition {
   return {
-    description: searchable ? EXECUTE_DESCRIPTION : SKILL_EXECUTE_DESCRIPTION,
+    description: executeDescription(tools),
     execute: (input: unknown, options: ToolExecuteOptions) => {
       const resolved = catalog.resolve({ input, toolName: EXECUTE_TOOL_NAME });
       // Input validation resolves every call before the SDK runs it.
@@ -322,9 +352,8 @@ function createExecuteTool(
       return runEntryCall(resolved, options);
     },
     frameworkTool: true,
-    inputSchema: refineJsonSchema(
-      searchable ? EXECUTE_INPUT_SCHEMA : SKILL_EXECUTE_INPUT_SCHEMA,
-      (value) => resolveExecuteInput(catalog, toolEntry, value as ExecuteInput, searchable),
+    inputSchema: refineJsonSchema(executeInputSchema(tools), (value) =>
+      resolveExecuteInput(catalog, toolEntry, value as ExecuteInput, tools),
     ),
     name: EXECUTE_TOOL_NAME,
   };
@@ -340,7 +369,7 @@ async function resolveExecuteInput(
   catalog: StepCatalog,
   toolEntry: (name: string) => HarnessToolDefinition | undefined,
   { input, skill, tool }: ExecuteInput,
-  searchable: boolean,
+  tools: CatalogTools,
 ): Promise<StandardSchemaV1.Result<ExecuteInput>> {
   if (skill !== undefined) {
     if (tool !== undefined) return failure("skill", "Pass either `tool` or `skill`, not both.");
@@ -349,10 +378,15 @@ async function resolveExecuteInput(
     }
     if (catalog.skills.has(skill)) return { value: { skill } };
     const connections = catalog.connections.map((connection) => connection.connectionName);
-    return failure("skill", unknownSkillMessage(skill, catalog.skills, connections, searchable));
+    return failure("skill", unknownSkillMessage(skill, catalog.skills, connections, tools.search));
   }
-  if (!searchable) return failure("skill", "Pass `skill`, the name of a listed skill.");
-  if (tool === undefined) return failure("tool", "Pass `tool`, or `skill` to load a skill.");
+  if (!tools.search) return failure("skill", "Pass `skill`, the name of a listed skill.");
+  if (tool === undefined) {
+    return failure(
+      "tool",
+      tools.skills ? "Pass `tool`, or `skill` to load a skill." : "Pass `tool`.",
+    );
+  }
   const definition = toolEntry(tool);
   if (definition === undefined) return failure("tool", unknownEntryMessage(tool, catalog));
   if (definition.deferred !== true) {

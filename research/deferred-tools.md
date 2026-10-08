@@ -615,10 +615,16 @@ today.
   are already listable, it only confirms. It has no approval, and its label
   is `Sign in to Linear`. Every path that finishes a sign-in, whether in
   `eve__search`, a tool call, or this entry, goes through one helper.
-- **Description.** Fixed for each eve version. It tells the model to use
-  names exactly as `eve__search` returns them, to load skills with `skill`, and to
-  prefer connected services over web search or general knowledge. That last
-  sentence moves over from `connection_search`.
+- **Description.** Fixed for each eve version and built from what the agent
+  declares, so it never changes within a deployment. Loading a skill comes
+  first, with `load_skill`'s trigger: load one when the request clearly matches
+  a listed skill, or one `eve__search` found, or the user asks for it. An audit
+  found that a skill clause placed after the generic call-a-tool text left only
+  the system prompt prompting skill loads. Then calling a tool by the exact name
+  `eve__search` returns, and, only with connections, preferring connected
+  services over web search or general knowledge, a sentence that moves over
+  from `connection_search`. Each clause, and the `skill` field, appears only
+  when the agent has what it describes.
 
 **Both tools**
 
