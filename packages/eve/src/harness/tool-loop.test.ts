@@ -1684,6 +1684,82 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
+  it("approval, execute, and sign-in siblings emit one input wait for the park", async () => {
+    const signal = requestAuthorization([
+      {
+        attemptId: "sibling-attempt",
+        name: "probe",
+        challenge: {
+          url: "https://idp.example/auth",
+          instructions: "Sign in",
+          userCode: "ABC",
+        },
+        hookUrl: "https://app.example/callback",
+        principal: { type: "app" },
+        resume: { nonce: "n1" },
+      },
+    ]);
+    const output = modelFacingAuthorizationOutput(signal);
+    const gate = { type: "tool-call" as const, toolCallId: "gate-1", toolName: "add", input: {} };
+    const work = {
+      type: "tool-call" as const,
+      toolCallId: "delegate-1",
+      toolName: "delegate",
+      input: { message: "probe" },
+    };
+    const auth = {
+      type: "tool-call" as const,
+      toolCallId: "probe-1",
+      toolName: "probe",
+      input: {},
+    };
+    const approval = {
+      approvalId: "approval-gate",
+      toolCallId: "gate-1",
+      type: "tool-approval-request" as const,
+    };
+    const authResult = {
+      type: "tool-result" as const,
+      toolCallId: "probe-1",
+      toolName: "probe",
+      output,
+    };
+    setupMockAgent({
+      content: [gate, approval, work, auth],
+      finishReason: "tool-calls",
+      response: {
+        messages: [
+          { role: "assistant", content: [gate, approval, work, auth] },
+          { role: "tool", content: [authResult] },
+        ],
+      },
+      text: "",
+      toolCalls: [gate, work, auth],
+      toolResults: [authResult],
+    });
+    const tools = new Map(withBash(createDelegationToolMap()));
+    tools.set("probe", {
+      name: "probe",
+      description: "Probe",
+      inputSchema: jsonSchema({ type: "object" }),
+      execute: vi.fn(),
+    });
+    const { emit, events } = createEventCollector();
+    const run = createToolLoopHarness(createTestConfig(emit, { tools }));
+    const ctx = new ContextContainer();
+    stashToolInterrupt(ctx, "probe-1", signal);
+    const result = await contextStorage.run(ctx, () =>
+      run(createPendingBashApprovalSession(), {
+        inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
+      }),
+    );
+    expect(runtimeWait(result.session.state)?.tasks[0]?.entry.entryPoint).toBe("execute");
+    expect(events.filter((event) => event.type === "authorization.required")).toHaveLength(1);
+    const waits = events.filter((event) => event.type === "turn.waiting");
+    expect(waits).toHaveLength(1);
+    expect(waits[0]?.data.on).toBe("input");
+  });
+
   it("parks on both batches when one step carries a workflow task and an approval", async () => {
     mockApprovalAlongsideWorkflowTask();
 
