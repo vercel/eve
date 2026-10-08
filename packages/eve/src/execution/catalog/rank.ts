@@ -5,16 +5,20 @@
  * `create_issue` are the same words. Matches rank in tiers:
  *
  * 1. Exact: the query's words are the full name's words.
- * 2. Exact without prefix: they are a connection tool's name without its
- *    connection prefix, so `create_issue` finds `linear__create_issue`.
+ * 2. Exact without namespace: they are the name after its last `__`, so
+ *    `create_issue` finds `linear__create_issue` and `sre__create_issue`.
  * 3. Connection: they are the connection's name, or its first whole words,
  *    so `linear` lists the `linear` connection's tools, while `git` leaves
  *    `github`'s tools to the name prefix tier.
- * 4. Name prefix: the name's words start with the query's words, the last of
- *    which may be partial, so `create_iss` finds `create_issue`.
+ * 4. Name prefix: the full name's words, or those after its last `__`, start
+ *    with the query's words, the last of which may be partial, so
+ *    `create_iss` finds `create_issue` and `status page incidents` finds
+ *    `sre__status_page_incidents_list`.
  * 5. Keyword: any other match. A query word matches a word when either is a
  *    prefix of the other, so `repo` finds `repositories` and `issues` finds
  *    `issue`, and each query word adds the weight of every field it matches.
+ *    One-letter and filler words such as `a` and `the` don't score when the
+ *    query has other words, so `a` doesn't find `assign`.
  *
  * Within a tier, the keyword score orders matches, then connection, then name.
  */
@@ -37,8 +41,9 @@ export function rankCandidates<T extends RankCandidate>(
   candidates: readonly T[],
 ): T[] {
   const terms = tokenize(query);
+  const scored = scoringTerms(terms);
   return candidates
-    .map((candidate) => ({ candidate, ...rankCandidate(terms, candidate) }))
+    .map((candidate) => ({ candidate, ...rankCandidate(terms, scored, candidate) }))
     .filter((entry) => entry.score > 0)
     .sort(
       (a, b) =>
@@ -65,28 +70,63 @@ export function closestNames(name: string, candidates: readonly RankCandidate[])
     .map((candidate) => candidate.name);
 }
 
-const Tier = { exact: 0, exactWithoutPrefix: 1, connection: 2, namePrefix: 3, keyword: 4 } as const;
+const Tier = {
+  exact: 0,
+  exactWithoutNamespace: 1,
+  connection: 2,
+  namePrefix: 3,
+  keyword: 4,
+} as const;
 
 function rankCandidate(
   terms: readonly string[],
+  scored: readonly string[],
   candidate: RankCandidate,
 ): { readonly score: number; readonly tier: number } {
-  const ownName = tokenize(candidate.name);
-  const fullName =
+  const name =
     candidate.connection === undefined
-      ? ownName
-      : tokenize(connectionToolName(candidate.connection.name, candidate.name));
+      ? candidate.name
+      : connectionToolName(candidate.connection.name, candidate.name);
+  const fullName = tokenize(name);
+  const localName = tokenize(name.slice(name.lastIndexOf("__") + 2));
   const tier = sameWords(fullName, terms)
     ? Tier.exact
-    : sameWords(ownName, terms)
-      ? Tier.exactWithoutPrefix
+    : sameWords(localName, terms)
+      ? Tier.exactWithoutNamespace
       : candidate.connection !== undefined &&
           startsWithWholeWords(tokenize(candidate.connection.name), terms)
         ? Tier.connection
-        : startsWithWords(fullName, terms) || startsWithWords(ownName, terms)
+        : startsWithWords(fullName, terms) || startsWithWords(localName, terms)
           ? Tier.namePrefix
           : Tier.keyword;
-  return { score: scoreFields(terms, candidateFields(candidate)), tier };
+  return { score: scoreFields(scored, candidateFields(candidate)), tier };
+}
+
+/** Words that say nothing about which tool a query wants. */
+const FILLER_WORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "for",
+  "in",
+  "is",
+  "me",
+  "my",
+  "of",
+  "or",
+  "please",
+  "the",
+  "to",
+  "with",
+]);
+
+/**
+ * The query words that score keyword matches: without one-letter and filler
+ * words, which match nearly anything by prefix, unless they are all it has.
+ */
+function scoringTerms(terms: readonly string[]): readonly string[] {
+  const meaningful = terms.filter((term) => term.length > 1 && !FILLER_WORDS.has(term));
+  return meaningful.length > 0 ? meaningful : terms;
 }
 
 function sameWords(words: readonly string[], terms: readonly string[]): boolean {

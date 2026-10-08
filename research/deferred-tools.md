@@ -558,15 +558,17 @@ today.
 - **Ranking.** Matches rank in tiers, and an exact name always ranks first:
   1. the query's words equal the entry's full name, such as
      `linear__create_issue`;
-  2. they equal the name without its connection prefix, such as
-     `create_issue`;
+  2. they equal the name after its last `__`, whatever the namespace, such
+     as `create_issue` for `linear__create_issue` or `sre__create_issue`;
   3. they start the entry's connection name and the full name, so `linear`
      returns the `linear` connection's tools;
-  4. they start the entry's name, with the last word allowed to be partial,
-     such as `create_iss`;
+  4. they start the entry's full name or its name after the last `__`, with
+     the last word allowed to be partial, such as `create_iss`;
   5. keyword matches, weighted by field: the name, then the connection name,
      input property names, the description, and last property descriptions
-     and the connection description.
+     and the connection description. One-letter and filler words such as
+     `a`, `to`, and `the` don't score when the query has other words, since
+     they match nearly any name by prefix.
 
   A score breaks ties within a tier, then the connection name, then the
   entry name. A skill has only a name and a description to match. `eve__execute`'s

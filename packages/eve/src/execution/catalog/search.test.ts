@@ -340,6 +340,44 @@ describe("search", () => {
       ]);
     });
 
+    it("matches the name after any namespace, not only a connection's, as exact or prefix", async () => {
+      const search = searchFor([
+        inlineTool("sre__status_page_incidents_list", {
+          deferred: true,
+          description: "List open incidents.",
+        }),
+        inlineTool("sre__status_page_incident_get", {
+          deferred: true,
+          description: "Get one status page incident, with its status, page, and incidents linked.",
+        }),
+        inlineTool("support__refund", { deferred: true, description: "Refund an order." }),
+        inlineTool("refund_policy", { deferred: true, description: "Read the refund policy." }),
+      ]);
+      const ranked = async (query: string) => names(await search({ query }));
+
+      expect((await ranked("status page incidents"))[0]).toBe("sre__status_page_incidents_list");
+      expect((await ranked("refund"))[0]).toBe("support__refund");
+    });
+
+    it("leaves one-letter and filler words out of scoring unless the query has nothing else", async () => {
+      const search = searchFor([
+        inlineTool("support__case_assign", {
+          deferred: true,
+          description: "Assign a support case to a teammate.",
+        }),
+        inlineTool("support__case_reply_draft", {
+          deferred: true,
+          description: "Write a response.",
+        }),
+      ]);
+      const ranked = async (query: string) => names(await search({ query }));
+
+      expect((await ranked("draft a reply to a support ticket"))[0]).toBe(
+        "support__case_reply_draft",
+      );
+      expect(await ranked("a")).toContain("support__case_assign");
+    });
+
     it("finds a one-letter connection by its name", async () => {
       expect((await ranked("x"))[0]).toBe("x__post");
     });
