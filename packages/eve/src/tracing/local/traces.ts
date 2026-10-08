@@ -1,0 +1,120 @@
+import type { SpanProcessor } from "#compiled/@vercel/otel/index.js";
+
+import { AgentTraceSpanProcessor } from "#tracing/local/agent-trace-span-processor.js";
+import { LocalTraceSpanProcessor } from "#tracing/local/trace-span-processor.js";
+import {
+  requestLocalTraceStorePrune,
+  resolveLocalTraceRetentionSettings,
+} from "#tracing/local/trace-retention.js";
+import {
+  normalizeSpanExportPolicies,
+  type SpanExportPolicy,
+} from "#tracing/eve/span-export-policy.js";
+
+/**
+ * The local spool, as a span processor.
+ *
+ * Session liveness and retention live in here rather than in the runtime that
+ * installs it, so nothing an author puts in the same `spanProcessors` list can
+ * see them — and eve's accept filter never reaches an author's exporters.
+ */
+export interface LocalTracesProcessor extends SpanProcessor {
+  /**
+   * Settles pending writes and releases this conversation's active traces.
+   */
+  releaseConversation(conversationId: string): Promise<boolean>;
+}
+
+/**
+ * Reports whether a processor tracks which conversation owns which trace, so
+ * eve can tell it when that conversation is done.
+ *
+ * Anything standing between eve and the spool has to answer for the spool, so
+ * this is the check a wrapper uses to decide whether it must forward the call.
+ *
+ * @internal
+ */
+export function hasConversationRelease(
+  processor: SpanProcessor,
+): processor is LocalTracesProcessor {
+  return typeof (processor as Partial<LocalTracesProcessor>).releaseConversation === "function";
+}
+
+/**
+ * Writes the OTLP/JSON spool under `.eve/traces/v1`.
+ *
+ * `EVE_TRACES=off` removes the writer but keeps the processor: eve still has
+ * to observe spans to track which session owns which trace.
+ *
+ * Internal because of `releaseConversation`, which eve's runtime drives off session
+ * lifecycle. The authored surface is `localTraces()`, which wraps this in an
+ * `OtelIntegration`.
+ */
+export function createLocalTracesProcessor(
+  input: { readonly appRoot?: string } = {},
+): LocalTracesProcessor {
+  const appRoot = input.appRoot ?? process.env["EVE_DEV_WORKER_APP_ROOT"];
+  if (appRoot === undefined) return inertLocalTracesProcessor();
+
+  const retention = resolveLocalTraceRetentionSettings();
+  const processor = new AgentTraceSpanProcessor(
+    retention.enabled ? [new LocalTraceSpanProcessor(appRoot)] : [],
+  );
+
+  const requestPrune = (): void => {
+    if (!retention.enabled) return;
+    requestLocalTraceStorePrune({
+      activeTraceIds: processor.activeTraceIds(),
+      appRoot,
+      maxAgeMs: retention.maxAgeMs,
+      maxTotalBytes: retention.maxTotalBytes,
+      retainCount: retention.retainCount,
+    });
+  };
+
+  // Startup sweep: a store left oversized by a killed dev server is bounded
+  // before this worker adds to it.
+  requestPrune();
+
+  const forceFlush = async (): Promise<void> => {
+    await processor.forceFlush();
+    if (processor.releaseCompletedTraces()) requestPrune();
+  };
+  return {
+    forceFlush,
+    onEnd: (span) => processor.onEnd(span),
+    onStart: (span, parentContext) => processor.onStart(span, parentContext),
+    async releaseConversation(conversationId) {
+      // Settle pending segment writes before dropping liveness: a sweep already
+      // running reads the same live set, so releasing first would expose the
+      // trace to eviction while it is still being written.
+      await forceFlush();
+      if (!processor.releaseConversation(conversationId)) return false;
+      requestPrune();
+      return true;
+    },
+    shutdown: () => processor.shutdown(),
+  };
+}
+
+/** Applies the local content environment override before authored policies. @internal */
+export function resolveLocalTracesExportPolicy(
+  exportPolicy?: SpanExportPolicy | readonly SpanExportPolicy[],
+): SpanExportPolicy | readonly SpanExportPolicy[] | undefined {
+  if (process.env.EVE_TRACES_CONTENT !== "off") return exportPolicy;
+  return [
+    { span: () => ({ redact: true, inputs: true, outputs: true }) },
+    ...normalizeSpanExportPolicies(exportPolicy),
+  ];
+}
+
+/** A production-authored `localTraces()` has no local development store. */
+function inertLocalTracesProcessor(): LocalTracesProcessor {
+  return {
+    forceFlush: async () => undefined,
+    onEnd: () => undefined,
+    onStart: () => undefined,
+    releaseConversation: async () => false,
+    shutdown: async () => undefined,
+  };
+}

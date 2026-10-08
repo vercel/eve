@@ -9,7 +9,7 @@ import {
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
-import type { InvokeToolTraceOrigin } from "#tracing/invoke-tool-span.js";
+import type { InvokeToolTraceOrigin } from "#tracing/eve/invoke-tool-span.js";
 
 /**
  * Builds the route's `invokeTool`. The agent's static tools and sandbox load on

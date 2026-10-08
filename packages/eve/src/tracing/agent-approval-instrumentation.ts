@@ -18,7 +18,7 @@ import { agentTraceIdentityAttributes, traceSessionIdOf } from "#tracing/agent-o
 import { decodeTraceSessionId } from "#tracing/agent-trace-context-codec.js";
 import { AGENT_SPAN_NAMES } from "#tracing/agent-span-contract.js";
 import { recordAgentSpanError as recordError } from "#tracing/agent-span-error.js";
-import { withChannelAudience } from "#tracing/channel-audience-context.js";
+import { withChannelAudience } from "#tracing/eve/channel-audience-context.js";
 import type { AgentToolContext } from "#tracing/agent-tool-instrumentation.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
