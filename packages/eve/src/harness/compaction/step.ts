@@ -1,4 +1,4 @@
-import type { LanguageModel, TelemetryOptions } from "ai";
+import { type LanguageModel, streamText, type TelemetryOptions } from "ai";
 
 import { createLogger, logError } from "#internal/logging.js";
 import { AuthKey, HistoryStateKey } from "#context/keys.js";
@@ -23,8 +23,8 @@ import {
 import { canonicalizeMemoryRecords, shouldCanonicalizeMemory } from "#shared/memory-state.js";
 import {
   compactMessages,
+  type CompactionSummarizer,
   getInputTokenCount,
-  resolveCompactionModel,
   shouldCompact,
 } from "#harness/compaction/engine.js";
 import { contextStorage } from "#context/container.js";
@@ -33,8 +33,15 @@ import {
   createCompactionRequestedEvent,
 } from "#protocol/message.js";
 import { drainMemoryCommit, prepareMemoryCompaction } from "#context/memory-lifecycle.js";
-import { gatewayModelId } from "#harness/model-call/usage.js";
+import { normalizeModelStreamError } from "#harness/model-call/errors.js";
+import { runModelCallWithRetries } from "#harness/model-call/retry.js";
+import {
+  extractGatewayCostUsd,
+  extractTokenUsageDelta,
+  gatewayModelId,
+} from "#harness/model-call/usage.js";
 import { resolveModelProfile } from "#harness/model-profile.js";
+import { addTurnUsage, type TokenUsageDelta } from "#harness/turn-tag-state.js";
 import { getRequestEnvelopeTokens } from "#harness/request-envelope.js";
 import { idle } from "#harness/session-machine/transitions.js";
 import { resolveCallProviderOptions } from "#harness/provider-safety.js";
@@ -164,19 +171,41 @@ export async function maybeCompact(input: {
     return { compacted: false, messages, session };
   }
 
-  const compaction = await resolveCompactionModel({
-    compactionModelReference: session.agent.compactionModelReference,
-    model: input.model,
-    modelReference: requireSessionModelReference(session),
-    resolveModel: input.resolveModel,
-  });
-  const profile = resolveModelProfile(compaction.model);
+  const modelReference = requireSessionModelReference(session);
+  const compactionModelReference = session.agent.compactionModelReference ?? modelReference;
+  const model =
+    compactionModelReference === modelReference
+      ? input.model
+      : await input.resolveModel(compactionModelReference);
+  const profile = resolveModelProfile(model);
   const providerOptions = resolveCallProviderOptions({
     auth: input.auth,
     conversationId: resolveConversationId(session.rootSessionId ?? session.sessionId),
     profile,
-    providerOptions: compaction.providerOptions,
-  }) as Parameters<typeof compactMessages>[3];
+    providerOptions: compactionModelReference.providerOptions,
+  }) as Parameters<typeof streamText>[0]["providerOptions"];
+  const call = {
+    abortSignal: input.abortSignal,
+    headers: buildGatewayAttributionHeaders(profile, input.runtimeIdentity),
+    model,
+    providerOptions,
+    telemetry: input.telemetry && { ...input.telemetry, functionId: "eve.compaction" },
+  };
+  const summaryUsage: (TokenUsageDelta | undefined)[] = [];
+  const summarize = async (prompt: CompactionSummaryPrompt) => {
+    const summary = await runModelCallWithRetries(
+      () => streamCompactionSummary({ ...call, ...prompt }),
+      { sessionId: session.sessionId, turnId: emissionState.turnId },
+      input.abortSignal,
+    );
+    summaryUsage.push(summary.usage);
+    if (summary.text.trim().length === 0) {
+      throw new Error(
+        `The compaction model returned an empty summary. Finish reason: ${summary.finishReason}.`,
+      );
+    }
+    return summary.text;
+  };
 
   {
     const ctx = contextStorage.getStore();
@@ -185,7 +214,7 @@ export async function maybeCompact(input: {
     }
     await publish(
       createCompactionRequestedEvent({
-        modelId: gatewayModelId(compaction.model) ?? "unknown",
+        modelId: gatewayModelId(model) ?? "unknown",
         sequence: emissionState.sequence,
         sessionId: session.sessionId,
         stepIndex: emissionState.stepIndex,
@@ -222,12 +251,8 @@ export async function maybeCompact(input: {
   const compactedOrdinary = needsSummary
     ? await compactMessages(
         [...ordinary],
-        compaction.model,
         historyCompaction,
-        providerOptions,
-        input.telemetry,
-        buildGatewayAttributionHeaders(profile, input.runtimeIdentity),
-        input.abortSignal,
+        summarize,
         input.force === true,
         input.requestEnvelopeTokens === undefined
           ? undefined
@@ -242,6 +267,7 @@ export async function maybeCompact(input: {
             ),
       )
     : [...ordinary];
+  for (const usage of summaryUsage) session = addTurnUsage(session, emissionState.turnId, usage);
   messages = validateHarnessModelMessages([...canonical.memory, ...compactedOrdinary]);
 
   {
@@ -251,7 +277,7 @@ export async function maybeCompact(input: {
     }
     await publish(
       createCompactionCompletedEvent({
-        modelId: gatewayModelId(compaction.model) ?? "unknown",
+        modelId: gatewayModelId(model) ?? "unknown",
         sequence: emissionState.sequence,
         sessionId: session.sessionId,
         stepIndex: emissionState.stepIndex,
@@ -269,4 +295,39 @@ export async function maybeCompact(input: {
   }
 
   return { compacted: true, messages, session: replaceSessionHistory(session, messages) };
+}
+
+type CompactionSummaryPrompt = Parameters<CompactionSummarizer>[0];
+
+/**
+ * Calls the compaction model the way a step calls its model: streamed, with stream errors
+ * thrown in the same shape, so the caller's retries classify them alike.
+ */
+async function streamCompactionSummary(
+  input: CompactionSummaryPrompt &
+    Pick<
+      Parameters<typeof streamText>[0],
+      "abortSignal" | "headers" | "model" | "providerOptions" | "telemetry"
+    >,
+): Promise<{
+  readonly finishReason: string;
+  readonly text: string;
+  readonly usage: TokenUsageDelta | undefined;
+}> {
+  // The stream's error part is rethrown below; the default handler would also log it.
+  const result = streamText({ ...input, onError: () => {} });
+  for await (const part of result.fullStream) {
+    if (part.type === "error") throw normalizeModelStreamError(part.error);
+  }
+  const [text, finishReason, usage, providerMetadata] = await Promise.all([
+    result.text,
+    result.finishReason,
+    result.usage,
+    result.providerMetadata,
+  ]);
+  return {
+    finishReason,
+    text,
+    usage: extractTokenUsageDelta({ costUsd: extractGatewayCostUsd(providerMetadata), usage }),
+  };
 }

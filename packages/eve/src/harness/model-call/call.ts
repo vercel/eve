@@ -45,12 +45,7 @@ import {
 import { estimateTokens } from "#harness/token-estimate.js";
 import { buildToolApproval } from "#harness/tools.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
-import {
-  accumulateTurnUsage,
-  getTurnUsageState,
-  setTurnUsageState,
-  type TokenUsageDelta,
-} from "#harness/turn-tag-state.js";
+import { addTurnUsage, type TokenUsageDelta } from "#harness/turn-tag-state.js";
 import type { StepResult } from "#harness/types.js";
 import type { InstrumentationAttempt } from "#instrumentation/runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -191,14 +186,7 @@ export class ModelCaller {
     throwIfTurnAborted(step.config.abortSignal);
     step.ctx?.set(HistoryStateKey, this.request.historyState);
     if (this.interruptedUsage !== undefined) {
-      step.session = setTurnUsageState(
-        step.session,
-        accumulateTurnUsage({
-          previous: getTurnUsageState(step.session.state),
-          turnId: step.position().turnId,
-          usage: this.interruptedUsage,
-        }),
-      );
+      step.session = addTurnUsage(step.session, step.position().turnId, this.interruptedUsage);
     }
     await step.emit?.(
       createStepCompletedEvent({

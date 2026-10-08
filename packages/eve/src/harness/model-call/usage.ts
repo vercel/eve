@@ -1,12 +1,7 @@
 import type { LanguageModel, ProviderMetadata } from "ai";
 
 import type { HarnessStepResult } from "#harness/step-hooks.js";
-import {
-  accumulateTurnUsage,
-  getTurnUsageState,
-  setTurnUsageState,
-  type TokenUsageDelta,
-} from "#harness/turn-tag-state.js";
+import { addTurnUsage, getTurnUsageState, type TokenUsageDelta } from "#harness/turn-tag-state.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import type { Step } from "#harness/step/context.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
@@ -71,22 +66,22 @@ export async function recordModelUsage(
   step: Step,
   input: { readonly model: LanguageModel; readonly result: HarnessStepResult },
 ): Promise<void> {
-  const usage = accumulateTurnUsage({
-    previous: getTurnUsageState(step.session.state),
-    turnId: step.position().turnId,
-    usage: extractTokenUsageDelta({
+  step.session = addTurnUsage(
+    step.session,
+    step.position().turnId,
+    extractTokenUsageDelta({
       costUsd: extractGatewayCostUsd(input.result.providerMetadata),
       usage: input.result.usage,
     }),
-  });
-  step.session = setTurnUsageState(step.session, usage);
+  );
+  const usage = getTurnUsageState(step.session.state);
   const attributes = {
     "$eve.model": gatewayModelId(input.model),
-    "$eve.input_tokens": usage.inputTokens,
-    "$eve.output_tokens": usage.outputTokens,
-    "$eve.cache_read_tokens": usage.cacheReadTokens,
-    "$eve.cache_write_tokens": usage.cacheWriteTokens,
-    "$eve.cost_usd": usage.sawCost ? usage.costUsd : undefined,
+    "$eve.input_tokens": usage?.inputTokens,
+    "$eve.output_tokens": usage?.outputTokens,
+    "$eve.cache_read_tokens": usage?.cacheReadTokens,
+    "$eve.cache_write_tokens": usage?.cacheWriteTokens,
+    "$eve.cost_usd": usage?.sawCost ? usage.costUsd : undefined,
     "$eve.tool_count": step.config.tools.size,
   };
   await step.config.titleAttributeWrite;

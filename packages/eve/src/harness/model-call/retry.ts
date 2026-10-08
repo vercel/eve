@@ -33,14 +33,14 @@ export async function runModelCallWithRetries<T>(
     readonly turnId: string;
     readonly canRetry?: () => boolean;
   },
-  signal: AbortSignal,
+  signal?: AbortSignal,
 ): Promise<T> {
   for (let attempt = 1; ; attempt++) {
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     try {
       return await fn(attempt);
     } catch (error) {
-      signal.throwIfAborted();
+      signal?.throwIfAborted();
       if (
         diag.canRetry?.() === false ||
         attempt === MODEL_CALL_MAX_ATTEMPTS ||
