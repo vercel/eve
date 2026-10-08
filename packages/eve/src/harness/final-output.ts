@@ -6,7 +6,7 @@ import type { JsonObject } from "#shared/json.js";
 
 const REPLY_TOOL_DESCRIPTION =
   "Reply with your final answer in the required structure by calling this tool. " +
-  "Call it exactly once, when you are done; do not answer in prose.";
+  "Call it when you are done, as your final step; do not answer in prose.";
 
 /**
  * What the model reads when it gives its final output beside calls whose results it hasn't seen:

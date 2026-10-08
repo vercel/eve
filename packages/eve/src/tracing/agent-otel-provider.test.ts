@@ -2066,7 +2066,7 @@ describe("createAgentOtelInstrumentation", () => {
         idempotencyKey: uncorrelatedToolKey,
         input: {},
         scope,
-        toolName: "final_output",
+        toolName: "eve__reply",
         type: "tool.call",
       },
       () => Promise.resolve("done"),
@@ -2080,7 +2080,7 @@ describe("createAgentOtelInstrumentation", () => {
 
     const spans = runtime.exporter.getFinishedSpans();
     const tool = byName(spans, "execute_tool weather")[0]!;
-    const uncorrelatedTool = byName(spans, "execute_tool final_output")[0]!;
+    const uncorrelatedTool = byName(spans, "execute_tool eve__reply")[0]!;
     expect(tool.parentSpanContext?.spanId).toBe(
       byName(spans, "agent.step")[0]!.spanContext().spanId,
     );
