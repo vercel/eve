@@ -8,7 +8,7 @@ export default defineAgent({
     mock: ({ toolResults }) =>
       toolResults.find((result) => result.name === "get_stock_price") === undefined
         ? { toolCalls: [{ input: { ticker: "GOOG" }, name: "get_stock_price" }] }
-        : JSON.stringify(toolResults.find((result) => result.name === "get_stock_price")?.output),
+        : "GOOG is trading at 178.92.",
   }),
   reasoning: "high",
 });
