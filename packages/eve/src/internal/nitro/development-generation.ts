@@ -69,7 +69,7 @@ export async function stageDevelopmentGeneration(
       sourceWatchPaths: [
         ...(snapshot.sourceWatchPaths ?? []),
         ...prepared.sourceModules.filter(
-          (path) => !isPathInsideOrEqual(path, compileResult.project.agentRoot),
+          (path) => !isPathInsideOrEqual(path, compileResult.manifest.agentRoot),
         ),
       ],
     };

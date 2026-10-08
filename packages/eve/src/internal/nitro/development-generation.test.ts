@@ -47,9 +47,9 @@ function createGeneration(id: string): DevelopmentGeneration {
 
 describe("development generation staging", () => {
   const compileResult = {
-    manifest: {},
+    manifest: { agentRoot: "/tmp/app/agent" },
     paths: { moduleMapPath: "/tmp/app/modules.mjs" },
-    project: { agentRoot: "/tmp/app/agent", appRoot: "/tmp/app" },
+    project: { appRoot: "/tmp/app" },
   } as CompileAgentResult;
   beforeEach(() => {
     mocks.prepare.mockReset();
