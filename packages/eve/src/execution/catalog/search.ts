@@ -89,8 +89,11 @@ type SearchCandidate = RankCandidate & {
 const SEARCH_LABEL = {
   start: (input: unknown) => `Search tools${labelQuery(input)}`,
   complete: (input: unknown, output: unknown) => {
-    const found = (output as SearchOutput).results.length;
-    return `Searched tools${labelQuery(input)}, found ${found === 0 ? "nothing" : String(found)}`;
+    const { results, unavailable = [] } = output as SearchOutput;
+    const searched = `Searched tools${labelQuery(input)}, found ${results.length === 0 ? "nothing" : String(results.length)}`;
+    if (results.length > 0 || unavailable.length === 0) return searched;
+    const connections = unavailable.length === 1 ? "connection" : "connections";
+    return `${searched}; ${String(unavailable.length)} ${connections} unavailable`;
   },
 };
 

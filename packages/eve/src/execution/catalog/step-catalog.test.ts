@@ -147,9 +147,9 @@ describe("buildStepCatalog", () => {
       });
 
       expect(resolved?.call).toEqual({ input: { skill: "pdf-forms" }, toolName: "eve:load-skill" });
-      expect(resolved?.definition.label?.start?.(resolved.call.input)).toBe(
-        "Loaded skill pdf-forms",
-      );
+      const label = resolved?.definition.label;
+      expect(label?.start?.(resolved?.call.input)).toBe("Load skill pdf-forms");
+      expect(label?.complete?.(resolved?.call.input, "# PDF forms")).toBe("Loaded skill pdf-forms");
       expect(
         await resolved?.definition.execute?.(resolved.call.input, { messages: [], toolCallId: "" }),
       ).toBe("# PDF forms");

@@ -65,7 +65,7 @@ interface BuiltinToolCopy {
 /** Copy shared by the full presenters and their preparing placeholders. */
 const WRITE_FILE_VERB = "Write";
 const DELEGATE_VERB = "Delegate";
-const FINAL_OUTPUT_TITLE = "Return final output";
+const REPLY_TITLE = "Reply";
 
 /**
  * Builtin tools whose calls read as one verb plus one argument. Runs group
@@ -222,7 +222,7 @@ export function presentTool(
   if (baseName === REPLY_TOOL_NAME) {
     // Structured-output terminal signal: its input is the
     // structured result itself, kept behind the expanded `--tools full` view.
-    return { title: FINAL_OUTPUT_TITLE, subtitle: "", summarizeResult: () => undefined };
+    return { title: REPLY_TITLE, subtitle: "", summarizeResult: () => undefined };
   }
 
   const copy = BUILTIN_TOOL_COPY[baseName];
@@ -327,7 +327,7 @@ export function presentPreparingTool(
 ): ToolPresentation {
   const baseName = toolBaseName(toolName);
   if (baseName === REPLY_TOOL_NAME) {
-    return { title: FINAL_OUTPUT_TITLE, subtitle: "", summarizeResult: () => undefined };
+    return { title: REPLY_TITLE, subtitle: "", summarizeResult: () => undefined };
   }
   if (context?.isSubagent === true) {
     // A named subagent's tool carries the delegation target in its name —

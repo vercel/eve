@@ -684,7 +684,7 @@ looks a call up by name. Model history is the only place that keeps
   the same runtime action `load_skill` produces today
   (`kind: "load-skill"`). So protocol events, activation, package files
   under the skills root, and `t.loadedSkill(...)` are unchanged. Its label
-  reads `Loaded skill <name>`, since the skill loads within the step. History holds an `eve__execute` call whose result is the skill's
+  reads `Load skill <name>`, then `Loaded skill <name>` once it loads. History holds an `eve__execute` call whose result is the skill's
   markdown. Loading needs no approval, as today.
 - **No nested actions.** Every entry, including a connection tool, is
   reported as the call itself. The nested-action helper and the tool-call
