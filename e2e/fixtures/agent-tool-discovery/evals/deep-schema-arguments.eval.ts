@@ -1,11 +1,15 @@
 import { SEARCH_TOOL } from "@eve-e2e/config/catalog-tools";
 import { defineEval } from "eve/evals";
 
-import { INVOICE_DRAFT_ID, INVOICE_DRAFT_TOOL } from "../agent/lib/invoice-draft";
-import { calledTools } from "./tool-use";
+import { INVOICE_DRAFT_ID, INVOICE_DRAFT_TOOL, PILOT_DISCOUNT } from "../agent/lib/invoice-draft";
 
-/** Bounds recovery: the first attempt plus a couple of corrections from validation issues. */
-const MAX_ATTEMPTS = 3;
+/**
+ * Bounds recovery by model steps rather than attempts: a call rejected by
+ * input validation emits no `actions.requested` event, so attempts are not
+ * countable from the stream. Budget: up to two searches, the first attempt
+ * plus two corrections, and the reply.
+ */
+const MAX_MODEL_STEPS = 6;
 
 /**
  * A deferred tool whose required field sits past the advertised signature's
@@ -31,10 +35,21 @@ export default defineEval({
     turn.expectOk();
     t.toolOrder([SEARCH_TOOL, INVOICE_DRAFT_TOOL]);
     t.calledTool(INVOICE_DRAFT_TOOL, { status: "completed" });
+    turn.eventsSatisfy(`${INVOICE_DRAFT_TOOL} runs with the pilot discount reason code`, (events) =>
+      events.some(
+        (event) =>
+          event.type === "action.result" &&
+          event.data.status === "completed" &&
+          "toolName" in event.data.result &&
+          event.data.result.toolName === INVOICE_DRAFT_TOOL &&
+          (event.data.result.output as { reasonCode?: unknown } | undefined)?.reasonCode ===
+            PILOT_DISCOUNT,
+      ),
+    );
     turn.eventsSatisfy(
-      `${INVOICE_DRAFT_TOOL} is attempted at most ${MAX_ATTEMPTS} times`,
+      `the turn takes at most ${MAX_MODEL_STEPS} model steps`,
       (events) =>
-        calledTools(events).filter((name) => name === INVOICE_DRAFT_TOOL).length <= MAX_ATTEMPTS,
+        events.filter((event) => event.type === "step.completed").length <= MAX_MODEL_STEPS,
     );
     t.messageIncludes(INVOICE_DRAFT_ID);
   },

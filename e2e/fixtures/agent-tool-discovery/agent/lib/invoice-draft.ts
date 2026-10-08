@@ -10,7 +10,14 @@ export const INVOICE_DRAFT_TOOL = "billing__invoice_draft_create";
 /** The draft id the tool returns, which a reply carries only if the call ran. */
 export const INVOICE_DRAFT_ID = "DRAFT-77310";
 
-export const REASON_CODES = ["CONTRACT_EXCEPTION", "PILOT_DISCOUNT", "GOODWILL_CREDIT"] as const;
+/**
+ * Lowercase dotted codes rather than SCREAMING_CASE, so a model cannot guess the
+ * value from the request's wording and has to read it from validation issues.
+ */
+export const REASON_CODES = ["exc.contract", "disc.pilot", "cred.goodwill"] as const;
+
+/** The code the eval's request ("the pilot discount we agreed on") maps to. */
+export const PILOT_DISCOUNT = "disc.pilot";
 
 export const INVOICE_DRAFT_SCHEMA = {
   type: "object",
