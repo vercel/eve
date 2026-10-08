@@ -3319,7 +3319,7 @@ describe("createToolLoopHarness", () => {
     },
   );
 
-  it("throws a distinct content-filter error on the non-streaming path without reissue", async () => {
+  it("throws a distinct content-filter error without reissue", async () => {
     setupMockAgent({
       finishReason: "content-filter",
       providerMetadata: { gateway: { generationId: "gen_filtered" } },
@@ -7777,7 +7777,7 @@ describe("createToolLoopHarness", () => {
   });
 
   it("consumes text approval shortcuts without appending them as user messages", async () => {
-    const generateCalls: unknown[] = [];
+    const streamCalls: unknown[] = [];
 
     vi.mocked(ToolLoopAgent).mockImplementation(function (
       this: Record<string, unknown>,
@@ -7794,7 +7794,7 @@ describe("createToolLoopHarness", () => {
             context: undefined,
           });
         }
-        generateCalls.push(input.messages);
+        streamCalls.push(input.messages);
         const result = {
           finishReason: "stop",
           response: { messages: [{ content: "Approved.", role: "assistant" }] },
@@ -7880,7 +7880,7 @@ describe("createToolLoopHarness", () => {
     await createToolLoopHarness(config)(session, { message: "approve" });
 
     // The answer runs the call; the model reads its result, never the text that approved it.
-    expect(generateCalls[0]).toEqual([
+    expect(streamCalls[0]).toEqual([
       {
         content: expect.stringContaining("[Pending approvals]"),
         kind: "context.state",
@@ -10549,10 +10549,8 @@ describe("createToolLoopHarness", () => {
 
       // --- Invariant 3: the mocked ToolLoopAgent.stream saw hydrated bytes.
       //
-      // The mock constructor ran once; grab the generate spy (no `emit`
-      // was passed on the config, so the harness takes the non-streaming
-      // branch) and verify the messages it received had `data: Buffer`
-      // for the FilePart.
+      // The mock constructor ran once; grab the stream spy and verify the
+      // messages it received had `data: Buffer` for the FilePart.
       const mockInstance = vi.mocked(ToolLoopAgent).mock.results[0]?.value as {
         stream: ReturnType<typeof vi.fn>;
       };
