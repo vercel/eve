@@ -5,9 +5,12 @@ import {
   pausedOnPerson,
   pausedOnTasks,
 } from "#execution/session/pending-turn-state.js";
-import type { DurableStepResult } from "#execution/session/turn-step-types.js";
+import type {
+  DurableStepResult,
+  DurableStepResultFields,
+} from "#execution/session/turn-step-types.js";
 import { getTurnUsageState, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
-import type { StepResult } from "#harness/types.js";
+import type { HarnessSession, SettledTurn, StepResult } from "#harness/types.js";
 
 export function resolveSessionStepResult(
   stepResult: StepResult,
@@ -48,24 +51,36 @@ export function resolveSessionStepResult(
   // Usage stays unreported until the turn settles, so the caller's result includes all of it.
   const reported =
     stepResult.settledTurn === undefined ? undefined : takeSessionUsageDelta(stepResult.session);
-  const parked =
+  const fields =
     reported === undefined
       ? values
       : {
           serializedContext: nextSerializedContext,
           ...createDurableSessionValues(reported.session),
         };
-  const calls = pausedOnCalls(stepResult.session);
-  if (calls !== undefined) return { action: "paused", ...calls, ...parked };
-  return {
-    action: "parked",
-    ...(stepResult.settledTurn !== undefined && {
-      settled: {
-        output: stepResult.settledTurn.output,
-        isError: stepResult.settledTurn.isError,
-        usage: reported?.delta,
-      },
-    }),
-    ...parked,
-  };
+  return pausedOrParked(
+    stepResult.session,
+    fields,
+    stepResult.settledTurn === undefined
+      ? undefined
+      : {
+          output: stepResult.settledTurn.output,
+          isError: stepResult.settledTurn.isError,
+          usage: reported?.delta,
+        },
+  );
+}
+
+/**
+ * The turn pauses on the calls the runtime runs for it, or, with none, parks the session.
+ * `settled` is a settled turn's answer to its delegated caller.
+ */
+export function pausedOrParked(
+  session: HarnessSession,
+  fields: DurableStepResultFields,
+  settled?: SettledTurn,
+): DurableStepResult {
+  const calls = pausedOnCalls(session);
+  if (calls !== undefined) return { action: "paused", ...calls, ...fields };
+  return { action: "parked", ...(settled !== undefined && { settled }), ...fields };
 }
