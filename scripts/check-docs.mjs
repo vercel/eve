@@ -192,8 +192,12 @@ for (const root of ROOTS) {
 }
 
 // 3. Internal links resolve. Every relative (./ ../) or site-absolute (/docs/)
-//    markdown link in a doc page must point at a rendered doc URL or folder.
-//    fumadocs renders broken links as dead clicks; CI should catch them.
+//    markdown link in a doc page must point at a page fumadocs actually
+//    renders. A bare folder (e.g. `../channels`) is not a page unless that
+//    folder's index has a `url:` frontmatter override pointing at it — a
+//    folder with no override renders nothing at its own path and 404s, even
+//    though it appears in the sidebar as a group. fumadocs renders broken
+//    links as dead clicks; CI should catch them.
 function renderedUrl(relPath, source) {
   const slug = relPath.replace(/\.mdx?$/, "").replace(/(^|\/)index$/, "");
   const override = parseFrontmatter(source)?.url;
@@ -234,7 +238,7 @@ function checkLinks(rootDir) {
       failures.push({
         root: "docs",
         file: rel,
-        issue: `broken internal link → \`${m[1].trim()}\` (resolves to \`${resolvedUrl}\`, no such page)`,
+        issue: `broken internal link → \`${m[1].trim()}\` (resolves to \`${resolvedUrl}\`, no such page — folders without a \`url:\` override on their index page have no route of their own)`,
       });
     }
   }
