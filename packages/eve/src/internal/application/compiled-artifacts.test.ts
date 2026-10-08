@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createDevelopmentWorkflowWorldPluginSource,
@@ -83,3 +83,23 @@ describe("createDevelopmentWorkflowWorldPluginSource", () => {
     expect(source).toContain("await workflowWorld.start?.();");
   });
 });
+
+afterEach(() => vi.unstubAllEnvs());
+it.each(["hub", "eve/world-hub"])(
+  "honors WORKFLOW_TARGET_WORLD=%s for dev and production",
+  (target) => {
+    vi.stubEnv("WORKFLOW_TARGET_WORLD", target);
+    const input = {
+      compiledArtifactsBootstrapPath: "/app/bootstrap.mjs",
+      configuredWorld: "local" as const,
+    };
+    for (const source of [
+      createDevelopmentWorkflowWorldPluginSource(input),
+      createWorkflowWorldPluginSource({ ...input, defaultWorld: "vercel" }),
+    ]) {
+      expect(source).toContain('import * as workflowWorldModule from "eve/world-hub";');
+      expect(source).not.toContain("setWorld(createDevelopmentWorkflowWorld())");
+      expect(source).not.toContain("resolveLocalWorkflowWorldDataDirectory");
+    }
+  },
+);
