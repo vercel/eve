@@ -1,14 +1,14 @@
 ---
 issue: "None (maintainer-requested research)"
 status: draft
-last_updated: "2026-10-07"
+last_updated: "2026-10-08"
 ---
 
 # Session event lifecycle
 
 Companion docs:
 
-- [`dynamic-participant-points.md`](./dynamic-participant-points.md) renames the keys that dynamic resolvers and memory providers run on. It's independent of this proposal.
+- [`dynamic-participants.md`](./dynamic-participants.md) runs dynamic resolvers and memory providers on real events, using two events this proposal adds. Its pipeline is independent of this proposal; its key changes ship with it.
 - [`session-machine-simplification.md`](./session-machine-simplification.md) covers structural cleanup in the session machine. Two of its items help this proposal land.
 
 ## Introduction
@@ -25,24 +25,24 @@ Today that stream has 34 event types, added one feature at a time. Most of them 
 
 This proposal replaces the vocabulary at the next stream-version break (v27). The goal is a smaller conceptual framework where every piece of the system has an explicit lifecycle:
 
-- **Nine entities:** `session`, `delivery`, `turn`, `model run`, `content part`, `call`, `task`, `interaction`, and `context change`. Each one is introduced by one fact and closed by exactly one terminal fact, with an outcome from a closed set.
+- **Ten entities:** `session`, `delivery`, `turn`, `model run`, `content part`, `call`, `task`, `interaction`, `response`, and `context change`. Each one is introduced by one fact and closed by exactly one terminal fact, with an outcome from a closed set.
 - **Lifecycles are not inferred** When the machine ends something, it produces an event that records this in the same commit, including events for other things that are ended at the same time.
 - **One commit per stream line** Multiple facts that happen atomically share a single stream line, and the session projection retains its own counter for stream position. This means events no longer need to be stamped with ULIDs (instead they get literal stream indicies) and readers resume exactly.
 - **Additive evolution after the break** New kinds, fields, and families don't need a version bump, and older readers stay correct ([Future proofing](#future-proofing)).
 
-The proposed catalog has 28 types (25 facts and 3 progress types), down from 34. Compatibility is cut on purpose: v27 clients read v27 streams only, and sessions don't cross the break.
+The proposed catalog has 31 types (28 facts and 3 progress types), down from 34. Compatibility is cut on purpose: v27 clients read v27 streams only, and sessions don't cross the break.
 
 ### Where the contract lives
 
 Today the event contract has no single home. Its pieces are spread across the package, and several readers re-derive parts of it:
 
-| Piece              | Today                                                                                                                                                                                                                     | With this proposal                                                                                                                                                    |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Types and encoding | `protocol/message.ts` (2,018 lines): types, 34 builders, encoding, headers. `message-version.ts` normalizes v21–v26, and `event-id.ts` and `event-dedupe.ts` handle `meta.id`                                             | `protocol/session-events/`: Zod schemas per family, the envelope, a runtime catalog, and a checker. Producers build typed literals, and old versions are deleted      |
-| Lifecycle state    | The server projection (`protocol/session-projection.ts`) and the client reducers (`message-reducer*.ts`, `conversation-reducer.ts`) fold separately. `TurnSegment` and `message-response.ts` add their own boundary rules | One public fold with typed tables and selectors, shared by client and server                                                                                          |
-| Readers' own folds | Telegram's sign-in lookup, the invocation API's 64-event window, evals (`derive-run-facts.ts`), ACP, and the TUI                                                                                                          | Selectors over the shared fold                                                                                                                                        |
-| Authoring surfaces | Hook and channel event maps (`public/definitions/`); dynamic resolver and memory keys reuse event names                                                                                                                   | Hook and channel maps type-checked against the catalog; resolver keys move to participant points ([`dynamic-participant-points.md`](./dynamic-participant-points.md)) |
-| Parent–child relay | `subagents/callback-route.ts` re-declares v26 event shapes with strict schemas                                                                                                                                            | Its own tolerant relay contract, keyed by child IDs                                                                                                                   |
+| Piece              | Today                                                                                                                                                                                                                     | With this proposal                                                                                                                                                     |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Types and encoding | `protocol/message.ts` (2,018 lines): types, 34 builders, encoding, headers. `message-version.ts` normalizes v21–v26, and `event-id.ts` and `event-dedupe.ts` handle `meta.id`                                             | `protocol/session-events/`: Zod schemas per family, the envelope, a runtime catalog, and a checker. Producers build typed literals, and old versions are deleted       |
+| Lifecycle state    | The server projection (`protocol/session-projection.ts`) and the client reducers (`message-reducer*.ts`, `conversation-reducer.ts`) fold separately. `TurnSegment` and `message-response.ts` add their own boundary rules | One public fold with typed tables and selectors, shared by client and server                                                                                           |
+| Readers' own folds | Telegram's sign-in lookup, the invocation API's 64-event window, evals (`derive-run-facts.ts`), ACP, and the TUI                                                                                                          | Selectors over the shared fold                                                                                                                                         |
+| Authoring surfaces | Hook and channel event maps (`public/definitions/`); dynamic resolver and memory keys reuse event names                                                                                                                   | Hook, channel, dynamic resolver, and memory maps keyed by the catalog's events, with guards from `eve/events` ([`dynamic-participants.md`](./dynamic-participants.md)) |
+| Parent–child relay | `subagents/callback-route.ts` re-declares v26 event shapes with strict schemas                                                                                                                                            | Its own tolerant relay contract, keyed by child IDs                                                                                                                    |
 
 After the break, a new fact or field touches one family module. The checker, the old-reader conformance test, and `extension-contracts` catch drift ([The contract module](#the-contract-module), [Evolving safely after 1.0](#evolving-safely-after-10)).
 
@@ -71,35 +71,36 @@ v26 leaves readers to guess when a response is done, how a decision ended, when 
 
 ### Entities
 
-| Entity         | What it is                                                        | Introduced by            | Ends with                |
-| -------------- | ----------------------------------------------------------------- | ------------------------ | ------------------------ |
-| Session        | A durable conversation and its ongoing work                       | `session.started`        | `session.ended`          |
-| Delivery       | One submitted message, answer, or control                         | `delivery.accepted`      | `delivery.settled`       |
-| Turn           | Agent work that can pause and resume                              | `turn.started`           | `turn.settled`           |
-| Model run      | One logical model invocation                                      | `model.started`          | `model.settled`          |
-| Content part   | One block of model output: text, reasoning, a result, a file      | `content.completed`      | `content.completed`      |
-| Call           | One invocation of a tool, agent, or skill                         | `call.requested`         | `call.settled`           |
-| Task           | Work that outlives an immediate return                            | `task.started`           | `task.ended`             |
-| Interaction    | An approval, question, sign-in, or budget prompt                  | `interaction.opened`     | `interaction.settled`    |
-| Context change | An operation on what the model sees next: a compaction or a clear | `context-change.started` | `context-change.settled` |
+| Entity         | What it is                                                        | Introduced by        | Ends with             |
+| -------------- | ----------------------------------------------------------------- | -------------------- | --------------------- |
+| Session        | A durable conversation and its ongoing work                       | `session.started`    | `session.ended`       |
+| Delivery       | One submitted message, answer, control, or sign-in callback       | `delivery.admitted`  | `delivery.settled`    |
+| Turn           | Agent work that can pause and resume                              | `turn.started`       | `turn.settled`        |
+| Model run      | One logical model invocation                                      | `model.requested`    | `model.settled`       |
+| Content part   | One block of model output: text, reasoning, a result, a file      | `content.completed`  | `content.completed`   |
+| Call           | One invocation of a tool, agent, or skill                         | `call.requested`     | `call.settled`        |
+| Task           | Work that outlives an immediate return                            | `task.started`       | `task.ended`          |
+| Interaction    | An approval, question, sign-in, or budget prompt                  | `interaction.opened` | `interaction.settled` |
+| Response       | One answer to an interaction, from a person or a sign-in callback | `response.submitted` | `response.settled`    |
+| Context change | An operation on what the model sees next: a compaction or a clear | `context.started`    | `context.settled`     |
 
 Two smaller records hang off these:
 
-- **Candidates** are responders' answers to a policy-gated approval (`candidate.opened`, `candidate.settled`).
 - **Child links** record a call or task that opened a child session (`child.opened`). The child's own lifecycle lives in its own stream.
+- **Usage records** (`usage.recorded`) attribute model and other usage to the run, call, or context change that spent it. They have no lifecycle.
 
 Every entity records where it came from when it's introduced:
 
 ```text
 Session
 ├─ Delivery ──consumed into──▶ Turn
-├─ Turn (cause: a delivery or a callback; follows: an earlier turn)
+├─ Turn (cause: a delivery; follows: an earlier turn)
 │    ├─ Model run
 │    │    ├─ Content part
-│    │    └─ Call ──delegated to──▶ Task
+│    │    └─ Call ──served by──▶ Task
 │    │         ├─ Call (nested)
-│    │         └─ Interaction (approval) ──answered by──▶ Delivery
-│    │              └─ Candidate
+│    │         └─ Interaction (approval)
+│    │              └─ Response ──submitted in──▶ Delivery
 │    └─ Interaction (sign-in, budget)
 ├─ Context change (turn: the one it ran in, if any)
 │    └─ Model run (a summary)
@@ -108,7 +109,7 @@ Session
      └─ Child session link
 ```
 
-Each family states its own lifetime rules ([Lifecycle rules](#lifecycle-rules)).
+**Owners and containers.** An entity's owner records where it came from, and never changes. What closes it is its container: runs and their parts close with their turn or context change; calls and interactions stay open after their run settles, until the turn or task they belong to ends; tasks can outlive turns, and end before `session.ended`.
 
 ### Three kinds of records
 
@@ -129,82 +130,89 @@ Each family states its own lifetime rules ([Lifecycle rules](#lifecycle-rules)).
 
 ### Outcomes
 
-Terminal verbs follow one rule. Things that resolve once settle: deliveries, turns, model runs, calls, interactions, candidates, and context changes. Long-lived containers that go idle and are reused end: sessions and tasks. Content parts arrive `completed`.
+Verbs follow a few rules:
+
+- **Introductions.** `requested` when an entity still needs a decision before it can run, such as a model run's model and tools or a call's clearance, followed by `started` when it runs. `started` alone when it runs from the start. `opened` when it waits on a person. `submitted` for an answer, and `admitted` for input that passed its checks.
+- **Terminals.** Things that resolve once settle: deliveries, turns, model runs, calls, interactions, responses, and context changes. Long-lived containers that go idle and are reused end: sessions and tasks. Content parts arrive `completed`.
+- **Families are single words,** and a type is `family.verb`. A family named after a resource stands for operations on it: `model` for model runs, `context` for context changes. Each type's role (introduces, updates, terminal) is catalog metadata, so readers can handle families generically without parsing verbs.
 
 Terminal outcome sets are closed for the life of the major version:
 
-| Terminal                 | Outcomes                                                |
-| ------------------------ | ------------------------------------------------------- |
-| `session.ended`          | completed, failed                                       |
-| `delivery.settled`       | handled, paused, applied, ignored, refused, failed      |
-| `turn.settled`           | completed, failed, cancelled                            |
-| `model.settled`          | completed, failed, interrupted, abandoned               |
-| `call.settled`           | completed, failed, rejected, interrupted                |
-| `task.ended`             | completed, failed, cancelled                            |
-| `interaction.settled`    | accepted, declined, invalid, failed, withdrawn, expired |
-| `candidate.settled`      | accepted, refused, failed, expired, withdrawn           |
-| `context-change.settled` | completed, failed, cancelled, interrupted               |
+| Terminal              | Outcomes                                                                        |
+| --------------------- | ------------------------------------------------------------------------------- |
+| `session.ended`       | completed, failed                                                               |
+| `delivery.settled`    | handled, awaiting-input, applied, ignored, refused, failed                      |
+| `turn.settled`        | completed, failed, cancelled                                                    |
+| `model.settled`       | completed, failed, interrupted, abandoned                                       |
+| `call.settled`        | completed, failed, rejected, interrupted, abandoned                             |
+| `task.ended`          | completed, failed, cancelled                                                    |
+| `interaction.settled` | accepted, declined, invalid, failed, withdrawn, interrupted, abandoned, expired |
+| `response.settled`    | applied, refused, failed, withdrawn, abandoned, expired                         |
+| `context.settled`     | completed, failed, cancelled, interrupted                                       |
 
 <details>
 <summary>Glossary</summary>
 
-| Word        | Meaning                                             | Used by                                              |
-| ----------- | --------------------------------------------------- | ---------------------------------------------------- |
-| accepted    | The answer was taken                                | interaction, candidate                               |
-| declined    | A person said no                                    | interaction                                          |
-| refused     | Policy said no                                      | candidate, delivery                                  |
-| invalid     | The answer didn't fit the request                   | interaction                                          |
-| withdrawn   | The asker stopped waiting; `reason` says why        | interaction, candidate                               |
-| expired     | Time ran out                                        | interaction, candidate                               |
-| failed      | Something went wrong                                | every family                                         |
-| completed   | Finished normally                                   | session, turn, model run, call, task, context change |
-| cancelled   | Someone stopped it directly                         | turn, task, context change                           |
-| interrupted | Cut off because something it depends on stopped     | model run, call, content, context change             |
-| rejected    | Never ran because of a decision; `cause` says whose | call                                                 |
-| abandoned   | Superseded by a retry                               | model run                                            |
-| handled     | The work a delivery started or joined settled       | delivery                                             |
-| paused      | Further progress needs another delivery             | delivery                                             |
-| applied     | A control took effect                               | delivery                                             |
-| ignored     | The channel chose not to deliver it                 | delivery                                             |
+| Word           | Meaning                                                                     | Used by                                               |
+| -------------- | --------------------------------------------------------------------------- | ----------------------------------------------------- |
+| accepted       | The answer was taken                                                        | interaction                                           |
+| declined       | A person said no                                                            | interaction                                           |
+| refused        | Policy said no                                                              | response, delivery                                    |
+| invalid        | The answer didn't fit the request                                           | interaction                                           |
+| withdrawn      | The asker no longer needs it; `reason` says why                             | interaction, response                                 |
+| expired        | Time ran out                                                                | interaction, response                                 |
+| failed         | Something went wrong                                                        | every family                                          |
+| completed      | Finished normally                                                           | session, turn, model run, call, task, context change  |
+| cancelled      | Someone stopped it directly                                                 | turn, task, context change                            |
+| interrupted    | Cut off because something it depends on stopped                             | model run, call, content, interaction, context change |
+| rejected       | Never ran because of a decision; `cause` says whose                         | call                                                  |
+| abandoned      | Replaced by a newer instance: a retry, a newer attempt, or a revised answer | model run, call, interaction, response                |
+| handled        | The work a delivery started or joined settled                               | delivery                                              |
+| awaiting-input | Further progress needs a person's input                                     | delivery                                              |
+| applied        | A control took effect, or a response decided its interaction                | delivery, response                                    |
+| ignored        | The channel chose not to deliver it                                         | delivery                                              |
 
 </details>
 
 ## Event catalog
 
-### The 28 types
+### The 31 types
 
 `~` marks progress: streamed between commits and never folded into the lifecycle tables.
 
-| Type                     | Entity         | Role                 | Replaces in v26                                                 |
-| ------------------------ | -------------- | -------------------- | --------------------------------------------------------------- |
-| `session.started`        | Session        | Introduces           | `session.started`                                               |
-| `session.ended`          | Session        | Terminal             | `session.completed`, `session.failed`                           |
-| `delivery.accepted`      | Delivery       | Introduces           | **New** (only `meta.deliveryIds` before)                        |
-| `delivery.consumed`      | Delivery       | Updates              | `message.received`                                              |
-| `delivery.settled`       | Delivery       | Terminal             | **New** (inferred from turn boundaries before)                  |
-| `turn.started`           | Turn           | Introduces           | `turn.started`                                                  |
-| `turn.paused`            | Turn           | Updates              | `turn.waiting`                                                  |
-| `turn.resumed`           | Turn           | Updates              | **New** (the next `step.started` before)                        |
-| `turn.settled`           | Turn           | Terminal             | `turn.completed`, `turn.failed`, `turn.cancelled`               |
-| `model.started`          | Model run      | Introduces           | `step.started`; **new** for compaction summary calls            |
-| `model.settled`          | Model run      | Terminal             | `step.completed`, `step.failed`                                 |
-| `content.delta~`         | Content part   | Progress (announces) | `message.appended`, `reasoning.appended`                        |
-| `content.completed`      | Content part   | Introduces and ends  | `message.completed`, `reasoning.completed`, `result.completed`  |
-| `call.input~`            | Call           | Progress (announces) | `action.input.appended`                                         |
-| `call.requested`         | Call           | Introduces           | `actions.requested`, now one fact per call                      |
-| `call.delegated`         | Call           | Updates              | **New** (per-call `task.started` before)                        |
-| `call.progress~`         | Call           | Progress             | `action.partial`                                                |
-| `call.settled`           | Call           | Terminal             | `action.result`, and `task.settled` for the calls a task serves |
-| `task.started`           | Task           | Introduces           | `task.started`, now once per task                               |
-| `task.ended`             | Task           | Terminal             | **New**                                                         |
-| `interaction.opened`     | Interaction    | Introduces           | `input.requested`, `authorization.required`                     |
-| `interaction.responded`  | Interaction    | Updates              | **New** (private batch state before)                            |
-| `interaction.settled`    | Interaction    | Terminal             | `input.resolved`, `approval.settled`, `authorization.completed` |
-| `candidate.opened`       | Candidate      | Introduces           | `approval.candidate` with `pending`                             |
-| `candidate.settled`      | Candidate      | Terminal             | `approval.candidate` with any other outcome                     |
-| `child.opened`           | Child link     | Introduces           | `agent.started`                                                 |
-| `context-change.started` | Context change | Introduces           | `compaction.requested`; **new** for a clear                     |
-| `context-change.settled` | Context change | Terminal             | `compaction.completed`, `context.cleared`                       |
+| Type                  | Entity         | Role                 | Replaces in v26                                                 |
+| --------------------- | -------------- | -------------------- | --------------------------------------------------------------- |
+| `session.started`     | Session        | Introduces           | `session.started`                                               |
+| `session.redeployed`  | Session        | Updates              | **New** (an implicit resolver refresh before)                   |
+| `session.ended`       | Session        | Terminal             | `session.completed`, `session.failed`                           |
+| `delivery.admitted`   | Delivery       | Introduces           | **New** (only `meta.deliveryIds` before)                        |
+| `delivery.consumed`   | Delivery       | Updates              | `message.received`                                              |
+| `delivery.settled`    | Delivery       | Terminal             | **New** (inferred from turn boundaries before)                  |
+| `turn.started`        | Turn           | Introduces           | `turn.started`                                                  |
+| `turn.paused`         | Turn           | Updates              | `turn.waiting`                                                  |
+| `turn.resumed`        | Turn           | Updates              | **New** (the next `step.started` before)                        |
+| `turn.settled`        | Turn           | Terminal             | `turn.completed`, `turn.failed`, `turn.cancelled`               |
+| `model.requested`     | Model run      | Introduces           | **New** (resolvers ran on a preview of `step.started` before)   |
+| `model.started`       | Model run      | Updates              | `step.started`; **new** for compaction summary calls            |
+| `model.settled`       | Model run      | Terminal             | `step.completed`, `step.failed`                                 |
+| `content.delta~`      | Content part   | Progress (announces) | `message.appended`, `reasoning.appended`                        |
+| `content.completed`   | Content part   | Introduces and ends  | `message.completed`, `reasoning.completed`, `result.completed`  |
+| `call.input~`         | Call           | Progress (announces) | `action.input.appended`                                         |
+| `call.requested`      | Call           | Introduces           | `actions.requested`, now one fact per call                      |
+| `call.started`        | Call           | Updates              | **New** (per-call `task.started` before, for task calls)        |
+| `call.progress~`      | Call           | Progress             | `action.partial`                                                |
+| `call.settled`        | Call           | Terminal             | `action.result`, and `task.settled` for the calls a task serves |
+| `task.started`        | Task           | Introduces           | `task.started`, now once per task                               |
+| `task.ended`          | Task           | Terminal             | **New**                                                         |
+| `interaction.opened`  | Interaction    | Introduces           | `input.requested`, `authorization.required`                     |
+| `interaction.settled` | Interaction    | Terminal             | `input.resolved`, `approval.settled`, `authorization.completed` |
+| `response.submitted`  | Response       | Introduces           | `approval.candidate` with `pending`; **new** for other answers  |
+| `response.admitted`   | Response       | Updates              | **New** (private batch state before)                            |
+| `response.settled`    | Response       | Terminal             | `approval.candidate` with any other outcome                     |
+| `child.opened`        | Child link     | Introduces           | `agent.started`                                                 |
+| `context.started`     | Context change | Introduces           | `compaction.requested`; **new** for a clear                     |
+| `context.settled`     | Context change | Terminal             | `compaction.completed`, `context.cleared`                       |
+| `usage.recorded`      | Usage record   | Record               | `usage` on step, turn, and session events                       |
 
 `session.waiting` goes away, from the stream and from hooks and channels. Readers ask the `idle` selector instead, and observers key on the fact that ends the work ([Observers](#observers-hooks-and-channels)).
 
@@ -212,13 +220,16 @@ Terminal outcome sets are closed for the life of the major version:
 
 Each new type records something v26 left for readers to infer:
 
-- **`delivery.accepted`:** a message, answer, or control was admitted. Without it, a queued message is invisible until a turn consumes it, and a refused or ignored one is invisible forever.
+- **`delivery.admitted`:** a message, answer, control, or sign-in callback was admitted. Without it, a queued message is invisible until a turn consumes it, and a refused or ignored one is invisible forever.
 - **`delivery.settled`:** the response to a delivery is complete, and how it ended. It replaces every reader's version of "the turn boundary that belongs to my message", including `respond()`'s first-boundary fallback.
-- **`turn.resumed`:** the turn left a pause, and why (an answer, a callback, finished tasks). Before, the only signal was the next `step.started`, and approved calls that ran before the next model call had no resume at all.
-- **`call.delegated`:** a task serves this call. It separates "the call was handed to a task" from "the call completed", which v26 conflated in the receipt.
+- **`turn.resumed`:** the turn left a pause, and why (a delivery, or finished tasks). Before, the only signal was the next `step.started`, and approved calls that ran before the next model call had no resume at all.
+- **`model.requested`:** the turn decided to call the model, before the model and tools are chosen. Dynamic resolvers run on it; before, they ran on a hand-built preview of `step.started`, because the published one already carried the chosen model.
+- **`call.started`:** the call was cleared and began running, and what cleared it, or which task serves it. Before, a call waiting for approval looked like a running one, an auto-approved call looked like one a grant cleared, and "the call was handed to a task" was conflated with "the call completed" in the receipt.
 - **`task.ended`:** the task itself stopped. v26 settled each call a task served, but the task had no end, so "is this subagent still alive?" was a guess.
-- **`interaction.responded`:** an answer was admitted but its batch is still incomplete. It's revisable and isn't permission to execute. Before, the pending answer lived only in private batch state and a client overlay, so another reader, or a reload, lost it.
-- **`context-change.started` and `.settled`:** one lifecycle for operations on what the model sees next. v26 gave compaction a start and a success, but no failure and no usage for its summary call (#3483), and recorded a clear on its own. Future rewinds, branch switches, and context edits become new kinds, not new families.
+- **`response.submitted`, `.admitted`, and `.settled`:** every answer to an interaction, from submission through its checks to whether it decided the interaction. Before, policy-gated answers were candidates, partial batch answers lived only in private state and a client overlay, and sign-in completions were callbacks outside the delivery model.
+- **`session.redeployed`:** a newer deployment took the session over. Session-scoped resolvers refresh on it; before, they re-ran on a hand-built `session.started`, and nothing told readers why the agent's tools or instructions changed.
+- **`usage.recorded`:** the only carrier of usage, attributed to the run, call, or context change that spent it, or to nothing, as for cache warming. Before, usage rode on step, turn, and session events, and delegated usage was easy to count twice.
+- **`context.started` and `.settled`:** one lifecycle for operations on what the model sees next. v26 gave compaction a start and a success, but no failure and no usage for its summary call (#3483), and recorded a clear on its own. Future rewinds, branch switches, and context edits become new kinds, not new families.
 
 <details>
 <summary>Every v26 type and where it goes</summary>
@@ -226,10 +237,11 @@ Each new type records something v26 left for readers to infer:
 ```text
 v26                              v27
 session.started ───────────────▶ session.started        parent?: {sessionId, callId}
+(an implicit resolver refresh) ▶ session.redeployed     {revision}
 session.completed ─┬───────────▶ session.ended          {completed | failed}
 session.failed ────┘
 session.waiting ───────────────▶ ✕ removed: the idle selector; observers use delivery.settled, turn.settled, or idle(ctx.view)
-(meta.deliveryIds) ────────────▶ delivery.accepted · delivery.consumed · delivery.settled
+(meta.deliveryIds) ────────────▶ delivery.admitted · delivery.consumed · delivery.settled
 message.received ──────────────▶ delivery.consumed      {turnId, parts}
 
 turn.started ──────────────────▶ turn.started           {cause, follows}; no sequence
@@ -239,13 +251,15 @@ turn.completed ─┐
 turn.failed ────┼──────────────▶ turn.settled           {completed | failed | cancelled, reply?}
 turn.cancelled ─┘
 
-step.started ──────────────────▶ model.started          {runId, owner: {turnId}, modelId}
-step.completed ─┬──────────────▶ model.settled          {outcome, finishReason, usage, generationId}
+step.started ──────────────────▶ model.requested        {runId, owner: {turnId}}
+                                 model.started          {runId, modelId}, once the model is chosen
+step.completed ─┬──────────────▶ model.settled          {outcome, finishReason, generationId}
 step.failed ────┘
-compaction.requested ──────────▶ context-change.started {changeId, kind: "compaction", trigger}
-(the summary model call) ──────▶ model.started · model.settled   owner: {changeId}
-compaction.completed ──────────▶ context-change.settled {completed | failed | cancelled | interrupted}
-context.cleared ───────────────▶ context-change.started + .settled   {kind: "clear", selects: null}
+(usage on step, turn, session) ▶ usage.recorded         {owner?, kind, usage}
+compaction.requested ──────────▶ context.started        {changeId, kind: "compaction", trigger}
+(the summary model call) ──────▶ model.requested · model.started · model.settled   owner: {changeId}
+compaction.completed ──────────▶ context.settled        {kind, completed | failed | cancelled | interrupted}
+context.cleared ───────────────▶ context.started + .settled   {kind: "clear", selects: null}
 
 message.appended ──────┐
 reasoning.appended ────┴───────▶ content.delta~         {partId, kind, delta}
@@ -255,19 +269,21 @@ reasoning.completed ─┼─────────▶ content.completed      
 result.completed ────┘
 
 actions.requested ─────────────▶ call.requested         one per call; capability, not dispatch
+(clearance, private before) ───▶ call.started           {clearedBy?, taskId?}
 action.partial ────────────────▶ call.progress~
 action.result ─────────────────▶ call.settled           the only place a call's output appears
-task.started ──────────────────▶ task.started (once) + call.delegated (every call it serves)
+task.started ──────────────────▶ task.started (once) + call.started {taskId} (every call it serves)
 task.settled ──────────────────▶ call.settled (+ task.ended when the task stops)
 agent.started ─────────────────▶ child.opened
 
 input.requested ─────────┐
 authorization.required ──┴─────▶ interaction.opened     {kind: approval | question | budget | sign-in}
-(private pending answers) ─────▶ interaction.responded
+approval.candidate ────────────▶ response.submitted · response.settled
+(private pending answers) ─────▶ response.admitted
+(sign-in callbacks) ───────────▶ delivery.admitted {source: callback} + response.*
 input.resolved ──────────┐
 approval.settled ────────┼─────▶ interaction.settled    one terminal; one closed outcome set
 authorization.completed ─┘
-approval.candidate ────────────▶ candidate.opened · candidate.settled
 ```
 
 </details>
@@ -278,11 +294,13 @@ approval.candidate ────────────▶ candidate.opened · c
 <summary>Sessions</summary>
 
 ```text
-session.started  { parent?: {sessionId, callId} }
-session.ended    { outcome: completed | failed, cause?, error? }
+session.started     { parent?: {sessionId, callId} }
+session.redeployed  { revision }
+session.ended       { outcome: completed | failed, cause?, error? }
 ```
 
 - Every reader stops at `session.ended`. Nothing after it counts.
+- **`session.redeployed`** comes first in the first commit after a newer deployment takes the session over, which happens only while the session is idle. `revision` is the runtime revision eve already compares: the deployment ID, or the compiled artifacts' key locally. Session-scoped resolvers refresh on it ([`dynamic-participants.md`](./dynamic-participants.md)). A fresh process on the same deployment isn't a redeploy.
 - A failed session references what failed, for example `cause: {turnId}`; the error details live on that entity.
 - The ending commit settles every delivery that was accepted but not settled, with `failed` and `reason: "session-ended"`, and settles any open context change `interrupted`. Inbox payloads that were never read were never introduced, so `session.ended` is their only signal.
 - A reset ends the session, not the channel's conversation. Following the conversation into its next session is the channel's job, outside the stream contract.
@@ -293,45 +311,49 @@ session.ended    { outcome: completed | failed, cause?, error? }
 <summary>Deliveries</summary>
 
 ```text
-delivery.accepted  { deliveryId, principal?, source?: {channel, scheduleId?, caller?}, clientContext? }
+delivery.admitted  { deliveryId, principal?, source?: {channel, scheduleId?, caller?} | {control} | {callback}, clientContext? }
 delivery.consumed  { deliveryId, turnId, parts }
 delivery.settled   { deliveryId, outcome, turnId?, reason? }
 ```
 
-- **What a delivery is.** It's the `deliveryId` minted for each inbound operation (`channel/delivery-metadata.ts`): HTTP sends, channel webhooks, schedules (as the app principal), parent-to-child messages, and controls.
+- **What a delivery is.** It's the `deliveryId` minted for each inbound operation (`channel/delivery-metadata.ts`): HTTP sends, channel webhooks, schedules (as the app principal), parent-to-child messages, controls, and sign-in callbacks.
 - **No declared kind.** The facts that cite a delivery record what it did:
 
-  | Effect         | Recorded as                                                                 |
-  | -------------- | --------------------------------------------------------------------------- |
-  | A message      | `delivery.consumed {turnId, parts}`                                         |
-  | Context only   | `delivery.consumed {turnId, parts: []}`; the notice text stays private      |
-  | An answer      | `interaction.responded` or `interaction.settled` with `cause: {deliveryId}` |
-  | A control      | That control's fact, with `cause: {deliveryId}`                             |
-  | `outputSchema` | Private                                                                     |
+  | Effect         | Recorded as                                                             |
+  | -------------- | ----------------------------------------------------------------------- |
+  | A message      | `delivery.consumed {turnId, parts}`                                     |
+  | Context only   | `delivery.consumed {turnId, parts: []}`; the notice text stays private  |
+  | An answer      | `response.submitted {deliveryId}`, for a question, approval, or sign-in |
+  | A control      | That control's fact, with `cause: {deliveryId}`                         |
+  | `outputSchema` | Private                                                                 |
 
-- **Admitted at step boundaries.** The session admits deliveries in the workflow body, and only steps write the stream. So `delivery.accepted` lands in the next step's first commit. During a running turn that's up to one model call late. HTTP's 202 with the `deliveryId` stays the transport acknowledgement, and clients keep their optimistic local submission.
+- **Admitted at step boundaries.** The session admits deliveries in the workflow body, and only steps write the stream. So `delivery.admitted` lands in the next step's first commit. During a running turn that's up to one model call late. HTTP's 202 with the `deliveryId` stays the transport acknowledgement, and clients keep their optimistic local submission.
 - **Folded deliveries** admitted together each get their own `delivery.consumed` and `delivery.settled` (#3313).
 - **Steering is visible at consumption.** A delivery steered into the open turn names that turn; a queued one is consumed by the next turn. Only the turn's principal, or its delegated caller, steers.
 - **What resumes a paused turn:** only a message from the turn's own person, or an answer. A context-only delivery never resumes a turn or withdraws its requests (#4276). It waits, is consumed when the turn next runs, and starts the next turn if the paused one is cancelled or cleared.
 - **Controls are deliveries.** Cancel, clear, compact, and reset get an ID and carry the caller's auth, so `turn.settled {cancelled, cause}` names who cancelled. Today `SessionCommand` carries neither.
-- **Callbacks aren't deliveries.** A sign-in completion appears as a cause: `{callback: {interactionId}}`.
+- **Sign-in callbacks are deliveries,** with three differences from a send:
+  - **No principal.** The identity provider redirects a browser, and the callback route drops request headers on purpose. Whoever holds the link can complete it, as today. Attribution follows `source`, so a callback is never credited to the session's principal, the way other deliveries without auth are.
+  - **Narrow.** A callback answers only the sign-in attempt it names. It never steers, starts a turn, or withdraws anything, and it's admitted ahead of queued messages.
+  - **Once per attempt.** The `deliveryId` derives from the attempt, so a repeated callback, from a browser refresh or a route retry, is dropped at admission and leaves no trace beyond server logs. That also keeps an unauthenticated route from adding lines at will.
+- **`deliver` shapes only the channel's own sends.** The channel's `deliver` hook runs for sends from the session's channel, as today. Controls and callbacks never pass through it, so only a channel send can settle `ignored`.
 - **User parts** use eve's own schema, not the AI SDK's: `{kind: "text", text}` or `{kind: "file", mediaType, filename?, size?, ref?}`, plus an explicit unavailable marker. Image inputs are file parts. `textOf(parts, {files: "placeholder" | "omit"})` replaces the flattened `message` string.
 
 **The settle rule.** A delivery settles when the work it started or joined settles, or when the session can make no more progress for it without another delivery.
 
-| Outcome   | When                                                                                                    |
-| --------- | ------------------------------------------------------------------------------------------------------- |
-| `handled` | The work it started or joined settled. `turnId` points at the turn, whose `reply` lists the reply parts |
-| `paused`  | Further progress needs another delivery                                                                 |
-| `applied` | A control took effect. A clear or compact settles `applied` once its context change completes           |
-| `ignored` | The channel's `deliver` hook returned nothing                                                           |
-| `refused` | Not allowed, such as an unauthenticated answer to a policy-gated approval                               |
-| `failed`  | Something went wrong, including the session ending first                                                |
+| Outcome          | When                                                                                                    |
+| ---------------- | ------------------------------------------------------------------------------------------------------- |
+| `handled`        | The work it started or joined settled. `turnId` points at the turn, whose `reply` lists the reply parts |
+| `awaiting-input` | Further progress needs a person's input: an answer or a sign-in                                         |
+| `applied`        | A control took effect. A clear or compact settles `applied` once its context change completes           |
+| `ignored`        | The channel's `deliver` hook returned nothing                                                           |
+| `refused`        | Not allowed, such as an unauthenticated answer to a policy-gated approval                               |
+| `failed`         | Something went wrong, including the session ending first                                                |
 
-- **Answers join the work they resume.** An answer settles `handled` when the resumed turn settles, or `paused` if the turn stops again.
-  - An answer that doesn't complete its approval batch settles `paused` at once.
+- **Answers join the work they resume.** An answer settles `handled` when the resumed turn settles, or `awaiting-input` if the turn stops again.
+  - An answer that doesn't complete its approval batch settles `awaiting-input` at once.
   - An answer to an interaction whose subject has no open turn settles `applied`.
-- **Some pauses don't settle a delivery.** A pause on tasks, or on a sign-in that completes through a callback, leaves the delivery open, because the callback continues the same work. Readers that must hand control back at a sign-in (CLI `invoke`, the invocation API) stop on the open sign-in interaction instead.
+- **Only task waits keep a delivery open.** A turn parked on working tasks continues the same work when they finish, so its delivery stays open. Every other pause (approvals, questions, sign-ins, budget prompts) settles it `awaiting-input`, and the answer's delivery carries the resumed work. CLI `invoke` and the invocation API stop at `delivery.settled`, and read the prompt or sign-in link from the open interaction.
 
 </details>
 
@@ -339,13 +361,14 @@ delivery.settled   { deliveryId, outcome, turnId?, reason? }
 <summary>Turns and model runs</summary>
 
 ```text
-turn.started   { turnId, cause, follows }
-turn.paused    { turnId, awaiting: [{interactionId} | {callId} | {taskId}] }
-turn.resumed   { turnId, cause }
-turn.settled   { turnId, outcome, reply?: partId[], cause?, error? }
+turn.started     { turnId, cause, follows }
+turn.paused      { turnId, awaiting: [{interactionId} | {callId} | {taskId}] }
+turn.resumed     { turnId, cause }
+turn.settled     { turnId, outcome, reply?: partId[], cause?, error? }
 
-model.started  { runId, owner: {turnId} | {changeId}, modelId }
-model.settled  { runId, outcome, finishReason?, usage?, generationId?, error? }
+model.requested  { runId, owner: {turnId} | {changeId} }
+model.started    { runId, modelId }
+model.settled    { runId, outcome, finishReason?, generationId?, error? }
 ```
 
 - **Turn IDs** stay deterministic (`turn_${n}` from the projection). Retry recovery relies on that.
@@ -354,8 +377,9 @@ model.settled  { runId, outcome, finishReason?, usage?, generationId?, error? }
 - **`turn.resumed`** is emitted wherever the machine leaves a pause, including when approved calls run before the next model call.
 - **`turn.settled.reply`** lists the parts that answer the turn: text, a structured result, or files. Deliveries reach it through `delivery.settled.turnId`, so folded deliveries share one reply.
 - **Runs have IDs.** `sequence` and `stepIndex` leave every payload. The client derives a per-turn step ordinal for display.
-- **Run outcomes:** `completed`; `failed`; `interrupted`, for a cancel (later also steering or barge-in); and `abandoned`, when a retry superseded the run. `usage` is optional on every outcome, so a cancelled run reports what it spent (#952).
-- **Runs belong to a turn or a context change.** A compaction's summary call is a model run owned by the change, so its usage counts like any other run's, including attempts whose summary is rejected (#3483).
+- **A run is requested, then started.** `model.requested` lands in the commit that makes the next model call necessary: the turn's start, the last call result, an answer, or steering. Model participants run after it, and `model.started` records the model they chose when the provider call begins. A run that fails before starting settles `failed`, and one cancelled first settles `interrupted`, without a `model.started`.
+- **Run outcomes:** `completed`; `failed`; `interrupted`, for a cancel (later also steering or barge-in); and `abandoned`, when a retry superseded the run. Usage is a `usage.recorded {owner: {runId}}` in the run's terminal commit, so a cancelled run reports what it spent (#952).
+- **Runs belong to a turn or a context change.** A compaction's summary call is a model run owned by the change, so its usage counts like any other run's, including attempts whose summary is rejected (#3483). It uses `compactionModel` if one is configured, otherwise the model the turn's current run chose; between turns, the model participants run on its `model.requested` ([`dynamic-participants.md`](./dynamic-participants.md)).
 
 </details>
 
@@ -385,24 +409,27 @@ content.completed  { partId, runId, kind, value, phase, interrupted? }
 ```text
 call.input~     { callId, name, delta }                     the first record announces the call
 call.requested  { callId, owner: {runId} | {callId}, capability: {kind, name, title?}, input? | inputError? }
-call.delegated  { callId, taskId }
+call.started    { callId, clearedBy?: {policy} | {grant: {interactionId}} | {interactionId}, taskId? }
 call.progress~  { callId, output }                          a bounded snapshot; the latest replaces earlier ones
-call.settled    { callId, outcome, output? | outputOf?, error?, reason?, cause?, usage? }
+call.settled    { callId, outcome, output? | outputOf?, error?, reason?, cause? }
 ```
 
-- **Output appears once, on `call.settled`.** What the model saw isn't published separately: for a sync call it's the output; a task call's receipt is implied by `call.delegated`; denial and cancel text follows from `reason`.
+- **Output appears once, on `call.settled`.** What the model saw isn't published separately: for a sync call it's the output; a task call's receipt is implied by `call.started {taskId}`; denial and cancel text follows from `reason`.
+- **Requested, then started.** `call.requested` records what the model asked for, and `call.started` records that the call was cleared and began. `clearedBy` names the policy, the grant (the earlier interaction that granted it), or the approval, and is absent when the call needed no approval. A call that never ran settles without a `call.started`. Calls the AI SDK runs while streaming get both facts in one commit.
 - **Outcomes:**
   - `completed`;
   - `failed`, for an execution error or invalid input;
   - `rejected`, with `cause: {interactionId}` or `{policy}`;
-  - `interrupted`, with reason `turn-cancelled`, `authorization-required`, or `attempt-abandoned`.
+  - `interrupted`, with reason `turn-cancelled` or `authorization-required`;
+  - `abandoned`, when a retry superseded the attempt and eve can't tell whether the tool ran.
 - **Every call the model made is introduced.** When validation fails, `call.requested` carries `inputError` instead of `input`, and `call.settled {failed}` follows. If the run ends before a call announced by `call.input` is requested, the run's terminal abandons the preview; a call that was never requested never ran.
-- **Calls settle by what actually happened, as far as eve can tell.** The AI SDK runs tools while it streams. When emission can tell that a tool ran and has its output, the call settles `completed` or `failed`, even if the run is then abandoned. When it can't, the call settles `interrupted` with `attempt-abandoned`.
+- **Calls settle by what actually happened, as far as eve can tell.** The AI SDK runs tools while it streams. When emission can tell that a tool ran and has its output, the call settles `completed` or `failed`, even if the run is then abandoned. When it can't, the call settles `abandoned`.
 - **Each call settles in its own commit,** unless atomicity requires grouping (an approval batch, whose facts are small). That keeps every line no larger than today's largest event.
 - **Nested calls** (for example, the connection calls `connection_execute` makes) have `owner: {callId}`. They appear for activity views and evals but never enter the model's history.
 - **Sign-ins:** a call that needs a sign-in settles `interrupted` with `authorization-required`. After the sign-in the model calls again, and that's a new call.
 - **Capability, not dispatch.** `capability.kind` is open (`tool`, `agent`, `skill` today). Whether a call runs inline, as a workflow, remotely, or at the provider stays private.
 - **Task-limit refusals are rejections:** `call.settled {rejected, cause: {policy: "task-limit"}}`, so readers no longer special-case `TOO_MANY_TASKS` failures (`isTaskRetryRefusal`).
+- **Delegated usage** is a `usage.recorded {owner: {callId}}` in the commit that settles the call, never on `task.ended`, so a parent counts a child's usage once.
 
 </details>
 
@@ -411,28 +438,28 @@ call.settled    { callId, outcome, output? | outputOf?, error?, reason?, cause?,
 
 ```text
 task.started    { taskId, startedBy: {callId}, kind: agent | tool, name }
-call.delegated  { callId, taskId }                          every call the task serves, including the first
+call.started    { callId, taskId }                          every call the task serves, including the first
 call.settled    { callId, outcome, output? | outputOf? }
 task.ended      { taskId, outcome: completed | failed | cancelled, reason? }
 ```
 
-- **One start, one end.** `task.started` fires once, when the first call starts the task. Each call the task serves gets `call.delegated` and later its own `call.settled`.
+- **One start, one end.** `task.started` fires once, when the first call starts the task. Each call the task serves gets `call.started {taskId}` and later its own `call.settled`.
 - **One reply, several calls.** A `serve` task's `ctx.reply(output)` settles every call received so far with one output. The first call's `call.settled` carries it, and the others carry `outputOf: {callId}`.
 - **When a task ends:** its body returns or throws; 30 seconds pass after a cancel it doesn't return from; or the session ends, before `session.ended`.
-- **Working versus idle** is a selector: a task is working while any of its delegated calls is unsettled. The 32-task cap counts working tasks only. Idle `serve` tasks, which every subagent is, don't count.
+- **Working versus idle** is a selector: a task is working while any call it serves is unsettled. The 32-task cap counts working tasks only. Idle `serve` tasks, which every subagent is, don't count.
 - **This replaces** the per-call `task.started` and `task.settled` from [`eve-tasks.md`](./eve-tasks.md).
 
 </details>
 
 <details>
-<summary>Interactions and candidates</summary>
+<summary>Interactions and responses</summary>
 
 ```text
-interaction.opened     { interactionId, subject, request, origin?, audience? }
-interaction.responded  { interactionId, deliveryId, response }
-interaction.settled    { interactionId, outcome, reason?, cause?, response? }
-candidate.opened       { candidateId, interactionId, principal }
-candidate.settled      { candidateId, outcome, reason? }
+interaction.opened   { interactionId, subject, request, origin?, audience? }
+interaction.settled  { interactionId, outcome, reason?, cause?, response? }
+response.submitted   { responseId, interactionId, deliveryId, value? }
+response.admitted    { responseId }
+response.settled     { responseId, outcome, reason? }
 ```
 
 The family follows HumanInput's request model: one interaction per request.
@@ -440,26 +467,33 @@ The family follows HumanInput's request model: one interaction per request.
 - **Requests render without knowing their kind.** Every request carries `{kind, prompt, title?, options?, allowFreeform?, display?, link?}`, extending today's `InputRequest`, plus kind-specific fields.
 - **One closed outcome set for every kind.** Kind-specific detail rides on `response`.
 
-  | Kind     | Subject                                                 | Outcomes                                        |
-  | -------- | ------------------------------------------------------- | ----------------------------------------------- |
-  | approval | Its call                                                | accepted, declined, invalid, withdrawn, expired |
-  | question | The asking call, or the task whose run asked            | accepted, withdrawn, expired                    |
-  | sign-in  | The held turn, the task whose run asked, or a candidate | accepted, declined, failed, withdrawn, expired  |
-  | budget   | The turn                                                | accepted, declined, withdrawn                   |
+  | Kind     | Subject                                                | Outcomes                                                                |
+  | -------- | ------------------------------------------------------ | ----------------------------------------------------------------------- |
+  | approval | Its call                                               | accepted, declined, invalid, withdrawn, interrupted, abandoned, expired |
+  | question | The asking call, or the task whose run asked           | accepted, withdrawn, interrupted, expired                               |
+  | sign-in  | The held turn, the task whose run asked, or a response | accepted, declined, failed, withdrawn, interrupted, abandoned, expired  |
+  | budget   | The turn                                               | accepted, declined, withdrawn, interrupted                              |
 
+- **Outcomes say how a request ended, without parsing reasons:**
+  - `withdrawn` when the asker no longer needs an answer, such as after a steering message (`reason: "superseded-by-message"`);
+  - `interrupted` when its owner stopped: the turn was cancelled, or the owner ended;
+  - `abandoned` when a newer instance replaced it: a newer sign-in attempt, or a retried step.
+
+  Channels map these straight to card states: "no longer needed", "cancelled", or replaced by the newer card.
+
+- **Every answer is a response.** A person's answer, or a sign-in callback, arrives as a delivery and becomes `response.submitted`. Its checks (policy, the responder's sign-in) end in `response.admitted`, or in `response.settled {refused | failed}`. A response that decides its interaction settles `applied` in the same commit as `interaction.settled`, whose `cause` names it. A deciding answer that needs no checks writes all of this in one commit.
 - **A step's approvals settle together.**
   - Answers are revisable until every approval in the step has one.
-  - Each admitted answer that leaves the batch incomplete writes `interaction.responded`, and a revision writes it again. Readers show the latest as pending; it isn't permission to execute.
-  - When the last answer arrives, every `interaction.settled` and the matching `call.settled` rejections land in one commit. An answer that completes the batch goes straight to settlement, without a `responded`.
-  - A steering message from the turn's person withdraws the unanswered approvals (`superseded-by-message`), and answers already given stand.
-- **`interaction.responded` is written only once the answer is admitted,** after policy and sign-in checks. Candidates and sign-in facts describe the stages before that.
+  - An admitted answer that leaves the batch incomplete stays open as `response.admitted`. Readers show the latest admitted response as pending; it isn't permission to execute. A revision is a new response, and the one it replaces settles `abandoned`.
+  - When the last answer arrives, the deciding responses settle `applied`, and every `interaction.settled`, with the matching `call.started` approvals and `call.settled` rejections, lands in one commit.
+  - A steering message from the turn's person withdraws the unanswered approvals, and answers already given stand.
 - **No settlement by inference.** A decline is one commit with `interaction.settled {declined}` and `call.settled {rejected, cause: {interactionId}}`.
-- **`withdrawn` carries a reason:** `turn-cancelled`, `superseded`, `superseded-by-message`, `owner-ended`, or `attempt-abandoned`.
-- **Each sign-in attempt is its own interaction.** A newer attempt withdraws the older one with `superseded`. A sign-in's subject is the turn, because the calls that asked leave the step and the model calls them again.
+- **Each sign-in attempt is its own interaction.** A newer attempt settles the older one `abandoned`. A sign-in's subject is the turn, because the calls that asked leave the step and the model calls them again.
+- **A sign-in completes through a callback delivery** ([Deliveries](#payloads-by-family)). Its response carries no `value` on the wire, because the identity provider's payload stays private.
 - **`invalid` stays terminal,** as today: the answer named an option the approval doesn't offer, and the call doesn't run.
-- **Candidates** are responders' answers to a policy-gated approval. They're public and carry the principal; Slack uses refused candidates to notify the responder privately. Only `interaction.settled` closes the interaction. A candidate ends `accepted`, `refused` (by policy), `failed` (the responder's sign-in failed), `expired`, or `withdrawn: superseded` (the approval settled another way).
+- **Policy-gated approvals** record each responder's answer as a response, attributed through its delivery's principal. Slack uses refused responses to notify the responder privately. Only `interaction.settled` closes the interaction, and other open responses settle `withdrawn` when it settles another way.
 - **Relayed requests:** a request from a child session or workflow run has the parent's serving call as its subject, and `origin: {sessionId, interactionId}` names the child's request. Relays chain hop by hop ([Child sessions and relays](#child-sessions-and-relays)).
-- **Who answered** joins through the delivery's principal. Sign-in challenge fields (`url`, `userCode`, the callback URL) carry over, visible to the same readers as today.
+- **Who answered** joins through the response's delivery and its principal. Sign-in challenge fields (`url`, `userCode`, the callback URL) carry over, visible to the same readers as today.
 
 </details>
 
@@ -467,19 +501,21 @@ The family follows HumanInput's request model: one interaction per request.
 <summary>Children and context changes</summary>
 
 ```text
-child.opened            { sessionId, owner: {callId} | {taskId}, name, stream }
-context-change.started  { changeId, kind, turnId?, cause?, trigger? }
-context-change.settled  { changeId, outcome, selects?, error? }
+child.opened     { sessionId, owner: {callId} | {taskId}, name, stream }
+context.started  { changeId, kind, turnId?, cause?, trigger? }
+context.settled  { changeId, kind, outcome, selects?, error? }
 ```
 
 - **`child.opened`** links a child session. Where a remote child runs, and which credential resolver reaches it, stays off the stream ([Child sessions and relays](#child-sessions-and-relays)).
 - **Transcript versus context.** The **transcript** is what happened: the stream, append-only. The **context** is what the model sees next. It stays private, so framework messages, cancelled-call text, and compaction summaries live only there, while nested calls and interrupted text live only in the transcript.
 - **A context change is an operation on the context that isn't a turn.** `kind` is open: `compaction` and `clear` today.
-  - Every change writes both facts. A clear is instant, so both land in one commit.
+  - Every change writes both facts. A clear is instant, so both land in one commit. `kind` repeats on `context.settled`, so readers and guards that don't fold can tell a failed compaction from a failed clear.
   - Every compaction is visible, including one that only reorganizes memory records or prunes tool results without calling a model. Each summary call is a model run with `owner: {changeId}`, so a compaction that retries its summary owns several.
   - `turnId` names the turn a threshold compaction ran in. A manual compaction or a clear runs between turns, and its `cause` is its control delivery. A threshold compaction records `trigger: {inputTokens}`; recovery from a context-length error (#3795) would be another trigger.
+  - A threshold compaction runs inside the responding run's window. The threshold counts the chosen model's whole request, including instructions and tools, so the check happens after `model.requested` and the model participants, and the change settles before `model.started`.
   - Outcomes: `completed`; `failed`; `cancelled`, for a direct stop; and `interrupted`, when its turn is cancelled or the session ends.
   - The `idle` selector is false while a change is open.
+- **What a compaction does.** It first caps oversized tool results in the older part of the history, which often suffices with no model call. Otherwise its summary run writes a handoff note for the next model: progress, decisions, constraints, remaining work, and exact identifiers. The note becomes an assistant message after "Summary of our conversation so far:", followed by the recent messages, and a later compaction updates the note rather than summarizing a summary. The note stays in the context; readers see that the change happened and what its run cost.
 - **`selects` carries the effect on the conversation,** so readers never branch on `kind`. A clear sets `null`: the conversation is empty until the next turn, which `follows: null`. Compactions omit it, because they change the context, not the transcript. A reader that meets an unknown kind shows "Context changed" and still applies `selects`.
 - **What `follows` and `selects` enable later.** With `conversation()` in place from the start, in-session edit and regenerate become turns that follow an earlier turn. Branch navigation falls out of grouping sibling turns.
   - A rewind or branch switch with no new turn is a new kind of context change that sets `selects: {turnId}`. Because `selects` ships in v27.0, older readers follow it. A branch switch that summarizes the abandoned branch, as pi does, owns a model run like a compaction.
@@ -489,30 +525,84 @@ context-change.settled  { changeId, outcome, selects?, error? }
 
 </details>
 
+<details>
+<summary>A compaction and a clear, line by line</summary>
+
+Positions continue from earlier turns; scopes are omitted.
+
+```text
+── a manual compaction between turns ──
+10 facts  delivery.admitted  {deliveryId: d3, principal, source: {control: "compact"}}
+          context.started    {changeId: x1, kind: "compaction", cause: {deliveryId: d3}}
+                             ── memory capture runs ──
+11 facts  model.requested    {runId: r3, owner: {changeId: x1}}
+          model.started      {runId: r3, modelId}
+12 facts  model.settled      {runId: r3, outcome: "completed", finishReason: "stop"}
+          usage.recorded     {owner: {runId: r3}, kind: "model", usage}
+          context.settled    {changeId: x1, kind: "compaction", outcome: "completed"}
+          delivery.settled   {deliveryId: d3, outcome: "applied"}
+                             ── memory recall runs ──
+
+── a threshold compaction inside turn t2 ──
+20 facts  call.settled       {callId: c7, outcome: "completed", output}
+          model.requested    {runId: r6, owner: {turnId: t2}}
+                             ── model participants run; the request is over the threshold ──
+21 facts  context.started    {changeId: x2, kind: "compaction", turnId: t2, trigger: {inputTokens: 183400}}
+22 facts  model.requested    {runId: r5, owner: {changeId: x2}}
+          model.started      {runId: r5, modelId}
+23 facts  model.settled      {runId: r5, outcome: "completed", finishReason: "stop"}
+          usage.recorded     {owner: {runId: r5}, kind: "model", usage}
+          context.settled    {changeId: x2, kind: "compaction", outcome: "completed"}
+24 facts  model.started      {runId: r6, modelId}
+
+── a clear, then the next message ──
+30 facts  delivery.admitted  {deliveryId: d5, principal, source: {control: "clear"}}
+          context.started    {changeId: x3, kind: "clear", cause: {deliveryId: d5}}
+          context.settled    {changeId: x3, kind: "clear", outcome: "completed", selects: null}
+          delivery.settled   {deliveryId: d5, outcome: "applied"}
+31 facts  delivery.admitted  {deliveryId: d6, principal}
+          turn.started       {turnId: t4, cause: {deliveryId: d6}, follows: null}
+          delivery.consumed  {deliveryId: d6, turnId: t4, parts}
+          model.requested    {runId: r8, owner: {turnId: t4}}
+```
+
+- Without a memory provider, lines 10 and 11 merge, and so do 21 and 22. A summary run has no participants, so its requested and started facts share a commit.
+- A compaction that only caps tool results writes `context.started` and `context.settled`, with no run.
+- The summary's text goes into the context, not the transcript, so a summary run has no content parts and no progress.
+- After line 30, `conversation()` is empty until `t4`, which follows nothing. The earlier turns stay in the transcript.
+
+</details>
+
 ### Example: a declined approval
 
 One line per commit or progress record; scopes are omitted. [Wire format](#wire-format) shows lines 6 and 8 as stored.
 
 ```text
-0 facts     delivery.accepted   {deliveryId: d1, principal}
+0 facts     delivery.admitted   {deliveryId: d1, principal}
             turn.started        {turnId: t1, cause: {deliveryId: d1}, follows: null}
             delivery.consumed   {deliveryId: d1, turnId: t1, parts}
-1 facts     model.started       {runId: r1, owner: {turnId: t1}, modelId}
+            model.requested     {runId: r1, owner: {turnId: t1}}
+1 facts     model.started       {runId: r1, modelId}
 2 progress  call.input          {callId: c1, name: "deploy", delta: "{\"env\":\"prod\"}"}
 3 facts     call.requested      {callId: c1, owner: {runId: r1}, capability: {kind: "tool", name: "deploy"}, input}
-4 facts     model.settled       {runId: r1, outcome: "completed", finishReason: "tool-calls", usage}
+4 facts     model.settled       {runId: r1, outcome: "completed", finishReason: "tool-calls"}
+            usage.recorded      {owner: {runId: r1}, kind: "model", usage}
 5 facts     interaction.opened  {interactionId: i1, subject: {callId: c1}, request: {kind: "approval", prompt, options}}
             turn.paused         {turnId: t1, awaiting: [{interactionId: i1}]}
-            delivery.settled    {deliveryId: d1, outcome: "paused", turnId: t1}
+            delivery.settled    {deliveryId: d1, outcome: "awaiting-input", turnId: t1}
             ── the answer arrives ──
-6 facts     delivery.accepted   {deliveryId: d2, principal}
-            interaction.settled {interactionId: i1, outcome: "declined", cause: {deliveryId: d2}}
+6 facts     delivery.admitted   {deliveryId: d2, principal}
+            response.submitted  {responseId: a1, interactionId: i1, deliveryId: d2, value}
+            response.settled    {responseId: a1, outcome: "applied"}
+            interaction.settled {interactionId: i1, outcome: "declined", cause: {responseId: a1}}
             call.settled        {callId: c1, outcome: "rejected", cause: {interactionId: i1}}
             turn.resumed        {turnId: t1, cause: {deliveryId: d2}}
-7 facts     model.started       {runId: r2, owner: {turnId: t1}, modelId}
+            model.requested     {runId: r2, owner: {turnId: t1}}
+7 facts     model.started       {runId: r2, modelId}
 8 progress  content.delta       {partId: p1, kind: "text", delta: "Understood, I won't deploy."}
 9 facts     content.completed   {partId: p1, runId: r2, kind: "text", value, phase: "reply"}
-            model.settled       {runId: r2, outcome: "completed", finishReason: "stop", usage}
+            model.settled       {runId: r2, outcome: "completed", finishReason: "stop"}
+            usage.recorded      {owner: {runId: r2}, kind: "model", usage}
             turn.settled        {turnId: t1, outcome: "completed", reply: [p1]}
             delivery.settled    {deliveryId: d2, outcome: "handled", turnId: t1}
 ```
@@ -588,6 +678,7 @@ interface Scope {
   turnId?: string;
   taskId?: string;
   runId?: string;
+  changeId?: string;
 }
 ```
 
@@ -595,8 +686,8 @@ interface Scope {
 
 - **`at`** is the commit's timestamp: ISO 8601 in UTC, stamped by the writer when it writes the line. Every fact in the commit shares it. It's for display and durations, never ordering: positions order lines, steps run on different machines, and a retried step stamps a new time. Progress carries no timestamp; readers that time deltas, such as time to first token, use arrival time or instrumentation.
 - **`facts`** is always an array, even with one fact. Facts are in order, so a fact may reference an entity introduced earlier in the same line.
-- **`type`** is `family.verb`, with exactly one dot. A multi-word family is hyphenated, as in `context-change`.
-- **`scope`** is stamped by the publisher from the entity's owners: its turn, task, and model run. Owners never change, so scope never goes stale. It lets readers that don't fold, such as log pipelines and eval matchers, place a fact.
+- **`type`** is `family.verb`, with exactly one dot. Families are single words.
+- **`scope`** is stamped by the publisher from the entity's owners: its turn, task, model run, and context change. Owners never change, so scope never goes stale. It lets readers that don't fold, such as log pipelines and eval matchers, place a fact.
 - **`data`** is the payload ([Payloads by family](#payloads-by-family)).
 
 <details>
@@ -605,17 +696,23 @@ interface Scope {
 Wrapped for reading; on the wire, each record is one line. `…` marks fields left out here.
 
 ```text
-// Line 6: one commit, four facts
+// Line 6: one commit, seven facts
 {"at": "2026-10-07T21:04:11.912Z",
  "facts": [
-   {"type": "delivery.accepted",
+   {"type": "delivery.admitted",
     "data": {"deliveryId": "d2", "principal": …}},
+   {"type": "response.submitted", "scope": {"turnId": "t1", "runId": "r1"},
+    "data": {"responseId": "a1", "interactionId": "i1", "deliveryId": "d2", "value": …}},
+   {"type": "response.settled", "scope": {"turnId": "t1", "runId": "r1"},
+    "data": {"responseId": "a1", "outcome": "applied"}},
    {"type": "interaction.settled", "scope": {"turnId": "t1", "runId": "r1"},
-    "data": {"interactionId": "i1", "outcome": "declined", "cause": {"deliveryId": "d2"}}},
+    "data": {"interactionId": "i1", "outcome": "declined", "cause": {"responseId": "a1"}}},
    {"type": "call.settled", "scope": {"turnId": "t1", "runId": "r1"},
     "data": {"callId": "c1", "outcome": "rejected", "cause": {"interactionId": "i1"}}},
    {"type": "turn.resumed", "scope": {"turnId": "t1"},
-    "data": {"turnId": "t1", "cause": {"deliveryId": "d2"}}}
+    "data": {"turnId": "t1", "cause": {"deliveryId": "d2"}}},
+   {"type": "model.requested", "scope": {"turnId": "t1"},
+    "data": {"runId": "r2", "owner": {"turnId": "t1"}}}
  ]}
 
 // Line 8: progress that announces a text part
@@ -709,7 +806,7 @@ What changes is the vocabulary they key on, and what `ctx` holds:
 | `view`             | —                          | The session's tables and selectors, as of this whole commit               |
 | `cancel()` (hooks) | Aborts the running turn    | Unchanged; the turn settles `cancelled` with `cause: {hook}`              |
 
-The channel handler's third argument becomes an observer-only subtype of `SessionContext`, so tools don't see these fields. The channel `session.failed` handler gains its `ctx`.
+The channel handler's third argument becomes an observer-only subtype of `SessionContext`, so tools don't see these fields. The channel handler for `session.ended` gets a `ctx`, which today's `session.failed` handler lacks.
 
 - **`ctx.view` reflects the whole commit.** A handler for `interaction.settled` sees the call already settled when the same commit settles it. Handlers read what changed from the fact, and where things stand from `ctx.view`.
 - **Order per commit:** write, then channel handlers, then hooks, synchronously. Today channels run before the write, so a channel could post about an event whose write then failed. Progress goes to channels live.
@@ -725,6 +822,11 @@ The channel handler's third argument becomes an observer-only subtype of `Sessio
   - **Invocation, not delivery.** Observers run for every fact, in order, and a handler that throws is logged and counts as invoked. eve doesn't guarantee that an external effect succeeded, or happened only once.
   - **Recovery after a step retry.** The order gives an implicit cursor: if line N+1 exists, line N's observers ran. A retried step re-dispatches only the last line it recovers, with that commit's view, so at most one invocation repeats.
   - **The flush window.** `write()` resolves once the chunk is buffered, not stored. If the process dies inside the writer's flush window, observers may have acted on a fact that never became durable. Hooks have this gap today, and channels gain the same one in exchange for no longer running before the write. Running observers only after the write is durable stays the goal, once Workflow exposes write acknowledgements or a flush on step writables. It isn't worth forcing with tail polling or a writable per commit.
+- **Guards for conditions.** `eve/events` exports type guards such as `isCompaction`, `isCompleted`, `hasKind(…)`, and `hasOutcome(…)`, plus `when(...guards)(handler)`, shared with participants ([`dynamic-participants.md`](./dynamic-participants.md)). Observers branch on open values and fall back for unknown ones; participants check for the values they want.
+- **Channels:**
+  - `deliver` shapes only the channel's own sends ([Deliveries](#payloads-by-family)).
+  - Built-in channels render status from the shared `activity` selector, instead of rebuilding it from their own handlers and state. Slack, for example, keeps `pendingTaskResults` and `pendingToolCallMessage` today to say "Reviewing results…" and to tell narration from a reply.
+  - Channel routes, such as Telegram's sign-in button and Slack's interaction buttons, read selectors through the session handle instead of scanning the stream.
 - **Model messages never reach observers,** as is already true for authored hooks.
 
 ### Tables, selectors, and retention
@@ -736,17 +838,18 @@ The fold that produces the tables is shared by the client, the server, and anyon
 
 ```text
 SessionView @ position
-├─ session        status · parent?
+├─ session        status · parent? · revision?
 ├─ deliveries     [deliveryId]     principal? · source? · status · turnId? · outcome?
 ├─ turns          [turnId]         cause · follows · status · awaiting? · reply?
-├─ runs           [runId]          owner · modelId · status · finishReason? · usage?
+├─ runs           [runId]          owner · modelId? · status · finishReason?
 ├─ parts          [partId]         runId · kind · phase? · interrupted? · status
-├─ calls          [callId]         owner · capability · taskId? · status · outcome?
+├─ calls          [callId]         owner · capability · clearedBy? · taskId? · status · outcome?
 ├─ tasks          [taskId]         startedBy · kind · name · status · outcome?
-├─ interactions   [interactionId]  kind · subject · origin? · status · pending? · outcome?
-│                                  candidates[candidateId] { principal · outcome? }
+├─ interactions   [interactionId]  kind · subject · origin? · status · outcome?
+├─ responses      [responseId]     interactionId · deliveryId · status · outcome?
 ├─ children       [sessionId]      owner · name · stream
-└─ changes        [changeId]       kind · turnId? · cause? · status · outcome? · selects?
+├─ changes        [changeId]       kind · turnId? · cause? · status · outcome? · selects?
+└─ usage          totals by owner and kind
 ```
 
 - **The tables are public, read-only, and typed,** one per family. Fields are what the facts introduce and settle, plus status, and they follow the same stability rules as the wire.
@@ -756,7 +859,9 @@ SessionView @ position
   - turns: `turn`, `activeTurn`, `conversation`, `reply`, `failure`;
   - work: `call`, `task`, `tasks`, `interaction`, `openInteractions({kind?, subject?})`;
   - deliveries: `delivery`, `queue`;
-  - session: `idle`, `usage`, `children`, `child`, `childForCall`.
+  - session: `idle`, `usage`, `children`, `child`, `childForCall`;
+  - status: `activity({turnId?})`, what the session is doing right now for status lines: thinking, running calls by name, waiting on a person or on tasks, reviewing results, compacting, or idle.
+- **Selectors work outside observers too.** Channel routes and server code read them through the session handle (`session.view()`), served from the saved projection.
 - **Extending state without rebuilding the reducer:**
 
   ```ts
@@ -775,7 +880,7 @@ SessionView @ position
 - **The client's UI model stays AI SDK-shaped.** `ConversationState` keeps `UIMessage`-style parts with `type` discriminators, built from the tables, and gains run and part IDs.
 - **Two retention modes:**
   - **Complete,** for clients and explicit history reads. It keeps everything folded for a loaded session.
-  - **Operational,** for server checkpoints and `ctx.view`. It keeps the session and its open turn; every open call, task, interaction, context change, and unsettled delivery; whatever the observed commit touched, until that commit's callbacks finish; and older records while execution still needs them. It prunes the rest. A missing row means "not retained here", not "never existed".
+  - **Operational,** for server checkpoints and `ctx.view`. It keeps the session and its open turn; every open call, task, interaction, response, context change, and unsettled delivery; whatever the observed commit touched, until that commit's callbacks finish; and older records while execution still needs them. It prunes the rest. A missing row means "not retained here", not "never existed".
   - Aggregates such as usage are folded, so they don't pin their sources.
 - **No projection snapshots on the wire.** The wire contract stays facts only. Server readers fold from line 0, skipping closed progress, because the stream's shape is stable across deployments while a saved projection's internal shape isn't.
 
@@ -798,8 +903,9 @@ SessionView @ position
 - **Relays become their own contract.** Today parent and child exchange v26 stream events: the subagent adapter forwards child requests, and the remote callback route parses them with strict schemas and closed enums (`subagents/callback-route.ts`). Instead:
   - relay messages are keyed by the child's IDs, under a bumped remote agent protocol version, and parsed tolerantly;
   - a relayed request becomes an ordinary parent interaction with `subject: {callId}` and `origin: {sessionId, interactionId}`, so parent hooks and channels see it like any other (this subsumes #3785);
-  - forwarding an answer to the child is an execution effect after the write, retried, and idempotent per child session and interaction;
-  - the child settles its own interaction and reports back, and the parent settles its mirror; cancellation withdraws across hops.
+  - forwarding a response to the child is an execution effect after the write, retried, and idempotent per child session and interaction;
+  - the child records its own response, settles its interaction, and reports back, and the parent settles its mirror; cancellation withdraws across hops;
+  - a sign-in callback lands on the session that owns the attempt, and the parent's mirror settles through the relay.
 
 <details>
 <summary>Why not forward child events into the parent stream (#666, #1725)</summary>
@@ -834,7 +940,7 @@ A model call retried after it emitted anything abandons its run, and a retried s
 
 1. reads the tail once, then folds from the checkpoint's position to the tail;
 2. skips facts already present that its inputs fully determine (accepts, consumes, turn starts), which works because those IDs are deterministic;
-3. closes what the dead attempt left open: runs `abandoned`, calls `interrupted: attempt-abandoned`, interactions `withdrawn: attempt-abandoned`;
+3. closes what the dead attempt left open: runs, calls, and interactions `abandoned`;
 4. re-dispatches observers for the last recovered line only.
 
 Recovery is best-effort. If the read fails, the step logs it and continues the way `main` does today, without closures. A write from the dead attempt that lands after the read is missed, as on `main`, and can leave the server's counted positions slightly behind; clients count lines themselves and aren't affected.
@@ -860,7 +966,7 @@ The wire contract lives in one self-contained module, `protocol/session-events/`
 ```text
 protocol/session-events/
   envelope.ts   lines, fact and progress envelopes, IDs, scope, cause, principal, error, usage, value references
-  families/     session, delivery, turn, model, content, call, task, interaction, child, context-change
+  families/     session, delivery, turn, model, content, call, task, interaction, response, child, context, usage
                 each: payload schemas, plus a descriptor {idField, introducedBy, terminal, owner}
   catalog.ts    unions, type → family, descriptor table, open-set fallbacks
   checker.ts    invariant checker for test streams
@@ -870,7 +976,8 @@ protocol/session-projection/   folds per family, public tables, selectors
 - **Self-contained.** A guard forbids imports from `shared/`, `harness/`, `connections/`, or `ai`, so runtime refactors can't silently change the wire. That's also why the AI SDK's types leave `protocol/`: the UI part picks on `message.received`, and the provider-metadata type behind `generationId`, which becomes a plain string.
 - **Zod schemas, kept out of clients.** Types are inferred from the schemas. A plain runtime catalog (type → family, fallbacks) serves the client fold, and a guard keeps Zod out of client bundles. Validation runs in tests and dev only, so nothing is validated on the delta hot path.
 - **No builders in `protocol/`.** Facts are typed literals built by their owners: the session machine and `hitl/` for lifecycle, the emission code for content and calls.
-- **Authoring maps are checked against the catalog.** The hook and channel maps stay explicit, so a new fact doesn't silently become a hook event, but they're type-checked against the catalog.
+- **Authoring maps are checked against the catalog.** The hook, channel, dynamic resolver, and memory maps stay explicit, so a new fact doesn't silently become a hook event, but they're type-checked against the catalog.
+- **Guards ship with the catalog.** The public `eve/events` entry exports the client catalog's types, the guards, and `when`. It has no runtime dependencies, so clients, hooks, channels, and participants share it.
 
 </details>
 
@@ -879,7 +986,7 @@ protocol/session-projection/   folds per family, public tables, selectors
 - **No upcaster.** Clients read v27 only, and the v21–v26 normalization (`protocol/message-version.ts`) is deleted. The CLI, ACP, and eval runners report the existing unsupported-version error against older deployments.
 - **Sessions don't cross the break.** Pre-break checkpoints are refused by v27 successors, so the deployment that owns a session keeps it until it ends ([`single-workflow-session-upgrades.md`](./single-workflow-session-upgrades.md)). Self-hosted services drain, or their channels start fresh sessions (#4092).
 - **Pre-break history isn't readable by v27 clients.** If a product needs it, a read-only upcaster can go into the stream route later without touching anything else.
-- **Hook and channel event names break.** Their retained `extension-contracts` epochs (32 hook and 39 channel fixtures) are dropped with a reason. Dynamic resolver and memory keys move to participant points in the same release, without aliases ([`dynamic-participant-points.md`](./dynamic-participant-points.md)), and instrumentation keeps its own vocabulary.
+- **Hook and channel event names break.** Their retained `extension-contracts` epochs (32 hook and 39 channel fixtures) are dropped with a reason. In the same release, dynamic resolver and memory keys follow the catalog without aliases: `step.started` becomes `model.requested`, and memory's compaction and completed-turn keys become `context.*` and `turn.settled` with guards ([`dynamic-participants.md`](./dynamic-participants.md)). Instrumentation keeps its own vocabulary.
 - **The remote agent protocol version is bumped.** A v27 parent calling a v26 remote agent fails at call time with the existing mismatch error. Remote agent protocol 1 is deleted.
 
 ## Codepaths that change
@@ -970,7 +1077,7 @@ const emit = async (event) => {
 - The invocation API folds its own mini-projection over the last 64 events (`INVOCATION_EVENT_WINDOW_SIZE`), which a long reply's deltas can push an open request out of.
 - The remote child proxy scans the parent's stream from line 0 on every connect to find the child's binding.
 
-**With v27.** Telegram and the invocation API use the shared fold, skipping closed progress, and read `openInteractions({kind: "sign-in"})`. The proxy reads the child's private side stream. All three scans are deleted. The first two fixes can land before the break, on today's fold.
+**With v27.** Telegram and the invocation API read `openInteractions({kind: "sign-in"})` from the shared fold through the session handle. The proxy reads the child's private side stream. All three scans are deleted. The first two fixes can land before the break, on today's fold.
 
 </details>
 
@@ -1008,7 +1115,7 @@ After the break, and through 1.x, the stream should evolve without breaking anyo
   | Capability `kind`                                                 | A generic call card, using `name`                     |
   | Interaction `kind`                                                | A generic prompt, using the common request fields     |
   | `phase`                                                           | Narration                                             |
-  | Context-change `kind`                                             | "Context changed", still applying `selects`           |
+  | Context change `kind`                                             | "Context changed", still applying `selects`           |
   | Cause kind                                                        | "System"                                              |
   | Delivery source kind, `finishReason`, error codes, every `reason` | Open strings                                          |
 
@@ -1027,7 +1134,7 @@ After the break, and through 1.x, the stream should evolve without breaking anyo
 | Change                                                                                                                            | Ships as | Why older readers stay correct                                    |
 | --------------------------------------------------------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------- |
 | A new optional field                                                                                                              | Minor    | They ignore it                                                    |
-| A new value in an open set: a content, capability, interaction, or context-change kind, or a `reason`                             | Minor    | They render the fallback                                          |
+| A new value in an open set: a content, capability, interaction, or context change kind, or a `reason`                             | Minor    | They render the fallback                                          |
 | A new progress type                                                                                                               | Minor    | They ignore it, and completing facts carry full values            |
 | A new annotation on an existing entity                                                                                            | Minor    | They ignore it, and the entity's lifecycle doesn't change         |
 | A new family that references existing entities                                                                                    | Minor    | They ignore it, and it can't own a known entity                   |
@@ -1042,22 +1149,28 @@ After the break, and through 1.x, the stream should evolve without breaking anyo
 These are just hypothetical. Each would land as a minor, using a mechanism the contract already has.
 
 <details>
-<summary>Fifteen directions, and how each lands</summary>
+<summary>Twenty-one directions, and how each lands</summary>
 
 | Direction                                            | How it lands                                                                                                                                                                      |
 | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Edit, regenerate, rewind, and branch switching (#75) | New turns `follow` an earlier turn, and siblings become versions. A rewind or branch switch with no new turn is a new context-change kind, and older readers follow its `selects` |
+| Edit, regenerate, rewind, and branch switching (#75) | New turns `follow` an earlier turn, and siblings become versions. A rewind or branch switch with no new turn is a new context change kind, and older readers follow its `selects` |
 | Forks into a new session                             | `session.started.forkedFrom {sessionId, position}`                                                                                                                                |
 | Steering with replacement input, barge-in (#867)     | The run settles `interrupted`, its parts complete with what streamed, and the steering delivery is consumed into the same turn                                                    |
-| Answers sent before their prompt existed (#786)      | `delivery.accepted.seenThrough: position`, so a message isn't taken as the answer to a prompt opened after it                                                                     |
-| Deadlines and escalation on `ctx.ask` (#3546)        | The interaction settles `expired`, and a new interaction opens for another audience                                                                                               |
+| Answers sent before their prompt existed (#786)      | `delivery.admitted.seenThrough: position`, so a message isn't taken as the answer to a prompt opened after it                                                                     |
+| Deadlines and escalation on `ctx.ask` (#3546)        | `expiresAt` on `interaction.opened`; the interaction settles `expired`, and a new interaction opens for another audience                                                          |
+| Stop requests                                        | `turn.stopping` and `task.stopping` updates between a cancel decision and the terminal, so readers can show "Stopping…"                                                           |
+| Session metadata                                     | `agent`, `deployment`, and `title` on `session.started`                                                                                                                           |
+| What a run could use                                 | A per-run summary on `model.started`, such as the names of the tools and skills it was offered                                                                                    |
+| Visible compaction summaries                         | An optional `summary` on `context.settled`, since the handoff note is written for a model, not a person                                                                           |
+| Who signed in                                        | `account` on a sign-in's `interaction.settled.response`, when the connection reports it, visible to the same readers as the challenge fields                                      |
+| Fewer channel API calls                              | A channel handler that runs once per commit                                                                                                                                       |
 | Human handoff, MCP elicitation, forms                | New interaction kinds, rendered from the common request fields and answered through the declared mechanisms                                                                       |
 | Plans, todo lists, environment setup (#544)          | A new family that references turns and calls, without owning them                                                                                                                 |
 | Media from models and tools (#3384)                  | New content kinds with `mediaType`, `fallbackText`, and references                                                                                                                |
 | Model fallback within a run                          | An optional field on `model.settled` naming the model that actually served                                                                                                        |
 | Visible memory recall                                | An annotation on the turn naming what was recalled                                                                                                                                |
 | Principal-scoped sessions (#661)                     | `session.started.principal`, plus redaction in place, so positions stay global                                                                                                    |
-| Retries that reuse completed work                    | A private journal of run and tool results, plus a context-change kind, with `targets`, for completed runs that recovery dropped from the context                                  |
+| Retries that reuse completed work                    | A private journal of run and tool results, plus a context change kind, with `targets`, for completed runs that recovery dropped from the context                                  |
 | Server-side views of children (#2087, #3945)         | Selectors over followed child streams                                                                                                                                             |
 | One stream for clients that don't fold children      | Read-time multiplexing of selected child streams, each line tagged with its source stream and position, with nothing stored twice                                                 |
 | Durable-before-observers, fencing, coalescing        | Producer changes behind the writer, with no change to the vocabulary                                                                                                              |
@@ -1065,6 +1178,56 @@ These are just hypothetical. Each would land as a minor, using a mechanism the c
 </details>
 
 Realtime media transport (#637) doesn't fit, and isn't meant to: the stream records the transcript, and media stays out of band.
+
+### Toward a session log
+
+The stream is the public half of a session log. The longer-run direction is for all session state to be derivable from events: model history, private records, resolver results, and authored state. That doesn't happen at v27, but v27 shouldn't block it.
+
+- **Two tiers, one commit model.** Public facts go on the wire, as specified here. Private entries would live only in the log, ride in the same commits as the facts they accompany, and reference public IDs. Each type declares its audience.
+- **Everything else becomes a fold:** the public tables, the model's context, resolved capabilities, and open work. Checkpoints become snapshots of those folds at a position, which can be rebuilt. The machine side is in [`session-machine-simplification.md`](./session-machine-simplification.md#toward-a-session-log).
+- **Never in the log:** code, secrets (only references), live progress, leases, and Workflow internals.
+
+<details>
+<summary>A sketch of the private tier</summary>
+
+| Entry                                          | Holds                                                                                                                                              | Today                                                                                                                 |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `capabilities.changed`                         | One participant's full result at one scope: tool declarations and references, instructions, skills, connections, subagents                         | `eve.{session,turn,step}DynamicToolMetadata`, the dynamic model references, `dynamicSkillManifest`, runtime revisions |
+| `contribution.recorded`                        | Model input besides the conversation: memory recall, notices, skill and connection announcements, `outputSchema`                                   | `eve.memory.preparedPreamble`, `pendingSkillAnnouncement`, `pendingDynamicInstructionUserMessages`                    |
+| `context.summarized`                           | A compaction's summary and its boundary                                                                                                            | The rewritten history                                                                                                 |
+| `model.recorded`, `call.recorded`              | What history replay needs: provider metadata such as reasoning signatures, and what the model saw of a call when it differs from the public output | Model history in the checkpoint                                                                                       |
+| `suspension.recorded`, `.released`             | A suspended step, and how to resume it                                                                                                             | HumanInput's suspended steps                                                                                          |
+| `authorization.recorded`, `relay.recorded`     | Matching sign-in callbacks; where a relayed request's answers go                                                                                   | `eve.runtime.pendingAuthorization`; HumanInput's relayed routes                                                       |
+| `task.bound`, `child.bound`, `result.recorded` | A task's workflow run; a remote child's binding; results that retries reuse                                                                        | The task table; the private side stream, already                                                                      |
+| `owner.changed`, `address.claimed`             | Handoffs between runs; continuation aliases                                                                                                        | The session anchor; continuation hook tokens                                                                          |
+| `state.updated`, `channel.recorded`            | `defineState` slots; channel-owned state such as posted card IDs                                                                                   | Durable context slots; channel adapter state                                                                          |
+| `sandbox.attached`, `.released`                | The session's sandbox                                                                                                                              | `eve.sandbox`                                                                                                         |
+
+Model history, turn delivery IDs, grants, and limits are folds, not entries.
+
+</details>
+
+- **Capabilities as keyed replacement.** Each `capabilities.changed` replaces one participant's result at one scope, and the fold merges session, then turn, then run, the way `buildDynamicSubagentTools` already merges session and turn selections. Participants own separate slots, so there's nothing to diff, and folding costs grow with the number of participants rather than the session's length. pi patches its prompt instead, because many extensions edit one shared prompt.
+- **Filter, derive, or split.** Deriving the public stream from the log is the most flexible; a split is the natural way to get there.
+
+  <details>
+  <summary>The three layouts</summary>
+
+  |                        | Filter: one stream, the route strips private parts     | Derive: the private log is the truth, the public stream is projected from it | Split: v27's public stream, plus a parallel private stream             |
+  | ---------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+  | Atomicity              | Free: one chunk                                        | The log append is the commit; the public write follows, outbox-style         | The private part is written first; the public line is the commit point |
+  | Leak safety            | Every reader must filter                               | Safe by construction: only what the projector emits is public                | Safe                                                                   |
+  | Public positions       | Shared with the log; private-only commits show as gaps | Each view numbers its own lines, deterministically                           | As today                                                               |
+  | New views              | Hard                                                   | Natural: a new wire version, a view scoped to one person, a debug view       | Partly                                                                 |
+  | A missing public write | Can't happen                                           | Repaired exactly by deriving again                                           | Recovered best-effort, as in v27                                       |
+  | Cost                   | One write; every read pays for private bulk            | Two writes, public facts stored twice, a projector cursor                    | Two writes, nothing stored twice                                       |
+
+  A derived view's positions stay stable only while its derivation is frozen. A view is never derived again in place, because clients hold its cursors; a new projector means a new view with its own numbering. v27's private child bindings already follow the split layout.
+
+  </details>
+
+- **What v27 keeps open:** positions belong to a stream or view; gap markers already let a reader skip positions it isn't sent; public facts can be computed from the commit alone; participants record results in one place; and nothing here calls the public stream the record of private state.
+- **Until then, new private state should be entry-shaped.** It goes through the commit path as records that could become entries, even while it's stored in checkpoints. Each new ad hoc context key is a future migration.
 
 ## Implementation plan
 
@@ -1076,15 +1239,16 @@ Realtime media transport (#637) doesn't fit, and isn't meant to: the stream reco
 - Move Telegram's sign-in lookup and the invocation API onto the shared fold.
 - Record golden scenario streams and stream-cost metrics: lines and bytes per reply, catch-up volume, and time to first byte on reload. They size delta coalescing (#3701) and the catch-up holdback, and later serve as v27 golden inputs.
 - Count stream positions in the saved projection, and run channel handlers after the write.
-- Add the v27 contract module, its fold, tables, and selectors, with no runtime use yet.
+- Add the v27 contract module, its fold, tables, selectors, and `eve/events` guards, with no runtime use yet.
 - Move remote child bindings to the private side stream, keeping the scan as a fallback for older sessions until the break.
+- Route new private state through the commit path as entry-shaped records ([Toward a session log](#toward-a-session-log)).
 
 **2. Structural prerequisites, after HumanInput.** HumanInput (#4342–#4344) is now rebased onto the session-state stack and in review. Two items from [`session-machine-simplification.md`](./session-machine-simplification.md) matter here:
 
 - **Lifecycle only in the projection** is required before interactions move to v27. Otherwise `hitl/` and the machine both write turn facts: HumanInput still builds `turn.waiting` and `message.completed` events.
 - **One commit path** for the small publishing steps is recommended. It makes "one transition, one commit, one line" uniform.
 
-The participant-point pipeline from [`dynamic-participant-points.md`](./dynamic-participant-points.md) fits here too, but nothing depends on it.
+The participant pipeline from [`dynamic-participants.md`](./dynamic-participants.md) fits here too, but nothing depends on it.
 
 **3. The break.** One stream-version change, developed on a long-lived integration branch and released together.
 
@@ -1098,20 +1262,23 @@ envelope · positions · catch-up · transport endings
  ├─ session · turn · model run
  │    └─ content · reply · files
  │         └─ calls · tasks
- ├─ deliveries · controls as deliveries
- ├─ interactions · candidates            ◀── lifecycle only in the projection
+ ├─ deliveries · controls and sign-in callbacks as deliveries
+ ├─ interactions · responses             ◀── lifecycle only in the projection
  ├─ child links · relay contract · remote protocol bump
  └─ retry recovery                       ◀── runs, calls, and interactions
-client tables · selectors · extendConversation · framework bindings
+participant keys on events · eve/events guards
+client tables · selectors · activity · extendConversation · framework bindings
 compatibility deletions · docs · release notes
 ```
 
 **4. After the break, as additive minors.**
 
 - A general retrieval route for large non-file values.
-- A private journal of run and tool results, so retries reuse them. Plus a context-change kind for completed runs lost to recovery.
-- Rewind and branch switching: new context-change kinds, and raw history across compaction.
-- `seenThrough` on `delivery.accepted`, so a message isn't taken as the answer to a prompt opened after it (#786).
+- A private journal of run and tool results, so retries reuse them. Plus a context change kind for completed runs lost to recovery.
+- Rewind and branch switching: new context change kinds, and raw history across compaction.
+- `seenThrough` on `delivery.admitted`, so a message isn't taken as the answer to a prompt opened after it (#786).
+- Stop requests, session metadata, interaction deadlines, and the other directions above.
+- A private session log ([Toward a session log](#toward-a-session-log)).
 - Server-side child selectors for channels.
 - A reasoning opt-out.
 - Fencing, once Workflow provides it.
@@ -1121,20 +1288,20 @@ compatibility deletions · docs · release notes
 <details>
 <summary>PRs and issues, and the plan for each</summary>
 
-| PR or issue                        | Relation                                                   | Plan                                                                                                                                                    |
-| ---------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| #4342–#4344 HumanInput             | Rewrites `hitl/`; the interaction family follows its model | Land first. In review, ask for an "answer admitted" output for `interaction.responded`, and for `commitSessionStep` to become the session's commit path |
-| #4223 first-class attachments      | Supplies the file store and retrieval route                | Ideally its store and refs land before the break, so v27.0 ships refs. Its outbound files map to file content parts                                     |
-| #4194 `fetchFile` on `eveChannel`  | Inbound web uploads by URL                                 | Compatible                                                                                                                                              |
-| #3222 close terminal streams       | Readers rely on terminal runs closing their stream         | Land                                                                                                                                                    |
-| #3701 delta coalescing             | Progress granularity                                       | Land with a window measured by the golden streams                                                                                                       |
-| #4031 `meta.index` on reads        | The same positions, assigned on read                       | Compatible on v26; v27 subsumes it                                                                                                                      |
-| #4099 `clientContext`              | A display-relevant delivery attribute                      | Lands on `delivery.accepted` in v27                                                                                                                     |
-| #3785 hooks for proxied events     | Relayed requests                                           | Subsumed: relayed interactions are ordinary parent facts                                                                                                |
-| #3580, #3581 web state and history | Client readers                                             | Rebase onto the client tables, or land first and port                                                                                                   |
-| #2948 deferred tail                | Tail cost and the route's handshake                        | Reconcile with catch-up filtering                                                                                                                       |
-| #1725 forward child events (#666)  | Conflicts with separate child streams                      | Close ([why](#child-sessions-and-relays))                                                                                                               |
-| #4092 stranded sessions            | Self-hosted impact of the break                            | Align the release notes                                                                                                                                 |
+| PR or issue                        | Relation                                                   | Plan                                                                                                                                                |
+| ---------------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| #4342–#4344 HumanInput             | Rewrites `hitl/`; the interaction family follows its model | Land first. In review, ask for an "answer admitted" output for `response.admitted`, and for `commitSessionStep` to become the session's commit path |
+| #4223 first-class attachments      | Supplies the file store and retrieval route                | Ideally its store and refs land before the break, so v27.0 ships refs. Its outbound files map to file content parts                                 |
+| #4194 `fetchFile` on `eveChannel`  | Inbound web uploads by URL                                 | Compatible                                                                                                                                          |
+| #3222 close terminal streams       | Readers rely on terminal runs closing their stream         | Land                                                                                                                                                |
+| #3701 delta coalescing             | Progress granularity                                       | Land with a window measured by the golden streams                                                                                                   |
+| #4031 `meta.index` on reads        | The same positions, assigned on read                       | Compatible on v26; v27 subsumes it                                                                                                                  |
+| #4099 `clientContext`              | A display-relevant delivery attribute                      | Lands on `delivery.admitted` in v27                                                                                                                 |
+| #3785 hooks for proxied events     | Relayed requests                                           | Subsumed: relayed interactions are ordinary parent facts                                                                                            |
+| #3580, #3581 web state and history | Client readers                                             | Rebase onto the client tables, or land first and port                                                                                               |
+| #2948 deferred tail                | Tail cost and the route's handshake                        | Reconcile with catch-up filtering                                                                                                                   |
+| #1725 forward child events (#666)  | Conflicts with separate child streams                      | Close ([why](#child-sessions-and-relays))                                                                                                           |
+| #4092 stranded sessions            | Self-hosted impact of the break                            | Align the release notes                                                                                                                             |
 
 </details>
 
@@ -1147,27 +1314,27 @@ About −400 lines net in source (plausibly +300 to −1,200) across roughly 10,
 
 This is an estimate from reading `main` at `285d4e09b`, to within a few hundred lines per row.
 
-| Area                       | Today                                                                                          | Change                                                                                                       | Net  |
-| -------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ---- |
-| Contract                   | `protocol/message.ts` 2,018 lines with 34 builders; event IDs and dedupe 60                    | Zod schemas for 28 types, envelope, runtime catalog, checker; builders become typed literals at owners       | −900 |
-| Emitters                   | 87 builder calls in 18 files; coordinate plumbing                                              | Scope stamped centrally; run and part IDs; no `sequence` or `stepIndex`                                      | −100 |
-| Publisher                  | `publish-session-events.ts` 511, ordered emitter 278                                           | A commit as one line; position counter; write → channels → hooks; observer `ctx`; no `session.waiting`       | +100 |
-| Route and transport        | `eve-channel/request.ts` 684, `open-stream.ts` 387, `ndjson.ts` 162                            | Catch-up filtering with markers; `stream.ended`; idle budget and version branches removed                    | +70  |
-| Deliveries                 | Delivery-ID stamping; controls without auth                                                    | Three facts, the settle rule, `ignored` and `refused`, controls with ID and auth, settling at session end    | +380 |
-| Calls, tasks, turn closure | Cancel paths repair history only                                                               | `call.delegated`, `task.ended`, `outputOf`, `turn.resumed`, interrupted parts, best-effort settlement        | +180 |
-| Interactions               | HumanInput's 26 v26 builder calls in `hitl/`                                                   | `interaction.responded`, candidates, one interaction per sign-in attempt, atomic batch settlement            | +50  |
-| Retry recovery             | —                                                                                              | Recovery read, closures, skipped determined facts, last-line replay, in-step abandonment                     | +250 |
-| Server fold                | `protocol/session-projection.ts` 685                                                           | Delivery, run, part, child, and context-change families; per-family tolerance; two retention modes; previews | +300 |
-| Server stream scans        | Telegram, the invocation window, the remote binding scan                                       | Shared fold and the private side stream                                                                      | −100 |
-| Relay                      | `forward-session-input.ts`, `callback-route.ts`, `hitl-proxy.ts`, `event-proxy-step.ts` (~700) | Tolerant relay messages keyed by child IDs, retried after the write                                          | +50  |
-| Client reducers            | Message reducer family 1,353; conversation reducer and state 390                               | Tables, selectors, `extendConversation`; the UI model keyed by IDs                                           | −250 |
-| Client response boundaries | `TurnSegment`, delivery-ID filtering, `message-response.ts`                                    | `delivery.settled` and `turn.settled.reply`                                                                  | −270 |
-| Evals, TUI, `invoke`, ACP  | `derive-run-facts.ts` 263, ACP adapter 665, TUI reducer                                        | Selectors and renames                                                                                        | −140 |
-| Channels                   | About ten `finishReason` checks; task cards 470 and 485                                        | `phase`; no receipt special case; renames                                                                    | −100 |
-| Files                      | AI SDK part types; `data:` URLs                                                                | eve-owned parts, refs, the file content kind                                                                 | +60  |
-| Instrumentation bridge     | `instrumentation/native-events.ts` 403                                                         | Facts mapped onto its unchanged vocabulary                                                                   | +30  |
+| Area                       | Today                                                                                          | Change                                                                                                               | Net  |
+| -------------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ---- |
+| Contract                   | `protocol/message.ts` 2,018 lines with 34 builders; event IDs and dedupe 60                    | Zod schemas for 31 types, envelope, runtime catalog, checker; builders become typed literals at owners               | −900 |
+| Emitters                   | 87 builder calls in 18 files; coordinate plumbing                                              | Scope stamped centrally; run and part IDs; no `sequence` or `stepIndex`                                              | −100 |
+| Publisher                  | `publish-session-events.ts` 511, ordered emitter 278                                           | A commit as one line; position counter; write → channels → hooks; observer `ctx`; no `session.waiting`               | +100 |
+| Route and transport        | `eve-channel/request.ts` 684, `open-stream.ts` 387, `ndjson.ts` 162                            | Catch-up filtering with markers; `stream.ended`; idle budget and version branches removed                            | +70  |
+| Deliveries                 | Delivery-ID stamping; controls without auth                                                    | Three facts, the settle rule, `ignored` and `refused`, controls and callbacks as deliveries, settling at session end | +380 |
+| Calls, tasks, turn closure | Cancel paths repair history only                                                               | `call.started`, `task.ended`, `outputOf`, `turn.resumed`, interrupted parts, best-effort settlement                  | +180 |
+| Interactions               | HumanInput's 26 v26 builder calls in `hitl/`                                                   | Responses for every answer, one interaction per sign-in attempt, atomic batch settlement                             | +50  |
+| Retry recovery             | —                                                                                              | Recovery read, closures, skipped determined facts, last-line replay, in-step abandonment                             | +250 |
+| Server fold                | `protocol/session-projection.ts` 685                                                           | Delivery, run, part, response, child, and context families; per-family tolerance; two retention modes; previews      | +300 |
+| Server stream scans        | Telegram, the invocation window, the remote binding scan                                       | Shared fold and the private side stream                                                                              | −100 |
+| Relay                      | `forward-session-input.ts`, `callback-route.ts`, `hitl-proxy.ts`, `event-proxy-step.ts` (~700) | Tolerant relay messages keyed by child IDs, retried after the write                                                  | +50  |
+| Client reducers            | Message reducer family 1,353; conversation reducer and state 390                               | Tables, selectors, `extendConversation`; the UI model keyed by IDs                                                   | −250 |
+| Client response boundaries | `TurnSegment`, delivery-ID filtering, `message-response.ts`                                    | `delivery.settled` and `turn.settled.reply`                                                                          | −270 |
+| Evals, TUI, `invoke`, ACP  | `derive-run-facts.ts` 263, ACP adapter 665, TUI reducer                                        | Selectors and renames                                                                                                | −140 |
+| Channels                   | About ten `finishReason` checks; task cards 470 and 485                                        | `phase`; no receipt special case; renames                                                                            | −100 |
+| Files                      | AI SDK part types; `data:` URLs                                                                | eve-owned parts, refs, the file content kind                                                                         | +60  |
+| Instrumentation bridge     | `instrumentation/native-events.ts` 403                                                         | Facts mapped onto its unchanged vocabulary                                                                           | +30  |
 
-- **Source:** about −400 lines net, out of roughly 10,000 touched across about 160 source files. The plausible range is +300 to −1,200. Deletions are inference code and coordinate plumbing; additions are deliveries, recovery, catch-up, and closure, which are new guarantees rather than reshuffled code. Interactions are the least certain row, because HumanInput's final shape isn't settled.
+- **Source:** about −400 lines net, out of roughly 10,000 touched across about 160 source files. The plausible range is +300 to −1,200. The types added in review (`model.requested`, `call.started`, responses, `usage.recorded`, `session.redeployed`) mostly ride existing code paths and stay within each row's precision. Deletions are inference code and coordinate plumbing; additions are deliveries, recovery, catch-up, and closure, which are new guarantees rather than reshuffled code. Interactions are the least certain row, because HumanInput's final shape isn't settled.
 - **Removed by the compatibility cut, beyond that:**
   - the v21–v26 normalization (258 lines, plus client handling);
   - hook and channel epoch fixtures (71 files, about 850 lines);
@@ -1177,19 +1344,19 @@ This is an estimate from reading `main` at `285d4e09b`, to within a few hundred 
   That's about −1,900 in total.
 
 - **Tests:** 187 test files quote v26 type names (about 2,400 references) and make about 670 builder calls. That's the largest churn: about 6,000–10,000 lines touched, roughly flat in net.
-- **Docs:** 56 pages mention v26 names (about 690 mentions). Some are participant keys, which move to participant points in the same release.
+- **Docs:** 56 pages mention v26 names (about 690 mentions). Some are participant keys, which follow the catalog in the same release.
 - **Phase 1** adds about 3,000–4,000 lines, mostly the contract module and tests, which the break then uses.
 
 Lifecycle records per turn, not counting progress:
 
-| Scenario                                | v26 events | v27 facts | Difference                                                                                    |
-| --------------------------------------- | ---------- | --------- | --------------------------------------------------------------------------------------------- |
-| A message and a text reply              | 7          | 8         | `delivery.accepted` and `delivery.settled`; no `session.waiting`                              |
-| Three parallel tool calls, then a reply | 13         | 16        | The same, plus one `call.requested` per call instead of one `actions.requested`               |
-| Ten parallel tool calls, then a reply   | 20         | 30        | The same, with ten requests                                                                   |
-| The declined approval above             | 16         | 18        | Two of each delivery fact and `turn.resumed`; no `session.waiting`; one settlement, not three |
+| Scenario                                | v26 events | v27 facts | Difference                                                                                             |
+| --------------------------------------- | ---------- | --------- | ------------------------------------------------------------------------------------------------------ |
+| A message and a text reply              | 7          | 10        | `delivery.admitted`, `delivery.settled`, `model.requested`, and `usage.recorded`; no `session.waiting` |
+| Three parallel tool calls, then a reply | 13         | 23        | The same per run, plus `call.requested` and `call.started` per call instead of one `actions.requested` |
+| Ten parallel tool calls, then a reply   | 20         | 44        | The same, with ten calls                                                                               |
+| The declined approval above             | 16         | 24        | Two of each delivery fact, `turn.resumed`, and the response's facts; one settlement, not three         |
 
-v27 writes a few more lifecycle facts, because deliveries get explicit ends and every call gets its own request. Facts in one commit share a line, so the line count is lower than the fact count. Progress dominates line counts either way, and catch-up skipping removes it from reloads.
+v27 writes more lifecycle facts, because deliveries get explicit ends, every call gets its own request and start, and runs record when they were requested and what they spent. The added facts mostly ride commits that exist anyway: `model.requested` lands with what caused it, `call.started` with an auto-cleared call's request, and `usage.recorded` with the run's terminal. Facts in one commit share a line, so the line count is lower than the fact count. Progress dominates line counts either way, and catch-up skipping removes it from reloads.
 
 </details>
 
@@ -1206,7 +1373,7 @@ v27 writes a few more lifecycle facts, because deliveries get explicit ends and 
 - **Scenario suites:**
   - cancel mid-tool;
   - an approval batch with a revision;
-  - a sign-in callback;
+  - a sign-in callback delivery, and a repeated callback;
   - a task outliving its turn;
   - a child relay, local and remote;
   - a handoff;
@@ -1233,6 +1400,7 @@ v27 writes a few more lifecycle facts, because deliveries get explicit ends and 
 - **External delivery.** No guarantee that an external effect succeeded, or happened only once.
 - **Duplicated chunks** from HTTP write retries.
 - **Self-hosted sessions** strand at the break unless their services drain.
+- **Sign-in links are credentials.** Whoever completes one binds their account to the session, as today.
 
 **Non-goals:**
 
@@ -1242,7 +1410,7 @@ v27 writes a few more lifecycle facts, because deliveries get explicit ends and 
 - Projection snapshots on the wire.
 - Per-type versions.
 - A declarative state-machine language.
-- Publishing private records to make state reconstructible.
+- Publishing private records on the wire to make state reconstructible. A private log is a separate, later direction ([Toward a session log](#toward-a-session-log)).
 - Unifying HITL execution or authorization rules just because their lifecycle is unified.
 
 </details>

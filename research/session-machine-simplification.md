@@ -1,7 +1,7 @@
 ---
 issue: "None (maintainer-requested research)"
 status: draft
-last_updated: "2026-10-07"
+last_updated: "2026-10-08"
 ---
 
 # Session machine simplification
@@ -25,7 +25,7 @@ Two of the cuts help [`session-event-lifecycle.md`](./session-event-lifecycle.md
 - **Lifecycle only in the projection** is required before interactions move to the new events.
 - **One commit path** is recommended before the event break.
 
-The rest are independent, and can land before or after it.
+The rest are independent, and can land before or after it. A longer-run direction, a session log from which all state is derived, is sketched at the end ([Toward a session log](#toward-a-session-log)).
 
 ## Where the lines go
 
@@ -327,7 +327,8 @@ This cluster overlaps the areas above.
 
 - The projection is the only lifecycle authority.
 - Private records hold payloads, routes, grants, and resume data, never status.
-- `hitl/` emits only interaction, candidate, and call-rejection facts. The machine owns turn and delivery facts.
+- `hitl/` emits only interaction, response, and call facts: approvals' `call.started` and rejections' `call.settled`. The machine owns turn and delivery facts.
+- Sign-in callbacks arrive as deliveries ([`session-event-lifecycle.md`](./session-event-lifecycle.md#payloads-by-family)), so their separate inbox kind and the queue that holds them (`takeAuthorizations`) go away.
 
 **For the event lifecycle.** Required before interactions move to the new events. Otherwise two producers write turn facts.
 
@@ -389,7 +390,7 @@ The first two are also counted in [`session-event-lifecycle.md`](./session-event
 2. **HumanInput (#4342–#4344)** lands. It's rebased onto the session-state stack and in review. What these cuts need from it:
    - `commitSessionStep` becomes the session's commit path;
    - no new readers of its private request state outside `hitl/`;
-   - an output for "answer admitted", which the event lifecycle publishes as `interaction.responded`.
+   - an output for "answer admitted", which the event lifecycle publishes as `response.admitted`.
 3. **After HumanInput,** in any order:
    - one commit path;
    - lifecycle only in the projection, before interactions move;
@@ -404,9 +405,34 @@ These parts are mostly essential, and unlikely to shrink much:
 
 - **model-call plumbing:** provider errors and recovery;
 - **durability and handoff:** sessions move between deployments by checkpoint, so the program counter has to be data, not a JavaScript stack;
-- **human-input policy rules:** response policies, candidates, budgets;
+- **human-input policy rules:** response policies, gated responses, budgets;
 - **compaction;**
 - **task semantics.**
+
+## Toward a session log
+
+The cuts above keep state in checkpoints, consistent through one commit path. The longer-run direction is a session log from which all of it is derived. [`session-event-lifecycle.md`](./session-event-lifecycle.md#toward-a-session-log) sketches the log's private entries; on the machine side:
+
+- **Commits append entries, and state is folded from them.** A transition produces entries, and the projection, model context, resolved capabilities, and open work are folds. One commit path, lifecycle only in the projection, and one suspension record are smaller versions of the same move.
+- **Steps pass positions, not state.** Today every step journals the complete `SessionStepState`. With a log, a step receives a position and a snapshot reference, folds the suffix, acts, and commits.
+- **Checkpoints become snapshots,** `{position, foldVersion, state}`, written periodically and at handoff. A fold-version mismatch folds again from an earlier snapshot.
+- **Recovery reads the truth.** A retried step sees exactly what it committed, and the projection's counter can't drift from the stream. Zombie writers can still interleave; a conditional append ("expected position N") would be the natural fence if Workflow offers one.
+- **Participants record results as entries.** Restores rebuild code from them, and redeploys are events ([`dynamic-participants.md`](./dynamic-participants.md)).
+- **Compaction stops being destructive,** because raw history stays in the log. That's what rewinding past a compaction needs.
+
+**After 1.0, without breaking clients.** The public view keeps producing exactly the v27 facts, so clients, hooks, and channels see nothing change.
+
+- Live sessions migrate at handoff, which already happens only while a session is idle and already upgrades old checkpoints. The upgrade writes a genesis snapshot, and appends continue from there. History before it is unavailable, and rewinding past it settles `refused` with `context-unavailable`.
+- Each kind of private state moves separately, in minors: write entries alongside the existing key, compare the fold against it, switch the readers, and delete the key.
+
+**What's hard, in order:**
+
+1. **Deriving model history exactly.** It has to reproduce the same provider input, or prompt caching misses (`harness/prompt-cache.ts`), including provider metadata, `toModelOutput` transforms, announcements, and today's compaction behavior.
+2. **Snapshots on Workflow:** where they live, and what reading a log suffix costs per step.
+3. **Volume:** about 55 framework context keys, and about 235 non-test `ctx.get`, `set`, and `require` call sites.
+4. **Behavior authors notice.** Resolvers run less often, because restores stop running them again.
+
+As a judgment, not an estimate from reading code line by line, this is comparable to the event break in lines touched, spread across releases. Meanwhile, new private state should be entry-shaped: it goes through the commit path as records that could become entries, even while it's stored in checkpoints. Each new ad hoc context key is a future migration.
 
 ## Open questions
 
