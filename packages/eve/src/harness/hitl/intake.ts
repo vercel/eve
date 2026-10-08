@@ -28,11 +28,11 @@ import {
   stepForRequest,
   withdrawSignIns,
 } from "./approvals.js";
-import { runApprovedCalls } from "./approved-calls.js";
+import { rejectApprovedCall, runApprovedCalls, type ApprovedCallResult } from "./approved-calls.js";
 import { getApprovalAuditState, retireActiveCandidates } from "./candidates.js";
 import { coordinateApprovalDelivery } from "./coordinator.js";
 import { deliver, resolveTypedApproval, turnInputOnly, withoutTurnInput } from "./delivery.js";
-import { approversOf, setApprovedCallCallers } from "./approved-call-callers.js";
+import { recheckApprovedCall } from "#harness/tools.js";
 import type { InputRequest } from "#shared/input.js";
 import type { InstrumentationAttempt } from "#instrumentation/runtime.js";
 import { activeTurnId } from "#harness/session-machine/view.js";
@@ -257,14 +257,33 @@ export function hasApprovedWork(step: Step): boolean {
  */
 export async function dispatchApprovedWorkflows(step: Step, work: ApprovedWork): Promise<boolean> {
   const tasks: RuntimeWorkflowTaskRequest[] = [];
-  const approved: InputRequest[] = [];
+  const denied: ApprovedCallResult[] = [];
   for (const parked of step.view().turn.suspended) {
     const tools = work.toolsOf(parked);
-    const requests = (parked.approved ?? []).filter(
-      (request) => tools.get(request.action.toolName)?.workflowId !== undefined,
-    );
+    const requests: InputRequest[] = [];
+    for (const request of parked.approved ?? []) {
+      const tool = tools.get(request.action.toolName);
+      if (tool?.workflowId === undefined) continue;
+      const recheck = await recheckApprovedCall(tool, {
+        abortSignal: step.config.abortSignal,
+        callId: request.action.callId,
+        input: request.action.input,
+        approvedTools: grantedApprovalKeys(step.view(), (approved) =>
+          tools.get(approved.action.toolName)?.approvalKey?.(approved.action.input),
+        ),
+      });
+      if (recheck.denied) {
+        denied.push(
+          await rejectApprovedCall({
+            request,
+            reason: recheck.reason,
+            position: step.position(),
+            publish: step.publish,
+          }),
+        );
+      } else requests.push(request);
+    }
     if (requests.length === 0) continue;
-    approved.push(...requests);
     const dispatched = collectWorkflowCalls({
       session: step.session,
       toolCalls: requests.map(({ action }) => ({
@@ -278,10 +297,9 @@ export async function dispatchApprovedWorkflows(step: Step, work: ApprovedWork):
     step.session = dispatched.session;
     tasks.push(...dispatched.workflowRequests);
   }
+  if (denied.length > 0) await step.apply(settle(step.view(), { results: denied }));
   if (tasks.length === 0) return false;
-  await step.apply(
-    dispatch(step.view(), { approvers: approversOf(approved, step.session.state), tasks }),
-  );
+  await step.apply(dispatch(step.view(), { tasks }));
   if (tasks.some((task) => task.entry.entryPoint === "execute")) {
     await step.apply(hold(step.view(), { on: "tasks" }));
   }
@@ -291,7 +309,7 @@ export async function dispatchApprovedWorkflows(step: Step, work: ApprovedWork):
 /**
  * Runs approved local calls once the step has started and its budget allows it, as the AI SDK ran
  * them before the model read their results: each with the tools of the step that asked, as
- * whoever approved it, and in the step's first attempt. A call that needs a sign-in holds the
+ * the turn's requester, and in the step's first attempt. A call that needs a sign-in holds the
  * turn.
  */
 export async function runApprovedLocalCalls(
@@ -314,7 +332,6 @@ export async function runApprovedLocalCalls(
         .filter((name) => tools.get(name)?.frameworkTool === true),
     ),
   );
-  setApprovedCallCallers(approved, step.session.state);
   const position = step.position();
   const attempt =
     approved.length === 0
