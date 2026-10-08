@@ -186,7 +186,11 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
       const parkedResult = await parkOnApprovals(step, {
         ...parked,
         requests: approvalRequests,
-        waitsOnRuntime: deferredToolCalls.length > 0 || authorizationInterrupt !== undefined,
+        waitsOn: authorizationInterrupt
+          ? "sign-in"
+          : deferredToolCalls.length > 0
+            ? "runtime"
+            : undefined,
       });
       // Approval only precedes sign-in for the same call, not an executing sibling.
       if (authorizationInterrupt) {
