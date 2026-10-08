@@ -265,6 +265,12 @@ connections. Named-agent and custom public mount prefixes also apply to the
 registered destination. No authored channel file is needed. This first version
 does not support event subscriptions in subagent connections.
 
+The build summary (`.eve/agent-summary.json`) includes an optional
+`experimental_events: { method: "POST", urlPath }` on each opted-in connection.
+The receiver path includes the configured public mount prefix. This describes
+the deployed capability; subscription IDs, catalogs, and live delivery status
+are determined at runtime and are not part of the summary.
+
 Connect owns upstream subscriptions, verification, renewal, and cancellation.
 eve uses the AI SDK to discover the account-specific catalog and create managed
 subscriptions through the Connect adapter. Catalog discovery currently requires
