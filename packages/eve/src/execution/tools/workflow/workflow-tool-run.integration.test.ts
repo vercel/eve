@@ -201,7 +201,9 @@ describe("workflow tools", () => {
         });
         expect(request.options?.map((option) => option.id)).toEqual(["approve", "cancel"]);
         // The call is still running, so the question parks the open turn.
-        const [parked] = filterEventsByType(asked, "turn.waiting");
+        const parked = filterEventsByType(asked, "turn.waiting").find(
+          (event) => event.data.on === "input",
+        );
         expect(asked.at(-1)).toBe(parked);
         expect(filterEventsByType(asked, "turn.completed")).toHaveLength(0);
 
