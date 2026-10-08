@@ -1,7 +1,7 @@
 import type { ModelMessage } from "ai";
 
 import { SKILL_NAME_PATTERN, SKILL_NAME_RULE } from "#discover/grammar.js";
-import type { DynamicScopeEvent } from "#dynamic/definition.js";
+import type { DynamicSessionOrTurnEvent } from "#dynamic/definition.js";
 import { isBrandedSkillEntry, type SkillPackageDefinition } from "#shared/skill-definition.js";
 import {
   type MaterializableSkillPackage,
@@ -148,7 +148,7 @@ async function syncDynamicSkillFiles(input: {
 export async function resolveDynamicSkills(input: {
   readonly ctx: ContextContainer;
   readonly resolvers: readonly ResolvedDynamicSkillResolver[];
-  readonly event: Exclude<DynamicScopeEvent, { type: "step.started" }>;
+  readonly event: DynamicSessionOrTurnEvent;
   readonly messages: readonly ModelMessage[];
 }): Promise<void> {
   const { ctx, resolvers, event, messages } = input;

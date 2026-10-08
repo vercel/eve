@@ -21,6 +21,9 @@ export type DynamicScopeEvent = Extract<
   { type: DynamicToolEventName }
 >;
 
+/** A session's or a turn's start: the events every resolver but the model's and tools' answers. */
+export type DynamicSessionOrTurnEvent = Exclude<DynamicScopeEvent, { type: "step.started" }>;
+
 /** The kinds of dynamic resolver, by the slot they're authored in. */
 export type DynamicResolverKind =
   | "connection"

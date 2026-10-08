@@ -4,7 +4,7 @@ import { AuthKey, InitiatorAuthKey, SessionIdKey } from "#context/keys.js";
 import { assertNotConnectionOwned } from "#connections/ownership.js";
 import { dynamicToolNames } from "#context/build-dynamic-tools.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
-import type { DynamicScopeEvent } from "#dynamic/definition.js";
+import type { DynamicSessionOrTurnEvent } from "#dynamic/definition.js";
 import { CONNECTION_SLUG_PATTERN } from "#discover/grammar.js";
 import { createLogger } from "#internal/logging.js";
 import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
@@ -73,11 +73,10 @@ function qualifyConnectionNames(
 }
 
 /** The scopes a connection resolver answers. */
-type ConnectionScopeEvent = Exclude<DynamicScopeEvent, { type: "step.started" }>;
 
 async function resolveConnections(input: {
   readonly ctx: ContextContainer;
-  readonly event: ConnectionScopeEvent;
+  readonly event: DynamicSessionOrTurnEvent;
   readonly resolver: ResolvedDynamicConnectionResolver;
 }): Promise<readonly ResolvedConnectionDefinition[]> {
   const handler = input.resolver.events[input.event.type];
@@ -100,7 +99,7 @@ async function resolveConnections(input: {
 export async function resolveDynamicConnections(input: {
   readonly ctx: ContextContainer;
   readonly resolvers: readonly ResolvedDynamicConnectionResolver[];
-  readonly event: ConnectionScopeEvent;
+  readonly event: DynamicSessionOrTurnEvent;
 }): Promise<void> {
   const matching = input.resolvers.filter((resolver) =>
     resolver.eventNames.includes(input.event.type),

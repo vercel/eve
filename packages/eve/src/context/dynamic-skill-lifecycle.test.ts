@@ -1,4 +1,4 @@
-import type { DynamicScopeEvent } from "#dynamic/definition.js";
+import type { DynamicSessionOrTurnEvent } from "#dynamic/definition.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
@@ -100,11 +100,8 @@ function createResolver(
   };
 }
 
-function makeEvent(): Exclude<DynamicScopeEvent, { type: "step.started" }> {
-  return { type: "session.started", data: {} } as Exclude<
-    DynamicScopeEvent,
-    { type: "step.started" }
-  >;
+function makeEvent(): DynamicSessionOrTurnEvent {
+  return { type: "session.started", data: {} } as DynamicSessionOrTurnEvent;
 }
 
 function makeSkill(

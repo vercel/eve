@@ -28,7 +28,7 @@ import {
   dispatchMemoryTurnCompleted,
   dispatchMemoryTurnStarted,
 } from "#context/memory-lifecycle.js";
-import type { DynamicScopeEvent } from "#dynamic/definition.js";
+import type { DynamicScopeEvent, DynamicSessionOrTurnEvent } from "#dynamic/definition.js";
 import type { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import {
   sessionStartedForResolvers,
@@ -106,7 +106,7 @@ export function bindSessionParticipants(input: {
 
   /** A session's or a turn's start: every resolver that answers that scope, in order. */
   const resolveScope = async (
-    event: Exclude<DynamicScopeEvent, { type: "step.started" }>,
+    event: DynamicSessionOrTurnEvent,
     messages: readonly ModelMessage[],
   ): Promise<void> => {
     await resolveModel(event, messages);

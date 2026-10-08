@@ -1,6 +1,6 @@
 import type { ModelMessage, SystemModelMessage } from "ai";
 
-import type { DynamicScopeEvent } from "#dynamic/definition.js";
+import type { DynamicSessionOrTurnEvent } from "#dynamic/definition.js";
 import { isBrandedInstructionsEntry } from "#shared/instructions-definition.js";
 import type { InstructionsDefinition } from "#public/definitions/instructions.js";
 import { normalizeInstructionsDefinition } from "#internal/authored-definition/core.js";
@@ -79,7 +79,7 @@ export function drainDynamicInstructionUserMessages(ctx: AlsContext): UserModelM
 export async function resolveDynamicInstructions(input: {
   readonly ctx: ContextContainer;
   readonly resolvers: readonly ResolvedDynamicInstructionsResolver[];
-  readonly event: Exclude<DynamicScopeEvent, { type: "step.started" }>;
+  readonly event: DynamicSessionOrTurnEvent;
   readonly messages: readonly ModelMessage[];
 }): Promise<void> {
   const { ctx, resolvers, event, messages } = input;
