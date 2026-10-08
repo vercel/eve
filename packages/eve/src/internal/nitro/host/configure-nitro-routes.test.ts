@@ -199,6 +199,29 @@ function createPreparedHost(
 }
 
 describe("Nitro route configuration", () => {
+  it.each(["hub", "eve/world-hub"])(
+    "mounts env-selected %s dispatch routes in dev and builds without authored world",
+    async (target) => {
+      vi.stubEnv("WORKFLOW_TARGET_WORLD", target);
+      for (const configure of [configureDevelopmentNitroRoutes, configureProductionNitroRoutes]) {
+        const nitro = createNitroStub();
+        await configure(nitro, createPreparedHost());
+        expect(nitro.options.handlers).toEqual(
+          expect.arrayContaining([expect.objectContaining({ route: "/eve/v1/workflow/dispatch" })]),
+        );
+      }
+    },
+  );
+  it("does not mount hub dispatch without config or env", async () => {
+    vi.stubEnv("WORKFLOW_TARGET_WORLD", "");
+    for (const configure of [configureDevelopmentNitroRoutes, configureProductionNitroRoutes]) {
+      const nitro = createNitroStub();
+      await configure(nitro, createPreparedHost());
+      expect(
+        nitro.options.handlers.some((handler) => handler.route === "/eve/v1/workflow/dispatch"),
+      ).toBe(false);
+    }
+  });
   beforeEach(() => {
     fsMocks.mkdir.mockClear();
     fsMocks.writeFile.mockClear();

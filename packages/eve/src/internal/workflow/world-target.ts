@@ -12,5 +12,11 @@ export function resolveWorkflowWorldImport(targetWorld: string): string {
 }
 
 export function usesHubWorkflowWorld(target: string | undefined): boolean {
-  return target !== undefined && resolveWorkflowWorldImport(target) === "eve/world-hub";
+  const effective = resolveConfiguredWorkflowWorld(target);
+  return effective !== undefined && resolveWorkflowWorldImport(effective) === "eve/world-hub";
+}
+
+/** Environment selection takes precedence over authored config in dev and builds. */
+export function resolveConfiguredWorkflowWorld(configured: string | undefined): string | undefined {
+  return process.env.WORKFLOW_TARGET_WORLD?.trim() || configured;
 }

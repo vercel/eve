@@ -16,6 +16,20 @@ export interface WorldHubOptions {
   bypassSecret?: string;
   streamFlushIntervalMs?: number;
 }
+export interface WorldHubStats {
+  rpcCalls: number;
+  operations: Record<string, number>;
+  streamChunks: number;
+  writeMultiCalls: number;
+}
+const stats: WorldHubStats = { rpcCalls: 0, operations: {}, streamChunks: 0, writeMultiCalls: 0 };
+/** Process-wide cumulative counters. Take snapshots around a turn to calculate deltas. */
+export function getWorldHubStats(): WorldHubStats {
+  return { ...stats, operations: { ...stats.operations } };
+}
+function statsEnabled(): boolean {
+  return process.env.WORLD_HUB_STATS === "1";
+}
 const localId = `dpl_local_${randomUUID()}`;
 export async function createWorldHubWorld(options: WorldHubOptions): Promise<World> {
   if (!options.secret) throw new Error("World hub requires a secret");
@@ -43,6 +57,11 @@ export async function createWorldHubWorld(options: WorldHubOptions): Promise<Wor
     return response;
   }
   async function call(operation: string, args: unknown[]) {
+    if (statsEnabled()) {
+      stats.rpcCalls++;
+      stats.operations[operation] = (stats.operations[operation] ?? 0) + 1;
+      if (operation === "streams.writeMulti") stats.writeMultiCalls++;
+    }
     return decode(
       await (await request("/world/v1/rpc", "POST", encode({ operation, arguments: args }))).text(),
     );
@@ -140,6 +159,7 @@ export async function createWorldHubWorld(options: WorldHubOptions): Promise<Wor
       async write(runId: string, name: string, chunk: string | Uint8Array) {
         const value = state(runId, name);
         if (value.error) throw value.error;
+        if (statsEnabled()) stats.streamChunks++;
         value.chunks.push(chunk);
         if (!value.timer)
           value.timer = setTimeout(() => {
@@ -149,6 +169,7 @@ export async function createWorldHubWorld(options: WorldHubOptions): Promise<Wor
       async writeMulti(runId: string, name: string, chunks: (string | Uint8Array)[]) {
         const value = state(runId, name);
         if (value.error) throw value.error;
+        if (statsEnabled()) stats.streamChunks += chunks.length;
         value.chunks.push(...chunks);
         await flush(value);
       },
@@ -176,10 +197,14 @@ export async function createWorldHubWorld(options: WorldHubOptions): Promise<Wor
     },
   } as unknown as World;
   function beforeExit() {
-    void flushAll().catch((error) => {
-      console.error("World hub stream flush failed", error);
-      process.exitCode = 1;
-    });
+    void flushAll()
+      .then(() => {
+        if (statsEnabled()) console.log("World hub stats", JSON.stringify(getWorldHubStats()));
+      })
+      .catch((error) => {
+        console.error("World hub stream flush failed", error);
+        process.exitCode = 1;
+      });
   }
   process.on("beforeExit", beforeExit);
   return world;
@@ -188,6 +213,13 @@ export function createWorld(): Promise<World> {
   const url = process.env.WORLD_HUB_URL;
   const secret = process.env.WORLD_HUB_SECRET;
   if (!url || !secret) throw new Error("WORLD_HUB_URL and WORLD_HUB_SECRET are required");
-  return createWorldHubWorld({ url, secret });
+  return createWorldHubWorld({
+    url,
+    secret,
+    deploymentId: process.env.VERCEL_DEPLOYMENT_ID ?? process.env.WORLD_HUB_DEPLOYMENT_ID,
+    deploymentUrl: process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : process.env.WORLD_HUB_DEPLOYMENT_URL,
+  });
 }
 export default createWorld;
