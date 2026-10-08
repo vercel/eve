@@ -43,7 +43,7 @@ describe("buildVercelAgentSummary", () => {
             url: "https://issues.example/mcp",
             description: "Issues",
             auth,
-            ...(name === "issues" ? { experimental_events: { onEvent() {} } } : {}),
+            experimental_events: name === "issues" ? { onEvent() {} } : undefined,
           }),
         }),
       })),

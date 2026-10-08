@@ -154,24 +154,26 @@ function toConnectionEntry(
   connection: CompiledConnectionDefinition,
   publicRoutePrefix: string | undefined,
 ): VercelEveConnectionEntry {
-  const entry: VercelEveConnectionEntry = {
+  let entry: VercelEveConnectionEntry = {
     name: connection.connectionName,
     description: connection.description,
     url: connection.url,
     logicalPath: connection.logicalPath,
     type: connection.protocol,
-    ...(connection.experimental_events === true
-      ? {
-          experimental_events: {
-            method: "POST" as const,
-            urlPath: joinEveRoutePath(
-              normalizePublicRoutePrefix(publicRoutePrefix) ?? "",
-              connectionEventRoute(connection.connectionName),
-            ),
-          },
-        }
-      : {}),
   };
+
+  if (connection.experimental_events === true) {
+    entry = {
+      ...entry,
+      experimental_events: {
+        method: "POST",
+        urlPath: joinEveRoutePath(
+          normalizePublicRoutePrefix(publicRoutePrefix) ?? "",
+          connectionEventRoute(connection.connectionName),
+        ),
+      },
+    };
+  }
 
   if (connection.vercelConnect !== undefined) {
     return {
