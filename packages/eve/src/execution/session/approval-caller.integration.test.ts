@@ -246,7 +246,7 @@ function turnBoundaries(stage: Stage) {
 
 describe("approval caller", () => {
   it.each([false, true])(
-    "runs only the call another person approves as that person (unmatched stub: %s)",
+    "runs a call another person approves as its requester (unmatched stub: %s)",
     async (withStub) => {
       const { secondRequesters, seen, stages } = await withChainRun(
         `approval-caller-${withStub}`,
@@ -275,7 +275,7 @@ describe("approval caller", () => {
         ["turn.completed turn_0"],
       ]);
       expect(seen).toEqual([
-        { tool: "deploy_change", caller: "bob" },
+        { tool: "deploy_change", caller: "alice" },
         { tool: "read_notes", caller: "alice" },
         { tool: "publish_change", caller: "alice" },
       ]);
@@ -300,12 +300,12 @@ describe("approval caller", () => {
       ["turn.completed turn_0"],
     ]);
     expect(seen).toEqual([
-      { tool: "deploy_change", caller: "bob" },
+      { tool: "deploy_change", caller: "alice" },
       { tool: "read_notes", caller: "alice" },
     ]);
   }, 60_000);
 
-  it("starts an approved workflow tool's run as its approver", async () => {
+  it("starts an approved workflow tool's run as its requester", async () => {
     const { stages } = await withChainRun(
       "approval-caller-workflow",
       async (run) => {
@@ -333,7 +333,7 @@ describe("approval caller", () => {
       .flat()
       .flatMap((event) => (event.type === "action.result" ? [event.data.result] : []));
     expect(results.find((result) => result.callId === "call-report_caller")?.output).toEqual({
-      caller: "bob",
+      caller: "alice",
     });
   }, 60_000);
 
@@ -353,7 +353,7 @@ describe("approval caller", () => {
     );
 
     expect(seen).toEqual([
-      { tool: "deploy_change", caller: "bob" },
+      { tool: "deploy_change", caller: "alice" },
       { tool: "read_notes", caller: "alice" },
       { tool: "publish_change", caller: "alice" },
     ]);
@@ -383,7 +383,7 @@ describe("approval caller", () => {
     ]);
   }, 60_000);
 
-  it("runs approved calls in parallel, each as its own approver", async () => {
+  it("runs approved calls in parallel as their requester", async () => {
     const { log, seen } = await withChainRun(
       "approval-caller-parallel",
       async (run) => {
@@ -397,13 +397,13 @@ describe("approval caller", () => {
     expect(log.slice(0, 2).every((entry) => entry.startsWith("start "))).toBe(true);
     expect(new Map(seen.map((entry) => [entry.tool, entry.caller]))).toEqual(
       new Map([
-        ["deploy_change", "bob"],
+        ["deploy_change", "alice"],
         ["publish_change", "alice"],
       ]),
     );
   }, 60_000);
 
-  it("does not reuse an earlier approver for a later call with the same call id", async () => {
+  it("keeps requester identity when a later call repeats an approved call id", async () => {
     // Some providers repeat call ids. Turn 1's report_caller is gated and Bob
     // approves it; turn 2 calls it again ungated, with the same id.
     const model = markMockModel(
@@ -458,6 +458,6 @@ describe("approval caller", () => {
           ? [(event.data.result.output as { caller: string }).caller]
           : [],
       );
-    expect(callers).toEqual(["bob", "alice"]);
+    expect(callers).toEqual(["alice", "alice"]);
   }, 60_000);
 });

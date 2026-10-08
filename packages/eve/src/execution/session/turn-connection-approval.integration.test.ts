@@ -703,8 +703,8 @@ describe("turn connection approval restoration", () => {
         getApprovalAuditState(readDurableSession(resumed.sessionState).state).settlements,
       ).toEqual([expect.objectContaining({ outcome: "allowed", requestId: request.requestId })]);
       expect(fixture.fetch).toHaveBeenCalledOnce();
-      // Bob approved Alice's call, so the approved request goes out as Bob.
-      expect(callerHeader(fixture.fetch.mock.calls[0])).toBe("bob");
+      // Bob supplies consent; the connection request still uses Alice's credentials.
+      expect(callerHeader(fixture.fetch.mock.calls[0])).toBe("alice");
       expect(suspendedSteps(readDurableSession(resumed.sessionState).state)).toEqual([]);
       expect(resumed.serializedContext).not.toHaveProperty("eve.pendingConnectionCalls");
       expect(fixture.events.filter((event) => event.type === "turn.started")).toHaveLength(1);
