@@ -23,3 +23,32 @@ describe("World hub HMAC", () => {
     );
   });
 });
+
+it.each([
+  "x-world-hub-deployment-id",
+  "x-world-hub-deployment-url",
+  "x-vqs-queue-name",
+  "x-vqs-message-id",
+  "x-vqs-message-attempt",
+])("authenticates %s including removal", (name) => {
+  const headers = new Headers(
+    signWorldHubRequest(
+      "secret",
+      "POST",
+      "/dispatch",
+      "body",
+      undefined,
+      new Headers({ [name]: "original" }),
+    ),
+  );
+  expect(verifyWorldHubRequest("secret", "POST", "/dispatch", "body", headers)).toBe(true);
+  headers.set(name, "tampered");
+  expect(verifyWorldHubRequest("secret", "POST", "/dispatch", "body", headers)).toBe(false);
+  headers.delete(name);
+  expect(verifyWorldHubRequest("secret", "POST", "/dispatch", "body", headers)).toBe(false);
+});
+it("rejects the unsigned-metadata v1 scheme", () => {
+  const headers = new Headers(signWorldHubRequest("secret", "GET", "/"));
+  headers.set("x-world-hub-signature", headers.get("x-world-hub-signature")!.replace("v2=", "v1="));
+  expect(verifyWorldHubRequest("secret", "GET", "/", "", headers)).toBe(false);
+});

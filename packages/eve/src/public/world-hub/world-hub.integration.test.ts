@@ -138,3 +138,97 @@ it("registers env deployment fallbacks and exposes opt-in counters", async () =>
     await once(server, "close");
   }
 });
+
+it.each(["x-world-hub-deployment-id", "x-world-hub-deployment-url"])(
+  "rejects tampered %s before registration on RPC and streams",
+  async (name) => {
+    const onDeployment = vi.fn();
+    const server = createServer(
+      createWorldHubServer({ secret: "secret", onDeployment, world: { specVersion: 8 } as World }),
+    );
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    try {
+      for (const method of ["POST", "GET"]) {
+        const path = method === "POST" ? "/world/v1/rpc" : "/world/v1/streams?runId=run&name=text";
+        const body = method === "POST" ? encode({ operation: "world.info", arguments: [] }) : "";
+        const headers = new Headers(
+          signWorldHubRequest(
+            "secret",
+            method,
+            path,
+            body,
+            undefined,
+            new Headers({
+              "x-world-hub-deployment-id": "deployment",
+              "x-world-hub-deployment-url": "https://deployment.test",
+            }),
+          ),
+        );
+        headers.set(name, "https://attacker.test");
+        const response = await fetch(url + path, {
+          method,
+          headers,
+          body: method === "POST" ? body : undefined,
+        });
+        expect(response.status).toBe(401);
+      }
+      expect(onDeployment).not.toHaveBeenCalled();
+      const client = await createWorldHubWorld({
+        url,
+        secret: "secret",
+        deploymentId: "deployment",
+        deploymentUrl: "https://deployment.test",
+      });
+      expect(onDeployment).toHaveBeenCalledExactlyOnceWith("deployment", "https://deployment.test");
+      await client.close?.();
+    } finally {
+      server.close();
+      await once(server, "close");
+    }
+  },
+);
+it("rejects tampered dispatch metadata before calling the queue handler", async () => {
+  const server = createServer(
+    createWorldHubServer({ secret: "secret", world: { specVersion: 8 } as World }),
+  );
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const client = await createWorldHubWorld({
+    url: `http://127.0.0.1:${(server.address() as { port: number }).port}`,
+    secret: "secret",
+  });
+  const handler = vi.fn(async () => ({ ok: true }));
+  const delivery = client.createQueueHandler("workflow-", handler);
+  const fakeFetch = vi.fn(async (input, init) => {
+    for (const name of [
+      "x-world-hub-deployment-id",
+      "x-world-hub-deployment-url",
+      "x-vqs-queue-name",
+      "x-vqs-message-id",
+      "x-vqs-message-attempt",
+    ]) {
+      const headers = new Headers(init?.headers);
+      headers.set(name, "tampered");
+      expect((await delivery(new Request(String(input), { ...init, headers }))).status).toBe(401);
+    }
+    expect(handler).not.toHaveBeenCalled();
+    const response = await delivery(new Request(String(input), init));
+    expect(response.status).toBe(200);
+    return response;
+  }) as typeof fetch;
+  try {
+    const queue = createWorldHubDispatcher({
+      secret: "secret",
+      resolveDeploymentUrl: () => "https://deployment.test",
+      fetch: fakeFetch,
+    });
+    await queue("workflow-test" as never, {} as never, { deploymentId: "deployment" });
+    await vi.waitFor(() => expect(handler).toHaveBeenCalledOnce());
+  } finally {
+    await client.close?.();
+    server.close();
+    await once(server, "close");
+  }
+});
