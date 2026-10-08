@@ -139,6 +139,11 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
     .filter((toolCall) => !blockedCallIds.has(toolCall.toolCallId))
     .filter((toolCall) => isWorkflowTool(input.catalog.get(toolCall.toolName)));
 
+  const authorizationInterrupt = resolveInlineAuthorizationInterrupt({
+    messages: [...promptMessages, ...responseMessages],
+    toolResults: result.toolResults,
+  });
+
   // --- Park on approvals or runtime calls ----------------------------------
 
   if (workflowToolCalls.length > 0 || approvalRequests.length > 0) {
@@ -158,23 +163,33 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
       tasks: dispatched.workflowRequests,
     };
     if (approvalRequests.length > 0) {
-      return parkOnApprovals(step, {
+      const parkedResult = await parkOnApprovals(step, {
         ...parked,
         requests: approvalRequests,
         tools: input.catalog,
-        waitsOnRuntime: workflowToolCalls.length > 0,
+        waitsOnRuntime: workflowToolCalls.length > 0 || authorizationInterrupt !== undefined,
       });
+      // Approval only precedes sign-in for the same call, not an executing sibling.
+      if (authorizationInterrupt) {
+        return stopForToolSignIn(step, {
+          ...authorizationInterrupt,
+          history: step.session.history,
+        });
+      }
+      return parkedResult;
     }
     await step.apply(suspendStep(step.view(), parked));
+    if (authorizationInterrupt) {
+      return stopForToolSignIn(step, {
+        ...authorizationInterrupt,
+        history: step.session.history,
+      });
+    }
     return { next: null, session: step.session };
   }
 
   // --- Park on authorization request ------------------------------------------
 
-  const authorizationInterrupt = resolveInlineAuthorizationInterrupt({
-    messages: [...promptMessages, ...responseMessages],
-    toolResults: result.toolResults,
-  });
   if (authorizationInterrupt) return stopForToolSignIn(step, authorizationInterrupt);
 
   // --- Continue or terminate ------------------------------------------------
