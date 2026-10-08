@@ -142,6 +142,7 @@ export class ScheduleDispatcher {
     const scope = new ContextContainer();
     scope.set(ScheduleIdKey, input.collectionId);
     scope.set(AuthKey, auth);
+    scope.setVirtualContext(ExtensionConfigsKey, this.extensionConfigs);
     scope.set(OccurrenceIdKey, occurrence.executionId);
     scope.set(ScheduleInstanceKey, occurrence.name);
     return await contextStorage.run(scope, async () => {

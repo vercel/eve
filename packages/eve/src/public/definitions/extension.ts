@@ -6,38 +6,12 @@ const MOUNTED_EXTENSION = Symbol.for("eve.mounted-extension");
 /** The validated config a mount call produced, read back when the agent graph resolves. */
 const MOUNTED_CONFIG = Symbol.for("eve.mounted-extension-config");
 
-const CONFIG_REGISTRY = Symbol.for("eve.extension-config-registry");
-
 /**
  * Returns the extension configs the active runtime scope (session, channel
  * request, or schedule run) binds, or `undefined` outside one. Installed by the
  * runtime.
  */
 const SCOPED_CONFIGS_RESOLVER = Symbol.for("eve.extension-scoped-configs-resolver");
-
-/**
- * Ambient namespace set by the dev/eval loader around a mount module's
- * evaluation. A mount loads the handle unbundled (cross-package), so the
- * bundler's scope shim never runs on it; this fallback lets the mount still bind
- * under the package namespace. The shim's explicit argument takes precedence.
- */
-const EXT_CONFIG_SCOPE = Symbol.for("eve.ext-config-scope");
-
-function ambientConfigScope(): string | undefined {
-  const scope = (globalThis as Record<symbol, unknown>)[EXT_CONFIG_SCOPE];
-  return typeof scope === "string" && scope.length > 0 ? scope : undefined;
-}
-
-/** Process-global map of extension namespace to its bound, validated config. */
-function configRegistry(): Map<string, Record<string, unknown>> {
-  const container = globalThis as Record<symbol, unknown>;
-  let registry = container[CONFIG_REGISTRY] as Map<string, Record<string, unknown>> | undefined;
-  if (registry === undefined) {
-    registry = new Map();
-    container[CONFIG_REGISTRY] = registry;
-  }
-  return registry;
-}
 
 type ScopedConfigsResolver = () => ReadonlyMap<string, Record<string, unknown>> | undefined;
 
@@ -184,16 +158,12 @@ export function defineExtension(
   namespace?: string,
 ): ExtensionHandle | NoConfigExtensionHandle {
   const schema = options?.config;
-  // The bundler shim passes the namespace explicitly for the extension's own
-  // bundled modules; an unshimmed cross-package mount falls back to the ambient
-  // scope the loader sets around the mount evaluation.
-  const resolvedNamespace = namespace ?? ambientConfigScope();
+  const resolvedNamespace = namespace;
+  let boundConfig: Record<string, unknown> | undefined;
 
   const handle = ((values?: unknown): MountedExtension => {
     const parsed = validateConfig(schema, values);
-    if (resolvedNamespace !== undefined && resolvedNamespace.length > 0) {
-      configRegistry().set(resolvedNamespace, parsed);
-    }
+    boundConfig = parsed;
     return { [MOUNTED_EXTENSION]: true, [MOUNTED_CONFIG]: parsed } as MountedExtension;
   }) as ExtensionHandle & NoConfigExtensionHandle;
 
@@ -201,18 +171,14 @@ export function defineExtension(
   Object.defineProperty(handle, "config", {
     enumerable: true,
     get(): Record<string, unknown> {
-      if (resolvedNamespace === undefined) {
-        return validateConfig(schema, {});
-      }
-      // Inside a runtime scope, read the config of the mount serving that
-      // agent node, never another agent's. Outside one (e.g. module top level)
-      // fall back to the last mount bound.
       const scoped = scopedConfigs();
-      const bound =
-        scoped === undefined
-          ? configRegistry().get(resolvedNamespace)
-          : scoped.get(resolvedNamespace);
-      return bound ?? validateConfig(schema, {});
+      if (scoped !== undefined) {
+        return (
+          (resolvedNamespace === undefined ? undefined : scoped.get(resolvedNamespace)) ??
+          validateConfig(schema, {})
+        );
+      }
+      return boundConfig ?? validateConfig(schema, {});
     },
   });
 

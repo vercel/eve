@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
-import { defineExtension } from "#public/definitions/extension.js";
+import { defineExtension, readMountedExtensionConfig } from "#public/definitions/extension.js";
+import { withExtensionConfigs } from "#runtime/extension-mount-configs.js";
 
 describe("defineExtension", () => {
   it("exposes the declared schema", () => {
@@ -22,15 +23,18 @@ describe("defineExtension", () => {
     const mounted = ext({ apiKey: "sk-456" });
 
     expect(mounted).toBeDefined();
-    expect(ext.config).toEqual({ apiKey: "sk-456", baseUrl: "https://api.acme.example" });
+    expect(readMountedExtensionConfig(mounted)).toEqual({
+      apiKey: "sk-456",
+      baseUrl: "https://api.acme.example",
+    });
   });
 
   it("lets a bound value override a default", () => {
     const ext = defineExtension({
       config: z.object({ baseUrl: z.string().default("https://default") }),
     });
-    ext({ baseUrl: "https://override" });
-    expect(ext.config).toEqual({ baseUrl: "https://override" });
+    const mounted = ext({ baseUrl: "https://override" });
+    expect(readMountedExtensionConfig(mounted)).toEqual({ baseUrl: "https://override" });
   });
 
   it("applies schema defaults when read before an all-optional mount binds", () => {
@@ -70,16 +74,21 @@ describe("defineExtension", () => {
   });
 
   it("types the config reader from the schema", () => {
-    const ext = defineExtension({
-      config: z.object({ apiKey: z.string(), tier: z.string().default("free") }),
-    });
+    const ext = defineExtension(
+      { config: z.object({ apiKey: z.string(), tier: z.string().default("free") }) },
+      "@acme/types",
+    );
     ext({ apiKey: "k" });
+    const config = withExtensionConfigs(
+      new Map([["@acme/types", { apiKey: "k", tier: "free" }]]),
+      () => ext.config,
+    );
 
     // Compile-time assertions (checked by `tsc`).
-    const apiKey: string = ext.config.apiKey;
-    const tier: string = ext.config.tier;
+    const apiKey: string = config.apiKey;
+    const tier: string = config.tier;
     // @ts-expect-error apiKey is a string, not a number
-    const wrong: number = ext.config.apiKey;
+    const wrong: number = config.apiKey;
     void wrong;
 
     expect(apiKey).toBe("k");

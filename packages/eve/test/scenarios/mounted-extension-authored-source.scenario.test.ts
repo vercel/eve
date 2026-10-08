@@ -8,9 +8,11 @@ import {
 } from "../../src/compiler/manifest.js";
 import type { CompiledModuleMap } from "../../src/compiler/module-map.js";
 import { ContextContainer, contextStorage } from "../../src/context/container.js";
+import { withExtensionConfigs } from "../../src/runtime/extension-mount-configs.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "../../src/runtime/compiled-artifacts-source.js";
 import { loadCompiledManifest } from "../../src/runtime/loaders/manifest.js";
 import { loadCompiledModuleMapFromAuthoredSource } from "../../src/internal/authored-module-map-loader.js";
+import { loadResolvedModuleExport } from "../../src/runtime/resolve-helpers.js";
 import { createDevelopmentNitroArtifactsConfig } from "../../src/internal/nitro/host/artifacts-config.js";
 import {
   dispatchChannelRequest,
@@ -66,9 +68,11 @@ describe("mounted extension via authored-source loader", () => {
 
     const tool = graph.root.agent.tools.find((entry) => entry.name === "crm__crm_echo");
     expect(tool).toBeDefined();
-    await expect(tool?.execute?.({}, { messages: [], toolCallId: "call_1" })).resolves.toEqual({
-      apiKey: "sk-authored",
-    });
+    await expect(
+      withExtensionConfigs(graph.root.extensionConfigs, () =>
+        tool?.execute?.({}, { messages: [], toolCallId: "call_1" }),
+      ),
+    ).resolves.toEqual({ apiKey: "sk-authored" });
   });
 
   it("keeps each agent's config when one extension is mounted in several agents", async () => {
@@ -143,7 +147,9 @@ describe("mounted extension via authored-source loader", () => {
   });
 
   it("gives an extension schedule run the root mount's config", async () => {
-    const { appRoot } = await createMultiMountApp("mounted-extension-authored-source-schedule");
+    const { appRoot, manifest, moduleMap } = await createMultiMountApp(
+      "mounted-extension-authored-source-schedule",
+    );
     const compiledArtifactsSource = createDiskRuntimeCompiledArtifactsSource(appRoot);
     const schedules = await loadResolvedCompiledSchedules({ compiledArtifactsSource });
     const sync = createScheduleRegistrations(schedules).find(
@@ -151,11 +157,27 @@ describe("mounted extension via authored-source loader", () => {
     );
     expect(sync).toBeDefined();
 
-    await dispatchScheduleTaskFromArtifacts(sync!.taskName, compiledArtifactsSource);
+    const dispatched = await dispatchScheduleTaskFromArtifacts(
+      sync!.taskName,
+      compiledArtifactsSource,
+    );
+    expect(dispatched.scheduleId).toBe("crm__sync");
 
+    const graph = await resolveRuntimeAgentGraph({ manifest, moduleMap });
+    const schedule = manifest.schedules.find((entry) => entry.name === "crm__sync");
+    expect(schedule).toBeDefined();
+    const definition = (await loadResolvedModuleExport({
+      definition: schedule!,
+      kindLabel: "schedule",
+      moduleMap,
+      nodeId: undefined,
+    })) as { run(): Promise<void> | void };
+    delete (globalThis as Record<symbol, unknown>)[Symbol.for(SCHEDULE_API_KEY_SLOT)];
+    await withExtensionConfigs(graph.root.extensionConfigs, () => definition.run());
     expect((globalThis as Record<symbol, unknown>)[Symbol.for(SCHEDULE_API_KEY_SLOT)]).toBe(
       "sk-root",
     );
+    delete (globalThis as Record<symbol, unknown>)[Symbol.for(SCHEDULE_API_KEY_SLOT)];
   });
 });
 

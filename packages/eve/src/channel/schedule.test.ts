@@ -20,8 +20,10 @@ import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import { defineDynamicSchedules } from "#public/schedules/subscription.js";
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
 import { createScheduleCollectionPayload } from "#runtime/schedules/payload.js";
+import "#runtime/extension-mount-configs.js";
 import { z } from "#compiled/zod/index.js";
 import { defineChannel } from "#public/definitions/channel.js";
+import { defineExtension } from "#public/definitions/extension.js";
 
 function createMockRunHandle(): RunHandle {
   return { events: new ReadableStream<MessageStreamEvent>(), sessionId: "mock-session-id" };
@@ -81,6 +83,9 @@ describe("ScheduleDispatcher", () => {
     function setup(auth: typeof creator | null = creator) {
       const runtime = createMockRuntime();
       const targets: string[] = [];
+      const extensionConfigs = new Map([["@acme/crm", { apiKey: "sk-root" }]]);
+      const crm = defineExtension({ config: z.object({ apiKey: z.string() }) }, "@acme/crm");
+      const observedExtensionConfigs: Array<unknown> = [];
       const channel = defineChannel<undefined, void, { channelId: string }>({
         routes: [],
         async receive(input, context) {
@@ -97,6 +102,8 @@ describe("ScheduleDispatcher", () => {
           auth: SessionAuthContext;
           waitUntil: (task: Promise<unknown>) => void;
         }) => {
+          observedExtensionConfigs.push(contextStorage.getStore()?.get(ExtensionConfigsKey));
+          observedExtensionConfigs.push(crm.config);
           const channelId =
             args.payload.destination === "my-dm" ? `dm-${args.auth.principalId}` : "team-channel";
           args.waitUntil(args.to(channel, { channelId }).send(args.payload.task));
@@ -134,7 +141,7 @@ describe("ScheduleDispatcher", () => {
             fetch: async () => new Response(),
           },
         ],
-        extensionConfigs: new Map(),
+        extensionConfigs,
       });
       const input = {
         collectionId: "requests",
@@ -142,7 +149,15 @@ describe("ScheduleDispatcher", () => {
         occurrence,
         payload,
       };
-      return { dispatcher, input, runtime, run, targets };
+      return {
+        dispatcher,
+        input,
+        extensionConfigs,
+        observedExtensionConfigs,
+        runtime,
+        run,
+        targets,
+      };
     }
 
     it("derives a destination from payload intent and starts fresh unattended work as the creator", async () => {
@@ -162,6 +177,12 @@ describe("ScheduleDispatcher", () => {
       expect(started[0]!.continuationToken).not.toBe(started[1]!.continuationToken);
       expect(started[0]!.continuationConflictCommand).toBeUndefined();
       expect(runtime.dispatchContinuation).not.toHaveBeenCalled();
+    });
+
+    it("runs occurrence handlers with the root extension configs", async () => {
+      const { dispatcher, input, extensionConfigs, observedExtensionConfigs } = setup();
+      await dispatcher.triggerCollection(input);
+      expect(observedExtensionConfigs).toEqual([extensionConfigs, { apiKey: "sk-root" }]);
     });
 
     it.each([null, { ...creator, principalId: "bob" }])(

@@ -31,14 +31,14 @@ function crmMount(sourceId: string): CompiledExtensionMount {
     namespace: "crm",
     packageName: "@acme/crm",
     specifier: "@acme/crm",
-    mountId: "agent/extensions/crm.ts",
+    mountId: sourceId,
     sourceRoot: "/node_modules/@acme/crm/extension",
     mountSourcePath: "/app/agent/extensions/crm.ts",
   };
 }
 
 describe("resolveExtensionMountConfigs", () => {
-  const crm = defineExtension({ config: regionSchema }, "@acme/crm-resolve");
+  const crm = defineExtension({ config: regionSchema }, "root-crm");
   const manifest = {
     extensionMounts: [crmMount("root-crm")],
     subagents: [
@@ -66,13 +66,13 @@ describe("resolveExtensionMountConfigs", () => {
   it("inherits the parent's config for a node without its own mount", () => {
     const configs = resolveExtensionMountConfigs(manifest, moduleMap);
 
-    expect(configs.get("shipped")?.get("@acme/crm")).toEqual({ region: "eu" });
+    expect(configs.get("shipped")?.get("root-crm")).toEqual({ region: "eu" });
   });
 
   it("does not inherit the parent's config for a node's own bare mount", () => {
     const configs = resolveExtensionMountConfigs(manifest, moduleMap);
 
-    expect(configs.get("bare")?.has("@acme/crm")).toBe(false);
+    expect(configs.get("bare")?.has("bare-crm")).toBe(false);
   });
 });
 
@@ -87,7 +87,7 @@ function sessionScope(extensionConfigs: ResolvedRuntimeAgentNode["extensionConfi
 
 describe("extension config scoping", () => {
   it("gives a session node without a mount the defaults, not another agent's config", () => {
-    const crm = defineExtension({ config: regionSchema }, "@acme/crm-session");
+    const crm = defineExtension({ config: regionSchema }, "root-crm");
     crm({ region: "eu" });
 
     const config = contextStorage.run(sessionScope(new Map()), () => crm.config);
@@ -96,11 +96,11 @@ describe("extension config scoping", () => {
   });
 
   it("reads ingress configs until a session bundle takes over", () => {
-    const crm = defineExtension({ config: regionSchema }, "@acme/crm-ingress");
+    const crm = defineExtension({ config: regionSchema }, "root-crm");
     crm({ region: "eu" });
-    const session = sessionScope(new Map([["@acme/crm-ingress", { region: "sa" }]]));
+    const session = sessionScope(new Map([["root-crm", { region: "sa" }]]));
 
-    const seen = withExtensionConfigs(new Map([["@acme/crm-ingress", { region: "ap" }]]), () => ({
+    const seen = withExtensionConfigs(new Map([["root-crm", { region: "ap" }]]), () => ({
       ingress: crm.config,
       session: contextStorage.run(session, () => crm.config),
     }));

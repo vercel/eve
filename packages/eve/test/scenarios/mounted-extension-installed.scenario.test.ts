@@ -18,6 +18,7 @@ import {
 import { createDiskRuntimeCompiledArtifactsSource } from "../../src/runtime/compiled-artifacts-source.js";
 import { loadCompiledManifest } from "../../src/runtime/loaders/manifest.js";
 import { resolveRuntimeAgentGraph } from "../../src/runtime/resolve-agent-graph.js";
+import { withExtensionConfigs } from "../../src/runtime/extension-mount-configs.js";
 import { loadResolvedModuleExport } from "../../src/runtime/resolve-helpers.js";
 
 // Scenario tier: building the extension package spawns tsc for declarations.
@@ -296,14 +297,18 @@ describe("mounted extension installed under node_modules", () => {
 
     const echo = graph.root.agent.tools.find((entry) => entry.name === "crm__echo");
     expect(echo).toBeDefined();
-    await expect(echo?.execute?.({}, { messages: [], toolCallId: "call_1" })).resolves.toEqual({
-      apiKey: "sk-installed",
-    });
+    await expect(
+      withExtensionConfigs(graph.root.extensionConfigs, () =>
+        echo?.execute?.({}, { messages: [], toolCallId: "call_1" }),
+      ),
+    ).resolves.toEqual({ apiKey: "sk-installed" });
 
     const shout = graph.root.agent.tools.find((entry) => entry.name === "crm__shout");
-    await expect(shout?.execute?.({}, { messages: [], toolCallId: "call_2" })).resolves.toEqual({
-      apiKey: "SK-INSTALLED",
-    });
+    await expect(
+      withExtensionConfigs(graph.root.extensionConfigs, () =>
+        shout?.execute?.({}, { messages: [], toolCallId: "call_2" }),
+      ),
+    ).resolves.toEqual({ apiKey: "SK-INSTALLED" });
 
     const status = graph.root.agent.channels.find((entry) => entry.name === "crm__status");
     expect(status).toMatchObject({
@@ -312,11 +317,13 @@ describe("mounted extension installed under node_modules", () => {
       urlPath: "/crm/status",
     });
     if (status === undefined) throw new Error("Expected the extension channel to resolve.");
-    const response = await status.fetch(new Request("https://example.com/crm/status"), {
-      params: {},
-      requestIp: null,
-      waitUntil() {},
-    });
+    const response = await withExtensionConfigs(graph.root.extensionConfigs, () =>
+      status.fetch(new Request("https://example.com/crm/status"), {
+        params: {},
+        requestIp: null,
+        waitUntil() {},
+      }),
+    );
     await expect(response.text()).resolves.toBe("sk-installed");
 
     const sync = manifest.schedules.find((entry) => entry.name === "crm__sync");
@@ -335,11 +342,13 @@ describe("mounted extension installed under node_modules", () => {
       run(input: { waitUntil(task: Promise<unknown>): void }): Promise<void> | void;
     };
     let scheduledTask: Promise<unknown> | undefined;
-    await syncDefinition.run({
-      waitUntil(task) {
-        scheduledTask = task;
-      },
-    });
+    await withExtensionConfigs(graph.root.extensionConfigs, () =>
+      syncDefinition.run({
+        waitUntil(task) {
+          scheduledTask = task;
+        },
+      }),
+    );
     await expect(scheduledTask).resolves.toBe("sk-installed");
 
     const reviewer = graph.root.subagentRegistry.subagentsByName.get("crm__reviewer");
@@ -349,9 +358,11 @@ describe("mounted extension installed under node_modules", () => {
     });
     const reviewerNode = graph.nodesByNodeId.get(reviewer!.definition.nodeId);
     const key = reviewerNode?.agent.tools.find((entry) => entry.name === "key");
-    await expect(key?.execute?.({}, { messages: [], toolCallId: "call_3" })).resolves.toEqual({
-      apiKey: "sk-installed",
-    });
+    await expect(
+      withExtensionConfigs(reviewerNode!.extensionConfigs, () =>
+        key?.execute?.({}, { messages: [], toolCallId: "call_3" }),
+      ),
+    ).resolves.toEqual({ apiKey: "sk-installed" });
     expect(
       graph.root.subagentRegistry.subagentsByName.get("crm__weather")?.definition,
     ).toMatchObject({
@@ -365,9 +376,11 @@ describe("mounted extension installed under node_modules", () => {
     const nestedReviewer = managerNode?.subagentRegistry.subagentsByName.get("nested__reviewer");
     const nestedReviewerNode = graph.nodesByNodeId.get(nestedReviewer!.definition.nodeId);
     const nestedKey = nestedReviewerNode?.agent.tools.find((entry) => entry.name === "key");
-    await expect(nestedKey?.execute?.({}, { messages: [], toolCallId: "call_4" })).resolves.toEqual(
-      { apiKey: "sk-installed" },
-    );
+    await expect(
+      withExtensionConfigs(nestedReviewerNode!.extensionConfigs, () =>
+        nestedKey?.execute?.({}, { messages: [], toolCallId: "call_4" }),
+      ),
+    ).resolves.toEqual({ apiKey: "sk-installed" });
 
     expect(graph.root.agent.skills.map((skill) => skill.name)).toEqual(
       expect.arrayContaining(["crm__notes", "crm__research", "crm__guide"]),
@@ -394,10 +407,12 @@ describe("mounted extension installed under node_modules", () => {
     const dynamicTools = graph.root.agent.dynamicToolResolvers.find(
       (resolver) => resolver.slug === "crm__dynamic",
     );
-    const producedTools = (await dynamicTools?.events["session.started"]?.({}, {})) as {
-      quote: { execute(input: unknown, context: unknown): Promise<unknown> };
-    };
-    await expect(producedTools.quote.execute({}, {})).resolves.toEqual({ apiKey: "sk-installed" });
+    const producedTools = (await withExtensionConfigs(graph.root.extensionConfigs, () =>
+      dynamicTools?.events["session.started"]?.({}, {}),
+    )) as { quote: { execute(input: unknown, context: unknown): Promise<unknown> } };
+    await expect(
+      withExtensionConfigs(graph.root.extensionConfigs, () => producedTools.quote.execute({}, {})),
+    ).resolves.toEqual({ apiKey: "sk-installed" });
 
     const dynamicSkills = graph.root.agent.dynamicSkillResolvers.find(
       (resolver) => resolver.slug === "crm__oncall",
@@ -476,14 +491,18 @@ describe("mounted extension installed under node_modules", () => {
     const { graph } = await compileRuntimeGraph(app.appRoot);
 
     const rootEcho = graph.root.agent.tools.find((entry) => entry.name === "crm__echo");
-    await expect(rootEcho?.execute?.({}, { messages: [], toolCallId: "call_1" })).resolves.toEqual({
-      apiKey: "sk-root",
-    });
+    await expect(
+      withExtensionConfigs(graph.root.extensionConfigs, () =>
+        rootEcho?.execute?.({}, { messages: [], toolCallId: "call_1" }),
+      ),
+    ).resolves.toEqual({ apiKey: "sk-root" });
     const manager = graph.root.subagentRegistry.subagentsByName.get("manager");
     const managerNode = graph.nodesByNodeId.get(manager!.definition.nodeId);
     const managerShout = managerNode?.agent.tools.find((entry) => entry.name === "crm__shout");
     await expect(
-      managerShout?.execute?.({}, { messages: [], toolCallId: "call_2" }),
+      withExtensionConfigs(managerNode!.extensionConfigs, () =>
+        managerShout?.execute?.({}, { messages: [], toolCallId: "call_2" }),
+      ),
     ).resolves.toEqual({ apiKey: "sk-manager" });
   });
 });

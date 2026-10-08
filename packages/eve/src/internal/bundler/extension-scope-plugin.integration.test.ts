@@ -83,6 +83,28 @@ describe("extension-scope plugin (bundled)", () => {
     };
     expect(result.distinct).toBe(true);
   });
+
+  it("binds defineExtension to the owning package in a mounted entry", async () => {
+    const { modulePath, sourceRoot } = scratchModule(
+      [
+        'import { defineExtension } from "eve/extension";',
+        "export default defineExtension();",
+      ].join("\n"),
+    );
+    const code = await bundle(`${modulePath}?eve-mount=extensions%2Fcrm`, [
+      createExtensionMountPlugin([
+        {
+          mountId: "extensions/crm",
+          packageName: "@acme/crm",
+          sourceRoot,
+          specifier: "@acme/crm",
+        },
+      ]),
+      externalizeEvePlugin,
+    ]);
+    expect(code).toContain('defineExtension(options, "extensions/crm")');
+  });
+
   it.each(["dual", "import-only"])(
     "uses the ESM export for a mounted %s package",
     async (shape) => {
