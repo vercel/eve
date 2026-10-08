@@ -14,7 +14,13 @@ import { SessionIdKey } from "#context/keys.js";
 import { deserializeContext } from "#context/serialize.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { finalizeSession } from "#execution/session/finalization.js";
-import { withOpenTurn } from "#internal/testing/session-machine.js";
+import { withPublished } from "#internal/testing/session-machine.js";
+import {
+  createSessionStartedEvent,
+  createSessionWaitingEvent,
+  createTurnCompletedEvent,
+  createTurnStartedEvent,
+} from "#protocol/message.js";
 import { POST, defineChannel } from "#public/definitions/channel.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
@@ -42,8 +48,9 @@ it("delivers session.completed to the channel handler when a session expires bet
   restored.set(SessionIdKey, SESSION_ID);
   vi.mocked(deserializeContext).mockResolvedValue(restored);
 
-  // `turn_3` completed: its epilogue cleared the turn id and advanced the sequence to 4.
-  const session = withOpenTurn(
+  // `turn_3` completed, and `session.waiting` pruned it from the projection.
+  const turn = { sequence: 3, turnId: "turn_3" };
+  const session = withPublished(
     {
       agent: { modelReference: { id: "unused" }, system: "", tools: [] },
       compaction: { recentWindowSize: 10, threshold: 100_000 },
@@ -51,7 +58,12 @@ it("delivers session.completed to the channel handler when a session expires bet
       history: [],
       sessionId: SESSION_ID,
     },
-    { sequence: 3, stepIndex: 0, turnId: "turn_3" },
+    [
+      createSessionStartedEvent(),
+      createTurnStartedEvent(turn),
+      createTurnCompletedEvent(turn),
+      createSessionWaitingEvent(undefined),
+    ],
   );
 
   const written: string[] = [];

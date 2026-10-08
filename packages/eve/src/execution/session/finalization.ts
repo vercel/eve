@@ -64,11 +64,12 @@ export async function finalizeSession(
   }
   const session = sessionState?.snapshot.session;
   const usage = session === undefined ? undefined : getSessionUsage(session);
+  const latest = storedProjection(session?.state).latestTurn;
   if (outcome.kind === "expired") {
     await emitTerminalSessionCompletionStep({
       sessionWritable: context.sessionWritable,
       serializedContext,
-      turn: lastPublishedTurn(session?.state),
+      turn: latest && { id: latest.turnId, sequence: latest.sequence },
       usage,
     });
   } else if (outcome.kind === "failed") {
@@ -76,7 +77,7 @@ export async function finalizeSession(
       error: normalizeSerializableError(outcome.error),
       sessionWritable: context.sessionWritable,
       serializedContext,
-      turnId: outcome.turnId,
+      turnId: outcome.turnId ?? latest?.turnId,
       usage,
     });
   }
@@ -146,13 +147,4 @@ function settledResult(
     case "failed":
       return { isError: true, output: normalizeSerializableError(outcome.error), ...usage };
   }
-}
-
-function lastPublishedTurn(state: import("#harness/types.js").SessionStateMap | undefined) {
-  const turns = Object.values(storedProjection(state).turns);
-  const turn = turns.reduce<(typeof turns)[number] | undefined>(
-    (last, next) => (last === undefined || next.sequence > last.sequence ? next : last),
-    undefined,
-  );
-  return turn === undefined ? undefined : { id: turn.turnId, sequence: turn.sequence };
 }
