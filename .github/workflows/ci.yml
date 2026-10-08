@@ -189,6 +189,11 @@ jobs:
 
   test-webchat:
     runs-on: ubuntu-latest
+    # The image bakes in Chromium and its system libraries. Keep its tag in
+    # lockstep with packages/eve's playwright-core version.
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+      options: --ipc=host
 
     steps:
       - name: Checkout code
@@ -207,9 +212,6 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Install Chromium
-        run: pnpm --filter eve exec playwright-core install --with-deps chromium-headless-shell
 
       - name: Run web chat tests
         run: pnpm test:webchat
