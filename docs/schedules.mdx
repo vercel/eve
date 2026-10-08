@@ -29,7 +29,7 @@ interface ScheduleHandlerArgs {
 
 A TypeScript schedule with `markdown` is compile-only because eve stores the prompt in the manifest. A schedule with `run` remains a runtime entry so the handler can execute. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).
 
-`cron` is a standard 5-field string (`minute hour day-of-month month day-of-week`) with minute granularity. On Vercel, each schedule becomes a Vercel Cron Job, and Vercel evaluates the expression in UTC, so `"0 9 * * 1-5"` fires at 09:00 UTC on weekdays. `eve dev` never fires `defineSchedule` schedules on their cron cadence. A built app served with `eve start` does run production scheduled tasks. To trigger one while iterating in dev, use the dispatch route below.
+`cron` is a standard 5-field string (`minute hour day-of-month month day-of-week`) with minute granularity. On Vercel, each schedule becomes a Vercel Cron Job, and Vercel evaluates the expression in UTC, so `"0 9 * * 1-5"` fires at 09:00 UTC on weekdays. `eve dev` never fires schedules on their cron cadence. A built app served with `eve start` does run production scheduled tasks. To trigger one while iterating in dev, use the dispatch route below.
 
 ## Markdown form (fire-and-forget)
 
@@ -107,7 +107,7 @@ Markdown schedules start a new session on every fire. Handler schedules do too, 
 
 ## Trigger a schedule while iterating
 
-The dev server mounts a one-shot dispatch route that fires a schedule by name, out of band, exactly once. Since `eve dev` never runs `defineSchedule` schedules on their cron cadence, this is how you trigger one without waiting for the next production tick.
+The dev server mounts a one-shot dispatch route that fires a schedule by name, out of band, exactly once. Since `eve dev` never runs schedules on their cron cadence, this is how you trigger one without waiting for the next production tick.
 
 ```sh
 curl -X POST http://localhost:2000/eve/v1/dev/schedules/heartbeat
@@ -117,22 +117,6 @@ curl -X POST http://localhost:2000/eve/v1/dev/schedules/heartbeat
 `:scheduleId` is the path-derived schedule name (`agent/schedules/heartbeat.ts` → `heartbeat`; URL-encode the `/` in nested names). It runs the exact dispatch path the production cron handler uses and returns the started session ids as JSON, so you can subscribe to each one's [stream](./concepts/sessions-runs-and-streaming) at `GET /eve/v1/session/:sessionId/stream`. An unknown id comes back `404` with `availableScheduleIds`, listing the schedules the app actually defines.
 
 The route is dev-only. Production builds never mount it, and it needs no auth since the dev server is local-only.
-
-## Dynamic schedules in local development
-
-Experimental collections created with `defineDynamicSchedules` from `eve/experimental/schedules` use Vercel Schedules by default. When `vc dev` starts your eve service, eve uses its local Schedules API and consumes occurrences from its local Queues API. Cron and one-time occurrences fire automatically while `vc dev` is running, with the same payload validation and creator authorization checks used in production.
-
-Use Vercel CLI 62.5.0 or newer. For a project [composed with `withEve` from `eve/vercel`](./guides/deployment/vercel#compose-agents-with-other-vercel-services), run from the project root:
-
-```sh
-vc dev --local
-```
-
-`--local` lets an unlinked project run without pulling Vercel project settings or environment variables. The CLI supplies the local API endpoints and tokens; you do not need cloud scheduling credentials. Dynamic schedules and queued occurrences are process-local and do not survive a `vc dev` restart.
-
-Standalone `eve dev` still defaults to in-memory storage without automatic firing. You can invoke a stored occurrence explicitly through the collection's `schedules(...).invoke(...)` client. An explicitly configured provider overrides the default.
-
-This local integration applies to `defineDynamicSchedules`, not the `defineSchedule` Cron Jobs described above.
 
 ## On Vercel
 

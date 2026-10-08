@@ -31,7 +31,7 @@ export interface VercelScheduleProviderOptions {
   readonly fetch?: typeof fetch;
 }
 
-/** Uses Vercel Schedules in production and under `vc dev`, or process-local storage in standalone `eve dev`. */
+/** Uses ambient OIDC on Vercel and process-local storage under `eve dev`. */
 export function vercelScheduleProvider(
   options: VercelScheduleProviderOptions = {},
 ): ScheduleProvider {

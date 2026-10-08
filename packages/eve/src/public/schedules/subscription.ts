@@ -285,7 +285,7 @@ type DynamicSchedulesOptions<
   DynamicSchedulesDefinition<TInput, TSchema, TPrepared>,
   "provider" | "tool" | "approval"
 > & {
-  /** Defaults to vercelScheduleProvider(): Vercel production or vc dev scheduling, process-local storage in standalone eve dev. */
+  /** Defaults to vercelScheduleProvider(): hosted production scheduling, process-local storage in eve dev. */
   readonly provider?: ScheduleProvider;
 } & (
     | { readonly tool: false; readonly approval?: never }
@@ -298,8 +298,7 @@ type DynamicSchedulesOptions<
  * while eve captures creator identity separately and re-resolves it on every attempt.
  * `run` chooses destinations and starts work; no creation conversation is implicitly captured.
  * Provider defaults to vercelScheduleProvider(); pass provider explicitly to select another backend.
- * The default supports Vercel production, local scheduling under vc dev, and process-local storage
- * in standalone eve dev. It does not support preview or self-hosted scheduling.
+ * The default supports Vercel production and eve dev, not preview or self-hosted scheduling.
  */
 export function defineDynamicSchedules<TInput, TPrepared>(
   definition: Omit<
