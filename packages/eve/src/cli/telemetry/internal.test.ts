@@ -36,9 +36,20 @@ beforeEach(() => {
 afterEach(() => {
   vi.clearAllMocks();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe("resolveEveTelemetryInternal", () => {
+  it("treats an environment marked internal as internal without a lookup", async () => {
+    vi.stubEnv("EVE_TELEMETRY_INTERNAL", "1");
+    vi.mocked(isEphemeralEveTelemetryEnvironment).mockReturnValue(true);
+    const fetchMock = stubTeam({ emailDomain: "example.com" });
+
+    await expect(resolveEveTelemetryInternal()).resolves.toBe(true);
+    expect(readVercelCliTeam).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("flags a selected team whose sign-up email domain is vercel.com and saves the result", async () => {
     const fetchMock = stubTeam({ id: "team_selected", emailDomain: "vercel.com" });
 
