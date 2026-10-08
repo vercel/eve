@@ -47,6 +47,9 @@ const EveConfigSchema = z.looseObject({
       noticeVersion: z.number().int().positive().optional(),
       notifiedAt: z.string().optional(),
       projectSalt: z.string().optional(),
+      internalTeamId: z.string().optional(),
+      internal: z.boolean().optional(),
+      internalCheckedAt: z.number().optional(),
     })
     .optional(),
 });
@@ -124,5 +127,45 @@ export async function markEveTelemetryNotified(): Promise<void> {
   await updateEveTelemetryPreference({
     noticeVersion: EVE_TELEMETRY_NOTICE_VERSION,
     notifiedAt: new Date().toISOString(),
+  });
+}
+
+type EveTelemetryInternalTeam = {
+  readonly teamId: string;
+  readonly internal: boolean;
+  readonly checkedAt: number;
+};
+
+export async function readEveTelemetryInternalTeam(): Promise<
+  EveTelemetryInternalTeam | undefined
+> {
+  try {
+    const telemetry = EveConfigSchema.safeParse(
+      JSON.parse(await readFile(eveConfigPath(), "utf8")) as unknown,
+    ).data?.telemetry;
+    if (
+      telemetry?.internalTeamId === undefined ||
+      telemetry.internal === undefined ||
+      telemetry.internalCheckedAt === undefined
+    ) {
+      return undefined;
+    }
+    return {
+      teamId: telemetry.internalTeamId,
+      internal: telemetry.internal,
+      checkedAt: telemetry.internalCheckedAt,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+export async function writeEveTelemetryInternalTeam(
+  entry: EveTelemetryInternalTeam,
+): Promise<void> {
+  await updateEveTelemetryPreference({
+    internalTeamId: entry.teamId,
+    internal: entry.internal,
+    internalCheckedAt: entry.checkedAt,
   });
 }

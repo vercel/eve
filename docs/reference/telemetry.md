@@ -15,6 +15,7 @@ eve sends the following information to Vercel:
 - The command you ran, its outcome, and setup or onboarding steps when applicable, including connection-ready and first-response timing. When setup or onboarding fails, eve sends a bounded category describing the failed step. It does not send the underlying error.
 - For `eve dev`, whether you connected to a local or remote agent and whether the UI was interactive or headless.
 - Random identifiers for the CLI session, installation, and project, plus whether the installation and project identifiers are ephemeral or persistent.
+- Whether the team selected in the Vercel CLI is a Vercel-internal team, so Vercel can exclude its own usage. When you are logged in to the Vercel CLI, eve's background telemetry process looks up that team's sign-up email domain at most once a week and sends only `true` or `false`. It never sends the team ID or domain, and it skips this check in CI and Docker.
 
 The project identifier lets eve group usage from the same project without sending its name or location. eve derives it from the Git remote when available, otherwise `REPOSITORY_URL` or the working directory, and transforms that value before sending it.
 
