@@ -273,7 +273,7 @@ const channelConformance = {
         "a message while an approval is pending cancels it, so typing approve afterwards runs nothing and the next message gets a reply":
           TUI_TYPED_APPROVAL,
         "pressing Approve on an approval a message cancelled runs nothing": TUI_TYPED_APPROVAL,
-        "the requester typing approve on a requester-only approval runs the tool":
+        "the requester typing approve on a policy-gated approval steers without running it":
           TUI_TYPED_APPROVAL,
         "pressing Approve names who approved on the approval": TUI_SINGLE_PERSON,
         "pressing an option names who answered on the question": TUI_SINGLE_PERSON,

@@ -368,7 +368,7 @@ describe("coordinateApprovalDelivery", () => {
     ]);
   });
 
-  it("asks the response policy about the person who typed approve", async () => {
+  it("keeps a typed policy-gated approval as ordinary text", async () => {
     const ctx = new ContextContainer();
     ctx.set(SessionKey, {
       auth: { current: responder, initiator: responder },
@@ -384,17 +384,12 @@ describe("coordinateApprovalDelivery", () => {
         tools: new Map(),
       }),
     );
-    expect(ingested.kind).toBe("continue-coordination");
-    expect(ingested.stepInput?.message).toBeUndefined();
-
+    expect(ingested.kind).toBe("continue");
+    expect(ingested.stepInput?.message).toBe("approve");
     const response = vi.fn<ApprovalResponsePolicy>(() => ({ status: "allowed" }));
     const settled = await authorize(ingested.session, response);
-    expect(response).toHaveBeenCalledWith(
-      expect.objectContaining({ response: { decision: "approve", principal: responder } }),
-    );
-    expect(settled.stepInput?.inputResponses).toEqual([
-      { optionId: "approve", requestId: request.requestId },
-    ]);
+    expect(response).not.toHaveBeenCalled();
+    expect(settled.stepInput?.inputResponses ?? []).toEqual([]);
   });
 
   it("forwards an unrelated message while a response-authorized approval remains pending", async () => {
