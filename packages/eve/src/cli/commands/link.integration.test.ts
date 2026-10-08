@@ -201,7 +201,6 @@ describe("runLinkCommand", () => {
           }),
         );
       }
-      if (existing === "unknown") expect(fake.prompter.log.warning).toHaveBeenCalled();
     },
   );
 

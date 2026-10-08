@@ -26,7 +26,7 @@ interface LinkProjectOptions {
   prompter: Prompter;
   /** Headless runs must not ask follow-up questions after the plan is fixed. */
   headless?: boolean;
-  /** Configure 100% trace sampling for a newly created project. Defaults to true. */
+  /** Configure 100% trace sampling for a newly created project. */
   traceSampling?: boolean;
   deps?: LinkProjectDeps;
 }

@@ -60,10 +60,6 @@ export async function runLinkCommand(
       appRoot,
       options,
       onCreatedProject: (link) => configureTraceSampling(link, prompter),
-      onProjectCreationUnknown: () =>
-        prompter.log.warning(
-          "Could not verify the Vercel project for trace sampling, so it was not configured. Check the project settings if you need traces in Agent Runs.",
-        ),
     });
     return;
   }
