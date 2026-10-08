@@ -1,39 +1,39 @@
 ---
 title: "Schedules"
-description: "Run an agent on a cron cadence, either a fire-and-forget prompt or a handler that hands work off to a channel."
+description: "Run an agent on a fixed cron cadence or create user-owned schedules at runtime."
 ---
 
-A schedule starts the agent on its own clock instead of waiting for an inbound message. Use one for daily digests, data syncs, cleanup sweeps, heartbeats, or anything that should fire on a cadence. Root-authored schedules are single files under `agent/schedules/`, and mounted extensions can contribute them from `extension/schedules/`. Declared subagents cannot have a `schedules/` directory.
+A schedule starts the agent on its own clock instead of waiting for an inbound message. Use one for daily digests, data syncs, cleanup sweeps, or heartbeats. Root-authored schedules live under `agent/schedules/`, and mounted extensions can contribute them from `extension/schedules/`. Declared subagents cannot have a `schedules/` directory.
 
-The name comes from the path under `schedules/` (`agent/schedules/billing/sweep.ts` → `"billing/sweep"`), and nested directories are fine. An extension mount prefixes that name (`extension/schedules/sweep.ts` mounted as `crm` → `"crm__sweep"`) without changing its cron expression.
+The name comes from the path (`agent/schedules/billing/sweep.ts` → `"billing/sweep"`). An extension mount prefixes that name (`extension/schedules/sweep.ts` mounted as `crm` → `"crm__sweep"`) without changing its cron expression.
+
+Use `defineSchedule` for a fixed, code-authored cron. Use the experimental `defineDynamicSchedules` when users or agents need to create recurring or one-time schedules at runtime.
 
 ## `defineSchedule`
 
-Every schedule provides a `cron` and exactly one of `markdown` or `run`:
+Every static schedule provides a `cron` and exactly one of `markdown` or `run`:
 
 ```ts
 interface ScheduleDefinition {
   cron: string;
-  markdown?: string; // fire-and-forget prompt
-  run?: (args: ScheduleHandlerArgs) => Promise<void> | void; // handler
+  markdown?: string;
+  run?: (args: ScheduleHandlerArgs) => Promise<void> | void;
 }
 
 interface ScheduleHandlerArgs {
-  to: ScheduleToFn; // select a channel target, then send
-  waitUntil: (task: Promise<unknown>) => void; // keep the cron task alive past return
-  appAuth: SessionAuthContext; // pre-built app principal
+  to: ScheduleToFn;
+  waitUntil: (task: Promise<unknown>) => void;
+  appAuth: SessionAuthContext;
 }
 ```
 
-`defineSchedule` is a type-level pass-through. The compiler is what enforces the one-of rule.
+`defineSchedule` is a type-level pass-through. The compiler enforces the one-of rule. A TypeScript schedule with `markdown` is compile-only because eve stores the prompt in the manifest. A schedule with `run` remains a runtime entry. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).
 
-A TypeScript schedule with `markdown` is compile-only because eve stores the prompt in the manifest. A schedule with `run` remains a runtime entry so the handler can execute. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).
-
-`cron` is a standard 5-field string (`minute hour day-of-month month day-of-week`) with minute granularity. On Vercel, each schedule becomes a Vercel Cron Job, and Vercel evaluates the expression in UTC, so `"0 9 * * 1-5"` fires at 09:00 UTC on weekdays. `eve dev` never fires schedules on their cron cadence. A built app served with `eve start` does run production scheduled tasks. To trigger one while iterating in dev, use the dispatch route below.
+`cron` is a standard five-field string (`minute hour day-of-month month day-of-week`) with minute granularity. On Vercel, each static schedule becomes a Vercel Cron Job, evaluated in UTC. `eve dev` never fires schedules on their cron cadence. A built app served with `eve start` runs production scheduled tasks.
 
 ## Markdown form (fire-and-forget)
 
-This is the minimal schedule. eve runs the agent on the prompt and throws away the output, though the agent can still call tools, write to backends, and log along the way. The session has no channel, so it cannot ask a person for input, and nothing can send it a follow-up message. If the agent calls a tool that needs approval, the session fails instead of waiting for an answer. After its turn settles, the session parks like any other session until its [session timeout](./agent-config#runtime-limits) ends it.
+The markdown form runs the agent on a prompt and discards the output, though the agent can still call tools and write to backends. The session has no channel and cannot request human input. Approval-gated tools fail instead of waiting for an answer. After its turn settles, the session parks until its [session timeout](./agent-config#runtime-limits) ends it.
 
 ```ts title="agent/schedules/heartbeat.ts"
 import { defineSchedule } from "eve/schedules";
@@ -44,11 +44,9 @@ export default defineSchedule({
 });
 ```
 
-You can write the same thing as a plain `.md` file: its frontmatter takes `cron`, and the body is the prompt.
+You can write the same thing as a plain `.md` file. Its frontmatter takes `cron`, and the body is the prompt:
 
-`agent/schedules/cleanup.md`:
-
-```md
+```md title="agent/schedules/cleanup.md"
 ---
 cron: "0 0 * * 0"
 ---
@@ -58,11 +56,10 @@ Sweep stale workflow state.
 
 ## Handler form (`run`)
 
-Use a handler when the schedule needs to deliver to a channel, branch on conditions, or compute its arguments at fire time. The handler is in full control. It has no channel of its own, so it selects a channel target with `to(...)` and sends through the returned handle.
+Use a handler to deliver to a channel, branch on conditions, or compute arguments at fire time. The handler has no channel of its own; `to(...)` selects a target on an authored channel.
 
 ```ts title="agent/schedules/critical-alerts.ts"
 import { defineSchedule } from "eve/schedules";
-
 import slack from "../channels/slack";
 
 export default defineSchedule({
@@ -77,60 +74,180 @@ export default defineSchedule({
 });
 ```
 
-Every run delivers the agent's reply to the channel. To skip a run when there is nothing to report, check that condition in the handler before calling `send`. When only the agent can tell, add the opt-in [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool and ask the agent to call it when there is nothing to report; the run then posts nothing.
+The channel delivers the agent's reply. To skip empty reports, check the condition before `send`, or add the opt-in [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool and ask the agent to call it when there is nothing to report.
 
-- `to(channel, target).send(message, { auth })`: starts a session on another channel. It has the same contract as a route handler's `ctx.to(...)` handle.
-- `waitUntil(promise)`: extends the cron task's lifetime so the parked session and any in-flight fetches settle before the task ends. Wrap the `send` call in it.
-- `appAuth`: the app principal (`{ authenticator: "app", principalId: "eve:app", principalType: "runtime" }`). Pass it as `to(...).send(..., { auth: appAuth })` for work the agent does on its own behalf.
+- `to(channel, target).send(message, { auth })` starts or resumes a session on another channel, with the same contract as a route handler's `ctx.to(...)`.
+- `waitUntil(promise)` registers background work for the cron task to await.
+- `appAuth` is the app principal (`{ authenticator: "app", principalId: "eve:app", principalType: "runtime" }`). Use it for work on the agent's own behalf.
 
-The `auth` option controls which principal the session runs as. A handler may instead supply a user principal when scheduled work needs that user's grants; a session created by that dispatch still retains schedule provenance.
+A static handler may instead supply user auth when work needs that user's grants. The session retains schedule provenance. Unlike dynamic schedules, static handlers can resume a channel conversation and allow human input.
 
 ### Detect the app principal
 
-`isScheduleAuth(auth)` returns `true` when `auth` is the app principal that schedules pass as `appAuth` and that markdown-form sessions run as. Use it in tools, hooks, or channel handlers to treat the agent's own work differently from a user's:
+`isScheduleAuth(auth)` identifies the app principal, not every scheduled run:
 
 ```ts
 import { isScheduleAuth } from "eve/schedules";
 
 if (isScheduleAuth(ctx.session.auth.current)) {
-  // The turn runs as the app principal, not as a user.
+  // This turn runs as the app principal.
 }
 ```
 
-`isScheduleAuth` identifies the principal, not how the turn started. A turn from a schedule handler that sends with a user principal returns `false`, and any code that passes `appAuth` along returns `true`.
-
-A handler-form session runs on the same durable runtime engine as any other session, so it can park (durably suspend), for instance when the channel handoff is waiting for a Slack reply. Markdown-form sessions park too, but no channel is attached, so they cannot receive follow-up messages.
+A schedule that runs as a user returns `false`. Markdown-form static schedules run as the app principal.
 
 ## Session continuity
 
-Markdown schedules start a new session on every fire. Handler schedules do too, unless they send to an existing conversation, such as a Slack thread. Store data that must survive across fires outside session state.
+Markdown schedules start a new session on every fire. Static handler schedules do too, unless they send to an existing conversation, such as a Slack thread. Store data that must survive across fires outside session state.
 
 ## Trigger a schedule while iterating
 
-The dev server mounts a one-shot dispatch route that fires a schedule by name, out of band, exactly once. Since `eve dev` never runs schedules on their cron cadence, this is how you trigger one without waiting for the next production tick.
+The dev-only dispatch route fires a static schedule by name without waiting for its cron:
 
 ```sh
 curl -X POST http://localhost:2000/eve/v1/dev/schedules/heartbeat
 # -> { "scheduleId": "heartbeat", "sessionIds": ["..."] }
 ```
 
-`:scheduleId` is the path-derived schedule name (`agent/schedules/heartbeat.ts` → `heartbeat`; URL-encode the `/` in nested names). It runs the exact dispatch path the production cron handler uses and returns the started session ids as JSON, so you can subscribe to each one's [stream](./concepts/sessions-runs-and-streaming) at `GET /eve/v1/session/:sessionId/stream`. An unknown id comes back `404` with `availableScheduleIds`, listing the schedules the app actually defines.
+`:scheduleId` is the path-derived name; URL-encode `/` in nested names. The route uses the production dispatch path and returns started session IDs. Subscribe at `GET /eve/v1/session/:sessionId/stream`; see [Sessions, runs & streaming](./concepts/sessions-runs-and-streaming). An unknown name returns `404` with `availableScheduleIds`.
 
-The route is dev-only. Production builds never mount it, and it needs no auth since the dev server is local-only.
+Production builds do not mount this route. It needs no auth because the dev server is local-only.
 
 ## On Vercel
 
-Hosted Vercel builds turn every `defineSchedule(...)` into a Vercel Cron Job, with each `cron` written as an entry in `.vercel/output/config.json`. This also applies when [`withEve`](./guides/frontend/nextjs) embeds one or more agents in a Next.js deployment: Vercel assembles each generated eve service's schedules into the project Build Output config while preserving existing project cron entries. Named agents use their public `/eve/<name>` route prefix automatically.
+Hosted builds turn static `defineSchedule(...)` definitions into Vercel Cron Jobs in `.vercel/output/config.json`. This also applies when [`withEve`](./guides/frontend/nextjs) embeds agents in Next.js: Vercel assembles each generated eve service's schedules while preserving existing project cron entries. Named agents use their public `/eve/<name>` route prefix.
 
-When running `vercel build` locally, use Vercel CLI 56.4.0 or later so generated-service cron entries are included in the project output.
-
-Vercel evaluates cron expressions in UTC. Confirm discovery under **Settings → Cron Jobs** and watch execution history under **Observability → Cron Jobs**. Per-run logs land under **Observability → Logs**.
+When running `vercel build` locally, use Vercel CLI 56.4.0 or later so generated-service cron entries are included. Confirm discovery under **Settings → Cron Jobs**, execution history under **Observability → Cron Jobs**, and logs under **Observability → Logs**.
 
 ## Self-deployed hosts
 
-Production builds register schedules as Nitro scheduled tasks. On Vercel, Nitro's Vercel preset wires those task registrations into Vercel Cron for you. Outside Vercel, the standard `eve build && eve start` path serves Nitro's Node output and starts Nitro's schedule runner, so the tasks fire on their cron cadence while that process is running.
+Production builds register static schedules as Nitro scheduled tasks. Outside Vercel, `eve build && eve start` serves the Node output and starts Nitro's schedule runner.
 
-The gotcha is custom hosting. If you adapt the generated output to a process manager, container platform, or Nitro preset that only serves HTTP and does not start Nitro's scheduled task runner, the schedule definitions still compile, but they will not fire automatically. In that case, run eve through `eve start`, use a host that supports Nitro scheduled tasks, or trigger the same work from your own scheduler through an authenticated route, channel handoff, or application-specific job runner. The dev dispatch route above is only for `eve dev`; production builds do not mount it.
+Custom hosting that only serves HTTP and does not start the scheduled task runner will not fire static schedules. Use `eve start`, a host that supports Nitro scheduled tasks, or your own scheduler through an authenticated route or channel handoff. The dev dispatch route is not a production scheduler.
+
+## Experimental dynamic schedules
+
+`defineDynamicSchedules` configures runtime schedule management and an authored occurrence callback. It does not create a schedule or set its timing. The model supplies schema-defined payload; eve captures the authenticated creator separately and resolves current execution auth whenever an occurrence fires.
+
+This API is experimental and may change.
+
+```ts title="agent/schedules/requests.ts"
+import { byPrincipal, defineDynamicSchedules } from "eve/experimental/schedules";
+import { z } from "zod";
+import slack from "../channels/slack";
+import { resolveCurrentUser } from "../lib/identity";
+import { resolveCreatorDm, resolveAuthorizedTeamChannel } from "../lib/schedule-policy";
+
+export default defineDynamicSchedules({
+  description: "Schedule Slack tasks for the creator's DM or authorized team channel.",
+  inputSchema: z
+    .object({
+      task: z.string().min(1).max(2000),
+      destination: z.enum(["my-dm", "team-channel"]),
+    })
+    .strict(),
+  scope: byPrincipal,
+  auth: ({ principal }) => resolveCurrentUser(principal),
+  async run({ payload, occurrence, to, auth }) {
+    const target =
+      payload.destination === "my-dm"
+        ? await resolveCreatorDm(auth)
+        : await resolveAuthorizedTeamChannel(auth);
+    await to(slack, target).send(
+      `Perform this task now. Do not create another schedule.\nSchedule: ${occurrence.displayName}\nScheduled for: ${occurrence.scheduledAt}\nTask: ${payload.task}`,
+    );
+  },
+});
+```
+
+The identity and destination helpers are application code. `inputSchema`, `auth`, and `run` are required. `provider` is optional and defaults to `vercelScheduleProvider()`. Pass a provider explicitly to use another backend or configure the Vercel endpoint. `scope` defaults to `byPrincipal`, isolating management by authenticated principal type, authenticator, issuer, and ID, plus application and path-derived definition identity. A custom scope resolver must authorize each operation before returning a namespace; return `null` to deny.
+
+### Creator identity
+
+`auth({ principal, payload, occurrence })` resolves the stored creator reference to current execution auth. Look up current account status and permissions rather than replaying credentials or roles captured at creation. Return `null` to deny; thrown errors remain eligible for provider retries.
+
+The returned principal type, authenticator, issuer, ID, and subject must match the creator reference. eve does not fall back to app identity. Manual invocation does not replace the creator with the invoker. Tool and connection authorization still applies during execution.
+
+### Payload and destinations
+
+The generated creation tool validates its `payload` field with your `inputSchema`. By default, eve validates it before persistence and again before dispatch. The complete provider envelope is limited to 64 KB; store JSON data and stable references, not credentials or sensitive recipient details.
+
+Optional `preparePayload(input, context)` runs after input validation and scope authorization, before persistence. It validates application policy, resolves creation context, and returns the stored shape. For model calls, eve prepares before asking for approval and provides the prepared payload to `approval.create`. It prepares again before writing and rejects the call if the payload, scope, or creator differs from the approved snapshot. Preparation errors reach the model before a person is asked. Authenticated code calling the client prepares once before writing, without model approval. `auth`, `run`, and occurrence events infer the prepared return type; declare `preparePayload` before these callbacks or give it an explicit return type for TypeScript contextual inference. Without preparation, payload type comes from the schema.
+
+The input schema does not describe prepared output. eve bounds and JSON-validates the complete persisted envelope but does not structurally revalidate prepared application data against the input schema at execution. Authored code owns that persisted contract; validate it explicitly if needed. Preparation may repeat on creation retries, so avoid irreversible effects. Reads, state changes, and occurrences never rerun it.
+
+```ts
+preparePayload(input, context) {
+  const target = resolveDestination(input.destination, context);
+  return { task: input.task, target };
+},
+```
+
+`resolveDestination` is application code. For channel delivery it can validate trusted caller context and capture channel/workspace references without exposing those fields in the model-facing schema.
+
+Destination IDs are optional. Conditional logic in `run` can derive a DM from creator identity, select an authorized configured channel, or look up a destination using another payload value. There is no `resolvePayload` hook and no required custom creation tool.
+
+A schema may expose explicit IDs when the model can obtain them, but valid IDs do not prove access. Management scope does not authorize sending to every destination. Validate model-selected destinations against the creator's current permissions.
+
+The original creation conversation is not captured automatically. To support “reply in the exact thread where I created this,” persist an authorized thread reference at creation through application code, such as a custom tool. Creator identity alone cannot recover that thread. Runtime lookups can follow changed configuration; persist a destination reference when the destination must stay fixed.
+
+### Callback execution and retries
+
+`run` receives `payload`, `occurrence`, `auth`, `to`, and `waitUntil`. It may start zero or several sessions or perform application work directly. `to(channel, target).send(message)` is bound to the resolved creator; no auth argument is needed or accepted. It starts fresh, unattended sessions through an authored channel, even when the target names an existing thread. It does not steer an existing conversation.
+
+eve awaits the callback and its registered `waitUntil` promises before reporting `occurrence.dispatched`. That event includes `sessionIds`; it means dispatch succeeded, not that the agent completed its task or delivered a successful result. Channels own output delivery and session-level failure reporting. Unattended sessions cannot wait for approvals or questions; configure tools accordingly.
+
+Provider retries may repeat the callback and start new sessions. This is an at-least-once callback contract, not create-once admission or exactly-once side effects. Use `occurrence.executionId` together with the schedule/resource identity to deduplicate application effects where the destination supports it. An observer failure can also cause callback retry. `occurrence.failed` reports permanent provider failures or exhaustion of the provider retry budget.
+
+Stored payloads from the earlier request/deliveries API are rejected. Recreate those schedules using the definition's input schema.
+
+### Generated tools and custom clients
+
+Each dynamic schedules definition contributes direct tools for `create`, `get`, `list`, `enable`, `disable`, `invoke`, and `delete`. Each has its own object-rooted schema, approval policy, and readable action label. For example, `agent/schedules/billing/requests.ts` generates `schedule__billing-requests__create`, `schedule__billing-requests__list`, and the other operation names. There is no manage tool or operation field.
+
+Creation takes `{ name, expression, payload }`; listing takes optional `{ cursor, limit }`; other tools take `{ name }` using the unique identifier from receipts or reads. Timing and payload are immutable; changing either requires explicit replacement. Direct tools are the initial exposure mode; deferred catalog integration is not part of this API yet.
+
+Reads need no approval by default; mutations require user approval. Configure top-level `approval`, keyed by operation, with ordinary request/response policies. Separate tool identities keep `once()` grants independent. Create policies additionally receive a typed `payload` containing prepared data; their `toolInput.payload` also contains prepared rather than raw data.
+
+```ts
+approval: {
+  create: ({ payload }) => payload.target.audience === "private" ? "not-applicable" : "user-approval",
+  delete: always(),
+},
+```
+
+Import `always` from `eve/tools/approval`; `target.audience` above is an application-owned prepared field. Set `tool: false` for code-only scheduling or `tool: true` (the default) for direct tools. Combining `tool: false` with `approval` is rejected by TypeScript and runtime validation: these policies apply only to model calls, not code using `schedules(definition)`. Approvals do not bypass scope authorization or configure tools a future agent session uses.
+
+```ts title="agent/tools/list-requests.ts"
+import { schedules } from "eve/experimental/schedules";
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+import requests from "../schedules/requests";
+
+export default defineTool({
+  description: "List the caller's scheduled requests.",
+  inputSchema: z.object({}),
+  async execute() {
+    return await (await schedules(requests)).list({ limit: 20 });
+  },
+});
+```
+
+Call the client inside an active eve context, not at module scope. Client creation accepts `{ name, expression, payload }`. The supplied `name` is a display label and may repeat. eve appends a UUID to allocate a unique management name without a name-availability check in approval policy. Receipts and reads include `name` (use this exact value for management) and `displayName`; labels longer than 219 characters are truncated to fit the provider identifier limit. Callbacks and events keep the unique management identifier in `occurrence.name` and expose the readable label as `occurrence.displayName`. Approval still applies to the unchanged label, timing, and payload; the generated storage identifier does not change those effects. Both direct tools and authored clients check authorization on every operation. Schedule management is unavailable during scheduled turns, including local delegated work. Authored tools, hooks, and channel events can read `ctx.session.schedule`: `undefined` for ordinary work, or `{ definition, instance?, occurrenceId? }` for scheduled work. Static schedules that run as a user are included; this is framework provenance, not an auth attribute. A new ordinary inbound message clears the scheduled-turn context; approval/input responses preserve it.
+
+### Timing, reads, and replacement
+
+For “in one minute,” use `expression: { type: "delay", minutes: 1 }`. eve resolves the time when the approved operation executes, before asynchronous policy/provider calls. Delays accept whole minutes from 1 through 525,600 and round up to minute precision, adding up to 59 seconds before provider/execution latency. Approval time is not part of the delay. A separate client retry resolves a new time; this is not a mutation-idempotency guarantee.
+
+Use `single` with a `YYYY-MM-DDTHH:mm` local datetime and IANA timezone for absolute times, or `cron` with a five-field expression and timezone for recurring work. Omitted timezones mean UTC. Relative delays do not need a timezone.
+
+`get` and `list` return identity, timing, state, and timestamps, not payload or creator data. There is no update operation. Enable, disable, and delete affect future scheduling, not emitted callbacks or running sessions. To change timing, payload, or destination intent, create a replacement and explicitly delete the old schedule; replacement is not atomic.
+
+`invoke(name)` requests an additional occurrence as the original creator. Inactive schedules may be invoked; completed schedules cannot. Manual invocation does not consume a pending one-time fire. Enqueue acceptance does not prove callback or agent success.
+
+### Provider availability
+
+The default provider, `vercelScheduleProvider()`, uses hosted Vercel Schedules in production and process-local storage under `eve dev`. Operations fail on preview deployments and self-hosted builds. Local storage has no background clock; call `invoke` through the client to dispatch an occurrence. The in-memory provider is also available from `eve/experimental/schedules/testing`.
 
 ## What to read next
 
