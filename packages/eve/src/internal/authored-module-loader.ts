@@ -60,6 +60,11 @@ export interface ExtensionMountEntry {
 }
 
 export interface AuthoredModuleLoadOptions {
+  /**
+   * Selected app root that owns authored Workflow ids. A workspace member's app root sits
+   * below the shared package root, which still owns dependency resolution.
+   */
+  readonly appRoot?: string;
   readonly externalDependencies?: readonly string[];
   readonly extension?: {
     readonly mountId: string;
@@ -196,7 +201,7 @@ export async function bundleAuthoredModuleCode(
               },
             },
           ]),
-      createAuthoredWorkflowDirectivePlugin({ appRoot: packageRoot }),
+      createAuthoredWorkflowDirectivePlugin({ appRoot: options.appRoot ?? packageRoot }),
       ...(mount === undefined ? [] : [createExtensionMountPlugin(mountChain)!]),
     ],
     sourcemap: "inline",
@@ -659,7 +664,7 @@ function createInFlightModuleLoadKey(
 ): string {
   const externalDependencies = normalizeExternalDependencies(options.externalDependencies);
 
-  return `${modulePath}\0${externalDependencies.join("\0")}\0${options.extension?.mountId ?? ""}\0${options.extension?.evaluationId ?? ""}`;
+  return `${modulePath}\0${externalDependencies.join("\0")}\0${options.extension?.mountId ?? ""}\0${options.extension?.evaluationId ?? ""}\0${options.appRoot ?? ""}`;
 }
 
 export function resolveAuthoredTsConfigPath(packageRoot: string): string | false {

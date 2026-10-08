@@ -432,6 +432,7 @@ class AgentGraphCompiler {
       (binding) => sourceIds.get(bindingMountId(binding) ?? ""),
       this.mounts,
       this.evaluationId,
+      input.manifest.appRoot,
     );
     evaluation.setBindings(
       Object.fromEntries(
