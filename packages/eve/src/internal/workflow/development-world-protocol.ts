@@ -32,29 +32,8 @@ export const DEVELOPMENT_WORKFLOW_DELIVERY_HEADER = "x-eve-dev-workflow-delivery
  * a live stream over its own route, `createQueueHandler` runs entirely in
  * the worker, and `start`/`close` belong to the parent's lifecycle.
  */
-export const DEVELOPMENT_WORLD_OPERATIONS = [
-  "events.create",
-  "events.get",
-  "events.list",
-  "events.listByCorrelationId",
-  "hooks.get",
-  "hooks.getByToken",
-  "hooks.list",
-  "getDeploymentId",
-  "queue",
-  "resolveLatestDeploymentId",
-  "runs.experimentalSetAttributes",
-  "runs.get",
-  "runs.list",
-  "steps.get",
-  "steps.list",
-  "streams.close",
-  "streams.getChunks",
-  "streams.getInfo",
-  "streams.list",
-  "streams.write",
-  "streams.writeMulti",
-] as const;
+export { WORLD_OPERATIONS as DEVELOPMENT_WORLD_OPERATIONS } from "#internal/workflow/world-protocol.js";
+import { WORLD_OPERATIONS as DEVELOPMENT_WORLD_OPERATIONS } from "#internal/workflow/world-protocol.js";
 
 export type DevelopmentWorldOperation = (typeof DEVELOPMENT_WORLD_OPERATIONS)[number];
 
