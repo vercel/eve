@@ -45,7 +45,7 @@ import {
   type InvokeToolObserver,
   type InvokeToolTraceOrigin,
   withInvokeToolSpan,
-} from "#tracing/invoke-tool-span.js";
+} from "#tracing/eve/invoke-tool-span.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import type { ToolModelOutput } from "#tools/model-output.js";
 

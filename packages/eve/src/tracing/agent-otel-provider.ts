@@ -26,10 +26,10 @@ import {
 } from "#tracing/agent-otel-content.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { createAgentApprovalInstrumentation } from "#tracing/agent-approval-instrumentation.js";
-import { createAgentChannelDeliveryInstrumentation } from "#tracing/agent-channel-delivery-instrumentation.js";
+import { createAgentChannelDeliveryInstrumentation } from "#tracing/eve/agent-channel-delivery-instrumentation.js";
 import { createAgentToolInstrumentation } from "#tracing/agent-tool-instrumentation.js";
 import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
-import { markAgentTraceContext } from "#tracing/agent-trace-context.js";
+import { markAgentTraceContext } from "#tracing/eve/agent-trace-context.js";
 import { agentTraceIdentityAttributes, traceSessionIdOf } from "#tracing/agent-otel-attributes.js";
 import * as runtimeAttributes from "#tracing/agent-otel-runtime-context.js";
 import { createAgentMemoryInstrumentation } from "#tracing/agent-memory-instrumentation.js";
@@ -40,14 +40,14 @@ import {
   setGenAiUsage,
 } from "#tracing/agent-otel-usage.js";
 import { createAgentOtelSessionContext } from "#tracing/agent-otel-session-context.js";
-import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
+import type { TraceCapturePolicy } from "#tracing/eve/otel-declaration.js";
 import { isSampledTrace, resolveTracePolicyDecision } from "#tracing/sampled-trace.js";
 import {
   applyLiveDeliveryAudienceCeiling,
   resolveForwardedTraceSeed,
 } from "#shared/forwarded-trace-policy.js";
 import { readInstrumentationDecision } from "#shared/instrumentation-decision.js";
-import { withChannelAudience } from "#tracing/channel-audience-context.js";
+import { withChannelAudience } from "#tracing/eve/channel-audience-context.js";
 import { suppressTracing } from "#tracing/suppress-tracing.js";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
 import type {
@@ -75,7 +75,7 @@ import {
 } from "#tracing/agent-span-contract.js";
 import { withErrorContent } from "#tracing/error-content-context.js";
 import { withAgentToolContentPolicy } from "#tracing/agent-tool-span-context.js";
-import { withOperationConversation } from "#tracing/conversation-context.js";
+import { withOperationConversation } from "#tracing/eve/conversation-context.js";
 import { recordAgentSpanError as recordError } from "#tracing/agent-span-error.js";
 import { resolveInstrumentationEnvironment } from "#internal/application/dev-environment.js";
 import type { ConversationEnvironment } from "#shared/conversation-context.js";

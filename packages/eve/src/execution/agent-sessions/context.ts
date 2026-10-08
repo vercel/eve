@@ -22,7 +22,7 @@ import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
 import {
   resolveToolCallAgentTrace,
   type AgentChildTraceDispatch,
-} from "#tracing/agent-invocation-coordinator.js";
+} from "#tracing/eve/agent-invocation-coordinator.js";
 
 /**
  * What a workflow run needs to open `ctx.agent` sessions for its caller,

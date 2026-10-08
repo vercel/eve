@@ -57,7 +57,7 @@ import {
 import type { SessionCheckpoint } from "#execution/session/handoff.js";
 import { walkCauseChain } from "#shared/errors.js";
 import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
-import { isAgentTraceContext } from "#tracing/agent-trace-context.js";
+import { isAgentTraceContext } from "#tracing/eve/agent-trace-context.js";
 import {
   sessionCommandHookToken,
   sessionInboxHookToken,

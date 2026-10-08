@@ -42,7 +42,7 @@ import {
   writeForwardedParentSessionBaggage,
 } from "#protocol/baggage.js";
 import { decisionToTraceContentCeiling } from "#shared/forwarded-trace-policy.js";
-import { writeConversationBaggage } from "#tracing/conversation-context.js";
+import { writeConversationBaggage } from "#tracing/eve/conversation-context.js";
 
 const CreateSessionResponseSchema = z.object({
   ok: z.literal(true),

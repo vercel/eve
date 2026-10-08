@@ -29,7 +29,7 @@ import { registerInstrumentationRuntime } from "#instrumentation/runtime.js";
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
-import { markAgentTraceContext } from "#tracing/agent-trace-context.js";
+import { markAgentTraceContext } from "#tracing/eve/agent-trace-context.js";
 import type { TraceCaptureContext } from "#shared/trace-policy.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 
