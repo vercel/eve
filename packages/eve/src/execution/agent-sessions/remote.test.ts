@@ -193,6 +193,26 @@ describe("startRemoteAgentSession", () => {
     });
   });
 
+  it("accepts an unversioned (protocol 1) remote's create response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          Response.json({ ok: true, sessionId: "legacy-session", status: "accepted" }),
+        ),
+    );
+
+    await expect(
+      startRemoteAgentSession({
+        action: createAction(),
+        callbackBaseUrl: "https://caller.example.com",
+        remote: createRemoteAgent(),
+        session: { continuationToken: "eve:parent-token" },
+      }),
+    ).resolves.toEqual({ sessionId: "legacy-session" });
+  });
+
   it.each([true, false])(
     "preserves configured headers unless context replaces them (%s)",
     async (hasContext) => {
