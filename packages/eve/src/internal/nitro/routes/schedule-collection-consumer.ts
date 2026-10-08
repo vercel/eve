@@ -1,4 +1,8 @@
-import { handleCallback } from "@vercel/queue";
+import {
+  handleCallback,
+  type MessageHandler,
+  type RetryHandler,
+} from "#compiled/@vercel/queue/index.js";
 import { SchedulesApiError, SchedulesClient } from "#compiled/@vercel/schedules/index.js";
 
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
@@ -30,8 +34,17 @@ export async function handleScheduleCollectionConsumer(
   config: NitroArtifactsConfig,
   request: Request,
 ): Promise<Response> {
-  const handler = handleCallback<unknown>(
-    async (message, metadata) => {
+  const { handler, retry } = createScheduleCollectionConsumer(config);
+  return await handleCallback(handler, { retry })(request);
+}
+
+/** Shares occurrence verification and dispatch between hosted callbacks and local queue polling. */
+export function createScheduleCollectionConsumer(config: NitroArtifactsConfig): {
+  readonly handler: MessageHandler<unknown>;
+  readonly retry: RetryHandler;
+} {
+  return {
+    handler: async (message, metadata) => {
       const queue = expectScheduleQueueMessage(message);
       const application = queue.payload.eve.application;
       const collection = queue.payload.eve.collection;
@@ -109,15 +122,12 @@ export async function handleScheduleCollectionConsumer(
         throw error;
       }
     },
-    {
-      retry(error) {
-        return error instanceof PermanentScheduleMessageError
-          ? { acknowledge: true as const }
-          : undefined;
-      },
+    retry(error) {
+      return error instanceof PermanentScheduleMessageError
+        ? { acknowledge: true as const }
+        : undefined;
     },
-  );
-  return await handler(request);
+  };
 }
 
 /** Reads the delivered schedule with the collection provider's own client options. */

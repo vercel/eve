@@ -6,6 +6,7 @@ import { resolveAuthoredTsConfigPath } from "#internal/authored-module-loader.js
 import { createNitro } from "nitro/builder";
 import type { Nitro } from "nitro/types";
 import { hasVercelScheduleCollections } from "#internal/schedules/consumer-route.js";
+import { isVercelSchedulesDevEnvironment } from "#internal/schedules/dev-environment.js";
 import { configureInstrumentationEntry } from "#internal/nitro/host/instrumentation-entry.js";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import {
@@ -722,6 +723,11 @@ export async function createDevelopmentApplicationNitro(
     preset: undefined,
   });
   const plugins = createApplicationNitroPlugins(preparedHost);
+  if (isVercelSchedulesDevEnvironment()) {
+    plugins.push(
+      resolvePackageSourceFilePath("src/internal/nitro/host/local-schedules-runtime-plugin.ts"),
+    );
+  }
   if (preparedHost.compiledArtifacts.instrumentationPluginPath === undefined) {
     plugins.unshift(
       resolvePackageSourceFilePath("src/internal/nitro/host/local-tracing-runtime-plugin.ts"),
