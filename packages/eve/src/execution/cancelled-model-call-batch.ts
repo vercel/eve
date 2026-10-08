@@ -7,8 +7,7 @@ import { createDurableSessionValues } from "#execution/durable-session-store.js"
 import type { DurableStepResult } from "#execution/session/turn-step-types.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import { appliedSession, saveSessionProjection } from "#harness/session-machine/current.js";
-import { readTurnState, writeTurnState } from "#harness/session-machine/state.js";
-import { isEmptyInput } from "#harness/hitl/delivery.js";
+import { takeDeferredMessage } from "#harness/hitl/index.js";
 import { preserveSerializedInstrumentationState } from "#instrumentation/state.js";
 import { preserveSerializedAgentTraceState } from "#tracing/agent-trace-context-store.js";
 
@@ -29,13 +28,12 @@ async function cancelledWithoutCheckpoint(
   stepInput: StepInput | undefined,
 ): Promise<HarnessSession> {
   const applied = appliedSession<HarnessSession>(ctx);
-  const { queued, ...turn } = readTurnState(applied?.state);
   let session = applied ?? initial;
   let preserved = stepInput;
-  if (applied !== undefined && queued?.message !== undefined) {
-    const { message, ...rest } = queued;
-    session = writeTurnState(applied, isEmptyInput(rest) ? turn : { ...turn, queued: rest });
-    preserved = { ...stepInput, message };
+  if (applied !== undefined) {
+    const deferred = takeDeferredMessage(applied);
+    session = deferred.session;
+    if (deferred.message !== undefined) preserved = { ...stepInput, message: deferred.message };
   }
   return await contextStorage.run(ctx, () => preserveCancelledTurnMessage(session, preserved));
 }

@@ -7,9 +7,10 @@ import { clearPendingAuthorization } from "#harness/authorization.js";
 import type { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
 import { validateHarnessModelMessages } from "#harness/messages.js";
 import { fail } from "#harness/session-machine/transitions.js";
+import { readTurnState, writeTurnState } from "#harness/session-machine/state.js";
 import type { StepCoordinates } from "#harness/session-machine/view.js";
 import type { Step } from "#harness/step/context.js";
-import type { HarnessSessionBase, HarnessToolMap, StepResult } from "#harness/types.js";
+import type { HarnessSessionBase, HarnessToolMap, StepInput, StepResult } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { InputRequest } from "#shared/input.js";
 import { renderPendingApprovalsInstruction } from "./approval-prompt.js";
@@ -22,6 +23,7 @@ import {
 } from "./approvals.js";
 import { checkSessionUsageLimit } from "./budget.js";
 import { retireActiveCandidates } from "./candidates.js";
+import { isEmptyInput } from "./delivery.js";
 import { holdForInput } from "./intake.js";
 
 // The session's human-in-the-loop lifecycle, behind the few points where the rest of the harness
@@ -187,5 +189,21 @@ export function retireCancelledCandidates<T extends HarnessSessionBase>(session:
   return {
     ...session,
     state: retireActiveCandidates(session.state, { completedAt: Date.now(), reason: "Cancelled." }),
+  };
+}
+
+/**
+ * Takes the message a delivery's answers deferred into the turn queue out of it, so a cancelled
+ * turn can keep it in history once instead of also leaving it queued. The rest of the queue stays.
+ */
+export function takeDeferredMessage<T extends HarnessSessionBase>(
+  session: T,
+): { readonly message?: StepInput["message"]; readonly session: T } {
+  const { queued, ...turn } = readTurnState(session.state);
+  if (queued?.message === undefined) return { session };
+  const { message, ...rest } = queued;
+  return {
+    message,
+    session: writeTurnState(session, isEmptyInput(rest) ? turn : { ...turn, queued: rest }),
   };
 }
