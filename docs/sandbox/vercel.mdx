@@ -93,7 +93,7 @@ The build requires Vercel project credentials and an OCI builder: Docker locally
 
 This environment does not accept `prepare`. Add a Dockerfile when the eve base image is not sufficient, and put immutable software setup there. The build artifact records only the digest-pinned image reference and content-addressed Drive identities; it never records credentials.
 
-At runtime, eve resolves each prepared Drive with `Drive.get()`, forks it for the session, and mounts the fork read-write. Each session starts with the prepared workspace and skills but writes only to its own forks. This lets dynamic skills add or replace files under `$HOME/.agents/skills` without changing the prepared Drive or another session.
+At runtime, eve resolves each prepared Drive with `Drive.get()`, forks it for the session, and mounts the fork read-write. Each session starts with the prepared workspace and skills but writes only to its own forks. This lets dynamic skills add or replace files under `$HOME/.agents/skills` without changing the prepared Drive or another session. When the session ends, eve deletes the sandbox to detach its forks, then deletes each session fork; prepared source Drives remain available for new sessions.
 
 This environment requires access to Vercel's [Drive forks private beta](https://vercel.com/docs/sandbox/concepts/drives#forking-a-drive), which is available on Pro and Enterprise plans.
 

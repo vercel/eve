@@ -17,6 +17,7 @@ import {
 } from "#execution/sandbox/bindings/vercel-options.js";
 import {
   isVercelImageUnavailableError,
+  isVercelResourceMissingError,
   isVercelResourcePendingError,
 } from "#execution/sandbox/bindings/vercel-errors.js";
 import { getNamedVercelSandbox } from "#execution/sandbox/bindings/vercel-lookup.js";
@@ -33,7 +34,9 @@ import {
 } from "#execution/sandbox/bindings/vercel-image-resources.js";
 import type {
   VercelCreateOptions,
+  VercelDrive,
   VercelModule,
+  VercelSandbox,
 } from "#execution/sandbox/bindings/vercel-sdk-types.js";
 import { buildSandboxSession } from "#execution/sandbox/session.js";
 import { materializeSandboxDockerfile } from "#execution/sandbox/dockerfile.js";
@@ -53,8 +56,11 @@ import { decodeVercelOidcTokenClaims } from "#shared/vercel-project.js";
 import {
   isSandboxPreparedArtifactRecord,
   sandboxProviderResourceIdentity,
+  type SandboxDeleteOptions,
   type SandboxPreparedArtifact,
   type SandboxProviderImplementation,
+  type SandboxProviderResources,
+  type SandboxProviderSessionContext,
 } from "#shared/sandbox-provider.js";
 
 export const VERCEL_IMAGE_PROVIDER_NAME = "vercel-image";
@@ -82,9 +88,7 @@ export interface CreateVercelImageProviderInput {
   readonly identityPrefix?: string;
   readonly loadDeleteModule?: () => Promise<VercelModule>;
   readonly loadModule?: () => Promise<VercelModule>;
-  readonly resolveNativeSession?: (
-    context: import("#shared/sandbox-provider.js").SandboxProviderSessionContext,
-  ) => {
+  readonly resolveNativeSession?: (context: SandboxProviderSessionContext) => {
     readonly identity: Readonly<Record<string, string>>;
     readonly tags: Readonly<Record<string, string>>;
   };
@@ -126,6 +130,44 @@ export function createVercelImageSandboxProvider(
     timeout: DEFAULT_SANDBOX_TIMEOUT_MS,
     ...environmentOptions,
   };
+
+  async function deleteForks(
+    module: VercelModule,
+    forks: readonly VercelImageForkArtifact[],
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const credentials = await getVercelSandboxCredentials(createOptions);
+    const fetch = getVercelSandboxFetch(createOptions);
+    for (const fork of forks) {
+      let drive: VercelDrive;
+      try {
+        drive = await module.Drive.get({ ...credentials, fetch, name: fork.driveName, signal });
+      } catch (error) {
+        if (isVercelResourceMissingError(error)) continue;
+        throw error;
+      }
+      try {
+        await drive.delete({ signal });
+      } catch (error) {
+        if (!isVercelResourceMissingError(error)) throw error;
+      }
+    }
+  }
+
+  function createSessionHandle(sandbox: VercelSandbox, forks: readonly VercelImageForkArtifact[]) {
+    const handle = createVercelSandboxHandle({
+      createOptions,
+      loadDeleteSandboxModule: loadDeleteModule,
+      sandbox,
+    });
+    return {
+      ...handle,
+      async onSandboxDelete(options?: SandboxDeleteOptions) {
+        await handle.onSandboxDelete(options);
+        await deleteForks(await loadDeleteModule(), forks, options?.abortSignal);
+      },
+    };
+  }
 
   async function openSession(
     options: Readonly<ExperimentalVercelImageRuntimeOptions> | undefined,
@@ -216,15 +258,29 @@ export function createVercelImageSandboxProvider(
     return {
       created,
       forks,
-      handle: createVercelSandboxHandle({
-        createOptions,
-        loadDeleteSandboxModule: loadDeleteModule,
-        sandbox,
-      }),
+      handle: createSessionHandle(sandbox, forks),
     };
   }
 
   return {
+    async onSessionEnd(_context, artifact, stateValue) {
+      const prepared = requirePreparedArtifact(artifact);
+      const state = requireSessionState(stateValue, prepared);
+      if (state.generation !== imageGeneration(artifact, createOptions)) {
+        throw new Error(
+          "Vercel image sandbox session state is incompatible with this environment.",
+        );
+      }
+      const module = await loadDeleteModule();
+      const sandbox = await getNamedVercelSandbox({
+        createOptions,
+        sandboxModule: module,
+        sandboxName: state.sandboxName,
+      });
+      if (sandbox !== null) await sandbox.delete({ signal: createOptions.signal });
+
+      await deleteForks(module, state.forks, createOptions.signal);
+    },
     async prepare(context) {
       const dockerfile = await materializeSandboxDockerfile({
         files: context.files,
@@ -274,11 +330,7 @@ export function createVercelImageSandboxProvider(
         throw new Error(`Vercel image sandbox session "${state.sandboxName}" no longer exists.`);
       }
       await ensureBaseRuntime(sandbox);
-      return createVercelSandboxHandle({
-        createOptions,
-        loadDeleteSandboxModule: loadDeleteModule,
-        sandbox,
-      });
+      return createSessionHandle(sandbox, state.forks);
     },
     async start(context, options, artifact) {
       const nativeSession = resolveNativeSession(context);
@@ -304,7 +356,7 @@ async function publishDockerfileImage(input: {
   readonly createOptions: VercelCreateOptions;
   readonly dockerfile: NonNullable<Awaited<ReturnType<typeof materializeSandboxDockerfile>>>;
   readonly environmentOptions: ExperimentalVercelImageEnvironmentOptions | undefined;
-  readonly resources: import("#shared/sandbox-provider.js").SandboxProviderResources;
+  readonly resources: SandboxProviderResources;
 }): Promise<string> {
   const credentials = await getVercelSandboxCredentials(input.createOptions);
   const imageReference = resolveImageReference(

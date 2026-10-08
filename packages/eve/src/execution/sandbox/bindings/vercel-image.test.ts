@@ -46,16 +46,24 @@ function context(sessionId = "session-a"): SandboxProviderSessionContext {
   };
 }
 
-function createProvider(input: { readonly existing?: boolean } = {}) {
+function createProvider(
+  input: { readonly existing?: boolean; readonly missingForkOnCleanup?: boolean } = {},
+) {
   const sandbox = {
     delete: vi.fn(async () => {}),
     name: "native",
     status: "running",
+    stop: vi.fn(async () => {}),
     tags: undefined,
     update: vi.fn(async () => {}),
   };
-  const create = vi.fn(async () => sandbox);
-  const get = vi.fn(async () => (input.existing ? sandbox : null));
+  let nativeSandbox: typeof sandbox | null = input.existing ? sandbox : null;
+  const create = vi.fn(async () => {
+    nativeSandbox = sandbox;
+    return sandbox;
+  });
+  const get = vi.fn(async () => nativeSandbox);
+  const deleteFork = vi.fn(async () => {});
   const sourceDrive = {
     driveId: "source-drive-id",
     fork: vi.fn(async ({ name }: { name: string }) => ({
@@ -64,7 +72,15 @@ function createProvider(input: { readonly existing?: boolean } = {}) {
     })),
     region: "iad1",
   };
-  const getDrive = vi.fn(async () => sourceDrive);
+  const getDrive = vi.fn(async ({ name }: { name: string }) => {
+    if (name.startsWith("eve-sbx-fork-")) {
+      if (input.missingForkOnCleanup) {
+        throw Object.assign(new Error("missing"), { status: 404 });
+      }
+      return { delete: deleteFork, name };
+    }
+    return sourceDrive;
+  });
   vi.stubEnv(
     "VERCEL_OIDC_TOKEN",
     createFakeVercelOidcToken({
@@ -77,17 +93,28 @@ function createProvider(input: { readonly existing?: boolean } = {}) {
   vi.stubEnv("VERCEL_ORG_ID", "team-id");
   vi.stubEnv("VERCEL_PROJECT_ID", "project-id");
   const publish = vi.fn(async () => artifact.image);
+  const module = { Drive: { get: getDrive }, Sandbox: { create, get } } as never;
   const provider = createVercelImageSandboxProvider(
     {},
     {
       createImagePublisher: () => ({ publish }),
       ensureBaseRuntime: vi.fn(async () => {}),
       hydrateResources: vi.fn(async () => {}),
-      loadModule: async () => ({ Drive: { get: getDrive }, Sandbox: { create, get } }) as never,
+      loadDeleteModule: async () => module,
+      loadModule: async () => module,
       waitForImage: vi.fn(async () => {}),
     },
   );
-  return { create, get, getDrive, provider, publish, sandbox, sourceDrive };
+  return {
+    create,
+    deleteFork,
+    get,
+    getDrive,
+    provider,
+    publish,
+    sandbox,
+    sourceDrive,
+  };
 }
 
 function prepareContext(hasDockerfile = true): SandboxProviderPrepareContext {
@@ -150,6 +177,56 @@ describe("createVercelImageSandboxProvider", () => {
       ],
       version: 3,
     });
+  });
+
+  it("deletes the sandbox before its session Drive forks when the session ends", async () => {
+    const { deleteFork, provider, sandbox } = createProvider();
+    const started = await provider.start(context("session-a"), {}, artifactWithDrive);
+
+    await provider.onSessionEnd?.(context("session-a"), artifactWithDrive, started.state, {
+      reason: "expired",
+    });
+
+    expect(sandbox.delete).toHaveBeenCalledOnce();
+    expect(deleteFork).toHaveBeenCalledOnce();
+    expect(sandbox.delete.mock.invocationCallOrder[0]).toBeLessThan(
+      deleteFork.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+  });
+
+  it("deletes session Drive forks when authored code deletes the sandbox", async () => {
+    const { deleteFork, provider, sandbox } = createProvider();
+    const started = await provider.start(context("session-a"), {}, artifactWithDrive);
+
+    await started.handle.onSandboxDelete();
+
+    expect(sandbox.delete).toHaveBeenCalledOnce();
+    expect(deleteFork).toHaveBeenCalledOnce();
+  });
+
+  it("treats missing session resources as already cleaned up", async () => {
+    const { get, provider, sandbox } = createProvider({ missingForkOnCleanup: true });
+    const started = await provider.start(context("session-a"), {}, artifactWithDrive);
+    get.mockResolvedValueOnce(null);
+
+    await expect(
+      provider.onSessionEnd?.(context("session-a"), artifactWithDrive, started.state, {
+        reason: "failed",
+      }),
+    ).resolves.toBeUndefined();
+    expect(sandbox.delete).not.toHaveBeenCalled();
+  });
+
+  it("treats a missing session Drive fork as already cleaned up", async () => {
+    const { provider, sandbox } = createProvider({ missingForkOnCleanup: true });
+    const started = await provider.start(context("session-a"), {}, artifactWithDrive);
+
+    await expect(
+      provider.onSessionEnd?.(context("session-a"), artifactWithDrive, started.state, {
+        reason: "completed",
+      }),
+    ).resolves.toBeUndefined();
+    expect(sandbox.delete).toHaveBeenCalledOnce();
   });
 
   it("derives distinct native identity for each eve session", async () => {
