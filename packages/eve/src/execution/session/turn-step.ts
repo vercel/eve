@@ -54,7 +54,7 @@ import { resolveSessionStepResult } from "#execution/session/turn-step-result.js
 import { withSessionStateDelta } from "#execution/session/state-delta.js";
 import { openSessionEventPublisher } from "#execution/publish-session-events.js";
 import { createTurnEventHandler } from "#execution/session/turn-event-handler.js";
-import { derivePendingState } from "#execution/session/pending-turn-state.js";
+import { pausedOnCalls } from "#execution/session/pending-turn-state.js";
 import { CallbackBaseUrlKey, PendingAuthorizationResultKey } from "#harness/authorization.js";
 import { readHitlState } from "#harness/hitl/index.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
@@ -394,12 +394,11 @@ async function runSessionStepBody(
           ? { history: input.history, sessionState: input.sessionState }
           : createDurableSessionValues(aliased);
 
-      return {
-        action: "park",
-        ...derivePendingState(aliased, currentProjection(ctx)),
-        serializedContext: nextSerializedContext,
-        ...nextValues,
-      };
+      const calls = pausedOnCalls(aliased);
+      const fields = { serializedContext: nextSerializedContext, ...nextValues };
+      return calls === undefined
+        ? { action: "parked", ...fields }
+        : { action: "paused", ...calls, ...fields };
     }
 
     const runtimeIdentity = buildRuntimeIdentity(effectiveNode);

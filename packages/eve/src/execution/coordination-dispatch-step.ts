@@ -24,19 +24,15 @@ import { storedProjection } from "#harness/session-machine/view.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { HarnessSessionBase } from "#harness/types.js";
 
-type CoordinationDispatchStepInput = CoordinationDispatchInput & {
-  readonly action: "park";
-};
-
 export async function dispatchCoordinationStep(
-  input: CoordinationDispatchStepInput,
+  input: CoordinationDispatchInput,
 ): Promise<WithSessionStateDelta<CoordinationDispatchResult>> {
   "use step";
   return await withSessionStateDelta(input, dispatchCoordination);
 }
 
 async function dispatchCoordination(
-  input: CoordinationDispatchStepInput,
+  input: CoordinationDispatchInput,
 ): Promise<CoordinationDispatchResult> {
   const prepared = await prepareCoordinationDispatch({
     serializedContext: input.serializedContext,

@@ -17,19 +17,22 @@ export async function waitForParkedTurnStep(runId: string, count = 1): Promise<v
     async () => {
       const world = await getWorld();
       const steps = await world.steps.list({ runId, resolveData: "all" });
-      let parked = 0;
+      let parkedSteps = 0;
       for (const step of steps.data) {
         if (!step.stepName.endsWith("//turnStep") || step.output === undefined) continue;
         const result: TurnStepResult = await hydrateStepReturnValue(step.output, runId, undefined);
-        if (result.action !== "park") continue;
+        const parked =
+          result.action === "parked" ||
+          (result.action === "paused" && result.awaiting.callIds.length > 0);
+        if (!parked) continue;
         const events = await world.events.listByCorrelationId({
           correlationId: step.stepId,
           resolveData: "none",
           runId,
         });
-        if (events.data.some((event) => event.eventType === "step_completed")) parked++;
+        if (events.data.some((event) => event.eventType === "step_completed")) parkedSteps++;
       }
-      expect(parked).toBeGreaterThanOrEqual(count);
+      expect(parkedSteps).toBeGreaterThanOrEqual(count);
     },
     { timeout: 10_000 },
   );

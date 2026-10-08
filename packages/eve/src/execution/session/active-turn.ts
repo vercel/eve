@@ -27,7 +27,7 @@ export type RuntimeEvent =
   | { readonly kind: "steering" }
   /** An `eve__task_wait` call's timeout passed. */
   | { readonly kind: "timeout"; readonly callId: string }
-  /** A delivery or sign-in callback was admitted; a held request may be answered. */
+  /** A delivery or sign-in callback was admitted; a paused turn's request may be answered. */
   | { readonly kind: "input" }
   | "cancelled";
 
@@ -210,7 +210,7 @@ export class ActiveTurn {
         delivery = mapped.delivery;
       }
       this.admitted.delete(sequence);
-      // Someone else's answers settle the held request, but the rest of their
+      // Someone else's answers settle the paused turn's request, but the rest of their
       // delivery waits for the turn to end, as their messages do.
       const split = isSteeringDelivery(delivery, this.identity, { heldOnPerson: true })
         ? undefined

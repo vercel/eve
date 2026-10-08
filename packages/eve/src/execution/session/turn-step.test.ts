@@ -973,7 +973,6 @@ describe("dispatchCoordinationStep", () => {
     ctx.set(TraceRootKey, traceRoot);
 
     await dispatchCoordinationStep({
-      action: "park",
       workflowToolRunOwner: { inbox: "generated-owner-token" },
       sessionWritable: createTestWritable(),
       serializedContext: serializeContext(ctx),
@@ -2322,7 +2321,7 @@ describe("turnStep", () => {
     });
 
     expect(result).toMatchObject({
-      action: "park",
+      action: "parked",
       settled: { output: "settled answer" },
     });
   });
@@ -2354,7 +2353,7 @@ describe("turnStep", () => {
     });
 
     expect(result).toMatchObject({
-      action: "park",
+      action: "parked",
       settled: { output: "settled answer" },
     });
   });
@@ -2487,7 +2486,7 @@ describe("turnStep", () => {
         sessionState: createStubSessionState(),
       });
 
-      expect(result).toMatchObject({ action: "park", settled: { output: "settled answer" } });
+      expect(result).toMatchObject({ action: "parked", settled: { output: "settled answer" } });
       expect(records).toMatchObject([
         {
           level: "warn",
@@ -2544,13 +2543,13 @@ describe("turnStep", () => {
     });
 
     expect(first).toMatchObject({
-      action: "park",
+      action: "parked",
       settled: {
         output: "first answer",
         usage: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 100, outputTokens: 40 },
       },
     });
-    if (first.action !== "park") throw new Error("expected park");
+    if (first.action !== "parked") throw new Error("expected parked");
 
     // Second turn: session totals are cumulative (150/60), but the settled
     // answer must only report what this turn added (50/20).
@@ -2577,7 +2576,7 @@ describe("turnStep", () => {
     });
 
     expect(second).toMatchObject({
-      action: "park",
+      action: "parked",
       settled: {
         output: "second answer",
         usage: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 50, outputTokens: 20 },
@@ -2713,8 +2712,8 @@ describe("turnStep", () => {
       sessionState: createStubSessionState(),
     });
 
-    expect(result.action).toBe("park");
-    if (result.action === "park") {
+    expect(result.action).toBe("parked");
+    if (result.action === "parked") {
       expect(result.settled).toBeUndefined();
     }
   });
@@ -2809,7 +2808,7 @@ describe("turnStep", () => {
       sessionState,
     });
 
-    expect(first.action).toBe("park");
+    expect(first.action).toBe("parked");
     expect(seenMessages[0]).toBe("thread=alpha; user=seed:alpha");
     expect(first.serializedContext[ThreadKey.name]).toBe("alpha");
 
@@ -3173,7 +3172,7 @@ describe("turnStep", () => {
           ? { message: `thread=unset; user=${turnInput.message}` }
           : undefined,
       );
-      expect(result).toMatchObject({ action: "park" });
+      expect(result).toMatchObject({ action: "parked" });
       // The harness completes the sign-in and resumes the turn it holds.
       expect(vi.mocked(createExecutionNodeStep).mock.calls.at(-1)?.[0].signInCompletions).toEqual([
         expect.objectContaining({ attemptId: "attempt-statuspage", name: "statuspage" }),
