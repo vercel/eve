@@ -10,7 +10,13 @@ import {
   parseSlackConnectorDetails,
   type SlackTriggerDestination,
 } from "./slack-connect.js";
-import { provisionSlackbot, reconcileSlackUid } from "./slackbot.js";
+import {
+  inspectSlackbotConnectors,
+  provisionSlackbot,
+  reconcileSlackUid,
+  type SlackbotConnectorInspection,
+  type SlackConnectorSelection,
+} from "./slackbot.js";
 
 vi.mock("#setup/primitives/run-vercel.js", () => ({
   captureVercel: vi.fn(),
@@ -254,7 +260,6 @@ function fakeConnect(initial: FakeConnector[]) {
       entry.destinations = (
         JSON.parse(options.stdin!) as { destinations: SlackTriggerDestination[] }
       ).destinations;
-      for (const destination of entry.destinations) attachProject(entry, destination.projectId);
       return { ok: true, stdout: details(entry) };
     }
     if (suffix === "/projects") {
@@ -269,11 +274,12 @@ function fakeConnect(initial: FakeConnector[]) {
     if (args[1] === "attach") {
       const entry = state.get(args[2]!)!;
       attachProject(entry, PROJECT);
-      const path = args[args.indexOf("--trigger-path") + 1]!;
-      if (
-        !entry.destinations.some((d) => d.projectId === PROJECT && d.path === path && !d.branch)
-      ) {
-        entry.destinations.push({ projectId: PROJECT, path });
+      // Like the CLI, `--triggers` appends a destination; plain attach only grants token access.
+      if (args.includes("--triggers")) {
+        entry.destinations.push({
+          projectId: PROJECT,
+          path: args[args.indexOf("--trigger-path") + 1],
+        });
       }
       return true;
     }
@@ -369,6 +375,29 @@ describe("parseCreatedSlackConnector", () => {
   });
 });
 
+/** Inspects, then provisions the preferred connector or `select`'s choice, as setup does. */
+async function provision(
+  log: ChannelSetupLog,
+  root: string,
+  slug: string,
+  deps: Parameters<typeof provisionSlackbot>[4],
+  options: Parameters<typeof provisionSlackbot>[5] & {
+    channelConnectorUid?: string;
+    select?: (inspection: SlackbotConnectorInspection) => SlackConnectorSelection;
+  } = {},
+) {
+  const { channelConnectorUid, select, ...provisionOptions } = options;
+  const inspection = await inspectSlackbotConnectors(
+    log,
+    root,
+    slug,
+    { signal: options.signal, channelConnectorUid },
+    deps,
+  );
+  const selection = select?.(inspection) ?? inspection.preferred ?? "create";
+  return provisionSlackbot(log, root, inspection, selection, deps, provisionOptions);
+}
+
 describe("provisionSlackbot", () => {
   it("makes no changes when the channel's connector is already configured", async () => {
     const connect = fakeConnect([
@@ -376,7 +405,7 @@ describe("provisionSlackbot", () => {
     ]);
 
     await expect(
-      provisionSlackbot(createTestLog(), ROOT, "my-agent", connect.deps, {
+      provision(createTestLog(), ROOT, "my-agent", connect.deps, {
         channelConnectorUid: "slack/my-agent",
       }),
     ).resolves.toEqual({
@@ -388,21 +417,29 @@ describe("provisionSlackbot", () => {
     expect(connect.mutations()).toEqual([]);
   });
 
-  it("reuses an unattached connector no other project uses with one additive attach", async () => {
-    const connect = fakeConnect([
-      connector({ uid: "slack/my-agent", projects: [], destinations: [] }),
-    ]);
+  it.each([
+    ["no destination", []],
+    // An earlier run that detached the project but failed to re-attach it.
+    ["a stale default destination", [{ projectId: PROJECT, path: "/triggers/slack" }]],
+  ])(
+    "attaches an unattached connector no other project uses, with %s",
+    async (_name, destinations) => {
+      const connect = fakeConnect([
+        connector({ uid: "slack/my-agent", projects: [], destinations }),
+      ]);
 
-    await expect(
-      provisionSlackbot(createTestLog(), ROOT, "my-agent", connect.deps),
-    ).resolves.toMatchObject({ state: "attached", connectorUid: "slack/my-agent" });
-    expect(connect.mutations()).toEqual([
-      `connect attach slack/my-agent --triggers --trigger-path ${ROUTE} --yes --scope team_demo`,
-    ]);
-    expect(connect.state.get("slack/my-agent")?.destinations).toEqual([
-      { projectId: PROJECT, path: ROUTE },
-    ]);
-  });
+      await expect(
+        provision(createTestLog(), ROOT, "my-agent", connect.deps),
+      ).resolves.toMatchObject({ state: "attached", connectorUid: "slack/my-agent" });
+      expect(connect.mutations()).toEqual([
+        "connect attach slack/my-agent --yes --scope team_demo",
+        expect.stringContaining("/trigger-destinations?teamId=team_demo --method PATCH"),
+      ]);
+      const routed = connect.state.get("slack/my-agent")!;
+      expect(routed.projects).toEqual([{ id: PROJECT }]);
+      expect(routed.destinations).toEqual([{ projectId: PROJECT, path: ROUTE }]);
+    },
+  );
 
   it("reads only connectors attached here or named for this agent", async () => {
     const connect = fakeConnect([
@@ -412,12 +449,13 @@ describe("provisionSlackbot", () => {
       connector({ uid: "slack/my-agent", id: "scl_named", projects: [] }),
     ]);
     const offered: string[] = [];
-    const selectConnector = async (candidates: readonly { uid: string }[]) => {
-      offered.push(...candidates.map((entry) => entry.uid));
-      return "create" as const;
-    };
 
-    await provisionSlackbot(createTestLog(), ROOT, "my-agent", connect.deps, { selectConnector });
+    await provision(createTestLog(), ROOT, "my-agent", connect.deps, {
+      select: ({ candidates }) => {
+        offered.push(...candidates.map((entry) => entry.uid));
+        return "create";
+      },
+    });
 
     expect(connect.commands.slice(0, 4)).toEqual([
       "api /v1/connect/connectors?projectId=prj_demo&type=slack&include=projects&limit=100&teamId=team_demo --scope team_demo",
@@ -429,9 +467,8 @@ describe("provisionSlackbot", () => {
     expect(offered).toEqual(["slack/my-agent", "slack/attached"]);
   });
 
-  it("never offers or attaches a connector another project uses", async () => {
-    const log = createTestLog();
-    const connect = fakeConnect([
+  it("never offers a connector another project uses", async () => {
+    fakeConnect([
       connector({
         uid: "slack/my-agent",
         projects: [{ id: "prj_prod", name: "chief-prod" }],
@@ -440,18 +477,38 @@ describe("provisionSlackbot", () => {
       // Only a destination ties this one to another project.
       connector({ uid: "slack/routed", projects: [], destinations: [{ projectId: "prj_prod" }] }),
     ]);
-    const selectConnector = vi.fn(async () => ({ uid: "slack/my-agent", id: "scl_my_agent" }));
 
-    await expect(
-      provisionSlackbot(log, ROOT, "my-agent", connect.deps, { selectConnector }),
-    ).resolves.toEqual({
+    const inspection = await inspectSlackbotConnectors(
+      createTestLog(),
+      ROOT,
+      "my-agent",
+      { channelConnectorUid: "slack/routed" },
+      linkedDeps(),
+    );
+
+    expect(inspection.candidates).toEqual([]);
+    expect(inspection.preferred).toBeUndefined();
+    expect(inspection.inUse.map(({ uid, otherProjects }) => ({ uid, otherProjects }))).toEqual([
+      { uid: "slack/my-agent", otherProjects: [{ id: "prj_prod", name: "chief-prod" }] },
+      { uid: "slack/routed", otherProjects: [{ id: "prj_prod" }] },
+    ]);
+  });
+
+  it("refuses a connector another project started using after inspection", async () => {
+    const connect = fakeConnect([connector({ uid: "slack/my-agent", projects: [] })]);
+    const log = createTestLog();
+    const result = await provision(log, ROOT, "my-agent", connect.deps, {
+      select: ({ preferred }) => {
+        connect.state.get("slack/my-agent")!.projects.push({ id: "prj_other", name: "other" });
+        return preferred!;
+      },
+    });
+    expect(result).toEqual({
       state: "connector-in-use",
       connectorUid: "slack/my-agent",
-      projects: [{ id: "prj_prod", name: "chief-prod" }],
+      projects: [{ id: "prj_other", name: "other" }],
     });
-    expect(selectConnector).toHaveBeenCalledWith([], undefined);
     expect(connect.mutations()).toEqual([]);
-    expect(log.warning).toHaveBeenCalledWith(expect.stringContaining("is used by chief-prod"));
   });
 
   it("fixes a stale destination with one replacement that keeps other entries", async () => {
@@ -468,9 +525,9 @@ describe("provisionSlackbot", () => {
       }),
     ]);
 
-    await expect(
-      provisionSlackbot(createTestLog(), ROOT, "my-agent", connect.deps),
-    ).resolves.toMatchObject({ state: "attached", connectorUid: "slack/my-agent" });
+    await expect(provision(createTestLog(), ROOT, "my-agent", connect.deps)).resolves.toMatchObject(
+      { state: "attached", connectorUid: "slack/my-agent" },
+    );
     expect(connect.mutations()).toEqual([
       "api /v1/connect/connectors/scl_my_agent/trigger-destinations?teamId=team_demo --method PATCH --input - --scope team_demo",
     ]);
@@ -484,7 +541,7 @@ describe("provisionSlackbot", () => {
   it("adds a missing destination without re-attaching an attached project", async () => {
     const connect = fakeConnect([connector({ uid: "slack/my-agent", destinations: [] })]);
 
-    await provisionSlackbot(createTestLog(), ROOT, "my-agent", connect.deps);
+    await provision(createTestLog(), ROOT, "my-agent", connect.deps);
 
     expect(connect.mutations()).toEqual([
       expect.stringContaining("/trigger-destinations?teamId=team_demo --method PATCH"),
@@ -497,9 +554,7 @@ describe("provisionSlackbot", () => {
   it("replaces a new connector's default destination with the eve route", async () => {
     const connect = fakeConnect([]);
 
-    await expect(
-      provisionSlackbot(createTestLog(), ROOT, "my-agent", connect.deps),
-    ).resolves.toEqual({
+    await expect(provision(createTestLog(), ROOT, "my-agent", connect.deps)).resolves.toEqual({
       state: "attached",
       connectorUid: "slack/my-agent",
       chatUrl: "https://slack.com/app_redirect?app=A0&team=T0",
@@ -532,7 +587,7 @@ describe("provisionSlackbot", () => {
       }),
     ]);
 
-    await expect(provisionSlackbot(log, ROOT, "my-agent", connect.deps)).resolves.toEqual({
+    await expect(provision(log, ROOT, "my-agent", connect.deps)).resolves.toEqual({
       state: "trigger-limit-reached",
       connectorUid: "slack/my-agent",
       destinations,
@@ -550,9 +605,9 @@ describe("provisionSlackbot", () => {
     ]);
     connect.pageSize = 1;
 
-    await expect(
-      provisionSlackbot(createTestLog(), ROOT, "my-agent", connect.deps),
-    ).resolves.toMatchObject({ state: "already-configured", connectorUid: "slack/my-agent" });
+    await expect(provision(createTestLog(), ROOT, "my-agent", connect.deps)).resolves.toMatchObject(
+      { state: "already-configured", connectorUid: "slack/my-agent" },
+    );
     expect(connect.commands).toContain(
       "api /v1/connect/connectors?projectId=prj_demo&type=slack&include=projects&limit=100&cursor=1&teamId=team_demo --scope team_demo",
     );
@@ -562,8 +617,8 @@ describe("provisionSlackbot", () => {
     const connect = fakeConnect([connector({ uid: "slack/other", id: "scl_other" })]);
 
     await expect(
-      provisionSlackbot(createTestLog(), ROOT, "my-agent", connect.deps, {
-        selectConnector: async () => "create",
+      provision(createTestLog(), ROOT, "my-agent", connect.deps, {
+        select: () => "create",
       }),
     ).resolves.toMatchObject({ state: "attached", connectorUid: "slack/my-agent" });
     expect(connect.mutations()[0]).toBe("connect create slack --triggers --name my-agent -F json");
@@ -576,11 +631,9 @@ describe("provisionSlackbot", () => {
     const connect = fakeConnect([connector({ uid: "slack/my-agent" })]);
     connect.fail = fails;
 
-    await expect(
-      provisionSlackbot(createTestLog(), ROOT, "my-agent", connect.deps),
-    ).resolves.toEqual({
-      state: "connector-lookup-failed",
-    });
+    await expect(provision(createTestLog(), ROOT, "my-agent", connect.deps)).rejects.toThrow(
+      "Could not inspect existing Slack connectors",
+    );
     expect(connect.mutations()).toEqual([]);
   });
 
@@ -588,11 +641,11 @@ describe("provisionSlackbot", () => {
     const connect = fakeConnect([]);
 
     await expect(
-      provisionSlackbot(createTestLog(), ROOT, "my-agent", {
+      provision(createTestLog(), ROOT, "my-agent", {
         ...connect.deps,
         readProjectLink: async () => undefined,
       }),
-    ).resolves.toEqual({ state: "connector-lookup-failed" });
+    ).rejects.toThrow("needs a linked Vercel project");
     expect(connect.commands).toEqual([]);
   });
 
@@ -600,9 +653,7 @@ describe("provisionSlackbot", () => {
     const connect = fakeConnect([]);
     connect.fail = (args) => args.includes("PATCH");
 
-    await expect(
-      provisionSlackbot(createTestLog(), ROOT, "my-agent", connect.deps),
-    ).resolves.toEqual({
+    await expect(provision(createTestLog(), ROOT, "my-agent", connect.deps)).resolves.toEqual({
       state: "attach-failed",
       connectorUid: "slack/my-agent",
     });
@@ -618,13 +669,14 @@ describe("provisionSlackbot", () => {
     });
     const log = createTestLog();
 
-    await expect(provisionSlackbot(log, ROOT, "my-agent", connect.deps)).resolves.toEqual({
+    await expect(provision(log, ROOT, "my-agent", connect.deps)).resolves.toEqual({
       state: "create-failed",
       detail: "Error: Connect is not available for this team.",
     });
     // Nothing could exist, so there is no browser warning and no ownership lookup.
     expect(log.warning).not.toHaveBeenCalled();
-    expect(connect.commands.filter((command) => command.includes("slack%2F"))).toHaveLength(1);
+    // One lookup during discovery and one to reserve the name at create time.
+    expect(connect.commands.filter((command) => command.includes("slack%2F"))).toHaveLength(2);
   });
 
   it("fails closed when create fails without proving it stopped before the browser flow", async () => {
@@ -633,7 +685,7 @@ describe("provisionSlackbot", () => {
     mockedRunVercelCaptureStdout.mockResolvedValue({ ok: false, stdout: "", stderr: "" });
     const log = createTestLog();
 
-    await expect(provisionSlackbot(log, ROOT, "my-agent", connect.deps)).resolves.toEqual({
+    await expect(provision(log, ROOT, "my-agent", connect.deps)).resolves.toEqual({
       state: "cleanup-failed",
       connectorUids: [],
     });
@@ -649,8 +701,8 @@ describe("provisionSlackbot", () => {
     ]);
     const log = createTestLog();
 
-    const result = await provisionSlackbot(log, ROOT, "my-agent", connect.deps, {
-      selectConnector: async () => "create",
+    const result = await provision(log, ROOT, "my-agent", connect.deps, {
+      select: () => "create",
     });
 
     expect(result).toMatchObject({ state: "attached", connectorUid: "slack/my-agent-3" });
@@ -666,9 +718,7 @@ describe("provisionSlackbot", () => {
     const connect = fakeConnect([]);
     mockedRunVercelCaptureStdout.mockImplementation(browserCreate({ ok: true, stdout: "" }));
 
-    await expect(
-      provisionSlackbot(createTestLog(), ROOT, "my-agent", connect.deps),
-    ).resolves.toEqual({
+    await expect(provision(createTestLog(), ROOT, "my-agent", connect.deps)).resolves.toEqual({
       state: "cleanup-failed",
       connectorUids: [],
     });
@@ -734,7 +784,7 @@ describe("provisionSlackbot", () => {
       },
     };
 
-    const provisioning = provisionSlackbot(
+    const provisioning = provision(
       log,
       "/tmp/eve-agent",
       "my-agent",
@@ -770,7 +820,7 @@ describe("provisionSlackbot", () => {
     );
     expect(close).toHaveBeenCalledOnce();
     expect(phases).toEqual([
-      { message: "Checking for an existing Slackbot...", stopped: true },
+      { message: "Checking existing Slack connectors...", stopped: true },
       { message: "Waiting for Slack setup to finish...", stopped: true },
       { message: "Configuring Slack event delivery for this agent...", stopped: true },
     ]);
@@ -827,7 +877,7 @@ describe("provisionSlackbot", () => {
     });
     let now = 0;
 
-    const provisioning = provisionSlackbot(createTestLog(), "/tmp/eve-agent", "my-agent", {
+    const provisioning = provision(createTestLog(), "/tmp/eve-agent", "my-agent", {
       captureVercel: mockedCaptureVercel,
       runVercel: mockedRunVercel,
       runVercelCaptureStdout: mockedRunVercelCaptureStdout,
@@ -863,7 +913,7 @@ describe("provisionSlackbot", () => {
       throw new Error(`Unexpected vercel command: ${args.join(" ")}`);
     });
 
-    const provisioning = provisionSlackbot(createTestLog(), "/tmp/eve-agent", "my-agent", {
+    const provisioning = provision(createTestLog(), "/tmp/eve-agent", "my-agent", {
       captureVercel: mockedCaptureVercel,
       runVercel: mockedRunVercel,
       runVercelCaptureStdout: mockedRunVercelCaptureStdout,
@@ -904,10 +954,10 @@ describe("provisionSlackbot", () => {
       },
     };
 
-    await provisionSlackbot(log, ROOT, "my-agent", linkedDeps());
+    await provision(log, ROOT, "my-agent", linkedDeps());
 
     expect(phases).toEqual([
-      { message: "Checking for an existing Slackbot...", stopped: true },
+      { message: "Checking existing Slack connectors...", stopped: true },
       { message: "Waiting for Slack setup to finish...", stopped: true },
       { message: "Configuring Slack event delivery for this agent...", stopped: true },
     ]);
@@ -920,10 +970,10 @@ describe("provisionSlackbot", () => {
     mockHappyPathProvision();
     const log = createTestLog();
 
-    await provisionSlackbot(log, ROOT, "my-agent", linkedDeps());
+    await provision(log, ROOT, "my-agent", linkedDeps());
 
     expect(vi.mocked(log.message).mock.calls.map(([text]) => text)).toEqual([
-      "Checking for an existing Slackbot...",
+      "Checking existing Slack connectors...",
       "Waiting for Slack setup to finish...",
       "Configuring Slack event delivery for this agent...",
     ]);
@@ -974,7 +1024,7 @@ describe("provisionSlackbot", () => {
     );
 
     const log = choiceLog(["cancel"]);
-    const result = await provisionSlackbot(
+    const result = await provision(
       log,
       "/tmp/eve-agent",
       "my-agent",
@@ -1007,7 +1057,7 @@ describe("provisionSlackbot", () => {
     );
     const log = choiceLog(["cancel"]);
 
-    const result = await provisionSlackbot(
+    const result = await provision(
       log,
       "/tmp/eve-agent",
       "my-agent",
@@ -1040,7 +1090,7 @@ describe("provisionSlackbot", () => {
       async (args) => emptyInspection(args) ?? { ok: true, stdout: "{}" },
     );
 
-    const provisioning = provisionSlackbot(
+    const provisioning = provision(
       createTestLog(),
       "/tmp/eve-agent",
       "my-agent",
@@ -1076,7 +1126,7 @@ describe("provisionSlackbot", () => {
       async (args) => emptyInspection(args) ?? { ok: true, stdout: "{}" },
     );
 
-    const provisioning = provisionSlackbot(
+    const provisioning = provision(
       log,
       "/tmp/eve-agent",
       "my-agent",
@@ -1111,7 +1161,7 @@ describe("provisionSlackbot", () => {
     });
 
     const log = choiceLog(["cancel"]);
-    const result = await provisionSlackbot(
+    const result = await provision(
       log,
       "/tmp/eve-agent",
       "my-agent",
@@ -1140,7 +1190,7 @@ describe("provisionSlackbot", () => {
     );
 
     const log = choiceLog(["cancel"]);
-    const result = await provisionSlackbot(
+    const result = await provision(
       log,
       "/tmp/eve-agent",
       "my-agent",
@@ -1181,7 +1231,7 @@ describe("provisionSlackbot", () => {
     });
 
     const log = choiceLog(["retry"]);
-    const result = await provisionSlackbot(
+    const result = await provision(
       log,
       "/tmp/eve-agent",
       "my-agent",
@@ -1222,7 +1272,7 @@ describe("provisionSlackbot", () => {
     );
 
     const log = choiceLog(["retry", "never"]);
-    const provisioning = provisionSlackbot(
+    const provisioning = provision(
       log,
       "/tmp/eve-agent",
       "my-agent",
@@ -1267,7 +1317,7 @@ describe("provisionSlackbot", () => {
     );
 
     const log = choiceLog(["retry", "cancel"]);
-    const result = await provisionSlackbot(
+    const result = await provision(
       log,
       "/tmp/eve-agent",
       "my-agent",
@@ -1294,7 +1344,7 @@ describe("provisionSlackbot", () => {
       connect.state.get("slack/my-agent")!.installed = true;
     });
 
-    const result = await provisionSlackbot(createTestLog(), ROOT, "my-agent", {
+    const result = await provision(createTestLog(), ROOT, "my-agent", {
       ...connect.deps,
       ...makeClock(),
     });
@@ -1311,7 +1361,7 @@ describe("provisionSlackbot", () => {
     fakeConnect([connector({ uid: "slack/my-agent", installed: false })]);
     const log = choiceLog(["retry", "cancel"]);
 
-    const result = await provisionSlackbot(
+    const result = await provision(
       log,
       ROOT,
       "my-agent",
@@ -1336,7 +1386,7 @@ describe("provisionSlackbot", () => {
     });
 
     const log = choiceLog(["never"]);
-    const result = await provisionSlackbot(
+    const result = await provision(
       log,
       "/tmp/eve-agent",
       "my-agent",
@@ -1390,7 +1440,7 @@ describe("provisionSlackbot", () => {
     });
     const log = choiceLog(["never"]);
 
-    const provisioning = provisionSlackbot(
+    const provisioning = provision(
       log,
       "/tmp/eve-agent",
       "my-agent",
@@ -1423,7 +1473,7 @@ describe("provisionSlackbot", () => {
       awaitChoice: vi.fn(() => ({ choice: new Promise<string | undefined>(() => {}), close })),
     });
 
-    const result = await provisionSlackbot(
+    const result = await provision(
       log,
       "/tmp/eve-agent",
       "my-agent",
@@ -1458,12 +1508,13 @@ describe("provisionSlackbot", () => {
         ok: true,
         stdout: createSlackConnectorJson("slack/my-agent"),
       })
-      .mockResolvedValue({
-        ok: true,
-        stdout: connectedSlackConnectorJson("slack/my-agent"),
-      });
+      .mockImplementation(async (args) =>
+        args[1]?.includes("/projects?")
+          ? { ok: true, stdout: JSON.stringify({ projects: [{ projectId: PROJECT }] }) }
+          : { ok: true, stdout: connectedSlackConnectorJson("slack/my-agent") },
+      );
 
-    const result = await provisionSlackbot(createTestLog(), "/tmp/eve-agent", "my-agent", {
+    const result = await provision(createTestLog(), "/tmp/eve-agent", "my-agent", {
       captureVercel: mockedCaptureVercel,
       runVercel: mockedRunVercel,
       runVercelCaptureStdout: mockedRunVercelCaptureStdout,
@@ -1475,8 +1526,8 @@ describe("provisionSlackbot", () => {
       state: "attached",
       chatUrl: "https://slack.com/app_redirect?app=A0&team=T0",
     });
-    // Inventory, snapshot, two polls, then the destination replacement.
-    expect(mockedCaptureVercel).toHaveBeenCalledTimes(5);
+    // Inventory, snapshot, two polls, fresh details and projects, then the replacement.
+    expect(mockedCaptureVercel).toHaveBeenCalledTimes(7);
     expect(mockedCaptureVercel.mock.calls.at(-1)?.[0]).toContain("PATCH");
     expect(mockedRunVercelCaptureStdout).not.toHaveBeenCalled();
   });
@@ -1499,7 +1550,7 @@ describe("provisionSlackbot", () => {
         },
       });
 
-    const result = await provisionSlackbot(createTestLog(), "/tmp/eve-agent", "my-agent", {
+    const result = await provision(createTestLog(), "/tmp/eve-agent", "my-agent", {
       captureVercel: mockedCaptureVercel,
       runVercel: mockedRunVercel,
       runVercelCaptureStdout: mockedRunVercelCaptureStdout,
@@ -1522,11 +1573,9 @@ describe("provisionSlackbot", () => {
         : { ok: true, stdout: JSON.stringify({ uid: "slack/my-agent" }) },
     );
 
-    await expect(
-      provisionSlackbot(createTestLog(), ROOT, "my-agent", connect.deps),
-    ).resolves.toEqual({
-      state: "connector-lookup-failed",
-    });
+    await expect(provision(createTestLog(), ROOT, "my-agent", connect.deps)).rejects.toThrow(
+      "Could not inspect existing Slack connectors",
+    );
     expect(connect.mutations()).toEqual([]);
   });
 
@@ -1539,7 +1588,7 @@ describe("provisionSlackbot", () => {
       return { ok: true, stdout: createSlackConnectorJson("slack/my-agent") };
     });
 
-    const result = await provisionSlackbot(createTestLog(), "/tmp/eve-agent", "my-agent", {
+    const result = await provision(createTestLog(), "/tmp/eve-agent", "my-agent", {
       captureVercel: mockedCaptureVercel,
       runVercel: mockedRunVercel,
       runVercelCaptureStdout: mockedRunVercelCaptureStdout,

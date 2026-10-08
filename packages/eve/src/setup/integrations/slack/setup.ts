@@ -1,10 +1,7 @@
-import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { parseEnv } from "node:util";
 
-import { DEVELOPMENT_ENV_FILE_NAMES } from "#cli/dev/environment.js";
+import { readDevelopmentEnvironmentValues } from "#cli/dev/environment.js";
 import { InvalidAnswerError, select } from "#setup/ask.js";
-import type { VercelProjectReference } from "#setup/project-resolution.js";
 import {
   deriveSlackConnectorSlug,
   ensureChannel,
@@ -122,20 +119,8 @@ export interface SlackSetupDeps {
 
 /** Slack variables unset in both the process and the local development env files. */
 async function missingSlackEnvironment(environmentRoot: string): Promise<string[]> {
-  const defined = new Set<string>();
-  for (const fileName of DEVELOPMENT_ENV_FILE_NAMES) {
-    let source: string;
-    try {
-      source = await readFile(join(environmentRoot, fileName), "utf8");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
-      throw error;
-    }
-    for (const [key, value] of Object.entries(parseEnv(source))) {
-      if (value) defined.add(key);
-    }
-  }
-  return SLACK_ENVIRONMENT_VARIABLES.filter((name) => !process.env[name] && !defined.has(name));
+  const defined = readDevelopmentEnvironmentValues(environmentRoot);
+  return SLACK_ENVIRONMENT_VARIABLES.filter((name) => !process.env[name] && !defined.get(name));
 }
 
 const defaultDeps: SlackSetupDeps = {
@@ -156,7 +141,7 @@ type SlackSetupPlan =
   | {
       credentials: "vercel-connect";
       slug: SlackConnectorSlug;
-      project: VercelProjectReference;
+      inspection: SlackbotConnectorInspection;
       connector: SlackConnectorSelection;
       /** UID the existing channel file names; patched when another connector is chosen. */
       channelConnectorUid: string | undefined;
@@ -287,7 +272,7 @@ export async function prepareSlackSetup(
     const inUse = inspection.inUse.find((candidate) => candidate.uid === channelConnectorUid);
     if (inUse !== undefined) {
       throw new Error(
-        `${SLACK_CHANNEL_PATH} names ${connectorInUseMessage(inUse)} Re-run \`eve add channel/slack --overwrite\` to replace the channel file.`,
+        `${connectorInUseMessage(inUse)} To replace the connector ${SLACK_CHANNEL_PATH} names, re-run \`eve add channel/slack --overwrite\`.`,
       );
     }
     connector = inspection.candidates.find((candidate) => candidate.uid === channelConnectorUid);
@@ -307,7 +292,7 @@ export async function prepareSlackSetup(
   return {
     credentials: "vercel-connect",
     slug,
-    project,
+    inspection,
     connector,
     channelConnectorUid,
   };
@@ -363,13 +348,10 @@ export async function applySlackSetup(
   const result = await deps.provisionSlackbot(
     context.presenter.log,
     context.projectRoot,
-    plan.slug,
+    plan.inspection,
+    plan.connector,
     undefined,
-    {
-      signal: context.signal,
-      selectConnector: async () => plan.connector,
-      channelConnectorUid: plan.channelConnectorUid,
-    },
+    { signal: context.signal },
   );
   context.signal?.throwIfAborted();
   if (result.state === "cancelled") throw new WizardCancelledError();

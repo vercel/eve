@@ -6,6 +6,7 @@ import {
   orderSlackConnectorCandidates,
   planSlackRouting,
   type SlackConnectorCandidate,
+  type SlackRoutingPlan,
 } from "./slack-setup-plan.js";
 
 const ROUTE = "/eve/v1/slack";
@@ -39,74 +40,57 @@ describe("classifySlackDestination", () => {
 });
 
 describe("planSlackRouting", () => {
-  it("changes nothing for an attached project with the correct destination", () => {
-    expect(
-      planSlackRouting({
-        attached: true,
-        destinations: [{ projectId: PROJECT, path: ROUTE }],
-        projectId: PROJECT,
-        route: ROUTE,
-      }),
-    ).toEqual({ kind: "none" });
-  });
+  const own = { projectId: PROJECT, path: ROUTE };
+  const stale = { projectId: PROJECT, path: "/triggers/slack" };
 
-  it("attaches an unattached project, which adds its destination", () => {
-    expect(
-      planSlackRouting({
-        attached: false,
-        destinations: [otherProject],
-        projectId: PROJECT,
-        route: ROUTE,
-      }),
-    ).toEqual({ kind: "attach" });
-  });
-
-  it("adds a missing destination without re-attaching an attached project", () => {
-    expect(
-      planSlackRouting({
-        attached: true,
-        destinations: [otherProject],
-        projectId: PROJECT,
-        route: ROUTE,
-      }),
-    ).toEqual({
-      kind: "replace",
-      destinations: [otherProject, { projectId: PROJECT, path: ROUTE }],
-    });
-  });
-
-  it("replaces only this project's stale default destination", () => {
-    expect(
-      planSlackRouting({
-        attached: true,
-        destinations: [otherProject, { projectId: PROJECT, path: "/triggers/slack" }, branch],
-        projectId: PROJECT,
-        route: ROUTE,
-      }),
-    ).toEqual({
-      kind: "replace",
-      destinations: [otherProject, branch, { projectId: PROJECT, path: ROUTE }],
-    });
+  it.each<[string, boolean, SlackTriggerDestination[], SlackRoutingPlan]>([
+    ["changes nothing when attached and routed", true, [own], { kind: "apply", attach: false }],
+    ["only attaches when routed but unattached", false, [own], { kind: "apply", attach: true }],
+    [
+      "adds a missing destination without re-attaching",
+      true,
+      [otherProject],
+      { kind: "apply", attach: false, destinations: [otherProject, own] },
+    ],
+    [
+      "attaches and adds a missing destination",
+      false,
+      [otherProject],
+      { kind: "apply", attach: true, destinations: [otherProject, own] },
+    ],
+    [
+      "attaches and replaces a stale destination",
+      false,
+      [stale],
+      { kind: "apply", attach: true, destinations: [own] },
+    ],
+    [
+      "replaces only this project's stale default destination",
+      true,
+      [otherProject, stale, branch],
+      { kind: "apply", attach: false, destinations: [otherProject, branch, own] },
+    ],
+  ])("%s", (_name, attached, destinations, expected) => {
+    expect(planSlackRouting({ attached, destinations, projectId: PROJECT, route: ROUTE })).toEqual(
+      expected,
+    );
   });
 
   it("stops before exceeding three destinations, not counting a replaced stale entry", () => {
     const full = [otherProject, branch, customEnvironment];
-    expect(
-      planSlackRouting({ attached: true, destinations: full, projectId: PROJECT, route: ROUTE }),
-    ).toEqual({ kind: "limit-reached", destinations: full });
-    expect(
-      planSlackRouting({ attached: false, destinations: full, projectId: PROJECT, route: ROUTE }),
-    ).toEqual({ kind: "limit-reached", destinations: full });
-
-    const withStale = [otherProject, branch, { projectId: PROJECT, path: "/triggers/slack" }];
+    for (const attached of [true, false]) {
+      expect(
+        planSlackRouting({ attached, destinations: full, projectId: PROJECT, route: ROUTE }),
+      ).toEqual({ kind: "limit-reached", destinations: full });
+    }
     expect(
       planSlackRouting({
         attached: true,
-        destinations: withStale,
+        destinations: [otherProject, branch, stale],
         projectId: PROJECT,
         route: ROUTE,
       }),
-    ).toMatchObject({ kind: "replace" });
+    ).toMatchObject({ kind: "apply" });
   });
 });
 
@@ -115,7 +99,6 @@ function candidate(uid: string, createdAt: number, attached: boolean): SlackConn
     uid,
     id: `scl_${createdAt}`,
     attached,
-    destination: "missing",
     triggerDestinations: [],
     otherProjects: [],
     createdAt,

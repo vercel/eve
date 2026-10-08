@@ -68,9 +68,11 @@ export {
 } from "./project-resolution.js";
 export { runVercelEnvPull } from "./run-vercel-link.js";
 export {
+  inspectSlackbotConnectors,
   provisionSlackbot,
   reconcileSlackUid,
   type ProvisionSlackbotResult,
+  type SlackbotConnectorInspection,
   type SlackConnectorCandidate,
   type SlackConnectorSelection,
 } from "./slackbot.js";

@@ -17,7 +17,6 @@ import { captureVercel, runVercel, runVercelCaptureStdout } from "#setup/primiti
 import { updateSlackChannelConnectorUid } from "#setup/scaffold/update/update-slack-channel.js";
 
 import type {
-  SlackConnectorDetails,
   SlackConnectorProject,
   SlackConnectorRef,
   SlackTriggerDestination,
@@ -30,6 +29,7 @@ import {
   CONNECT_LOOKUP_TIMEOUT_MS,
   fetchSlackConnectorDetails,
   fetchSlackWorkspace,
+  refreshSlackCandidate,
   findFreeSlackConnectorName,
   inspectSlackConnectors,
   type SlackConnectLifecycleDeps,
@@ -86,8 +86,8 @@ interface SlackbotConnection {
  * `cleanup-failed` means it may remain and callers must stop rather than
  * create another connector. `trigger-limit-reached` changed nothing because
  * the connector already has the maximum number of trigger destinations.
- * `connector-in-use` changed nothing because another project uses the chosen
- * connector and a second agent on one Slack app would answer the same events.
+ * `connector-in-use` changed nothing because another project now uses the
+ * chosen connector.
  */
 export type ProvisionSlackbotResult =
   | { state: "connector-lookup-failed" }
@@ -97,11 +97,7 @@ export type ProvisionSlackbotResult =
   | { state: "existing-not-installed"; connectorUid: string }
   | { state: "cleanup-failed"; connectorUids: readonly string[] }
   | { state: "attach-failed"; connectorUid: string }
-  | {
-      state: "connector-in-use";
-      connectorUid: string;
-      projects: readonly SlackConnectorProject[];
-    }
+  | { state: "connector-in-use"; connectorUid: string; projects: readonly SlackConnectorProject[] }
   | {
       state: "trigger-limit-reached";
       connectorUid: string;
@@ -114,7 +110,7 @@ export type ProvisionSlackbotResult =
 
 /** Terminal result of polling connector details for Slack workspace metadata. */
 type SlackWorkspacePollResult =
-  | { state: "connected"; workspace: SlackWorkspaceConnection; details: SlackConnectorDetails }
+  | { state: "connected"; workspace: SlackWorkspaceConnection }
   | { state: "timed-out" }
   | { state: "failed"; message: string };
 
@@ -124,12 +120,13 @@ type AttemptOutcome =
       state: "attached";
       ref: SlackConnectorRef;
       workspace?: SlackWorkspaceConnection;
-      /** False only when the connector was already fully configured. */
+      /** False only when an existing connector was already fully configured. */
       changed: boolean;
     }
   | { state: "create-failed"; detail?: string }
   | { state: "unresolved" }
   | { state: "attach-failed"; ref: SlackConnectorRef; message?: string }
+  | { state: "in-use"; ref: SlackConnectorRef; projects: readonly SlackConnectorProject[] }
   | {
       state: "limit-reached";
       ref: SlackConnectorRef;
@@ -293,17 +290,14 @@ async function runAttempt(input: {
   const { log, deps, projectRoot, projectId, orgId, onOutput, signal, phase } = input;
   let ref: SlackConnectorRef;
   let workspace: SlackWorkspaceConnection | undefined;
-  let destinations: readonly SlackTriggerDestination[];
   let attached: boolean;
-  let otherProjects: SlackConnectorCandidate["otherProjects"] = [];
-  let waited = false;
+  let destinations: readonly SlackTriggerDestination[];
+  let otherProjects: readonly SlackConnectorProject[] = [];
+  let changed = input.source.state === "new";
   if (input.source.state === "existing") {
     const { candidate } = input.source;
     ref = { uid: candidate.uid, id: candidate.id };
     workspace = candidate.workspace;
-    destinations = candidate.triggerDestinations;
-    attached = candidate.attached;
-    otherProjects = candidate.otherProjects;
     if (workspace === undefined) {
       openSlackInstall(log, ref, orgId);
       const poll = await phase("Waiting for the Slack workspace install...", () =>
@@ -312,9 +306,28 @@ async function runAttempt(input: {
       if (poll.state === "timed-out") return { state: "timed-out", ref };
       if (poll.state === "failed") return { state: "failed", ref, message: poll.message };
       workspace = poll.workspace;
-      destinations = poll.details.triggerDestinations;
-      waited = true;
+      changed = true;
     }
+    // The chosen connector may have changed since the question was answered.
+    // Recheck both its project access and destinations before routing it.
+    const fresh = await refreshSlackCandidate({
+      deps,
+      projectRoot,
+      candidate,
+      projectId,
+      orgId,
+      onOutput,
+      signal,
+    });
+    signal?.throwIfAborted();
+    if (fresh.state === "failed") return { state: "attach-failed", ref, message: fresh.message };
+    if (!isReusableSlackConnector(fresh.candidate)) {
+      return { state: "in-use", ref, projects: fresh.candidate.otherProjects };
+    }
+    attached = fresh.candidate.attached;
+    destinations = fresh.candidate.triggerDestinations;
+    otherProjects = fresh.candidate.otherProjects;
+    workspace ??= fresh.candidate.workspace;
   } else {
     const created = await createSlackConnector({
       deps,
@@ -353,8 +366,9 @@ async function runAttempt(input: {
     }
     ref = created.ref;
     if (created.via === "workspace") workspace = created.workspace;
-    // Connect adds a default destination at creation whose path depends on
-    // whether it already recognizes the project as eve, so read it back.
+    // `connect create` runs in the linked directory, which attaches the project.
+    attached = true;
+    // Connect adds a default destination at creation; read it back.
     const details = await fetchSlackConnectorDetails({
       deps,
       projectRoot,
@@ -365,13 +379,10 @@ async function runAttempt(input: {
       signal,
     });
     signal?.throwIfAborted();
-    if (details.state === "failed") {
+    if (details.state === "failed")
       return { state: "attach-failed", ref, message: details.message };
-    }
     destinations = details.details.triggerDestinations;
     workspace ??= details.details.workspace;
-    // `connect create` runs in the linked directory, which attaches the project.
-    attached = true;
   }
 
   const plan = planSlackRouting({
@@ -392,14 +403,14 @@ async function runAttempt(input: {
       description: describeSlackDestinations(plan.destinations, projectNames),
     };
   }
-  if (plan.kind !== "none") {
+  if (plan.attach || plan.destinations !== undefined) {
     const routing = await phase("Configuring Slack event delivery for this agent...", () =>
       applySlackRouting({ deps, projectRoot, ref, plan, orgId, onOutput, signal }),
     );
     signal?.throwIfAborted();
     if (routing.state === "attach-failed") return { state: "attach-failed", ref };
+    changed = true;
   }
-  const changed = waited || plan.kind !== "none" || input.source.state === "new";
   return workspace === undefined
     ? { state: "attached", ref, changed }
     : { state: "attached", ref, workspace, changed };
@@ -458,11 +469,19 @@ async function raceAttemptAgainstChoice(input: {
   }
 }
 
-/** A team connector to reuse, or a request to create a new one. */
-export type SlackConnectorSelection = SlackConnectorRef | "create";
+/** A reusable connector from {@link inspectSlackbotConnectors}, or a request to create one. */
+export type SlackConnectorSelection = SlackConnectorCandidate | "create";
 
-/** Read-only view of the team's Slack connectors relative to the linked project. */
+/**
+ * Read-only snapshot of the Slack connectors setup may reuse for the linked
+ * project. Setup takes it once, asks its questions from it, and hands it to
+ * {@link provisionSlackbot}.
+ */
 export interface SlackbotConnectorInspection {
+  projectId: string;
+  orgId: string | undefined;
+  /** Preferred short-name for `connect create slack --name`; suffixed when taken. */
+  slug: string;
   /**
    * Reusable connectors in question order: the suggestion first, then
    * attached, then the rest. Connectors other projects use are excluded.
@@ -476,43 +495,12 @@ export interface SlackbotConnectorInspection {
 const UNLINKED_PROJECT_WARNING =
   "Slack setup with Vercel Connect needs a linked Vercel project to tell which Slack connectors belong to it, so eve did not create one. Run `vercel link`, then try again.";
 
-type OrderedInspection =
-  | (SlackbotConnectorInspection & { state: "ok"; knownUids: ReadonlyMap<string, boolean> })
-  | { state: "failed"; message: string };
-
-async function inspectOrdered(input: {
-  deps: SlackbotProvisionDeps;
-  projectRoot: string;
-  projectId: string;
-  orgId: string | undefined;
-  slug: string;
-  channelConnectorUid: string | undefined;
-  onOutput: ReturnType<typeof createPromptCommandOutput>;
-  signal: AbortSignal | undefined;
-}): Promise<OrderedInspection> {
-  const expectedUid = `slack/${input.slug}`;
-  const namedUids = new Set([expectedUid]);
-  if (input.channelConnectorUid !== undefined) namedUids.add(input.channelConnectorUid);
-  const inspection = await inspectSlackConnectors({ ...input, namedUids });
-  if (inspection.state === "failed") {
-    return {
-      state: "failed",
-      message: `Could not inspect existing Slack connectors, so eve did not create another one. ${inspection.message}`,
-    };
-  }
-  const ordered = orderSlackConnectorCandidates(
-    inspection.candidates.filter(isReusableSlackConnector),
-    { expectedUid, channelConnectorUid: input.channelConnectorUid },
-  );
-  return {
-    state: "ok",
-    ...ordered,
-    inUse: inspection.candidates.filter((candidate) => !isReusableSlackConnector(candidate)),
-    knownUids: inspection.knownUids,
-  };
-}
-
-/** Snapshot used to resolve the create/reuse decision before provisioning. */
+/**
+ * Inspects the connectors attached to the linked project, plus
+ * `slack/<slug>` and the channel file's UID looked up by name. Throws when
+ * the project isn't linked or any connector can't be read, so setup never
+ * creates a connector on a guess.
+ */
 export async function inspectSlackbotConnectors(
   log: ChannelSetupLog,
   projectRoot: string,
@@ -522,21 +510,37 @@ export async function inspectSlackbotConnectors(
 ): Promise<SlackbotConnectorInspection> {
   const projectLink = await (deps.readProjectLink ?? readProjectLink)(projectRoot);
   if (projectLink?.projectId === undefined) throw new Error(UNLINKED_PROJECT_WARNING);
+  const { projectId, orgId } = projectLink;
+  const { channelConnectorUid } = options;
+  const expectedUid = `slack/${slug}`;
+  const namedUids = new Set([expectedUid]);
+  if (channelConnectorUid !== undefined) namedUids.add(channelConnectorUid);
   const inspection = await withPhase(log, "Checking existing Slack connectors...", () =>
-    inspectOrdered({
+    inspectSlackConnectors({
       deps,
       projectRoot,
-      projectId: projectLink.projectId,
-      orgId: projectLink.orgId,
-      slug,
-      channelConnectorUid: options.channelConnectorUid,
+      projectId,
+      orgId,
+      namedUids,
       onOutput: createPromptCommandOutput(log),
       signal: options.signal,
     }),
   );
-  if (inspection.state === "failed") throw new Error(inspection.message);
-  const { candidates, preferred, inUse } = inspection;
-  return preferred === undefined ? { candidates, inUse } : { candidates, preferred, inUse };
+  if (inspection.state === "failed") {
+    throw new Error(
+      `Could not inspect existing Slack connectors, so eve did not create another one. ${inspection.message}`,
+    );
+  }
+  return {
+    projectId,
+    orgId,
+    slug,
+    ...orderSlackConnectorCandidates(inspection.candidates.filter(isReusableSlackConnector), {
+      expectedUid,
+      channelConnectorUid,
+    }),
+    inUse: inspection.candidates.filter((candidate) => !isReusableSlackConnector(candidate)),
+  };
 }
 
 interface ProvisionSlackbotOptions {
@@ -545,78 +549,36 @@ interface ProvisionSlackbotOptions {
    * cleanup; only the explicit interactive Cancel action returns `cancelled`.
    */
   signal?: AbortSignal;
-  /**
-   * Chooses a reusable Slack connector or requests a new one. Candidates are
-   * connectors attached to this project or used by no other project; each
-   * carries whether it is attached, installed in a workspace, and already
-   * delivering to eve's Slack route. Defaults to `preferred`, or a new
-   * connector when nothing is suggested.
-   */
-  selectConnector?: (
-    candidates: readonly SlackConnectorCandidate[],
-    preferred: SlackConnectorCandidate | undefined,
-  ) => Promise<SlackConnectorSelection>;
-  /** Connector UID already named by `agent/channels/slack.ts`; suggested first. */
-  channelConnectorUid?: string | undefined;
   /** Concurrent retry/cancel controls supplied by an interactive prompter. */
   awaitChoice?: ChannelSetupAwaitChoice;
 }
 
 /**
- * Creates or reuses a Slack connector and points its event destination at
- * eve, running only the steps the connector still needs. Re-running it after
- * a partial failure resumes where the previous run stopped; it never detaches
- * a project. A successful `connect create` is the completion boundary for a
- * new browser flow. Existing connectors are verified through their
- * team-scoped detail payload before any change.
+ * Reuses the selected connector or creates a new one, then points its event
+ * destination at eve, running only the steps the connector still needs.
+ * Re-running it after a partial failure resumes where the previous run
+ * stopped; it never detaches a project. A successful `connect create` is the
+ * completion boundary for a new browser flow.
  */
 export async function provisionSlackbot(
   log: ChannelSetupLog,
   projectRoot: string,
-  /**
-   * Preferred connector short-name for `vercel connect create slack --name`;
-   * suffixed when a team connector already uses it.
-   */
-  slug: string,
+  inspection: SlackbotConnectorInspection,
+  selection: SlackConnectorSelection,
   deps: SlackbotProvisionDeps = defaultDeps,
   options: ProvisionSlackbotOptions = {},
 ): Promise<ProvisionSlackbotResult> {
   options.signal?.throwIfAborted();
   const onOutput = createPromptCommandOutput(log);
-  const projectLink = await (deps.readProjectLink ?? readProjectLink)(projectRoot);
-  const orgId = projectLink?.orgId;
+  const { projectId, orgId, slug } = inspection;
   const cleanupContext = { log, deps, projectRoot, orgId, onOutput };
-  if (projectLink?.projectId === undefined) {
-    log.warning(UNLINKED_PROJECT_WARNING);
-    return { state: "connector-lookup-failed" };
-  }
-  const projectId = projectLink.projectId;
 
-  const inspection = await withPhase(log, "Checking for an existing Slackbot...", () =>
-    inspectOrdered({
-      deps,
-      projectRoot,
-      projectId,
-      orgId,
-      slug,
-      channelConnectorUid: options.channelConnectorUid,
-      onOutput,
-      signal: options.signal,
-    }),
-  );
-  options.signal?.throwIfAborted();
-  if (inspection.state === "failed") {
-    log.warning(inspection.message);
-    return { state: "connector-lookup-failed" };
-  }
-
-  const findFreeName = async (knownUids?: ReadonlyMap<string, boolean>) => {
+  const findFreeName = async () => {
     const free = await findFreeSlackConnectorName({
       deps,
       projectRoot,
       orgId,
       slug,
-      knownUids,
       onOutput,
       signal: options.signal,
     });
@@ -650,6 +612,15 @@ export async function provisionSlackbot(
         }
         return { state: "create-failed" };
       }
+      case "in-use":
+        log.warning(
+          connectorInUseMessage({ uid: outcome.ref.uid, otherProjects: outcome.projects }),
+        );
+        return {
+          state: "connector-in-use",
+          connectorUid: outcome.ref.uid,
+          projects: outcome.projects,
+        };
       case "attach-failed":
         log.warning(
           `Could not register ${SLACK_CHANNEL_DEFAULT_ROUTE} on this project as a trigger destination for \`${outcome.ref.uid}\`.${outcome.message === undefined ? "" : ` ${outcome.message}`} eve kept the connector; re-run \`eve add channel/slack\` to finish event delivery.`,
@@ -672,8 +643,7 @@ export async function provisionSlackbot(
           destinations: outcome.destinations,
         };
       case "attached": {
-        const state =
-          attempt.state === "existing" && !outcome.changed ? "already-configured" : "attached";
+        const state = outcome.changed ? "attached" : "already-configured";
         return outcome.workspace === undefined
           ? { state, connectorUid: outcome.ref.uid }
           : {
@@ -884,33 +854,11 @@ export async function provisionSlackbot(
     return { state: "finished", result: { state: "cancelled" } };
   }
 
-  const { candidates, preferred } = inspection;
-  const selection =
-    options.selectConnector === undefined
-      ? (preferred ?? "create")
-      : await options.selectConnector(candidates, preferred);
-  options.signal?.throwIfAborted();
   if (selection !== "create") {
-    const inUse = inspection.inUse.find((entry) => entry.uid === selection.uid);
-    if (inUse !== undefined) {
-      log.warning(connectorInUseMessage(inUse));
-      return {
-        state: "connector-in-use",
-        connectorUid: inUse.uid,
-        projects: inUse.otherProjects,
-      };
-    }
-    const candidate = candidates.find((entry) => entry.uid === selection.uid);
-    if (candidate === undefined) {
-      log.warning(
-        `The Slack connector \`${selection.uid}\` is no longer in this team, so eve did not change anything. Re-run \`eve add channel/slack\` to choose again.`,
-      );
-      return { state: "connector-lookup-failed" };
-    }
-    return runExistingConnector({ state: "existing", candidate });
+    return runExistingConnector({ state: "existing", candidate: selection });
   }
 
-  const free = await findFreeName(inspection.knownUids);
+  const free = await findFreeName();
   options.signal?.throwIfAborted();
   if (free.state === "failed") return { state: "connector-lookup-failed" };
   if (free.name !== slug) log.info(renamedConnectorMessage(slug, free.name, inspection.inUse));

@@ -198,7 +198,8 @@ function applyDevelopmentEnvironmentValues(input: {
   }
 }
 
-function readDevelopmentEnvironmentValues(environmentRoot: string): Map<string, string> {
+/** Merged values of the development env files in `environmentRoot`, by precedence. */
+export function readDevelopmentEnvironmentValues(environmentRoot: string): Map<string, string> {
   const values = new Map<string, string>();
 
   for (const fileName of [...DEVELOPMENT_ENV_FILE_NAMES].reverse()) {

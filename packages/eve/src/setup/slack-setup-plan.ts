@@ -18,7 +18,7 @@ export const MAX_SLACK_TRIGGER_DESTINATIONS = 3;
  * How the linked project's default-deployment destination compares to eve's
  * Slack route. Branch and custom-environment destinations never count.
  */
-export type SlackDestinationState = "correct" | "stale" | "missing";
+type SlackDestinationState = "correct" | "stale" | "missing";
 
 /** A connector other projects use, which setup never attaches to this one. */
 export interface SlackConnectorInUse {
@@ -32,7 +32,6 @@ export interface SlackConnectorCandidate extends SlackConnectorRef {
   attached: boolean;
   /** Present once the Slack app is installed into a workspace. */
   workspace?: SlackWorkspaceConnection;
-  destination: SlackDestinationState;
   triggerDestinations: readonly SlackTriggerDestination[];
   /**
    * Other projects that use this connector, by attachment or by trigger
@@ -72,20 +71,19 @@ export function classifySlackDestination(
 }
 
 /**
- * The single mutation that finishes event delivery for one connector.
- * `attach` adds token access and the destination in one idempotent call;
- * `replace` rewrites the destination set without touching token access.
+ * What finishes event delivery for one connector. `attach` gives the project
+ * token access; `destinations`, when present, is the full destination set to
+ * write, changing only this project's default-deployment entry. Each half is
+ * idempotent, so a run that stops between them resumes on the next one.
  */
 export type SlackRoutingPlan =
-  | { kind: "none" }
-  | { kind: "attach" }
-  | { kind: "replace"; destinations: readonly SlackTriggerDestination[] }
+  | { kind: "apply"; attach: boolean; destinations?: readonly SlackTriggerDestination[] }
   | { kind: "limit-reached"; destinations: readonly SlackTriggerDestination[] };
 
 /**
  * Plans the routing mutation. An attached project is never re-attached,
  * because `connect attach` without `--environment` resets its environment
- * scoping. Only this project's default-deployment entries are rewritten.
+ * scoping.
  */
 export function planSlackRouting(input: {
   attached: boolean;
@@ -94,16 +92,16 @@ export function planSlackRouting(input: {
   route: string;
 }): SlackRoutingPlan {
   const { attached, destinations, projectId, route } = input;
-  const state = classifySlackDestination(destinations, projectId, route);
-  if (state === "correct") return attached ? { kind: "none" } : { kind: "attach" };
-
+  const attach = !attached;
+  if (classifySlackDestination(destinations, projectId, route) === "correct") {
+    return { kind: "apply", attach };
+  }
   const kept = destinations.filter((destination) => !isProjectDefault(destination, projectId));
   const next = [...kept, { projectId, path: route }];
   if (next.length > MAX_SLACK_TRIGGER_DESTINATIONS) {
     return { kind: "limit-reached", destinations };
   }
-  if (!attached && state === "missing") return { kind: "attach" };
-  return { kind: "replace", destinations: next };
+  return { kind: "apply", attach, destinations: next };
 }
 
 /**

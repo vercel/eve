@@ -8,7 +8,7 @@ import {
   withPolicy,
 } from "#setup/ask.js";
 import type { SlackConnectorSlug } from "#setup/scaffold/index.js";
-import type { SlackConnectorCandidate } from "#setup/slackbot.js";
+import type { SlackbotConnectorInspection, SlackConnectorCandidate } from "#setup/slackbot.js";
 import { integrationSetupEnvironment } from "../shared/environment.js";
 import { createSetupContexts } from "../shared/ui.js";
 import { applySlackSetup, prepareSlackSetup, type SlackSetupDeps } from "./setup.js";
@@ -38,7 +38,6 @@ function candidate(uid: string, overrides: Partial<SlackConnectorCandidate> = {}
     uid,
     id: `scl_${uid.slice("slack/".length)}`,
     attached: true,
-    destination: "correct" as const,
     triggerDestinations: [],
     otherProjects: [],
     createdAt: 1,
@@ -47,11 +46,24 @@ function candidate(uid: string, overrides: Partial<SlackConnectorCandidate> = {}
   };
 }
 
+function inspection(
+  overrides: Partial<SlackbotConnectorInspection> = {},
+): SlackbotConnectorInspection {
+  return {
+    projectId: "project",
+    orgId: "team",
+    slug: "agent",
+    candidates: [],
+    inUse: [],
+    ...overrides,
+  };
+}
+
 function deps(): SlackSetupDeps {
   return {
     deriveSlackConnectorSlug: vi.fn(async () => "agent" as SlackConnectorSlug),
     ensureChannel: vi.fn(async () => channelResult()),
-    inspectConnectors: vi.fn(async () => ({ candidates: [], inUse: [] })),
+    inspectConnectors: vi.fn(async () => inspection()),
     provisionSlackbot: vi.fn(async () => ({
       state: "attached" as const,
       connectorUid: "slack/agent",
@@ -83,9 +95,8 @@ function contexts(
   };
 }
 
-async function selectedConnector(effects: SlackSetupDeps) {
-  const options = vi.mocked(effects.provisionSlackbot).mock.calls[0]?.[4];
-  return options?.selectConnector?.([], undefined);
+function selectedConnector(effects: SlackSetupDeps) {
+  return vi.mocked(effects.provisionSlackbot).mock.calls[0]?.[3];
 }
 
 describe("Slack setup", () => {
@@ -136,22 +147,26 @@ describe("Slack setup", () => {
   it("offers team connectors and resolves the choice during prepare", async () => {
     const connector = candidate("slack/existing");
     const effects = deps();
-    vi.mocked(effects.inspectConnectors).mockResolvedValue({
-      inUse: [],
-      candidates: [connector],
-      preferred: connector,
-    });
+    vi.mocked(effects.inspectConnectors).mockResolvedValue(
+      inspection({
+        inUse: [],
+        candidates: [connector],
+        preferred: connector,
+      }),
+    );
     const ctx = contexts({ "slack-credentials": "vercel", "slack-connector": connector.uid });
     const plan = await prepareSlackSetup(ctx.prepare, effects);
     await applySlackSetup(plan, ctx.apply, effects);
-    expect(await selectedConnector(effects)).toBe(connector);
+    expect(selectedConnector(effects)).toBe(connector);
   });
   it("names the searched team when the connector answer is unknown", async () => {
     const effects = deps();
-    vi.mocked(effects.inspectConnectors).mockResolvedValue({
-      inUse: [],
-      candidates: [candidate("slack/existing")],
-    });
+    vi.mocked(effects.inspectConnectors).mockResolvedValue(
+      inspection({
+        inUse: [],
+        candidates: [candidate("slack/existing")],
+      }),
+    );
     const ctx = contexts({ "slack-credentials": "vercel", "slack-connector": "slack/missing" });
 
     const error = await prepareSlackSetup(ctx.prepare, effects).catch((caught: unknown) => caught);
@@ -162,10 +177,12 @@ describe("Slack setup", () => {
   });
   it("explains which connectors setup reuses when the answer isn't one", async () => {
     const effects = deps();
-    vi.mocked(effects.inspectConnectors).mockResolvedValue({
-      candidates: [candidate("slack/agent")],
-      inUse: [],
-    });
+    vi.mocked(effects.inspectConnectors).mockResolvedValue(
+      inspection({
+        candidates: [candidate("slack/agent")],
+        inUse: [],
+      }),
+    );
     const ctx = contexts({ "slack-credentials": "vercel", "slack-connector": "slack/elsewhere" });
 
     await expect(prepareSlackSetup(ctx.prepare, effects)).rejects.toThrow(
@@ -182,7 +199,9 @@ describe("Slack setup", () => {
       kind: "connect",
       connectorUid: shared.uid,
     });
-    vi.mocked(effects.inspectConnectors).mockResolvedValue({ candidates: [], inUse: [shared] });
+    vi.mocked(effects.inspectConnectors).mockResolvedValue(
+      inspection({ candidates: [], inUse: [shared] }),
+    );
 
     await expect(prepareSlackSetup(contexts({}).prepare, effects)).rejects.toThrow(
       "`slack/shared` is used by chief-prod.",
@@ -196,11 +215,13 @@ describe("Slack setup", () => {
       kind: "connect",
       connectorUid: named.uid,
     });
-    vi.mocked(effects.inspectConnectors).mockResolvedValue({
-      inUse: [],
-      candidates: [candidate("slack/agent"), named],
-      preferred: named,
-    });
+    vi.mocked(effects.inspectConnectors).mockResolvedValue(
+      inspection({
+        inUse: [],
+        candidates: [candidate("slack/agent"), named],
+        preferred: named,
+      }),
+    );
     vi.mocked(effects.ensureChannel).mockResolvedValue(channelResult("skipped"));
     vi.mocked(effects.provisionSlackbot).mockResolvedValue({
       state: "already-configured",
@@ -212,8 +233,8 @@ describe("Slack setup", () => {
     const plan = await prepareSlackSetup(ctx.prepare, effects);
     const completion = await applySlackSetup(plan, ctx.apply, effects);
 
-    expect(await selectedConnector(effects)).toBe(named);
-    expect(vi.mocked(effects.provisionSlackbot).mock.calls[0]?.[4]).toMatchObject({
+    expect(selectedConnector(effects)).toBe(named);
+    expect(vi.mocked(effects.inspectConnectors).mock.calls[0]?.[3]).toMatchObject({
       channelConnectorUid: named.uid,
     });
     expect(effects.reconcileSlackUid).toHaveBeenCalledWith(
@@ -234,11 +255,13 @@ describe("Slack setup", () => {
       kind: "connect",
       connectorUid: "slack/gone",
     });
-    vi.mocked(effects.inspectConnectors).mockResolvedValue({
-      inUse: [],
-      candidates: [replacement],
-      preferred: replacement,
-    });
+    vi.mocked(effects.inspectConnectors).mockResolvedValue(
+      inspection({
+        inUse: [],
+        candidates: [replacement],
+        preferred: replacement,
+      }),
+    );
     vi.mocked(effects.ensureChannel).mockResolvedValue(channelResult("skipped"));
     const ctx = contexts({ "slack-connector": replacement.uid });
 
@@ -248,7 +271,7 @@ describe("Slack setup", () => {
     expect(ctx.log.warning).toHaveBeenCalledWith(
       expect.stringContaining("`slack/gone`, which was not found in team team"),
     );
-    expect(await selectedConnector(effects)).toBe(replacement);
+    expect(selectedConnector(effects)).toBe(replacement);
     // The file still names the missing UID, so apply patches it.
     expect(vi.mocked(effects.reconcileSlackUid).mock.calls[0]?.[3]).toBe("slack/gone");
   });
@@ -274,7 +297,6 @@ describe("Slack setup", () => {
 
     await expect(prepareSlackSetup(ctx.prepare, effects)).resolves.toMatchObject({
       credentials: "vercel-connect",
-      project: { orgId: "team", projectId: "project" },
     });
     expect(ctx.resolveVercelProject).toHaveBeenCalledWith("Slack");
   });

@@ -1,7 +1,7 @@
-import { SLACK_CHANNEL_DEFAULT_ROUTE } from "#setup/scaffold/index.js";
 import { CONNECT_MUTATION_TIMEOUT_MS } from "#setup/connect-provisioning.js";
 import { createPromptCommandOutput, type ChannelSetupLog } from "#setup/cli/index.js";
 import { captureVercel, runVercel } from "#setup/primitives/run-vercel.js";
+import { mapWithConcurrency } from "#shared/map-with-concurrency.js";
 import { isNotFoundApiFailure, normalizeVercelApiResult } from "#setup/vercel-api-failure.js";
 import {
   parseConnectorProjects,
@@ -14,11 +14,7 @@ import {
   type SlackTriggerDestination,
   type SlackWorkspaceConnection,
 } from "./slack-connect.js";
-import {
-  classifySlackDestination,
-  type SlackConnectorCandidate,
-  type SlackRoutingPlan,
-} from "./slack-setup-plan.js";
+import type { SlackConnectorCandidate, SlackRoutingPlan } from "./slack-setup-plan.js";
 
 export const CONNECT_LOOKUP_TIMEOUT_MS = 60_000;
 
@@ -193,7 +189,6 @@ function toCandidate(input: {
   const candidate: SlackConnectorCandidate = {
     ...details.ref,
     attached: input.attached,
-    destination: classifySlackDestination(destinations, projectId, SLACK_CHANNEL_DEFAULT_ROUTE),
     triggerDestinations: destinations,
     otherProjects: otherProjectsOf(input.projects, destinations, projectId),
     createdAt: input.createdAt,
@@ -205,31 +200,11 @@ function toCandidate(input: {
 /** Detail lookups run a few at a time so many connectors cannot fan out unbounded subprocesses. */
 const INSPECTION_CONCURRENCY = 4;
 
-async function mapBounded<T, R>(
-  items: readonly T[],
-  limit: number,
-  task: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const results: R[] = [];
-  let next = 0;
-  const worker = async (): Promise<void> => {
-    while (next < items.length) {
-      const index = next;
-      next += 1;
-      results[index] = await task(items[index]!);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-  return results;
-}
-
 export type SlackConnectorInspection =
   | {
       state: "ok";
       /** Connectors attached to this project or found by UID, with details. */
       candidates: readonly SlackConnectorCandidate[];
-      /** Whether each UID this snapshot resolved exists, so name probes can skip it. */
-      knownUids: ReadonlyMap<string, boolean>;
     }
   | LookupFailure;
 
@@ -260,58 +235,104 @@ export async function inspectSlackConnectors(input: {
   const unlisted = [...input.namedUids].filter((uid) => !listedUids.has(uid));
   const lookupInput = { deps, projectRoot, orgId, onOutput, signal };
 
-  const attached = mapBounded(
-    list.connectors,
+  const inspectListed = async (
+    connector: RawSlackConnector,
+  ): Promise<SlackConnectorCandidate | string> => {
+    const details = await fetchSlackConnectorDetails({
+      ...lookupInput,
+      connectorId: connector.id,
+      timeoutMs: CONNECT_LOOKUP_TIMEOUT_MS,
+    });
+    if (details.state === "failed") return `${connector.uid}: ${details.message}`;
+    return toCandidate({
+      details: details.details,
+      attached: true,
+      projects: connector.projects,
+      projectId,
+      createdAt: connector.createdAt,
+    });
+  };
+  const inspectNamed = async (
+    uid: string,
+  ): Promise<SlackConnectorCandidate | string | undefined> => {
+    const lookup = await lookupSlackConnector({
+      ...lookupInput,
+      key: uid,
+      timeoutMs: CONNECT_LOOKUP_TIMEOUT_MS,
+    });
+    if (lookup.state === "absent") return undefined;
+    if (lookup.state === "failed") return `${uid}: ${lookup.message}`;
+    const projects = await fetchConnectorProjects({
+      ...lookupInput,
+      connectorId: lookup.details.ref.id,
+    });
+    if (projects.state === "failed") return `${uid}: ${projects.message}`;
+    return toCandidate({
+      details: lookup.details,
+      // The project-scoped list is authoritative; this only absorbs a lagging list.
+      attached: projects.projects.some((project) => project.id === projectId),
+      projects: projects.projects,
+      projectId,
+      createdAt: 0,
+    });
+  };
+  const inspected = await mapWithConcurrency(
+    [
+      ...list.connectors.map((connector) => () => inspectListed(connector)),
+      ...unlisted.map((uid) => () => inspectNamed(uid)),
+    ],
     INSPECTION_CONCURRENCY,
-    async (connector): Promise<SlackConnectorCandidate | string> => {
-      const details = await fetchSlackConnectorDetails({
-        ...lookupInput,
-        connectorId: connector.id,
-        timeoutMs: CONNECT_LOOKUP_TIMEOUT_MS,
-      });
-      if (details.state === "failed") return `${connector.uid}: ${details.message}`;
-      return toCandidate({
-        details: details.details,
-        attached: true,
-        projects: connector.projects,
-        projectId,
-        createdAt: connector.createdAt,
-      });
-    },
+    (inspect) => inspect(),
   );
-  const named = mapBounded(
-    unlisted,
-    INSPECTION_CONCURRENCY,
-    async (uid): Promise<SlackConnectorCandidate | string | undefined> => {
-      const lookup = await lookupSlackConnector({
-        ...lookupInput,
-        key: uid,
-        timeoutMs: CONNECT_LOOKUP_TIMEOUT_MS,
-      });
-      if (lookup.state === "absent") return undefined;
-      if (lookup.state === "failed") return `${uid}: ${lookup.message}`;
-      const projects = await fetchConnectorProjects({
-        ...lookupInput,
-        connectorId: lookup.details.ref.id,
-      });
-      if (projects.state === "failed") return `${uid}: ${projects.message}`;
-      return toCandidate({
-        details: lookup.details,
-        // The project-scoped list is authoritative; this only absorbs a lagging list.
-        attached: projects.projects.some((project) => project.id === projectId),
-        projects: projects.projects,
-        projectId,
-        createdAt: 0,
-      });
-    },
-  );
-  const inspected = (await Promise.all([attached, named])).flat();
   const failure = inspected.find((entry) => typeof entry === "string");
   if (failure !== undefined) return { state: "failed", message: failure };
   const candidates = inspected.filter((entry) => typeof entry === "object");
-  const knownUids = new Map<string, boolean>(unlisted.map((uid) => [uid, false]));
-  for (const candidate of candidates) knownUids.set(candidate.uid, true);
-  return { state: "ok", candidates, knownUids };
+  return { state: "ok", candidates };
+}
+
+/** Rechecks the chosen connector before changing its project access or destinations. */
+export async function refreshSlackCandidate(input: {
+  deps: SlackConnectLifecycleDeps;
+  projectRoot: string;
+  candidate: SlackConnectorCandidate;
+  projectId: string;
+  orgId: string | undefined;
+  onOutput: CommandOutput;
+  signal?: AbortSignal;
+}): Promise<{ state: "ok"; candidate: SlackConnectorCandidate } | LookupFailure> {
+  const { deps, projectRoot, candidate, projectId, orgId, onOutput, signal } = input;
+  const details = await fetchSlackConnectorDetails({
+    deps,
+    projectRoot,
+    connectorId: candidate.id,
+    orgId,
+    onOutput,
+    timeoutMs: CONNECT_LOOKUP_TIMEOUT_MS,
+    signal,
+  });
+  if (details.state === "failed") return details;
+  if (details.details.ref.uid !== candidate.uid) {
+    return { state: "failed", message: `The connector ${candidate.uid} changed since inspection.` };
+  }
+  const projects = await fetchConnectorProjects({
+    deps,
+    projectRoot,
+    connectorId: candidate.id,
+    orgId,
+    onOutput,
+    signal,
+  });
+  if (projects.state === "failed") return projects;
+  return {
+    state: "ok",
+    candidate: toCandidate({
+      details: details.details,
+      attached: projects.projects.some((project) => project.id === projectId),
+      projects: projects.projects,
+      projectId,
+      createdAt: candidate.createdAt,
+    }),
+  };
 }
 
 /** Name probes stop here so a long run of taken names fails with a clear error. */
@@ -321,31 +342,26 @@ const MAX_CONNECTOR_NAME_PROBES = 20;
  * Picks the `--name` for a new connector: `slug`, then `slug-2`, `slug-3`,
  * and so on. Connect derives the UID `slack/<name>` from it, and a UID a
  * team connector already uses fails the create, so each name is checked by
- * looking its UID up directly. `knownUids` skips lookups a snapshot already made.
+ * looking its UID up directly.
  */
 export async function findFreeSlackConnectorName(input: {
   deps: Pick<SlackConnectLifecycleDeps, "captureVercel">;
   projectRoot: string;
   orgId: string | undefined;
   slug: string;
-  knownUids?: ReadonlyMap<string, boolean>;
   onOutput: CommandOutput;
   signal?: AbortSignal;
 }): Promise<{ state: "ok"; name: string } | LookupFailure> {
   for (let index = 1; index <= MAX_CONNECTOR_NAME_PROBES; index += 1) {
     const name = index === 1 ? input.slug : `${input.slug}-${index}`;
     const uid = `slack/${name}`;
-    let exists = input.knownUids?.get(uid);
-    if (exists === undefined) {
-      const lookup = await lookupSlackConnector({
-        ...input,
-        key: uid,
-        timeoutMs: CONNECT_LOOKUP_TIMEOUT_MS,
-      });
-      if (lookup.state === "failed") return lookup;
-      exists = lookup.state === "found";
-    }
-    if (!exists) return { state: "ok", name };
+    const lookup = await lookupSlackConnector({
+      ...input,
+      key: uid,
+      timeoutMs: CONNECT_LOOKUP_TIMEOUT_MS,
+    });
+    if (lookup.state === "failed") return lookup;
+    if (lookup.state === "absent") return { state: "ok", name };
   }
   return {
     state: "failed",
@@ -357,64 +373,53 @@ export async function findFreeSlackConnectorName(input: {
 export type SlackRoutingResult = { state: "configured" } | { state: "attach-failed" };
 
 /**
- * Applies the planned routing mutation. Never detaches: attach is additive
- * and idempotent, and the trigger-destinations replacement keeps the
- * project's token access and every other project's entries intact.
+ * Applies the planned routing mutation. Never detaches: attach only adds
+ * token access, and the trigger-destinations replacement keeps the project's
+ * token access and every other project's entries intact.
  */
 export async function applySlackRouting(input: {
   deps: SlackConnectLifecycleDeps;
   projectRoot: string;
   ref: SlackConnectorRef;
-  plan: Extract<SlackRoutingPlan, { kind: "attach" | "replace" }>;
+  plan: Extract<SlackRoutingPlan, { kind: "apply" }>;
   orgId: string | undefined;
   onOutput: CommandOutput;
   signal?: AbortSignal;
 }): Promise<SlackRoutingResult> {
   const { deps, projectRoot, ref, plan, orgId, onOutput, signal } = input;
-  switch (plan.kind) {
-    case "attach": {
-      const args = [
-        "connect",
-        "attach",
-        ref.uid,
-        "--triggers",
-        "--trigger-path",
-        SLACK_CHANNEL_DEFAULT_ROUTE,
-        "--yes",
-      ];
-      if (orgId !== undefined) args.push("--scope", orgId);
-      const attached = await deps.runVercel(args, {
-        cwd: projectRoot,
-        onOutput,
-        nonInteractive: true,
-        timeoutMs: CONNECT_MUTATION_TIMEOUT_MS,
-        signal,
-      });
-      return attached ? { state: "configured" } : { state: "attach-failed" };
-    }
-    case "replace": {
-      const args = connectApiArgs(`${connectorPath(ref.id)}/trigger-destinations`, orgId, {}, [
-        "--method",
-        "PATCH",
-        "--input",
-        "-",
-      ]);
-      const result = normalizeVercelApiResult(
-        await deps.captureVercel(args, {
-          cwd: projectRoot,
-          onOutput,
-          stdin: JSON.stringify({ destinations: plan.destinations }),
-          timeoutMs: CONNECT_MUTATION_TIMEOUT_MS,
-          signal,
-        }),
-      );
-      return result.ok ? { state: "configured" } : { state: "attach-failed" };
-    }
+  if (plan.attach) {
+    const args = ["connect", "attach", ref.uid, "--yes"];
+    if (orgId !== undefined) args.push("--scope", orgId);
+    const attached = await deps.runVercel(args, {
+      cwd: projectRoot,
+      onOutput,
+      nonInteractive: true,
+      timeoutMs: CONNECT_MUTATION_TIMEOUT_MS,
+      signal,
+    });
+    if (!attached) return { state: "attach-failed" };
   }
+  if (plan.destinations === undefined) return { state: "configured" };
+  const args = connectApiArgs(`${connectorPath(ref.id)}/trigger-destinations`, orgId, {}, [
+    "--method",
+    "PATCH",
+    "--input",
+    "-",
+  ]);
+  const result = normalizeVercelApiResult(
+    await deps.captureVercel(args, {
+      cwd: projectRoot,
+      onOutput,
+      stdin: JSON.stringify({ destinations: plan.destinations }),
+      timeoutMs: CONNECT_MUTATION_TIMEOUT_MS,
+      signal,
+    }),
+  );
+  return result.ok ? { state: "configured" } : { state: "attach-failed" };
 }
 
 type SlackWorkspaceLookup =
-  | { state: "connected"; workspace: SlackWorkspaceConnection; details: SlackConnectorDetails }
+  | { state: "connected"; workspace: SlackWorkspaceConnection }
   | { state: "pending" }
   | { state: "failed"; message: string };
 
@@ -489,7 +494,7 @@ export async function fetchSlackWorkspace(input: {
   if (lookup.state === "failed") return lookup;
   return lookup.details.workspace === undefined
     ? { state: "pending" }
-    : { state: "connected", workspace: lookup.details.workspace, details: lookup.details };
+    : { state: "connected", workspace: lookup.details.workspace };
 }
 
 async function cleanupConnectorUid(
