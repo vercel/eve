@@ -9,7 +9,12 @@ import { fail } from "#harness/session-machine/transitions.js";
 import { readTurnState, writeTurnState } from "#harness/session-machine/state.js";
 import type { StepCoordinates } from "#harness/session-machine/view.js";
 import type { Step } from "#harness/step/context.js";
-import type { HarnessSessionBase, HarnessToolLookup, StepInput, StepResult } from "#harness/types.js";
+import type {
+  HarnessSessionBase,
+  HarnessToolLookup,
+  StepInput,
+  StepResult,
+} from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { InputRequest } from "#shared/input.js";
 import { renderPendingApprovalsInstruction } from "./approval-prompt.js";

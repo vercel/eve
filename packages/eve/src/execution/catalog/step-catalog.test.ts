@@ -5,17 +5,22 @@ import { TASK_CANCEL_TOOL_NAME, TASK_WAIT_TOOL_NAME } from "#protocol/task-tools
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import { isAuthorizationSignal, PendingAuthorizationResultKey } from "#harness/authorization.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import { ContextContainer } from "#context/container.js";
 import {
+  catalogBundle,
   catalogContext,
   connectionTool,
   fakeConnection,
   inlineTool,
   subagentTool,
+  toolMap,
   workflowTool,
 } from "#internal/testing/catalog-fixtures.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 
-import type { StepCatalog } from "./step-catalog.js";
+import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+
+import { buildStepCatalog, type StepCatalog } from "./step-catalog.js";
 
 const CHILD = { rootSessionId: "root-session" };
 
@@ -35,6 +40,64 @@ describe("buildStepCatalog", () => {
 
     expect(names(catalog.advertised)).toEqual(["add", SEARCH_TOOL_NAME, EXECUTE_TOOL_NAME]);
     expect(names(catalog.deferred)).toEqual(["refund_invoice"]);
+  });
+
+  describe("which catalog tools the agent gets", () => {
+    /** The tool list of an agent that declares one dynamic resolver of `kind`. */
+    function advertisedWithResolver(
+      kind: "dynamicConnectionResolvers" | "dynamicSkillResolvers" | "dynamicToolResolvers",
+    ) {
+      const bundle = catalogBundle();
+      const ctx = new ContextContainer();
+      ctx.set(BundleKey, { ...bundle, resolvedAgent: { ...bundle.resolvedAgent, [kind]: [{}] } });
+      return names(
+        buildStepCatalog({ agentTools: toolMap(), ctx, endsTurn: true, session: {} }).advertised,
+      );
+    }
+
+    it("gives an agent with nothing to find or load neither tool", () => {
+      const { catalog } = catalogContext({ tools: [inlineTool("add")] });
+
+      expect(names(catalog.advertised)).toEqual(["add"]);
+    });
+
+    it("gives an agent with only listed skills an execute that loads them and never mentions search", async () => {
+      const { catalog } = catalogContext({ skills: [{ name: "house-rules" }] });
+      const execute = catalog.advertised.get(EXECUTE_TOOL_NAME)!;
+
+      expect(names(catalog.advertised)).toEqual([EXECUTE_TOOL_NAME]);
+      expect(execute.description).toBe(
+        "Load one of your listed skills by name with `skill`, then follow the instructions it returns.",
+      );
+      expect(await validateExecute(catalog, { skill: "house-rules" })).toEqual({
+        value: { skill: "house-rules" },
+      });
+      const unknown = JSON.stringify(await validateExecute(catalog, { skill: "house_rules" }));
+      expect(unknown).toContain('No skill named \\"house_rules\\"');
+      expect(unknown).not.toContain(SEARCH_TOOL_NAME);
+    });
+
+    it.each([
+      ["a deferred tool", { tools: [inlineTool("refund_invoice", { deferred: true })] }],
+      ["a deferred agent", { tools: [subagentTool("researcher", { deferred: true })] }],
+      ["a deferred skill", { skills: [{ deferred: true, name: "pdf-forms" }] }],
+      ["a connection", { connections: [fakeConnection({ name: "linear", tools: [] })] }],
+      ["a dynamic subagent resolver", { dynamicSubagents: ["helper"] }],
+    ])("gives an agent with %s both tools", (_, declared) => {
+      // A subagent also brings the task tools; the catalog tools come last.
+      expect(names(catalogContext(declared).catalog.advertised).slice(-2)).toEqual([
+        SEARCH_TOOL_NAME,
+        EXECUTE_TOOL_NAME,
+      ]);
+    });
+
+    it.each([
+      "dynamicToolResolvers",
+      "dynamicSkillResolvers",
+      "dynamicConnectionResolvers",
+    ] as const)("gives an agent with %s both tools, whatever they resolve", (kind) => {
+      expect(advertisedWithResolver(kind)).toEqual([SEARCH_TOOL_NAME, EXECUTE_TOOL_NAME]);
+    });
   });
 
   it("hides root-only entries, direct or deferred, from delegated sessions", async () => {

@@ -68,9 +68,15 @@ export function resolveApprovalOutcome(response: InputResponse | undefined): {
   };
 }
 
-/** What the model reads when a call's tool went away before the call could run. */
-export function unavailableToolMessage(toolName: string): string {
-  return `The tool "${toolName}" is no longer available, so the call didn't run. If the task still needs it, find an available tool with ${SEARCH_TOOL_NAME} and make a new call.`;
+/**
+ * What the model reads when a call's tool went away before the call could run.
+ * `searchable` says whether the agent has `eve__search` to find another.
+ */
+export function unavailableToolMessage(toolName: string, searchable: boolean): string {
+  const next = searchable
+    ? `find an available tool with ${SEARCH_TOOL_NAME} and make a new call`
+    : "make a new call with an available tool";
+  return `The tool "${toolName}" is no longer available, so the call didn't run. If the task still needs it, ${next}.`;
 }
 
 /**

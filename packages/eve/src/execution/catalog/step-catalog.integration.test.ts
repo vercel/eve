@@ -657,29 +657,25 @@ describe("step catalog in the harness (real AI SDK)", () => {
     );
   });
 
-  it("gives an agent with an empty catalog both tools and no listing", async () => {
+  it("gives an agent with only listed skills execute to load them, no search, and no listing", async () => {
     const ctx = createSessionContext();
     ctx.set(BundleKey, catalogBundle({ skills: [{ name: "house-rules" }] }));
     const driver = createDriver(ctx, toolMap(inlineTool("add")));
     driver.reply(
-      calls(call("search-empty", SEARCH_TOOL_NAME, { query: "refund" })),
+      calls(call("load-rules", EXECUTE_TOOL_NAME, { skill: "house-rules" })),
       calls(call("add", "add", {})),
-      text("Nothing else is available."),
+      text("Done, following the house rules."),
     );
 
-    await driver.drive({ message: "Alice asks what else the desk can do." });
+    await driver.drive({ message: "Alice asks for a sum, following the house rules." });
 
     const requests = driver.requests();
     expect(requests).toHaveLength(3);
     for (const request of requests) {
-      expect(request.tools?.map((tool) => tool.name)).toEqual([
-        "add",
-        SEARCH_TOOL_NAME,
-        EXECUTE_TOOL_NAME,
-      ]);
+      expect(request.tools?.map((tool) => tool.name)).toEqual(["add", EXECUTE_TOOL_NAME]);
       expect(catalogMessages(request)).toEqual([]);
     }
-    expect(toolResult(requests[1]!, "search-empty")).toEqual({ results: [] });
+    expect(toolResult(requests[1]!, "load-rules")).toBe("# house-rules");
   });
 
   it("validates a connection tool's input before asking anyone to approve the call", async () => {
@@ -696,7 +692,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
       ],
     });
     ctx.set(ConnectionRegistryKey, connectionRegistry([crm]));
-    ctx.set(BundleKey, catalogBundle());
+    ctx.set(BundleKey, catalogBundle({ connections: [crm.definition] }));
     const driver = createDriver(ctx, toolMap(inlineTool("add")));
     driver.reply(
       calls(

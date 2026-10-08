@@ -1,7 +1,7 @@
 ---
 issue: TBD
 status: proposed
-last_updated: "2026-10-07"
+last_updated: "2026-10-08"
 ---
 
 # Deferred tools and skills
@@ -58,9 +58,12 @@ eve__execute(
   - a connection tool calls its connection;
   - `eve__execute({ skill })` loads a skill, deferred or not, with today's
     `load-skill` action.
-- **Always registered.** Both tools exist in every session of every agent.
-  So entries, static or dynamic, can join or leave the catalog at any step
-  without changing the `tools` array.
+- **Registered from declarations.** An agent gets both tools when it declares
+  anything they could reach: a deferred entry, a connection, or a dynamic
+  resolver. With only skills it gets `eve__execute` alone; with none of these,
+  neither. The rule reads what the agent declares, never what its resolvers
+  return, so entries, static or dynamic, can join or leave the catalog at any
+  step without changing the `tools` array.
 - **Cache stable.** Catalog entries never enter the `tools` array, the system
   prompt, or a tool description. They are announced through one append-only
   listing, under the invariants of
@@ -619,14 +622,28 @@ today.
 
 **Both tools**
 
-- **Always present.** Both exist in every session of every agent, root and
-  child, whether or not the catalog has entries. This is what lets dynamic
-  entries join the catalog on any step: the `tools` array never has to change
-  to reach them. A rule like "present while the catalog is non-empty" would
-  flip the array the first time a resolver returns a deferred entry.
-- **Cost of an empty catalog.** Two fixed definitions, about the size of
-  today's two connection tools, cached with the rest of the prefix. No
-  listing is appended, and `eve__search` returns `{ results: [] }`.
+- **Present from what the agent declares.** Each agent, root or subagent,
+  decides from its own declarations, once per deployment:
+  - `eve__search` with any deferred tool, agent, or skill, any connection, or
+    any dynamic resolver for tools, skills, subagents, or connections, since a
+    resolver may add deferred entries or connections at runtime;
+  - `eve__execute` with `eve__search`, or alone when the agent has skills,
+    because skills load only through it. Alone, it takes only `skill`, and no
+    model-facing text mentions `eve__search`, deferred tools, or connections;
+  - neither otherwise, so such an agent's tool list is `main`'s minus
+    `load_skill`.
+
+  A rule like "present while the catalog is non-empty" would flip the array
+  the first time a resolver returns a deferred entry; reading declarations
+  keeps it fixed for the deployment, so parked approvals and restored steps
+  see the same tools.
+
+- **Why not always.** The first design registered both tools for every
+  agent. A pre-merge audit measured about 290 extra tokens per request (net
+  of the removed `load_skill`) for agents with nothing to find, where
+  `eve__search` always returned `{ results: [] }` and `eve__execute`
+  described nothing the agent had. gpt-6-sol also serialized parallel tool
+  calls whenever the two tools were present.
 - **One reserved namespace.** Every tool eve adds at runtime is named
   `eve__<name>`: `eve__search`, `eve__execute`, `eve__task_wait`,
   `eve__task_cancel`, and `eve__reply`. Nothing authored or dynamic may be
@@ -766,8 +783,9 @@ Connections, whose tools are named <connection>__<tool>; search one connection's
 
 1. **Fixed tools.** The `tools` array is identical on every step of a
    session: same names, descriptions, schemas, and order. Catalog changes,
-   static or dynamic, never touch it, because `eve__search` and `eve__execute` are
-   always present.
+   static or dynamic, never touch it, because whether `eve__search` and
+   `eve__execute` are present follows from what the agent declares, never from
+   what its resolvers return.
 2. **No session-specific text** in the system prompt or any tool description.
 3. **Append-only history.** Listing changes only append messages, and earlier
    messages are never rewritten.
@@ -939,8 +957,8 @@ Everything in this section lands in [3/3].
     large count.
   - Arm 2 beats arm 3 on success.
   - Connection and skill evals don't regress.
-  - Agents with an empty catalog don't regress, now that every agent carries
-    the two tools.
+  - Agents with nothing to find get neither tool, so they behave as on
+    `main`.
   - The model doesn't call `eve__search` for web questions on agents that have
     `web_search`.
   - No cache regression after discovery.
@@ -968,25 +986,25 @@ Everything in this section lands in [3/3].
 
 ## Decisions and alternatives considered
 
-| Decision            | Chosen                                                                                            | Rejected                                                                                                                                                                                                                                                                                                                                               |
-| ------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Tool names          | `eve__search` and `eve__execute`, under the `eve__` namespace eve reserves for every tool it adds | `search` and `execute` unprefixed (reserves two common words authors want, and nothing marks them as eve's); `$search` (`$` isn't legal in tool names for eve or some providers); `_search` (tool names start with a letter, and a leading underscore reads as private); `tool_search` and `tool_execute` (still reserves names outside any namespace) |
-| Search surface      | One `eve__search` over every entry, connections included                                          | Keeping `connection_search` next to it (two places to look, two listings); a separate `skill_search`                                                                                                                                                                                                                                                   |
-| Variants            | A key per variant: `tool` and `skill` now, `code` later                                           | One name space with markers such as `skill:pdf`; a `kind` field the model must echo                                                                                                                                                                                                                                                                    |
-| Presence            | Always, in every session of every agent                                                           | Only while the catalog is non-empty (flips `tools` when a dynamic entry appears); an agent-level flag                                                                                                                                                                                                                                                  |
-| Dynamic entries     | Deferrable, like static ones                                                                      | Static only (rules out per-tenant catalogs)                                                                                                                                                                                                                                                                                                            |
-| Opt-in              | `deferred: true` on tools and skills; `tool: "deferred"` on agents                                | An agent-level list of names; `deferLoading` (eve never loads the definition); pi's `exposure` enum                                                                                                                                                                                                                                                    |
-| Discovery mechanism | Two fixed tools                                                                                   | AI SDK `toolSearch()` or activation (grows `tools`); provider-native search (one provider at a time, partly beta)                                                                                                                                                                                                                                      |
-| Dispatch            | Resolve to an entry, then dispatch it like a direct call                                          | A `defineTool` proxy (can't reach workflow tools or subagents; duplicates approval)                                                                                                                                                                                                                                                                    |
-| Entry names         | One flat name, `__` as the only namespace separator, and connections own their prefix             | `<connection>.<tool>` (a second separator for one owner, and it renames connection tools); dots everywhere, encoded as `__` for providers (deferring would rename a tool); a separate `connection` argument (a two-part key)                                                                                                                           |
-| Owners              | Recorded on each entry as data, added with code mode                                              | Recovered by splitting names at `__` (can't tell an owner from a convention prefix)                                                                                                                                                                                                                                                                    |
-| Dispatch marker     | `eve__execute` returns a marker for workflow and subagent entries; the harness strips it          | Renaming calls in a provider middleware (connection tools can't join the tool set without listing every connection, so they would need a second path)                                                                                                                                                                                                  |
-| Search output       | TypeScript `signature`                                                                            | Raw JSON Schema (larger, and code mode needs the signature anyway)                                                                                                                                                                                                                                                                                     |
-| Protocol shape      | Actions carry the entry's name; only history says `eve__execute`                                  | An outer `eve__execute` action with a nested entry action                                                                                                                                                                                                                                                                                              |
-| Search state        | Stateless; any entry can be executed                                                              | A durable discovered set that execution checks                                                                                                                                                                                                                                                                                                         |
-| Listing             | One append-only listing: the kinds present, capped namespaces, and capped connections             | Nothing (the model can't tell when to search); every deferred name (defeats deferring and grows without bound); counts (churn on dynamic changes)                                                                                                                                                                                                      |
-| Old paths and tests | Deleted with no compatibility layer; old tests deleted, and new tests written fresh in [3/3]      | Aliases or flags for removed tools; porting old tests to the new surface; tests spread across the implementation PRs                                                                                                                                                                                                                                   |
-| Loading skills      | `eve__execute({ skill })` for every skill; `load_skill` is removed                                | Keeping `load_skill` beside `eve__execute` (two ways to load); `load_skill` only for skills that aren't deferred (the model must know which kind it has)                                                                                                                                                                                               |
+| Decision            | Chosen                                                                                                                               | Rejected                                                                                                                                                                                                                                                                                                                                               |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Tool names          | `eve__search` and `eve__execute`, under the `eve__` namespace eve reserves for every tool it adds                                    | `search` and `execute` unprefixed (reserves two common words authors want, and nothing marks them as eve's); `$search` (`$` isn't legal in tool names for eve or some providers); `_search` (tool names start with a letter, and a leading underscore reads as private); `tool_search` and `tool_execute` (still reserves names outside any namespace) |
+| Search surface      | One `eve__search` over every entry, connections included                                                                             | Keeping `connection_search` next to it (two places to look, two listings); a separate `skill_search`                                                                                                                                                                                                                                                   |
+| Variants            | A key per variant: `tool` and `skill` now, `code` later                                                                              | One name space with markers such as `skill:pdf`; a `kind` field the model must echo                                                                                                                                                                                                                                                                    |
+| Presence            | From what the agent declares: both with a deferred entry, a connection, or a dynamic resolver; `eve__execute` alone with only skills | Always (about 290 tokens per request with nothing to find, and serialized parallel calls on gpt-6-sol); only while the catalog is non-empty (flips `tools` when a dynamic entry appears); an agent-level flag                                                                                                                                          |
+| Dynamic entries     | Deferrable, like static ones                                                                                                         | Static only (rules out per-tenant catalogs)                                                                                                                                                                                                                                                                                                            |
+| Opt-in              | `deferred: true` on tools and skills; `tool: "deferred"` on agents                                                                   | An agent-level list of names; `deferLoading` (eve never loads the definition); pi's `exposure` enum                                                                                                                                                                                                                                                    |
+| Discovery mechanism | Two fixed tools                                                                                                                      | AI SDK `toolSearch()` or activation (grows `tools`); provider-native search (one provider at a time, partly beta)                                                                                                                                                                                                                                      |
+| Dispatch            | Resolve to an entry, then dispatch it like a direct call                                                                             | A `defineTool` proxy (can't reach workflow tools or subagents; duplicates approval)                                                                                                                                                                                                                                                                    |
+| Entry names         | One flat name, `__` as the only namespace separator, and connections own their prefix                                                | `<connection>.<tool>` (a second separator for one owner, and it renames connection tools); dots everywhere, encoded as `__` for providers (deferring would rename a tool); a separate `connection` argument (a two-part key)                                                                                                                           |
+| Owners              | Recorded on each entry as data, added with code mode                                                                                 | Recovered by splitting names at `__` (can't tell an owner from a convention prefix)                                                                                                                                                                                                                                                                    |
+| Dispatch marker     | `eve__execute` returns a marker for workflow and subagent entries; the harness strips it                                             | Renaming calls in a provider middleware (connection tools can't join the tool set without listing every connection, so they would need a second path)                                                                                                                                                                                                  |
+| Search output       | TypeScript `signature`                                                                                                               | Raw JSON Schema (larger, and code mode needs the signature anyway)                                                                                                                                                                                                                                                                                     |
+| Protocol shape      | Actions carry the entry's name; only history says `eve__execute`                                                                     | An outer `eve__execute` action with a nested entry action                                                                                                                                                                                                                                                                                              |
+| Search state        | Stateless; any entry can be executed                                                                                                 | A durable discovered set that execution checks                                                                                                                                                                                                                                                                                                         |
+| Listing             | One append-only listing: the kinds present, capped namespaces, and capped connections                                                | Nothing (the model can't tell when to search); every deferred name (defeats deferring and grows without bound); counts (churn on dynamic changes)                                                                                                                                                                                                      |
+| Old paths and tests | Deleted with no compatibility layer; old tests deleted, and new tests written fresh in [3/3]                                         | Aliases or flags for removed tools; porting old tests to the new surface; tests spread across the implementation PRs                                                                                                                                                                                                                                   |
+| Loading skills      | `eve__execute({ skill })` for every skill; `load_skill` is removed                                                                   | Keeping `load_skill` beside `eve__execute` (two ways to load); `load_skill` only for skills that aren't deferred (the model must know which kind it has)                                                                                                                                                                                               |
 
 ## Later: code mode
 

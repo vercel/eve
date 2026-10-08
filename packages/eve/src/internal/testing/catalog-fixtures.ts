@@ -101,6 +101,8 @@ export interface CatalogSkillSource {
 /** The parts of a session bundle the catalog reads: authored skills and dynamic subagent resolvers. */
 export function catalogBundle(
   input: {
+    /** The connections the agent declares. */
+    readonly connections?: readonly ResolvedConnectionDefinition[];
     readonly dynamicSubagents?: readonly string[];
     readonly skills?: readonly CatalogSkillSource[];
   } = {},
@@ -114,6 +116,7 @@ export function catalogBundle(
     nodeId: undefined,
     resolvedAgent: {
       config: { name: "test-agent" },
+      connections: input.connections ?? [],
       skills: (input.skills ?? []).map((skill) => ({
         deferred: skill.deferred,
         description: skill.description ?? `${skill.name} skill`,
@@ -262,7 +265,11 @@ export function catalogContext(
   ctx.set(CallbackBaseUrlKey, "https://agent.example.com");
   ctx.set(
     BundleKey,
-    catalogBundle({ dynamicSubagents: input.dynamicSubagents, skills: input.skills }),
+    catalogBundle({
+      connections: input.connections?.map((connection) => connection.definition),
+      dynamicSubagents: input.dynamicSubagents,
+      skills: input.skills,
+    }),
   );
   if (input.connections !== undefined) {
     ctx.set(ConnectionRegistryKey, connectionRegistry(input.connections));

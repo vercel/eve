@@ -86,12 +86,15 @@ export function unknownSkillMessage(
   name: string,
   skills: ReadonlyMap<string, CatalogSkill>,
   connections: readonly string[],
+  searchable: boolean,
 ): string {
   const suggestions = closestNames(name, [...skills.values()]);
   const hint =
     suggestions.length > 0
       ? ` Closest skills: ${suggestions.join(", ")}.`
-      : ` Find skills with ${SEARCH_TOOL_NAME}.`;
+      : searchable
+        ? ` Find skills with ${SEARCH_TOOL_NAME}.`
+        : "";
   const connection = connections.find(
     (connectionName) => connectionName.toLowerCase() === name.toLowerCase(),
   );

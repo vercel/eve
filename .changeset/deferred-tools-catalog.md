@@ -2,7 +2,7 @@
 "eve": minor
 ---
 
-Every agent now has `eve__search` and `eve__execute`, which reach tools marked `deferred: true`, agents marked `tool: "deferred"`, and every connection tool without growing the model's tool list. They replace `connection_search` and `connection_execute`, and stream events, approvals, hooks, and traces now name each connection tool call `<connection>__<tool>`. `eve__search` never asks the user to sign in: it lists a connection that needs sign-in under the connection's own name, and `eve__execute` on that name, such as `eve__execute({ tool: "linear" })`, asks the user to sign in. `eve__search` takes a required `query`; a query such as `linear__` searches only that connection's tools.
+An agent with deferred entries or connections now has `eve__search` and `eve__execute`, which reach tools marked `deferred: true`, agents marked `tool: "deferred"`, and every connection tool without growing the model's tool list. An agent whose only such entries are skills gets `eve__execute` to load them, and an agent with none gets neither, so its tool list is unchanged apart from the removed `load_skill`. They replace `connection_search` and `connection_execute`, and stream events, approvals, hooks, and traces now name each connection tool call `<connection>__<tool>`. `eve__search` never asks the user to sign in: it lists a connection that needs sign-in under the connection's own name, and `eve__execute` on that name, such as `eve__execute({ tool: "linear" })`, asks the user to sign in. `eve__search` takes a required `query`; a query such as `linear__` searches only that connection's tools.
 
 Breaking changes:
 

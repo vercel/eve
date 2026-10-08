@@ -19,6 +19,7 @@ import {
 } from "#harness/input-request-resolution.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { HarnessToolLookup } from "#harness/types.js";
+import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { createActionPartialEvent, createActionResultEvent } from "#protocol/message.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { toError } from "#shared/errors.js";
@@ -95,7 +96,13 @@ export async function runApprovedCalls(input: {
         // A connection or dynamic tool can go away while its call waits for approval.
         if (definition === undefined || execute === undefined) {
           return {
-            settled: [await settleFailure(callId, toolName, unavailableToolMessage(toolName))],
+            settled: [
+              await settleFailure(
+                callId,
+                toolName,
+                unavailableToolMessage(toolName, input.tools.get(SEARCH_TOOL_NAME) !== undefined),
+              ),
+            ],
             toolResults,
           };
         }

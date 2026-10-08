@@ -15,6 +15,8 @@ import type { ConnectionRegistry } from "#runtime/connections/registry-types.js"
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { type ConnectionClient, defineInteractiveAuthorization } from "#shared/connection-types.js";
 
+import { catalogBundle } from "#internal/testing/catalog-fixtures.js";
+import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { buildStepCatalog } from "./step-catalog.js";
 
 const URL = "https://kennel.example.com/mcp";
@@ -142,6 +144,7 @@ function setup(mode: ServerMode) {
   ctx.set(SessionIdKey, "mcp-sign-in");
   ctx.set(CallbackBaseUrlKey, "https://agent.example.com");
   ctx.set(ConnectionRegistryKey, registry);
+  ctx.set(BundleKey, catalogBundle({ connections: [connection] }));
   const catalog = buildStepCatalog({ agentTools: new Map(), ctx, endsTurn: true, session: {} });
   const options = { messages: [], toolCallId: "call-1" };
 
