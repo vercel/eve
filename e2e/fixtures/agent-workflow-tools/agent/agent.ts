@@ -153,6 +153,7 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
     ["WORKFLOW-APPROVAL-DENIED-START", "gated_deploy", "review-only"],
     ["WORKFLOW-DEPLOY-START", "deploy_service"],
     ["WORKFLOW-CONFIRM-START", "confirm_deploy"],
+    ["WORKFLOW-TWO-QUESTIONS-START", "confirm_deploy", "two-questions"],
     ["WORKFLOW-ESCALATE-START", "escalate_deploy"],
     ["WORKFLOW-HOLD-START", "hold_deploy"],
     ["WORKFLOW-FANOUT-START", "fanout_deploy"],

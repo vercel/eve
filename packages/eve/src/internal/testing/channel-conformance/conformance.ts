@@ -278,7 +278,7 @@ const channelConformance = {
         "pressing Approve names who approved on the approval": TUI_SINGLE_PERSON,
         "pressing an option names who answered on the question": TUI_SINGLE_PERSON,
         "answering a question by text names who answered on the question": TUI_SINGLE_PERSON,
-        "text replies answer two pending questions one at a time, in the order shown":
+        "text with two open relayed questions steers instead of answering either":
           TUI_TYPED_REPLIES,
         "text replies answer two pending approvals one at a time, in the order shown":
           TUI_TYPED_APPROVAL,

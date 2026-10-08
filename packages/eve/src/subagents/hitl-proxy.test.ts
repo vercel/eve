@@ -341,7 +341,7 @@ describe("routeDeliverPayload message resolution", () => {
     ]);
   });
 
-  it("answers the first of several pending questions", () => {
+  it("keeps text for the turn when several relayed questions are open", () => {
     const routed = routeDeliverPayload({
       payload: { message: "production" },
       resolveMessage: true,
@@ -351,10 +351,8 @@ describe("routeDeliverPayload message resolution", () => {
       ]).state,
     });
 
-    expect(routed.forSelf).toBeUndefined();
-    expect(routed.forChildren.map((child) => child.payload.inputResponses)).toEqual([
-      [{ optionId: "2", requestId: "ask-1" }],
-    ]);
+    expect(routed.forSelf).toEqual({ message: "production" });
+    expect(routed.forChildren).toEqual([]);
   });
 
   it("keeps a message for the turn when it doesn't answer the first question", () => {
