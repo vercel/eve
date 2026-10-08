@@ -2,11 +2,16 @@ import { defineEval } from "eve/evals";
 
 import { calledTools, usesCatalog } from "./tool-use";
 
-/** A question about the world goes to `web_search`; `eve__search` only finds the agent's own tools. */
+const WEB_TOOLS = new Set(["web_search", "web_fetch"]);
+
+/**
+ * A question about the world goes to the web tools; `eve__search` only finds the agent's own tools.
+ * Either web tool is a correct route: models answer this with `web_search` or by fetching a release index with `web_fetch`.
+ */
 export default defineEval({
   tags: ["real-model"],
   description:
-    "A question that needs current public information goes to web_search, not eve__search.",
+    "A question that needs current public information goes to web_search or web_fetch, not eve__search.",
 
   async test(t) {
     const turn = await t.send(
@@ -17,9 +22,9 @@ export default defineEval({
     );
 
     turn.expectOk();
-    turn.eventsSatisfy("web_search is called, and the catalog isn't", (events) => {
+    turn.eventsSatisfy("a web tool is called, and the catalog isn't", (events) => {
       const called = calledTools(events);
-      return called.includes("web_search") && !called.some(usesCatalog);
+      return called.some((name) => WEB_TOOLS.has(name)) && !called.some(usesCatalog);
     });
   },
 });
