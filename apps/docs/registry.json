@@ -1671,178 +1671,6 @@
       ]
     },
     {
-      "name": "channel/slack",
-      "type": "registry:item",
-      "title": "Slack",
-      "description": "Connect an eve agent to Slack with Vercel Connect or portable credentials.",
-      "meta": {
-        "eve": {
-          "setup": {
-            "command": "eve",
-            "package": "eve",
-            "bin": "eve",
-            "args": ["integration", "setup", "slack"]
-          },
-          "requires": ">=0.33.0",
-          "docs": "/docs/channels/slack",
-          "implementation": "native"
-        }
-      },
-      "dependencies": ["@vercel/connect@>=0.4.2"]
-    },
-    {
-      "name": "channel/discord",
-      "type": "registry:item",
-      "title": "Discord",
-      "description": "Connect an eve agent to Discord with guided connector and slash-command setup.",
-      "dependencies": ["@vercel/connect@>=0.6.0"],
-      "meta": {
-        "eve": {
-          "setup": {
-            "command": "eve",
-            "package": "eve",
-            "bin": "eve",
-            "args": ["integration", "setup", "discord"]
-          },
-          "requires": ">=0.33.0",
-          "docs": "/docs/channels/discord",
-          "implementation": "native"
-        }
-      }
-    },
-    {
-      "name": "channel/teams",
-      "type": "registry:item",
-      "title": "Microsoft Teams",
-      "description": "Run an eve agent as a managed Microsoft Teams bot, with guided Vercel Connect setup.",
-      "meta": {
-        "eve": {
-          "setup": {
-            "command": "eve",
-            "package": "eve",
-            "bin": "eve",
-            "args": ["integration", "setup", "teams"]
-          },
-          "requires": ">=0.53.0",
-          "docs": "/docs/channels/teams",
-          "implementation": "native"
-        }
-      },
-      "dependencies": ["@vercel/connect@>=2.1.0"],
-      "devDependencies": ["vercel@>=58.5.1"]
-    },
-    {
-      "name": "channel/telegram",
-      "type": "registry:item",
-      "title": "Telegram",
-      "description": "Connect your agent to a Telegram bot for 1:1 and group chats.",
-      "envVars": {
-        "TELEGRAM_BOT_TOKEN": ""
-      },
-      "files": [
-        {
-          "path": "registry/channels/telegram.ts",
-          "type": "registry:file",
-          "target": "agent/channels/telegram.ts"
-        }
-      ],
-      "meta": {
-        "eve": {
-          "docs": "/docs/channels/telegram",
-          "implementation": "native"
-        }
-      }
-    },
-    {
-      "name": "channel/twilio",
-      "type": "registry:item",
-      "title": "Twilio",
-      "description": "Put your agent on a phone number: SMS and speech-transcribed calls.",
-      "envVars": {
-        "TWILIO_ACCOUNT_SID": "",
-        "TWILIO_AUTH_TOKEN": ""
-      },
-      "files": [
-        {
-          "path": "registry/channels/twilio.ts",
-          "type": "registry:file",
-          "target": "agent/channels/twilio.ts"
-        }
-      ],
-      "meta": {
-        "eve": {
-          "docs": "/docs/channels/twilio",
-          "implementation": "native"
-        }
-      }
-    },
-    {
-      "name": "channel/blooio",
-      "type": "registry:item",
-      "title": "Blooio",
-      "description": "Send and receive iMessage, RCS, and SMS through Blooio, with reactions, typing indicators, read receipts, polls, groups, capability checks, and history.",
-      "dependencies": ["eve-channel-blooio"],
-      "envVars": {
-        "BLOOIO_API_KEY": "",
-        "BLOOIO_WEBHOOK_SECRET": ""
-      },
-      "files": [
-        {
-          "path": "registry/channels/blooio.ts",
-          "type": "registry:file",
-          "target": "agent/channels/blooio.ts"
-        }
-      ],
-      "meta": {
-        "eve": {
-          "docs": "/integrations/blooio#configure",
-          "implementation": "native"
-        }
-      }
-    },
-    {
-      "name": "channel/github",
-      "type": "registry:item",
-      "title": "GitHub",
-      "description": "Drive your agent from issues, pull requests, and comments, with guided Connect setup.",
-      "meta": {
-        "eve": {
-          "setup": {
-            "command": "eve",
-            "package": "eve",
-            "bin": "eve",
-            "args": ["integration", "setup", "github"]
-          },
-          "requires": ">=0.33.0",
-          "docs": "/docs/channels/github",
-          "implementation": "native"
-        }
-      },
-      "dependencies": ["@vercel/connect@>=0.6.0"],
-      "devDependencies": ["vercel@>=58.5.1"]
-    },
-    {
-      "name": "channel/linear",
-      "type": "registry:item",
-      "title": "Linear Agent",
-      "description": "Delegate Linear issues and comments through Agent Sessions, with guided Vercel Connect setup.",
-      "meta": {
-        "eve": {
-          "setup": {
-            "command": "eve",
-            "package": "eve",
-            "bin": "eve",
-            "args": ["integration", "setup", "linear"]
-          },
-          "requires": ">=0.33.0",
-          "docs": "/docs/channels/linear",
-          "implementation": "native"
-        }
-      },
-      "dependencies": ["@vercel/connect"],
-      "devDependencies": ["vercel@>=58.5.1"]
-    },
-    {
       "name": "channel/web",
       "type": "registry:item",
       "title": "Web Chat",
@@ -2101,6 +1929,178 @@
           "target": "apps/web/tsconfig.json"
         }
       ]
+    },
+    {
+      "name": "channel/slack",
+      "type": "registry:item",
+      "title": "Slack",
+      "description": "Connect an eve agent to Slack with Vercel Connect or portable credentials.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "setup", "slack"]
+          },
+          "requires": ">=0.33.0",
+          "docs": "/docs/channels/slack",
+          "implementation": "native"
+        }
+      },
+      "dependencies": ["@vercel/connect@>=0.4.2"]
+    },
+    {
+      "name": "channel/discord",
+      "type": "registry:item",
+      "title": "Discord",
+      "description": "Connect an eve agent to Discord with guided connector and slash-command setup.",
+      "dependencies": ["@vercel/connect@>=0.6.0"],
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "setup", "discord"]
+          },
+          "requires": ">=0.33.0",
+          "docs": "/docs/channels/discord",
+          "implementation": "native"
+        }
+      }
+    },
+    {
+      "name": "channel/teams",
+      "type": "registry:item",
+      "title": "Microsoft Teams",
+      "description": "Run an eve agent as a managed Microsoft Teams bot, with guided Vercel Connect setup.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "setup", "teams"]
+          },
+          "requires": ">=0.53.0",
+          "docs": "/docs/channels/teams",
+          "implementation": "native"
+        }
+      },
+      "dependencies": ["@vercel/connect@>=2.1.0"],
+      "devDependencies": ["vercel@>=58.5.1"]
+    },
+    {
+      "name": "channel/telegram",
+      "type": "registry:item",
+      "title": "Telegram",
+      "description": "Connect your agent to a Telegram bot for 1:1 and group chats.",
+      "envVars": {
+        "TELEGRAM_BOT_TOKEN": ""
+      },
+      "files": [
+        {
+          "path": "registry/channels/telegram.ts",
+          "type": "registry:file",
+          "target": "agent/channels/telegram.ts"
+        }
+      ],
+      "meta": {
+        "eve": {
+          "docs": "/docs/channels/telegram",
+          "implementation": "native"
+        }
+      }
+    },
+    {
+      "name": "channel/twilio",
+      "type": "registry:item",
+      "title": "Twilio",
+      "description": "Put your agent on a phone number: SMS and speech-transcribed calls.",
+      "envVars": {
+        "TWILIO_ACCOUNT_SID": "",
+        "TWILIO_AUTH_TOKEN": ""
+      },
+      "files": [
+        {
+          "path": "registry/channels/twilio.ts",
+          "type": "registry:file",
+          "target": "agent/channels/twilio.ts"
+        }
+      ],
+      "meta": {
+        "eve": {
+          "docs": "/docs/channels/twilio",
+          "implementation": "native"
+        }
+      }
+    },
+    {
+      "name": "channel/blooio",
+      "type": "registry:item",
+      "title": "Blooio",
+      "description": "Send and receive iMessage, RCS, and SMS through Blooio, with reactions, typing indicators, read receipts, polls, groups, capability checks, and history.",
+      "dependencies": ["eve-channel-blooio"],
+      "envVars": {
+        "BLOOIO_API_KEY": "",
+        "BLOOIO_WEBHOOK_SECRET": ""
+      },
+      "files": [
+        {
+          "path": "registry/channels/blooio.ts",
+          "type": "registry:file",
+          "target": "agent/channels/blooio.ts"
+        }
+      ],
+      "meta": {
+        "eve": {
+          "docs": "/integrations/blooio#configure",
+          "implementation": "native"
+        }
+      }
+    },
+    {
+      "name": "channel/github",
+      "type": "registry:item",
+      "title": "GitHub",
+      "description": "Drive your agent from issues, pull requests, and comments, with guided Connect setup.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "setup", "github"]
+          },
+          "requires": ">=0.33.0",
+          "docs": "/docs/channels/github",
+          "implementation": "native"
+        }
+      },
+      "dependencies": ["@vercel/connect@>=0.6.0"],
+      "devDependencies": ["vercel@>=58.5.1"]
+    },
+    {
+      "name": "channel/linear",
+      "type": "registry:item",
+      "title": "Linear Agent",
+      "description": "Delegate Linear issues and comments through Agent Sessions, with guided Vercel Connect setup.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "setup", "linear"]
+          },
+          "requires": ">=0.33.0",
+          "docs": "/docs/channels/linear",
+          "implementation": "native"
+        }
+      },
+      "dependencies": ["@vercel/connect"],
+      "devDependencies": ["vercel@>=58.5.1"]
     },
     {
       "name": "channel/chat-sdk-gchat",
