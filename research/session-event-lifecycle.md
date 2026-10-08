@@ -850,7 +850,7 @@ SessionView @ position
 └─ usage          totals by owner and kind
 ```
 
-- **The tables are public, read-only, and typed,** one per family. Fields are what the facts introduce and settle, plus status, and they follow the same stability rules as the wire.
+- **The tables are public, read-only, and typed,** one per family. Fields are what the facts introduce and settle, plus status and the position of the introducing fact, and they follow the same stability rules as the wire. That position lets participant re-runs receive the original event exactly.
   - Bookkeeping stays out of the public types: indexes, pruning marks, and the client-only overlay that marks an approval answered before the server confirms.
   - The projection stops hiding behind the `conversationProjection` symbol.
 - **Selectors over the fold.** We have a set of convenience functions for working with the folded state. This includes fallbacks for open kinds and common questions. The starting set comes from what the TUI and the web chat read today:

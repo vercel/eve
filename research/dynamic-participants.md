@@ -113,7 +113,24 @@ The pattern is as old as dynamic model selection (#581), which had to choose the
 
 ### What that costs
 
-- **The names promise stream facts that aren't there.** A resolver's `step.started` fires before the model call that the published `step.started` describes, and replays carry approximate data.
+- **The names promise stream facts that aren't there.** Model selection shows it most clearly, and the proposal changes what the resolver receives rather than when it runs:
+
+  ```text
+  today     build step.started {modelId: "dynamic"}   unpublished, no meta
+            → the resolver picks the model
+            → publish step.started {modelId: chosen}  a different event
+            → provider call
+
+  proposed  commit model.requested {runId, owner}     published at position N
+            → the resolver receives that exact fact
+            → commit model.started {runId, modelId}   the decision lands on the next fact
+            → provider call
+  ```
+
+  - **Today the resolver's input depends on its own answer,** so `modelId` is a placeholder and the event can't be published first. `model.requested` holds nothing the resolver decides, so it's written first and handed over as is.
+  - **Replays change the same way.** Restores, the refresh after a redeploy, and parked steps pass the real `session.started`, `turn.started`, or `model.requested`, rebuilt exactly from the fold with their positions, instead of approximations from the v26 builders.
+  - **Two things do move earlier.** Readers see a model call coming before the model is chosen, which lets clients show "preparing" and evals time resolution. Hooks see `model.requested` before participants run, since participants run after a commit's observers; hooks never saw the synthetic event, so they lose nothing.
+
 - **Some keys name events that are going away.** v27 removes `step.started`, `turn.completed`, and the `compaction.*` events, so those keys would name facts that no longer exist.
 - **Dispatch is scattered:**
   - six type-filtered dispatch calls, run for every published event, deltas included;
