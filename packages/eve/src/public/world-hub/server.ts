@@ -160,17 +160,25 @@ export function createWorldHubDispatcher(options: WorldHubDispatcherOptions): Wo
           const response = await (options.fetch ?? fetch)(url, {
             method: "POST",
             body,
-            headers: {
-              ...opts.headers,
-              ...signWorldHubRequest(options.secret, "POST", path, body),
-              "content-type": "application/json",
-              "x-vqs-queue-name": queueName,
-              "x-vqs-message-id": messageId,
-              "x-vqs-message-attempt": String(attempt),
-              ...(options.bypassSecret
-                ? { "x-vercel-protection-bypass": options.bypassSecret }
-                : {}),
-            },
+            headers: signWorldHubRequest(
+              options.secret,
+              "POST",
+              path,
+              body,
+              undefined,
+              new Headers({
+                ...opts.headers,
+                "x-world-hub-deployment-id": opts.deploymentId,
+                "x-world-hub-deployment-url": url.origin,
+                "content-type": "application/json",
+                "x-vqs-queue-name": queueName,
+                "x-vqs-message-id": messageId,
+                "x-vqs-message-attempt": String(attempt),
+                ...(options.bypassSecret
+                  ? { "x-vercel-protection-bypass": options.bypassSecret }
+                  : {}),
+              }),
+            ),
             signal: AbortSignal.timeout(300_000),
           });
           if (response.ok) {
