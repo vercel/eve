@@ -12,7 +12,6 @@ import {
   humanInputContext,
   runApprovedLocalCalls,
 } from "#harness/hitl/index.js";
-import { stepStartedForResolvers } from "#harness/session-machine/resolver-events.js";
 import { startStep } from "#harness/session-machine/transitions.js";
 import { activeTurnId } from "#harness/session-machine/view.js";
 import { failBoundaryEvent, failModelSelection, type Step } from "#harness/step/context.js";
@@ -182,17 +181,12 @@ async function selectModel(
 ): Promise<{ readonly model: LanguageModel } | { readonly failed: StepResult }> {
   const { config, ctx } = step;
   try {
-    if (ctx !== undefined && config.dispatchDynamicModelEvent !== undefined) {
+    if (config.participants !== undefined) {
       const position = step.position();
-      await config.dispatchDynamicModelEvent({
-        ctx,
-        event: stepStartedForResolvers({
-          modelId: step.session.agent.modelReference?.id ?? "dynamic",
-          sequence: position.sequence,
-          stepIndex: position.stepIndex,
-          turnId: activeTurnId(position),
-        }),
+      await config.participants.selectModel({
+        at: { ...position, turnId: activeTurnId(position) },
         messages: validateHarnessModelMessages(step.projectHistory(withClientContext(prompt))),
+        modelId: step.session.agent.modelReference?.id ?? "dynamic",
       });
     }
     const resolved = await resolveEffectiveRuntimeModel({ config, ctx, session: step.session });

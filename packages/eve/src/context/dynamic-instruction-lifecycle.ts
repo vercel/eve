@@ -1,10 +1,9 @@
 import type { ModelMessage, SystemModelMessage } from "ai";
 
-import { ALLOWED_DYNAMIC_INSTRUCTION_EVENTS } from "#dynamic/definition.js";
+import type { DynamicScopeEvent } from "#dynamic/definition.js";
 import { isBrandedInstructionsEntry } from "#shared/instructions-definition.js";
 import type { InstructionsDefinition } from "#public/definitions/instructions.js";
 import { normalizeInstructionsDefinition } from "#internal/authored-definition/core.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { ResolvedDynamicInstructionsResolver } from "#runtime/types.js";
 import { createLogger } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -40,17 +39,6 @@ function lowerInstruction(definition: InstructionsDefinition): LoweredInstructio
     : { role: "user", message: createFrameworkUserMessage("context.instruction", content) };
 }
 
-function durableKeyForEvent(eventType: string): ContextKey<SlugMessageMap> | undefined {
-  switch (eventType) {
-    case "session.started":
-      return SessionDynamicInstructionsKey;
-    case "turn.started":
-      return TurnDynamicInstructionsKey;
-    default:
-      return undefined;
-  }
-}
-
 /**
  * Builds the flattened system messages from session + turn durable keys.
  * Session-scoped entries appear first.
@@ -81,22 +69,20 @@ export function drainDynamicInstructionUserMessages(ctx: AlsContext): UserModelM
 }
 
 /**
- * Dispatches a stream event to dynamic instruction resolvers.
+ * Runs the dynamic instruction resolvers for a session or a turn.
  *
  * Each resolver's output replaces its own slot (keyed by slug) in the
  * scope-appropriate durable key (session or turn). The tool-loop calls
  * {@link buildDynamicInstructionMessages} to assemble the flattened
  * result for the model call.
  */
-export async function dispatchDynamicInstructionEvent(input: {
+export async function resolveDynamicInstructions(input: {
   readonly ctx: ContextContainer;
   readonly resolvers: readonly ResolvedDynamicInstructionsResolver[];
-  readonly event: UnstampedMessageStreamEvent;
+  readonly event: Exclude<DynamicScopeEvent, { type: "step.started" }>;
   readonly messages: readonly ModelMessage[];
 }): Promise<void> {
   const { ctx, resolvers, event, messages } = input;
-
-  if (!ALLOWED_DYNAMIC_INSTRUCTION_EVENTS.has(event.type)) return;
 
   if (event.type === "turn.started") {
     // A new turn owns a fresh turn-scoped map. Invalid returns and exceptions
@@ -107,8 +93,8 @@ export async function dispatchDynamicInstructionEvent(input: {
   const matching = resolvers.filter((r) => r.eventNames.includes(event.type));
   if (matching.length === 0) return;
 
-  const durableKey = durableKeyForEvent(event.type);
-  if (durableKey === undefined) return;
+  const durableKey: ContextKey<SlugMessageMap> =
+    event.type === "session.started" ? SessionDynamicInstructionsKey : TurnDynamicInstructionsKey;
 
   const resolveMessages = ctx.get(DynamicInstructionResolveMessagesKey) ?? messages;
   const pendingUserMessages = ctx.get(PendingDynamicInstructionUserMessagesKey) ?? [];

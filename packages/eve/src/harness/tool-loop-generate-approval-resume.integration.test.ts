@@ -10,7 +10,7 @@ import type { InstrumentationAttemptScope } from "#instrumentation/lifecycle.js"
 import { describe, expect, it, vi } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import {
-  dispatchDynamicToolEvent,
+  resolveDynamicTools,
   preparePersistedStepDynamicToolMetadata,
 } from "#context/dynamic-tool-lifecycle.js";
 import type { OldSourceOffsetDynamicToolMetadata } from "#context/dynamic-tool-metadata.js";
@@ -27,7 +27,9 @@ import type { InputRequest } from "#shared/input.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import { createToolLoopHarness as createHarness } from "#harness/tool-loop.js";
 import { enterSessionProjection } from "#harness/session-machine/current.js";
-import type { StepFn } from "#harness/types.js";
+import type { StepFn, StepParticipants } from "#harness/types.js";
+import { createStepStartedEvent } from "#protocol/message.js";
+import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
 import {
   foldingHandler,
   grantedKeys,
@@ -265,10 +267,10 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
         },
       ]);
       const staticExecute = vi.fn(async () => "static");
-      const resolveStepDynamicTools = vi.fn(async () => {});
+      const restoreStep = vi.fn(async () => {});
       const runStep = createToolLoopHarness({
         ...createConfig(createModel(), staticExecute),
-        resolveStepDynamicTools,
+        participants: { restoreStep, selectModel: async () => {} },
       });
 
       const result = await contextStorage.run(ctx, () =>
@@ -281,7 +283,7 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
               },
         ),
       );
-      expect(resolveStepDynamicTools).toHaveBeenCalledOnce();
+      expect(restoreStep).toHaveBeenCalledOnce();
 
       expect(grantedKeys(result.session)).toEqual(new Set(["bash:pwd"]));
       expect(execute).toHaveBeenCalledOnce();
@@ -383,12 +385,18 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
     });
     const config = {
       handleEvent: async (event, messages) => {
-        await dispatchDynamicToolEvent({
-          ctx,
-          event,
-          messages: messages ?? [],
-          resolvers: [resolver],
-        });
+        if (
+          event.type === "session.started" ||
+          event.type === "turn.started" ||
+          event.type === "step.started"
+        ) {
+          await resolveDynamicTools({
+            ctx,
+            event,
+            messages: messages ?? [],
+            resolvers: [resolver],
+          });
+        }
         if (event.type === "step.started") {
           const metadata = ctx.get(StepDynamicToolMetadataKey) ?? [];
           const version = (
@@ -397,8 +405,7 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
           order.push(`step.started:${String(version)}`);
         }
       },
-      resolveStepDynamicTools: (input) =>
-        preparePersistedStepDynamicToolMetadata({ ...input, resolvers: [resolver] }),
+      participants: restoringParticipants(ctx, [resolver]),
       resolveModel: async (): Promise<LanguageModel> => model,
       tools: new Map(),
     } satisfies ToolLoopHarnessConfig;
@@ -500,12 +507,11 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
       } satisfies OldSourceOffsetDynamicToolMetadata,
     ]);
     const execute = vi.fn(async () => "/workspace");
-    const resolveStepDynamicTools = vi.fn((input) =>
-      preparePersistedStepDynamicToolMetadata({ ...input, resolvers: [] }),
-    );
+    const participants = restoringParticipants(ctx, []);
+    const restoreStep = vi.spyOn(participants, "restoreStep");
     const runStep = createToolLoopHarness({
       ...createConfig(createModel(), execute),
-      resolveStepDynamicTools,
+      participants,
     });
 
     await expect(
@@ -521,7 +527,7 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
       ),
     ).resolves.toBeDefined();
 
-    expect(resolveStepDynamicTools).not.toHaveBeenCalled();
+    expect(restoreStep).not.toHaveBeenCalled();
     expect(execute).not.toHaveBeenCalled();
   });
 
@@ -1026,3 +1032,20 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
     });
   });
 });
+
+/** Participants that restore a parked step's tools from `resolvers`, as a session's do. */
+function restoringParticipants(
+  ctx: ContextContainer,
+  resolvers: readonly ResolvedDynamicToolResolver[],
+): StepParticipants {
+  return {
+    selectModel: async () => {},
+    restoreStep: ({ at, messages, modelId }) =>
+      preparePersistedStepDynamicToolMetadata({
+        ctx,
+        event: createStepStartedEvent({ ...at, modelId }),
+        messages,
+        resolvers,
+      }),
+  };
+}

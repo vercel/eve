@@ -3,7 +3,7 @@ import type { LanguageModel } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
+import { resolveDynamicSkills } from "#context/dynamic-skill-lifecycle.js";
 import { SessionDynamicInstructionsKey, StaticModelReferenceKey } from "#context/keys.js";
 import { mockModel, type MockModelRequest } from "#evals/mock-model.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
@@ -89,7 +89,7 @@ describe("model request envelope accounting", () => {
     const ctx = new ContextContainer();
     // Dynamic resolvers read the session's model.
     ctx.set(StaticModelReferenceKey, { id: "task" });
-    await dispatchDynamicSkillEvent({
+    await resolveDynamicSkills({
       ctx,
       event: createSessionStartedEvent(),
       messages: [],

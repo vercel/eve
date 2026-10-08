@@ -38,6 +38,7 @@ import {
 import { normalizeApproval } from "#internal/authored-definition/approval.js";
 import { shouldRebindDynamicCallbacks } from "#internal/dynamic-tool-rebind.js";
 import {
+  assertDynamicResolverEvents,
   assertResolverOnlyDynamicSentinel,
   isDynamicSentinel,
   type DynamicToolEventName,
@@ -99,9 +100,11 @@ type NormalizedToolEntry =
 export function normalizeToolDefinition(value: unknown, message: string): NormalizedToolEntry {
   if (isDynamicSentinel(value)) {
     assertResolverOnlyDynamicSentinel(value, message);
+    const eventNames = Object.keys(value.events) as DynamicToolEventName[];
+    assertDynamicResolverEvents("tool", eventNames, message);
     return {
       kind: "dynamic-tool",
-      eventNames: Object.keys(value.events) as DynamicToolEventName[],
+      eventNames,
       rebindMissingCallbacks: shouldRebindDynamicCallbacks(value),
     };
   }

@@ -2,12 +2,7 @@ import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { LanguageModel, ModelMessage, UserContent } from "ai";
 
 import type { SessionAuthContext, SessionCapabilities } from "#channel/types.js";
-import type { AlsContext } from "#context/container.js";
-import type {
-  RuntimeIdentity,
-  StepStartedStreamEvent,
-  UnstampedMessageStreamEvent,
-} from "#protocol/message.js";
+import type { RuntimeIdentity, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { InputResponse } from "#shared/input.js";
@@ -290,6 +285,33 @@ export type HarnessEmitFn = (
  * every event goes through channel adapter, stream write, hooks,
  * and dynamic tool dispatch in one call.
  */
+/** Where a model call stands: its turn and its step within the turn. */
+export interface StepCoordinates {
+  readonly sequence: number;
+  readonly stepIndex: number;
+  readonly turnId: string;
+}
+
+/** The session's participants, at the moments a step reaches without publishing an event. */
+export interface StepParticipants {
+  /** Chooses the model for the model call about to start, before its `step.started`. */
+  selectModel(input: {
+    readonly at: StepCoordinates;
+    readonly messages: readonly ModelMessage[];
+    readonly modelId: string;
+  }): Promise<void>;
+  /**
+   * Restores the tools a parked step offered, before an approval policy reads them. A parked
+   * step's own turn also gets its connections back.
+   */
+  restoreStep(input: {
+    readonly at: StepCoordinates;
+    readonly messages: readonly ModelMessage[];
+    readonly modelId: string;
+    readonly parked: boolean;
+  }): Promise<void>;
+}
+
 export type HandleEventFn = (
   event: UnstampedMessageStreamEvent,
   messages?: readonly import("ai").ModelMessage[],
@@ -329,22 +351,8 @@ export interface ToolLoopHarnessConfig {
    * a connection's sign-in resumes the turn that asked for it.
    */
   readonly signInCompletions?: readonly AuthorizationChallenge[];
-  /** Restores runtime resources for the originating turn before approval work. */
-  readonly prepareApprovalTurn?: (event: {
-    readonly sequence: number;
-    readonly turnId: string;
-  }) => Promise<void>;
-  /** Resolves persisted step-scoped tools before an approval policy reads them. */
-  readonly resolveStepDynamicTools?: (input: {
-    readonly ctx: AlsContext;
-    readonly event: StepStartedStreamEvent;
-    readonly messages: readonly ModelMessage[];
-  }) => Promise<void>;
-  readonly dispatchDynamicModelEvent?: (input: {
-    readonly ctx: AlsContext;
-    readonly event: UnstampedMessageStreamEvent;
-    readonly messages: readonly ModelMessage[];
-  }) => Promise<void>;
+  /** The session's participants, for the moments a step reaches without publishing an event. */
+  readonly participants?: StepParticipants;
   readonly resolveModel: (reference: RuntimeModelReference) => Promise<LanguageModel>;
   /**
    * Runtime identity metadata attached to the `session.started` event.

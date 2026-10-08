@@ -1,17 +1,12 @@
 import { bindTurnCallerContext } from "#subagents/parent-notification.js";
 import type { HandleEventFn } from "#harness/types.js";
-import { bindDynamicConnections } from "#execution/dynamic-connections.js";
+import { bindSessionParticipants } from "#execution/participants.js";
 import { recoverDynamicConnectionRehydration } from "#execution/dynamic-connection-recovery.js";
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
 import { contextStorage } from "#context/container.js";
 import { runStep } from "#context/run-step.js";
-import { refreshDynamicSessionSubagentsForRuntimeRevision } from "#context/dynamic-subagent-lifecycle.js";
-import {
-  rebindMissingCompiledDynamicToolCallbacks,
-  refreshDynamicSessionToolsForRuntimeRevision,
-} from "#context/dynamic-tool-lifecycle.js";
 import {
   AuthKey,
   ScheduleIdKey,
@@ -23,8 +18,6 @@ import {
   CapabilitiesKey,
   ChannelDeliveryKey,
   HandleEventKey,
-  SessionDynamicSubagentRuntimeRevisionKey,
-  SessionDynamicToolRuntimeRevisionKey,
   StaticModelReferenceKey,
   TurnDeliveryIdsKey,
 } from "#context/keys.js";
@@ -49,10 +42,6 @@ import {
 } from "#harness/session-machine/current.js";
 import { saveTransition, dropClosedRecords, sessionView } from "#harness/session-machine/commit.js";
 import { matchSignIns } from "#harness/session-machine/transitions.js";
-import {
-  sessionStartedForResolvers,
-  turnStartedForResolvers,
-} from "#harness/session-machine/resolver-events.js";
 import { coalesceTurnInputs, validateHarnessModelMessages } from "#harness/messages.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import { attributeAnswers } from "#execution/session/answer-caller.js";
@@ -286,19 +275,20 @@ async function runSessionStepBody(
       ? hookCancellation.signal
       : AbortSignal.any([input.abortSignal, hookCancellation.signal]);
   try {
-    const dynamicConnections = bindDynamicConnections(ctx, bundle.resolvedAgent);
     const effectiveNode = { ...bundle.graph.root, turnAgent: effectiveAgent.turnAgent };
-    let compacted = false;
-    const emitTurnEvent = createTurnEventHandler({
+    const participants = bindSessionParticipants({
       abortSignal,
       bundle,
-      canCancelTurn: input.input?.control === undefined,
-      hookCancellation,
       ctx,
-      dynamicConnections,
       effectiveAgent,
       effectiveNode,
       instrumentation,
+    });
+    let compacted = false;
+    const emitTurnEvent = createTurnEventHandler({
+      canCancelTurn: input.input?.control === undefined,
+      hookCancellation,
+      participants,
       publisher,
     });
     const handleEvent: HandleEventFn = async (event, messages) => {
@@ -412,54 +402,24 @@ async function runSessionStepBody(
       };
     }
 
-    const dynamicSubagentResolvers = bundle.subagentRegistry.dynamicResolvers ?? [];
-    const dynamicToolResolvers = bundle.resolvedAgent.dynamicToolResolvers ?? [];
     const runtimeIdentity = buildRuntimeIdentity(effectiveNode);
     try {
       const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
-      const dynamicRuntimeRevision = deploymentId
-        ? `deployment:${deploymentId}`
-        : await resolveRuntimeCompiledArtifactsVersionedCacheKey(bundle.compiledArtifactsSource);
-      const sessionStarted = initialEmissionState.sessionStarted;
-
       ctx.setVirtualContext(StaticModelReferenceKey, effectiveAgent.turnAgent.model ?? null);
-      if (!sessionStarted) {
-        ctx.set(SessionDynamicSubagentRuntimeRevisionKey, dynamicRuntimeRevision);
-        ctx.set(SessionDynamicToolRuntimeRevisionKey, dynamicRuntimeRevision);
-      } else {
-        const refreshEvent = sessionStartedForResolvers(runtimeIdentity);
-        await Promise.all([
-          refreshDynamicSessionSubagentsForRuntimeRevision({
-            ctx,
-            resolvers: dynamicSubagentResolvers,
-            event: refreshEvent,
-            messages: history.initial.messages,
-            runtimeRevision: dynamicRuntimeRevision,
-          }),
-          contextStorage.run(
-            ctx,
-            async () =>
-              await refreshDynamicSessionToolsForRuntimeRevision({
-                ctx,
-                resolvers: dynamicToolResolvers,
-                event: refreshEvent,
-                messages: history.initial.messages,
-                runtimeRevision: dynamicRuntimeRevision,
-              }),
-          ),
-        ]);
-        if (!startedBetweenTurns) {
-          await rebindMissingCompiledDynamicToolCallbacks({
-            ctx,
-            event: turnStartedForResolvers({
+      await participants.restore({
+        messages: history.initial.messages,
+        runtime: runtimeIdentity,
+        runtimeRevision: deploymentId
+          ? `deployment:${deploymentId}`
+          : await resolveRuntimeCompiledArtifactsVersionedCacheKey(bundle.compiledArtifactsSource),
+        sessionStarted: initialEmissionState.sessionStarted,
+        turn: startedBetweenTurns
+          ? undefined
+          : {
               sequence: initialEmissionState.sequence,
               turnId: activeTurnId(initialEmissionState),
-            }),
-            messages: history.initial.messages,
-            resolvers: dynamicToolResolvers,
-          });
-        }
-      }
+            },
+      });
     } catch (error) {
       await failChannelDeliveries(error);
       throw error;
@@ -491,7 +451,7 @@ async function runSessionStepBody(
         compactOnly: input.input?.control === "compact",
         createRuntime: createWorkflowRuntime,
         handleEvent,
-        prepareApprovalTurn: (event) => dynamicConnections.dispatch(turnStartedForResolvers(event)),
+        participants,
         signInCompletions,
         historyProjector: history.projector,
         historyView: history.prepare(modelSession),
@@ -528,13 +488,14 @@ async function runSessionStepBody(
                 : enrichedSession;
             const connectionState = turnPosition(currentProjection(ctx));
             try {
-              await dynamicConnections.rehydrate(
-                connectionState,
-                runtimeIdentity,
-                isBetweenTurns(currentProjection(ctx))
-                  ? undefined
-                  : { sequence: connectionState.sequence, turnId: activeTurnId(connectionState) },
-              );
+              if (connectionState.sessionStarted) {
+                await participants.rehydrateConnections({
+                  runtime: runtimeIdentity,
+                  turn: isBetweenTurns(currentProjection(ctx))
+                    ? undefined
+                    : { sequence: connectionState.sequence, turnId: activeTurnId(connectionState) },
+                });
+              }
             } catch (error) {
               const recovered = await recoverDynamicConnectionRehydration({
                 emit: handleEvent,
