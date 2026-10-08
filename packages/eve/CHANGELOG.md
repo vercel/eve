@@ -1,5 +1,17 @@
 # eve
 
+## 0.75.1
+
+### Patch Changes
+
+- 6189eea: Context compaction now calls its model the way a step does: it streams the summary, retries transient provider failures with the same policy, and counts the summary call's tokens and cost toward session usage limits. Automatic compaction reports that usage with the turn it ran in. Manual compaction runs between turns, so it counts toward session totals without being added to the next turn's usage.
+- 8c7bb64: Provider options, web search, and prompt caching now read one description of the resolved model. A dynamically selected model gets provider-specific options, such as OpenAI and Anthropic safety identifiers, for the model actually called rather than its catalog id.
+- 30c88ee: Configure 100% trace sampling when eve creates a Vercel project during `eve link`, `eve deploy`, or integration setup, so traces appear in Agent Runs. Existing projects keep their sampling settings, and `eve deploy --no-trace-sampling` still skips configuration.
+- eb06c04: The `/add` picker and `eve registry list` now load the full official registry, so instrumentation items (Braintrust, PostHog, Sentry, and others) appear again instead of being cut off after the first 100 entries.
+- 13059ba: Session stream requests now open the event stream while the tail index lookup is in flight, and the event stream reads its durable source only as fast as the client consumes it instead of buffering the whole history in memory.
+- ee4b14f: Generated Web Chat apps now render `ask_question` prompts with the shadcn `Questionnaire` component from `@shadcn/react`. Pick an option by clicking it or pressing its number, or type your own answer, then submit with Answer or Enter.
+- a4d38b3: Update eve's bundled Workflow SDK packages to the stable 5.2 release family.
+
 ## 0.75.0
 
 ### Minor Changes
