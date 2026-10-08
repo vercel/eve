@@ -36,7 +36,7 @@ export interface SuspendedStep {
   readonly approved?: readonly InputRequest[];
   /** Workflow and agent calls the runtime runs for the step. */
   readonly tasks: readonly RuntimeWorkflowTaskRequest[];
-  /** Who approved each task an approval started, by call id: the task runs as them. */
+  /** Legacy persisted field, retained for readability but ignored during execution. */
   readonly approvers?: Readonly<Record<string, SessionAuthContext>>;
   readonly responseAuthRequiredRequestIds?: readonly string[];
   /** The caller whose turn parked the step; `null` when unauthenticated. */

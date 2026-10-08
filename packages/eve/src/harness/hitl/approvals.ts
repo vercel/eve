@@ -1,4 +1,3 @@
-import type { SessionAuthContext } from "#channel/types.js";
 import type { ModelMessage } from "ai";
 
 import type { getApprovalAuditState } from "#harness/hitl/candidates.js";
@@ -115,11 +114,10 @@ export function parkOnApprovals(
   };
 }
 
-/** Approved workflow and agent calls join the runs their steps wait on, as their approvers. */
+/** Approved workflow and agent calls join the runs their requesting steps wait on. */
 export function dispatch(
   view: SessionView,
   input: {
-    readonly approvers: Readonly<Record<string, SessionAuthContext>>;
     readonly tasks: readonly RuntimeWorkflowTaskRequest[];
   },
 ): Transition {
@@ -128,15 +126,9 @@ export function dispatch(
     const tasks = input.tasks.filter((task) => calls.has(task.callId));
     if (tasks.length === 0) return step;
     const dispatched = withoutApproved(step, new Set(tasks.map((task) => task.callId)));
-    const approvers = { ...step.approvers };
-    for (const { callId } of tasks) {
-      const approver = input.approvers[callId];
-      if (approver !== undefined) approvers[callId] = approver;
-    }
     return {
       ...dispatched,
       tasks: [...step.tasks, ...tasks],
-      ...(Object.keys(approvers).length > 0 && { approvers }),
     };
   });
   return { events: [], turn: { ...view.turn, suspended } };

@@ -118,32 +118,14 @@ export async function runApprovedCalls(input: {
           approvedTools: input.approvedTools,
         });
         if (recheck.denied) {
-          // The policy refused the call it approved earlier, so it doesn't run.
-          await input.publish(
-            createActionResultEvent({
-              ...at,
-              rejected: true,
-              result: {
-                callId,
-                isError: true,
-                kind: "tool-result",
-                output: {
-                  code: "TOOL_EXECUTION_DENIED",
-                  message: recheck.reason ?? TOOL_EXECUTION_DENIED_MESSAGE,
-                  tool: { result: "not_run" },
-                },
-                toolName,
-              },
+          settled.push(
+            await rejectApprovedCall({
+              request,
+              reason: recheck.reason,
+              position: at,
+              publish: input.publish,
             }),
           );
-          settled.push({
-            part: {
-              output: { reason: recheck.reason, type: "execution-denied" },
-              toolCallId: callId,
-              toolName,
-              type: "tool-result",
-            },
-          });
           return { settled, toolResults };
         }
         let output: unknown;
@@ -275,6 +257,45 @@ export async function runApprovedCalls(input: {
   return {
     settled: completed.flatMap((call) => call.settled),
     toolResults: completed.flatMap((call) => call.toolResults),
+  };
+}
+
+/** Records an approved call refused by its final request-policy check. */
+export async function rejectApprovedCall(input: {
+  readonly request: InputRequest;
+  readonly reason?: string;
+  readonly position: {
+    readonly sequence: number;
+    readonly stepIndex: number;
+    readonly turnId: string;
+  };
+  readonly publish: HandleEventFn;
+}): Promise<ApprovedCallResult> {
+  const { callId, toolName } = input.request.action;
+  await input.publish(
+    createActionResultEvent({
+      ...input.position,
+      rejected: true,
+      result: {
+        callId,
+        isError: true,
+        kind: "tool-result",
+        toolName,
+        output: {
+          code: "TOOL_EXECUTION_DENIED",
+          message: input.reason ?? TOOL_EXECUTION_DENIED_MESSAGE,
+          tool: { result: "not_run" },
+        },
+      },
+    }),
+  );
+  return {
+    part: {
+      output: { reason: input.reason, type: "execution-denied" },
+      toolCallId: callId,
+      toolName,
+      type: "tool-result",
+    },
   };
 }
 

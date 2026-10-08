@@ -122,7 +122,7 @@ export interface RuntimeWait {
   readonly callIds: readonly string[];
   readonly tasks: readonly RuntimeWorkflowTaskRequest[];
   readonly taskToolCalls: readonly TaskToolCall[];
-  /** Who approved each task an approval started, by call id. */
+  /** Legacy dispatch field; approval never changes a task's caller. */
   readonly approvers: Readonly<Record<string, SessionAuthContext>>;
 }
 
@@ -138,7 +138,7 @@ export function runtimeWait(state: SessionStateMap | undefined): RuntimeWait | u
   const tasks = waiting.flatMap((entry) => entry.tasks);
   const taskToolCalls = waiting.flatMap((entry) => entry.taskToolCalls);
   return {
-    approvers: Object.assign({}, ...waiting.map((entry) => entry.step.approvers)),
+    approvers: {},
     callIds: [...tasks.map((task) => task.callId), ...taskToolCalls.map((call) => call.callId)],
     event: first.step.event,
     taskToolCalls,
