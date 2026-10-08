@@ -14,7 +14,7 @@ import { buildDynamicSubagentTools } from "#context/dynamic-subagent-lifecycle.j
 import type { ContextReader } from "#context/key.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { startsTasks } from "#execution/tasks/tool-entry-point.js";
-import { isWorkflowTool, withTaskTools } from "#execution/tasks/model-step.js";
+import { withTaskTools } from "#execution/tasks/model-step.js";
 import { runEntryCall } from "#harness/execute-call.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { checkToolCallInput } from "#harness/tool-call-io.js";
@@ -31,6 +31,7 @@ import {
   SKILL_ENTRY_NAME,
   SKILL_TOOL_NAME,
 } from "#protocol/catalog-tools.js";
+import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
@@ -385,14 +386,14 @@ function runResolved(
  * Whether `eve__tool` runs `definition`: a deferred entry, or a listed tool eve
  * runs itself. A model that routes a listed tool through `eve__tool` then gets
  * the same result as a direct call instead of a wasted step; nothing it reads
- * says this works. eve's own tools, and tools a provider or client runs, stay
- * direct-only.
+ * says this works. The tools in eve's reserved namespace, and tools a provider
+ * or client runs, stay direct-only.
  */
 function callableByName(definition: HarnessToolDefinition): boolean {
   return (
     definition.deferred === true ||
-    (definition.frameworkTool !== true &&
-      (definition.execute !== undefined || isWorkflowTool(definition)))
+    (eveNamespaceReservation(definition.name) === undefined &&
+      (definition.execute !== undefined || definition.workflowId !== undefined))
   );
 }
 

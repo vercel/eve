@@ -341,6 +341,9 @@ describe("buildStepCatalog", () => {
         inlineTool("refund_payment", { deferred: true }),
         inlineTool("stripe_list_disputes", { deferred: true }),
         workflowTool("research", "task"),
+        // eve's built-in tools and static agents are marked as framework tools.
+        inlineTool("bash", { frameworkTool: true }),
+        subagentTool("billing_specialist", { frameworkTool: true }),
         {
           ...inlineTool("web_search"),
           behavior: { availability: [], handling: { kind: "provider-tool", provider: "parallel" } },
@@ -349,11 +352,16 @@ describe("buildStepCatalog", () => {
       ],
     });
 
-    it("eve__tool accepts a tool in the model's tool list, with its own input", async () => {
-      expect(await validateTool(catalog, { input: {}, name: "add" })).toEqual({
-        value: { input: {}, name: "add" },
-      });
-    });
+    it.each([
+      ["an authored tool", "add", {}],
+      ["a built-in tool", "bash", {}],
+      ["a static agent", "billing_specialist", { message: "Review Bob's dispute." }],
+    ])(
+      "eve__tool accepts %s in the model's tool list, with its own input",
+      async (_case, name, input) => {
+        expect(await validateTool(catalog, { input, name })).toEqual({ value: { input, name } });
+      },
+    );
 
     it.each([
       [

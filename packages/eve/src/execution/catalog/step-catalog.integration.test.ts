@@ -642,12 +642,18 @@ describe("step catalog in the harness (real AI SDK)", () => {
         }),
         inlineTool("archive_account", { approval: always() }),
         workflowTool("deploy_service"),
+        // eve's built-in tools and static agents are marked as framework tools.
+        inlineTool("bash", { frameworkTool: true }),
+        subagentTool("billing_specialist", { frameworkTool: true }),
         inlineTool("refund_invoice", { deferred: true }),
       ),
     );
 
     driver.reply(
-      calls(call("lookup", CALL_TOOL_NAME, { input: { orderId: "o_1" }, name: "lookup_order" })),
+      calls(
+        call("lookup", CALL_TOOL_NAME, { input: { orderId: "o_1" }, name: "lookup_order" }),
+        call("shell", CALL_TOOL_NAME, { name: "bash" }),
+      ),
       text("Found order o_1."),
     );
     await driver.drive({ message: "Alice asks about order o_1." });
@@ -655,6 +661,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
       input: { orderId: "o_1" },
       ran: "lookup_order",
     });
+    expect(toolResult(driver.requests()[1]!, "shell")).toEqual({ input: {}, ran: "bash" });
     expect(
       driver.events.flatMap((event) =>
         event.type === "actions.requested" ? event.data.actions : [],
@@ -683,14 +690,20 @@ describe("step catalog in the harness (real AI SDK)", () => {
       ran: "archive_account",
     });
 
-    // A listed workflow tool is dispatched after the step, as a direct call is.
+    // A listed workflow tool and static agent are dispatched after the step, as direct calls are.
     driver.reply(
-      calls(call("deploy", CALL_TOOL_NAME, { input: { service: "api" }, name: "deploy_service" })),
+      calls(
+        call("deploy", CALL_TOOL_NAME, { input: { service: "api" }, name: "deploy_service" }),
+        call("delegate", CALL_TOOL_NAME, {
+          input: { message: "Review Bob's dispute." },
+          name: "billing_specialist",
+        }),
+      ),
     );
-    const deploying = await driver.drive({ message: "Alice asks to deploy the api service." });
+    const deploying = await driver.drive({ message: "Alice asks to deploy and review a dispute." });
     expect(
       parkedSteps(deploying.session).flatMap((step) => step.tasks.map((task) => task.toolName)),
-    ).toEqual(["deploy_service"]);
+    ).toEqual(["deploy_service", "billing_specialist"]);
   });
 
   it("names the entry, not eve__tool, when a deferred entry returns a result that isn't JSON", async () => {

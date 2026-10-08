@@ -621,7 +621,8 @@ today.
   as data the model can act on:
   - An unknown name lists the closest tool names.
   - A skill's name says to load it with `eve__skill`.
-  - A direct tool returns `"<name>" is in your tool list; call it directly.`
+  - eve's own catalog and task tools, and tools a provider or client runs,
+    return `"<name>" is in your tool list; call it directly.`
   - Invalid input returns the entry's `signature`.
 - **Sign-in.** A connection's own name is an entry.
   `eve__tool({ name: "linear" })` finishes a pending sign-in or starts one, the
