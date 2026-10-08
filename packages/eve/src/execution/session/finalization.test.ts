@@ -171,7 +171,7 @@ it("attempts every subscription cleanup even when one cancellation fails", async
         caller: undefined,
         cursor: {
           serializedContext: { "eve.connectionEvents": { bindings: { first: {}, second: {} } } },
-          sessionState: sessionWithUnreportedUsage(),
+          sessionState: sessionWithTaskRun(),
         },
         sessionWritable: new WritableStream(),
       },
@@ -181,4 +181,34 @@ it("attempts every subscription cleanup even when one cancellation fails", async
     "first",
     "second",
   ]);
+  expect(terminateChildSessionsStep).toHaveBeenCalledTimes(1);
+});
+
+it("reports the original session failure even when subscription cleanup also fails", async () => {
+  vi.mocked(stopConnectionEventStep).mockRejectedValueOnce(new Error("Connect unavailable"));
+  const error = new Error("Owner failed");
+  const caller = {
+    callId: "delegate",
+    subagentName: "detector",
+    replyTo: { kind: "hook" as const, token: "parent" },
+  };
+  const result = await finalizeSession(
+    { kind: "failed", error },
+    {
+      caller,
+      cursor: {
+        serializedContext: { "eve.connectionEvents": { bindings: { first: {} } } },
+        sessionState: sessionWithTaskRun(),
+      },
+      sessionWritable: new WritableStream(),
+    },
+  );
+  expect(result).toMatchObject({ isError: true });
+  expect(terminateChildSessionsStep).toHaveBeenCalledTimes(1);
+  expect(emitTerminalSessionFailureStep).toHaveBeenCalledWith(
+    expect.objectContaining({ error: expect.objectContaining({ message: "Owner failed" }) }),
+  );
+  expect(notifyTurnCallerStep).toHaveBeenCalledWith(
+    expect.objectContaining({ caller, settled: expect.objectContaining({ isError: true }) }),
+  );
 });

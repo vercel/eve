@@ -1,6 +1,7 @@
 import { principalOf } from "#execution/session/principal.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { SessionIdKey } from "#context/keys.js";
+import { AuthKey, SessionIdKey } from "#context/keys.js";
+import { contextStorage } from "#context/container.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { createAttachSessionFn } from "#channel/session.js";
@@ -137,14 +138,18 @@ export async function dispatchConnectionEventStep(
       ),
     };
     const callbacks = connection.experimental_events!;
-    if ("event" in delivery) await callbacks.onEvent({ ...common, event: delivery.event });
-    else if (delivery.control.type === "gap")
-      await callbacks.onGap?.({
-        ...common,
-        cursor: delivery.control.cursor,
-        truncated: delivery.control.truncated,
-      });
-    else await callbacks.onTerminated?.({ ...common, error: delivery.control.error });
+    // The callback runs as its creator without replacing the last conversational caller.
+    ctx.setVirtualContext(AuthKey, binding.auth);
+    await contextStorage.run(ctx, async () => {
+      if ("event" in delivery) await callbacks.onEvent({ ...common, event: delivery.event });
+      else if (delivery.control.type === "gap")
+        await callbacks.onGap?.({
+          ...common,
+          cursor: delivery.control.cursor,
+          truncated: delivery.control.truncated,
+        });
+      else await callbacks.onTerminated?.({ ...common, error: delivery.control.error });
+    });
     // Bound checkpoint size; durable external effects still use deliveryId as
     // their idempotency key when Connect redelivers beyond this recent window.
     const completed = Object.entries(state.receipts)

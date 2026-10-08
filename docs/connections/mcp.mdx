@@ -262,6 +262,9 @@ Connect owns upstream subscriptions, verification, renewal, and cancellation.
 eve uses the AI SDK to discover the account-specific catalog and create managed
 subscriptions through the Connect adapter. Catalog discovery currently requires
 a Streamable HTTP MCP endpoint. There is no AI SDK event store.
+Event arguments use eve's normal tool-schema validation and defaults. Schemas
+that eve cannot validate locally remain the upstream server's responsibility,
+as with other remote tool inputs.
 
 The receiver authenticates Connect's delivery-purpose OIDC bearer token and
 validates the JSON envelope, then durably queues
@@ -274,6 +277,9 @@ reconciled using the saved request and original idempotency key. Retired session
 receive no replacement, and retired bindings start no new event work.
 
 Gap and termination state is saved before the corresponding callback runs.
+Callbacks run in an eve context scoped to the subscription creator, so authored
+`defineState()` reads and updates persist with the callback step. This scope
+does not replace the session's most recent conversational caller.
 Callbacks run as durable steps and can retry after failure. Exhausting workflow
 step retries can fail the session; monitor failed steps and recover them. Use `deliveryId` as
 an idempotency key for external side effects: a crash after an external write but
@@ -288,3 +294,5 @@ durable cleanup. An unavailable provider or Connect API can delay or fail that
 cleanup; inspect the workflow's failed step before treating the upstream watch
 as stopped. `expiresAt: null` removes the Connect monitoring deadline; it does
 not keep an ended eve session alive.
+Subscription cleanup failures do not prevent child-task termination or hide an
+existing session failure from its waiting caller.

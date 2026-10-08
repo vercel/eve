@@ -4,7 +4,12 @@ import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
 import { createRuntimeAdapterRegistry } from "#runtime/channels/registry.js";
 import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { ContextContainer, contextStorage } from "#context/container.js";
+import { ContextContainer, contextStorage, loadContext } from "#context/container.js";
+import { defineState } from "#public/definitions/state.js";
+import { runPreparedSession, type SessionStart } from "#execution/session/program.js";
+import { SessionExecution } from "#execution/session/turn.js";
+import type { SessionInboxHandle, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
+import { createTestSessionState } from "#internal/testing/session-state.js";
 import { AuthKey, SessionIdKey } from "#context/keys.js";
 import { serializeContext } from "#context/serialize.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
@@ -34,6 +39,9 @@ vi.mock("#compiled/@ai-sdk/mcp/index.js", () => ({ createMCPClient: createClient
 vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
   getCompiledRuntimeAgentBundle: loadBundle,
 }));
+vi.mock("#execution/terminal-session-completion-step.js", () => ({
+  emitTerminalSessionCompletionStep: vi.fn(),
+}));
 let ctx: ContextContainer;
 let actions: ConnectionEventActions;
 let connection: ResolvedConnectionDefinition;
@@ -45,8 +53,16 @@ let callback: ReturnType<typeof vi.fn<(...args: unknown[]) => Promise<void>>>;
 let gap: ReturnType<typeof vi.fn<(...args: unknown[]) => Promise<void>>>;
 let terminated: ReturnType<typeof vi.fn<(...args: unknown[]) => Promise<void>>>;
 let initial: SessionStepState;
+let eventSchema: Record<string, unknown>;
+const callbackState = defineState("events-test.receipts", () => [] as string[]);
 
 beforeEach(async () => {
+  eventSchema = {
+    type: "object",
+    properties: { project: { type: "string" } },
+    required: ["project"],
+    additionalProperties: false,
+  };
   requested = [];
   saved = new Map();
   callback = vi.fn(async () => {});
@@ -134,12 +150,7 @@ beforeEach(async () => {
           {
             name: `${config.transport.headers.account}.issue.created`,
             delivery: ["webhook"],
-            inputSchema: {
-              type: "object",
-              properties: { project: { type: "string" } },
-              required: ["project"],
-              additionalProperties: false,
-            },
+            inputSchema: eventSchema,
           },
         ],
       }),
@@ -159,8 +170,81 @@ beforeEach(async () => {
   };
 });
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.clearAllMocks();
   vi.unstubAllEnvs();
+});
+
+it.each<SessionStart>([
+  { kind: "first-message" },
+  { kind: "turn", input: undefined },
+  { kind: "parked" },
+])(
+  "dispatches events through the session owner starting from $kind without starting a model turn",
+  async (start) => {
+    await watch();
+    const messages: SessionInboxPayload[] = [payload()];
+    const inbox: SessionInboxHandle = {
+      claimedTokens: [],
+      claimSessionHook: async () => {},
+      claimSessionHooks: async () => {},
+      next: async () => messages.shift(),
+      drain: () => messages.splice(0),
+      hasPending: () => messages.length > 0,
+      whenPending: async () => {},
+      onDelivery: () => () => {},
+      onInterrupt: () => () => {},
+      restore: (values) => messages.push(...values),
+      dispose: async () => {},
+      release: async () => messages.splice(0),
+    };
+    const turn = vi
+      .spyOn(SessionExecution.prototype, "runTurn")
+      .mockResolvedValue({ kind: "park" });
+    await runPreparedSession(
+      {
+        anchor: { kind: "self" },
+        caller: undefined,
+        deploymentId: "deployment-1",
+        history: [],
+        start,
+        serializedContext: serializeContext(ctx),
+        sessionId: "session-1",
+        sessionState: createTestSessionState({ sessionId: "session-1" }),
+        sessionTimeoutMs: false,
+        sessionWritable: new WritableStream(),
+      },
+      inbox,
+    );
+    expect(callback).toHaveBeenCalledTimes(1);
+    expect(turn).toHaveBeenCalledTimes(start.kind === "turn" ? 1 : 0);
+  },
+);
+
+it("runs callbacks in the creator's eve context and persists authored state without changing the current caller", async () => {
+  await watch();
+  setUser("bob");
+  initial = { ...initial, serializedContext: serializeContext(ctx) };
+  callback.mockImplementation(async () => {
+    expect(loadContext().require(AuthKey)?.principalId).toBe("alice");
+    callbackState.update((receipts) => [...receipts, "received"]);
+  });
+  await prepare(payload());
+  await dispatch(payload());
+  expect(initial.serializedContext["events-test.receipts"]).toEqual(["received"]);
+  expect(initial.serializedContext[AuthKey.name]).toMatchObject({ principalId: "bob" });
+});
+
+it("uses eve tool schema defaults and treats format as an annotation for event arguments", async () => {
+  eventSchema = {
+    type: "object",
+    properties: {
+      project: { type: "string", format: "email" },
+      includeArchived: { type: "boolean", default: false },
+    },
+  };
+  await watch();
+  expect(requested[0]!.arguments).toEqual({ project: "ABC", includeArchived: false });
 });
 function setUser(id: string) {
   ctx.set(AuthKey, {

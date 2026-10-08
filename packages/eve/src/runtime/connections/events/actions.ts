@@ -1,6 +1,6 @@
 import { principalOf } from "#execution/session/principal.js";
 import { z } from "zod";
-import { Validator } from "#compiled/@cfworker/json-schema/index.js";
+import { toInputSchema } from "#tools/schema.js";
 import { createHash } from "node:crypto";
 import { createMCPClient } from "#compiled/@ai-sdk/mcp/index.js";
 import { contextStorage } from "#context/container.js";
@@ -259,12 +259,16 @@ export class ConnectionEventActions {
       );
       if (definition === undefined)
         throw new Error("Unknown event subscription action for this account.");
-      const eventArguments = parseJsonObject(args.arguments);
-      const valid = new Validator(definition.inputSchema, "2020-12", false).validate(
-        eventArguments,
+      const schema =
+        typeof definition.inputSchema === "boolean"
+          ? { allOf: [definition.inputSchema] }
+          : definition.inputSchema;
+      const valid = await toInputSchema(schema)["~standard"].validate(
+        parseJsonObject(args.arguments),
       );
-      if (!valid.valid)
+      if (valid.issues !== undefined)
         throw new Error("Event arguments do not match the authorized catalog schema.");
+      const eventArguments = parseJsonObject(valid.value);
       const expiresAt = args.expiresAt;
       if (
         expiresAt !== null &&
