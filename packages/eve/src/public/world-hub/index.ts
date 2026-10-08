@@ -33,7 +33,11 @@ function statsEnabled(): boolean {
 const localId = `dpl_local_${randomUUID()}`;
 export async function createWorldHubWorld(options: WorldHubOptions): Promise<World> {
   if (!options.secret) throw new Error("World hub requires a secret");
-  const deploymentId = options.deploymentId ?? process.env.VERCEL_DEPLOYMENT_ID ?? localId;
+  const deploymentId =
+    options.deploymentId?.trim() ||
+    process.env.VERCEL_DEPLOYMENT_ID?.trim() ||
+    process.env.WORLD_HUB_DEPLOYMENT_ID?.trim() ||
+    localId;
   const deploymentUrl =
     options.deploymentUrl ?? (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
   async function request(path: string, method: string, body = "") {
@@ -122,6 +126,9 @@ export async function createWorldHubWorld(options: WorldHubOptions): Promise<Wor
   }
   const world = {
     ...forwarded,
+    async getDeploymentId() {
+      return deploymentId || (await call("getDeploymentId", []));
+    },
     // SDK step scheduling may omit deploymentId; retain this client's deployment.
     queue: ((name, message, opts) =>
       call("queue", [
