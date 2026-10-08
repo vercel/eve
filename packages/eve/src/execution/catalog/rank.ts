@@ -88,7 +88,8 @@ function rankCandidate(
       ? candidate.name
       : connectionToolName(candidate.connection.name, candidate.name);
   const fullName = tokenize(name);
-  const localName = tokenize(name.slice(name.lastIndexOf("__") + 2));
+  const at = name.lastIndexOf("__");
+  const localName = tokenize(at < 0 ? name : name.slice(at + 2));
   const tier = sameWords(fullName, terms)
     ? Tier.exact
     : sameWords(localName, terms)

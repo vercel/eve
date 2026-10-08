@@ -17,7 +17,7 @@ import { createEmptyDerivedFacts } from "#evals/runner/derive-run-facts.js";
 import { EvalSessionManager } from "#evals/session-manager.js";
 import type { EvalSessionStartedEvent } from "#evals/session.js";
 import { createEvalContext } from "#evals/context.js";
-import { scopeEvalTargetHandle } from "#evals/target.js";
+import { scopeEvalTargetHandle, targetTools } from "#evals/target.js";
 import { AssertionCollector } from "#evals/assertions/collector.js";
 import { EvalRequirementFailed, EvalSkipped } from "#evals/control-flow.js";
 
@@ -59,7 +59,7 @@ interface ExecuteTaskResult {
 export async function executeTask(options: ExecuteTaskOptions): Promise<ExecuteTaskResult> {
   const { client, evaluation, target, timeoutMs } = options;
   const signal = timeoutMs !== undefined ? AbortSignal.timeout(timeoutMs) : neverAbortSignal();
-  const collector = new AssertionCollector(target.capabilities.tools);
+  const collector = new AssertionCollector(targetTools(target));
   const manager = new EvalSessionManager({
     client,
     collector,

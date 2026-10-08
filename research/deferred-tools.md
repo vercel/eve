@@ -574,6 +574,11 @@ today.
   entry name. A skill has only a name and a description to match. `eve__execute`'s
   closest-name suggestions use the same ranking.
 
+  Measured on the `agent-tool-discovery` catalog plus two connections
+  (Linear and GitHub) with 32 queries phrased as models send them, matching
+  names after any namespace and ignoring filler words raised recall@1 from
+  27/32 to 29/32 and MRR from 0.907 to 0.939; recall@5 stayed at 32/32.
+
 - **Sign-in.** `eve__search` never prompts. It lists a connection that needs
   sign-in as a result, and `eve__execute({ tool: "<connection>" })` asks the user
   to sign in.

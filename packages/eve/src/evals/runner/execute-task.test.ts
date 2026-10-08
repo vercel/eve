@@ -801,7 +801,7 @@ describe("executeTask", () => {
     ]);
   });
 
-  it("fails with an authoring error when an eval requires a retired tool name", async () => {
+  it("fails with an authoring error when an eval requires eve__execute", async () => {
     const server = createScriptedServer([
       {
         sessionId: "session_1",
@@ -820,12 +820,12 @@ describe("executeTask", () => {
       target,
       evaluation: createTestEval(async (t) => {
         const turn = await t.send("run");
-        turn.requireToolCall("load_skill");
-      }, "retired-tool"),
+        turn.requireToolCall("eve__execute");
+      }, "execute-tool"),
     });
 
     expect(String(outcome.error)).toContain(
-      'Tool name "load_skill" was retired; use t.loadedSkill(name).',
+      "Calls through eve__execute are reported under the entry's name",
     );
     expect(outcome.assertions).toEqual([]);
   });

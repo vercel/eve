@@ -5,9 +5,9 @@ import type {
   AssertionHandle,
   AssertionResult,
   AssertionSeverity,
-  EveEvalTargetCapabilities,
   EveEvalTaskResult,
 } from "#evals/types.js";
+import type { TargetTools } from "#evals/target.js";
 import type { EveEvalAssertionSubject } from "#evals/assertions/run.js";
 
 export type AssertionOutcome = AssertionEvaluation;
@@ -48,9 +48,9 @@ export class AssertionCollector {
   readonly #pending: Promise<void>[] = [];
 
   /** The target's root agent tools, which tool-name assertions are checked against. */
-  readonly tools: EveEvalTargetCapabilities["tools"];
+  readonly tools: TargetTools | undefined;
 
-  constructor(tools?: EveEvalTargetCapabilities["tools"]) {
+  constructor(tools?: TargetTools) {
     this.tools = tools;
   }
 

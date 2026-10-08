@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Client } from "#client/client.js";
-import { resolveEvalTargetHandle } from "#evals/target.js";
+import { createEvalTargetHandle, resolveEvalTargetHandle, targetTools } from "#evals/target.js";
 import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
 
 afterEach(() => {
@@ -39,10 +39,18 @@ describe("resolveEvalTargetHandle", () => {
     });
 
     expect(target.url).toBe("http://127.0.0.1:3000");
-    expect(target.capabilities).toEqual({
-      devRoutes: true,
-      tools: { dynamic: false, static: [] },
-    });
+    expect(target.capabilities).toEqual({ devRoutes: true });
+    expect(targetTools(target)).toEqual({ dynamic: false, static: [] });
+    expect(
+      targetTools(
+        createEvalTargetHandle({
+          capabilities: { devRoutes: true },
+          client,
+          kind: "local",
+          url: target.url,
+        }),
+      ),
+    ).toBeUndefined();
     const { dispatchSchedule } = target;
     await expect(dispatchSchedule("heartbeat")).resolves.toEqual({
       scheduleId: "heartbeat",

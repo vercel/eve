@@ -359,6 +359,18 @@ describe("search", () => {
       expect((await ranked("refund"))[0]).toBe("support__refund");
     });
 
+    it("keeps a name without a namespace whole for exact and prefix matches", async () => {
+      const search = searchFor([
+        inlineTool("xrefund", { deferred: true, description: "Refund a charge." }),
+        inlineTool("refund_policy", { deferred: true, description: "Read the policy." }),
+      ]);
+      const ranked = async (query: string) => names(await search({ query }));
+
+      expect(await ranked("refund")).toEqual(["refund_policy", "xrefund"]);
+      expect((await ranked("xrefund"))[0]).toBe("xrefund");
+      expect((await ranked("refund_pol"))[0]).toBe("refund_policy");
+    });
+
     it("leaves one-letter and filler words out of scoring unless the query has nothing else", async () => {
       const search = searchFor([
         inlineTool("support__case_assign", {

@@ -525,12 +525,6 @@ export interface EveEvalTarget {
 
 export interface EveEvalTargetCapabilities {
   readonly devRoutes: boolean;
-  /**
-   * The root agent's tools, from `/eve/v1/info`: its static tool names and
-   * whether it has a dynamic tool resolver. Tool-name assertions use it to tell
-   * an authored tool from a retired eve tool name.
-   */
-  readonly tools?: { readonly dynamic: boolean; readonly static: readonly string[] };
 }
 
 export interface EveEvalScheduleDispatchResult {

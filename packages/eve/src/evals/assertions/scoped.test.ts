@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import { AssertionCollector } from "#evals/assertions/collector.js";
 import { createScopedAssertions } from "#evals/assertions/scoped.js";
-import type { EveEvalTargetCapabilities } from "#evals/types.js";
+import type { TargetTools } from "#evals/target.js";
 
-function assertionsFor(tools: EveEvalTargetCapabilities["tools"]) {
+function assertionsFor(tools: TargetTools | undefined) {
   return createScopedAssertions(new AssertionCollector(tools), {
     timing: "final",
     select: (result) => result,
@@ -31,13 +31,14 @@ describe("tool-name assertions", () => {
     expect(() => t.notCalledTool("lookup")).not.toThrow();
   });
 
-  it("accept a retired name the root agent authors, or that a dynamic tool resolver may return", () => {
+  it("accept a retired name the root agent authors, that a dynamic tool resolver may return, or when its tools are unknown", () => {
     expect(() =>
       assertionsFor({ dynamic: false, static: ["task_wait"] }).notCalledTool("task_wait"),
     ).not.toThrow();
     expect(() =>
       assertionsFor({ dynamic: true, static: [] }).calledTool("load_skill"),
     ).not.toThrow();
+    expect(() => assertionsFor(undefined).toolOrder(["final_output"])).not.toThrow();
   });
 
   it("always reject eve__execute, whose calls are reported under the entry they reach", () => {
