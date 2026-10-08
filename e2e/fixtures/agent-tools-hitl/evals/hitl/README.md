@@ -26,6 +26,8 @@ and [`agent-workflow-tools/evals/hitl`](../../../agent-workflow-tools/evals/hitl
 | Rule                                                                               | Eval                                                                                                                    |
 | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | Approve runs the call in eve, result before the next step                          | [approve-runs-the-call](./approvals/approve-runs-the-call.eval.ts)                                                      |
+| Approval beside runtime work reports tasks, then input                             | [approval-runtime-park-emits-waiting](./continuation/approval-runtime-park-emits-waiting.eval.ts)                       |
+| Runtime workflow parks report waiting on tasks                                     | [runtime-park-emits-waiting](./continuation/runtime-park-emits-waiting.eval.ts)                                         |
 | Deny resolves `denied` and records a not-run result                                | [deny-records-not-run](./approvals/deny-records-not-run.eval.ts)                                                        |
 | A partial answer keeps the turn held, with no model call                           | [partial-answer-keeps-turn-held](./approvals/partial-answer-keeps-turn-held.eval.ts)                                    |
 | A typed reply naming an option answers                                             | [typed-approve-answers](./approvals/typed-approve-answers.eval.ts)                                                      |
