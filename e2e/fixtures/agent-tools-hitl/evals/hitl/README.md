@@ -46,6 +46,8 @@ and [`agent-workflow-tools/evals/hitl`](../../../agent-workflow-tools/evals/hitl
 | Cancel declines an authorization                                          | [cancel-declines-authorization](./authorizations/cancel-declines-authorization.eval.ts)                                 |
 | An approved call that needs an authorization                              | [approved-call-needs-authorization](./authorizations/approved-call-needs-authorization.eval.ts)                         |
 
+| A sibling sign-in is emitted beside an approval; newer attempts replace older ones | [newer-attempt-supersedes](./authorizations/newer-attempt-supersedes.eval.ts) |
+
 The rule that the model never runs while a request is open is checked inside
 the evals above by `expectNoModelCallWhileOpen` and
 `expectNoModelCallDuringAuthorization` ([helpers](./helpers.ts)).

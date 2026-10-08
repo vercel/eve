@@ -11,6 +11,7 @@ export const SAY = {
   secondEcho: "Alice asks for a guarded echo of the second note.",
   retiring: "Alice asks for the retiring change.",
   checkAccess: "Alice asks to check her Fixture Auth access.",
+  checkAndPublish: "Alice asks to check her access and publish the draft together.",
   publish: "Alice asks to publish the draft.",
   hello: "Alice changes her mind and asks for a short hello instead.",
   bobStatus: "Bob asks for a status update.",
@@ -95,6 +96,11 @@ export function respond(request: MockModelRequest): MockModelResponse {
       ),
     [SAY.publish]: () =>
       run([call("publish", "publish-draft")], () => `Publish: ${outcome("publish")}.`),
+    [SAY.checkAndPublish]: () =>
+      run(
+        [call("probe", "auth-probe", { marker: "hitl" }), call("publish", "publish-draft")],
+        () => `Access check: ${outcome("probe")}. Publish: ${outcome("publish")}.`,
+      ),
     [SAY.hello]: () => ({
       text: allText.includes(SIGN_IN_DROPPED) ? REPLY.helloAfterAuthorization : REPLY.hello,
     }),
