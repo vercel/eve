@@ -72,11 +72,11 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
   const skill = SKILL_DIRECTIVE.exec(message);
   if (skill?.[1] !== undefined) {
     if (!turnHasToolResult) {
-      return { toolCalls: [{ input: { skill: skill[1] }, name: "execute" }] };
+      return { toolCalls: [{ input: { skill: skill[1] }, name: "eve__execute" }] };
     }
     // Loaded skills instruct an exact reply whose text is the skill body's
     // final line (see the redeploy eval's deploy-note skill).
-    return lastNonEmptyLine(toolOutput(request, "execute"));
+    return lastNonEmptyLine(toolOutput(request, "eve__execute"));
   }
 
   return `Mock reply: ${message}`;
