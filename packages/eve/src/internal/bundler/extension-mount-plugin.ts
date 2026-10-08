@@ -2,6 +2,7 @@ import { readFileSync, realpathSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 
 const MOUNT_QUERY = "?eve-mount=";
+const EXTENSION_HANDLE_PREFIX = "\0eve-extension-handle:";
 
 /** Directory beside an extension distribution's source root that holds its shared chunks. */
 export const EXTENSION_CHUNK_DIRECTORY = "_chunks";
@@ -117,6 +118,26 @@ export function createExtensionMountPlugin(
       if (mountId !== undefined && mount === undefined)
         throw new Error(`Unknown extension mount "${mountId}".`);
 
+      if (cleanSource === "eve/extension" && importerPath !== undefined) {
+        const owners = roots.filter((root) => isExtensionModule(importerPath, root.root));
+        const owner =
+          mountId === undefined
+            ? owners.length === 1
+              ? owners[0]
+              : undefined
+            : (owners
+                .filter(
+                  (candidate) =>
+                    mountId === candidate.mountId || mountId.startsWith(`${candidate.mountId}/`),
+                )
+                .sort((left, right) => right.mountId.length - left.mountId.length)[0] ??
+              (owners.length === 1 ? owners[0] : undefined));
+        const mountIdentity = owner?.mountId;
+        if (mountIdentity !== undefined) {
+          return `${EXTENSION_HANDLE_PREFIX}${encodeURIComponent(mountIdentity)}`;
+        }
+      }
+
       // An override has mount context for its imports, but remains application-owned:
       // its own state and all of its other dependencies keep their ordinary identity.
       const override =
@@ -182,6 +203,17 @@ export function createExtensionMountPlugin(
         : undefined;
     },
     load(id: string) {
+      if (id.startsWith(EXTENSION_HANDLE_PREFIX)) {
+        const mountId = decodeURIComponent(id.slice(EXTENSION_HANDLE_PREFIX.length));
+        return {
+          code: [
+            `import { defineExtension as define } from "eve/extension";`,
+            `export const defineExtension = (options) => define(options, ${JSON.stringify(mountId)});`,
+            "",
+          ].join("\n"),
+          moduleType: "js" as const,
+        };
+      }
       const query = id.indexOf(MOUNT_QUERY);
       if (query < 0) return undefined;
       const path = id.slice(0, query);

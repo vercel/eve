@@ -148,6 +148,7 @@ describe("schedule trigger end-to-end (channel-less schedules)", () => {
       const dispatcher = new ScheduleDispatcher({
         runtime: createCapturingRuntime(captured),
         channels: bundle.graph.root.channels,
+        extensionConfigs: bundle.graph.root.extensionConfigs,
       });
 
       const dispatchInput: { scheduleId: string; markdown?: string } = {
@@ -209,6 +210,7 @@ describe("schedule trigger end-to-end (channel-less schedules)", () => {
       const dispatcher = new ScheduleDispatcher({
         runtime: createCapturingRuntime(captured),
         channels: bundle.graph.root.channels,
+        extensionConfigs: bundle.graph.root.extensionConfigs,
       });
 
       const dispatchInput: { scheduleId: string; markdown?: string } = {
@@ -291,6 +293,7 @@ describe("schedule trigger end-to-end (channel-less schedules)", () => {
       const dispatcher = new ScheduleDispatcher({
         runtime: createCapturingRuntime(captured),
         channels: bundle.graph.root.channels,
+        extensionConfigs: bundle.graph.root.extensionConfigs,
       });
 
       await dispatcher.trigger({

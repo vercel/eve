@@ -41,6 +41,7 @@ export async function dispatchScheduleTaskFromArtifacts(
   const dispatcher = new ScheduleDispatcher({
     runtime,
     channels: bundle.graph.root.channels,
+    extensionConfigs: bundle.graph.root.extensionConfigs,
   });
 
   const dispatchInput: {

@@ -6,7 +6,12 @@ import {
   type ExtensionScopeBundlerPlugin,
 } from "#internal/bundler/extension-scope-plugin.js";
 
-const SCOPES = [{ sourceRoot: "/pkg/crm/extension", mountId: "extensions/crm" }];
+const SCOPES = [
+  {
+    sourceRoot: "/pkg/crm/extension",
+    mountId: "extensions/crm",
+  },
+];
 
 function pathPlugin(): ExtensionScopeBundlerPlugin {
   const created = createExtensionScopePlugin(SCOPES);
@@ -55,9 +60,11 @@ describe("createExtensionScopePlugin (path containment)", () => {
     ).toBe("\0eve-ext-scope:context:subagents%2Fresearch%2Fextensions%2Fcrm");
   });
 
-  it("leaves eve/extension unscoped for extension-owned importers", () => {
-    const id = pathPlugin().resolveId("eve/extension", "/pkg/crm/extension/config.ts");
-    expect(id).toBeUndefined();
+  it("binds eve/extension handles to the mounted identity", () => {
+    const plugin = pathPlugin();
+    const id = plugin.resolveId("eve/extension", "/pkg/crm/extension/config.ts");
+    expect(id).toBe("\0eve-ext-scope:extension:extensions%2Fcrm");
+    expect(plugin.load(id!)?.code).toContain('define(options, "extensions/crm")');
   });
 
   it("ignores importers outside every extension source root", () => {
@@ -83,7 +90,9 @@ describe("createFixedMountScopePlugin (dev per-module)", () => {
     expect(plugin.resolveId("eve/context", "/anywhere/on/disk/tool.ts")).toBe(
       "\0eve-ext-scope:context:extensions%2Fcrm",
     );
-    expect(plugin.resolveId("eve/extension", "/anywhere/config.ts")).toBeUndefined();
+    expect(plugin.resolveId("eve/extension", "/anywhere/config.ts")).toBe(
+      "\0eve-ext-scope:extension:extensions%2Fcrm",
+    );
   });
 
   it("never re-enters through virtual shim importers", () => {
@@ -100,12 +109,19 @@ describe("createFixedMountScopePlugin (dev per-module)", () => {
 });
 
 describe("shim baking (shared)", () => {
-  it("bakes the namespace into the defineState shim", () => {
+  it("bakes the mount identity into the defineState shim", () => {
     const shim = createFixedMountScopePlugin("extensions/crm").load(
       "\0eve-ext-scope:context:extensions%2Fcrm",
     );
     expect(shim?.code).toContain(`import { defineMountedState } from "eve/internal/mount-state"`);
     expect(shim?.code).toContain(`defineMountedState("extensions/crm", name, initial)`);
+  });
+
+  it("bakes the mount identity into the defineExtension shim", () => {
+    const shim = createFixedMountScopePlugin("extensions/crm").load(
+      "\0eve-ext-scope:extension:extensions%2Fcrm",
+    );
+    expect(shim?.code).toContain('define(options, "extensions/crm")');
   });
 
   it("passes through non-shim ids in load", () => {

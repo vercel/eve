@@ -33,6 +33,7 @@ import { createRouteInvokeTool } from "#internal/nitro/routes/route-invoke-tool.
 import { readVercelProjectLink } from "#internal/vercel/project-link.js";
 import { withVercelOidcProjectResolver } from "#channel/auth/vercel-oidc-project.js";
 import { withLocalDevRequestScope } from "#runtime/local-dev-capability.js";
+import { withExtensionConfigs } from "#runtime/extension-mount-configs.js";
 import { getWorld } from "#internal/workflow/runtime.js";
 
 const log = createLogger("channel.dispatch");
@@ -104,22 +105,27 @@ export async function dispatchChannelRequest(
     let response: Response;
 
     try {
-      response = await withDevelopmentVercelOidcContext(config, event.req, async () => {
-        if (matchedChannel.handler) {
-          // Authored CompiledChannel route — build RouteHandlerArgs.
-          return await matchedChannel.handler(event.req, routeArgs.args);
-        }
+      response = await withDevelopmentVercelOidcContext(
+        config,
+        event.req,
+        async () =>
+          await withExtensionConfigs(bundle.extensionConfigs, async () => {
+            if (matchedChannel.handler) {
+              // Authored CompiledChannel route — build RouteHandlerArgs.
+              return await matchedChannel.handler(event.req, routeArgs.args);
+            }
 
-        // Framework-internal fetch-only channel (e.g. the connection
-        // callback route). Build a RouteContext with the agent handle.
-        const ctx: RouteContext = {
-          waitUntil: routeArgs.args.waitUntil,
-          params: routeArgs.args.params,
-          requestIp: routeArgs.args.requestIp,
-        };
+            // Framework-internal fetch-only channel (e.g. the connection
+            // callback route). Build a RouteContext with the agent handle.
+            const ctx: RouteContext = {
+              waitUntil: routeArgs.args.waitUntil,
+              params: routeArgs.args.params,
+              requestIp: routeArgs.args.requestIp,
+            };
 
-        return await matchedChannel.fetch(event.req, ctx);
-      });
+            return await matchedChannel.fetch(event.req, ctx);
+          }),
+      );
     } catch (error) {
       // Without this a handler throw is only Nitro's default 5xx, with no eve
       // log. logError records the exception against the active request span,
@@ -177,10 +183,14 @@ export async function dispatchChannelWebSocketRequest(
     const hooks = await withDevelopmentVercelOidcContext(
       config,
       event.req,
-      async () => await websocket(event.req, routeArgs.args),
+      async () =>
+        await withExtensionConfigs(
+          bundle.extensionConfigs,
+          async () => await websocket(event.req, routeArgs.args),
+        ),
     );
     flushBackgroundTasks(event, routeArgs.backgroundTasks, routeKey, matchedChannel.name);
-    return hooks;
+    return withScopedWebSocketHooks(hooks, bundle.extensionConfigs);
   } catch (error) {
     const errorId = logError(log, "channel websocket handler threw", error, {
       routeKey,
@@ -192,6 +202,27 @@ export async function dispatchChannelWebSocketRequest(
       500,
     );
   }
+}
+
+function withScopedWebSocketHooks(
+  hooks: WebSocketRouteHooks,
+  extensionConfigs: ReadonlyMap<string, Record<string, unknown>>,
+): WebSocketRouteHooks {
+  // Hooks may be a class instance relying on its prototype or private fields,
+  // so they run bound to the authored object, not to this wrapper.
+  const scoped =
+    <Args extends unknown[], Result>(callback: (...args: Args) => Result) =>
+    (...args: Args): Result =>
+      withExtensionConfigs(extensionConfigs, () => callback.apply(hooks, args));
+
+  return {
+    ...hooks,
+    close: hooks.close === undefined ? undefined : scoped(hooks.close),
+    error: hooks.error === undefined ? undefined : scoped(hooks.error),
+    message: hooks.message === undefined ? undefined : scoped(hooks.message),
+    open: hooks.open === undefined ? undefined : scoped(hooks.open),
+    upgrade: hooks.upgrade === undefined ? undefined : scoped(hooks.upgrade),
+  };
 }
 
 async function withDevelopmentVercelOidcContext<T>(
