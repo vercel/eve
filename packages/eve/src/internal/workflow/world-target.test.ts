@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   resolveWorkflowWorldImport,
@@ -25,3 +25,16 @@ it("recognizes hub without changing default or arbitrary worlds", () => {
     expect(usesHubWorkflowWorld(world)).toBe(false);
   for (const world of ["hub", "eve/world-hub"]) expect(usesHubWorkflowWorld(world)).toBe(true);
 });
+
+afterEach(() => vi.unstubAllEnvs());
+it.each(["hub", "eve/world-hub"])(
+  "env %s disables the dev parent local world and selects hub routes",
+  async (target) => {
+    vi.stubEnv("WORKFLOW_TARGET_WORLD", target);
+    const { usesParentDevelopmentWorkflowWorld } = await import("./development-world-protocol.js");
+    expect(usesParentDevelopmentWorkflowWorld(undefined)).toBe(false);
+    expect(usesParentDevelopmentWorkflowWorld("local")).toBe(false);
+    expect(usesHubWorkflowWorld(undefined)).toBe(true);
+    expect(usesHubWorkflowWorld("local")).toBe(true);
+  },
+);

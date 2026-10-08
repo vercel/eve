@@ -25,7 +25,10 @@ import {
 } from "#internal/materialized-authored-modules.js";
 import { type InstrumentationLayout } from "#internal/instrumentation-layout.js";
 import { usesParentDevelopmentWorkflowWorld } from "#internal/workflow/development-world-protocol.js";
-import { resolveWorkflowWorldImport } from "#internal/workflow/world-target.js";
+import {
+  resolveConfiguredWorkflowWorld,
+  resolveWorkflowWorldImport,
+} from "#internal/workflow/world-target.js";
 import { BUILD_DEPLOYMENT_ID_PLACEHOLDER } from "#internal/nitro/host/build-deployment-id.js";
 
 export type BuiltInWorkflowWorldTarget = "local" | "vercel";
@@ -389,7 +392,8 @@ export function createWorkflowWorldPluginSource(input: {
   configuredWorld: AgentWorkflowWorldDefinition | undefined;
   defaultWorld: BuiltInWorkflowWorldTarget;
 }): string {
-  const targetWorld = input.configuredWorld ?? input.defaultWorld;
+  const configuredWorld = resolveConfiguredWorkflowWorld(input.configuredWorld);
+  const targetWorld = configuredWorld ?? input.defaultWorld;
   const packageName = resolveWorkflowWorldImport(targetWorld);
   const wiring = resolveWorkflowWorldWiring(packageName);
 
@@ -403,7 +407,7 @@ export function createWorkflowWorldPluginSource(input: {
     "",
     `installWorkflowDeploymentId(${JSON.stringify(BUILD_DEPLOYMENT_ID_PLACEHOLDER)});`,
     wiring.createWorldSource,
-    `await installWorkflowWorld({ packageName: ${JSON.stringify(input.configuredWorld)}, world: workflowWorld });`,
+    `await installWorkflowWorld({ packageName: ${JSON.stringify(configuredWorld)}, world: workflowWorld });`,
     "",
     "export default function installWorkflowWorldPlugin() {}",
     "",

@@ -1,8 +1,8 @@
 import { createServer } from "node:http";
 import { once } from "node:events";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { World } from "#compiled/@workflow/world/index.js";
-import { createWorldHubWorld } from "./index.js";
+import { createWorld, createWorldHubWorld, getWorldHubStats } from "./index.js";
 import {
   createWorldHubServer,
   createWorldHubDispatcher,
@@ -80,4 +80,47 @@ describe("World hub transport", () => {
     await vi.waitFor(() => expect(ids).toHaveLength(2), { timeout: 2000 });
     expect(ids[0]).toBe(ids[1]);
   });
+});
+
+afterEach(() => vi.unstubAllEnvs());
+it("registers env deployment fallbacks and exposes opt-in counters", async () => {
+  vi.stubEnv("VERCEL_URL", undefined);
+  vi.stubEnv("VERCEL_DEPLOYMENT_ID", undefined);
+  vi.stubEnv("WORLD_HUB_DEPLOYMENT_ID", "local-bot");
+  vi.stubEnv("WORLD_HUB_DEPLOYMENT_URL", "http://bot.test");
+  vi.stubEnv("WORLD_HUB_STATS", "1");
+  vi.stubEnv("WORLD_HUB_SECRET", "secret");
+  const onDeployment = vi.fn();
+  const writeMulti = vi.fn(async () => {});
+  const server = createServer(
+    createWorldHubServer({
+      secret: "secret",
+      onDeployment,
+      world: { specVersion: 8, streams: { writeMulti, close: async () => {} } } as unknown as World,
+    }),
+  );
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  vi.stubEnv("WORLD_HUB_URL", `http://127.0.0.1:${(server.address() as { port: number }).port}`);
+  const before = getWorldHubStats();
+  const world = await createWorld();
+  try {
+    await world.streams.write("run", "text", "a");
+    await world.streams.write("run", "text", "b");
+    await world.streams.close("run", "text");
+    expect(onDeployment).toHaveBeenCalledWith("local-bot", "http://bot.test");
+    const after = getWorldHubStats();
+    expect(after.rpcCalls - before.rpcCalls).toBe(3);
+    expect(after.streamChunks - before.streamChunks).toBe(2);
+    expect(after.writeMultiCalls - before.writeMultiCalls).toBe(1);
+    expect(after.operations["streams.writeMulti"]).toBe(
+      (before.operations["streams.writeMulti"] ?? 0) + 1,
+    );
+    after.operations["streams.writeMulti"] = -1;
+    expect(getWorldHubStats().operations["streams.writeMulti"]).not.toBe(-1);
+  } finally {
+    await world.close?.();
+    server.close();
+    await once(server, "close");
+  }
 });
