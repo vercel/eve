@@ -16,7 +16,6 @@ import {
 import { saveTransition, sessionView, dropClosedRecords } from "#harness/session-machine/commit.js";
 import { storedProjection, SESSION_PROJECTION_STATE_KEY } from "#harness/session-machine/view.js";
 import { migrateSessionState } from "#harness/session-machine/migrate.js";
-import { projectHumanInput } from "#harness/hitl/projection.js";
 import { readTurnState } from "#harness/session-machine/state.js";
 import { foldSession } from "#protocol/session-projection.js";
 import { createTurnStartedEvent, type UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -66,7 +65,7 @@ export class Turn {
 
   get projected() {
     const view = sessionView(storedProjection(this.state), this.state);
-    return projectHumanInput(view, view.turn.suspended[0]);
+    return view;
   }
 
   get humanInput(): HumanInput {

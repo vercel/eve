@@ -165,3 +165,11 @@ export function relayedRoutes(state: SessionStateMap | undefined) {
 export function openLimit(view: SessionView) {
   return openInputs(view.projection).find((input) => input.request.kind === "session-limit");
 }
+
+export function sameStep(left: StepCoordinates, right: StepCoordinates): boolean {
+  return (
+    left.turnId === right.turnId &&
+    left.sequence === right.sequence &&
+    left.stepIndex === right.stepIndex
+  );
+}

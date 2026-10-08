@@ -29,7 +29,6 @@ import type { SessionProjection } from "#protocol/session-projection.js";
 import type { InputRequest } from "#shared/input.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 
-import { adoptCandidateAuthorizations } from "#harness/hitl/approval-candidate.js";
 import { withResult } from "./transitions.js";
 import type { RequestAt } from "#harness/hitl/input.js";
 import { parseState, type HeldStep, type HumanInputState } from "#harness/hitl/state.js";
@@ -526,4 +525,30 @@ function isStringArray(value: unknown): value is string[] {
 
 function isInputRequestKind(value: unknown): value is InputRequestKind {
   return typeof value === "string" && Object.hasOwn(PROXY_INPUT_REQUEST_KINDS, value);
+}
+
+/** Old responder sign-ins become candidate-owned metadata at hydration only. */
+function adoptCandidateAuthorizations(state: HumanInputState): HumanInputState {
+  const requests = { ...state.requests };
+  const activeCandidates = { ...state.audit?.activeCandidates };
+  let changed = false;
+  for (const [id, open] of Object.entries(requests)) {
+    if (open.kind !== "authorization" || open.challenge.candidateId === undefined) continue;
+    delete requests[id];
+    changed = true;
+    const candidate = activeCandidates[open.challenge.candidateId];
+    if (candidate !== undefined)
+      activeCandidates[candidate.candidateId] = {
+        ...candidate,
+        authorizations: [...(candidate.authorizations ?? []), open.challenge],
+        status: "authorization-required",
+      };
+  }
+  return !changed
+    ? state
+    : {
+        ...state,
+        requests,
+        ...(state.audit !== undefined && { audit: { ...state.audit, activeCandidates } }),
+      };
 }

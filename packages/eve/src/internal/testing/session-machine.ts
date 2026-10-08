@@ -2,7 +2,7 @@ import { readAnswerText } from "#internal/input-text.js";
 import type { ModelMessage } from "ai";
 
 import { contextStorage } from "#context/container.js";
-import { grantedApprovalKeys } from "#harness/hitl/projection.js";
+import { grantedApprovalKeys } from "#harness/hitl/approval.js";
 import { afterStep, beforeStep } from "#harness/hitl/decisions.js";
 import { renderPendingApprovalsSnippet } from "#harness/hitl/index.js";
 import { createFrameworkUserMessage } from "#harness/messages.js";

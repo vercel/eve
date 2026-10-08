@@ -1,3 +1,6 @@
+import type { SessionView } from "#harness/session-machine/view.js";
+import { turnPosition } from "#harness/session-machine/view.js";
+import { heldStep, withHeldStep } from "./approval.js";
 // The authorization request rules; the authorization primitives (challenges, results) live in harness/authorization.ts.
 /**
  * The authorization rules. A tool call that needs an authorization opens one request per
@@ -17,7 +20,7 @@ import { authorizationEventFields } from "#harness/authorization-event-fields.js
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { Command } from "#harness/hitl/command.js";
 import type { RequestAt } from "#harness/hitl/input.js";
-import type { HumanInputState, Reduced, OpenAuthorization } from "#harness/hitl/state.js";
+import type { Reduced, OpenAuthorization } from "#harness/hitl/state.js";
 import {
   createAuthorizationCompletedEvent,
   createAuthorizationRequiredEvent,
@@ -37,7 +40,7 @@ const SUPERSEDED_REASON = "Superseded by a newer authorization attempt.";
  * without them.
  */
 export function requireAuthorizations(
-  state: HumanInputState,
+  state: SessionView,
   input: {
     readonly at: RequestAt;
     readonly callIds: readonly string[];
@@ -47,9 +50,9 @@ export function requireAuthorizations(
   },
 ): Reduced {
   const stopped = new Set(input.callIds);
-  if (state.held !== undefined) {
-    const messages = withoutCalls(state.held.messages, stopped);
-    return openAuthorizations({ ...state, held: { ...state.held, messages } }, input);
+  if (heldStep(state) !== undefined) {
+    const messages = withoutCalls(heldStep(state)!.messages, stopped);
+    return openAuthorizations(withHeldStep(state, { ...heldStep(state)!, messages }), input);
   }
   const opened = openAuthorizations(state, input);
   const appended: Command[] = withoutCalls(input.messages, stopped).map((message) => ({
@@ -66,7 +69,7 @@ export function requireAuthorizations(
  * `requester`.
  */
 export function openAuthorizations(
-  state: HumanInputState,
+  state: SessionView,
   input: {
     readonly at: RequestAt;
     readonly challenges: readonly AuthorizationChallenge[];
@@ -81,18 +84,17 @@ export function openAuthorizations(
   const superseded = openAuthorizationsOf(state).filter((open) =>
     asked.some((challenge) => sameAuthorization(open.challenge, challenge)),
   );
-  const requests = { ...state.requests };
-  for (const open of superseded) delete requests[attemptKey(open.challenge)];
-  for (const challenge of asked) {
-    const authorization: OpenAuthorization = { at: input.at, challenge, kind: "authorization" };
-    requests[attemptKey(challenge)] = authorization;
-  }
+  const supersededKeys = new Set(superseded.map((open) => attemptKey(open.challenge)));
+  const signIns = [
+    ...state.signIns.filter((challenge) => !supersededKeys.has(attemptKey(challenge))),
+    ...asked,
+  ];
   const events: Command[] = [];
   for (const open of superseded) {
     events.push(completed(open.challenge, input.at, "failed", SUPERSEDED_REASON));
   }
   for (const challenge of asked) events.push(authorizationRequested(challenge, input.at));
-  return { events, state: { ...state, requests } };
+  return { events, state: { ...state, signIns } };
 }
 
 /** The `authorization.required` an authorization publishes as it opens. */
@@ -117,7 +119,7 @@ export function authorizationRequested(challenge: AuthorizationChallenge, at: Re
  * the person who started it, since the callback carries no identity.
  */
 export function completeAuthorization(
-  state: HumanInputState,
+  state: SessionView,
   input: {
     readonly attemptId: string;
     readonly callback?: AuthorizationCallback;
@@ -125,7 +127,9 @@ export function completeAuthorization(
     readonly outcome: "authorized" | "failed";
   },
 ): Reduced | undefined {
-  const open = state.requests[input.attemptId];
+  const open = openAuthorizationsOf(state).find(
+    (open) => attemptKey(open.challenge) === input.attemptId,
+  );
   if (open?.kind !== "authorization" || open.challenge.name !== input.connectionName) {
     return undefined;
   }
@@ -146,8 +150,13 @@ export function completeAuthorization(
       type: "resumeAuthorization",
     });
   }
-  const { [input.attemptId]: _closed, ...requests } = state.requests;
-  return { events, state: { ...state, requests } };
+  return {
+    events,
+    state: {
+      ...state,
+      signIns: state.signIns.filter((challenge) => attemptKey(challenge) !== input.attemptId),
+    },
+  };
 }
 
 /**
@@ -156,7 +165,7 @@ export function completeAuthorization(
  * calls asked for, so the model can be told which ones ended.
  */
 export function closeAuthorizations(
-  state: HumanInputState,
+  state: SessionView,
   input: {
     readonly outcome: AuthorizationOutcome;
     readonly reason: string;
@@ -167,27 +176,33 @@ export function closeAuthorizations(
     (open) => input.which === undefined || input.which(open.challenge),
   );
   if (closing.length === 0) return { events: [], names: [], state };
-  const requests = { ...state.requests };
-  for (const open of closing) delete requests[attemptKey(open.challenge)];
+  const closed = new Set(closing.map((open) => attemptKey(open.challenge)));
   const names = closing.map((open) => open.challenge.name);
   return {
     events: closing.map((open) => completed(open.challenge, open.at, input.outcome, input.reason)),
     names: [...new Set(names)],
-    state: { ...state, requests },
+    state: {
+      ...state,
+      signIns: state.signIns.filter((challenge) => !closed.has(attemptKey(challenge))),
+    },
   };
 }
 
 /** The attempt ids of every open authorization, whose callbacks the turn waits for. */
-export function awaitedAuthorizations(state: HumanInputState): readonly string[] {
+export function awaitedAuthorizations(state: SessionView): readonly string[] {
   return openAuthorizationsOf(state).flatMap((open) =>
     open.challenge.attemptId === undefined ? [] : [open.challenge.attemptId],
   );
 }
 
-function openAuthorizationsOf(state: HumanInputState): OpenAuthorization[] {
-  return Object.values(state.requests).filter(
-    (open): open is OpenAuthorization => open.kind === "authorization",
-  );
+export function openAuthorizationsOf(state: SessionView): OpenAuthorization[] {
+  return state.signIns
+    .filter((challenge) => challenge.candidateId === undefined)
+    .map((challenge) => ({
+      kind: "authorization",
+      challenge,
+      at: state.projection.authorizations[attemptKey(challenge)] ?? turnPosition(state.projection),
+    }));
 }
 
 /** A callback names its attempt; challenges minted before attempts existed fall back. */

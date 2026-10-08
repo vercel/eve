@@ -192,16 +192,14 @@ describe("approval response policies", () => {
 
   it("a responder's authorization belongs to its candidate, not to the turn's requests", () => {
     const authorization = bobMustAuthorize().stored();
-    const stored = authorization.projected as {
-      readonly audit: {
-        readonly activeCandidates: Record<string, { readonly authorizations?: unknown[] }>;
-      };
-      readonly requests: Record<string, unknown>;
-    };
-
-    expect(Object.keys(stored.requests)).toEqual(["deploy"]);
+    const stored = authorization.projected;
     expect(
-      Object.values(stored.audit.activeCandidates).map((c) => c.authorizations?.length),
+      stored.turn.suspended.flatMap((step) => step.requests.map((request) => request.requestId)),
+    ).toEqual(["deploy"]);
+    expect(
+      Object.values(stored.turn.hitl!.audit!.activeCandidates).map(
+        (candidate) => candidate.authorizations?.length,
+      ),
     ).toEqual([1]);
     // A callback for it settles only the candidate; the approval stays open when its policy fails.
     const turn = authorization.checked(callback("r1", "reviewer"), { kind: "threw" }).stored();
@@ -274,13 +272,15 @@ describe("durable response candidate audit", () => {
       kind: "threw",
       challenges: [challenge("r1", { requester: responder, name: "reviewer" })],
     });
-    const candidate = Object.values(active.stored().projected.audit!.activeCandidates)[0]!;
+    const candidate = Object.values(
+      active.stored().projected.turn.hitl!.audit!.activeCandidates,
+    )[0]!;
     expect(candidate.responder).toEqual(responder);
     const rejected = active.checked(callback("r1", "reviewer"), {
       kind: "returned",
       value: { status: "rejected", reason: "Permission required." },
     });
-    const history = rejected.projected.audit!.candidateHistory;
+    const history = rejected.projected.turn.hitl!.audit!.candidateHistory;
     expect(history[0]?.responder).toEqual({
       authenticator: responder.authenticator,
       issuer: responder.issuer,
@@ -296,12 +296,11 @@ describe("durable response candidate audit", () => {
       kind: "threw",
       challenges: [challenge("r2", { requester: CAROL, principalId: "carol" })],
     });
-    expect(Object.values(both.projected.audit!.activeCandidates).map((c) => c.responder)).toEqual([
-      BOB,
-      CAROL,
-    ]);
+    expect(
+      Object.values(both.projected.turn.hitl!.audit!.activeCandidates).map((c) => c.responder),
+    ).toEqual([BOB, CAROL]);
     const expired = both.input({ type: "time", now: NOW + 60_000 });
-    const audit = expired.projected.audit!;
+    const audit = expired.projected.turn.hitl!.audit!;
     expect(Object.values(audit.activeCandidates).map((c) => c.responder)).toEqual([CAROL]);
     expect(audit.candidateHistory).toEqual([
       expect.objectContaining({
@@ -317,14 +316,14 @@ describe("durable response candidate audit", () => {
     expect(settled.checks(answerAs(BOB))).toEqual([]);
     expect(settled.input(answerAs(BOB)).events).toEqual([]);
     expect(settled.input(callback("r1", "reviewer")).events).toEqual([]);
-    expect(settled.projected.audit!.settlements.deploy?.approver).toEqual(CAROL);
+    expect(settled.projected.turn.hitl!.audit!.settlements.deploy?.approver).toEqual(CAROL);
   });
 
   it("an allowed Cancel stales competing approvals without replacing its settlement", () => {
     const waiting = bobMustAuthorize();
     const cancelled = waiting.checked(answerAs(CAROL, "cancel"), ALLOWED);
     const late = cancelled.input(callback("r1", "reviewer"));
-    const audit = late.projected.audit!;
+    const audit = late.projected.turn.hitl!.audit!;
     expect(audit.activeCandidates).toEqual({});
     expect(audit.candidateHistory).toEqual(
       expect.arrayContaining([
@@ -350,7 +349,7 @@ describe("durable response candidate audit", () => {
       challenges: [challenge("r1", { requester: BOB })],
     });
     const settled = waiting.checked(answerAs(CAROL), ALLOWED);
-    expect(Object.values(settled.projected.audit!.activeCandidates)).toEqual([
+    expect(Object.values(settled.projected.turn.hitl!.audit!.activeCandidates)).toEqual([
       expect.objectContaining({ requestId: "publish", responder: BOB }),
     ]);
   });

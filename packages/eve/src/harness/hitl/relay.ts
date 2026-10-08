@@ -1,3 +1,4 @@
+import type { SessionView } from "#harness/session-machine/view.js";
 /**
  * Relayed requests: questions and approvals a child session, a remote agent,
  * or a workflow run's `ctx.ask()` asks a person through this session. The call
@@ -17,7 +18,7 @@ import type { InputResponse } from "#shared/input.js";
 import { outcomeOf } from "./approval.js";
 import type { Command } from "./command.js";
 import type { Input, RelayRoute } from "./input.js";
-import { type HumanInputState, type Reduced, type OpenRelayed, isOpenRelayed } from "./state.js";
+import { type Reduced, type OpenRelayed } from "./state.js";
 import { typedAnswers } from "./input-typed-reply.js";
 
 /**
@@ -26,7 +27,7 @@ import { typedAnswers } from "./input-typed-reply.js";
  * waits on the call that asked.
  */
 export function relay(
-  state: HumanInputState,
+  state: SessionView,
   input: Extract<Input, { readonly type: "relayed.requested" }>,
 ): Reduced {
   const { at, requests, route } = input;
@@ -34,13 +35,9 @@ export function relay(
   const replaced = openRelayed(state).filter(
     (open) => sameSource(open.route, route) && !fresh.has(open.request.requestId),
   );
-  const next: Record<string, HumanInputState["requests"][string]> = {
-    ...without(state, replaced).requests,
-  };
-  for (const request of requests) {
-    const open: OpenRelayed = { at, kind: "relayed", request, route };
-    next[request.requestId] = open;
-  }
+  const base = without(state, replaced);
+  const relayedRoutes = { ...base.turn.hitl?.relayedRoutes };
+  for (const request of requests) relayedRoutes[request.requestId] = route;
   return {
     events: [
       ...withdrawn(replaced),
@@ -54,7 +51,7 @@ export function relay(
       ),
       { relayed: true, type: "waitTurn" },
     ],
-    state: { ...state, requests: next },
+    state: { ...base, turn: { ...base.turn, hitl: { ...base.turn.hitl, relayedRoutes } } },
   };
 }
 
@@ -72,7 +69,7 @@ export function relay(
  * meant something else. A relayed budget Stop also cancels this turn.
  */
 export function deliverToRelayed(
-  state: HumanInputState,
+  state: SessionView,
   input: Extract<Input, { readonly type: "delivery.received" }>,
 ): Reduced {
   const { message } = input;
@@ -84,7 +81,10 @@ export function deliverToRelayed(
 
   const answers = new Map<string, InputResponse>();
   for (const response of responses) {
-    if (isOpenRelayed(state.requests[response.requestId]) && !answers.has(response.requestId)) {
+    if (
+      openRelayed(state).some((open) => open.request.requestId === response.requestId) &&
+      !answers.has(response.requestId)
+    ) {
       answers.set(response.requestId, response);
     }
   }
@@ -92,7 +92,7 @@ export function deliverToRelayed(
 
   const batches = new Map<string, OpenRelayed[]>();
   for (const requestId of answers.keys()) {
-    const open = state.requests[requestId] as OpenRelayed;
+    const open = openRelayed(state).find((open) => open.request.requestId === requestId)!;
     const key = batchKey(open);
     if (!batches.has(key))
       batches.set(
@@ -142,7 +142,7 @@ export function deliverToRelayed(
  * its completion arrives the same way; the turn waits on the call that asked.
  */
 export function relayAuthorization(
-  state: HumanInputState,
+  state: SessionView,
   input: Extract<Input, { readonly type: "relayed.authorization" }>,
 ): Reduced {
   const { event, runId } = input;
@@ -154,9 +154,15 @@ export function relayAuthorization(
         ? state
         : {
             ...state,
-            relayedAuthorizations: {
-              ...state.relayedAuthorizations,
-              [attemptId]: { at: { sequence, stepIndex, turnId }, name, runId },
+            turn: {
+              ...state.turn,
+              hitl: {
+                ...state.turn.hitl,
+                relayedAuthorizations: {
+                  ...state.turn.hitl?.relayedAuthorizations,
+                  [attemptId]: { at: { sequence, stepIndex, turnId }, name, runId },
+                },
+              },
             },
           };
     return { events: [published, { relayed: true, type: "waitTurn" }], state: next };
@@ -169,7 +175,7 @@ export function relayAuthorization(
 
 /** A run ended, or the turn was cancelled: nobody can answer what it relayed. */
 export function withdrawRelayed(
-  state: HumanInputState,
+  state: SessionView,
   select: (open: OpenRelayed) => boolean = () => true,
 ): Reduced {
   const selected = openRelayed(state).filter(select);
@@ -180,24 +186,25 @@ export function withdrawRelayed(
  * The authorizations a run started end with it, or all of them with the turn. Its
  * child reports its own completion, so ending them reports nothing.
  */
-export function endRelayedAuthorizations(state: HumanInputState, runId?: string): Reduced {
-  const ended = Object.entries(state.relayedAuthorizations ?? {})
+export function endRelayedAuthorizations(state: SessionView, runId?: string): Reduced {
+  const ended = Object.entries(state.turn.hitl?.relayedAuthorizations ?? {})
     .filter(([, authorization]) => runId === undefined || authorization.runId === runId)
     .map(([attemptId]) => attemptId);
   return { events: [], state: withoutAuthorizations(state, ended) };
 }
 
-function withoutAuthorizations(
-  state: HumanInputState,
-  attemptIds: readonly string[],
-): HumanInputState {
-  if (attemptIds.length === 0 || state.relayedAuthorizations === undefined) return state;
+function withoutAuthorizations(state: SessionView, attemptIds: readonly string[]): SessionView {
+  if (attemptIds.length === 0 || state.turn.hitl?.relayedAuthorizations === undefined) return state;
   const ids = new Set(attemptIds);
   const remaining = Object.fromEntries(
-    Object.entries(state.relayedAuthorizations).filter(([attemptId]) => !ids.has(attemptId)),
+    Object.entries(state.turn.hitl.relayedAuthorizations).filter(
+      ([attemptId]) => !ids.has(attemptId),
+    ),
   );
-  const { relayedAuthorizations: _dropped, ...rest } = state;
-  return Object.keys(remaining).length === 0 ? rest : { ...rest, relayedAuthorizations: remaining };
+  return {
+    ...state,
+    turn: { ...state.turn, hitl: { ...state.turn.hitl, relayedAuthorizations: remaining } },
+  };
 }
 
 /**
@@ -206,7 +213,7 @@ function withoutAuthorizations(
  * resolves from the session's first decision; a question still open closes.
  */
 export function withdrawAsk(
-  state: HumanInputState,
+  state: SessionView,
   input: Extract<Input, { readonly type: "relayed.withdrawn" }>,
 ): Reduced {
   const withdrawal = withdrawRelayed(
@@ -225,7 +232,7 @@ export function withdrawAsk(
   };
 }
 
-export function relayedRequestIds(state: HumanInputState): ReadonlySet<string> {
+export function relayedRequestIds(state: SessionView): ReadonlySet<string> {
   return new Set(openRelayed(state).map((open) => open.request.requestId));
 }
 
@@ -281,16 +288,29 @@ function sourceKey(route: RelayRoute): string {
   ]);
 }
 
-function openRelayed(state: HumanInputState): OpenRelayed[] {
-  return Object.values(state.requests).filter(isOpenRelayed);
+export function openRelayed(state: SessionView): OpenRelayed[] {
+  return Object.values(state.projection.inputs).flatMap((input) => {
+    const route = state.turn.hitl?.relayedRoutes?.[input.request.requestId];
+    return input.status === "settled" || route === undefined
+      ? []
+      : [{ kind: "relayed" as const, at: input, request: input.request, route }];
+  });
 }
 
-function without(state: HumanInputState, retired: readonly OpenRelayed[]): HumanInputState {
+function without(state: SessionView, retired: readonly OpenRelayed[]): SessionView {
   if (retired.length === 0) return state;
   const ids = new Set(retired.map((open) => open.request.requestId));
   return {
     ...state,
-    requests: Object.fromEntries(Object.entries(state.requests).filter(([id]) => !ids.has(id))),
+    turn: {
+      ...state.turn,
+      hitl: {
+        ...state.turn.hitl,
+        relayedRoutes: Object.fromEntries(
+          Object.entries(state.turn.hitl?.relayedRoutes ?? {}).filter(([id]) => !ids.has(id)),
+        ),
+      },
+    },
   };
 }
 

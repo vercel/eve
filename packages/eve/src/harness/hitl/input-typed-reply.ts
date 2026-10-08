@@ -1,7 +1,8 @@
 import { resolveTextToResponses } from "#channel/resolve-text.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 
-import { type HumanInputState, isOpenRelayed } from "./state.js";
+import type { SessionView } from "#harness/session-machine/view.js";
+import { openApprovalsOf } from "./approval.js";
 
 /**
  * The answers a person's typed reply gives, when it names an option of a
@@ -12,25 +13,33 @@ import { type HumanInputState, isOpenRelayed } from "./state.js";
  * answers nothing.
  */
 export function typedAnswers(
-  state: HumanInputState,
+  state: SessionView,
   text: string,
   of: "own" | "relayed",
 ): readonly InputResponse[] {
-  const open = Object.values(state.requests);
+  const inputs = Object.values(state.projection.inputs).filter(
+    (input) => input.status !== "settled",
+  );
   if (of === "relayed") {
-    const questions = open.flatMap((request) =>
-      isOpenRelayed(request) && request.request.kind === "question" ? [request] : [],
+    const questions = inputs.filter(
+      (input) =>
+        input.request.kind === "question" &&
+        state.turn.hitl?.relayedRoutes?.[input.request.requestId] !== undefined,
     );
     return questions.length === 1 ? answersTo(text, questions) : [];
   }
   const budget = answersTo(
     text,
-    open.flatMap((request) => (request.kind === "session-limit" ? [request] : [])),
+    inputs.filter(
+      (input) =>
+        input.request.kind === "session-limit" &&
+        state.turn.hitl?.relayedRoutes?.[input.request.requestId] === undefined,
+    ),
   );
   if (budget.length > 0) return budget;
   return answersTo(
     text,
-    open.flatMap((request) =>
+    openApprovalsOf(state).flatMap((request) =>
       request.kind === "tool-approval" &&
       request.answer === undefined &&
       request.responsePolicy !== true

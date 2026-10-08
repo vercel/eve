@@ -5,26 +5,29 @@ import type { StepInput } from "#harness/types.js";
 import type { InputRequest } from "#shared/input.js";
 
 import type { SessionView } from "#harness/session-machine/view.js";
-import { projectHumanInput } from "#harness/hitl/projection.js";
 
-import { askedCallIds, grantedApprovalKeys } from "#harness/hitl/approval.js";
+import {
+  askedCallIds,
+  grantedApprovalKeys,
+  heldStep,
+  openApprovalsOf,
+} from "#harness/hitl/approval.js";
 import { candidateAuthorizationAttempts } from "#harness/hitl/approval-candidate.js";
 import type { Next } from "#harness/hitl/command.js";
 import { pendingTaskToolCalls, type TaskToolCall } from "#execution/tasks/calls.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
-import type { HeldStep } from "#harness/hitl/state.js";
+import type { SuspendedStep } from "#harness/session-machine/view.js";
 import type { RequestAt } from "#harness/hitl/input.js";
 import { relayedRequestIds } from "#harness/hitl/relay.js";
 import { awaitedAuthorizations } from "#harness/hitl/authorization.js";
 import { staleAnswersAsText } from "#harness/hitl/input-stale-answer.js";
-import { type HumanInputState, isOpenRelayed } from "#harness/hitl/state.js";
 /** Read-only scenario assertions over the live SessionView; never reads legacy keys. */
 export class HumanInput {
-  readonly #state: HumanInputState;
+  readonly #state: SessionView;
 
   readonly #knownRequests?: ReadonlyMap<string, InputRequest>;
 
-  private constructor(state: HumanInputState, knownRequests?: ReadonlyMap<string, InputRequest>) {
+  private constructor(state: SessionView, knownRequests?: ReadonlyMap<string, InputRequest>) {
     this.#knownRequests = knownRequests;
     this.#state = state;
   }
@@ -32,7 +35,14 @@ export class HumanInput {
   /** Project one originating step. Runtime persistence belongs exclusively to the session machine. */
   static fromView(view: SessionView, stepIndex = 0): HumanInput {
     return new HumanInput(
-      projectHumanInput(view, view.turn.suspended[stepIndex]),
+      {
+        ...view,
+        turn: {
+          ...view.turn,
+          suspended:
+            view.turn.suspended[stepIndex] === undefined ? [] : [view.turn.suspended[stepIndex]!],
+        },
+      },
       new Map(
         Object.values(view.projection.inputs).map((entry) => [
           entry.request.requestId,
@@ -50,8 +60,12 @@ export class HumanInput {
    * request waits on the call that asked, not on the model.
    */
   next(): Next {
-    if (approvedCallsOf(this.#state.held) !== undefined) return { run: "approved" };
-    return Object.values(this.#state.requests).some((open) => !isOpenRelayed(open))
+    if (approvedCallsOf(heldStep(this.#state)) !== undefined) return { run: "approved" };
+    return openApprovalsOf(this.#state).length > 0 ||
+      this.#state.signIns.some((challenge) => challenge.candidateId === undefined) ||
+      Object.values(this.#state.projection.inputs).some(
+        (input) => input.status !== "settled" && input.request.kind === "session-limit",
+      )
       ? { waiting: "input" }
       : { run: "model" };
   }
@@ -72,7 +86,7 @@ export class HumanInput {
 
   /** Whether turn input waits for the turn's next step, behind calls that have joined history. */
   hasQueuedInput(): boolean {
-    return this.#state.queued !== undefined;
+    return this.#state.turn.queued !== undefined;
   }
 
   /**
@@ -81,7 +95,7 @@ export class HumanInput {
    * them after history.
    */
   heldMessages(): readonly ModelMessage[] {
-    return this.#state.held?.messages ?? [];
+    return heldStep(this.#state)?.messages ?? [];
   }
 
   /**
@@ -89,7 +103,7 @@ export class HumanInput {
    * result, tagged with whether it waits on a person or on runtime work.
    */
   heldCalls(): HeldCalls | undefined {
-    return heldCalls(this.#state.held, askedCallIds(this.#state));
+    return heldCalls(heldStep(this.#state), askedCallIds(this.#state));
   }
 
   /** The held step's calls that run as runtime work and have no result yet. */
@@ -100,19 +114,19 @@ export class HumanInput {
 
   /** The full auth of whoever approved a request, when it was allowed. */
   approverOfRequest(requestId: string): SessionAuthContext | undefined {
-    return this.#state.audit?.settlements[requestId]?.approver;
+    return this.#state.turn.hitl?.audit?.settlements[requestId]?.approver;
   }
 
   /** The calls a person approved that the turn has yet to run, at the step that asked. */
   approvedCalls():
     | { readonly at: RequestAt; readonly requests: readonly InputRequest[] }
     | undefined {
-    return approvedCallsOf(this.#state.held);
+    return approvedCallsOf(heldStep(this.#state));
   }
 
   /** Whether the originating live step still holds a transcript. */
   holdsStep(): boolean {
-    return this.#state.held !== undefined;
+    return heldStep(this.#state) !== undefined;
   }
 
   /** The approval keys `once()` approvals granted, which approval policies read. */
@@ -132,7 +146,7 @@ export class HumanInput {
   relaysAnything(): boolean {
     return (
       this.relayedRequestIds().size > 0 ||
-      Object.keys(this.#state.relayedAuthorizations ?? {}).length > 0
+      Object.keys(this.#state.turn.hitl?.relayedAuthorizations ?? {}).length > 0
     );
   }
 
@@ -142,16 +156,22 @@ export class HumanInput {
    * callbacks instead, and relayed requests belong to whoever asked.
    */
   openRequestIds(): ReadonlySet<string> {
-    return new Set(
-      Object.entries(this.#state.requests).flatMap(([requestId, open]) =>
-        open.kind === "authorization" || isOpenRelayed(open) ? [] : [requestId],
-      ),
-    );
+    return new Set([
+      ...openApprovalsOf(this.#state).map((open) => open.request.requestId),
+      ...Object.values(this.#state.projection.inputs)
+        .filter(
+          (input) =>
+            input.status !== "settled" &&
+            input.request.kind === "session-limit" &&
+            this.#state.turn.hitl?.relayedRoutes?.[input.request.requestId] === undefined,
+        )
+        .map((input) => input.request.requestId),
+    ]);
   }
 
   /** Whether the open request is an approval, for attributing its response. */
   isApproval(requestId: string): boolean {
-    return this.#state.requests[requestId]?.kind === "tool-approval";
+    return openApprovalsOf(this.#state).some((open) => open.request.requestId === requestId);
   }
 
   /** The ids of the open relayed requests, whose answers a delivery may carry to who asked. */
@@ -212,13 +232,13 @@ export interface HeldCalls {
  * on. `asked` names the calls whose approvals are open.
  */
 export function heldCalls(
-  step: HeldStep | undefined,
+  step: SuspendedStep | undefined,
   asked: ReadonlySet<string>,
 ): HeldCalls | undefined {
   if (step === undefined) return undefined;
   const answered = answeredCallIds(step.messages);
-  const tasks = (step.runtime?.tasks ?? []).filter((task) => !answered.has(task.callId));
-  const taskToolCalls = step.runtime === undefined ? [] : pendingTaskToolCalls(step.messages);
+  const tasks = step.tasks.filter((task) => !answered.has(task.callId));
+  const taskToolCalls = step.tasks.length === 0 ? [] : pendingTaskToolCalls(step.messages);
   const unanswered = unansweredCalls(step.messages);
   const toolNames = new Map(unanswered.map((call) => [call.toolCallId, call.toolName]));
   const calls: HeldCall[] = [
@@ -238,7 +258,7 @@ export function heldCalls(
       calls.push({ callId: call.toolCallId, toolName: call.toolName, waitsOn: "person" });
     }
   }
-  return { at: step.at, calls, taskToolCalls, tasks, approvers: step.runtime?.approvers };
+  return { at: step.event, calls, taskToolCalls, tasks, approvers: step.approvers };
 }
 
 export function unansweredCalls(
@@ -267,6 +287,6 @@ function answeredCallIds(messages: readonly ModelMessage[]): Set<string> {
   return answered;
 }
 
-function approvedCallsOf(step: HeldStep | undefined) {
-  return step?.approved?.length ? { at: step.at, requests: step.approved } : undefined;
+function approvedCallsOf(step: SuspendedStep | undefined) {
+  return step?.approved?.length ? { at: step.event, requests: step.approved } : undefined;
 }

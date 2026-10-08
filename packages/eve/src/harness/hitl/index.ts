@@ -13,7 +13,8 @@ import type { HarnessSessionBase, HarnessToolMap, StepResult } from "#harness/ty
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { InputRequest } from "#shared/input.js";
 import { renderPendingApprovalsSnippet, renderPendingApprovalsInstruction } from "./approval.js";
-import { grantedApprovalKeys, hasRunnableQueue } from "./projection.js";
+import { grantedApprovalKeys } from "./approval.js";
+import { hasRunnableQueue } from "./intake.js";
 import { checkSessionUsageLimit } from "./budget.js";
 import { applyHumanInputDecision } from "./effects.js";
 import { approvalsRequested } from "./approval.js";
@@ -36,7 +37,7 @@ export {
   type HumanInputIntake,
 } from "./intake.js";
 export { extractToolApprovalInputRequests } from "#harness/input-extraction.js";
-export { hasRunnableQueue } from "./projection.js";
+export { hasRunnableQueue } from "./intake.js";
 
 /**
  * A model step made calls that need a person's approval: the step parks on them beside any

@@ -16,8 +16,9 @@ import type { InputRequest, InputResponse } from "#shared/input.js";
 
 import type { Command } from "./command.js";
 import type { Input, RequestAt } from "./input.js";
-import { EMPTY_AUDIT, type ApprovalAudit, type Reduced, type OpenApproval } from "./state.js";
-import type { HeldStep } from "./state.js";
+import { EMPTY_AUDIT, type Reduced, type OpenApproval } from "./state.js";
+import type { SessionView, SuspendedStep } from "#harness/session-machine/view.js";
+import { hitlStepKey } from "./record.js";
 
 // The tool approval rules. A model step's calls open one request each; the
 // step's approvals resolve together once each has an answer, or when the turn
@@ -26,12 +27,7 @@ import type { HeldStep } from "./state.js";
 // held out of history and settles once every call it made has a result.
 
 /** The state the approval rules read and change. */
-interface ApprovalState {
-  readonly held?: HeldStep;
-  readonly requests: Readonly<Record<string, { readonly kind: string }>>;
-  readonly grants: readonly string[];
-  readonly audit?: ApprovalAudit;
-}
+type ApprovalState = SessionView;
 
 type Outcome = "approved" | "denied" | "invalid" | "ignored";
 
@@ -122,7 +118,9 @@ export function openApprovals<S extends ApprovalState>(
   // Every anonymous caller shares one identity, so an anonymous requester
   // can't be told apart from another anonymous person: record none.
   const requester = input.requester?.principalType === "anonymous" ? null : input.requester;
-  const requests: Record<string, { readonly kind: string }> = { ...state.requests };
+  const requests: Record<string, OpenApproval> = Object.fromEntries(
+    openApprovalsOf(state).map((open) => [open.request.requestId, open]),
+  );
   for (const request of input.requests) {
     if (request.requestId in requests) {
       throw new TypeError(`Duplicate input request id: ${JSON.stringify(request.requestId)}.`);
@@ -141,7 +139,7 @@ export function openApprovals<S extends ApprovalState>(
   }
   return {
     events: [publish(createInputRequestedEvent({ ...input.at, requests: input.requests }))],
-    state: { ...state, requests },
+    state: withOpenApprovals(state, Object.values(requests)),
   };
 }
 
@@ -163,7 +161,7 @@ export function answerApprovals<S extends ApprovalState>(
 ): Reduced<S> {
   const feedback: Command[] = [];
   const accepted = responses.filter((response) => {
-    const approval = state.requests[response.requestId];
+    const approval = approvalOf(state, response.requestId);
     const outcome = outcomeOf(response);
     if (
       isOpenApproval(approval) &&
@@ -204,9 +202,11 @@ export function answerApprovals<S extends ApprovalState>(
  * policy and the requester check already ran, and the settlement keeps who approved.
  */
 export function applyRecordedSettlements<S extends ApprovalState>(state: S): Reduced<S> {
-  const settlements = state.audit?.settlements ?? {};
+  const settlements = state.turn.hitl?.audit?.settlements ?? {};
   const responses: InputResponse[] = [];
-  for (const [requestId, open] of Object.entries(state.requests)) {
+  for (const [requestId, open] of openApprovalsOf(state).map(
+    (open) => [open.request.requestId, open] as const,
+  )) {
     if (!isOpenApproval(open) || open.answer !== undefined) continue;
     const settlement = settlements[requestId];
     if (settlement === undefined) continue;
@@ -228,9 +228,9 @@ function settledBy<S extends ApprovalState>(
   responder: SessionAuthContext,
 ): Reduced<S> {
   const events: Command[] = [];
-  const settlements = { ...state.audit?.settlements };
+  const settlements = { ...state.turn.hitl?.audit?.settlements };
   for (const response of responses) {
-    const approval = state.requests[response.requestId];
+    const approval = approvalOf(state, response.requestId);
     const outcome = outcomeOf(response);
     if (!isOpenApproval(approval) || (outcome !== "approved" && outcome !== "denied")) continue;
     settlements[response.requestId] = {
@@ -256,8 +256,14 @@ function settledBy<S extends ApprovalState>(
     );
   }
   if (events.length === 0) return { events, state };
-  const audit = state.audit ?? EMPTY_AUDIT;
-  return { events, state: { ...state, audit: { ...audit, settlements } } };
+  const audit = state.turn.hitl?.audit ?? EMPTY_AUDIT;
+  return {
+    events,
+    state: {
+      ...state,
+      turn: { ...state.turn, hitl: { ...state.turn.hitl, audit: { ...audit, settlements } } },
+    },
+  };
 }
 
 /**
@@ -273,7 +279,7 @@ export function steerPastApprovals<S extends ApprovalState>(state: S): Reduced<S
 
 /** Whether a response policy decides who may answer this open approval. */
 export function isPolicyGated(state: ApprovalState, requestId: string): boolean {
-  const open = state.requests[requestId];
+  const open = approvalOf(state, requestId);
   return isOpenApproval(open) && open.responsePolicy === true;
 }
 
@@ -300,13 +306,13 @@ export function cancelApprovals<S extends ApprovalState>(state: S): Reduced<S> {
       }),
     ),
   );
-  if (state.held === undefined) {
+  if (heldStep(state) === undefined) {
     events.push({
       message: notRunMessage(open.map((approval) => notRunPart(approval, "cancelled"))),
       type: "appendHistory",
     });
   }
-  return { events, state: { ...state, requests: withoutApprovals(state.requests) } };
+  return { events, state: withOpenApprovals(state, []) };
 }
 
 /** The calls whose approvals are open, which wait on a person. */
@@ -319,9 +325,16 @@ export function askedCallIds(state: ApprovalState): ReadonlySet<string> {
  * A grant is hidden while an approval for its key still waits, so the policy
  * keeps asking for that call.
  */
-export function grantedApprovalKeys(state: ApprovalState): ReadonlySet<string> {
-  const waiting = new Set(openApprovalsOf(state).map((approval) => approval.approvalKey));
-  return new Set(state.grants.filter((key) => !waiting.has(key)));
+export function grantedApprovalKeys(
+  state: ApprovalState,
+  approvalKey?: (request: InputRequest) => string | undefined,
+): ReadonlySet<string> {
+  const waiting = new Set(
+    openApprovalsOf(state).map(
+      (approval) => approvalKey?.(approval.request) ?? approval.approvalKey,
+    ),
+  );
+  return new Set(state.turn.grants.filter((key) => !waiting.has(key)));
 }
 
 /**
@@ -336,7 +349,7 @@ function resolveApprovals<S extends ApprovalState>(state: S): Reduced<S> {
   const notRun: ToolResultPart[] = [];
   const rejected: Command[] = [];
   const approved: InputRequest[] = [];
-  const grants = new Set(state.grants);
+  const grants = new Set(state.turn.grants);
   for (const approval of open) {
     const outcome = outcomeOf(approval.answer);
     resolutions.push({
@@ -378,32 +391,30 @@ function resolveApprovals<S extends ApprovalState>(state: S): Reduced<S> {
     publish(createInputResolvedEvent({ ...at, resolutions })),
     ...rejected,
   ];
-  const resolved = { ...state, grants: [...grants], requests: withoutApprovals(state.requests) };
+  const closed = withOpenApprovals(state, []);
+  const resolved = { ...closed, turn: { ...closed.turn, grants: [...grants] } };
   if (approved.length === 0) {
-    if (resolved.held === undefined)
+    if (heldStep(resolved) === undefined)
       return {
         events: [...events, { type: "appendHistory", message: notRunMessage(notRun) }],
         state: resolved,
       };
     return {
       events,
-      state: {
-        ...resolved,
-        held: {
-          ...resolved.held,
-          messages: notRun.reduce<ModelMessage[]>(
-            (messages, part) => withResult(messages, part),
-            [...resolved.held.messages],
-          ),
-        },
-      },
+      state: withHeldStep(resolved, {
+        ...heldStep(resolved)!,
+        messages: notRun.reduce<ModelMessage[]>(
+          (messages, part) => withResult(messages, part),
+          [...heldStep(resolved)!.messages],
+        ),
+      }),
     };
   }
   // The host runs the approved calls (`approvedCalls`); the step stays held
   // until their results settle it. A step parked before
   // steps were held out of history has its calls there: it holds only the
   // results, which join history after them.
-  const step = resolved.held ?? { at, messages: [] };
+  const step = heldStep(resolved) ?? { event: at, messages: [], requests: [], tasks: [] };
   const held = {
     ...step,
     approved,
@@ -412,7 +423,7 @@ function resolveApprovals<S extends ApprovalState>(state: S): Reduced<S> {
       [...step.messages],
     ),
   };
-  return { events, state: { ...resolved, held } };
+  return { events, state: withHeldStep(resolved, held) };
 }
 
 /** An approval's outcome from its answer; a relayed approval resolves the same way. */
@@ -425,30 +436,92 @@ export function outcomeOf(answer: InputResponse | undefined): Outcome {
 }
 
 function recordAnswers<S extends ApprovalState>(state: S, responses: readonly InputResponse[]): S {
-  const requests: Record<string, { readonly kind: string }> = { ...state.requests };
+  const requests: Record<string, OpenApproval> = Object.fromEntries(
+    openApprovalsOf(state).map((open) => [open.request.requestId, open]),
+  );
   for (const response of responses) {
     const open = requests[response.requestId];
     if (!isOpenApproval(open)) continue;
     const answered: OpenApproval = { ...open, answer: response };
     requests[response.requestId] = answered;
   }
-  return { ...state, requests };
+  return withOpenApprovals(state, Object.values(requests));
 }
 
-function openApprovalsOf(state: ApprovalState): OpenApproval[] {
-  return Object.values(state.requests).filter(isOpenApproval);
+export function openApprovalsOf(state: SessionView): OpenApproval[] {
+  return state.turn.suspended.flatMap((step) => {
+    const record = state.turn.hitl?.steps?.[hitlStepKey(step.event)];
+    return step.requests.map((request) => ({
+      kind: "tool-approval" as const,
+      at: step.event,
+      request,
+      requester: step.requester ?? null,
+      approvalKey: record?.approvalKeys[request.requestId] ?? request.action.toolName,
+      ...(record?.answers[request.requestId] !== undefined && {
+        answer: record.answers[request.requestId],
+      }),
+      ...(step.responseAuthRequiredRequestIds?.includes(request.requestId) && {
+        responsePolicy: true as const,
+      }),
+    }));
+  });
+}
+
+export function approvalOf(view: SessionView, requestId: string): OpenApproval | undefined {
+  return openApprovalsOf(view).find((open) => open.request.requestId === requestId);
+}
+
+export function heldStep(view: SessionView): SuspendedStep | undefined {
+  const step = view.turn.suspended[0];
+  return step?.transcriptCommitted === true &&
+    step.tasks.length === 0 &&
+    step.approved === undefined
+    ? undefined
+    : step;
+}
+
+export function withHeldStep<S extends SessionView>(view: S, step: SuspendedStep): S {
+  return { ...view, turn: { ...view.turn, suspended: [step] } };
+}
+
+function withOpenApprovals<S extends SessionView>(view: S, approvals: readonly OpenApproval[]): S {
+  const step = view.turn.suspended[0];
+  if (step === undefined) return view;
+  const steps = { ...view.turn.hitl?.steps };
+  const key = hitlStepKey(step.event);
+  if (approvals.length === 0) delete steps[key];
+  else
+    steps[key] = {
+      approvalKeys: Object.fromEntries(
+        approvals.map((open) => [open.request.requestId, open.approvalKey]),
+      ),
+      answers: Object.fromEntries(
+        approvals.flatMap((open) =>
+          open.answer === undefined ? [] : [[open.request.requestId, open.answer]],
+        ),
+      ),
+    };
+  return {
+    ...view,
+    turn: {
+      ...view.turn,
+      hitl: { ...view.turn.hitl, steps },
+      suspended: [
+        {
+          ...step,
+          requests: approvals.map((open) => open.request),
+          requester: approvals[0]?.requester ?? step.requester,
+          responseAuthRequiredRequestIds: approvals
+            .filter((open) => open.responsePolicy)
+            .map((open) => open.request.requestId),
+        },
+      ],
+    },
+  };
 }
 
 function isOpenApproval(value: { readonly kind: string } | undefined): value is OpenApproval {
   return value?.kind === "tool-approval";
-}
-
-function withoutApprovals<R extends { readonly kind: string }>(
-  requests: Readonly<Record<string, R>>,
-): Readonly<Record<string, R>> {
-  return Object.fromEntries(
-    Object.entries(requests).filter(([, request]) => !isOpenApproval(request)),
-  );
 }
 
 function notRunPart(approval: OpenApproval, outcome: keyof typeof NOT_RUN_REASONS): ToolResultPart {

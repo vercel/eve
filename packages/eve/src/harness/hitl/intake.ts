@@ -1,3 +1,4 @@
+import { openInputs } from "#protocol/session-projection.js";
 import { hitlStepKey } from "./record.js";
 import { openLimit } from "#harness/session-machine/view.js";
 import type { UserContent } from "ai";
@@ -12,7 +13,7 @@ import type { SessionView, TurnState } from "#harness/session-machine/view.js";
 import type { Transition } from "#harness/session-machine/commit.js";
 import { pendingPolicyChecks } from "./approval-candidate.js";
 import { typedAnswers } from "./input-typed-reply.js";
-import { projectHumanInput } from "./projection.js";
+
 import { readAnswerText } from "#internal/input-text.js";
 import { outcomeOf } from "./approval.js";
 import { AuthKey, SessionKey } from "#context/keys.js";
@@ -24,7 +25,7 @@ import { approvedCalls } from "#harness/session-machine/transitions.js";
 import type { SuspendedStep } from "#harness/session-machine/view.js";
 import { type Step } from "#harness/step/context.js";
 import type { HarnessToolMap, StepInput, StepResult } from "#harness/types.js";
-import { grantedApprovalKeys } from "./projection.js";
+import { grantedApprovalKeys } from "./approval.js";
 import { runApprovedCalls } from "./approved-calls.js";
 import { approversOf, setApprovedCallCallers } from "./approved-call-callers.js";
 import type { InstrumentationAttempt } from "#instrumentation/runtime.js";
@@ -182,7 +183,11 @@ export async function acceptHumanInput(
       ...(delivered.input?.inputResponses ?? []),
       ...(delivered.input?.attributedInputResponses ?? []).map((entry) => entry.response),
       ...view.turn.suspended.flatMap((parked) =>
-        typedAnswers(projectHumanInput(view, parked), readAnswerText(delivered.input) ?? "", "own"),
+        typedAnswers(
+          { ...view, turn: { ...view.turn, suspended: [parked] } },
+          readAnswerText(delivered.input) ?? "",
+          "own",
+        ),
       ),
     ]
       .filter((response) => response.optionId === "approve")
@@ -224,7 +229,9 @@ export async function acceptHumanInput(
   const existing = new Set(Object.keys(starting.turn.hitl?.audit?.activeCandidates ?? {}));
   const byId = new Map(
     readyView.turn.suspended
-      .flatMap((parked) => pendingPolicyChecks(projectHumanInput(readyView, parked)))
+      .flatMap((parked) =>
+        pendingPolicyChecks({ ...readyView, turn: { ...readyView.turn, suspended: [parked] } }),
+      )
       .filter((check) => existing.has(check.candidateId))
       .map((check) => [check.candidateId, check]),
   );
@@ -616,4 +623,30 @@ function compactInput(input: ResolvedStepInput | undefined): ResolvedStepInput {
   if (input.messageConsumed === true) result.messageConsumed = true;
   if (input.outputSchema !== undefined) result.outputSchema = input.outputSchema;
   return attachClientContext(result, readClientContext(input));
+}
+
+export function hasRunnableQueue(view: SessionView): boolean {
+  const queued = view.turn.queued;
+  if (queued === undefined) return false;
+  if (
+    queued.message !== undefined ||
+    (queued.context?.length ?? 0) > 0 ||
+    readClientContext(queued) !== undefined ||
+    queued.outputSchema !== undefined ||
+    (queued.runtimeActionResults?.length ?? 0) > 0
+  ) {
+    return true;
+  }
+  const responses = [
+    ...(queued.inputResponses ?? []),
+    ...(queued.attributedInputResponses ?? []).map(({ response }) => response),
+  ];
+  if (responses.length === 0) return false;
+  const answered = new Set(responses.map((response) => response.requestId));
+  const limit = openInputs(view.projection).find((open) => open.request.kind === "session-limit");
+  if (limit !== undefined) return answered.has(limit.request.requestId);
+  return view.turn.suspended.some(
+    (step) =>
+      step.requests.length > 0 && step.requests.every((request) => answered.has(request.requestId)),
+  );
 }

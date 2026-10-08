@@ -1,3 +1,6 @@
+import { openApprovalsOf, approvalOf } from "./approval.js";
+import { openRelayed } from "./relay.js";
+import { openAuthorizationsOf } from "./authorization.js";
 import { openLimit } from "#harness/session-machine/view.js";
 import { describe, expect, it } from "vitest";
 import type { ModelMessage } from "ai";
@@ -21,7 +24,6 @@ import {
 } from "#internal/testing/hitl.js";
 import { HumanInput } from "#internal/testing/hitl-observer.js";
 import { beforeStep, afterStep } from "./decisions.js";
-import { projectHumanInput } from "./projection.js";
 import { migrateSessionState } from "#harness/session-machine/migrate.js";
 import {
   LEGACY_BATCH_KEY,
@@ -96,14 +98,14 @@ describe("HumanInput boundary transitions", () => {
       initialSessionProjection(),
       JSON.parse(JSON.stringify(stored.state)),
     );
-    const projected = projectHumanInput(restarted, restarted.turn.suspended[0]);
-    expect(projected.held?.messages).toEqual(stepResponse([a, b]));
-    expect(projected.requests.a).toMatchObject({
+    const projected = restarted;
+    expect(projected.turn.suspended[0]?.messages).toEqual(stepResponse([a, b]));
+    expect(approvalOf(projected, "a")).toMatchObject({
       approvalKey: "a-key",
       responsePolicy: true,
       requester: ALICE,
     });
-    expect(projected.requests.b).toMatchObject({ approvalKey: "b" });
+    expect(approvalOf(projected, "b")).toMatchObject({ approvalKey: "b" });
     expect(stored.state?.[STATE_KEY]).toBeUndefined();
   });
 
@@ -117,7 +119,7 @@ describe("HumanInput boundary transitions", () => {
       initialSessionProjection(),
       JSON.parse(JSON.stringify(stored.state)),
     );
-    expect(projectHumanInput(restart, restart.turn.suspended[0]).requests.a).toMatchObject({
+    expect(approvalOf(restart, "a")).toMatchObject({
       answer: { requestId: "a", optionId: "approve" },
     });
     expect(restart.turn.hitl?.audit?.settlements.a?.approver).toEqual(ALICE);
@@ -139,13 +141,10 @@ describe("HumanInput boundary transitions", () => {
     };
     const unchanged = JSON.stringify(legacy);
     const migrated = sessionView(view().projection, migrateSessionState({ state: legacy }).state);
-    const projected = projectHumanInput(
-      { ...view(), turn: migrated.turn },
-      migrated.turn.suspended[0],
-    );
+    const projected = migrated;
     expect(migrated.turn.grants).toEqual(["old-tool"]);
-    expect(projected.held?.following).toEqual({ message: "following" });
-    expect(projected.held?.messages).toEqual(stepResponse([approval("old")]));
+    expect(projected.turn.suspended[0]?.following).toEqual({ message: "following" });
+    expect(projected.turn.suspended[0]?.messages).toEqual(stepResponse([approval("old")]));
     expect(JSON.stringify(legacy)).toBe(unchanged);
   });
 
@@ -156,7 +155,7 @@ describe("HumanInput boundary transitions", () => {
       v.projection,
       createInputRequestedEvent({ ...AT, requests: [req] }),
     );
-    const projected = projectHumanInput({
+    const projected = {
       ...v,
       projection: foldSession(
         projection,
@@ -170,13 +169,13 @@ describe("HumanInput boundary transitions", () => {
           relayedAuthorizations: { child: { at: AT, name: "github", runId: "run" } },
         },
       },
-    });
-    expect(projected.requests.relay).toMatchObject({ kind: "relayed", route });
-    expect(projected.requests[BUDGET_QUESTION.requestId]?.kind).toBe("session-limit");
-    expect(
-      Object.values(projected.requests).some((request) => request.kind === "authorization"),
-    ).toBe(true);
-    expect(projected.relayedAuthorizations?.child?.runId).toBe("run");
+    };
+    expect(openRelayed(projected).find((open) => open.request.requestId === "relay")).toMatchObject(
+      { kind: "relayed", route },
+    );
+    expect(openLimit(projected)?.request.kind).toBe("session-limit");
+    expect(openAuthorizationsOf(projected).length > 0).toBe(true);
+    expect(projected.turn.hitl?.relayedAuthorizations?.child?.runId).toBe("run");
   });
 
   it("holds arrivals behind approved results, not behind runtime results", () => {
@@ -234,7 +233,7 @@ describe("HumanInput boundary transitions", () => {
     );
     const waiting = { ...base, turn: open.transition.turn };
     const response = answer("approve", "a");
-    const projected = projectHumanInput(waiting, waiting.turn.suspended[0]);
+    const projected = waiting;
     const checks: string[] = [];
     reduce(projected, response, "pre-step", (check) => {
       checks.push(check.candidateId);
@@ -338,9 +337,7 @@ describe("HumanInput boundary transitions", () => {
     );
     let projection = first.transition.events.reduce(foldSession, v.projection);
     const restarted = sessionView(projection, saved.state);
-    expect(projectHumanInput(restarted).requests[BUDGET_QUESTION.requestId]?.kind).toBe(
-      "session-limit",
-    );
+    expect(openLimit(restarted)?.request.kind).toBe("session-limit");
     expect(first.transition.events.some((event) => event.type === "turn.completed")).toBe(false);
     const stopped = beforeStep(restarted, [answer("stop", BUDGET_QUESTION.requestId)]);
     expect(
@@ -349,7 +346,10 @@ describe("HumanInput boundary transitions", () => {
     projection = stopped.transition.events.reduce(foldSession, projection);
     const applied = await applyTransition(saved, stopped.transition, async () => {});
     expect(applied.state?.unrelated).toBe(1);
-    expect(projectHumanInput(sessionView(projection, applied.state)).requests).toEqual({});
+    expect(openApprovalsOf(sessionView(projection, applied.state))).toEqual([]);
+    expect(openLimit(sessionView(projection, applied.state))).toBeUndefined();
+    expect(openRelayed(sessionView(projection, applied.state))).toEqual([]);
+    expect(openAuthorizationsOf(sessionView(projection, applied.state))).toEqual([]);
   });
 
   it("cancels multiple held lenses without duplicating sibling resolutions or terminal events", () => {
@@ -423,7 +423,7 @@ describe("HumanInput boundary transitions", () => {
     const saved = await applyTransition(session(), { ...migration, events: [] }, async () => {});
     expect(saved.state?.[STATE_KEY]).toBeUndefined();
     const restarted = sessionView(initialSessionProjection(), saved.state);
-    expect(projectHumanInput(restarted, restarted.turn.suspended[0]).requests.old).toMatchObject({
+    expect(approvalOf(restarted, "old")).toMatchObject({
       approvalKey: "old-key",
       requester: ALICE,
     });

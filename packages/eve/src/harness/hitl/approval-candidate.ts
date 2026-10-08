@@ -1,3 +1,5 @@
+import type { SessionView } from "#harness/session-machine/view.js";
+import { approvalOf } from "./approval.js";
 /**
  * The response-policy rules. An answer to an approval whose tool defines
  * `approval.response` doesn't answer it: it becomes a candidate, bound to the
@@ -24,7 +26,6 @@ import type {
   CandidateDecision,
 } from "#harness/hitl/input.js";
 import type {
-  HumanInputState,
   Reduced,
   ActiveCandidate,
   ApprovalAudit,
@@ -57,7 +58,7 @@ const SETTLED_REASON = "Another response settled this approval.";
  * signed is refused, since the policy decides who may answer.
  */
 export function proposeCandidates(
-  state: HumanInputState,
+  state: SessionView,
   input: {
     readonly now: number;
     readonly responder: SessionAuthContext | null;
@@ -68,7 +69,7 @@ export function proposeCandidates(
   const events: Command[] = [];
   const checks: PolicyCheck[] = [];
   for (const response of input.responses) {
-    const approval = next.requests[response.requestId];
+    const approval = approvalOf(next, response.requestId);
     if (approval?.kind !== "tool-approval" || approval.answer !== undefined) continue;
     const decision = decisionOf(response.optionId);
     if (decision === undefined) continue;
@@ -114,12 +115,12 @@ export function proposeCandidates(
  * verdict for a candidate no longer active (expired, stale) changes nothing.
  */
 export function checkedCandidate(
-  state: HumanInputState,
+  state: SessionView,
   candidateId: string,
   ran: PolicyRun,
 ): Reduced & { readonly settled?: InputResponse } {
   const candidate = auditOf(state).activeCandidates[candidateId];
-  const approval = candidate === undefined ? undefined : state.requests[candidate.requestId];
+  const approval = candidate === undefined ? undefined : approvalOf(state, candidate.requestId);
   if (candidate === undefined || approval?.kind !== "tool-approval") return { events: [], state };
   const verdict = verdictOf(ran);
   switch (verdict.verdict) {
@@ -195,13 +196,13 @@ function verdictOf(ran: PolicyRun): Verdict {
  * returns `undefined`.
  */
 export function completeCandidateAuthorization(
-  state: HumanInputState,
+  state: SessionView,
   input: Extract<Input, { readonly type: "authorization.completed" }>,
 ): (Reduced & { readonly checks: readonly PolicyCheck[] }) | undefined {
   const candidate = Object.values(auditOf(state).activeCandidates).find((active) =>
     active.authorizations?.some((challenge) => opens(challenge, input)),
   );
-  const approval = candidate === undefined ? undefined : state.requests[candidate.requestId];
+  const approval = candidate === undefined ? undefined : approvalOf(state, candidate.requestId);
   if (candidate === undefined || approval?.kind !== "tool-approval") return undefined;
   const challenge = candidate.authorizations!.find((authorization) => opens(authorization, input))!;
   const events: Command[] = [completed(challenge, approval.at, input.outcome)];
@@ -245,37 +246,12 @@ export function completeCandidateAuthorization(
 }
 
 /** The attempt ids of the authorizations responders' candidates wait on. */
-export function candidateAuthorizationAttempts(state: HumanInputState): readonly string[] {
+export function candidateAuthorizationAttempts(state: SessionView): readonly string[] {
   return Object.values(auditOf(state).activeCandidates).flatMap((candidate) =>
     (candidate.authorizations ?? []).flatMap((challenge) =>
       challenge.attemptId === undefined ? [] : [challenge.attemptId],
     ),
   );
-}
-
-/**
- * A session stored while a responder's authorization was an open request of its own:
- * each such authorization moves to its candidate, and one whose candidate is gone closes.
- */
-export function adoptCandidateAuthorizations(state: HumanInputState): HumanInputState {
-  const legacy = Object.entries(state.requests).filter(
-    ([, open]) => open.kind === "authorization" && open.challenge.candidateId !== undefined,
-  );
-  if (legacy.length === 0) return state;
-  const requests = { ...state.requests };
-  let next: HumanInputState = state;
-  for (const [key, open] of legacy) {
-    delete requests[key];
-    if (open.kind !== "authorization") continue;
-    const candidate = auditOf(next).activeCandidates[open.challenge.candidateId!];
-    if (candidate === undefined) continue;
-    next = withCandidate(next, {
-      ...candidate,
-      authorizations: [...(candidate.authorizations ?? []), open.challenge],
-      status: "authorization-required",
-    });
-  }
-  return { ...next, requests };
 }
 
 function opens(
@@ -297,7 +273,7 @@ function without(candidate: ActiveCandidate, challenge: AuthorizationChallenge):
   };
 }
 
-function withCandidate(state: HumanInputState, candidate: ActiveCandidate): HumanInputState {
+function withCandidate(state: SessionView, candidate: ActiveCandidate): SessionView {
   const audit = auditOf(state);
   return withAudit(state, {
     ...audit,
@@ -306,7 +282,7 @@ function withCandidate(state: HumanInputState, candidate: ActiveCandidate): Huma
 }
 
 /** Candidates past their deadline time out, and their authorizations fail. */
-export function expireCandidates(state: HumanInputState, now: number): Reduced {
+export function expireCandidates(state: SessionView, now: number): Reduced {
   const expired = Object.values(auditOf(state).activeCandidates).filter(
     (candidate) => candidate.expiresAt <= now,
   );
@@ -320,13 +296,13 @@ export function expireCandidates(state: HumanInputState, now: number): Reduced {
  * The turn moved past its approvals, steered or cancelled: every active
  * candidate goes stale. Their authorizations close with the turn's other authorizations.
  */
-export function staleCandidates(state: HumanInputState, reason: string): Reduced {
+export function staleCandidates(state: SessionView, reason: string): Reduced {
   return finish(state, Object.values(auditOf(state).activeCandidates), "stale", reason);
 }
 
 /** Settles the approval with the allowed candidate's decision; its competitors go stale. */
 function settle(
-  state: HumanInputState,
+  state: SessionView,
   approval: OpenApproval,
   winner: ActiveCandidate,
 ): Reduced & { readonly settled: InputResponse } {
@@ -374,7 +350,7 @@ function settle(
  * close with them: `authorizations` says how, declined with `reason` by default.
  */
 function finish(
-  state: HumanInputState,
+  state: SessionView,
   candidates: readonly ActiveCandidate[],
   status: FinishedCandidate["status"],
   reason?: string,
@@ -401,7 +377,7 @@ function finish(
       responder: identityOf(responder),
       status,
     });
-    const approval = state.requests[candidate.requestId];
+    const approval = approvalOf(state, candidate.requestId);
     if (approval?.kind !== "tool-approval") continue;
     if (status !== "allowed") events.push(candidateEvent(approval.at, candidate, status, reason));
     for (const challenge of waiting ?? []) {
@@ -508,18 +484,32 @@ function identityOf(responder: SessionAuthContext): ResponderIdentity {
   };
 }
 
-function auditOf(state: HumanInputState): ApprovalAudit {
-  return state.audit ?? EMPTY_AUDIT;
+function auditOf(state: SessionView): ApprovalAudit {
+  return state.turn.hitl?.audit ?? EMPTY_AUDIT;
 }
 
-function withAudit(state: HumanInputState, audit: ApprovalAudit): HumanInputState {
-  return { ...state, audit };
+function withAudit(state: SessionView, audit: ApprovalAudit): SessionView {
+  const before = new Set(
+    Object.values(state.turn.hitl?.audit?.activeCandidates ?? {}).flatMap((candidate) =>
+      (candidate.authorizations ?? []).map((challenge) => challenge.attemptId ?? challenge.name),
+    ),
+  );
+  return {
+    ...state,
+    turn: { ...state.turn, hitl: { ...state.turn.hitl, audit } },
+    signIns: [
+      ...state.signIns.filter((challenge) => !before.has(challenge.attemptId ?? challenge.name)),
+      ...Object.values(audit.activeCandidates).flatMap(
+        (candidate) => candidate.authorizations ?? [],
+      ),
+    ],
+  };
 }
 
 /** Pending candidates are policy work for the next durable step, not new answers. */
-export function pendingPolicyChecks(state: HumanInputState): readonly PolicyCheck[] {
+export function pendingPolicyChecks(state: SessionView): readonly PolicyCheck[] {
   return Object.values(auditOf(state).activeCandidates).flatMap((candidate) => {
-    const approval = state.requests[candidate.requestId];
+    const approval = approvalOf(state, candidate.requestId);
     return candidate.status === "pending" && approval?.kind === "tool-approval"
       ? [check(approval, candidate)]
       : [];

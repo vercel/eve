@@ -1,3 +1,4 @@
+import { openApprovalsOf } from "#harness/hitl/approval.js";
 import { STATE_KEY, LEGACY_BATCH_KEY as LEGACY_KEY } from "./migrate-legacy.js";
 import type { ModelMessage } from "ai";
 import { describe, expect, it } from "vitest";
@@ -108,7 +109,13 @@ describe("a session parked on runtime calls under the old coordination key", () 
     // Before, the approvals' step was empty while the batch held its response.
     const held = Turn.idle().input(approvalsRequested([approval("deploy")], { messages: [] }));
     const state = {
-      [STATE_KEY]: held.stored().projected,
+      [STATE_KEY]: {
+        grants: held.stored().projected.turn.grants,
+        requests: Object.fromEntries(
+          openApprovalsOf(held.stored().projected).map((open) => [open.request.requestId, open]),
+        ),
+        held: { at: AT, messages: [] },
+      },
       [LEGACY_KEY]: { ...legacyBatch, responseMessages: messages },
     };
 
@@ -131,7 +138,12 @@ describe("a session parked on runtime calls under the old coordination key", () 
     const asked = Turn.idle()
       .input(approvalsRequested([approval("deploy")]))
       .stored();
-    const { held: _held, ...stored } = asked.projected;
+    const stored = {
+      grants: asked.projected.turn.grants,
+      requests: Object.fromEntries(
+        openApprovalsOf(asked.projected).map((open) => [open.request.requestId, open]),
+      ),
+    };
     const history = response(call("call-deploy", "deploy"));
 
     const cancelled = Turn.from({ [STATE_KEY]: stored }).input(cancel);
@@ -165,14 +177,25 @@ it("a session stored while a responder's authorization was a request of its own 
     })
     .stored();
   const answered = authorization.projected;
-  const [candidateId, candidate] = Object.entries(answered.audit!.activeCandidates)[0]!;
+  const [candidateId, candidate] = Object.entries(answered.turn.hitl!.audit!.activeCandidates)[0]!;
   const { authorizations, ...waiting } = candidate;
   const legacy = Turn.from({
     [STATE_KEY]: {
-      ...answered,
-      audit: { ...answered.audit, activeCandidates: { [candidateId]: waiting } },
+      grants: answered.turn.grants,
+      held: {
+        at: answered.turn.suspended[0]!.event,
+        messages: answered.turn.suspended[0]!.messages,
+      },
+      audit: { ...answered.turn.hitl!.audit, activeCandidates: { [candidateId]: waiting } },
       requests: {
-        ...answered.requests,
+        deploy: {
+          at: AT,
+          kind: "tool-approval",
+          request: approval("deploy"),
+          requester: answered.turn.suspended[0]!.requester,
+          approvalKey: "deploy",
+          responsePolicy: true,
+        },
         r1: { at: AT, challenge: authorizations![0], kind: "authorization" },
       },
     },

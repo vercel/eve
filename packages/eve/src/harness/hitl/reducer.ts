@@ -1,3 +1,5 @@
+import type { SessionView } from "#harness/session-machine/view.js";
+import { foldSession } from "#protocol/session-projection.js";
 import { answerBudget, askBudget, stopBudget, withdrawBudget } from "#harness/hitl/budget-rule.js";
 
 import {
@@ -29,7 +31,7 @@ import {
   completeAuthorization,
   requireAuthorizations,
 } from "./authorization.js";
-import { type HumanInputState, type Reduced, isOpenRelayed } from "./state.js";
+import { type Reduced } from "./state.js";
 import { typedAnswers } from "./input-typed-reply.js";
 
 // ---------------------------------------------------------------------------
@@ -56,7 +58,7 @@ export function verdictsOf(input: Input): VerdictOf {
 }
 
 export function reduce(
-  state: HumanInputState,
+  state: SessionView,
   input: Exclude<Input, { readonly type: "actions.dispatched" | "actions.settled" }>,
   phase: Phase,
   verdictOf: VerdictOf,
@@ -134,7 +136,8 @@ export function reduce(
     case "context.cleared":
       return { events: [], state: clearedState(state) };
     case "input.resumed": {
-      const { queued, ...rest } = state;
+      const queued = state.turn.queued;
+      const rest = { ...state, turn: { ...state.turn, queued: undefined } };
       return queued === undefined
         ? { events: [], state }
         : { events: [{ type: "resumeInput", input: queued }], state: rest };
@@ -155,7 +158,7 @@ export function reduce(
  * can carry that out. A cancel in the turn's step closes the rest and ends the
  * turn; its relayed requests stay open until the cancelled turn settles, parked.
  */
-function cancel(state: HumanInputState, phase: Phase): Reduced {
+function cancel(state: SessionView, phase: Phase): Reduced {
   if (phase !== "parked") {
     const closed = closeOwn(state);
     return {
@@ -176,13 +179,13 @@ function cancel(state: HumanInputState, phase: Phase): Reduced {
  * closes them again without reporting them. Its held step stays, for
  * the parked settle to cancel with what the step left.
  */
-function carryCancel(state: HumanInputState): Reduced {
+function carryCancel(state: SessionView): Reduced {
   const closed = closeOwn(state);
   return { events: closed.events.filter((event) => event.type !== "publish"), state: closed.state };
 }
 
 /** Closes what the turn's own calls wait on, as cancelled: its step too, with `step`. */
-function closeOwn(state: HumanInputState): Reduced {
+function closeOwn(state: SessionView): Reduced {
   return then(
     staleCandidates(state, CANCELLED_REASON),
     (next) => endRelayedAuthorizations(next),
@@ -197,7 +200,7 @@ function closeOwn(state: HumanInputState): Reduced {
  * their candidates go stale, and its authorizations are declined. The model hears
  * which of its authorizations ended, so it asks again only if still needed.
  */
-function steer(state: HumanInputState): Reduced {
+function steer(state: SessionView): Reduced {
   const approvals = then(staleCandidates(state, STEERED_REASON), steerPastApprovals);
   const authorizations = closeAuthorizations(approvals.state, {
     outcome: "declined",
@@ -219,7 +222,7 @@ function steer(state: HumanInputState): Reduced {
  * pending.
  */
 function checkCandidates(
-  state: HumanInputState,
+  state: SessionView,
   checks: readonly PolicyCheck[],
   verdictOf: VerdictOf,
 ): Reduced {
@@ -237,13 +240,13 @@ function checkCandidates(
 }
 
 /** Runs rules in order, each on the state the last one left, collecting their events. */
-function then(first: Reduced, ...rest: ((state: HumanInputState) => Reduced)[]): Reduced {
-  let state = first.state;
+function then(first: Reduced, ...rest: ((state: SessionView) => Reduced)[]): Reduced {
+  let state = foldReported(first);
   const events = [...first.events];
   for (const rule of rest) {
     const reduced = rule(state);
     events.push(...reduced.events);
-    state = reduced.state;
+    state = foldReported(reduced);
   }
   return { events, state };
 }
@@ -252,15 +255,29 @@ function then(first: Reduced, ...rest: ((state: HumanInputState) => Reduced)[]):
  * What a cleared session keeps: its standing grants, and what children and
  * runs relayed through it.
  */
-function clearedState(state: HumanInputState): HumanInputState {
-  const requests = Object.fromEntries(
-    Object.entries(state.requests).filter(([, open]) => isOpenRelayed(open)),
-  );
+function clearedState(state: SessionView): SessionView {
   return {
-    grants: state.grants,
-    requests,
-    ...(state.relayedAuthorizations !== undefined && {
-      relayedAuthorizations: state.relayedAuthorizations,
-    }),
+    ...state,
+    signIns: [],
+    turn: {
+      ...state.turn,
+      suspended: [],
+      queued: undefined,
+      hitl: {
+        relayedRoutes: state.turn.hitl?.relayedRoutes,
+        relayedAuthorizations: state.turn.hitl?.relayedAuthorizations,
+      },
+    },
+  };
+}
+
+function foldReported(reduced: Reduced): SessionView {
+  return {
+    ...reduced.state,
+    projection: reduced.events.reduce(
+      (projection, command) =>
+        command.type === "publish" ? foldSession(projection, command.event) : projection,
+      reduced.state.projection,
+    ),
   };
 }

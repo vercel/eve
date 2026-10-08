@@ -3,7 +3,12 @@ import { cleanupHitl } from "./record.js";
 import { applyRecordedSettlements } from "./approval.js";
 import { authorizationRequested } from "./authorization.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
-import type { SessionView, StepCoordinates, TurnState } from "#harness/session-machine/view.js";
+import type {
+  SessionView,
+  StepCoordinates,
+  TurnState,
+  SuspendedStep,
+} from "#harness/session-machine/view.js";
 import { foldSession } from "#protocol/session-projection.js";
 import type { Command, EffectCommand } from "./command.js";
 import type { Transition } from "#harness/session-machine/commit.js";
@@ -22,7 +27,8 @@ import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { FromStep, FromInbox, FromRelay, FromHost, PolicyCheck, PolicyRun } from "./input.js";
 import { typedAnswers } from "./input-typed-reply.js";
 import { reduce, verdictsOf } from "./reducer.js";
-import { projectHumanInput, projectedSignIns, projectedTurn, sameStep } from "./projection.js";
+import { sameStep } from "#harness/session-machine/view.js";
+import { openApprovalsOf } from "./approval.js";
 
 export type BeforeStepArrival =
   | FromInbox
@@ -72,19 +78,10 @@ export function beforeStep(
     }
   }
   for (const step of view.turn.suspended) {
-    const before = projectHumanInput(current, step);
+    const before = ruleScope(current, step);
     const reduced = applyRecordedSettlements(before);
     if (reduced.events.length === 0 && reduced.state === before) continue;
-    current = {
-      ...current,
-      projection: reduced.events.reduce(
-        (projection, command) =>
-          command.type === "publish" ? foldSession(projection, command.event) : projection,
-        current.projection,
-      ),
-      turn: projectedTurn(current, reduced.state, step.event),
-      signIns: projectedSignIns(current, before, reduced.state),
-    };
+    current = mergeScope(current, before, reduced.state, step, reduced.events);
     commands.push(...reduced.events);
     current = settleReady(current, commands, step.event);
   }
@@ -109,7 +106,7 @@ export function beforeStep(
       if (
         arrival.type === "message.received" &&
         (current.turn.hitl?.readsResults === true || openLimit(current) !== undefined) &&
-        typedAnswers(projectHumanInput(current), arrival.text, "own").length === 0
+        typedAnswers(ruleScope(current), arrival.text, "own").length === 0
       ) {
         if (step === undefined)
           current = {
@@ -151,13 +148,13 @@ export function beforeStep(
           ? undefined
           : current.turn.suspended.find((candidate) => sameStep(candidate.event, step.event));
       if (step !== undefined && selected === undefined) continue;
-      const before = projectHumanInput(current, selected);
+      const before = ruleScope(current, selected);
       const input =
         arrival.type === "input.answered" || arrival.type === "delivery.received"
           ? {
               ...arrival,
-              responses: arrival.responses.filter(
-                (response) => response.requestId in before.requests,
+              responses: arrival.responses.filter((response) =>
+                requestIds(before).has(response.requestId),
               ),
             }
           : arrival;
@@ -171,16 +168,7 @@ export function beforeStep(
         parked ? "parked" : "pre-step",
         checkPolicy ?? verdictsOf(input),
       );
-      current = {
-        ...current,
-        projection: reduced.events.reduce(
-          (projection, command) =>
-            command.type === "publish" ? foldSession(projection, command.event) : projection,
-          current.projection,
-        ),
-        turn: projectedTurn(current, reduced.state, selected?.event),
-        signIns: projectedSignIns(current, before, reduced.state),
-      };
+      current = mergeScope(current, before, reduced.state, selected, reduced.events);
       commands.push(...reduced.events);
       if (
         selected !== undefined &&
@@ -303,7 +291,7 @@ export function afterStep(
         );
       }
       if (input.authorizations !== undefined) {
-        const before = projectHumanInput(current);
+        const before = ruleScope(current);
         const reduced = reduce(
           before,
           {
@@ -316,11 +304,7 @@ export function afterStep(
           "post-step",
           verdictsOf(input),
         );
-        current = {
-          ...current,
-          turn: projectedTurn(current, reduced.state),
-          signIns: projectedSignIns(current, before, reduced.state),
-        };
+        current = mergeScope(current, before, reduced.state, undefined, reduced.events);
         commands.push(...reduced.events);
       }
       continue;
@@ -338,31 +322,128 @@ export function afterStep(
       selected = current.turn.suspended.at(-1);
     }
     if (input.type === "budget.exceeded") selected = undefined;
-    const before = projectHumanInput(current, selected);
+    const before = ruleScope(current, selected);
     const reduced = reduce(
       before,
       input,
       input.type === "budget.exceeded" ? "pre-step" : "post-step",
       verdictsOf(input),
     );
-    current = {
-      ...current,
-      projection: reduced.events.reduce(
-        (projection, command) =>
-          command.type === "publish" ? foldSession(projection, command.event) : projection,
-        current.projection,
-      ),
-      turn: projectedTurn(
-        current,
-        reduced.state,
-        input.type === "budget.exceeded" ? undefined : response.at,
-      ),
-      signIns: projectedSignIns(current, before, reduced.state),
-    };
+    current = mergeScope(current, before, reduced.state, selected, reduced.events);
     commands.push(...reduced.events);
     if (selected !== undefined) current = settleReady(current, commands, response.at);
   }
   return finishDecision(view, { turn: current.turn, signIns: current.signIns, commands });
+}
+
+/** Rules operate on native views scoped to one originating step or session-owned inputs. */
+function ruleScope(view: SessionView, step?: SuspendedStep): SessionView {
+  const requests = new Set(step?.requests.map((request) => request.requestId) ?? []);
+  const activeCandidates = Object.fromEntries(
+    Object.entries(view.turn.hitl?.audit?.activeCandidates ?? {}).filter(([, candidate]) =>
+      requests.has(candidate.requestId),
+    ),
+  );
+  const signIns = view.signIns.filter((challenge) => {
+    if (challenge.candidateId !== undefined) return challenge.candidateId in activeCandidates;
+    const authorization = view.projection.authorizations[challenge.attemptId ?? challenge.name];
+    return step === undefined
+      ? authorization === undefined ||
+          !view.turn.suspended.some((step) => sameStep(step.event, authorization))
+      : authorization !== undefined && sameStep(step.event, authorization);
+  });
+  return {
+    ...view,
+    signIns,
+    turn: {
+      ...view.turn,
+      suspended: step === undefined ? [] : [step],
+      hitl: {
+        ...view.turn.hitl,
+        ...(view.turn.hitl?.audit !== undefined && {
+          audit: {
+            ...view.turn.hitl.audit,
+            activeCandidates,
+          },
+        }),
+      },
+    },
+    projection: {
+      ...view.projection,
+      inputs: Object.fromEntries(
+        Object.entries(view.projection.inputs).filter(([, input]) =>
+          step === undefined
+            ? !view.turn.suspended.some((step) =>
+                step.requests.some((request) => request.requestId === input.request.requestId),
+              )
+            : requests.has(input.request.requestId),
+        ),
+      ),
+    },
+  };
+}
+
+function requestIds(view: SessionView): Set<string> {
+  return new Set([
+    ...openApprovalsOf(view).map((open) => open.request.requestId),
+    ...Object.values(view.projection.inputs)
+      .filter((input) => input.status !== "settled")
+      .map((input) => input.request.requestId),
+  ]);
+}
+
+function mergeScope(
+  view: SessionView,
+  before: SessionView,
+  next: SessionView,
+  step: SuspendedStep | undefined,
+  commands: readonly Command[],
+): SessionView {
+  const activeCandidates = { ...view.turn.hitl?.audit?.activeCandidates };
+  for (const id of Object.keys(before.turn.hitl?.audit?.activeCandidates ?? {}))
+    delete activeCandidates[id];
+  Object.assign(activeCandidates, next.turn.hitl?.audit?.activeCandidates);
+  const retiredSignIns = new Set(
+    before.signIns.map((challenge) => challenge.attemptId ?? challenge.name),
+  );
+  const turn = {
+    ...next.turn,
+    suspended:
+      step === undefined
+        ? view.turn.suspended
+        : view.turn.suspended.flatMap((candidate) =>
+            sameStep(candidate.event, step.event) ? next.turn.suspended : [candidate],
+          ),
+    hitl: {
+      ...next.turn.hitl,
+      ...(next.turn.hitl?.audit !== undefined && {
+        audit: { ...next.turn.hitl.audit, activeCandidates },
+      }),
+      ...(step !== undefined && {
+        relayedRoutes: view.turn.hitl?.relayedRoutes,
+        relayedAuthorizations: view.turn.hitl?.relayedAuthorizations,
+      }),
+    },
+  };
+  const projection = {
+    ...view.projection,
+    inputs: { ...view.projection.inputs, ...next.projection.inputs },
+  };
+  return {
+    ...view,
+    turn,
+    signIns: [
+      ...view.signIns.filter(
+        (challenge) => !retiredSignIns.has(challenge.attemptId ?? challenge.name),
+      ),
+      ...next.signIns,
+    ],
+    projection: commands.reduce(
+      (projection, command) =>
+        command.type === "publish" ? foldSession(projection, command.event) : projection,
+      projection,
+    ),
+  };
 }
 
 /** Settle one originating step without inspecting or committing a sibling's transcript. */

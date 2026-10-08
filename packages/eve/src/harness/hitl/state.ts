@@ -1,3 +1,4 @@
+import type { SessionView } from "#harness/session-machine/view.js";
 import type { ModelMessage } from "ai";
 
 import type { SessionAuthContext } from "#channel/types.js";
@@ -16,7 +17,7 @@ import type { RelayRoute, RequestAt } from "./input.js";
 // ---------------------------------------------------------------------------
 
 /** What a rule leaves: the state, and the events it reports, in order. */
-export interface Reduced<S = HumanInputState> {
+export interface Reduced<S = SessionView> {
   readonly events: readonly Command[];
   readonly state: S;
 }
