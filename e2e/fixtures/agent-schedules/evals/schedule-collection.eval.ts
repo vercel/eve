@@ -29,6 +29,39 @@ export default defineEval({
     );
     client.succeeded();
     client.calledTool("share-schedule", { input: { operation: "get", name: "collection-email" } });
+    const record = client.toolCalls.find((call) => call.name === "share-schedule")?.output;
+    const managementName = Reflect.get(Object(record), "name");
+    if (typeof managementName !== "string") throw new Error("The schedule has no management name.");
+    const edit = await t.send(
+      `Alice wants to revise her saved reminder. Update the schedule using management name ${managementName}. Set its one-time timing to January 2, 2030 at 09:00 UTC and replace its complete payload with a task to send a fixture email with subject Updated note and body A revised fixture note., and destination creator-email. Save the change without sending the email now.`,
+    );
+    edit.expectOk();
+    const updateApproval = edit.session.requireInputRequest({
+      display: "confirmation",
+      toolName: "schedule__requests__update",
+    });
+    const updated = await edit.session.respond([
+      { optionId: "approve", requestId: updateApproval.requestId },
+    ]);
+    updated.expectOk();
+    updated.session.calledTool("schedule__requests__update", {
+      input: {
+        name: managementName,
+        expression: { type: "single", at: "2030-01-02T09:00", timezone: "UTC" },
+        payload: { destination: "creator-email" },
+      },
+      status: "completed",
+    });
+    const inspected = await t.send(
+      "Inspect the schedule named collection-email with share-schedule using its get operation.",
+    );
+    inspected.succeeded();
+    inspected.calledTool("share-schedule", {
+      output: {
+        name: managementName,
+        expression: { type: "single", at: "2030-01-02T09:00", timezone: "UTC" },
+      },
+    });
     const manual = await t.send("Use share-schedule to invoke collection-email once.");
     manual.succeeded();
     manual.calledTool("share-schedule", {
@@ -46,7 +79,7 @@ export default defineEval({
     const scheduled = await t.target.attachSession(sessionId);
     scheduled.succeeded();
     scheduled.calledTool("record-email", {
-      input: { to: "alice@example.test", subject: "Scheduled note" },
+      input: { to: "alice@example.test", subject: "Updated note" },
       output: { recipient: "alice@example.test", accepted: true },
     });
     // The authored outbox channel records the scheduled session's reply.

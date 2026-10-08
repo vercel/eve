@@ -72,6 +72,34 @@ describe("vercelScheduleProvider", () => {
     expect(new Headers(init?.headers).get("Authorization")).toBe(`Bearer ${oidcToken}`);
   });
 
+  it("patches only supplied configuration, wraps replacement payloads, and clears omitted timing options", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("VERCEL_OIDC_TOKEN", oidcToken);
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json(schedule()));
+    const provider = vercelScheduleProvider({ fetch: fetchImpl });
+    await provider.update(context, "review-prs-daily", { payload: { task: "Updated" } });
+    await provider.update(context, "review-prs-daily", {
+      expression: { type: "cron", cron: "0 9 * * *" },
+    });
+    const [url, payloadRequest] = fetchImpl.mock.calls[0]!;
+    expect(String(url)).toBe(
+      "https://vercel-schedules.com/v1/schedules/review-prs-daily?namespace=eve-namespace",
+    );
+    expect(payloadRequest?.method).toBe("PATCH");
+    expect(JSON.parse(String(payloadRequest?.body))).toEqual({
+      payload: {
+        eve: { application: "dynamic-schedules", collection: "collection", version: 1 },
+        payload: { task: "Updated" },
+      },
+    });
+    expect(JSON.parse(String(fetchImpl.mock.calls[1]![1]?.body))).toEqual({
+      expression: { type: "cron", cron: "0 9 * * *" },
+      timezone: "UTC",
+      jitter: null,
+    });
+  });
+
   it("omits a blank first-page cursor", async () => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_ENV", "production");

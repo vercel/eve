@@ -459,7 +459,7 @@ describe("compileAgentManifest source graph", () => {
       messages: [],
     });
     expect(Object.keys(tools as object).sort()).toEqual(
-      ["create", "delete", "disable", "enable", "get", "invoke", "list"].map(
+      ["create", "delete", "disable", "enable", "get", "invoke", "list", "update"].map(
         (operation) => `schedule__billing-requests__${operation}`,
       ),
     );

@@ -10,6 +10,8 @@ export {
   type ScheduleApprovals,
   type ScheduleClient,
   type ScheduleClientCreate,
+  type ScheduleClientUpdate,
+  type SchedulePatch,
   type ScheduleCreate,
   type ScheduleExpression,
   type ScheduleTiming,

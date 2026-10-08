@@ -2,6 +2,11 @@ import type { MockModelRequest, MockModelResponse } from "eve/evals";
 
 const SCHEDULE = "collection-email";
 const EMAIL = { to: "alice@example.test", subject: "Scheduled note", body: "A fixture note." };
+const UPDATED_EMAIL = {
+  to: "alice@example.test",
+  subject: "Updated note",
+  body: "A revised fixture note.",
+};
 
 /**
  * Scripted mock for the world suites. Each `schedule-collection` eval prompt
@@ -11,7 +16,8 @@ const EMAIL = { to: "alice@example.test", subject: "Scheduled note", body: "A fi
 export function respond(request: MockModelRequest): MockModelResponse | string {
   const message = request.lastUserMessage ?? "";
   if (message.includes("This scheduled occurrence is firing now")) {
-    return once(request, "record-email", EMAIL, () => `Sent "${EMAIL.subject}" to ${EMAIL.to}.`);
+    const email = message.includes(UPDATED_EMAIL.subject) ? UPDATED_EMAIL : EMAIL;
+    return once(request, "record-email", email, () => `Sent "${email.subject}" to ${email.to}.`);
   }
   if (message.includes(`Create the schedule named ${SCHEDULE}`)) {
     const input = {
@@ -23,6 +29,23 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
       },
     };
     return once(request, "schedule__requests__create", input, () => `Saved ${SCHEDULE}.`);
+  }
+  if (message.includes("Update the schedule using management name")) {
+    const name = /management name ([0-9A-Za-z._-]+)\./u.exec(message)?.[1];
+    if (!name) throw new Error("The update prompt needs a management name.");
+    return once(
+      request,
+      "schedule__requests__update",
+      {
+        name,
+        expression: { type: "single", at: "2030-01-02T09:00", timezone: "UTC" },
+        payload: {
+          task: `Send a fixture email with subject "${UPDATED_EMAIL.subject}" and body "${UPDATED_EMAIL.body}".`,
+          destination: "creator-email",
+        },
+      },
+      () => `Updated ${SCHEDULE}.`,
+    );
   }
   for (const operation of ["get", "invoke", "delivery"] as const) {
     if (message.includes("share-schedule") && message.includes(OPERATION_PROMPTS[operation])) {

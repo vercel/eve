@@ -4,6 +4,7 @@ import type {
   ScheduleCreate,
   ScheduleExpression,
   ScheduleList,
+  SchedulePatch,
   SchedulePage,
   ScheduleProvider,
   ScheduleRecord,
@@ -72,6 +73,28 @@ export function inMemoryScheduleProvider(
     async get(context: ScheduleProviderContext, name: string) {
       const record = schedules.get(scheduleKey(context, name));
       return record === undefined ? null : publicRecord(record);
+    },
+
+    async update<TPayload>(
+      context: ScheduleProviderContext,
+      name: string,
+      patch: SchedulePatch<TPayload>,
+    ) {
+      return withOperationResult(operationResults, context.operationId, () => {
+        const key = scheduleKey(context, name);
+        const current = requireSchedule(schedules, key, name);
+        const updated: StoredSchedule = {
+          ...current,
+          expression:
+            patch.expression === undefined
+              ? current.expression
+              : normalizeExpression(patch.expression),
+          payload: patch.payload === undefined ? current.payload : patch.payload,
+          updatedAt: now().getTime(),
+        };
+        schedules.set(key, updated);
+        return publicRecord(updated);
+      });
     },
 
     async enable(context: ScheduleProviderContext, name: string) {
