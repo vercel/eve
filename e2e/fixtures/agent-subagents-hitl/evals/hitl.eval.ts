@@ -1,4 +1,4 @@
-import { defineEval, type ToolStub } from "eve/evals";
+import { defineEval } from "eve/evals";
 import type { EveEvalContext, EveEvalSession, EveEvalTurn } from "eve/evals";
 import { equals } from "eve/evals/expect";
 import type { InputHookObservation } from "../input-hook-audit";
@@ -14,24 +14,23 @@ type SessionCursor = Pick<
  * routes back down, and the child's result splices into the parent reply.
  * Parking is server-side.
  */
-const stockPriceEval = {
+const stockPriceEval = defineEval({
   tags: ["session-inbox"],
   description: "Subagent tool approval proxied through the parent session.",
   timeoutMs: 90_000,
 
-  async test(t: EveEvalContext, GOOG_PRICE = "178.92", stubs?: readonly ToolStub[]) {
-    const session = await t.session({ stubs });
-    const started = await session.send(
+  async test(t) {
+    const started = await t.send(
       `Call the stock-price subagent exactly once with message 'Call the get_stock_price tool exactly once with ticker "GOOG". After it returns, do not call any tool again; return the result.'. After that single subagent call finishes, do not call any subagent or tool again; include the exact stock price in your final reply.`,
     );
     const blocked = await waitForInput(t, started.session, "get_stock_price");
     const resumed = await blocked.respondAll("approve");
     t.check(resumed.inputRequests, equals([]));
     resumed.noFailedActions();
-    const completed = resumed.message?.includes(GOOG_PRICE)
+    const completed = resumed.message?.includes("178.92")
       ? resumed
-      : await waitForMessage(t, blocked, GOOG_PRICE);
-    completed.messageIncludes(GOOG_PRICE);
+      : await waitForMessage(t, blocked, "178.92");
+    completed.messageIncludes("178.92");
 
     const audit = await completed.session.send(
       "Alice reviews Bob's stock-price approval. Read the parent input-hook audit.",
@@ -69,21 +68,38 @@ const stockPriceEval = {
     t.calledSubagent("stock-price", { status: "completed", count: 1 });
     t.noFailedActions();
   },
-};
+});
 
 export default [
-  defineEval(stockPriceEval),
+  stockPriceEval,
   defineEval({
-    ...stockPriceEval,
+    tags: ["session-inbox"],
     description: "Subagent stock quote supplied by a tool stub.",
-    test: (t) =>
-      stockPriceEval.test(t, "314.15", [
-        {
-          id: "quote",
-          tool: "stock-price/get_stock_price",
-          outcome: { response: { price: 314.15 } },
-        },
-      ]),
+    timeoutMs: 90_000,
+    async test(t) {
+      const session = await t.session({
+        stubs: [
+          {
+            id: "quote",
+            tool: "stock-price/get_stock_price",
+            outcome: { response: { price: 314.15 } },
+          },
+        ],
+      });
+      const started = await session.send(
+        `Call the stock-price subagent exactly once with message 'Call the get_stock_price tool exactly once with ticker "GOOG". After it returns, do not call any tool again; return the result.'. After that single subagent call finishes, do not call any subagent or tool again; include the exact stock price in your final reply.`,
+      );
+      const blocked = await waitForInput(t, started.session, "get_stock_price");
+      const resumed = await blocked.respondAll("approve");
+      resumed.noFailedActions();
+      const completed = resumed.message?.includes("314.15")
+        ? resumed
+        : await waitForMessage(t, blocked, "314.15");
+      completed.messageIncludes("314.15");
+      t.succeeded();
+      t.calledSubagent("stock-price", { status: "completed", count: 1 });
+      t.noFailedActions();
+    },
   }),
 ];
 
