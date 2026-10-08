@@ -169,8 +169,8 @@ export async function ensureSandboxAccess(
   ): RuntimeSandboxSession {
     const sandbox = withRuntimeSandboxLifecycle(
       handle.sandbox,
-      (deleteOptions?: SandboxDeleteOptions) => handle.onSessionDelete(deleteOptions),
-      () => handle.onSessionStop(),
+      (deleteOptions?: SandboxDeleteOptions) => handle.onSandboxDelete(deleteOptions),
+      () => handle.onSandboxStop(),
     );
     opened = { handle, providerName, sandbox };
     return sandbox;
@@ -311,7 +311,7 @@ export async function ensureSandboxAccess(
         // same tool-session key, is using; only an owning access discards it.
         if (failed !== undefined && input.ownsSandbox !== false) {
           try {
-            await failed.onSessionDelete();
+            await failed.onSandboxDelete();
           } catch (cleanupError) {
             throw new AggregateError(
               [error, cleanupError],
@@ -356,7 +356,7 @@ export async function ensureSandboxAccess(
         throw new Error("Only the owning session can delete this sandbox.");
       const current = await requireHandle();
       const providerName = opened?.providerName;
-      await current.onSessionDelete(deleteOptions);
+      await current.onSandboxDelete(deleteOptions);
       if (providerName !== undefined) {
         untrackActiveSandboxHandle({ handle: current, providerName, sessionId: input.sessionId });
       }
@@ -423,10 +423,10 @@ export async function ensureSandboxAccess(
       if (provider.implementation.onSessionEnd !== undefined) {
         await provider.implementation.onSessionEnd(context, artifact, persisted.state, { reason });
       } else if (current !== undefined) {
-        await current.handle.onSessionDelete();
+        await current.handle.onSandboxDelete();
       } else {
         const resumed = await provider.implementation.resume(context, artifact, persisted.state);
-        await resumed.onSessionDelete();
+        await resumed.onSandboxDelete();
       }
       if (current !== undefined) {
         untrackActiveSandboxHandle({
@@ -446,7 +446,7 @@ export async function ensureSandboxAccess(
     },
     async stop() {
       const current = await requireHandle();
-      await current.onSessionStop();
+      await current.onSandboxStop();
       opened = undefined;
       opening = undefined;
       requiring = undefined;

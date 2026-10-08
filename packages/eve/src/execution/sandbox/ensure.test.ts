@@ -24,9 +24,9 @@ function fixture(setup?: () => void, returnCopy = false, onSessionEnd?: () => Pr
     const sandbox = mockSandbox();
     return {
       sandbox: sandbox.session,
-      onSessionDelete: deleteSandbox,
+      onSandboxDelete: deleteSandbox,
       onRuntimeShutdown: shutdownSandbox,
-      onSessionStop: stopSandbox,
+      onSandboxStop: stopSandbox,
     };
   });
   const start = vi.fn(async () => ({ handle: await create(), state: null }));

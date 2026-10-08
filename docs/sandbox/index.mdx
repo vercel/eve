@@ -221,7 +221,7 @@ export const AcmeSandbox = defineSandboxProvider<
 
 `onSessionEnd()` is invoked when the durable session reaches a completed, expired, or failed terminal outcome. It receives the exact prepared artifact, persisted provider state, and a `reason` of `"completed"`, `"expired"`, or `"failed"`. Implement idempotent permanent cleanup from those values rather than depending on a live handle. eve retries the cleanup step and logs an exhausted failure without replacing the session's terminal outcome. A session that never opened a sandbox and a child that borrows its parent's sandbox do not call the hook.
 
-Provider handles implement `onSessionStop()`, `onRuntimeShutdown()`, and `onSessionDelete()`. These handle-level methods cover authored stop or delete calls, process shutdown, and failed initialization; `onSessionEnd()` is the single provider hook for durable terminal session cleanup.
+Provider handles implement `onSandboxStop()`, `onRuntimeShutdown()`, and `onSandboxDelete()`. These handle-level methods cover authored stop or delete calls, process shutdown, and failed initialization; `onSessionEnd()` is the single provider hook for durable terminal session cleanup.
 
 Open options belong to `start()` and are not serialized or passed to `resume()`. A provider must put any immutable option-derived data needed for reconnection in its session state. With the current immutable-state contract, `resume()` reconnects existing native state and fails if it is gone rather than recreating callback side effects. A custom provider may define start-only callback fields, but built-in providers initialize the sandbox in `defineSandbox()` after `open()`.
 

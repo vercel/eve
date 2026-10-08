@@ -124,8 +124,8 @@ export interface SandboxProviderSessionContext {
 export interface SandboxProviderHandle<Session extends SandboxSession = SandboxSession> {
   readonly sandbox: Session;
   onRuntimeShutdown(): Promise<void>;
-  onSessionDelete(options?: SandboxDeleteOptions): Promise<void>;
-  onSessionStop(): Promise<void>;
+  onSandboxDelete(options?: SandboxDeleteOptions): Promise<void>;
+  onSandboxStop(): Promise<void>;
 }
 
 export interface SandboxProviderImplementation<
