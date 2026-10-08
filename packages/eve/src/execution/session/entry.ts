@@ -156,9 +156,9 @@ export async function bootInitialOwner(
   const serializedContext = stampSessionIdentity(input.serializedContext, sessionId);
   const sessionWritable = getWritable<Uint8Array>();
   const inbox = createSessionInbox(sessionId);
-  const { workflowStartedAt } = getWorkflowMetadata();
   const sessionTimeoutMs = input.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS;
-  const deadline = sessionTimeoutDeadline(sessionTimeoutMs, workflowStartedAt.getTime());
+  // Workflow's clock is replay-stable; its optimistic startedAt metadata is not.
+  const deadline = sessionTimeoutDeadline(sessionTimeoutMs, Date.now());
   const continuationToken = (serializedContext["eve.continuationToken"] as string) || "";
   const serializedBundle = serializedContext["eve.bundle"] as {
     source: DurableCompiledArtifactsSource;

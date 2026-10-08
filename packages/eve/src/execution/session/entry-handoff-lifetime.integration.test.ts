@@ -1,5 +1,5 @@
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session/timeout.js";
-import { assert, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
 import { hydrateStepReturnValue, hydrateWorkflowArguments } from "@workflow/core/serialization";
 import { captureTurnEvents } from "#internal/testing/events.js";
@@ -216,11 +216,25 @@ describe("workflowEntry integration", () => {
   });
 
   describe("compaction handoff", () => {
+    afterEach(() => vi.restoreAllMocks());
+
     it("moves each compacted session to a fresh run on its deployment and keeps its deadline", async () => {
       const output = captureConsoleOutput();
       const runtime = await createTestRuntime({ agent: { name: "workflow-entry-compaction" } });
 
       await runtime.run(async () => {
+        const world = await getWorld();
+        const createEvent = world.events.create.bind(world.events);
+        let delayFirstStart = true;
+        vi.spyOn(world.events, "create").mockImplementation(async (...args) => {
+          if (delayFirstStart && args[1].eventType === "run_started") {
+            delayFirstStart = false;
+            // Make the optimistic run's start time differ from the persisted
+            // timestamp used on replay, without changing the workflow clock.
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+          return createEvent(...args);
+        });
         const anchor = await start(workflowEntry, [
           {
             kind: "initial",
@@ -234,7 +248,6 @@ describe("workflowEntry integration", () => {
           },
         ]);
         const stream = captureTurnEvents(anchor);
-        const world = await getWorld();
         const workflowRuntime = createWorkflowRuntime({
           compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
         });
