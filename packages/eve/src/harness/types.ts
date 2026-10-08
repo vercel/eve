@@ -277,14 +277,6 @@ export type HarnessEmitFn = (
   messages?: readonly import("ai").ModelMessage[],
 ) => Promise<void>;
 
-/**
- * Unified event handler: emits the event to the stream, then
- * dispatches to hook subscribers and dynamic tool resolvers.
- *
- * Same signature as {@link HarnessEmitFn} but semantically broader —
- * every event goes through channel adapter, stream write, hooks,
- * and dynamic tool dispatch in one call.
- */
 /** Where a model call stands: its turn and its step within the turn. */
 export interface StepCoordinates {
   readonly sequence: number;
@@ -312,6 +304,13 @@ export interface StepParticipants {
   }): Promise<void>;
 }
 
+/**
+ * Unified event handler: emits the event to the stream, then dispatches it to hook subscribers
+ * and the session's participants.
+ *
+ * Same signature as {@link HarnessEmitFn} but semantically broader — every event goes through
+ * channel adapter, stream write, hooks, and participants in one call.
+ */
 export type HandleEventFn = (
   event: UnstampedMessageStreamEvent,
   messages?: readonly import("ai").ModelMessage[],
