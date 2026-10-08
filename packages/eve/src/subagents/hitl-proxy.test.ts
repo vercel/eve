@@ -349,6 +349,30 @@ describe("routeDeliverPayload message resolution", () => {
     expect(routed.forChildren).toEqual([]);
   });
 
+  it("keeps text for the turn when a relayed question precedes a relayed approval", () => {
+    const session = withRelays(askSession([["ask-1", {}]]), {
+      entries: [
+        [
+          "approval-1",
+          {
+            childContinuationToken: "hook-approval-1",
+            event: REQUEST_EVENT,
+            kind: "tool-approval",
+          },
+        ],
+      ],
+      forChildContinuationToken: "hook-approval-1",
+    });
+    const routed = routeDeliverPayload({
+      payload: { message: "production" },
+      resolveMessage: true,
+      state: session.state,
+    });
+
+    expect(routed.forSelf).toEqual({ message: "production" });
+    expect(routed.forChildren).toEqual([]);
+  });
+
   it("keeps a message for the turn when it doesn't answer the first question", () => {
     const routed = routeDeliverPayload({
       payload: { message: "Actually, check the logs first." },
