@@ -8,7 +8,7 @@ last_updated: "2026-10-08"
 
 Companion docs:
 
-- [`dynamic-participants.md`](./dynamic-participants.md) runs dynamic resolvers and memory providers on real events, using two events this proposal adds. Its pipeline is independent of this proposal; its key changes ship with it.
+- [`dynamic-participants.md`](./dynamic-participants.md) makes dynamic resolvers and memory providers functions over real events, using two events this proposal adds. Its pipeline is independent of this proposal; its API change ships with it.
 - [`session-machine-simplification.md`](./session-machine-simplification.md) covers structural cleanup in the session machine. Two of its items help this proposal land.
 
 ## Introduction
@@ -36,13 +36,13 @@ The proposed catalog has 31 types (28 facts and 3 progress types), down from 34.
 
 Today the event contract has no single home. Its pieces are spread across the package, and several readers re-derive parts of it:
 
-| Piece              | Today                                                                                                                                                                                                                     | With this proposal                                                                                                                                                     |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Types and encoding | `protocol/message.ts` (2,018 lines): types, 34 builders, encoding, headers. `message-version.ts` normalizes v21–v26, and `event-id.ts` and `event-dedupe.ts` handle `meta.id`                                             | `protocol/session-events/`: Zod schemas per family, the envelope, a runtime catalog, and a checker. Producers build typed literals, and old versions are deleted       |
-| Lifecycle state    | The server projection (`protocol/session-projection.ts`) and the client reducers (`message-reducer*.ts`, `conversation-reducer.ts`) fold separately. `TurnSegment` and `message-response.ts` add their own boundary rules | One public fold with typed tables and selectors, shared by client and server                                                                                           |
-| Readers' own folds | Telegram's sign-in lookup, the invocation API's 64-event window, evals (`derive-run-facts.ts`), ACP, and the TUI                                                                                                          | Selectors over the shared fold                                                                                                                                         |
-| Authoring surfaces | Hook and channel event maps (`public/definitions/`); dynamic resolver and memory keys reuse event names                                                                                                                   | Hook, channel, dynamic resolver, and memory maps keyed by the catalog's events, with guards from `eve/events` ([`dynamic-participants.md`](./dynamic-participants.md)) |
-| Parent–child relay | `subagents/callback-route.ts` re-declares v26 event shapes with strict schemas                                                                                                                                            | Its own tolerant relay contract, keyed by child IDs                                                                                                                    |
+| Piece              | Today                                                                                                                                                                                                                     | With this proposal                                                                                                                                                                                    |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Types and encoding | `protocol/message.ts` (2,018 lines): types, 34 builders, encoding, headers. `message-version.ts` normalizes v21–v26, and `event-id.ts` and `event-dedupe.ts` handle `meta.id`                                             | `protocol/session-events/`: Zod schemas per family, the envelope, a runtime catalog, and a checker. Producers build typed literals, and old versions are deleted                                      |
+| Lifecycle state    | The server projection (`protocol/session-projection.ts`) and the client reducers (`message-reducer*.ts`, `conversation-reducer.ts`) fold separately. `TurnSegment` and `message-response.ts` add their own boundary rules | One public fold with typed tables and selectors, shared by client and server                                                                                                                          |
+| Readers' own folds | Telegram's sign-in lookup, the invocation API's 64-event window, evals (`derive-run-facts.ts`), ACP, and the TUI                                                                                                          | Selectors over the shared fold                                                                                                                                                                        |
+| Authoring surfaces | Hook and channel event maps (`public/definitions/`); dynamic resolver and memory keys reuse event names                                                                                                                   | Hook and channel maps keyed by the catalog's events; dynamic resolvers and memory providers as functions over the events their kind receives ([`dynamic-participants.md`](./dynamic-participants.md)) |
+| Parent–child relay | `subagents/callback-route.ts` re-declares v26 event shapes with strict schemas                                                                                                                                            | Its own tolerant relay contract, keyed by child IDs                                                                                                                                                   |
 
 After the break, a new fact or field touches one family module. The checker, the old-reader conformance test, and `extension-contracts` catch drift ([The contract module](#the-contract-module), [Evolving safely after 1.0](#evolving-safely-after-10)).
 
@@ -227,7 +227,7 @@ Each new type records something v26 left for readers to infer:
 - **`call.started`:** the call was cleared and began running, and what cleared it, or which task serves it. Before, a call waiting for approval looked like a running one, an auto-approved call looked like one a grant cleared, and "the call was handed to a task" was conflated with "the call completed" in the receipt.
 - **`task.ended`:** the task itself stopped. v26 settled each call a task served, but the task had no end, so "is this subagent still alive?" was a guess.
 - **`response.submitted`, `.admitted`, and `.settled`:** every answer to an interaction, from submission through its checks to whether it decided the interaction. Before, policy-gated answers were candidates, partial batch answers lived only in private state and a client overlay, and sign-in completions were callbacks outside the delivery model.
-- **`session.redeployed`:** a newer deployment took the session over. Session-scoped resolvers refresh on it; before, they re-ran on a hand-built `session.started`, and nothing told readers why the agent's tools or instructions changed.
+- **`session.redeployed`:** a newer deployment took the session over. Session-scoped resolvers refresh after it, re-run with the session's original `session.started`; before, they re-ran on a hand-built one, and nothing told readers why the agent's tools or instructions changed.
 - **`usage.recorded`:** the only carrier of usage, attributed to the run, call, or context change that spent it, or to nothing, as for cache warming. Before, usage rode on step, turn, and session events, and delegated usage was easy to count twice.
 - **`context.started` and `.settled`:** one lifecycle for operations on what the model sees next. v26 gave compaction a start and a success, but no failure and no usage for its summary call (#3483), and recorded a clear on its own. Future rewinds, branch switches, and context edits become new kinds, not new families.
 
@@ -300,7 +300,7 @@ session.ended       { outcome: completed | failed, cause?, error? }
 ```
 
 - Every reader stops at `session.ended`. Nothing after it counts.
-- **`session.redeployed`** comes first in the first commit after a newer deployment takes the session over, which happens only while the session is idle. `revision` is the runtime revision eve already compares: the deployment ID, or the compiled artifacts' key locally. Session-scoped resolvers refresh on it ([`dynamic-participants.md`](./dynamic-participants.md)). A fresh process on the same deployment isn't a redeploy.
+- **`session.redeployed`** comes first in the first commit after a newer deployment takes the session over, which happens only while the session is idle. `revision` is the runtime revision eve already compares: the deployment ID, or the compiled artifacts' key locally. Session-scoped resolvers refresh on it, re-run with the session's original `session.started` ([`dynamic-participants.md`](./dynamic-participants.md)). A fresh process on the same deployment isn't a redeploy.
 - A failed session references what failed, for example `cause: {turnId}`; the error details live on that entity.
 - The ending commit settles every delivery that was accepted but not settled, with `failed` and `reason: "session-ended"`, and settles any open context change `interrupted`. Inbox payloads that were never read were never introduced, so `session.ended` is their only signal.
 - A reset ends the session, not the channel's conversation. Following the conversation into its next session is the channel's job, outside the stream contract.
@@ -822,7 +822,7 @@ The channel handler's third argument becomes an observer-only subtype of `Sessio
   - **Invocation, not delivery.** Observers run for every fact, in order, and a handler that throws is logged and counts as invoked. eve doesn't guarantee that an external effect succeeded, or happened only once.
   - **Recovery after a step retry.** The order gives an implicit cursor: if line N+1 exists, line N's observers ran. A retried step re-dispatches only the last line it recovers, with that commit's view, so at most one invocation repeats.
   - **The flush window.** `write()` resolves once the chunk is buffered, not stored. If the process dies inside the writer's flush window, observers may have acted on a fact that never became durable. Hooks have this gap today, and channels gain the same one in exchange for no longer running before the write. Running observers only after the write is durable stays the goal, once Workflow exposes write acknowledgements or a flush on step writables. It isn't worth forcing with tail polling or a writable per commit.
-- **Guards for conditions.** `eve/events` exports type guards such as `isCompaction`, `isCompleted`, `hasKind(…)`, and `hasOutcome(…)`, plus `when(...guards)(handler)`, shared with participants ([`dynamic-participants.md`](./dynamic-participants.md)). Observers branch on open values and fall back for unknown ones; participants check for the values they want.
+- **Guards for conditions.** `eve/events` exports type guards such as `isCompaction`, `isCompleted`, `hasKind(…)`, and `hasOutcome(…)`. Observers branch on open values and fall back for unknown ones. Participants rarely need guards, because each kind of participant receives only the events eve narrows for it ([`dynamic-participants.md`](./dynamic-participants.md)).
 - **Channels:**
   - `deliver` shapes only the channel's own sends ([Deliveries](#payloads-by-family)).
   - Built-in channels render status from the shared `activity` selector, instead of rebuilding it from their own handlers and state. Slack, for example, keeps `pendingTaskResults` and `pendingToolCallMessage` today to say "Reviewing results…" and to tell narration from a reply.
@@ -976,8 +976,8 @@ protocol/session-projection/   folds per family, public tables, selectors
 - **Self-contained.** A guard forbids imports from `shared/`, `harness/`, `connections/`, or `ai`, so runtime refactors can't silently change the wire. That's also why the AI SDK's types leave `protocol/`: the UI part picks on `message.received`, and the provider-metadata type behind `generationId`, which becomes a plain string.
 - **Zod schemas, kept out of clients.** Types are inferred from the schemas. A plain runtime catalog (type → family, fallbacks) serves the client fold, and a guard keeps Zod out of client bundles. Validation runs in tests and dev only, so nothing is validated on the delta hot path.
 - **No builders in `protocol/`.** Facts are typed literals built by their owners: the session machine and `hitl/` for lifecycle, the emission code for content and calls.
-- **Authoring maps are checked against the catalog.** The hook, channel, dynamic resolver, and memory maps stay explicit, so a new fact doesn't silently become a hook event, but they're type-checked against the catalog.
-- **Guards ship with the catalog.** The public `eve/events` entry exports the client catalog's types, the guards, and `when`. It has no runtime dependencies, so clients, hooks, channels, and participants share it.
+- **Authoring surfaces are checked against the catalog.** The hook and channel maps stay explicit, so a new fact doesn't silently become a hook event, but they're type-checked against the catalog. Each kind of participant's `event` parameter is typed from the catalog too.
+- **Guards ship with the catalog.** The public `eve/events` entry exports the client catalog's types and the guards. It has no runtime dependencies, so clients, hooks, channels, and participants share it.
 
 </details>
 
@@ -986,7 +986,7 @@ protocol/session-projection/   folds per family, public tables, selectors
 - **No upcaster.** Clients read v27 only, and the v21–v26 normalization (`protocol/message-version.ts`) is deleted. The CLI, ACP, and eval runners report the existing unsupported-version error against older deployments.
 - **Sessions don't cross the break.** Pre-break checkpoints are refused by v27 successors, so the deployment that owns a session keeps it until it ends ([`single-workflow-session-upgrades.md`](./single-workflow-session-upgrades.md)). Self-hosted services drain, or their channels start fresh sessions (#4092).
 - **Pre-break history isn't readable by v27 clients.** If a product needs it, a read-only upcaster can go into the stream route later without touching anything else.
-- **Hook and channel event names break.** Their retained `extension-contracts` epochs (32 hook and 39 channel fixtures) are dropped with a reason. In the same release, dynamic resolver and memory keys follow the catalog without aliases: `step.started` becomes `model.requested`, and memory's compaction and completed-turn keys become `context.*` and `turn.settled` with guards ([`dynamic-participants.md`](./dynamic-participants.md)). Instrumentation keeps its own vocabulary.
+- **Hook and channel event names break.** Their retained `extension-contracts` epochs (32 hook and 39 channel fixtures) are dropped with a reason. In the same release, dynamic resolvers and memory providers become one function per action over catalog events, without aliases, migrated by a codemod ([`dynamic-participants.md`](./dynamic-participants.md)). Instrumentation keeps its own vocabulary.
 - **The remote agent protocol version is bumped.** A v27 parent calling a v26 remote agent fails at call time with the existing mismatch error. Remote agent protocol 1 is deleted.
 
 ## Codepaths that change
@@ -1266,7 +1266,7 @@ envelope · positions · catch-up · transport endings
  ├─ interactions · responses             ◀── lifecycle only in the projection
  ├─ child links · relay contract · remote protocol bump
  └─ retry recovery                       ◀── runs, calls, and interactions
-participant keys on events · eve/events guards
+participants as functions over events · eve/events guards
 client tables · selectors · activity · extendConversation · framework bindings
 compatibility deletions · docs · release notes
 ```
@@ -1344,7 +1344,7 @@ This is an estimate from reading `main` at `285d4e09b`, to within a few hundred 
   That's about −1,900 in total.
 
 - **Tests:** 187 test files quote v26 type names (about 2,400 references) and make about 670 builder calls. That's the largest churn: about 6,000–10,000 lines touched, roughly flat in net.
-- **Docs:** 56 pages mention v26 names (about 690 mentions). Some are participant keys, which follow the catalog in the same release.
+- **Docs:** 56 pages mention v26 names (about 690 mentions). Some are participant keys, which go away in the same release when participants become functions.
 - **Phase 1** adds about 3,000–4,000 lines, mostly the contract module and tests, which the break then uses.
 
 Lifecycle records per turn, not counting progress:

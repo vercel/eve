@@ -17,24 +17,26 @@ That happens for two reasons:
 - **Two moments have no event.** Resolvers that pick the model and tools must run before each model call, but the event that records the call, `step.started`, already carries the chosen model. And when a newer deployment takes a session over, session-scoped resolvers refresh with nothing on the stream to say so.
 - **Results are re-derived instead of recorded.** Restores, rebinding after a redeploy, and parked steps re-run resolvers on hand-built events.
 
-This doc proposes making the keys true, rather than renaming them:
+This doc proposes making participants actual consumers of the stream:
 
 - [`session-event-lifecycle.md`](./session-event-lifecycle.md) adds the two missing events: `model.requested`, written before the model is chosen, and `session.redeployed`.
-- Participants run on committed events, in one pipeline, and their results are recorded so restores reuse them.
-- Conditions such as "only compactions" or "only completed turns" are plain functions: guards from `eve/events`, applied with `when`.
+- **Each participant is one function per action** over committed events: `resolve(event, ctx)` for dynamic resolvers, and `recall(event, ctx)` and `capture(event, ctx)` for memory.
+- **Each kind of participant receives a fixed set of events,** narrowed by eve. Memory, for example, sees only completed compactions, never clears. Authors branch only to tell those events apart.
+- Participants run in one pipeline, and their results are recorded so restores reuse them.
 
-The API keeps its shape. `defineDynamic({ events })` and memory's `recall` and `capture` stay, and only the keys that name removed events change. The pipeline can land first; the key changes ship with the event break.
+The pipeline can land first. The new API ships with the event break, so authors migrate once.
 
 ## Participants versus observers
 
-|                  | Observers                                        | Participants                                                                    |
-| ---------------- | ------------------------------------------------ | ------------------------------------------------------------------------------- |
-| Who              | Hooks, channel handlers                          | Dynamic model, tools, instructions, skills, connections, subagents; memory      |
-| Run on           | Committed events                                 | Committed events, before the work that depends on them continues                |
-| Can change state | No; they react to what was decided               | Yes; their results feed the model call, and are recorded so restores reuse them |
-| Open values      | Branch on them, with a fallback for unknown ones | Check for the values they want, so an unknown kind never triggers them          |
+|                  | Observers                          | Participants                                                                    |
+| ---------------- | ---------------------------------- | ------------------------------------------------------------------------------- |
+| Who              | Hooks, channel handlers            | Dynamic model, tools, instructions, skills, connections, subagents; memory      |
+| Run on           | Committed events                   | Committed events, before the work that depends on them continues                |
+| Can change state | No; they react to what was decided | Yes; their results feed the model call, and are recorded so restores reuse them |
+| Receive          | Every event they subscribe to      | Only the events their kind accepts, narrowed by eve                             |
+| Unknown values   | Branch on them, with a fallback    | Never see them: a new kind reaches a participant only if eve adds it            |
 
-The rule for authors: **observers render whatever arrives; participants opt in to what they understand.**
+The rule for authors: **observers render whatever arrives; participants handle the few moments that matter to them.**
 
 ## Today
 
@@ -122,18 +124,20 @@ The pattern is as old as dynamic model selection (#581), which had to choose the
 
 ### The API
 
-Keys are events from the catalog:
+Each participant is one function per action. It receives a committed event and `ctx`, and returns its result, or nothing for no change:
 
 ```ts
 // agent/tools/catalog.ts
 import { defineDynamic, defineTool } from "eve/tools";
 
 export default defineDynamic({
-  events: {
-    "session.started": async (_event, ctx) => ({
-      search: defineTool({/* … */}),
-    }),
-    "model.requested": async (_event, ctx) => toolsForMessages(ctx.messages),
+  async resolve(event, ctx) {
+    switch (event.type) {
+      case "session.started":
+        return { search: defineTool({/* … */}) };
+      case "model.requested":
+        return toolsForMessages(ctx.messages);
+    }
   },
 });
 ```
@@ -142,87 +146,82 @@ export default defineDynamic({
 // agent/agent.ts
 export default defineAgent({
   model: defineDynamic({
-    events: {
-      "session.started": (_event, ctx) => modelForPlan(ctx.session.auth),
-      "model.requested": (_event, ctx) => (hasImages(ctx.messages) ? visionModel : null),
-    },
+    resolve: (event, ctx) =>
+      event.type === "session.started" ? modelForPlan(ctx.session.auth) : undefined,
   }),
 });
 ```
 
-Memory providers keep their `recall` and `capture` containers, keyed the same way, with guards for conditions:
+Memory providers keep two actions. Most do the same thing at both of their moments, so they don't branch:
 
 ```ts
-import { when, isCompaction, isCompleted } from "eve/events";
+export default defineMemoryProvider({
+  // At the start of each turn, and after a compaction.
+  recall: async (_event, ctx) => store.search(ctx.memory.scope, latestUserText(ctx.messages)),
 
-defineMemoryProvider({
-  recall: {
-    "turn.started": recallForTurn,
-    "context.settled": when(isCompaction, isCompleted)(restoreAfterCompaction),
+  // After each completed turn, and before a compaction.
+  capture: async (_event, ctx) => store.save(ctx.memory.scope, ctx.messages),
+});
+```
+
+A provider that wants different behavior switches on the type. Each type it receives is exactly one moment:
+
+```ts
+export default defineMemoryProvider({
+  async recall(event, ctx) {
+    switch (event.type) {
+      case "turn.started":
+        return recallForTurn(ctx);
+      case "context.settled": // a compaction just completed
+        return restoreAfterCompaction(ctx);
+    }
   },
-  capture: {
-    "turn.settled": when(isCompleted)(captureTurn),
-    "context.started": when(isCompaction)(captureBeforeCompaction),
+  async capture(event, ctx) {
+    switch (event.type) {
+      case "turn.settled": // a turn just completed
+        return captureTurn(ctx);
+      case "context.started": // a compaction is about to start
+        return captureBeforeCompaction(ctx);
+    }
   },
 });
 ```
 
-- **Handlers receive the committed event,** with its position, typed by key, and `ctx` (`DynamicResolveContext`) unchanged. Memory handlers move from `(ctx)` to `(event, ctx)`, like every other participant.
-- **Every entry point is typed to the events its participant accepts.** `eve/skills` and the subagent form of `eve`'s `defineDynamic` get their own typed variants, so a skill handler on `model.requested` is a type error instead of a resolver that never runs.
-- **Old keys fail the build with the fix,** without aliases ([Compatibility](#compatibility)).
+- **`event` is typed to what the participant receives,** and narrows by `type`. On memory's `context.settled` branch, `event.data.kind` is literally `"compaction"`. `ctx` (`DynamicResolveContext`, or memory's context) is unchanged, and eve builds it lazily, so branching first costs little.
+- **Restrictions are type errors.** A skill resolver that writes `case "model.requested"` doesn't compile, because that comparison can't match the type it receives. `eve/skills` and the subagent form of `eve`'s `defineDynamic` get their own typed variants.
+- **`recall` is required and `capture` is optional,** as today.
+- **Guards from `eve/events`** (`isCompaction`, `isCompleted`, `hasKind`, `hasOutcome`) are there for hooks, channels, and view code. Participants rarely need them, because eve has already narrowed what they receive.
 
-### Triggers
+### What each participant receives
 
-| Event                | Condition                     | Participants                                                       | Replaces                                           |
-| -------------------- | ----------------------------- | ------------------------------------------------------------------ | -------------------------------------------------- |
-| `session.started`    | —                             | Dynamic model, tools, instructions, skills, connections, subagents | `session.started`                                  |
-| `session.redeployed` | —                             | The same, refreshing session-scoped results                        | The redeploy refresh's synthetic `session.started` |
-| `turn.started`       | —                             | Memory recall and memory tools, then the dynamic ones              | `turn.started`                                     |
-| `model.requested`    | See below                     | Dynamic model and tools                                            | `step.started`                                     |
-| `context.started`    | `isCompaction`                | Memory capture                                                     | `compaction.requested`                             |
-| `context.settled`    | `isCompaction`, `isCompleted` | Memory recall                                                      | `compaction.completed`                             |
-| `turn.settled`       | `isCompleted`                 | Memory capture                                                     | `turn.completed`                                   |
+| Participant                                  | Receives                                                                          |
+| -------------------------------------------- | --------------------------------------------------------------------------------- |
+| Dynamic model and tools                      | `session.started`, `turn.started`, and `model.requested` for runs owned by a turn |
+| Instructions, skills, connections, subagents | `session.started` and `turn.started`                                              |
+| Memory `recall`                              | `turn.started`, and `context.settled` for completed compactions                   |
+| Memory `capture`                             | `turn.settled` for completed turns, and `context.started` for compactions         |
+| Memory tools                                 | `turn.started`                                                                    |
 
 - **`model.requested`** lands in the commit that makes the next model call necessary: the turn's start, the last call result, an answer, steering, or a completed sign-in. Participants run after it, and `model.started` records the model they chose. It doesn't run again for provider retries inside one run, and a run that replaces an abandoned one reuses that run's decision.
-- **Summary runs.** A compaction's summary run uses `compactionModel` if one is configured, otherwise the model the turn's current run chose. Between turns, the dynamic model runs on the summary run's `model.requested`, as manual compaction's synthetic `step.started` does today. Tool participants run only for runs owned by a turn.
-- **`session.redeployed`** comes first in the first commit after a newer deployment takes an idle session over, so session-scoped results refresh before turn participants run. A fresh process on the same deployment isn't a redeploy: it rebuilds code from recorded results without deciding them again.
-- **Conditions are guards.** Memory's compaction and completed-turn handlers keep today's meaning through `when`. Capturing failed or cancelled turns becomes an opt-in through a different guard, not a new key.
-- **The restrictions stay.** Instructions, skills, connections, and subagents accept only `session.started`, `session.redeployed`, and `turn.started`.
+- **Summary runs.** A compaction's summary run uses `compactionModel` if one is configured, otherwise the model the turn's current run chose. Between turns, the dynamic model runs on the summary run's `model.requested`, as manual compaction's synthetic `step.started` does today. Tool participants never see summary runs.
+- **Redeploys re-run the session's start.** After the commit with `session.redeployed`, eve calls every session-scoped participant again with the session's original `session.started`: a real event at its real position, re-run against the new code. A resolver that handles only `session.started` still refreshes correctly. `session.redeployed` stays on the wire for observers and readers.
+- **A fresh process on the same deployment isn't a redeploy.** It rebuilds code from recorded results without deciding them again.
+- **Failed and cancelled turns** don't reach `capture`, as today. If providers ask, capturing them can come later as an explicit opt-in on the provider.
 - **Framework work moves onto events too.** The skill and connection announcements and the framework connection tools run on `model.requested` as built-in participants, instead of as special cases on `step.started`.
 
-### Guards
+### What a handler returns
 
-`eve/events` exports the catalog's event types and a few plain functions:
-
-- `when(...guards)(handler)` runs the handler only when every guard passes, and narrows the event's type for it.
-- `is*` guards for common conditions: `isCompaction`, `isClear`, `isCompleted`, and `isFailed`. `isCompleted` works on any terminal with a `completed` outcome.
-- `hasKind("…")` and `hasOutcome("…")` cover the rest, narrowing on the literal.
-
-```ts
-export const when =
-  <E extends SessionEvent>(...guards: readonly Guard<E>[]) =>
-  <R>(handler: (event: E, ctx: ParticipantContext) => R) =>
-  (event: E, ctx: ParticipantContext) =>
-    guards.every((guard) => guard(event)) ? handler(event, ctx) : undefined;
-```
-
-- **Guards check for what they want,** so a clear, or a future kind such as `rewind`, never matches a compaction guard. Docs examples always test positively.
-- **A handler whose guard fails returns nothing,** and nothing is recorded.
-- **The same guards work in hooks, channel handlers, and view code.** The module has no runtime dependencies, so clients can import it.
-
-### What a handler receives
-
-- **The committed event and `ctx`,** with no `entry` field. A restore rebuilds code from recorded results, using the original event at its position, and a redeploy is its own event.
-- **Results are recorded as today,** in the same durable keys, so a restore reuses locked identities instead of resolving again against the current configuration. Resolvers should stay idempotent, as the docs already ask.
-- **Stored scope names don't change.** Dynamic tool callbacks persist their scope as `session`, `turn`, or `step`, today derived from the key (`event.type.split(".")[0]`). The registry maps `model.requested` to the stored `step` scope, so a session that spans the deploy restores its locked tools.
+- **A result, or nothing.** Nothing means no change, and nothing is recorded.
+- **A result's scope comes from its event:** session for `session.started`, turn for `turn.started`, and step for `model.requested`. That's today's `event.type.split(".")[0]` mapping, with `model.requested` mapped to the stored `step` scope, so a session that spans the deploy restores its locked tools.
+- **Results are recorded as today,** in the same durable keys, so a restore reuses locked identities instead of resolving again against the current configuration. There's no `entry` field: a restore rebuilds code from recorded results using the original event, and a redeploy re-runs the original `session.started`. Resolvers should stay idempotent, as the docs already ask.
 
 ### One pipeline
 
 ```text
 harness/participants/
-  triggers.ts   which events each participant accepts, and its built-in eligibility
-  registry.ts   participants and their keys, built once from the bundle
-  run.ts        runParticipants(commit, ctx): runs participants for each event, in fact order, and records results
+  receives.ts   which events each kind of participant receives, and how eve narrows them
+  registry.ts   the bundle's participants, built once
+  run.ts        runParticipants(commit, ctx): calls participants for each event they receive, in fact order, and records results
 ```
 
 - **The step that writes a commit calls `runParticipants`** after the commit's observers. Progress never reaches participants.
@@ -235,7 +234,7 @@ harness/participants/
 - the six type-filtered dispatch calls in `turn-event-handler.ts`;
 - the memory type checks in `context/memory-event-lifecycle.ts`;
 - the `step.started` skip and special cases in the model, tool, skill, and connection dispatchers;
-- the `ALLOWED_DYNAMIC_*` sets in the runtime and the compiler, replaced by the typed triggers.
+- the `ALLOWED_DYNAMIC_*` sets in the runtime and the compiler, replaced by the table of what each participant receives.
 
 ### One ordering change
 
@@ -243,28 +242,23 @@ Today memory runs between the write and the hooks, while the dynamic resolvers r
 
 ## Compatibility
 
-The change is smaller than a rename, and ships in the same release as the event break ([`session-event-lifecycle.md`](./session-event-lifecycle.md#compatibility-at-the-break)), so authors migrate once.
+Every dynamic resolver and memory provider changes shape, mechanically. It ships in the same release as the event break ([`session-event-lifecycle.md`](./session-event-lifecycle.md#compatibility-at-the-break)), so authors migrate once.
 
-- **Unchanged:** `defineDynamic({ events })`, memory's `recall` and `capture`, and every `session.started` and `turn.started` key, which covers most authored resolvers.
-- **Renamed keys,** each failing the build with the exact replacement, plus a codemod:
-  - `step.started` → `model.requested`;
-  - memory's `compaction.requested` → `context.started` with `when(isCompaction)`;
-  - `compaction.completed` → `context.settled` with `when(isCompaction, isCompleted)`;
-  - `turn.completed` → `turn.settled` with `when(isCompleted)`.
-- **Memory handlers take `(event, ctx)`** instead of `(ctx)`.
-- **Handler payloads become typed.** The first argument is `unknown` today, so handlers that ignore it keep compiling.
+- **A codemod rewrites each map as a function:** `events: {a: f, b: g}` becomes `resolve(event, ctx)` with a `switch`, and memory's `recall` and `capture` maps become functions the same way. Along the way it renames `step.started` to `model.requested`, memory's `compaction.requested` to `context.started`, `compaction.completed` to `context.settled`, and `turn.completed` to `turn.settled`, and drops the conditions eve now applies.
+- **The old shape fails the build with the fix.** A `defineDynamic` with `events`, or a memory provider with maps, gets an error that points at the codemod. It's an error, not an alias, and it can be removed after a release or two.
+- **Handler payloads become typed.** The first argument is `unknown` today.
 - **Running sessions aren't affected.** Key names aren't persisted, and stored scope names stay as they are.
-- **Extension contracts.** One retained epoch (`dynamicTool/v4`) authors a resolver on `step.started` and is dropped with a reason. The other 127 dynamic-capability fixtures keep working.
-- **Third-party** memory providers, and resolvers keyed on `step.started`, break until they update.
+- **Extension contracts.** Retained epochs whose fixtures author `defineDynamic({ events })` are dropped with a reason: 57 for dynamic tools, 29 for instructions, 28 for skills, 9 for subagents, and 5 for connections. Each capability gets a new epoch.
+- **Third-party extensions and memory providers** built against the old API break until they update.
 - **In this repo,** the migration covers:
-  - 15 e2e fixture files and 3 framework source files (`models/auto.ts`, `tools/framework/connection-tools.ts`, and the `defineDynamic` types) that key resolvers on `step.started`;
+  - 51 e2e fixture files and 19 framework source files that use `defineDynamic`;
   - the file memory provider and two e2e memory fixtures;
-  - the dynamic capabilities guide and the custom memory provider guide.
+  - 7 docs pages, two template files, `eve-code`, and one app fixture.
 
 ## Plan
 
 1. **Land after HumanInput (#4342–#4344).** The pipeline touches `execution/session/turn-step.ts`, `harness/model-call/run.ts`, and `harness/hitl/intake.ts`, all of which HumanInput changes.
-2. **Add the pipeline behind today's API.** The triggers, the registry, and `runParticipants`, with today's keys mapped onto events internally. Then move dispatch onto it one participant at a time, with today's scenario tests pinning order and timing:
+2. **Add the pipeline behind today's API.** What each participant receives, the registry, and `runParticipants`, with today's maps adapted onto it internally. Then move dispatch onto it one participant at a time, with today's scenario tests pinning order and timing:
    - memory recall before the first model call;
    - dynamic model selection per model call, and for a manual compaction;
    - the refresh after a redeploy;
@@ -272,10 +266,10 @@ The change is smaller than a rename, and ships in the same release as the event 
 
    This part changes nothing for authors and can land on its own.
 
-3. **In the event break's release:** the renamed keys, memory's handler shape, typed entry points, `eve/events`, the build errors, the codemod, and the repo migration.
+3. **In the event break's release:** the single-function API, typed entry points, `eve/events`, the build errors, the codemod, and the repo migration.
 4. **Switch the docs.**
 
-**Size:** a small net reduction, not measured. The dispatch and synthetic-event code it removes is a few hundred lines across `turn-event-handler.ts` (140), `resolver-events.ts` (29), `memory-event-lifecycle.ts` (76), and the filtering parts of the six `context/dynamic-*-lifecycle.ts` files. The pipeline and guards add back something smaller.
+**Size:** a small net reduction, not measured. The dispatch and synthetic-event code it removes is a few hundred lines across `turn-event-handler.ts` (140), `resolver-events.ts` (29), `memory-event-lifecycle.ts` (76), and the filtering parts of the six `context/dynamic-*-lifecycle.ts` files. The pipeline adds back something smaller.
 
 ## Open questions
 
