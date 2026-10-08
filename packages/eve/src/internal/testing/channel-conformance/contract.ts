@@ -453,18 +453,15 @@ const questionRules = [
     },
   },
   {
-    rule: "text replies answer two pending questions one at a time, in the order shown",
+    rule: "text with two open relayed questions steers instead of answering either",
     source: "docs/tools/human-in-the-loop.md#several-requests-at-once",
     requires: ["text-replies"],
     variesByConversation: true,
     async run(conversation) {
       await conversation.say(PLAN_REVIEW);
-      await conversation.replyToEach({ [DAY_PROMPT]: "Saturday", [TIME_PROMPT]: "Afternoon" });
-      const output = await conversation.waitForToolResult(TWO_QUESTIONS_TOOL);
-      expect(output, `${TWO_QUESTIONS_TOOL} returned ${JSON.stringify(output)}`).toEqual({
-        day: "Saturday",
-        time: "Afternoon",
-      });
+      await conversation.waitForRest();
+      await conversation.say("Saturday");
+      await conversation.waitForReplyTo("Saturday");
     },
   },
   {

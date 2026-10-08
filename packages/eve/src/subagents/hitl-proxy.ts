@@ -277,6 +277,8 @@ function resolveMessageAgainstFirstRequest(input: {
   const requestId =
     firstOpenInput(storedProjection(input.state), answered)?.request.requestId ??
     [...input.entries.keys()].find((id) => !answered(id));
+  // Text answers a relayed request only while it is the sole one open.
+  if ([...input.entries.keys()].filter((id) => !answered(id)).length !== 1) return none;
   const reply = requestId === undefined ? undefined : input.entries.get(requestId)?.reply;
   // A request recorded without reply metadata cannot be matched at all.
   if (requestId === undefined || reply === undefined) return none;

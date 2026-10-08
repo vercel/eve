@@ -13,6 +13,21 @@ export default defineWorkflowTool({
   async *execute({ service }, ctx) {
     "use workflow";
 
+    if (service === "two-questions") {
+      const answers = await Promise.all(
+        ["first", "second"].map((which) =>
+          ctx.ask({
+            display: "select",
+            options: [
+              { id: "deploy", label: "Deploy" },
+              { id: "cancel", label: "Cancel" },
+            ],
+            prompt: `Deploy the ${which} service?`,
+          }),
+        ),
+      );
+      return { answers };
+    }
     yield "awaiting approval";
     const answer = await ctx.ask({
       display: "confirmation",
