@@ -91,6 +91,35 @@ export default eveChannel({
     const status = await alice.fetch(path + "/stubs");
     expect(status.status).toBe(200);
     expect(await status.json()).toEqual({ error: null, matchedRuleIds: ["deploy"] });
+    const { session: recovery } = await alice.sessions.create({
+      stubs: [
+        {
+          id: "retry",
+          tool: "deploy",
+          outcomes: [
+            { throw: { name: "TimeoutError", message: "Deployment service timed out" } },
+            { response: "recovered" },
+          ],
+        },
+      ],
+    });
+    const failed = await (await recovery.send("Alice asks to deploy api.")).result();
+    expect(failed.events).toContainEqual(
+      expect.objectContaining({
+        type: "action.result",
+        data: expect.objectContaining({
+          status: "failed",
+          result: expect.objectContaining({
+            toolName: "deploy",
+            output: expect.stringContaining("Deployment service timed out"),
+          }),
+        }),
+      }),
+    );
+    const retried = await (await recovery.send("Alice asks to deploy api again.")).result();
+    expect(results(retried.events)).toEqual(["recovered"]);
+    const verification = await alice.fetch(`/eve/v1/session/${recovery.state.sessionId}/stubs`);
+    expect(await verification.json()).toEqual({ error: null, matchedRuleIds: ["retry"] });
     const replacement = await bob.fetch(path, {
       method: "POST",
       body: JSON.stringify({ message: "Next", stubs }),

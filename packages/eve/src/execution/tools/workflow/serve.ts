@@ -1,4 +1,5 @@
 import { findStubTarget, stubCallId } from "#tool-stubs/target.js";
+import { toolStubOutput } from "#tool-stubs/output.js";
 import type { StubScope } from "#tool-stubs/types.js";
 import type { SessionContext } from "#context/session-context.js";
 import { callToolStubStep } from "#execution/tool-stubs/steps.js";
@@ -458,6 +459,6 @@ async function serveStub(
       throw new Error(
         result.kind === "error" ? result.error : "Persistent stub configuration changed.",
       );
-    ctx.reply(result.outcome.response);
+    ctx.reply(toolStubOutput(result.outcome));
   }
 }

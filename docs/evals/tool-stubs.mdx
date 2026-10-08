@@ -77,7 +77,7 @@ These responses describe a sequence, not a simulated task database. The second `
 | `outcome`  | One outcome repeated on every matching call, such as `{ response: { tasks: [] } }`.                                                    |
 | `outcomes` | A nonempty array of outcomes returned in sequence. Use exactly one of `outcome` or `outcomes`.                                         |
 
-Each outcome currently contains exactly one field: `response`, whose value is the JSON returned by the tool. The enclosing outcome is not part of the tool's response. Top-level `response` and `responses` are not accepted.
+Each outcome contains exactly one of `response` or `throw`. `response` holds the JSON returned by the tool; `throw` describes an error raised immediately instead. The enclosing outcome is not part of the tool's response. Top-level `response` and `responses` are not accepted.
 
 Exposing rule IDs and response positions in traces is a follow-up: [AX-5157](https://linear.app/vercel/issue/AX-5157).
 
@@ -109,7 +109,7 @@ const stubs = [
 ];
 ```
 
-A call for milk receives success; other valid calls receive the fallback. Reversing these rules makes the unconditional rule win every time. If no rule matches, eve executes the real tool. A selected stub failure fails the eval, even if the agent recovers; it never falls back to real execution.
+A call for milk receives success; other valid calls receive the fallback. Reversing these rules makes the unconditional rule win every time. If no rule matches, eve executes the real tool. A broken stub or failure processing its response fails the eval, even if the agent recovers. An intentional `throw` outcome is a normal tool failure that the eval can assert on. Neither falls back to real execution.
 
 If eve cannot record an output-processing failure, it cancels the workflow serving stubs. The original tool error or fallback is preserved, but verification rejects the eval. Failed or cancelled stub sessions cannot pass verification.
 
@@ -217,12 +217,11 @@ Connection authentication and discovery stay live so eve can validate the operat
 
 Tools executed by the model provider, such as provider-hosted web search, have no eve executor to replace. A search tool implemented in your own agent can be stubbed.
 
-## Planned error outcomes
+## Inject tool errors
 
-Error injection is a separate follow-up: [AX-5144](https://linear.app/vercel/issue/AX-5144). It will add `throw` as an alternative to `response` inside an outcome:
+Use `throw` to test how the agent handles a failed tool call. Mix errors and responses to test recovery:
 
 ```ts
-// Planned API; throw outcomes are not accepted yet.
 const stubs = [
   {
     id: "tasks",
@@ -235,4 +234,24 @@ const stubs = [
 ];
 ```
 
-Each outcome will contain exactly one of `response` or `throw`. Exceptions will be injected immediately, without artificial delays or hanging calls. Expected tool failures will remain distinct from broken stub infrastructure: an eval can pass when the agent handles an injected failure correctly, but an infrastructure failure must fail verification. Returning `{ response: { error: "timeout" } }` today is ordinary JSON, not a thrown error.
+`throw.message` is required. `throw.name` is optional and defaults to `"Error"`. eve creates an ordinary JavaScript `Error` with that name and message; it does not instantiate custom error classes. `TimeoutError` reports a timeout immediately, without delaying the call or testing an actual deadline.
+
+Ordinary tools and connection operations expose the error message to the model, without the error name. Workflow task errors also retain the name. Put any details the model needs to act on in `message`.
+
+Use `outcome: { throw: { message: "Service unavailable" } }` to fail every matching call. A sequence consumes one entry per new call, whether it returns or throws, and repeats its final entry. Workflow replay reuses the same recorded outcome.
+
+An injected exception follows the tool's normal error handling. Ordinary and blocking workflow calls are recorded as failed; background tasks report failure when they settle. The model can report the failure or try again. Assert the failed call explicitly:
+
+```ts
+const turn = await session.send(
+  "List my tasks once. If the service fails, explain the failure and wait for me to retry.",
+);
+turn.expectOk();
+turn.calledTool("list_tasks", { status: "failed", count: 1 });
+```
+
+The eval can pass when the agent handles the failure correctly. `noFailedActions()` still rejects the failed call, so use explicit assertions for expected failures. Stub infrastructure and response-processing failures still fail verification.
+
+This works for ordinary tools, workflow tools, whole-agent replacements, and qualified connection operations. An exception in a persistent workflow tool ends that task; retry with a new call, rather than its failed task ID. Normal approvals apply before an outcome is consumed.
+
+Returning `{ response: { error: "timeout" } }` remains ordinary JSON. Only `throw` raises an exception.
