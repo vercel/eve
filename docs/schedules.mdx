@@ -101,43 +101,6 @@ if (isScheduleAuth(ctx.session.auth.current)) {
 
 A handler-form session runs on the same durable runtime engine as any other session, so it can park (durably suspend), for instance when the channel handoff is waiting for a Slack reply. Markdown-form sessions park too, but no channel is attached, so they cannot receive follow-up messages.
 
-## Experimental dynamic schedules
-
-Export a `defineDynamicSchedules(...)` definition from `agent/schedules/` to let callers create and manage schedules at runtime. Import `defineDynamicSchedules` and `schedules` from `eve/experimental/schedules`. The definition supplies an `inputSchema`, an `auth` callback that resolves the stored creator to current permissions, and a `run` handler. APIs in this experimental module may change without notice.
-
-The default provider uses Vercel Schedules in production and process-local storage in `eve dev`; it does not support preview deployments or self-hosted production. Pass an explicit provider to choose another backend. Model-facing operation tools are enabled by default; set `tool: false` for code-only access. Mutations require model approval by default, while authenticated code calls do not request model approval. Both paths authorize every operation through `scope`, which defaults to the caller's principal.
-
-### Update timing or replace work
-
-Use the exact management `name` returned by `create`, `get`, or `list`. A display label may identify more than one schedule. `update(name, patch)` accepts `expression`, `payload`, or both; an empty patch is rejected.
-
-```ts title="agent/lib/manage-reminders.ts"
-import { schedules } from "eve/experimental/schedules";
-import reminders from "../schedules/reminders";
-
-export async function reviseReminder(name: string) {
-  const client = await schedules(reminders);
-
-  // Timing-only updates leave the stored work and creator unchanged.
-  await client.update(name, {
-    expression: { type: "cron", cron: "0 9 * * 1-5", timezone: "America/New_York" },
-  });
-
-  // Supply the complete replacement input, not a partial payload patch.
-  return await client.update(name, {
-    payload: { task: "Summarize this week's open requests." },
-  });
-}
-```
-
-The example assumes `reminders.inputSchema` accepts `{ task: string }`. Timing uses the same input as creation: `cron`, `single`, or a relative `delay` in minutes. Relative delays resolve at the write boundary after approval. An expression replaces the full timing configuration; an omitted timezone means UTC, and an omitted jitter clears the previous jitter.
-
-Payload replacement validates the complete input against `inputSchema` and calls `preparePayload(input, context)` when configured. The preparation context's `operation` is `"create"` or `"update"`. A payload update captures the updating caller as the new creator and can recapture a destination from that caller's verified channel context. Future occurrences resolve that creator's current permissions through `auth`; they do not retain the previous creator's permissions. In a shared scope, management access lets Bob replace Alice's scheduled work with Bob's work, not assume Alice's identity.
-
-The generated `schedule__<collection>__update` tool follows the same rules. Configure `approval.update` to approve the prepared replacement payload; its `payload` is `undefined` for timing-only updates. eve prepares again before writing and rejects the update if the prepared snapshot changed after approval. Keep preparation free of irreversible side effects because it can run more than once.
-
-Updates preserve the management name, schedule id, namespace, and dispatch target. Use `enable` and `disable` to change state. Updating a schedule does not cancel work already started. `get` and `list` still omit stored payloads and creator data. Schedule management, including update, is unavailable during scheduled execution.
-
 ## Session continuity
 
 Markdown schedules start a new session on every fire. Handler schedules do too, unless they send to an existing conversation, such as a Slack thread. Store data that must survive across fires outside session state.
