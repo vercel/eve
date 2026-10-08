@@ -6,7 +6,7 @@ import { AuthKey, SessionKey } from "#context/keys.js";
 import { clearPendingAuthorization } from "#harness/authorization.js";
 import type { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
 import { validateHarnessModelMessages } from "#harness/messages.js";
-import { fail } from "#harness/session-machine/transitions.js";
+import { fail, hold } from "#harness/session-machine/transitions.js";
 import type { StepCoordinates } from "#harness/session-machine/view.js";
 import type { Step } from "#harness/step/context.js";
 import type { HarnessSessionBase, HarnessToolMap, StepResult } from "#harness/types.js";
@@ -67,7 +67,10 @@ export async function parkOnApprovals(
     responseAuthRequiredRequestIds: responsePolicyRequestIds(step, input.requests),
   });
   await step.apply(transition, [...step.session.history, ...(transition.commit ?? [])]);
-  if (input.waitsOnRuntime) return { next: null, session: step.session };
+  if (input.waitsOnRuntime) {
+    if (input.tasks.length > 0) await step.apply(hold(step.view(), { on: "tasks" }));
+    return { next: null, session: step.session };
+  }
   if (hasRunnableQueue(step.view())) return { next: step.runStep, session: step.session };
   return holdForInput(step);
 }

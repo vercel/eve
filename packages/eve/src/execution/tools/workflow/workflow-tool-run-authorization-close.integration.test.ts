@@ -47,7 +47,9 @@ describe("workflow step authorization failures", () => {
         const stream = captureTurnEvents(run);
         try {
           // The sign-in parks the open turn; the run keeps waiting for its callback.
-          const events = await stream.nextUntil((event) => event.type === "turn.waiting");
+          const events = await stream.nextUntil(
+            (event) => event.type === "turn.waiting" && event.data.on === "input",
+          );
           expect(events.at(-2)?.type).toBe("authorization.required");
           expect(filterEventsByType(events, "turn.completed")).toHaveLength(0);
           const required = filterEventsByType(events, "authorization.required")[0]!;
