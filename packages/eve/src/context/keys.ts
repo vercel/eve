@@ -30,7 +30,7 @@ import type { HandleEventFn } from "#harness/types.js";
 import type { PersistedDynamicToolMetadata } from "#context/dynamic-tool-metadata.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
-import type { SandboxAccess } from "#sandbox/state.js";
+import type { SandboxAccess, SandboxSessionEndReason } from "#sandbox/state.js";
 import type { HistoryViewProjector } from "#shared/history-view.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
@@ -170,7 +170,7 @@ export const LegacyRemoteAgentCallerKey = new ContextKey<LegacyRemoteAgentCaller
 export const SessionKey = new ContextKey<Session>("eve.session");
 export const SandboxKey = new ContextKey<SandboxAccess>("eve.sandbox");
 export const SandboxTerminalCleanupKey = new ContextKey<
-  (reason: import("#sandbox/state.js").SandboxSessionEndReason) => Promise<void>
+  (reason: SandboxSessionEndReason) => Promise<void>
 >("eve.internal.sandboxTerminalCleanup");
 export const HandleEventKey = new ContextKey<HandleEventFn>("eve.internal.handleEvent");
 
