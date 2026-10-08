@@ -1,5 +1,8 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { connectionEventRoute } from "#runtime/connections/events/path.js";
+import { joinEveRoutePath } from "#shared/eve-route-path.js";
+import { normalizePublicRoutePrefix } from "#shared/public-route-prefix.js";
 
 import type {
   CompiledAgentManifest,
@@ -35,6 +38,7 @@ import {
 export function buildVercelAgentSummary(input: {
   manifest: CompiledAgentManifest;
   generatorVersion?: string;
+  publicRoutePrefix?: string;
 }): VercelEveAgentSummary {
   const { manifest } = input;
 
@@ -58,7 +62,9 @@ export function buildVercelAgentSummary(input: {
     schedules: manifest.schedules.map(toScheduleEntry),
     tools: manifest.tools.map(toToolEntry),
     skills: manifest.skills.map(toSkillEntry),
-    connections: manifest.connections.map(toConnectionEntry),
+    connections: manifest.connections.map((connection) =>
+      toConnectionEntry(connection, input.publicRoutePrefix),
+    ),
     channels: manifest.channelRoutes.effective.map(toChannelEntry),
     sandbox:
       manifest.sandbox === null
@@ -95,10 +101,12 @@ export async function emitVercelAgentSummary(input: {
   manifest: CompiledAgentManifest;
   generatorVersion?: string;
   outputPath: string;
+  publicRoutePrefix?: string;
 }): Promise<string> {
   const summary = buildVercelAgentSummary({
     generatorVersion: input.generatorVersion,
     manifest: input.manifest,
+    publicRoutePrefix: input.publicRoutePrefix,
   });
   await mkdir(dirname(input.outputPath), { recursive: true });
   await writeFile(input.outputPath, `${JSON.stringify(summary, null, 2)}\n`);
@@ -142,13 +150,27 @@ function toSkillEntry(skill: CompiledSkillDefinition): VercelEveSkillEntry {
   };
 }
 
-function toConnectionEntry(connection: CompiledConnectionDefinition): VercelEveConnectionEntry {
+function toConnectionEntry(
+  connection: CompiledConnectionDefinition,
+  publicRoutePrefix: string | undefined,
+): VercelEveConnectionEntry {
   const entry: VercelEveConnectionEntry = {
     name: connection.connectionName,
     description: connection.description,
     url: connection.url,
     logicalPath: connection.logicalPath,
     type: connection.protocol,
+    ...(connection.experimental_events === true
+      ? {
+          experimental_events: {
+            method: "POST" as const,
+            urlPath: joinEveRoutePath(
+              normalizePublicRoutePrefix(publicRoutePrefix) ?? "",
+              connectionEventRoute(connection.connectionName),
+            ),
+          },
+        }
+      : {}),
   };
 
   if (connection.vercelConnect !== undefined) {
