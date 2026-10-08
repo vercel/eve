@@ -96,6 +96,19 @@ describe("search", () => {
     expect(label.complete!({ query: "zebra" }, { results: [] })).toBe(
       "Searched tools for “zebra”, found nothing",
     );
+    const unavailable = (count: number) => ({
+      results: [],
+      unavailable: Array.from({ length: count }, (_, i) => ({
+        connection: `c${i}`,
+        error: "down",
+      })),
+    });
+    expect(label.complete!({ query: "zebra" }, unavailable(1))).toBe(
+      "Searched tools for “zebra”, found nothing; 1 connection unavailable",
+    );
+    expect(label.complete!({ query: "zebra" }, unavailable(2))).toBe(
+      "Searched tools for “zebra”, found nothing; 2 connections unavailable",
+    );
   });
 
   it("finds only deferred entries; direct tools and listed skills are already in context", async () => {

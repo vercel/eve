@@ -229,7 +229,9 @@ export type EveDynamicToolPart = {
  * and `eve.inputResponse` store the HITL prompt and submitted response when the
  * call required approval. `eve.label` is how the call reads to people, the same
  * text eve's channels and terminal UI show: the tool's label, or a readable form
- * of its name, replaced by its completion label once it settles.
+ * of its name, replaced by its completion label once it settles. The default
+ * reducer always sets it; it is optional only for parts persisted by older eve
+ * versions.
  */
 export interface EveMessageToolMetadata {
   readonly eve?: {

@@ -52,6 +52,16 @@ export function sessionSkills(ctx: ContextReader | undefined): ReadonlyMap<strin
   return skills;
 }
 
+const SKILL_LOAD_LABEL = {
+  start: (input: unknown) => `Load skill${skillName(input)}`,
+  complete: (input: unknown) => `Loaded skill${skillName(input)}`,
+};
+
+function skillName(input: unknown): string {
+  const skill = skillTarget(input);
+  return skill === undefined ? "" : ` ${skill}`;
+}
+
 /** The entry every `eve__execute({ skill })` call resolves to. */
 export function createSkillLoader(
   skills: ReadonlyMap<string, CatalogSkill>,
@@ -66,15 +76,9 @@ export function createSkillLoader(
     },
     frameworkTool: true,
     inputSchema: SKILL_INPUT_SCHEMA,
-    label: { start: skillLoadLabel },
+    label: SKILL_LOAD_LABEL,
     name: SKILL_ENTRY_NAME,
   };
-}
-
-/** A skill loads within the step that asks for it, so its call reads as done. */
-function skillLoadLabel(input: unknown): string {
-  const skill = skillTarget(input);
-  return skill === undefined ? "Load skill" : `Loaded skill ${skill}`;
 }
 
 /** Why `eve__execute` can't load `name`: the closest skills, or the connection it names. */

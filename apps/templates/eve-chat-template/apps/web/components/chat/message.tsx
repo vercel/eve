@@ -781,6 +781,11 @@ function toolCategory(name: string) {
 }
 
 function describeToolAction(part: EveDynamicToolPart) {
+  const label = toolLabel(part);
+  if (label) {
+    return label;
+  }
+
   const name = resolveToolName(part);
   const normalized = normalizeToolName(name);
   const input = asRecord(part.input);
@@ -820,16 +825,19 @@ function describeToolAction(part: EveDynamicToolPart) {
   return `Used ${formatToolName(name)}`;
 }
 
+/** eve versions that set `toolMetadata.eve.label` say how a call reads; older ones fall back to its name. */
+function toolLabel(part: EveDynamicToolPart): string | undefined {
+  const eve: Readonly<Record<string, unknown>> | undefined = part.toolMetadata?.eve;
+  return typeof eve?.label === "string" ? eve.label : undefined;
+}
+
 function resolveToolName(part: EveDynamicToolPart) {
   const metadataName = part.toolMetadata?.eve?.name;
   return metadataName && metadataName !== "unknown" ? metadataName : part.toolName;
 }
 
 function formatToolName(name: string) {
-  return normalizeToolName(name)
-    .replace(/^connection search$/, "connection search")
-    .replace(/\s+/g, " ")
-    .trim();
+  return normalizeToolName(name).replace(/\s+/g, " ").trim();
 }
 
 function normalizeToolName(name: string) {
