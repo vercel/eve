@@ -1,7 +1,8 @@
 # Contributing to eve
 
 Thanks for your interest in contributing to eve! We greatly appreciate bug
-reports, feature proposals, and implementation plans shared through issues.
+reports, feature proposals, and prompts or implementation plans shared through
+issues.
 
 If you are an external contributor, start with an
 [issue](https://github.com/vercel/eve/issues/new/choose) rather than a pull
@@ -183,28 +184,24 @@ first so you do not duplicate active work, then use the
 
 We use our own coding agents to implement accepted proposals. This lets us
 control which models and skills the agents use and how changes are validated.
-Your investigation and implementation plan are valuable contributions: they
-help us understand the problem and give our agents a concrete starting point.
+We welcome prompts as issues. Your investigation, prompt, or implementation
+plan helps us understand the problem and gives our agents a concrete starting
+point.
 You do not need to write the code or open a pull request to contribute.
 
-Describe the problem, use case, or bug reproduction. For a proposed change,
-include an implementation plan that the team can review and run with its own
-agents:
+Describe the problem, use case, or bug reproduction. If you have a change in
+mind, include a prompt or short implementation plan that the team can review
+and run with its own agents. Useful details include:
 
 - Explain the desired behavior and give a concrete user story or reproduction.
 - Identify the relevant code or docs and outline the changes you recommend.
 - Note constraints, trade-offs, and any public API or dependency changes.
 - Describe how to validate the result, including relevant tests and docs updates.
 
-Keep the plan focused on the outcome and the steps needed to get there. If you
-are unsure how to fix a bug, share the reproduction and what you have learned;
-a complete plan is not required to report a problem.
-
-For changes to public APIs, agent behavior, compiler/runtime internals,
-dependencies, generated artifacts, fixture contracts, or any non-trivial
-implementation detail, wait for maintainer agreement before expanding the
-plan. We first need to agree that the problem is real and that the proposed
-direction fits eve.
+Start with a short prompt or plan focused on the outcome. Once a maintainer
+agrees on the direction, they may ask for more detail. Prompts and plans are
+optional: you can report a bug or request a feature without knowing how to
+implement it. Share what you know, even if your proposal is incomplete.
 
 To make a proposal easier to evaluate:
 
@@ -216,9 +213,9 @@ To make a proposal easier to evaluate:
   package should keep runtime dependencies minimal.
 - Do not propose public behavior based only on a hypothetical use case. Include
   a concrete user story or, for bugs, a reproduction.
-- Check the issue thread before developing a plan in case someone else is
-  already working on it. Coordinate with maintainers rather than assuming an
-  issue is assigned to you.
+- Check the issue thread before developing a prompt or plan in case someone
+  else is already working on it. Coordinate with maintainers rather than
+  assuming an issue is assigned to you.
 
 ## Submitting a pull request
 

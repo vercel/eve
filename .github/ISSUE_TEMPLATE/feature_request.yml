@@ -1,7 +1,13 @@
 name: Feature request
-description: Suggest an idea or improvement for eve.
+description: Suggest an improvement or share a prompt for the team's coding agents.
 labels: ["enhancement"]
 body:
+  - type: markdown
+    attributes:
+      value: |
+        We welcome prompts as issues and greatly appreciate your ideas and investigation. Share the problem and desired outcome below. If you have a prompt or implementation plan in mind, include it for the team to review and run with our own coding agents, using our chosen models and skills.
+
+        Start with a short prompt; a detailed plan is optional, and you do not need to submit a pull request. Search [existing issues](https://github.com/vercel/eve/issues) first to avoid duplicating active work. See [Contributing to eve](https://github.com/vercel/eve/blob/main/CONTRIBUTING.md#proposing-a-change) for guidance.
   - type: textarea
     id: problem
     attributes:
@@ -17,15 +23,17 @@ body:
     validations:
       required: true
   - type: textarea
-    id: implementation-plan
+    id: implementation-prompt
     attributes:
-      label: Suggested implementation plan
-      description: Outline a plan the team can review and run with its own coding agents if the proposal is accepted. Include relevant code or docs, proposed changes, constraints, and validation steps. Share what you know even if the plan is incomplete.
+      label: Prompt or implementation plan for our agents (optional)
+      description: Share a prompt the team can run if the proposal is accepted. Describe the intended behavior, relevant code or docs, constraints, and how to validate the result. Include implementation steps if you know them; an incomplete prompt is welcome.
       placeholder: |
-        Proposed changes:
+        Implement the behavior described above.
+
+        Relevant code or docs:
         - ...
 
-        Constraints and trade-offs:
+        Constraints and proposed steps:
         - ...
 
         Validation:
