@@ -68,24 +68,6 @@ describe("integration discovery", () => {
     },
   );
 
-  it("renders Buzz as an ACP channel with explicit authorization guidance", () => {
-    const buzz = getIntegration("buzz");
-    expect(buzz).toBeDefined();
-
-    const markdown = integrationMarkdown(buzz!);
-    expect(markdown).toContain("npm install --global @eve/buzz-acp-adapter");
-    expect(markdown).toContain("eve-buzz-acp-adapter install");
-    expect(markdown).toContain("Customize for this agent");
-    expect(markdown).toContain("Agent harness** to **eve");
-    expect(markdown).toContain("does not prefill one for custom harnesses");
-    expect(markdown).toContain("Who can talk to this agent");
-    expect(markdown).toContain("AI_GATEWAY_API_KEY");
-    expect(markdown).toContain("Parallelism** to `1`");
-    expect(markdown).toContain("Accepted senders share one eve identity");
-    expect(markdown).toContain("## Configure");
-    expect(integrationSearchText(buzz!)).toContain("acp");
-  });
-
   it("renders every connection setup variant", () => {
     const notion = getIntegration("notion");
     expect(notion).toBeDefined();

@@ -151,13 +151,6 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
-    slug: "buzz",
-    name: "Buzz",
-    kind: "channel",
-    tagline: "Talk to your eve agent from Buzz through its ACP desktop harness.",
-    surfaces: { scaffoldable: false, registry: false, gallery: true },
-  },
-  {
     slug: "chat-sdk-gchat",
     name: "Google Chat",
     kind: "channel",
