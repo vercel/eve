@@ -5,6 +5,7 @@ import os from "node:os";
 import {
   createEveTelemetryIdentity,
   isEphemeralEveTelemetryEnvironment,
+  resolveEveTelemetryInternal,
   resolveEveTelemetryProjectId,
 } from "#cli/telemetry/identity.js";
 import {
@@ -261,6 +262,8 @@ export function createEveCliTelemetry(version: string): EveCliTelemetry {
           event("installation_id", identity.installationId),
           event("project_id", await resolveEveTelemetryProjectId({ identity })),
         );
+        const internal = await resolveEveTelemetryInternal();
+        if (internal !== undefined) events.push(event("internal", String(internal)));
         events.push(...setupEvents);
       } catch {
         return;
