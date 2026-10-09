@@ -1,8 +1,10 @@
 import { PollingQueueClient } from "#compiled/@vercel/queue/index.js";
 
 import { readDevelopmentRuntimeArtifactsSnapshotRoot } from "#internal/nitro/dev-runtime-artifacts.js";
-import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
-import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
+import {
+  createDevelopmentGenerationArtifactsSource,
+  createDevelopmentNitroArtifactsConfig,
+} from "#internal/nitro/host/artifacts-config.js";
 import { createScheduleCollectionConsumer } from "#internal/nitro/routes/schedule-collection-consumer.js";
 import {
   createEveScheduleQueueTrigger,
@@ -30,29 +32,50 @@ export default function installLocalSchedulesRuntimePlugin(nitroApp: {
     token,
   });
   const config = createDevelopmentNitroArtifactsConfig({ appRoot });
+  let snapshot:
+    | {
+        readonly root: string;
+        readonly consumer: ReturnType<typeof createScheduleCollectionConsumer>;
+        readonly trigger: ReturnType<typeof createEveScheduleQueueTrigger> | undefined;
+      }
+    | undefined;
   let closed = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let lastFailure: string | undefined;
 
   // Service-hosted queue functions are not discovered by vc dev yet.
   const poll = async () => {
+    let delay = 1_000;
     try {
-      if (
-        readDevelopmentRuntimeArtifactsSnapshotRoot(config.devRuntimeArtifactsPointerPath) === null
-      )
-        return;
-      const manifest = await loadCompiledManifest({
-        compiledArtifactsSource: resolveNitroCompiledArtifactsSource(config),
-      });
-      if (!closed && hasVercelScheduleCollections(manifest)) {
-        const consumer = createScheduleCollectionConsumer(
-          createDevelopmentNitroArtifactsConfig({
+      const root = readDevelopmentRuntimeArtifactsSnapshotRoot(
+        config.devRuntimeArtifactsPointerPath,
+      );
+      if (root === undefined) return;
+      if (snapshot?.root !== root) {
+        const manifest = await loadCompiledManifest({
+          compiledArtifactsSource: createDevelopmentGenerationArtifactsSource({
             appRoot,
-            configuredWorld: manifest.config.experimental?.workflow?.world,
+            runtimeAppRoot: root,
           }),
-        );
-        const { topic, maxDeliveries, retryAfterSeconds } = createEveScheduleQueueTrigger(
-          manifest.config.name,
-        );
+        });
+        snapshot = {
+          root,
+          consumer: createScheduleCollectionConsumer(
+            createDevelopmentNitroArtifactsConfig({
+              appRoot,
+              configuredWorld: manifest.config.experimental?.workflow?.world,
+            }),
+          ),
+          trigger: hasVercelScheduleCollections(manifest)
+            ? createEveScheduleQueueTrigger(manifest.config.name)
+            : undefined,
+        };
+      }
+      if (!closed && snapshot.trigger !== undefined) {
+        const {
+          consumer,
+          trigger: { topic, maxDeliveries, retryAfterSeconds },
+        } = snapshot;
         await queue.receive(
           topic,
           topic,
@@ -69,11 +92,24 @@ export default function installLocalSchedulesRuntimePlugin(nitroApp: {
           },
         );
       }
-    } catch {
-      if (!closed) console.warn("[eve] Local schedule delivery failed; it will be retried.");
+      lastFailure = undefined;
+    } catch (error) {
+      if (closed) return;
+      let reason = error instanceof Error ? error.message : "Unknown local schedule error";
+      for (const secret of [token, process.env.VERCEL_SCHEDULE_TOKEN]) {
+        if (secret) reason = reason.replaceAll(secret, "[redacted]");
+      }
+      reason = reason.slice(0, 1_000);
+      if (reason !== lastFailure) {
+        console.warn(
+          `[eve] Local schedule delivery failed: ${reason}. Check vc dev's local Queues and Schedules APIs; retrying in 5s.`,
+        );
+        lastFailure = reason;
+      }
+      delay = 5_000;
     } finally {
       if (!closed) {
-        timer = setTimeout(() => void poll(), 1_000);
+        timer = setTimeout(() => void poll(), delay);
         timer.unref();
       }
     }
