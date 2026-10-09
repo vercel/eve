@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { FatalError } from "#compiled/@workflow/core/index.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { readForwardedParentSessionBaggage } from "#protocol/baggage.js";
+import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
 import {
   cancelRemoteAgentTurn,
   continueRemoteAgentSession,
@@ -372,34 +373,31 @@ describe("startRemoteAgentSession", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it.each([1, undefined])(
-    "reports accepted protocol %s work as potentially completed",
-    async (protocolVersion) => {
-      const fetchMock = vi.fn().mockResolvedValue(
-        Response.json(
-          {
-            ok: true,
-            protocolVersion,
-            sessionId: "remote-session",
-            status: "accepted",
-          },
-          { status: 202 },
-        ),
-      );
-      vi.stubGlobal("fetch", fetchMock);
+  it("reports work accepted under an unknown protocol as potentially completed", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json(
+        {
+          ok: true,
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION + 1,
+          sessionId: "remote-session",
+          status: "accepted",
+        },
+        { status: 202 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
 
-      const result = startRemoteAgentSession({
-        action: createAction(),
-        callbackBaseUrl: "https://caller.example.com",
-        remote: createRemoteAgent(),
-        session: { continuationToken: "eve:parent-token" },
-      });
-      await expect(result).rejects.toBeInstanceOf(FatalError);
-      await expect(result).rejects.toThrow("may have completed");
-      await expect(result).rejects.toThrow("Remote session: remote-session");
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-    },
-  );
+    const result = startRemoteAgentSession({
+      action: createAction(),
+      callbackBaseUrl: "https://caller.example.com",
+      remote: createRemoteAgent(),
+      session: { continuationToken: "eve:parent-token" },
+    });
+    await expect(result).rejects.toBeInstanceOf(FatalError);
+    await expect(result).rejects.toThrow("may have completed");
+    await expect(result).rejects.toThrow("Remote session: remote-session");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 
   it("keeps a receiver's protocol rejection distinct from accepted work", async () => {
     vi.stubGlobal(
