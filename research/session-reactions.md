@@ -30,12 +30,14 @@ A session is state: the facts it has committed, folded into a view. Everything e
 - **A recall, a notification, or a compaction** works the same way: it reads the view, and what it produces becomes part of the view.
 
 ```text
-inputs ──▶ machine ──facts─────────────┐
-              ▲                        ▼
-              │                      commit ──fold──▶ view ──▶ reactions: select → resolve
-              │                        ▲                                    │
-              │                        └──────────── slots ◀────────────────┘
-              └─────────── reads the view: facts, slots, intents
+               inputs
+                 │
+                 ▼
+     ┌──────▶ machine ───── facts ─────┐
+     │                                 ▼
+   view ◀─────────── fold ────────── commit
+     │                                 ▲
+     └──────▶ reactions ──── slots ────┘
 ```
 
 Three things change state, and each has one writer:
@@ -113,6 +115,9 @@ Two pieces are still open. A retried step must fold the stream lines written aft
 
 Most of what reactions need has landed on `main` in the last few weeks, or is in review as the first tier of the v27 stack. The proposal mostly connects pieces that already exist.
 
+<details>
+<summary>The refactors, on `main` and in review</summary>
+
 **Already on `main`:**
 
 | Change                                                                 | What reactions get from it                                                                                                                                                                                                                                                                                            |
@@ -136,6 +141,8 @@ Most of what reactions need has landed on `main` in the last few weeks, or is in
 - **#4588, one running-work record:** tasks and the workflow runs a turn waits on live in one `eve.work` record.
 
 Tier 1 (#4564, #4567, #4574, #4591) commits each transition as one v27 line, with the machine as the only writer of facts, and hands authored channels and dynamic resolvers v27 facts. Hooks, channels, and dynamic resolvers already change shape in that break, so authors migrate once ([Compatibility](#compatibility)).
+
+</details>
 
 **What's left is the reaction layer itself:** slots and the runner, the authoring API and its codemod, and rebuilding durable callbacks from recorded selections. None of it needs new Workflow machinery.
 
