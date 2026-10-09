@@ -3,6 +3,15 @@
 
 const REPLACED: Readonly<Record<string, string>> = {
   "action.input.appended": "`call.input`",
+  "agent.started": "`child.opened`, which names the call whose run opened the child session",
+  "approval.candidate":
+    "`response.submitted` and `response.settled` (`refused`, `failed`, `expired`, `withdrawn`); the responder is the principal of the response's delivery",
+  "approval.settled":
+    '`interaction.settled` with `outcome: "accepted"` or `"declined"`; `cause.responseId` names the deciding response',
+  "authorization.completed": "`interaction.settled` for the sign-in interaction",
+  "authorization.required": '`interaction.opened` with `request.kind: "sign-in"`',
+  "input.requested": "`interaction.opened`, one per request; one commit's requests are one batch",
+  "input.resolved": "`interaction.settled`, one per request",
   "action.partial": "`call.progress`",
   "action.result": "`call.settled`, the only place a call's output appears",
   "actions.requested": "`call.requested`, one per call",
@@ -23,6 +32,7 @@ const REPLACED: Readonly<Record<string, string>> = {
   "step.completed": "`model.settled`",
   "step.failed": '`model.settled` with `outcome: "failed"`',
   "step.started": "`model.started`, or `model.requested` before the model is chosen",
+  "task.settled": "`call.settled` for each call the task served",
   "turn.cancelled": '`turn.settled` with `outcome: "cancelled"`',
   "turn.completed": '`turn.settled` with `outcome: "completed"`',
   "turn.failed": '`turn.settled` with `outcome: "failed"`',

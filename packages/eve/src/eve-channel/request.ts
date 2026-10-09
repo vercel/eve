@@ -31,10 +31,6 @@ import {
   readRemoteAgentProtocolVersion,
 } from "#protocol/remote-agent-protocol.js";
 import {
-  LEGACY_REMOTE_AGENT_PROTOCOL_VERSION,
-  splitLegacyTaskFields,
-} from "#execution/legacy-remote-agent/protocol.js";
-import {
   collectUploadPolicyViolations,
   formatUploadPolicyViolation,
   type UploadPolicy,
@@ -68,8 +64,7 @@ export async function deriveOperationContinuationToken(input: {
 }
 
 export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBody | Response {
-  const legacy = splitLegacyTaskFields(input);
-  const { payload } = legacy;
+  const payload = input;
   if (payload.inputResponses !== undefined) {
     return Response.json(
       { error: "'inputResponses' is only accepted for an existing session.", ok: false },
@@ -130,9 +125,6 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
   if (message !== undefined) result.message = message;
   if (typeof rawOperationId === "string") result.operationId = rawOperationId;
   if (protocolVersion !== undefined) result.protocolVersion = protocolVersion;
-  if (protocolVersion === LEGACY_REMOTE_AGENT_PROTOCOL_VERSION) {
-    result.legacyRemoteAgentCaller = legacy.taskId === undefined ? {} : { taskId: legacy.taskId };
-  }
   return result;
 }
 
@@ -148,7 +140,7 @@ interface ParsedSessionMessageBody {
 export function parseSessionMessageBody(
   input: Record<string, unknown>,
 ): ParsedSessionMessageBody | Response {
-  const { payload } = splitLegacyTaskFields(input);
+  const payload = input;
   if (Object.hasOwn(payload, "stubs")) {
     return Response.json(
       { ok: false, error: "Tool stubs are fixed at session creation." },
@@ -380,12 +372,7 @@ function parseProtocolVersionField(value: unknown): number | Response {
     );
   }
   const callerVersion = readRemoteAgentProtocolVersion(value);
-  if (
-    callerVersion === REMOTE_AGENT_PROTOCOL_VERSION ||
-    callerVersion === LEGACY_REMOTE_AGENT_PROTOCOL_VERSION
-  ) {
-    return callerVersion;
-  }
+  if (callerVersion === REMOTE_AGENT_PROTOCOL_VERSION) return callerVersion;
   return Response.json(
     {
       code: REMOTE_AGENT_PROTOCOL_MISMATCH,

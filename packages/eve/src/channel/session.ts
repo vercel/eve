@@ -1,3 +1,4 @@
+import type { RemoteChildBinding } from "#execution/child-binding.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { ContextAccessor } from "#context/key.js";
 import {
@@ -60,6 +61,8 @@ export interface Session {
   getEventStream(options?: { startIndex?: number }): Promise<ReadableStream<SessionStreamEvent>>;
   /** The session's stored lines from `startIndex`: one parsed record per line. */
   getLineStream(options?: { startIndex?: number }): Promise<ReadableStream<unknown>>;
+  /** Where a remote child of this session runs; read only by the parent's stream proxy. */
+  getChildBinding?(childSessionId: string): Promise<RemoteChildBinding | undefined>;
   getStreamTailIndex(): Promise<number>;
 }
 
@@ -180,6 +183,9 @@ export function createSession(
     },
     async getStreamTailIndex() {
       return runtime.getStreamTailIndex(id);
+    },
+    async getChildBinding(childSessionId: string) {
+      return await runtime.readChildBinding?.(id, childSessionId);
     },
   };
 }

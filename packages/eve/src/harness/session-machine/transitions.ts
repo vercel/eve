@@ -5,22 +5,41 @@ import type {
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
-import { authorizationEventFields } from "#harness/authorization-event-fields.js";
 import { callSettledFrom } from "#harness/call-facts.js";
 import { closeFacts, closureFor, notIn, publicViewOf } from "#harness/session-machine/closure.js";
-import { activeTurn, type OpenWork, openWork } from "#protocol/session-projection/selectors.js";
 import {
-  createAuthorizationCompletedEvent,
-  createAuthorizationRequiredEvent,
-  createInputRequestedEvent,
-  createInputResolvedEvent,
-  type InputResolution,
-  type RuntimeIdentity,
-  type RuntimeTraceContext,
-  type TaskCancelReason,
+  activeTurn,
+  callTask,
+  callTurn,
+  interactionOwner,
+  noWork,
+  type OpenWork,
+  openWork,
+} from "#protocol/session-projection/selectors.js";
+import type {
+  InputResolution,
+  RuntimeIdentity,
+  RuntimeTraceContext,
+  TaskCancelReason,
 } from "#protocol/message.js";
+import {
+  interactionOpened,
+  interactionSettled,
+  responseSettled,
+  responseSubmitted,
+  signInInteractionId,
+  signInOpened,
+} from "#harness/interaction-facts.js";
+import type { DeliverySource } from "#protocol/session-events/families/delivery.js";
+import type { ResponseSubmittedData } from "#protocol/session-events/families/response.js";
 import type { SessionEvent } from "#protocol/session-event.js";
-import type { Cause, ErrorInfo, Usage, UserPart } from "#protocol/session-events/envelope.js";
+import type {
+  Cause,
+  ErrorInfo,
+  Principal,
+  Usage,
+  UserPart,
+} from "#protocol/session-events/envelope.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { FactOf } from "#protocol/session-events/facts.js";
 import type { TurnAwaiting } from "#protocol/session-events/families/turn.js";
@@ -28,17 +47,14 @@ import {
   nextChangeId,
   nextRunId,
   openInputs,
-  openSignIns,
   workingTaskCalls,
-  type SessionInput,
   type SessionProjection,
 } from "#protocol/session-projection.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
-import type { InputRequest } from "#shared/input.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { Transition } from "./commit.js";
-import { inputWithdrawn, signInWithdrawn } from "./events.js";
-import type { StepCoordinates, SuspendedStep, TurnState } from "./state.js";
+import type { SuspendedStep, TurnState } from "./state.js";
 import {
   activeTurnId,
   answeredCallIds,
@@ -279,7 +295,14 @@ function runScope(
  * act on a sign-in, approval, or question. A pause on a person answers its deliveries for now
  * (`awaiting-input`); the answer's delivery carries the resumed work.
  */
-export function hold(view: SessionView, input: { readonly on: "input" | "tasks" }): Transition {
+export function hold(
+  view: SessionView,
+  input: {
+    readonly on: "input" | "tasks";
+    /** Interactions this commit opens, which the tables don't hold yet. */
+    readonly opening?: readonly string[];
+  },
+): Transition {
   const { projection } = view;
   const { turnId } = turnPosition(projection);
   if (turnId === "") return unchanged(view, []);
@@ -289,9 +312,13 @@ export function hold(view: SessionView, input: { readonly on: "input" | "tasks" 
           callId,
         }))
       : [
-          ...openInputs(projection).map((open) => ({ interactionId: open.request.requestId })),
-          ...openSignIns(projection).map((attempt) => ({ interactionId: attempt.attemptId })),
-        ];
+          ...new Set([
+            ...openWork(publicViewOf(projection), { turnId }).interactions.map(
+              (row) => row.interactionId,
+            ),
+            ...(input.opening ?? []),
+          ]),
+        ].map((interactionId) => ({ interactionId }));
   const events: SessionEvent[] = [
     { data: { awaiting, turnId }, scope: { turnId }, type: "turn.paused" },
   ];
@@ -427,7 +454,7 @@ export function sessionEndedFacts(
   },
 ): SessionEvent[] {
   const facts: SessionEvent[] = [];
-  let closed: OpenWork = { calls: [], changes: [], deliveries: [], runs: [], tasks: [] };
+  let closed: OpenWork = noWork();
   const tables = publicViewOf(projection);
   // The shared tables, not an execution pointer, decide which turns are still open. This
   // also works for degraded terminal publication from a checkpoint without live turn state.
@@ -445,6 +472,8 @@ export function sessionEndedFacts(
         deliveries: [...closed.deliveries, ...turn.closed.deliveries],
         runs: [...closed.runs, ...turn.closed.runs],
         tasks: [...closed.tasks, ...turn.closed.tasks],
+        interactions: [...closed.interactions, ...turn.closed.interactions],
+        responses: [...closed.responses, ...turn.closed.responses],
       };
     }
   }
@@ -529,8 +558,14 @@ export function settle(view: SessionView, input: { readonly results: readonly Se
   for (const step of steps) {
     if (step.tasks.length === 0 || step.requests.length === 0) continue;
     if (runningTasks(step).length > 0) continue;
-    if (step.requests.some((request) => request.requestId in view.projection.inputs)) continue;
-    events.push(createInputRequestedEvent({ requests: step.requests, ...step.event }));
+    const tables = publicViewOf(view.projection);
+    if (step.requests.some((request) => tables.interactions[request.requestId] !== undefined))
+      continue;
+    events.push(
+      ...step.requests.map((request) =>
+        interactionOpened(request, { scope: { turnId: step.event.turnId } }),
+      ),
+    );
   }
   const complete = steps.filter(isComplete);
   return {
@@ -749,6 +784,8 @@ export function endTask(
     readonly outcome: TaskCallOutcome;
     /** Calls whose actual outcomes precede this task terminal in the same commit. */
     readonly closedCallIds?: readonly string[];
+    /** Interactions an earlier commit of the same step already withdrew. */
+    readonly closedInteractionIds?: readonly string[];
   },
 ): Transition {
   const tables = publicViewOf(view.projection);
@@ -757,7 +794,13 @@ export function endTask(
   const { outcome } = input;
   const open = openWork(tables, { taskId: input.taskId });
   const closed = new Set(input.closedCallIds);
-  const remaining = { ...open, calls: open.calls.filter((call) => !closed.has(call.callId)) };
+  const withdrawn = new Set(input.closedInteractionIds);
+  const remaining = {
+    ...open,
+    calls: open.calls.filter((call) => !closed.has(call.callId)),
+    interactions: open.interactions.filter((row) => !withdrawn.has(row.interactionId)),
+    responses: open.responses.filter((row) => !withdrawn.has(row.interactionId)),
+  };
   const closure = closureFor({
     task: outcome.status,
     error:
@@ -776,16 +819,40 @@ export function finishRun(
   run: { readonly taskId?: string; readonly requestIds?: Iterable<string> },
 ): Transition {
   const ids = new Set(run.requestIds);
+  const tables = publicViewOf(view.projection);
+  const withdrawn = Object.values(tables.interactions).filter(
+    (row) =>
+      row.status === "open" &&
+      (ids.has(row.interactionId) ||
+        (run.taskId !== undefined && interactionOwner(tables, row).taskId === run.taskId)),
+  );
   return unchanged(
     view,
-    openInputs(view.projection)
-      .filter(
-        (input) =>
-          ids.has(input.request.requestId) ||
-          (run.taskId !== undefined && input.taskId === run.taskId),
-      )
-      .map(inputWithdrawn),
+    withdrawn.flatMap((row) => withdrawInteraction(tables, row.interactionId, "asker-ended")),
   );
+}
+
+/** An interaction nobody needs anymore, with the answers still open on it. */
+function withdrawInteraction(
+  tables: ReturnType<typeof publicViewOf>,
+  interactionId: string,
+  reason: string,
+  outcome: "withdrawn" | "interrupted" = "withdrawn",
+): SessionEvent[] {
+  const row = tables.interactions[interactionId];
+  if (row === undefined || row.status !== "open") return [];
+  const owner = interactionOwner(tables, row);
+  const scope: { turnId?: string; taskId?: string } = {};
+  if (owner.turnId !== undefined) scope.turnId = owner.turnId;
+  if (owner.taskId !== undefined) scope.taskId = owner.taskId;
+  return [
+    ...Object.values(tables.responses)
+      .filter(
+        (response) => response.interactionId === interactionId && response.status !== "settled",
+      )
+      .map((response) => responseSettled(response.responseId, "withdrawn", reason)),
+    interactionSettled(interactionId, outcome, { reason, scope }),
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -793,9 +860,11 @@ export function finishRun(
 // ---------------------------------------------------------------------------
 
 /**
- * A child session or workflow run asks a question or for a sign-in. The session passes it up
- * with its original coordinates, and the open turn waits on the call it serves.
- * A child's fresh batch replaces its earlier one, whose open requests are withdrawn.
+ * A child session or workflow run asks a question or for a sign-in, or reports how it settled
+ * one. The session mirrors each as its own interaction, about the call it serves; a child
+ * session's names the child's request as its origin. A child's fresh batch replaces its earlier
+ * one, whose open requests are withdrawn. The open turn waits on a request about one of its
+ * calls; a task's request waits on the task.
  */
 export function relay(
   view: SessionView,
@@ -805,118 +874,267 @@ export function relay(
   },
 ): Transition {
   const { payload } = input;
+  const tables = publicViewOf(view.projection);
   const events: SessionEvent[] = [
     ...finishRun(view, { requestIds: input.replacedRequestIds }).events,
   ];
+  const serving = tables.calls[payload.callId];
+  const scope: { turnId?: string; taskId?: string } = {};
+  const turnId =
+    (serving === undefined ? undefined : callTurn(tables, serving)) ??
+    (payload.kind === "subagent-input-request" ? payload.event.turnId : undefined);
+  const taskId =
+    (serving === undefined ? undefined : callTask(tables, serving)) ??
+    (payload.kind === "subagent-input-request" ? payload.event.taskId : undefined);
+  if (turnId !== undefined && turnId !== "") scope.turnId = turnId;
+  if (taskId !== undefined) scope.taskId = taskId;
+  // The asker: a child session, or the workflow tool run that asked, by its run id. Every
+  // relayed request names it, so readers tell it apart from this session's own requests.
+  const origin = (interactionId: string) => ({ interactionId, sessionId: payload.childSessionId });
+  const subject = { callId: payload.callId };
+  const opening: string[] = [];
   if (payload.kind === "subagent-input-request") {
-    const { event } = payload;
-    events.push(
-      createInputRequestedEvent({
-        callId: payload.callId,
-        requests: event.requests,
-        sequence: event.sequence,
-        stepIndex: event.stepIndex,
-        taskId: event.taskId,
-        turnId: event.turnId,
-      }),
-    );
+    for (const request of payload.event.requests) {
+      if (tables.interactions[request.requestId] !== undefined) continue;
+      opening.push(request.requestId);
+      events.push(
+        interactionOpened(request, { origin: origin(request.requestId), scope, subject }),
+      );
+    }
   } else {
     const { event } = payload;
-    events.push(event);
-    if (event.type !== "authorization.required") return unchanged(view, events);
+    const mirror = tables.interactions[event.data.interactionId];
+    if (event.type === "interaction.opened") {
+      if (mirror === undefined) {
+        opening.push(event.data.interactionId);
+        const data: { -readonly [K in keyof typeof event.data]: (typeof event.data)[K] } = {
+          ...event.data,
+          subject,
+        };
+        data.origin = origin(event.data.interactionId);
+        events.push({ data, scope, type: "interaction.opened" });
+      }
+    } else if (event.type === "interaction.settled") {
+      if (mirror?.status === "open") events.push(...mirrorSettled(tables, event.data, scope));
+    } else if (mirror !== undefined) {
+      // How the asker settled an answer this session forwarded; a deciding one settles with
+      // its interaction.
+      const answer = forwardedAnswer(tables, event.data);
+      if (answer !== undefined && event.data.outcome !== "applied")
+        events.push(responseSettled(answer, event.data.outcome, event.data.reason));
+    }
   }
-  events.push(...hold(view, { on: "input" }).events);
+  // A task's request waits on its task, not on the turn.
+  if (opening.length > 0 && taskId === undefined)
+    events.push(...hold(view, { on: "input", opening }).events);
   return unchanged(view, events);
 }
 
-/**
- * A person's message answered a request this session relays: the session records the delivery,
- * consumed into the turn that asked, while the answer goes on to the asker.
- */
-export function receiveRelayedAnswer(input: {
-  readonly deliveryIds: readonly string[];
-  readonly parts: readonly UserPart[];
-  readonly turnId: string;
-}): SessionEvent[] {
-  return input.deliveryIds.flatMap((deliveryId): SessionEvent[] => [
-    { data: { deliveryId }, type: "delivery.admitted" },
-    {
-      data: { deliveryId, parts: input.parts, turnId: input.turnId },
-      scope: { turnId: input.turnId },
-      type: "delivery.consumed",
-    },
-  ]);
+/** The asker settled what this session mirrors: the mirror settles the same way. */
+function mirrorSettled(
+  tables: ReturnType<typeof publicViewOf>,
+  settled: FactOf<"interaction.settled">["data"],
+  scope: { readonly turnId?: string; readonly taskId?: string },
+): SessionEvent[] {
+  const open = Object.values(tables.responses)
+    .filter((row) => row.interactionId === settled.interactionId && row.status !== "settled")
+    .sort((a, b) => a.introducedAt - b.introducedAt);
+  const decided =
+    settled.outcome === "accepted" ||
+    settled.outcome === "declined" ||
+    settled.outcome === "invalid";
+  const decider = decided ? open.at(-1) : undefined;
+  const events: SessionEvent[] = open.map((row) =>
+    responseSettled(row.responseId, row === decider ? "applied" : "withdrawn", settled.reason),
+  );
+  events.push(
+    interactionSettled(settled.interactionId, settled.outcome, {
+      cause: decider === undefined ? undefined : { responseId: decider.responseId },
+      reason: settled.reason,
+      response: answerOf(settled.interactionId, settled.response),
+      scope,
+    }),
+  );
+  return events;
 }
 
+function answerOf(
+  requestId: string,
+  detail: { readonly [key: string]: unknown } | undefined,
+): InputResponse | undefined {
+  if (detail === undefined) return undefined;
+  const answer: { requestId: string; optionId?: string; text?: string } = { requestId };
+  if (typeof detail.optionId === "string") answer.optionId = detail.optionId;
+  if (typeof detail.text === "string") answer.text = detail.text;
+  return answer.optionId === undefined && answer.text === undefined ? undefined : answer;
+}
+
+/** The answer this session forwarded that an asker's settlement is about. */
+function forwardedAnswer(
+  tables: ReturnType<typeof publicViewOf>,
+  settled: { readonly interactionId: string; readonly deliveryId?: string },
+): string | undefined {
+  const open = Object.values(tables.responses)
+    .filter((row) => row.interactionId === settled.interactionId && row.status !== "settled")
+    .sort((a, b) => a.introducedAt - b.introducedAt);
+  return (
+    open.find((row) => settled.deliveryId !== undefined && row.deliveryId === settled.deliveryId) ??
+    open.at(-1)
+  )?.responseId;
+}
+
+/** The outcome an interaction settles with when this session decides a relayed request. */
+function decidedOutcome(outcome: InputResolution["outcome"]) {
+  switch (outcome) {
+    case "approved":
+    case "answered":
+      return "accepted" as const;
+    case "denied":
+      return "declined" as const;
+    case "invalid":
+      return "invalid" as const;
+    default:
+      return "withdrawn" as const;
+  }
+}
+
+/**
+ * Answers to requests this session relays went on to their askers. Each delivery that carried
+ * only such answers is admitted here: a message that answered joins the turn that asked, and
+ * any other took effect once forwarded. A question this session decides settles now; an
+ * approval stays open until its asker settles it.
+ */
 export function routeAnswer(
   view: SessionView,
   input: {
-    readonly children: readonly {
-      readonly event: StepCoordinates;
-      readonly resolutions: readonly InputResolution[];
+    readonly deliveries: readonly {
+      readonly deliveryId: string;
+      readonly principal?: Principal;
+      readonly source?: DeliverySource;
+      /** A message that answered: the turn that asked consumes it. */
+      readonly consumed?: { readonly turnId: string; readonly parts: readonly UserPart[] };
     }[];
+    /** Every answer forwarded, as admitted. */
+    readonly forwarded: readonly ResponseSubmittedData[];
+    /** The requests this session settles now. */
+    readonly decided: readonly InputResolution[];
   },
 ): Transition {
-  const events: SessionEvent[] = input.children
-    .filter((child) => child.resolutions.length > 0)
-    .map((child) => createInputResolvedEvent({ resolutions: child.resolutions, ...child.event }));
+  const tables = publicViewOf(view.projection);
+  const events: SessionEvent[] = [];
+  const admitted = new Set<string>();
+  for (const delivery of input.deliveries) {
+    if (tables.deliveries[delivery.deliveryId] !== undefined || admitted.has(delivery.deliveryId))
+      continue;
+    admitted.add(delivery.deliveryId);
+    const data: { deliveryId: string; principal?: Principal; source?: DeliverySource } = {
+      deliveryId: delivery.deliveryId,
+    };
+    if (delivery.principal !== undefined) data.principal = delivery.principal;
+    if (delivery.source !== undefined) data.source = delivery.source;
+    events.push({ data, type: "delivery.admitted" });
+    if (delivery.consumed !== undefined) {
+      const { parts, turnId } = delivery.consumed;
+      events.push({
+        data: { deliveryId: delivery.deliveryId, parts, turnId },
+        scope: { turnId },
+        type: "delivery.consumed",
+      });
+    }
+  }
+  const known = (deliveryId: string) =>
+    admitted.has(deliveryId) || tables.deliveries[deliveryId] !== undefined;
+  const submitted = new Map<string, ResponseSubmittedData>();
+  for (const binding of input.forwarded) {
+    if (tables.responses[binding.responseId] !== undefined) continue;
+    if (tables.interactions[binding.interactionId]?.status !== "open") continue;
+    if (!known(binding.deliveryId)) continue;
+    submitted.set(binding.responseId, binding);
+    events.push(responseSubmitted(binding));
+  }
+  for (const resolution of input.decided) {
+    const row = tables.interactions[resolution.requestId];
+    if (row?.status !== "open") continue;
+    const answers = [
+      ...Object.values(tables.responses)
+        .filter((entry) => entry.interactionId === row.interactionId && entry.status !== "settled")
+        .map((entry) => entry.responseId),
+      ...[...submitted.values()]
+        .filter((binding) => binding.interactionId === row.interactionId)
+        .map((binding) => binding.responseId),
+    ];
+    const decider = resolution.response === undefined ? undefined : answers.at(-1);
+    for (const responseId of answers)
+      events.push(responseSettled(responseId, responseId === decider ? "applied" : "withdrawn"));
+    const owner = interactionOwner(tables, row);
+    const scope: { turnId?: string; taskId?: string } = {};
+    if (owner.turnId !== undefined) scope.turnId = owner.turnId;
+    if (owner.taskId !== undefined) scope.taskId = owner.taskId;
+    events.push(
+      interactionSettled(row.interactionId, decidedOutcome(resolution.outcome), {
+        cause: decider === undefined ? undefined : { responseId: decider },
+        response: resolution.response,
+        scope,
+      }),
+    );
+  }
+  for (const delivery of input.deliveries) {
+    if (delivery.consumed !== undefined || !admitted.has(delivery.deliveryId)) continue;
+    events.push({
+      data: { deliveryId: delivery.deliveryId, outcome: "applied" },
+      type: "delivery.settled",
+    });
+  }
   return unchanged(view, events);
 }
 
 /**
- * A workflow run's sign-in, reported to the session that owns the run, which relays it. Built
- * where the run asks, at the coordinates of the call it serves.
+ * A workflow run's sign-in, reported to the session that owns the run, which mirrors it: opened
+ * while the run waits, then how it settled.
  */
 export function runSignIn(
-  from: {
-    readonly sequence: number;
-    readonly stepIndex: number;
-    readonly taskId?: string;
-    readonly turnId: string;
-  },
+  from: { readonly taskId?: string; readonly turnId: string },
   challenge: AuthorizationChallenge,
   outcome?: "authorized" | "failed",
-) {
-  const fields = {
-    ...authorizationEventFields(challenge),
-    sequence: from.sequence,
-    stepIndex: from.stepIndex,
-    taskId: from.taskId,
-    turnId: from.turnId,
+): SubagentAuthorizationEventHookPayload["event"] {
+  if (outcome === undefined) {
+    const scope: { turnId: string; taskId?: string } = { turnId: from.turnId };
+    if (from.taskId !== undefined) scope.taskId = from.taskId;
+    return {
+      data: signInOpened(challenge, {
+        prompt: `Sign in to ${challenge.name} to continue.`,
+        scope,
+        subject: from.taskId === undefined ? { turnId: from.turnId } : { taskId: from.taskId },
+      }).data,
+      type: "interaction.opened",
+    };
+  }
+  return {
+    data: {
+      interactionId: signInInteractionId(challenge),
+      outcome: outcome === "authorized" ? "accepted" : "failed",
+    },
+    type: "interaction.settled",
   };
-  return outcome === undefined
-    ? createAuthorizationRequiredEvent({
-        ...fields,
-        description: `Sign in to ${challenge.name} to continue.`,
-        webhookUrl: challenge.hookUrl,
-      })
-    : createAuthorizationCompletedEvent({ ...fields, outcome });
 }
 
 // ---------------------------------------------------------------------------
 // Sign-ins
 // ---------------------------------------------------------------------------
 
-/** Sign-in callbacks arrived: each completion is reported at the coordinates of the turn that asked. */
+/** Sign-in callbacks arrived: each attempt the session still waits on is accepted. */
 export function completeSignIn(
   view: SessionView,
   input: { readonly completions: readonly AuthorizationChallenge[] },
 ): Transition {
-  const position = at(view.projection);
+  const tables = publicViewOf(view.projection);
   return unchanged(
     view,
-    input.completions.map((challenge) => {
-      const attempt =
-        challenge.attemptId === undefined
-          ? undefined
-          : view.projection.authorizations[challenge.attemptId];
-      return createAuthorizationCompletedEvent({
-        ...authorizationEventFields(challenge),
-        outcome: "authorized",
-        sequence: attempt?.sequence ?? position.sequence,
-        stepIndex: attempt?.stepIndex ?? position.stepIndex,
-        turnId: attempt?.turnId ?? position.turnId,
-      });
+    input.completions.flatMap((challenge) => {
+      const interactionId = signInInteractionId(challenge);
+      return tables.interactions[interactionId]?.status === "open"
+        ? [interactionSettled(interactionId, "accepted")]
+        : [];
     }),
   );
 }
@@ -960,23 +1178,25 @@ export function cancel(view: SessionView, input: { readonly cause?: Cause } = {}
   const stoppedRequestIds = new Set(
     stopped.flatMap((step) => step.requests.map((request) => request.requestId)),
   );
-  const owned = (input: SessionInput) =>
-    input.turnId === turnId ||
-    stoppedRequestIds.has(input.request.requestId) ||
-    view.relayedRequestIds.has(input.request.requestId) ||
-    input.request.kind === "session-limit";
-  const events: SessionEvent[] = [
-    ...openInputs(projection).filter(owned).map(inputWithdrawn),
-    ...openSignIns(projection)
-      .filter((attempt) => attempt.turnId === turnId)
-      .map((attempt) => signInWithdrawn(attempt, "Cancelled.")),
-  ];
-  events.push(
-    ...closeTurn(projection, {
-      cause: input.cause,
-      outcome: "cancelled",
-    }),
-  );
+  const tables = publicViewOf(projection);
+  const closingTurn = activeTurn(tables)?.turnId ?? turnId;
+  const turn =
+    closingTurn === undefined
+      ? undefined
+      : turnClosure(projection, closingTurn, { cause: input.cause, outcome: "cancelled" });
+  const closed = new Set(turn?.closed.interactions.map((row) => row.interactionId));
+  // The cancel also stops the work behind every relayed request and the stopped steps' asks.
+  const events: SessionEvent[] = Object.values(tables.interactions)
+    .filter(
+      (row) =>
+        row.status === "open" &&
+        !closed.has(row.interactionId) &&
+        (view.relayedRequestIds.has(row.interactionId) ||
+          stoppedRequestIds.has(row.interactionId) ||
+          row.request.kind === "budget"),
+    )
+    .flatMap((row) => withdrawInteraction(tables, row.interactionId, "Cancelled.", "interrupted"));
+  events.push(...(turn?.facts ?? []));
   return {
     commit: stopped.flatMap(cancelledTranscript),
     events,
@@ -1023,12 +1243,7 @@ export function clear(
   return {
     clearsHistory: true,
     events: [
-      ...openInputs(projection)
-        .filter((open) => !view.relayedRequestIds.has(open.request.requestId))
-        .map(inputWithdrawn),
-      ...openSignIns(projection).map((attempt) =>
-        signInWithdrawn(attempt, "The context was cleared."),
-      ),
+      ...clearedInteractions(view),
       // Clear runs between turns. A paused turn still owns a lifecycle; end it and its
       // non-task work before selecting an empty conversation, instead of dropping only its
       // private suspended steps and leaving the public turn and calls open forever.
@@ -1041,6 +1256,30 @@ export function clear(
     ],
     turn: { grants: view.turn.grants, suspended: [] } satisfies TurnState,
   };
+}
+
+/**
+ * What a clear withdraws beyond the turn it closes: the requests the cleared history asked for
+ * outside it. Requests relayed from live tasks stay.
+ */
+function clearedInteractions(view: SessionView): SessionEvent[] {
+  const tables = publicViewOf(view.projection);
+  const turnId = activeTurn(tables)?.turnId ?? view.projection.activeTurnId;
+  const closed = new Set(
+    turnId === undefined
+      ? []
+      : openWork(tables, { turnId }).interactions.map((row) => row.interactionId),
+  );
+  return Object.values(tables.interactions)
+    .filter(
+      (row) =>
+        row.status === "open" &&
+        !closed.has(row.interactionId) &&
+        !view.relayedRequestIds.has(row.interactionId),
+    )
+    .flatMap((row) =>
+      withdrawInteraction(tables, row.interactionId, "The context was cleared.", "interrupted"),
+    );
 }
 
 /** A context change starts. */

@@ -6,24 +6,9 @@ import { isFactType, isProgressType } from "#protocol/session-events/catalog.js"
 import type { CommitLine, ProgressLine, StoredLine } from "#protocol/session-events/envelope.js";
 import type { SessionEvent, SessionStreamEvent } from "#protocol/session-event.js";
 
-/** v26 work types that still ride as facts until their family moves. */
-const WORK_TYPES: ReadonlySet<string> = new Set([
-  "agent.started",
-  "approval.candidate",
-  "approval.settled",
-  "authorization.completed",
-  "authorization.required",
-  "input.requested",
-  "input.resolved",
-  "task.settled",
-  "task.started",
-]);
-
-/** True for a record this version knows: a v27 fact or progress type, or a work type. */
+/** True for a record this version knows: a v27 fact or progress type. */
 export function isKnownRecordType(type: unknown): boolean {
-  return (
-    isFactType(type) || isProgressType(type) || (typeof type === "string" && WORK_TYPES.has(type))
-  );
+  return isFactType(type) || isProgressType(type);
 }
 
 /**

@@ -12,7 +12,8 @@ import type {
   SendTurnPayload,
   StreamOptions,
 } from "#client/types.js";
-import type { RuntimeTraceContext, AgentStartedStreamEvent } from "#protocol/message.js";
+import type { RuntimeTraceContext } from "#protocol/message.js";
+import type { ChildOpened } from "#protocol/session-events/families/child.js";
 import { failureOf, ResponseSegment, summarizeTurnEvents } from "#client/session-utils.js";
 import { extractCompletedResult } from "#client/output-schema.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
@@ -153,8 +154,8 @@ export class EvalSessionDriver implements EveEvalSession {
     return await this.readTurn();
   }
 
-  agent(started: AgentStartedStreamEvent): EveEvalAgentSession {
-    const child = this.#session.agent(started);
+  agent(opened: ChildOpened): EveEvalAgentSession {
+    const child = this.#session.agent(opened);
     const signal = this.#signal;
     return {
       name: child.name,

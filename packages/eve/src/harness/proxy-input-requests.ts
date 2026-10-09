@@ -1,5 +1,4 @@
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
-import type { InputResolvedStreamEvent } from "#protocol/message.js";
 import type { StepCoordinates as PendingInputBatchEvent } from "#harness/session-machine/view.js";
 import type { HarnessSessionBase, SessionStateMap } from "#harness/types.js";
 import { inputOptionSchema, type InputOption, type InputRequestKind } from "#shared/input.js";
@@ -64,23 +63,11 @@ export interface ProxyInputRequestBatch {
 
 /**
  * Whether the child, not this session, closes a relayed request. A child's tool approval can
- * refuse the person who answered, so it stays open here until the child's own `input.resolved`
- * or `approval.settled` arrives. This session closes every other relayed request once it
- * forwards the answer.
+ * refuse the person who answered, so it stays open here until the child relays how it settled.
+ * This session closes every other relayed request once it forwards the answer.
  */
 export function resolvedByChild(kind: InputRequestKind): boolean {
   return kind === "tool-approval";
-}
-
-/**
- * The part of a child's `input.resolved` its parent relays: the requests the parent leaves for
- * the child to close. `undefined` when the parent already closed all of them.
- */
-export function resolvedForParent(
-  data: InputResolvedStreamEvent["data"],
-): InputResolvedStreamEvent["data"] | undefined {
-  const resolutions = data.resolutions.filter(({ kind }) => resolvedByChild(kind));
-  return resolutions.length === 0 ? undefined : { ...data, resolutions };
 }
 
 /** `requestId → route` map stored on the parent session. */

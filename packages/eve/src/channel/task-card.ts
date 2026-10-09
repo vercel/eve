@@ -128,37 +128,24 @@ export function trackTaskCardEvent(
   view?: SessionView,
 ): TurnChanges {
   switch (event.type) {
-    case "input.requested": {
-      const { requests, taskId } = event.data;
+    case "interaction.opened": {
+      // Only a task's requests block its card; the turn's own block the turn.
+      const taskId = event.scope?.taskId;
       if (taskId === undefined) return {};
-      const requested = requests.map((request) =>
-        blocker(
-          request.requestId,
-          request.kind === "question" ? "input" : "approval",
-          request.prompt,
-        ),
-      );
-      return updateBlockers(turns, taskId, (open) => [...open, ...requested]);
-    }
-    case "input.resolved": {
-      const resolved = new Set(event.data.resolutions.map((resolution) => resolution.requestId));
-      return updateBlockers(turns, undefined, (open) =>
-        open.filter((item) => !resolved.has(item.id)),
-      );
-    }
-    case "authorization.required": {
-      const { taskId } = event.data;
-      if (taskId === undefined) return {};
-      const id = authorizationId(event.data);
-      const label = event.data.authorization?.displayName ?? event.data.name;
+      const { interactionId, request } = event.data;
+      const signIn = request.kind === "sign-in";
+      const label = signIn
+        ? (request.signIn?.displayName ?? request.signIn?.name ?? request.prompt)
+        : request.prompt;
+      const kind = signIn ? "authorization" : request.kind === "question" ? "input" : "approval";
       return updateBlockers(turns, taskId, (open) => [
-        ...open.filter((item) => item.id !== id),
-        blocker(id, "authorization", label),
+        ...open.filter((item) => item.id !== interactionId),
+        blocker(interactionId, kind, label),
       ]);
     }
-    case "authorization.completed": {
-      const id = authorizationId(event.data);
-      return updateBlockers(turns, event.data.taskId, (open) =>
+    case "interaction.settled": {
+      const id = event.data.interactionId;
+      return updateBlockers(turns, event.scope?.taskId, (open) =>
         open.filter((item) => item.id !== id),
       );
     }
@@ -174,14 +161,6 @@ type TrackedBlocker = NonNullable<NonNullable<TrackedCall["task"]>["blockers"]>[
 function blocker(id: string, kind: TaskCardBlocker["kind"], text: string): TrackedBlocker {
   const label = presentationText(text)?.slice(0, MAX_BLOCKER_LABEL_LENGTH);
   return label === undefined ? { id, kind } : { id, kind, label };
-}
-
-function authorizationId(data: {
-  readonly attemptId?: string;
-  readonly candidateId?: string;
-  readonly name: string;
-}): string {
-  return data.attemptId ?? data.candidateId ?? data.name;
 }
 
 /** Applies `update` to the open blockers of each working task call, or only `taskId`'s. */

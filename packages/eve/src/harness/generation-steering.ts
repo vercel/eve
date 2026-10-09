@@ -58,7 +58,7 @@ export class GenerationSteering {
     // Published requests and terminal events must finish committing, even
     // when the model produced no assistant text.
     if (
-      event.type === "input.requested" ||
+      event.type === "interaction.opened" ||
       (event.type === "model.settled" && event.data.outcome === "failed") ||
       event.type === "turn.settled"
     )

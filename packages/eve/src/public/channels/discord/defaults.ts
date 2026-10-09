@@ -2,6 +2,11 @@ import { errorHintOf, replyTextOf } from "#public/channels/reply.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { resolvedPromptLabel } from "#channel/resolved-prompt.js";
+import {
+  requestBatchOf,
+  requestSettlementOf,
+  signInSettlementOf,
+} from "#channel/interaction-prompts.js";
 import { createLogger, formatErrorHint } from "#internal/logging.js";
 import {
   DISCORD_MESSAGE_CONTENT_MAX_LENGTH,
@@ -66,18 +71,13 @@ export const defaultEvents: DiscordChannelEvents = {
     await channel.discord.startTyping();
   },
 
-  async "authorization.completed"(event, channel, _ctx) {
-    if (event.outcome === "authorized") {
-      await channel.discord.startTyping();
-    }
-  },
-
   async "call.requested"(_event, channel, _ctx) {
     await channel.discord.startTyping();
   },
 
-  async "input.requested"(event, channel, _ctx) {
-    for (const request of event.requests) {
+  async "interaction.opened"(data, channel, ctx) {
+    const event = requestBatchOf(ctx.view, data);
+    for (const request of event?.requests ?? []) {
       const content = splitDiscordMessageContent(request.prompt)[0] ?? request.prompt;
       const components = renderInputRequestComponents(request);
       const posted = await channel.discord.post({ components, content });
@@ -95,8 +95,13 @@ export const defaultEvents: DiscordChannelEvents = {
 
   // Covers every way a prompt ends: a press, a modal answer, or a withdrawal.
   // The bot token outlives the interaction token the prompt may have been posted with.
-  async "input.resolved"(event, channel, _ctx) {
-    for (const resolution of event.resolutions) {
+  async "interaction.settled"(data, channel, ctx) {
+    if (signInSettlementOf(ctx.view, data)?.outcome === "authorized") {
+      await channel.discord.startTyping();
+      return;
+    }
+    const settled = requestSettlementOf(ctx.view, data);
+    for (const resolution of settled === undefined ? [] : [settled]) {
       const prompt = channel.state.hitlPrompts?.[resolution.requestId];
       if (prompt === undefined) continue;
       const { [resolution.requestId]: _, ...rest } = channel.state.hitlPrompts ?? {};

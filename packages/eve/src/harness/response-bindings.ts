@@ -20,3 +20,29 @@ function sameOption(a: string | undefined, b: string | undefined): boolean {
   // ACP's Deny and eve's Cancel are the same decision, without changing the submitted value.
   return (a === "deny" && b === "cancel") || (a === "cancel" && b === "deny");
 }
+
+/**
+ * Binds answers a typed message resolved to the delivery that carried it, so they keep one
+ * identity through coalescing and policy passes like a press does.
+ */
+export function withTypedBindings(
+  input: StepInput,
+  responses: readonly InputResponse[],
+): readonly ResponseSubmittedData[] | undefined {
+  const deliveryId = input.deliveries?.at(-1)?.deliveryId;
+  if (deliveryId === undefined || responses.length === 0) return input.responseBindings;
+  return [
+    ...(input.responseBindings ?? []),
+    ...responses.map((response, index) => {
+      const value: { optionId?: string; text?: string } = {};
+      if (response.optionId !== undefined) value.optionId = response.optionId;
+      if (response.text !== undefined) value.text = response.text;
+      return {
+        deliveryId,
+        interactionId: response.requestId,
+        responseId: `response_${deliveryId}_typed_${String(index)}`,
+        value,
+      };
+    }),
+  ];
+}

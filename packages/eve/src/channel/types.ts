@@ -1,7 +1,7 @@
-import type { SessionEvent, SessionStreamEvent } from "#protocol/session-event.js";
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { UserContent } from "ai";
 
-import type { LegacyRemoteAgentCaller } from "#execution/legacy-remote-agent/protocol.js";
+import type { RemoteChildBinding } from "#execution/child-binding.js";
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import type { CancelTurnResult as ProtocolCancelTurnResult } from "#protocol/cancel-turn.js";
 import type {
@@ -10,6 +10,11 @@ import type {
   RuntimeToolResultActionResult,
 } from "#shared/action-types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
+import type {
+  InteractionOpenedData,
+  InteractionSettledData,
+} from "#protocol/session-events/families/interaction.js";
+import type { ResponseOutcome } from "#protocol/session-events/families/response.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { AgentLimitsDefinition } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
@@ -337,20 +342,33 @@ export interface SubagentInputRequestHookPayload {
 }
 
 /**
- * Lifecycle event forwarded from a delegated child: responder and sign-in progress, and the
- * resolution of its requests. The parent relays it unchanged.
+ * A change to an interaction a delegated child or workflow run owns, relayed to the session that
+ * serves it and keyed by the asker's ids: a sign-in it opened, an interaction it settled, or how
+ * it settled an answer this session forwarded. The serving session mirrors each in its own
+ * stream; the asker's stream stays its own.
  */
-export type SubagentAuthorizationEvent = Extract<
-  SessionEvent,
-  {
-    type:
-      | "approval.candidate"
-      | "approval.settled"
-      | "authorization.required"
-      | "authorization.completed"
-      | "input.resolved";
-  }
->;
+export type SubagentAuthorizationEvent =
+  | {
+      readonly type: "interaction.opened";
+      readonly data: InteractionOpenedData;
+    }
+  | {
+      readonly type: "interaction.settled";
+      readonly data: InteractionSettledData;
+    }
+  | {
+      readonly type: "response.settled";
+      readonly data: RelayedResponseSettlement;
+    };
+
+/** How an asker settled an answer: which interaction, from which delivery, and how. */
+export interface RelayedResponseSettlement {
+  readonly interactionId: string;
+  /** The delivery the asker received the answer in, when it kept the forwarder's id. */
+  readonly deliveryId?: string;
+  readonly outcome: ResponseOutcome;
+  readonly reason?: string;
+}
 
 /**
  * Proxy payload sent from a child subagent while it waits for authorization.
@@ -483,8 +501,6 @@ export interface RunInput {
    * caller for their own turn.
    */
   readonly callback?: SessionCallback;
-  /** Set when {@link callback} belongs to a remote agent protocol 1 caller. */
-  readonly legacyRemoteAgentCaller?: LegacyRemoteAgentCaller;
   /**
    * Session continuation token for delivery and hook creation. Channels can
    * add a continuation address during the first turn via
@@ -645,6 +661,15 @@ export interface Runtime {
    * live stream.
    */
   getStreamTailIndex(sessionId: string): Promise<number>;
+
+  /**
+   * Reads where a remote child of `sessionId` runs, from the private record the parent wrote
+   * before linking it. Only the parent's stream proxy reads it.
+   */
+  readChildBinding?(
+    sessionId: string,
+    childSessionId: string,
+  ): Promise<RemoteChildBinding | undefined>;
 }
 
 /**

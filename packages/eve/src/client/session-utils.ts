@@ -1,5 +1,5 @@
+import { signInPromptOf, type SignInPrompt } from "#channel/interaction-prompts.js";
 import type { SessionEvent } from "#protocol/session-event.js";
-import type { AuthorizationRequiredStreamEvent } from "#protocol/message.js";
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 import {
   foldSession,
@@ -10,13 +10,7 @@ import {
 import type { InputRequest } from "#shared/input.js";
 
 /** A connection authorization challenge that remains unresolved where a response ended. */
-interface PendingAuthorization {
-  readonly authorization?: AuthorizationRequiredStreamEvent["data"]["authorization"];
-  readonly description: string;
-  readonly name: string;
-  readonly attemptId?: string;
-  readonly webhookUrl?: string;
-}
+type PendingAuthorization = SignInPrompt;
 
 /** What one response's events say, for a reader that wants the outcome. */
 interface TurnEventSummary {
@@ -141,8 +135,9 @@ export class ResponseSegment {
   /** Records `event`; an ending fact ends the response after the rest of its commit. */
   observe(event: SessionEvent): boolean {
     this.#projection = foldSession(this.#projection, event);
-    if (event.type === "authorization.required") {
-      this.#authorizations.set(event.data.attemptId ?? event.data.name, event.data);
+    if (event.type === "interaction.opened") {
+      const prompt = signInPromptOf(event.data, event.scope);
+      if (prompt !== undefined) this.#authorizations.set(prompt.attemptId, prompt);
     }
     const ends =
       this.#deliveryId === undefined

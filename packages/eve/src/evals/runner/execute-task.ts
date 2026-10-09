@@ -191,7 +191,7 @@ function evalUsage(sessions: readonly EveEvalSessionResult[]): TokenUsage | unde
   const opened = new Set(
     sessions.flatMap((session) =>
       session.events.flatMap((event) =>
-        event.type === "agent.started" ? [event.data.sessionId] : [],
+        event.type === "child.opened" ? [event.data.sessionId] : [],
       ),
     ),
   );

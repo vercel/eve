@@ -1109,8 +1109,9 @@ async function waitForRest(sessions: readonly Session[], wait: Wait): Promise<vo
 
 /** Whether an event asks the person `prompt`. */
 const asks = (prompt: string) => (event: SessionStreamEvent) =>
-  event.type === "input.requested" &&
-  event.data.requests.some((request) => request.prompt === prompt);
+  event.type === "interaction.opened" &&
+  event.data.request.kind !== "sign-in" &&
+  event.data.request.prompt === prompt;
 
 /** Whether `session` settled the request that asked `prompt`, answered or withdrawn. */
 async function settles(session: Session, prompt: string): Promise<boolean> {
@@ -1122,16 +1123,9 @@ async function settles(session: Session, prompt: string): Promise<boolean> {
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
-      if (value.type === "input.requested") {
-        for (const request of value.data.requests) {
-          if (request.prompt === prompt) requestIds.add(request.requestId);
-        }
-      } else if (value.type === "approval.settled" && requestIds.has(value.data.requestId)) {
-        return true;
-      } else if (
-        value.type === "input.resolved" &&
-        value.data.resolutions.some((resolution) => requestIds.has(resolution.requestId))
-      ) {
+      if (value.type === "interaction.opened" && value.data.request.prompt === prompt) {
+        requestIds.add(value.data.interactionId);
+      } else if (value.type === "interaction.settled" && requestIds.has(value.data.interactionId)) {
         return true;
       }
       if (value.meta.position.line >= tail && value.meta.endOfLine !== false) break;
@@ -1143,7 +1137,8 @@ async function settles(session: Session, prompt: string): Promise<boolean> {
 }
 
 /** Whether an event asks the person to sign in. */
-const isSignIn = (event: SessionStreamEvent) => event.type === "authorization.required";
+const isSignIn = (event: SessionStreamEvent) =>
+  event.type === "interaction.opened" && event.data.request.kind === "sign-in";
 
 /**
  * Whether the session held for the person after it last emitted an event

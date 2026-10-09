@@ -44,9 +44,9 @@ import {
   collectInboundFileParts,
   createSlackFetchFile,
 } from "#public/channels/slack/attachments.js";
-import { defaultInputRequestedHandler } from "#public/channels/slack/approval-cards.js";
 import {
   defaultEvents,
+  defaultInteractionOpenedHandler,
   defaultOnMessage,
   defaultReceived,
 } from "#public/channels/slack/defaults.js";
@@ -833,7 +833,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   const rendering = composeSlackRenderers(config.renderers ?? [], {
     events: {
       ...defaultEvents,
-      "input.requested": defaultInputRequestedHandler(config.approvalChannel),
+      "interaction.opened": defaultInteractionOpenedHandler(config.approvalChannel),
     },
     received: defaultReceived,
     taskCard: renderDefaultSlackTaskCard,

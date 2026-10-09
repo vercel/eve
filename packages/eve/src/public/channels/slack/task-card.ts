@@ -288,10 +288,8 @@ const TRACKED_EVENTS = [
   "call.requested",
   "call.started",
   "call.settled",
-  "input.requested",
-  "input.resolved",
-  "authorization.required",
-  "authorization.completed",
+  "interaction.opened",
+  "interaction.settled",
   "turn.settled",
 ] as const;
 

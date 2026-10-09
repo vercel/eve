@@ -22,10 +22,24 @@ import {
   type ConnectionAuthorizationOutcome,
 } from "#public/channels/slack/connections.js";
 import type { SlackMessage } from "#public/channels/slack/inbound.js";
-import { approvalEvents } from "#public/channels/slack/approval-cards.js";
+import {
+  defaultInputRequestedHandler,
+  notifyRefusedResponder,
+  settleApproval,
+} from "#public/channels/slack/approval-cards.js";
+import {
+  refusedAnswerOf,
+  requestBatchOf,
+  requestSettlementOf,
+  signInPromptOf,
+  signInSettlementOf,
+  type SignInPrompt,
+  type SignInSettlement,
+} from "#channel/interaction-prompts.js";
 import { deliverCompletedSlackReply } from "#public/channels/slack/reply-delivery.js";
 import { truncateTypingStatus } from "#public/channels/slack/limits.js";
 import type {
+  SlackApprovalChannelResolver,
   SlackChannelInternalEvents,
   SlackChannelState,
   SlackContext,
@@ -194,6 +208,128 @@ function firstNonEmptyLine(text: string): string | undefined {
 }
 
 /**
+ * A sign-in: a public, link-free status for the thread, and the challenge, which is a credential,
+ * privately to the person who must sign in.
+ */
+export async function showSlackSignIn(
+  event: SignInPrompt,
+  channel: SlackEventContext,
+): Promise<void> {
+  const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
+  const recipientUserId = slackUserIdForPrincipal(channel.state, event.principalId) ?? null;
+  const challengeUrl = event.authorization?.url;
+
+  // Post a public, link-free status so everyone in the thread can see
+  // the session is blocked and later see it complete. The challenge
+  // itself remains private.
+  const pending = channel.state.pendingAuthMessageTs ?? {};
+  if (event.responseId === undefined && pending[event.name] === undefined) {
+    const publicText = buildAuthRequiredPublicText({ displayName, recipientUserId });
+    try {
+      const sent = await channel.thread.post(publicText);
+      if (sent.id) {
+        channel.state.pendingAuthMessageTs = {
+          ...pending,
+          [event.name]: sent.id,
+        };
+      }
+    } catch (error) {
+      log.error("Slack auth public message delivery failed", {
+        name: event.name,
+        error,
+      });
+    }
+  }
+
+  // The challenge is user-specific: the sign-in link (and device code)
+  // must only ever be visible to the person who started the sign-in, never posted into
+  // the shared thread.
+  const instructions = event.authorization?.instructions;
+  if (recipientUserId && (challengeUrl || instructions)) {
+    const { channelId, threadTs } = channel.state;
+    // The turn's own sign-in holds it, so the prompt can cancel that turn.
+    const cancel =
+      event.responseId === undefined && channelId && threadTs && event.turnId
+        ? { channelId, threadTs, turnId: event.turnId }
+        : undefined;
+    const prompt = {
+      cancel,
+      displayName,
+      instructions,
+      url: challengeUrl,
+      userCode: event.authorization?.userCode,
+    };
+    try {
+      await channel.thread.postEphemeral(recipientUserId, {
+        blocks: buildAuthEphemeralBlocks(prompt),
+        text: buildAuthEphemeralText(prompt),
+      });
+    } catch (error) {
+      log.error("Slack auth ephemeral delivery failed", {
+        name: event.name,
+        error,
+      });
+    }
+  }
+}
+
+async function settleSlackSignIn(
+  event: SignInSettlement,
+  channel: SlackEventContext,
+): Promise<void> {
+  const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
+  if (event.outcome === "authorized" && event.responseId === undefined) {
+    await showStatus(channel, `Connected to ${displayName}. Resuming...`, { force: true });
+  }
+
+  const pending = channel.state.pendingAuthMessageTs ?? {};
+  const ts = pending[event.name];
+  if (ts === undefined) return;
+
+  const text = buildAuthCompletedText({
+    displayName,
+    outcome: event.outcome as ConnectionAuthorizationOutcome,
+    reason: event.reason,
+  });
+
+  try {
+    await channel.slack.request("chat.update", {
+      channel: channel.slack.channelId,
+      ts,
+      text,
+    });
+  } catch (error) {
+    log.error("Slack auth status edit failed", {
+      name: event.name,
+      error,
+    });
+  }
+
+  const next = { ...pending };
+  delete next[event.name];
+  channel.state.pendingAuthMessageTs = next;
+}
+
+/**
+ * Default `interaction.opened` handler: a commit's requests render as one batch, and a sign-in
+ * as its public status and private challenge.
+ */
+export function defaultInteractionOpenedHandler(
+  approvalChannel?: SlackApprovalChannelResolver,
+): NonNullable<SlackChannelInternalEvents["interaction.opened"]> {
+  const showRequests = defaultInputRequestedHandler(approvalChannel);
+  return async (data, channel, ctx) => {
+    const batch = requestBatchOf(ctx.view, data);
+    if (batch !== undefined) {
+      await showRequests(batch, channel, ctx);
+      return;
+    }
+    const signIn = signInPromptOf(data, ctx.scope);
+    if (signIn !== undefined) await showSlackSignIn(signIn, channel);
+  };
+}
+
+/**
  * eve's default Slack event rendering: status lines, replies, errors, and the
  * connection-authorization flow. It is the innermost link of every channel's
  * renderer chain. Typed as the internal full-context map because the default
@@ -201,7 +337,21 @@ function firstNonEmptyLine(text: string): string | undefined {
  * authored renderers cannot express.
  */
 export const defaultEvents: SlackChannelInternalEvents = {
-  ...approvalEvents,
+  async "interaction.settled"(data, channel, ctx) {
+    const signIn = signInSettlementOf(ctx.view, data);
+    if (signIn !== undefined) {
+      await settleSlackSignIn(signIn, channel);
+      return;
+    }
+    const resolution = requestSettlementOf(ctx.view, data);
+    if (resolution !== undefined) await settleApproval(resolution, channel);
+  },
+
+  async "response.settled"(data, channel, ctx) {
+    const refused = refusedAnswerOf(ctx.view, data);
+    if (refused !== undefined) await notifyRefusedResponder(refused, channel);
+  },
+
   // A turn held on a person's approval, answer, or sign-in isn't working, and
   // the prompt asking them says so. Its status comes back when it resumes.
   async "turn.paused"(event, channel, _ctx) {
@@ -371,98 +521,5 @@ export const defaultEvents: SlackChannelInternalEvents = {
         ...(errorId ? ["", `_Error id: \`${errorId}\`_`] : []),
       ].join("\n"),
     );
-  },
-
-  async "authorization.required"(event, channel, _ctx) {
-    const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
-    const recipientUserId = slackUserIdForPrincipal(channel.state, event.principalId) ?? null;
-    const challengeUrl = event.authorization?.url;
-
-    // Post a public, link-free status so everyone in the thread can see
-    // the session is blocked and later see it complete. The challenge
-    // itself remains private.
-    const pending = channel.state.pendingAuthMessageTs ?? {};
-    if (event.candidateId === undefined && pending[event.name] === undefined) {
-      const publicText = buildAuthRequiredPublicText({ displayName, recipientUserId });
-      try {
-        const sent = await channel.thread.post(publicText);
-        if (sent.id) {
-          channel.state.pendingAuthMessageTs = {
-            ...pending,
-            [event.name]: sent.id,
-          };
-        }
-      } catch (error) {
-        log.error("Slack auth public message delivery failed", {
-          name: event.name,
-          error,
-        });
-      }
-    }
-
-    // The challenge is user-specific: the sign-in link (and device code)
-    // must only ever be visible to the person who started the sign-in, never posted into
-    // the shared thread.
-    const instructions = event.authorization?.instructions;
-    if (recipientUserId && (challengeUrl || instructions)) {
-      const { channelId, threadTs } = channel.state;
-      // The turn's own sign-in holds it, so the prompt can cancel that turn.
-      const cancel =
-        event.candidateId === undefined && channelId && threadTs && event.turnId
-          ? { channelId, threadTs, turnId: event.turnId }
-          : undefined;
-      const prompt = {
-        cancel,
-        displayName,
-        instructions,
-        url: challengeUrl,
-        userCode: event.authorization?.userCode,
-      };
-      try {
-        await channel.thread.postEphemeral(recipientUserId, {
-          blocks: buildAuthEphemeralBlocks(prompt),
-          text: buildAuthEphemeralText(prompt),
-        });
-      } catch (error) {
-        log.error("Slack auth ephemeral delivery failed", {
-          name: event.name,
-          error,
-        });
-      }
-    }
-  },
-
-  async "authorization.completed"(event, channel, _ctx) {
-    const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
-    if (event.outcome === "authorized" && event.candidateId === undefined) {
-      await showStatus(channel, `Connected to ${displayName}. Resuming...`, { force: true });
-    }
-
-    const pending = channel.state.pendingAuthMessageTs ?? {};
-    const ts = pending[event.name];
-    if (ts === undefined) return;
-
-    const text = buildAuthCompletedText({
-      displayName,
-      outcome: event.outcome as ConnectionAuthorizationOutcome,
-      reason: event.reason,
-    });
-
-    try {
-      await channel.slack.request("chat.update", {
-        channel: channel.slack.channelId,
-        ts,
-        text,
-      });
-    } catch (error) {
-      log.error("Slack auth status edit failed", {
-        name: event.name,
-        error,
-      });
-    }
-
-    const next = { ...pending };
-    delete next[event.name];
-    channel.state.pendingAuthMessageTs = next;
   },
 };

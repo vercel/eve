@@ -1,13 +1,17 @@
 import type {
   ActionResultError,
-  ApprovalCandidateOutcome,
   AuthorizationOutcome,
-  AuthorizationRequiredStreamEvent,
   InputResolutionOutcome,
 } from "#protocol/message.js";
 import type { SessionEvent } from "#protocol/session-event.js";
+import type {
+  InteractionOpenedData,
+  InteractionOutcome,
+  InteractionRequest,
+  SignInChallenge,
+} from "#protocol/session-events/families/interaction.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
-import type { InputRequest, InputResponse } from "#shared/input.js";
+import type { InputOption, InputRequest, InputResponse } from "#shared/input.js";
 import type { JsonValue } from "#shared/json.js";
 
 // The session's private lifecycle fold: turns, runs, calls, requests, tasks, and sign-ins, with
@@ -123,13 +127,6 @@ export interface SessionAuthorization {
   readonly awaitsCallback?: true;
 }
 
-/** One responder's decision on an approval, as `approval.candidate` reports it. */
-export interface SessionApprovalCandidate {
-  readonly candidateId: string;
-  readonly requestId: string;
-  readonly outcome: ApprovalCandidateOutcome;
-}
-
 export interface SessionProjection {
   /** `session.started` was published. */
   readonly started?: true;
@@ -154,8 +151,6 @@ export interface SessionProjection {
   readonly calls: Readonly<Record<string, SessionCall>>;
   /** By `attemptId`. */
   readonly authorizations: Readonly<Record<string, SessionAuthorization>>;
-  /** By `candidateId`. */
-  readonly candidates: Readonly<Record<string, SessionApprovalCandidate>>;
   /** Open model runs, by `runId`: what owns each, and a turn's run's step index. */
   readonly runs?: Readonly<Record<string, SessionRun>>;
   /** Runs and context changes minted so far, so their ids are deterministic. */
@@ -177,7 +172,6 @@ export function initialSessionProjection(): SessionProjection {
   return {
     authorizations: {},
     calls: {},
-    candidates: {},
     inputs: {},
     nextSequence: 0,
     tasks: {},
@@ -459,117 +453,86 @@ export function foldSession<S extends SessionProjection>(
       if (state.tasks[taskId] !== undefined) return state;
       return putTask(state, { taskId, name, kind: kind === "agent" ? "agent" : "tool", calls: {} });
     }
-    case "input.requested": {
-      const inputs = { ...state.inputs };
-      let calls: Record<string, SessionCall> | undefined;
-      for (const request of typed.data.requests) {
-        if (inputs[request.requestId] !== undefined) continue;
-        const input: Mutable<SessionInput> = {
-          request,
-          sequence: typed.data.sequence,
-          turnId: typed.data.turnId,
-          stepIndex: typed.data.stepIndex,
-          status: "open",
+    case "interaction.opened": {
+      const { audience, interactionId, origin, request, subject } = typed.data;
+      const turnId =
+        typed.scope?.turnId ??
+        ("turnId" in subject ? subject.turnId : undefined) ??
+        state.activeTurnId ??
+        turnCoordinates(state).turnId;
+      const turn = state.turns[turnId];
+      const at = {
+        sequence: turn?.sequence ?? turnSequence(turnId) ?? state.nextSequence,
+        stepIndex: turn?.stepIndex ?? 0,
+        turnId,
+      };
+      const taskId = typed.scope?.taskId ?? ("taskId" in subject ? subject.taskId : undefined);
+      if (request.kind === "sign-in") {
+        if (state.authorizations[interactionId] !== undefined) return state;
+        const authorization: Mutable<SessionAuthorization> = {
+          attemptId: interactionId,
+          name: request.signIn?.name ?? interactionId,
+          status: "required",
+          ...at,
         };
-        if (typed.data.taskId !== undefined) input.taskId = typed.data.taskId;
-        if (typed.data.callId !== undefined) input.callId = typed.data.callId;
-        inputs[request.requestId] = input;
-        // A relayed request's action is the child's call, not one this session made.
-        if (request.kind !== "tool-approval" || isRelayed(typed.data)) continue;
-        const { callId, toolName } = request.action;
-        calls ??= { ...state.calls };
-        const call = calls[callId];
-        if (call?.taskId !== undefined) continue;
-        if (call !== undefined && isSettledCallStatus(call.status)) continue;
-        calls[callId] = {
-          ...(call ?? {
-            callId,
-            name: toolName,
-            turnId: typed.data.turnId,
-            stepIndex: typed.data.stepIndex,
-          }),
-          requestId: request.requestId,
-          status: "awaiting-input",
+        if (taskId !== undefined) authorization.taskId = taskId;
+        const principalId = audience?.principalIds[0];
+        if (principalId !== undefined) authorization.principalId = principalId;
+        if ("responseId" in subject) authorization.candidateId = subject.responseId;
+        if (request.signIn?.callbackUrl !== undefined) authorization.awaitsCallback = true;
+        return {
+          ...state,
+          authorizations: { ...state.authorizations, [interactionId]: authorization },
         };
       }
-      return calls === undefined ? { ...state, inputs } : { ...state, calls, inputs };
-    }
-    case "approval.candidate": {
-      const { candidateId, outcome, requestId } = typed.data;
-      state = {
-        ...state,
-        candidates: { ...state.candidates, [candidateId]: { candidateId, outcome, requestId } },
+      if (state.inputs[interactionId] !== undefined) return state;
+      const kind = inputKindOf(request);
+      if (kind === undefined) return state;
+      // A question, or a request from another session, answers elsewhere: it serves a call or a
+      // task. An approval without an origin is this session's own, about its own call.
+      const relayed = origin !== undefined || kind === "question";
+      const callId = "callId" in subject ? subject.callId : interactionId;
+      const input: Mutable<SessionInput> = {
+        request: inputRequestOf(interactionId, request, kind, {
+          callId,
+          toolName: state.calls[callId]?.name ?? kind,
+        }),
+        status: "open",
+        ...at,
       };
-      const current = state.inputs[typed.data.requestId];
-      if (current === undefined || current.status === "settled") return state;
-      if (typed.data.outcome === "pending" || current.status === "open") return state;
-      const { response: _response, ...rest } = current;
-      return {
-        ...state,
-        inputs: { ...state.inputs, [typed.data.requestId]: { ...rest, status: "open" } },
-      };
-    }
-    case "approval.settled": {
-      const current = state.inputs[typed.data.requestId];
-      if (current === undefined || current.status === "settled") return state;
-      // A responder's `cancelled` declines the call: the approval is denied, not withdrawn.
-      const outcome = typed.data.outcome === "approved" ? "approved" : "denied";
-      const next = {
-        ...state,
-        inputs: {
-          ...state.inputs,
-          [typed.data.requestId]: { ...current, status: "settled", outcome },
-        },
-      } as S;
-      return settleApprovalCall(next, current, outcome);
-    }
-    case "input.resolved": {
-      let next: S = state;
-      for (const resolution of typed.data.resolutions) {
-        const current = next.inputs[resolution.requestId];
-        if (current === undefined || current.status === "settled") continue;
-        const response = resolution.response ?? current.response;
-        const settled: Mutable<SessionInput> = {
-          ...current,
-          status: "settled",
-          outcome: resolution.outcome,
-        };
-        if (response !== undefined) settled.response = response;
-        next = { ...next, inputs: { ...next.inputs, [resolution.requestId]: settled } };
-        next = settleApprovalCall(next, current, resolution.outcome);
+      if (taskId !== undefined) input.taskId = taskId;
+      if (relayed && "callId" in subject) input.callId = subject.callId;
+      let next: S = { ...state, inputs: { ...state.inputs, [interactionId]: input } };
+      if (kind === "tool-approval" && !relayed) {
+        next = updateCall(next, callId, (call) =>
+          call.taskId !== undefined || isSettledCallStatus(call.status)
+            ? call
+            : { ...call, requestId: interactionId, status: "awaiting-input" },
+        );
       }
       return next;
     }
-    case "authorization.required": {
-      const attemptId = signInAttemptId(typed.data);
-      const authorization: Mutable<SessionAuthorization> = {
-        attemptId,
-        name: typed.data.name,
-        sequence: typed.data.sequence,
-        turnId: typed.data.turnId,
-        stepIndex: typed.data.stepIndex,
-        status: "required",
-      };
-      if (typed.data.taskId !== undefined) authorization.taskId = typed.data.taskId;
-      if (typed.data.principalId !== undefined) authorization.principalId = typed.data.principalId;
-      if (typed.data.candidateId !== undefined) authorization.candidateId = typed.data.candidateId;
-      if (typed.data.webhookUrl !== undefined) authorization.awaitsCallback = true;
-      return { ...state, authorizations: { ...state.authorizations, [attemptId]: authorization } };
-    }
-    case "authorization.completed": {
-      const attemptId = signInAttemptId(typed.data);
-      const current = state.authorizations[attemptId];
-      const completed: SessionAuthorization = {
-        ...(current ?? {
-          attemptId,
-          name: typed.data.name,
-          sequence: typed.data.sequence,
-          turnId: typed.data.turnId,
-          stepIndex: typed.data.stepIndex,
-        }),
-        status: typed.data.outcome,
-      };
-      return { ...state, authorizations: { ...state.authorizations, [attemptId]: completed } };
+    case "interaction.settled": {
+      const { interactionId, outcome, reason, response } = typed.data;
+      const attempt = state.authorizations[interactionId];
+      if (attempt !== undefined) {
+        if (attempt.status !== "required") return state;
+        return {
+          ...state,
+          authorizations: {
+            ...state.authorizations,
+            [interactionId]: { ...attempt, status: signInOutcomeOf(outcome) },
+          },
+        };
+      }
+      const current = state.inputs[interactionId];
+      if (current === undefined || current.status === "settled") return state;
+      const resolved = inputOutcomeOf(current.request.kind, outcome, reason);
+      const settled: Mutable<SessionInput> = { ...current, outcome: resolved, status: "settled" };
+      const answer = answerOf(interactionId, response);
+      if (answer !== undefined) settled.response = answer;
+      const next = { ...state, inputs: { ...state.inputs, [interactionId]: settled } };
+      return settleApprovalCall(next, current, resolved);
     }
     default:
       return state;
@@ -610,13 +573,94 @@ export function openRunOf(state: SessionProjection, turnId: string): string | un
   return found;
 }
 
-/** A sign-in's attempt, or its connection name from a writer that sent no attempt. */
-function signInAttemptId(data: { readonly attemptId?: string; readonly name: string }): string {
-  return data.attemptId ?? data.name;
-}
-
 function isRelayed(request: { readonly callId?: string; readonly taskId?: string }): boolean {
   return request.callId !== undefined || request.taskId !== undefined;
+}
+
+/** The private request kind of a public one; a kind this fold doesn't run has none. */
+function inputKindOf(request: InteractionRequest): InputRequest["kind"] | undefined {
+  if (request.kind === "approval") return "tool-approval";
+  if (request.kind === "budget") return "session-limit";
+  if (request.kind === "question") return "question";
+  return undefined;
+}
+
+const OPTION_STYLES: ReadonlySet<string> = new Set(["primary", "danger", "default"]);
+
+/**
+ * A request as execution reads it. The public request carries no call action: the subject's call
+ * names it, and its input stays on the call row.
+ */
+function inputRequestOf(
+  requestId: string,
+  request: InteractionRequest,
+  kind: InputRequest["kind"],
+  action: { readonly callId: string; readonly toolName: string },
+): InputRequest {
+  const rebuilt: Mutable<InputRequest> = {
+    action: { callId: action.callId, input: {}, kind: "tool-call", toolName: action.toolName },
+    kind,
+    prompt: request.prompt,
+    requestId,
+  };
+  if (request.allowFreeform !== undefined) rebuilt.allowFreeform = request.allowFreeform;
+  if (
+    request.display === "confirmation" ||
+    request.display === "select" ||
+    request.display === "text"
+  )
+    rebuilt.display = request.display;
+  if (request.options !== undefined) {
+    rebuilt.options = request.options.map((option) => {
+      const entry: Mutable<InputOption> = { id: option.id, label: option.label };
+      if (option.description !== undefined) entry.description = option.description;
+      if (option.style !== undefined && OPTION_STYLES.has(option.style))
+        entry.style = option.style as InputOption["style"];
+      return entry;
+    });
+  }
+  return rebuilt;
+}
+
+/** The v26-shaped outcome execution and the client still read for a settled request. */
+function inputOutcomeOf(
+  kind: InputRequest["kind"],
+  outcome: InteractionOutcome,
+  reason: string | undefined,
+): InputResolutionOutcome {
+  switch (outcome) {
+    case "accepted":
+      return kind === "tool-approval" ? "approved" : "answered";
+    case "declined":
+      return kind === "tool-approval" ? "denied" : "answered";
+    case "invalid":
+      return "invalid";
+    case "withdrawn":
+      return reason === SUPERSEDED_BY_MESSAGE ? "ignored" : "cancelled";
+    default:
+      return "cancelled";
+  }
+}
+
+/** Why a request nobody answered closed when a message steered its turn instead. */
+export const SUPERSEDED_BY_MESSAGE = "superseded-by-message";
+
+function signInOutcomeOf(outcome: InteractionOutcome): AuthorizationOutcome {
+  if (outcome === "accepted") return "authorized";
+  if (outcome === "expired") return "timed-out";
+  if (outcome === "failed" || outcome === "abandoned") return "failed";
+  return "declined";
+}
+
+function answerOf(
+  requestId: string,
+  response: { readonly [key: string]: unknown } | undefined,
+): InputResponse | undefined {
+  if (response === undefined) return undefined;
+  const answer: { requestId: string; optionId?: string; text?: string } = { requestId };
+  if (typeof response.optionId === "string") answer.optionId = response.optionId;
+  if (typeof response.text === "string") answer.text = response.text;
+  return answer.optionId === undefined && answer.text === undefined ? undefined : answer;
 }
 
 function settleApprovalCall<S extends SessionProjection>(
@@ -660,6 +704,19 @@ export function openSignIns(state: SessionProjection): readonly SessionAuthoriza
   return Object.values(state.authorizations).filter((attempt) => attempt.status === "required");
 }
 
+/** A sign-in still open, as a reader shows it: what to do, and where. */
+export interface OpenSignIn {
+  readonly attemptId: string;
+  readonly name: string;
+  readonly prompt: string;
+  /** Who the sign-in is for: the principal that started it. */
+  readonly principalId?: string;
+  /** The approval response whose responder signs in. */
+  readonly responseId?: string;
+  readonly signIn?: SignInChallenge;
+  readonly taskId?: string;
+}
+
 /**
  * Folds a read of a session's events. `observe` sees each event with the projection as it stood
  * before the event, for what a reader shows that the projection doesn't keep.
@@ -669,21 +726,36 @@ export async function foldSessionEvents<E extends SessionEvent>(
   observe?: (event: E, before: SessionProjection) => void,
 ): Promise<{
   readonly projection: SessionProjection;
-  /** The prompt of each sign-in still open, in the order they were required. */
-  readonly signIns: readonly AuthorizationRequiredStreamEvent["data"][];
+  /** Each sign-in still open, in the order they opened. */
+  readonly signIns: readonly OpenSignIn[];
 }> {
   let projection = initialSessionProjection();
-  const prompts = new Map<string, AuthorizationRequiredStreamEvent["data"]>();
+  const prompts = new Map<string, OpenSignIn>();
   for await (const event of events) {
     observe?.(event, projection);
     projection = foldSession(projection, event);
-    if (event.type === "authorization.required")
-      prompts.set(signInAttemptId(event.data), event.data);
+    if (event.type === "interaction.opened" && event.data.request.kind === "sign-in")
+      prompts.set(event.data.interactionId, openSignInOf(event.data, event.scope?.taskId));
   }
   const signIns = openSignIns(projection).flatMap(
     (attempt) => prompts.get(attempt.attemptId) ?? [],
   );
   return { projection, signIns };
+}
+
+function openSignInOf(data: InteractionOpenedData, taskId: string | undefined): OpenSignIn {
+  const entry: Mutable<OpenSignIn> = {
+    attemptId: data.interactionId,
+    name: data.request.signIn?.name ?? data.interactionId,
+    prompt: data.request.prompt,
+  };
+  const principalId = data.audience?.principalIds[0];
+  if (principalId !== undefined) entry.principalId = principalId;
+  if ("responseId" in data.subject) entry.responseId = data.subject.responseId;
+  if (data.request.signIn !== undefined) entry.signIn = data.request.signIn;
+  const owner = taskId ?? ("taskId" in data.subject ? data.subject.taskId : undefined);
+  if (owner !== undefined) entry.taskId = owner;
+  return entry;
 }
 
 /** Task calls whose run hasn't settled them. */
@@ -772,8 +844,5 @@ export function pruneSessionProjection(
   const turns = Object.fromEntries(
     Object.entries(state.turns).filter(([turnId]) => referencedTurns.has(turnId)),
   );
-  const candidates = Object.fromEntries(
-    Object.entries(state.candidates).filter(([, candidate]) => candidate.requestId in inputs),
-  );
-  return { ...state, authorizations, calls, candidates, inputs, tasks, turns };
+  return { ...state, authorizations, calls, inputs, tasks, turns };
 }
