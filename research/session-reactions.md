@@ -117,6 +117,23 @@ That's the whole primitive, and `defineHook` is its public form ([Hooks are the 
 - **Returning nothing keeps the slot,** and `null` clears it. Internally, that's `KEEP`.
 - **IDs come from file paths,** like every other eve name.
 
+### Why `select` is separate
+
+A single `(view) => output` function would need an `if` that asks "has this changed since last time?", and answering that means remembering the previous answer. `select` is that `if`, moved to where eve can run it on its own and remember the result. It's the boundary between what eve can run freely (cheap, pure, often) and what it should run sparingly (I/O, effects, code):
+
+- **Effects fire on a change,** not on every commit that matches.
+- **I/O runs when its inputs change,** not at every use.
+- **Restores rebuild old decisions** from the recorded selection. Without one, eve would need the old view, which means a full log.
+- **Development checks can run `select` twice,** because it's pure.
+
+<details>
+<summary>Ways to keep one function, and why not</summary>
+
+- **Tracked reads,** in the style of MobX or Salsa: eve records what the function read and re-runs when any of it changes. It sees raw reads, not derived values, so "has an image" re-runs at every message because it reads `messages.length`. Fixing that takes memoized intermediate derivations, which is `select` again with more machinery. It also hides dependencies, and the recorded reads can be large and include auth data.
+- **An inline memo,** like React's `useMemo` or pi-durable's `memo(name, candidate)`: `(view, ctx) => ctx.memo(key, () => fetchTools())`. It reads as one function, but it's the same split, with the outer part required to be pure and synchronous and every memo call needing a stable identity for restores. Those are React's rules of hooks.
+
+</details>
+
 ### When `resolve` is called
 
 Authors never choose the moment. eve does, from when each kind of entry is read ([Entries](#entries)):
