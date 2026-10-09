@@ -99,7 +99,8 @@ eve-pkg deployment succeeds.
 pnpm dlx https://pkg.eve.dev/pr/<pull-request-id>/eve.tgz dev
 ```
 
-Use the full commit SHA for an immutable package: `https://pkg.eve.dev/<full-sha>/eve.tgz`.
+`pnpm dlx` may reuse a cached package for the same PR URL. To test a newer
+commit, use its full-SHA URL: `https://pkg.eve.dev/<full-sha>/eve.tgz`.
 
 ## Linting and formatting
 
