@@ -253,15 +253,8 @@ describe("generation steering with the real AI SDK", () => {
     expect(providerSignal?.aborted).toBe(true);
     expect(interrupted.steered).toBe(true);
     expect(positionOf(interrupted.session).turnId).toBe("turn_0");
-    // The provider ignores abort and finishes its obsolete request anyway.
-    firstStream!.enqueue({
-      type: "tool-call",
-      toolCallId: "search",
-      toolName: "web_search",
-      input: "{}",
-      providerExecuted: true,
-    });
-    finish(firstStream!, "Stale 2026 answer");
+    // The AI SDK cancels the obsolete provider stream, so its late output has nowhere to go.
+    expect(() => finish(firstStream!, "Stale 2026 answer")).toThrow(/closed/);
     const result = await createStep()(interrupted.session, { message: "Actually 2025" });
     expect(result.steered).toBeUndefined();
     expect(events.filter((event) => event.type === "turn.started")).toHaveLength(1);

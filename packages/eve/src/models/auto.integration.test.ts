@@ -141,7 +141,12 @@ describe("auto", () => {
     });
     expect(decider.doDecide).toHaveBeenCalledWith(
       expect.objectContaining({
-        state: { messages: [{ role: "user", text: "Alice requests a routine summary." }] },
+        state: [
+          {
+            type: "json",
+            value: { messages: [{ role: "user", text: "Alice requests a routine summary." }] },
+          },
+        ],
         questions: {
           route: expect.objectContaining({
             criteria: {
