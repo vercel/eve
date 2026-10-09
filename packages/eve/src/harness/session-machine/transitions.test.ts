@@ -2,7 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import { requireSignIn } from "#harness/hitl/approvals.js";
 import { sessionView } from "#harness/session-machine/commit.js";
-import { hold, sessionEndedFacts } from "#harness/session-machine/transitions.js";
+import {
+  cancel,
+  discardAttempt,
+  fail,
+  hold,
+  sessionEndedFacts,
+} from "#harness/session-machine/transitions.js";
+import { createStreamChecker } from "#protocol/session-events/checker.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import { initialSessionProjection } from "#protocol/session-projection.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import type { HarnessSession } from "#harness/types.js";
@@ -133,5 +141,118 @@ describe("sessionEndedFacts", () => {
     const projection = storedProjection(runningCall().state);
     const facts = sessionEndedFacts(projection, { outcome: "completed" });
     expect(facts.filter((event) => event.type === "session.started")).toEqual([]);
+  });
+});
+
+/** A turn whose run called a tool and started an agent task, then asked a person to approve. */
+function busyTurn(): HarnessSession {
+  return withPublished(withOpenTurn(BASE, { sequence: 0, stepIndex: 0, turnId }), [
+    {
+      data: { callId: "tool", capability: { kind: "tool", name: "lookup" }, owner: { runId } },
+      scope: { runId, turnId },
+      type: "call.requested",
+    },
+    { data: { callId: "tool" }, scope: { turnId }, type: "call.started" },
+    {
+      data: { callId: "agent", capability: { kind: "agent", name: "helper" }, owner: { runId } },
+      scope: { runId, turnId },
+      type: "call.requested",
+    },
+    {
+      data: { kind: "agent", name: "helper", startedBy: { callId: "agent" }, taskId: "task-1" },
+      scope: { turnId },
+      type: "task.started",
+    },
+    { data: { callId: "agent", taskId: "task-1" }, scope: { turnId }, type: "call.started" },
+    {
+      data: {
+        interactionId: "approval-1",
+        request: { kind: "approval", prompt: "Approve?" },
+        subject: { callId: "tool" },
+      },
+      scope: { turnId },
+      type: "interaction.opened",
+    },
+  ]);
+}
+
+/** What `events` settles, by type and id. */
+function settledBy(events: readonly SessionEvent[]): Record<string, string> {
+  const settled: Record<string, string> = {};
+  for (const event of events) {
+    if (!("outcome" in event.data)) continue;
+    const id = Object.entries(event.data).find(([key]) => key.endsWith("Id"))?.[1];
+    settled[`${event.type}:${String(id ?? "")}`] = String(event.data.outcome);
+  }
+  return settled;
+}
+
+describe("closing what a turn leaves open", () => {
+  it("fails the turn with its run and calls, keeping the task that outlives it", () => {
+    const { events } = fail(viewOf(busyTurn()), { code: "BOOM", message: "It broke." });
+
+    expect(settledBy(events)).toMatchObject({
+      "call.settled:tool": "interrupted",
+      "interaction.settled:approval-1": "interrupted",
+      "model.settled:test_turn_0_0": "failed",
+      "turn.settled:turn_0": "failed",
+    });
+    expect(events.some((event) => event.type === "task.ended")).toBe(false);
+    expect(events.find((event) => event.type === "turn.settled")).toMatchObject({
+      data: { error: { code: "BOOM", message: "It broke." } },
+    });
+  });
+
+  it("cancels the turn, interrupting what it asked and stopping its work", () => {
+    const { events } = cancel(viewOf(busyTurn()), { cause: { deliveryId: "cancel-1" } });
+
+    expect(settledBy(events)).toMatchObject({
+      "call.settled:tool": "interrupted",
+      "interaction.settled:approval-1": "interrupted",
+      "turn.settled:turn_0": "cancelled",
+    });
+    expect(events.find((event) => event.type === "turn.settled")).toMatchObject({
+      data: { cause: { deliveryId: "cancel-1" } },
+    });
+  });
+
+  it("abandons a retried attempt's run and calls, and interrupts a steered one's", () => {
+    const retried = discardAttempt(viewOf(busyTurn()), { ending: "retried", runId });
+    expect(settledBy(retried.events)).toMatchObject({
+      "call.settled:tool": "abandoned",
+      "model.settled:test_turn_0_0": "abandoned",
+    });
+
+    const steered = discardAttempt(viewOf(busyTurn()), { ending: "steered", runId });
+    expect(settledBy(steered.events)).toMatchObject({
+      "call.settled:tool": "interrupted",
+      "model.settled:test_turn_0_0": "completed",
+    });
+  });
+
+  it("ends the session with everything it left open, the task too", () => {
+    const facts = sessionEndedFacts(storedProjection(busyTurn().state), { outcome: "failed" });
+
+    expect(settledBy(facts)).toMatchObject({
+      "session.ended:": "failed",
+      "task.ended:task-1": "cancelled",
+      "turn.settled:turn_0": "failed",
+    });
+    expect(facts.at(-1)?.type).toBe("session.ended");
+  });
+
+  it("commits each closure as one line the contract accepts", () => {
+    const session = busyTurn();
+    const seed = storedProjection(session.state).view;
+    for (const events of [
+      fail(viewOf(session), { code: "BOOM", message: "It broke." }).events,
+      cancel(viewOf(session)).events,
+      sessionEndedFacts(storedProjection(session.state), { outcome: "completed" }),
+    ]) {
+      const checker = createStreamChecker({ seed });
+      expect(
+        checker.check({ at: "2026-10-09T00:00:00.000Z", facts: events }, seed!.position),
+      ).toEqual([]);
+    }
   });
 });
