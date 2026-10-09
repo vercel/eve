@@ -36,7 +36,7 @@ import type { InputRequest } from "#shared/input.js";
 const log = createLogger("slack.defaults");
 
 /**
- * Default `input.requested` handler — renders each pending HITL
+ * Default `interaction.opened` handler — renders each pending HITL
  * request as Slack `block_actions`. Buttons by default; radio for
  * ≤6-option select requests; static_select for >6-option select
  * requests. Batches split into multiple posts when they would exceed

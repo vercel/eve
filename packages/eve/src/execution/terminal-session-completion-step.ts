@@ -4,7 +4,7 @@ import { publishTerminalSessionEvent } from "#execution/publish-session-events.j
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { SessionProjection } from "#protocol/session-projection.js";
 
-/** Emits a terminal `session.completed` outside a turn. */
+/** Emits a terminal `session.ended` outside a turn. */
 export async function emitTerminalSessionCompletionStep(input: {
   readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;

@@ -328,9 +328,9 @@ export interface RuntimeActionResultHookPayload {
 }
 
 /**
- * Event coordinates attached to a proxied `input.requested` batch.
+ * Event coordinates attached to a proxied `interaction.opened` batch.
  *
- * Mirrors the `data` payload of the child's `input.requested` stream event so
+ * Mirrors the `data` payload of the child's `interaction.opened` stream event so
  * the parent re-emits the same semantics without inventing new identifiers.
  */
 export interface SubagentInputRequestEvent {
@@ -348,7 +348,7 @@ export interface SubagentInputRequestEvent {
  *
  * Runtime-internal. Channel adapters and authored code never observe this
  * kind: it exists only on the durable hook between the subagent adapter's
- * `input.requested` handler and the parent's runtime loop.
+ * `interaction.opened` handler and the parent's runtime loop.
  */
 export interface SubagentInputRequestHookPayload {
   readonly remote?: import("#eve-channel/support.js").RemoteAgentBinding & {
@@ -606,7 +606,7 @@ export interface DeliverInput {
 /**
  * Terminal outcome of a runtime run.
  *
- * The durable event stream's `session.completed` / `session.failed`
+ * The durable event stream's `session.ended`
  * events report terminal state on the workflow runtime.
  */
 export type RunResult =

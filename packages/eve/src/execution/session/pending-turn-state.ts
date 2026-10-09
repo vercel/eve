@@ -8,7 +8,7 @@ import { type SessionProjection, waitsOnSignIn } from "#protocol/session-project
 
 /**
  * What a paused turn waits on, which is one kind of thing at a time. The turn keeps it to resume;
- * the stream reports the pause as `turn.waiting`.
+ * the stream reports the pause as `turn.paused`.
  */
 export type TurnPause =
   /** Sign-ins whose callbacks resume the turn, and questions and approvals a person answers. */

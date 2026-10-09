@@ -161,7 +161,7 @@ type SlackEventHandler<T extends SessionEvent["type"]> = (
 ) => void | Promise<void>;
 
 /**
- * Delivery surface handed to a renderer's `authorization.required` handler. The
+ * Delivery surface handed to a renderer's sign-in `interaction.opened` handler. The
  * connection challenge is a credential: anyone who completes the sign-in
  * binds their identity to this session's connection. So the only
  * delivery capabilities here are private ones, an ephemeral reply in the
@@ -224,8 +224,7 @@ export interface SlackChannelState {
    */
   triggeringUserId?: string | null;
   /**
-   * Buffered text from a `message.completed` event whose `finishReason`
-   * was `"tool-calls"`. The default `actions.requested` handler uses the
+   * Buffered narration from a `content.completed` event (`phase: "narration"`). The default `call.requested` handler uses the
    * first non-empty line as the next typing indicator, surfacing the
    * model's pre-tool narration instead of the action label. Cleared at
    * `turn.started` and after use.
@@ -239,15 +238,15 @@ export interface SlackChannelState {
   /**
    * Connection name to Slack message ts. Each entry is the public
    * link-free status post created by the default
-   * `authorization.required` handler; the matching
-   * `authorization.completed` handler edits it in place to surface the
+   * sign-in `interaction.opened` handler; the matching
+   * sign-in `interaction.settled` handler edits it in place to surface the
    * resolution outcome.
    */
   pendingAuthMessageTs?: Record<string, string>;
   pendingApprovalCards?: Record<string, SlackPendingApprovalCard>;
   /**
    * Each recent turn's tool calls and the task card eve last wrote for it, by
-   * turn id. The default `turn.waiting` handler names the working tasks.
+   * turn id. The default `turn.paused` handler names the working tasks.
    */
   taskCards?: Record<string, SlackTaskCardState> | null;
   /**
@@ -262,7 +261,7 @@ export interface SlackChannelState {
   /**
    * Principal id to Slack user id, recorded as each message or input response
    * is delivered. Default handlers use it to address the principal named on
-   * `authorization.required` and approval events.
+   * sign-in `interaction.opened` and approval events.
    */
   slackUsersByPrincipal?: Record<string, string>;
   /**
@@ -594,7 +593,7 @@ export type SlackInboundResultOrPromise = SlackMentionResultOrPromise;
 
 /**
  * eve's full-context Slack event handlers: the innermost link of every
- * channel's renderer chain. The default `authorization.required` handler keeps
+ * channel's renderer chain. The default sign-in `interaction.opened` handler keeps
  * the full {@link SlackEventContext} because it owns the public link-free
  * status, which authored renderers, limited to private delivery, can't post.
  */

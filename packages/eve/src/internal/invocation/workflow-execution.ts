@@ -175,7 +175,7 @@ export class WorkflowAgentInvocationExecution {
   }
 }
 
-/** The requests one `input.requested` introduced, by the batch-scoped id clients answer. */
+/** The requests one `interaction.opened` introduced, by the batch-scoped id clients answer. */
 type InputBatch = ReadonlyMap<string, InputRequest>;
 
 interface InvocationFailure {

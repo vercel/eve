@@ -392,12 +392,7 @@ export class ModelCaller {
     const agent = new ToolLoopAgent(settings);
 
     try {
-      const result = await this.stream(
-        agent,
-        callMessages,
-        hooks.stepResult,
-        attempt?.telemetry,
-      );
+      const result = await this.stream(agent, callMessages, hooks.stepResult, attempt?.telemetry);
       await attempt?.complete();
       return result;
     } catch (error) {

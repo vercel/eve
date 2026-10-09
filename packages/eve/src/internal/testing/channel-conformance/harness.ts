@@ -935,7 +935,7 @@ async function converse(
     };
 
     /**
-     * The turn emits `turn.waiting` inside the step that raised the request, but
+     * The turn emits `turn.paused` inside the step that raised the request, but
      * an address the channel aliased in that step (such as Discord's message id)
      * is only claimed once the step commits. Answering through it before then
      * finds no session.
@@ -1143,8 +1143,8 @@ const isSignIn = (event: SessionStreamEvent) =>
 /**
  * Whether the session held for the person after it last emitted an event
  * `asked` matches. A question, approval, or sign-in parks the open turn
- * (`turn.waiting`) after each request, or once after requests raised
- * together; a session-limit prompt ends the turn (`session.waiting`).
+ * (`turn.paused`) after each request, or once after requests raised
+ * together; a session-limit prompt pauses it the same way.
  */
 async function holdsFor(
   session: Session,

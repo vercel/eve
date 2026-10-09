@@ -252,7 +252,7 @@ async function cancelTasks(
   );
 }
 
-/** The `task.settled` events for a task's settled calls; calls only settle on a known task. */
+/** The `call.settled` events for a task's settled calls; calls only settle on a known task. */
 function taskSettledEvents(
   session: DurableSession,
   record: TaskRecord | undefined,

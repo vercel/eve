@@ -21,7 +21,7 @@ export const EVE_MESSAGE_STREAM_VERSION = "27";
 export type ActionResultStatus = "completed" | "failed" | "rejected";
 
 /**
- * Stable failure payload projected onto `action.result`.
+ * Stable failure payload projected onto `call.settled`.
  *
  * This keeps UI consumers from having to parse provider- or tool-specific
  * output strings just to determine whether a tool call failed.

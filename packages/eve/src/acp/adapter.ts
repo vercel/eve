@@ -391,7 +391,7 @@ export class EveAcpAdapter {
       }
     }
     // A result reports its content even when its call had already settled, such as the reason
-    // for a denial that `input.resolved` decided first.
+    // for a denial that `interaction.settled` decided first.
     const resultCallId = event.type === "call.settled" ? event.data.callId : undefined;
     if (resultCallId === undefined || updated.has(resultCallId)) return;
     if (!session.tools.has(resultCallId)) return;

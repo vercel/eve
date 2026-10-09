@@ -55,7 +55,7 @@ export type AgentSessionAddress =
       readonly forwardPrincipal?: boolean;
       readonly name: string;
       readonly nodeId: string;
-      /** Keys the authored credential functions, as on `agent.started`. */
+      /** Keys the authored credential functions, as on `child.opened`. */
       readonly resolverId?: string;
       readonly sessionId: string;
       readonly url: string;

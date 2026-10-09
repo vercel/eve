@@ -55,7 +55,7 @@ export interface SessionInput {
   readonly pendingResponseIds?: readonly string[];
 }
 
-/** One call that started or reached a task, settled by its `task.settled`. */
+/** One call that started or reached a task, settled by its `call.settled`. */
 export interface ConversationTaskCall {
   readonly callId: string;
   readonly turnId: string;
@@ -80,7 +80,7 @@ export interface ConversationTask {
 }
 
 /**
- * Where a call stands, as the stream reports it. A task call runs until its `task.settled`,
+ * Where a call stands, as the stream reports it. A task call runs until its `call.settled`,
  * not until the receipt the model reads.
  */
 export type SessionCallStatus =
@@ -137,7 +137,7 @@ export interface SessionAuthorization {
 export interface SessionProjection {
   /** `session.started` was published. */
   readonly started?: true;
-  /** The session ended with `session.completed` or `session.failed`. */
+  /** The session ended (`session.ended`). */
   readonly ended?: true;
   readonly activeTurnId?: string;
   /** The most recent turn, open or closed. Pruning keeps it, so the session's end can name it. */

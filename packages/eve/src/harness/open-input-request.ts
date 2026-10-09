@@ -7,7 +7,7 @@ import {
 /**
  * The request a typed reply answers: the first open request nobody has answered yet. A budget
  * prompt comes first, since the session settles it before anything else; the rest follow the
- * order of the session's `input.requested` events. Channels that can only show text show this
+ * order of the session's `interaction.opened` events. Channels that can only show text show this
  * request alone, so a reply answers the request the person sees.
  */
 export function firstOpenInput(

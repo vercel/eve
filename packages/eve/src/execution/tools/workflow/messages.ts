@@ -105,7 +105,7 @@ export interface WorkflowToolRunWithdrawMessage {
   readonly replyTo: string;
 }
 
-/** The run opened a session with `ctx.agent`, which its session announces as `agent.started`. */
+/** The run opened a session with `ctx.agent`, which its session announces as `child.opened`. */
 export interface WorkflowToolRunAgentStartedMessage {
   readonly from: WorkflowToolRunRef;
   readonly session: AgentSessionAddress;

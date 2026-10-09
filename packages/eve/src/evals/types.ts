@@ -101,7 +101,7 @@ export interface EveEvalDerivedFacts {
   readonly skillLoads: readonly EveEvalSkillLoad[];
   readonly subagentCalls: readonly EveEvalSubagentCall[];
   readonly subagentCallCount: number;
-  /** Every HITL input request raised during the run (`input.requested`). */
+  /** Every HITL input request raised during the run (`interaction.opened`). */
   readonly inputRequests: readonly InputRequest[];
   /** True when the run ended parked on unanswered HITL input requests. */
   readonly parked: boolean;
@@ -355,7 +355,7 @@ interface EveEvalSessionDriver {
   cancel(): Promise<CancelSessionResult>;
   /**
    * Compact this session's history between turns and wait for it to finish.
-   * Returns the compaction events through `session.waiting`; throws when the
+   * Returns the compaction's events through its `context.settled`; throws when the
    * session is no longer active.
    */
   compact(): Promise<EveEvalTurn>;
@@ -378,7 +378,7 @@ interface EveEvalSessionDriver {
   sendFile(text: string, filePath: string, mediaType?: string): Promise<EveEvalTurn>;
   /**
    * The session an agent run opened, as this session's stream announced it with
-   * `agent.started`. Its `stream()` follows the child through this parent session
+   * `child.opened`. Its `stream()` follows the child through this parent session
    * with the eval client's credentials, and stops with the eval unless given a `signal`.
    */
   agent(opened: ChildOpened): EveEvalAgentSession;
@@ -553,7 +553,7 @@ export interface EveEvalTargetHandle extends EveEvalTarget {
   /**
    * Attach to a pre-existing session and consume one turn boundary.
    *
-   * When that boundary is `session.waiting`, the attached session recovers
+   * When that boundary leaves the session open, the attached session recovers
    * the exact session ID, so `session.send(...)` and `session.respond(...)`
    * continue the same durable session.
    */

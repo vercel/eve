@@ -12,7 +12,7 @@
  * When no user can be targeted (no Slack user for the principal, no link or
  * instructions to show, or the ephemeral delivery fails), the public status still leaves
  * the shared thread with safe progress feedback. The matching
- * `authorization.completed` handler edits that status post in place to
+ * sign-in `interaction.settled` handler edits that status post in place to
  * surface the outcome (`authorized` / `declined` / `failed` /
  * `timed-out`).
  */
@@ -50,7 +50,7 @@ export function buildAuthRequiredPublicText(input: {
 
 /**
  * Final-state markdown for the public status message. Edited in place by
- * `authorization.completed` so the thread sees resolution without
+ * sign-in `interaction.settled` so the thread sees resolution without
  * scrolling.
  */
 export function buildAuthCompletedText(input: {

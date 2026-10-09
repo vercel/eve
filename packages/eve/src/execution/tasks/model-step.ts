@@ -137,7 +137,7 @@ export function workingTaskIds(session: HarnessSession): readonly string[] {
  * `task.result` message with every settled result, then the
  * `[Tasks]` note when the listing changed. The results are marked delivered
  * in the same step. The message lives only in the model's history: clients
- * read outcomes from `task.settled`.
+ * read outcomes from `call.settled`.
  */
 export async function appendTaskContext(input: {
   readonly messages: readonly HarnessModelMessage[];

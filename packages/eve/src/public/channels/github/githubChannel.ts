@@ -124,9 +124,8 @@ type GitHubEventHandler<T extends SessionEvent["type"]> = (
 /**
  * Event handlers for `githubChannel({ events })`. The channel installs built-in
  * handlers for `turn.started` (eyes reaction plus repo checkout),
- * `message.completed` (posts the reply), `input.requested`, `input.resolved`, and
- * `approval.settled` (post each prompt in turn),
- * and `session.failed`/`turn.failed` (posts an error comment). A handler supplied
+ * `content.completed` (posts the reply), `interaction.opened` and `interaction.settled`
+ * (post each prompt in turn), and `session.ended`/`turn.settled` (posts an error comment). A handler supplied
  * here replaces the built-in for that key rather than running alongside it.
  */
 export interface GitHubChannelEvents {
