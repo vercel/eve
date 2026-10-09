@@ -26,7 +26,7 @@ import {
   withdrawSignIns,
 } from "./approvals.js";
 import { rejectApprovedCall, runApprovedCalls, type ApprovedCallResult } from "./approved-calls.js";
-import { getApprovalAuditState, retireActiveCandidates } from "./candidates.js";
+import { getApprovalAuditState, responderOfRequest, retireActiveCandidates } from "./candidates.js";
 import { coordinateApprovalDelivery } from "./coordinator.js";
 import { deliver, resolveTypedApproval, turnInputOnly, withoutTurnInput } from "./delivery.js";
 import { recheckApprovedCall } from "#harness/tools.js";
@@ -331,6 +331,7 @@ export async function runApprovedLocalCalls(
         position: step.position(),
         publish: step.publish,
         requests,
+        responderOf: (request) => responderOfRequest(step.session.state, request.requestId),
         telemetry: attempt?.telemetry,
         tools,
       });
