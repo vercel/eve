@@ -2823,7 +2823,7 @@ describe("createAgentOtelInstrumentation", () => {
     );
   });
 
-  it("caps full model input while keeping valid message JSON", async () => {
+  it("caps full model input, keeps valid message JSON, and counts omitted messages", async () => {
     const runtime = createRuntime();
     const manyMessages = Array.from({ length: 200 }, (_, index) => ({
       content: `message ${index} ${"x".repeat(200)}`,
@@ -2890,6 +2890,9 @@ describe("createAgentOtelInstrumentation", () => {
     expect(parsed.length).toBeGreaterThan(1);
     expect(JSON.stringify(parsed)).toContain("message 199");
     expect(JSON.stringify(parsed)).not.toContain("message 0 ");
+    expect(model.attributes["agent.input.messages.omitted"]).toBe(
+      manyMessages.length - parsed.length,
+    );
     expect(model.attributes["agent.input.messages.delta"]).toBeUndefined();
   });
 
