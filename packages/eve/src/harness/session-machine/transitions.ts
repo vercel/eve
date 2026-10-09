@@ -50,7 +50,7 @@ import type { TurnAwaiting } from "#protocol/session-events/families/turn.js";
 import {
   nextChangeId,
   nextRunId,
-  openInputs,
+  openRequests,
   workingTaskCalls,
   type SessionProjection,
 } from "#protocol/session-projection.js";
@@ -1181,7 +1181,7 @@ export function completeSignIn(
 /** Requests this session asked itself and still awaits; relayed requests answer elsewhere. */
 export function ownOpenRequestIds(view: Omit<SessionView, "turn">): ReadonlySet<string> {
   return new Set(
-    openInputs(view.projection)
+    openRequests(view.projection.view)
       .filter(
         (input) =>
           input.callId === undefined &&

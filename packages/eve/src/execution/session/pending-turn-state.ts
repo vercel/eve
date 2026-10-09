@@ -4,7 +4,7 @@ import { ownOpenRequestIds } from "#harness/session-machine/transitions.js";
 import { runtimeWait } from "#harness/session-machine/view.js";
 import type { TaskToolCall } from "#execution/tasks/calls.js";
 import type { HarnessSession } from "#harness/types.js";
-import { openSignIns, type SessionProjection } from "#protocol/session-projection.js";
+import { type SessionProjection, waitsOnSignIn } from "#protocol/session-projection.js";
 
 /**
  * What a paused turn waits on, which is one kind of thing at a time. The turn keeps it to resume;
@@ -62,7 +62,7 @@ export function pausedOnCalls(session: HarnessSession): TurnPause | undefined {
 /** Whether the turn waits on a sign-in, an answer, or a call, which ends a batch of model calls. */
 export function waitsOnAnything(session: HarnessSession, projection: SessionProjection): boolean {
   return (
-    openSignIns(projection).length > 0 ||
+    waitsOnSignIn(projection.view) ||
     ownOpenRequestIds(sessionView(projection, session.state)).size > 0 ||
     (runtimeWait(session.state)?.callIds.length ?? 0) > 0
   );

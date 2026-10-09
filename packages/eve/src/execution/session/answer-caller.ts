@@ -1,5 +1,5 @@
 import type { SessionAuthContext } from "#channel/types.js";
-import { openInputs } from "#protocol/session-projection.js";
+import { openRequests } from "#protocol/session-projection.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import type { SessionStateMap, StepInput } from "#harness/types.js";
 
@@ -23,7 +23,7 @@ export function attributeAnswers(input: {
   }
   // The session's own requests; a relayed one belongs to the run that asked.
   const requests = new Map(
-    openInputs(storedProjection(input.state)).flatMap((open) =>
+    openRequests(storedProjection(input.state).view).flatMap((open) =>
       open.taskId === undefined && open.callId === undefined
         ? [[open.request.requestId, open.request.kind] as const]
         : [],

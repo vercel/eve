@@ -35,7 +35,12 @@ import {
 import { responseBindingFor } from "#harness/response-bindings.js";
 import { publicViewOf } from "#harness/session-machine/closure.js";
 import type { RefusedResponse } from "#harness/hitl/coordinator.js";
-import { openInputs, SUPERSEDED_BY_MESSAGE } from "#protocol/session-projection.js";
+import {
+  openRequests,
+  SUPERSEDED_BY_MESSAGE,
+  turnCoordinates,
+  turnCoordinatesOf,
+} from "#protocol/session-projection.js";
 import type { InteractionOutcome } from "#protocol/session-events/families/interaction.js";
 import type {
   ResponseOutcome,
@@ -286,7 +291,7 @@ export function answer(
   if (policy.challenges.length > 0) return done({ next: "sign-in" });
 
   const delivery = input.delivery;
-  const limit = openInputs(projection).find(
+  const limit = openRequests(projection.view).find(
     (open) =>
       open.request.kind === "session-limit" && ownOpenRequestIds(view).has(open.request.requestId),
   );
@@ -360,8 +365,9 @@ export function answer(
       queue(withoutTurnInput(resolved));
       return done({ input: resolved, next: "defer-message" });
     }
+    const at = turnCoordinatesOf(projection, limit.turnId ?? turnCoordinates(projection).turnId);
     const batch: ResolvedInputBatch = {
-      event: { sequence: limit.sequence, stepIndex: limit.stepIndex, turnId: limit.turnId },
+      event: at,
       inputs: [
         {
           outcome: resolveInputOutcome(limit.request.kind, response),
@@ -378,7 +384,7 @@ export function answer(
       limit.request,
       response,
       granted === undefined ? "invalid" : granted.granted ? "accepted" : "declined",
-      { turnId: limit.turnId },
+      { turnId: at.turnId },
     );
     const leftover = leftoverFor(answerable);
     if (leftover.length > 0) queue({ inputResponses: leftover });
@@ -643,7 +649,9 @@ export function hasRunnableQueue(view: SessionView): boolean {
   ];
   if (responses.length === 0) return false;
   const answered = new Set(responses.map((response) => response.requestId));
-  const limit = openInputs(view.projection).find((open) => open.request.kind === "session-limit");
+  const limit = openRequests(view.projection.view).find(
+    (open) => open.request.kind === "session-limit",
+  );
   if (limit !== undefined) return answered.has(limit.request.requestId);
   return view.turn.suspended.some(
     (step) =>

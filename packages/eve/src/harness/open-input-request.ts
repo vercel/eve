@@ -1,6 +1,6 @@
 import {
-  openInputs,
-  type SessionInput,
+  type OpenRequest,
+  openRequests,
   type SessionProjection,
 } from "#protocol/session-projection.js";
 
@@ -13,7 +13,7 @@ import {
 export function firstOpenInput(
   projection: SessionProjection,
   answered: (requestId: string) => boolean = () => false,
-): SessionInput | undefined {
-  const open = openInputs(projection).filter((input) => !answered(input.request.requestId));
+): OpenRequest | undefined {
+  const open = openRequests(projection.view).filter((input) => !answered(input.request.requestId));
   return open.find((input) => input.request.kind === "session-limit") ?? open[0];
 }

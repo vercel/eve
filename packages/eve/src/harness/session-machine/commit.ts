@@ -111,7 +111,7 @@ export function dropClosedRecords<T extends HarnessSessionBase>(
   projection: SessionProjection,
 ): T {
   return clearProxyInputRequestsWhere(session, (_route, requestId) => {
-    const input = projection.inputs[requestId];
-    return input === undefined || input.status === "settled";
+    const row = projection.view?.interactions[requestId];
+    return row === undefined || row.status === "settled";
   });
 }
