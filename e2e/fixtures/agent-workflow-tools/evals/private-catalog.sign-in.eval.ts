@@ -53,9 +53,8 @@ export default defineEval({
     const resumed = t.target.watchTurn(session.sessionId, {
       startIndex: session.state.streamIndex,
     });
-    const response = await fetch(
-      fixtureAuthorizationCallback(t.target.url, required.data.authorization?.url),
-    );
+    const callback = fixtureAuthorizationCallback(t.target.url, required.data.authorization?.url);
+    const response = await t.target.fetch(`${callback.pathname}${callback.search}`);
     if (!response.ok) throw new Error(`Authorization callback failed (${response.status}).`);
 
     const completed = await resumed.result();
