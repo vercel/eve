@@ -33,6 +33,8 @@ export function admitDeliveries(input: {
   }[];
   /** The position of the line the admission takes, for ids a delivery arrived without. */
   readonly position: number;
+  /** Whether the session already admitted a delivery, as when it forwarded part of it. */
+  readonly admitted?: (deliveryId: string) => boolean;
   readonly channelKind: string;
 }): DeliveryAdmission {
   const { delivery } = input;
@@ -68,7 +70,7 @@ export function admitDeliveries(input: {
     const clientContext = readClientContext(payload);
     if (clientContext !== undefined && clientContext.length > 0)
       data.clientContext = [...clientContext];
-    facts.push({ data, type: "delivery.admitted" });
+    if (input.admitted?.(deliveryId) !== true) facts.push({ data, type: "delivery.admitted" });
     if (stepInput === undefined) {
       facts.push({ data: { deliveryId, outcome: "ignored" }, type: "delivery.settled" });
       continue;

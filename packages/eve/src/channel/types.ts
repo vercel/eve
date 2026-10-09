@@ -203,13 +203,37 @@ export type SessionCommand =
       readonly requestId?: string;
       readonly turnPolicy?: TurnPolicy;
     }
-  | {
+  | ({
       readonly kind: "cancel";
       readonly turnId?: string;
-    }
-  | { readonly kind: "compact" }
-  | { readonly kind: "clear" }
-  | { readonly kind: "reset"; readonly reason?: string };
+    } & SessionControlIdentity)
+  | ({ readonly kind: "compact" } & SessionControlIdentity)
+  | ({ readonly kind: "clear" } & SessionControlIdentity)
+  | ({ readonly kind: "reset"; readonly reason?: string } & SessionControlIdentity);
+
+/**
+ * A control is a delivery: its id, and who sent it, so the facts it causes name it. Both are
+ * optional for callers that predate them; such a control changes the session without a delivery.
+ */
+export interface SessionControlIdentity {
+  readonly deliveryId?: string;
+  readonly auth?: SessionAuthContext | null;
+}
+
+/** Who sends a control, so the delivery it arrives as names them. */
+export interface SessionControlOptions {
+  readonly auth?: SessionAuthContext | null;
+}
+
+/** A control command as one delivery: a fresh id, and the sender when known. */
+export function controlCommand<
+  TCommand extends { readonly kind: "cancel" | "clear" | "compact" | "reset" },
+>(command: TCommand, options?: SessionControlOptions): TCommand & SessionControlIdentity {
+  const deliveryId = crypto.randomUUID();
+  return options?.auth === undefined
+    ? { ...command, deliveryId }
+    : { ...command, auth: options.auth, deliveryId };
+}
 
 export type SessionSendCommandResult =
   | { readonly status: "accepted"; readonly sessionId: string; readonly deliveryId?: string }

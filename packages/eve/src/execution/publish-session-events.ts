@@ -1,3 +1,4 @@
+import type { ControlDelivery } from "#harness/types.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapterContext } from "#channel/adapter.js";
 import { type ContextContainer, contextStorage } from "#context/container.js";
@@ -474,6 +475,8 @@ export function readSessionProjection(ctx: ContextContainer): SessionProjection 
 export interface SessionEnding {
   readonly outcome: "completed" | "failed";
   readonly cause?: Cause;
+  /** The reset control that ends the session, when it named its delivery. */
+  readonly control?: ControlDelivery;
   readonly error?: ErrorInfo;
 }
 

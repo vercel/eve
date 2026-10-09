@@ -1,3 +1,4 @@
+import { publicViewOf } from "#harness/session-machine/closure.js";
 import { bindTurnCallerContext } from "#subagents/parent-notification.js";
 import type { HandleEventFn } from "#harness/types.js";
 import { bindSessionParticipants } from "#execution/participants.js";
@@ -332,6 +333,8 @@ async function runSessionStepBody(
       admission = admitDeliveries({
         channelKind: getAdapterKind(adapter),
         delivery: rawDelivery ?? delivery,
+        admitted: (deliveryId) =>
+          publicViewOf(currentProjection(ctx)).deliveries[deliveryId] !== undefined,
         payloads: delivered,
         position: nextLinePosition(ctx),
       });
@@ -499,6 +502,7 @@ async function runSessionStepBody(
         capabilities,
         clearOnly: input.input?.control === "clear",
         compactOnly: input.input?.control === "compact",
+        controlDelivery: input.input?.controlDelivery,
         createRuntime: createWorkflowRuntime,
         handleEvent,
         participants,

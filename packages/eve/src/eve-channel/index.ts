@@ -481,7 +481,10 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (body instanceof Response) return body;
         let result: Awaited<ReturnType<Session["cancel"]>>;
         try {
-          result = await attachSession(sessionId).cancel({ turnId: body.turnId });
+          result = await attachSession(sessionId).cancel({
+            auth: sessionAuthFromResult(authResult),
+            turnId: body.turnId,
+          });
         } catch (error) {
           const errorId = logError(log, "cancel-turn request failed", error, { sessionId });
           return Response.json(
@@ -513,7 +516,9 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (body instanceof Response) return body;
         let result: Awaited<ReturnType<Session["compact"]>>;
         try {
-          result = await attachSession(sessionId).compact();
+          result = await attachSession(sessionId).compact({
+            auth: sessionAuthFromResult(authResult),
+          });
         } catch (error) {
           const errorId = logError(log, "session-compaction request failed", error, { sessionId });
           return Response.json(
@@ -545,7 +550,9 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (body instanceof Response) return body;
         let result: Awaited<ReturnType<Session["clear"]>>;
         try {
-          result = await attachSession(sessionId).clear();
+          result = await attachSession(sessionId).clear({
+            auth: sessionAuthFromResult(authResult),
+          });
         } catch (error) {
           const errorId = logError(log, "session-clear request failed", error, { sessionId });
           return Response.json(
@@ -577,7 +584,10 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (body instanceof Response) return body;
         let result: Awaited<ReturnType<Session["reset"]>>;
         try {
-          result = await attachSession(sessionId).reset({ reason: body.reason });
+          result = await attachSession(sessionId).reset({
+            auth: sessionAuthFromResult(authResult),
+            reason: body.reason,
+          });
         } catch (error) {
           const errorId = logError(log, "session-reset request failed", error, { sessionId });
           return Response.json(

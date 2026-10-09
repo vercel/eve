@@ -12,6 +12,7 @@ import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { ResponseSubmittedData } from "#protocol/session-events/families/response.js";
+import type { Principal } from "#protocol/session-events/envelope.js";
 import type { InternalToolDefinition } from "#tools/definition.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -148,6 +149,12 @@ export interface SessionLimits {
 export interface AttributedInputResponse {
   readonly auth: SessionAuthContext | null;
   readonly response: InputResponse;
+}
+
+/** The delivery a control arrived as: its id, and who sent it, as the wire names them. */
+export interface ControlDelivery {
+  readonly deliveryId: string;
+  readonly principal?: Principal;
 }
 
 export interface StepInput {
@@ -345,6 +352,8 @@ export interface ToolLoopHarnessConfig {
   readonly clearOnly?: boolean;
   /** Forces one context-compaction pass without running a model turn. */
   readonly compactOnly?: boolean;
+  /** The delivery a clear or compact control arrived as; its facts name it. */
+  readonly controlDelivery?: ControlDelivery;
   readonly handleEvent?: HandleEventFn;
   /** Projects raw durable history before it crosses a message-bearing boundary. */
   readonly historyProjector?: HistoryViewProjector;

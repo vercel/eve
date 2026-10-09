@@ -1,3 +1,4 @@
+import type { ClearedBy } from "#protocol/session-events/families/call.js";
 import {
   asSchema,
   generateId,
@@ -110,6 +111,8 @@ export async function executeToolCall(
     readonly modelCallId?: string;
     /** Runs just before the tool does, as the step's steering protection. */
     readonly beforeExecute?: () => void;
+    /** What cleared a call a person approved: the interaction that asked them. */
+    readonly clearedBy?: ClearedBy;
   },
   approval: CallApproval,
 ): Promise<CallOutcome> {
@@ -195,7 +198,16 @@ export async function executeToolCall(
         try {
           input.beforeExecute?.();
           started = true;
-          await input.publish(callStarted(callId, { scope: at }));
+          // A call a person approved starts when it runs, after the recheck: the approval cleared
+          // it, and the policy could still have refused it.
+          await input.publish(
+            callStarted(
+              callId,
+              input.clearedBy === undefined
+                ? { scope: at }
+                : { clearedBy: input.clearedBy, scope: at },
+            ),
+          );
           const executed = invokeTool(definition, args, {
             abortSignal: input.abortSignal,
             messages: [...input.messages],

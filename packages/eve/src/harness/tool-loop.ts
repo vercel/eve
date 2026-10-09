@@ -15,7 +15,12 @@ import {
   admitApprovedWork,
   discardClearedHumanInput,
 } from "#harness/hitl/index.js";
-import { clear, join } from "#harness/session-machine/transitions.js";
+import {
+  clear,
+  controlDeliveryFor,
+  controlled,
+  join,
+} from "#harness/session-machine/transitions.js";
 import { activeTurnId, turnPosition } from "#harness/session-machine/view.js";
 import { createStep, openTurn, type Step } from "#harness/step/context.js";
 import { prepareTurnInput, settleRuntimeWork } from "#harness/step/intake.js";
@@ -167,19 +172,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
  * The control is a delivery, applied in the same commit as the clear.
  */
 async function clearContext(step: Step): Promise<StepResult> {
-  const deliveryId = `control_${String(step.view().projection.position ?? 0)}`;
-  const transition = clear(step.view(), {
-    cause: { deliveryId },
-    sessionId: step.session.sessionId,
-  });
-  await step.apply({
-    ...transition,
-    events: [
-      { data: { deliveryId, source: { control: "clear" } }, type: "delivery.admitted" },
-      ...transition.events,
-      { data: { deliveryId, outcome: "applied" }, type: "delivery.settled" },
-    ],
-  });
+  const delivery = controlDeliveryFor(step.view(), step.config.controlDelivery);
+  await step.apply(
+    controlled(delivery, "clear", (cause) =>
+      clear(step.view(), { cause, sessionId: step.session.sessionId }),
+    ),
+  );
   const cleared = discardClearedHumanInput({
     ...step.session,
     state: clearMemorySessionState(step.session.state),

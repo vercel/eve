@@ -497,7 +497,7 @@ describe("eve ID-addressed session routes", () => {
     expect(session[operation]).toHaveBeenCalledTimes(1);
   });
 
-  it("forwards the turn guard without changing the response", async () => {
+  it("forwards the turn guard and the caller without changing the response", async () => {
     const session = createFixedSession();
     const response = await route("POST", "/eve/v1/session/:sessionId/cancel")(
       new Request("https://eve.test/eve/v1/session/wrun_A/cancel", {
@@ -507,7 +507,10 @@ describe("eve ID-addressed session routes", () => {
       createArgs(session),
     );
 
-    expect(session.cancel).toHaveBeenCalledWith({ turnId: "turn_1" });
+    expect(session.cancel).toHaveBeenCalledWith({
+      auth: expect.objectContaining({ principalId: "anonymous", principalType: "anonymous" }),
+      turnId: "turn_1",
+    });
     expect(response.status).toBe(202);
     await expect(response.json()).resolves.toEqual({
       ok: true,
