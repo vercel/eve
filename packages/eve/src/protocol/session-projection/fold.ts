@@ -117,6 +117,59 @@ export function foldLines(
   }
 }
 
+/** One event as a reader received it back: the record, and where its line put it. */
+export interface ReceivedEvent {
+  readonly type: string;
+  readonly data?: unknown;
+  readonly scope?: unknown;
+  readonly meta: {
+    readonly position: { readonly line: number; readonly index: number };
+    readonly at: string;
+    readonly endOfLine?: boolean;
+  };
+}
+
+/**
+ * Folds events as a reader received them back, regrouped into their lines by position. A line
+ * folds whole, once its last record has arrived: the events of a line still arriving are
+ * returned unfolded, to pass again with the rest. Lines the view already folded are skipped, so
+ * replayed overlap folds once.
+ */
+export function foldEvents<TEvent extends ReceivedEvent>(
+  view: SessionView,
+  events: readonly TEvent[],
+  options: FoldOptions & { readonly previews?: SessionPreviews } = {},
+): readonly TEvent[] {
+  let start = 0;
+  while (start < events.length) {
+    const line = events[start]!.meta.position.line;
+    let end = start + 1;
+    while (end < events.length && events[end]!.meta.position.line === line) end += 1;
+    const group = events.slice(start, end);
+    const last = group.at(-1)!;
+    if (end === events.length && last.meta.endOfLine === false) return group;
+    const first = group[0]!;
+    const stored: StoredLine =
+      group.length === 1 && isProgressType(first.type)
+        ? { progress: first }
+        : { at: first.meta.at, facts: group };
+    foldLine(view, stored, line, options);
+    start = end;
+  }
+  return [];
+}
+
+/** The tables a complete read of `events` folds into, with each part's and call's previews. */
+export function viewOfEvents(events: readonly ReceivedEvent[]): {
+  readonly view: SessionView;
+  readonly previews: SessionPreviews;
+} {
+  const view = emptySessionView();
+  const previews = emptyPreviews();
+  foldEvents(view, events, { previews });
+  return { previews, view };
+}
+
 /** Moves a view's position past lines a read skipped, as a position marker says. */
 export function skipTo(view: SessionView, next: number): void {
   const state = view as MutableView;

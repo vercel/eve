@@ -390,9 +390,10 @@ export class EvalSessionDriver implements EveEvalSession {
 }
 
 interface LiveEventWaiter {
-  readonly matches: (event: SessionStreamEvent) => boolean;
+  /** What the waiter waits for, once `event` brings it. */
+  readonly take: (event: SessionStreamEvent) => unknown;
   readonly reject: (error: Error) => void;
-  readonly resolve: (event: SessionStreamEvent) => void;
+  readonly resolve: (value: unknown) => void;
 }
 
 class EvalLiveTurn implements EveEvalLiveTurn {
@@ -435,17 +436,38 @@ class EvalLiveTurn implements EveEvalLiveTurn {
     const matches = (event: SessionStreamEvent): boolean =>
       event.type === type &&
       (options?.data === undefined ||
-        matchesValue(options.data, "data" in event ? event.data : undefined));
-    const observed = this.#events.find(matches);
-    if (observed !== undefined) return observed as EveEvalStreamEvent<TType>;
-    if (this.#waitError !== undefined) throw this.#waitError;
+        matchesValue(options.data, "data" in event ? event.data : undefined)) &&
+      (options?.scope === undefined || matchesValue(options.scope, event.scope ?? {}));
+    const take = (event: SessionStreamEvent) =>
+      matches(event) ? (event as EveEvalStreamEvent<TType>) : undefined;
+    return await this.#waitFor(take, this.#events.find(matches) as EveEvalStreamEvent<TType>);
+  }
 
-    return await new Promise<EveEvalStreamEvent<TType>>((resolve, reject) => {
-      const waiter: LiveEventWaiter = {
-        matches,
-        reject,
-        resolve: (event) => resolve(event as EveEvalStreamEvent<TType>),
-      };
+  async waitForToolCall(
+    name: string,
+    options: Omit<EveEvalToolCallMatchOptions, "count"> = {},
+  ): Promise<EveEvalToolCall> {
+    const find = () =>
+      deriveRunFacts(this.#events, { sessionId: this.sessionId }).toolCalls.find(
+        (call) =>
+          call.name === name &&
+          call.status !== "pending" &&
+          toolCallMatches(call, { ...options, status: options.status ?? call.status }),
+      );
+    // A call settles on `call.settled`; nothing else can complete one.
+    const take = (event: SessionStreamEvent) =>
+      event.type === "call.settled" ? find() : undefined;
+    return await this.#waitFor(take, find());
+  }
+
+  async #waitFor<T>(
+    take: (event: SessionStreamEvent) => T | undefined,
+    observed: T | undefined,
+  ): Promise<T> {
+    if (observed !== undefined) return observed;
+    if (this.#waitError !== undefined) throw this.#waitError;
+    return await new Promise<T>((resolve, reject) => {
+      const waiter: LiveEventWaiter = { reject, resolve: (value) => resolve(value as T), take };
       this.#waiters.add(waiter);
     });
   }
@@ -495,9 +517,10 @@ class EvalLiveTurn implements EveEvalLiveTurn {
 
   #resolveWaiters(event: SessionStreamEvent): void {
     for (const waiter of this.#waiters) {
-      if (!waiter.matches(event)) continue;
+      const value = waiter.take(event);
+      if (value === undefined) continue;
       this.#waiters.delete(waiter);
-      waiter.resolve(event);
+      waiter.resolve(value);
     }
   }
 

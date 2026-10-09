@@ -39,6 +39,8 @@ export type EveEvalActionStatus =
  * `call.requested` request with its matching `call.settled`.
  */
 export interface EveEvalToolCall {
+  /** The call's id, as its `call.*` facts name it. */
+  readonly callId: string;
   /** Authored tool name (e.g. `"get_weather"`). */
   readonly name: string;
   /** Tool input as requested by the model. */
@@ -324,6 +326,14 @@ export interface EveEvalLiveTurn {
     type: TType,
     options?: EveEvalWaitForEventOptions<TType>,
   ): Promise<EveEvalStreamEvent<TType>>;
+  /**
+   * Wait until a call to the tool named `name` settles, matching `options`. Without a `status`,
+   * any settled outcome matches.
+   */
+  waitForToolCall(
+    name: string,
+    options?: Omit<EveEvalToolCallMatchOptions, "count">,
+  ): Promise<EveEvalToolCall>;
 }
 
 /** Operations and state belonging to one accepted session. */

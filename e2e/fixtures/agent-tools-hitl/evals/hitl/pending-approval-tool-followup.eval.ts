@@ -1,4 +1,4 @@
-import { defineEval } from "eve/evals";
+import { defineEval, type EveEvalEventMatch } from "eve/evals";
 import { equals } from "eve/evals/expect";
 import { requestFrom } from "./continuation/helpers.ts";
 
@@ -6,6 +6,25 @@ const MARKER = "draft-status-3494";
 const READ_STATUS =
   `Alice is checking her draft. Call the read-draft-status tool exactly once with marker "${MARKER}". ` +
   "After the tool returns, tell Alice the status and marker from its result.";
+
+/** The order a completed status read ends `turnId` in: its call, then a reply naming the status. */
+function statusReadOrder(turnId: string, callId: string): EveEvalEventMatch[] {
+  return [
+    { type: "call.settled", data: { callId, outcome: "completed" }, scope: { turnId }, count: 1 },
+    {
+      type: "content.completed",
+      data: {
+        kind: "text",
+        phase: "reply",
+        value: (text) =>
+          typeof text === "string" && text.includes(MARKER) && text.includes("ready"),
+      },
+      scope: { turnId },
+      count: 1,
+    },
+    { type: "turn.settled", data: { turnId, outcome: "completed" }, count: 1 },
+  ];
+}
 
 export default [
   defineEval({
@@ -18,36 +37,21 @@ export default [
       // When the user asks to read the draft status.
       const session = await t.session();
       const live = await session.start(READ_STATUS);
-      const received = await live.waitForEvent("message.received");
+      const received = await live.waitForEvent("delivery.consumed");
       const turn = await live.result();
 
       // Then the tool executes once and the completed reply includes its status and marker.
       turn.expectOk();
       turn.calledTool("read-draft-status", { status: "completed", count: 1 });
-      turn.event("turn.completed", { count: 1 });
+      turn.event("turn.settled", { count: 1, data: { outcome: "completed" } });
       turn.messageIncludes(MARKER);
       turn.messageIncludes("ready");
+      const read = turn.toolCalls.find((call) => call.name === "read-draft-status");
+      if (read === undefined) throw new Error("Expected the status read.");
+      const { turnId } = received.data;
       turn.eventOrder([
-        { type: "message.received", data: { turnId: received.data.turnId }, count: 1 },
-        {
-          type: "action.result",
-          data: {
-            turnId: received.data.turnId,
-            status: "completed",
-            result: { toolName: "read-draft-status" },
-          },
-          count: 1,
-        },
-        {
-          type: "message.completed",
-          data: {
-            turnId: received.data.turnId,
-            message: (text) =>
-              typeof text === "string" && text.includes(MARKER) && text.includes("ready"),
-          },
-          count: 1,
-        },
-        { type: "turn.completed", data: { turnId: received.data.turnId }, count: 1 },
+        { type: "delivery.consumed", data: { turnId }, count: 1 },
+        ...statusReadOrder(turnId, read.callId),
       ]);
     },
   }),
@@ -63,7 +67,7 @@ export default [
       );
       const session = parked.session;
       parked.calledTool("gate", { status: "pending", count: 1 });
-      parked.notEvent("action.result", { data: { result: { toolName: "gate" } } });
+      parked.notEvent("call.settled");
       const approval = requestFrom(parked, "gate");
       t.log(`Original gate approval is pending: ${approval.requestId}`);
 
@@ -73,58 +77,27 @@ export default [
         `Alice will review the account change later. ${READ_STATUS}`,
       );
       // Then the tool result reaches a completed reply without executing the account change.
-      const result = await live.waitForEvent("action.result", {
-        data: { status: "completed", result: { toolName: "read-draft-status" } },
-      });
+      const result = await live.waitForToolCall("read-draft-status", { status: "completed" });
       t.log(`Follow-up tool completed before waiting for its reply: ${JSON.stringify(result)}`);
-      const received = await live.waitForEvent("message.received");
-      await live.waitForEvent("turn.completed", { data: { turnId: received.data.turnId } });
+      const received = await live.waitForEvent("delivery.consumed");
+      const { turnId } = received.data;
+      await live.waitForEvent("turn.settled", { data: { turnId } });
       const followup = await live.result();
       followup.expectOk();
       followup.calledTool("read-draft-status", { status: "completed", count: 1 });
       followup.messageIncludes(MARKER);
       followup.messageIncludes("ready");
       followup.eventOrder([
-        // The follow-up joins the held turn, which also received the original request.
-        {
-          type: "message.received",
-          data: { turnId: received.data.turnId, sequence: received.data.sequence },
-          count: 1,
-        },
-        {
-          type: "action.result",
-          data: {
-            turnId: received.data.turnId,
-            status: "completed",
-            result: { toolName: "read-draft-status" },
-          },
-          count: 1,
-        },
-        {
-          type: "message.completed",
-          data: {
-            turnId: received.data.turnId,
-            message: (text) =>
-              typeof text === "string" && text.includes(MARKER) && text.includes("ready"),
-          },
-          count: 1,
-        },
-        { type: "turn.completed", data: { turnId: received.data.turnId }, count: 1 },
+        // The follow-up joins the held turn instead of starting one.
+        { type: "delivery.consumed", data: { turnId }, count: 1 },
+        ...statusReadOrder(turnId, result.callId),
       ]);
-      followup.notEvent("action.result", {
-        data: { status: "completed", result: { toolName: "gate" } },
-      });
-      followup.notEvent("input.requested");
+      followup.calledTool("gate", { status: "completed", count: 0 });
+      followup.notEvent("interaction.opened");
       // Then the steer cancelled the account change instead of leaving it open.
-      followup.event("input.resolved", {
+      followup.event("interaction.settled", {
         count: 1,
-        data: {
-          resolutions: (resolutions) =>
-            resolutions.some(
-              (resolution) =>
-                resolution.requestId === approval.requestId && resolution.outcome === "ignored",
-            ),
-        },
+        data: { interactionId: approval.requestId, outcome: "withdrawn" },
       });
       t.check(session.pendingInputRequests.length, equals(0));
     },

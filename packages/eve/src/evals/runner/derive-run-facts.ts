@@ -14,6 +14,7 @@ import type {
 } from "#evals/types.js";
 
 interface MutableToolCall {
+  callId: string;
   name: string;
   input: JsonObject;
   output: JsonValue | undefined;
@@ -88,6 +89,7 @@ export function deriveRunFacts(
     const existing = toolCallsByCallId.get(callId);
     if (existing !== undefined) return existing;
     const call: MutableToolCall = {
+      callId,
       name,
       input,
       output: undefined,

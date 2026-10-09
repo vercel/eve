@@ -27,17 +27,7 @@ export default defineEval({
     ]);
 
     approved.expectOk();
-    approved.event("action.result", {
-      data: {
-        result: {
-          kind: "tool-result",
-          output: new RegExp(MARKER),
-          toolName: TOOL_NAME,
-        },
-        status: "completed",
-      },
-      count: 1,
-    });
+    approved.calledTool(TOOL_NAME, { output: new RegExp(MARKER), status: "completed", count: 1 });
     t.succeeded();
   },
 });

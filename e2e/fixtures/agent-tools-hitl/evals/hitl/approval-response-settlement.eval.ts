@@ -66,34 +66,33 @@ async function refuse(t: EveEvalContext, store: Store, callId: string, requestId
     }),
   );
   const events = store.snapshot.events.slice(start);
-  const candidates = events
-    .filter((event) => event.type === "approval.candidate")
-    .filter((event) => event.data.requestId === requestId);
-  await t.require(
-    candidates.map((event) => event.data.outcome),
-    equals(["pending", "rejected"]),
+  const submitted = events.filter(
+    (event) => event.type === "response.submitted" && event.data.interactionId === requestId,
   );
-  await t.require(candidates.at(-1)?.data.reason, equals("Wrong responder."));
+  await t.require(submitted.length, equals(1));
+  const responseId =
+    submitted[0]?.type === "response.submitted" ? submitted[0].data.responseId : undefined;
+  const settled = events.filter(
+    (event) => event.type === "response.settled" && event.data.responseId === responseId,
+  );
+  await t.require(
+    settled.map((event) => (event.type === "response.settled" ? event.data : undefined)),
+    equals([{ outcome: "refused", reason: "Wrong responder.", responseId }]),
+  );
   // The approval holds the turn, so a refused answer leaves it held.
-  await t.require(
-    events
-      .filter((event) => event.type === "approval.candidate" || event.type === "turn.waiting")
-      .map((event) => event.type),
-    equals(["approval.candidate", "approval.candidate", "turn.waiting"]),
-  );
-  await t.require(events.at(-1)?.type, equals("turn.waiting"));
   await t.require(
     events.filter(
       (event) =>
         event.type === "turn.started" ||
-        event.type === "input.resolved" ||
-        event.type === "approval.settled" ||
-        event.type === "action.result",
+        event.type === "turn.resumed" ||
+        event.type === "turn.settled" ||
+        event.type === "interaction.settled" ||
+        event.type === "call.settled",
     ).length,
     equals(0),
   );
   await expectAnswerable(t, store, callId, requestId);
-  return candidates.at(-1)?.data.candidateId;
+  return responseId;
 }
 
 export default defineEval({
@@ -153,10 +152,7 @@ export default defineEval({
         await expectAnswerable(t, reload, callId, requestId);
         await t.require(
           reload.snapshot.events.filter(
-            (event) =>
-              event.type === "approval.candidate" &&
-              event.data.requestId === requestId &&
-              event.data.outcome === "rejected",
+            (event) => event.type === "response.settled" && event.data.outcome === "refused",
           ).length,
           equals(2),
         );
@@ -183,28 +179,17 @@ export default defineEval({
         const finished = (
           await t.target.watchTurn(session.sessionId, { startIndex }).result()
         ).expectOk();
-        finished.event("approval.settled", {
-          data: { requestId, outcome: decision === "approve" ? "approved" : "cancelled" },
-          count: 1,
-        });
-        finished.event("input.resolved", {
+        finished.event("interaction.settled", {
           data: {
-            resolutions: (items) =>
-              items.some(
-                (item) =>
-                  item.requestId === requestId &&
-                  item.outcome === (decision === "approve" ? "approved" : "denied"),
-              ),
+            interactionId: requestId,
+            outcome: decision === "approve" ? "accepted" : "declined",
           },
           count: 1,
         });
         if (decision === "approve") {
           finished.calledTool(TOOL, { status: "completed", output: { executions: 1 }, count: 1 });
         } else {
-          finished.event("action.result", {
-            data: { result: { callId, toolName: TOOL }, status: "rejected" },
-            count: 1,
-          });
+          finished.event("call.settled", { data: { callId, outcome: "rejected" }, count: 1 });
           finished.calledTool(TOOL, { status: "completed", count: 0 });
         }
         await t.require(toolPart(reload, callId).state === "approval-requested", equals(false));

@@ -18,15 +18,9 @@ export default defineEval({
 
     const approved = await session.respondAll("approve");
     approved.expectOk();
-    approved.event("action.result", {
-      data: {
-        result: {
-          kind: "tool-result",
-          toolName: "guarded-echo",
-          output: new RegExp(GUARDED_ECHO_TOKEN),
-        },
-        status: "completed",
-      },
+    approved.calledTool("guarded-echo", {
+      output: new RegExp(GUARDED_ECHO_TOKEN),
+      status: "completed",
       count: 1,
     });
 

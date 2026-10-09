@@ -32,31 +32,23 @@ export default defineEval({
       const followup = await session.send(question);
 
       followup.expectOk();
-      followup.notEvent("actions.requested");
-      followup.notEvent("input.requested");
+      followup.notEvent("call.requested");
+      followup.notEvent("interaction.opened");
       if (index === 0) {
         // The steer cancels the held call, so its not-run result lands in this turn.
         followup.calledTool(TOOL_NAME, { status: "completed", count: 0 });
-        followup.event("input.resolved", {
+        followup.event("interaction.settled", {
           count: 1,
-          data: {
-            resolutions: (resolutions) =>
-              resolutions.some(
-                (resolution) =>
-                  resolution.requestId === approval.requestId && resolution.outcome === "ignored",
-              ),
-          },
+          data: { interactionId: approval.requestId, outcome: "withdrawn" },
         });
       } else {
         followup.usedNoTools();
       }
-      followup.event("session.waiting", { count: 1 });
+      followup.event("turn.settled", { count: 1, data: { outcome: "completed" } });
     }
 
     t.succeeded();
     t.check(session.pendingInputRequests.length, equals(0));
-    t.notEvent("action.result", {
-      data: { result: { output: new RegExp(MARKER), toolName: TOOL_NAME } },
-    });
+    t.calledTool(TOOL_NAME, { output: new RegExp(MARKER), count: 0 });
   },
 });

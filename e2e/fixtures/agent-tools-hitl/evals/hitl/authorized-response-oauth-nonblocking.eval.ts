@@ -24,7 +24,9 @@ export default defineEval({
       [{ optionId: "approve", requestId: approval.requestId }],
       as(RESPONDER),
     );
-    const required = await approvalTurn.waitForEvent("authorization.required");
+    const required = await approvalTurn.waitForEvent("interaction.opened", {
+      data: { request: { kind: "sign-in" } },
+    });
     // The responder's sign-in holds the turn, so this read stops there.
     const held = await approvalTurn.result();
     const resumeIndex = held.session.state.streamIndex;
@@ -36,46 +38,38 @@ export default defineEval({
       as(BYSTANDER),
     );
 
-    if (
-      required.type !== "authorization.required" ||
-      required.data.authorization?.url === undefined
-    ) {
-      throw new Error("Expected candidate OAuth URL.");
+    const url = required.data.request.signIn?.url;
+    if (url === undefined) throw new Error("Expected candidate OAuth URL.");
+    const audience = required.data.audience?.principalIds ?? [];
+    if (audience.length !== 1 || audience[0] !== RESPONDER) {
+      throw new Error(`Candidate sign-in named ${audience.join(", ")}, not the responder.`);
     }
-    if (required.data.principalId !== RESPONDER) {
-      throw new Error(
-        `Candidate sign-in named ${String(required.data.principalId)}, not the responder.`,
-      );
+    if (!("responseId" in required.data.subject)) {
+      throw new Error("Expected the sign-in to be for the responder's answer.");
     }
-    const callbackUrl = new URL(required.data.authorization.url);
+    const callbackUrl = new URL(url);
     const callbackTurn = t.target.watchTurn(held.sessionId, { startIndex: resumeIndex });
     const callback = await fetch(callbackUrl);
     if (!callback.ok)
       throw new Error(`Fixture OAuth callback failed (${String(callback.status)}).`);
     const resumed = await callbackTurn.result();
-    resumed.event("authorization.completed", {
+    resumed.event("interaction.settled", {
       count: 1,
-      data: { outcome: "authorized", principalId: RESPONDER },
+      data: { interactionId: required.data.interactionId, outcome: "accepted" },
     });
-    resumed.event("approval.settled", {
+    resumed.event("interaction.settled", {
       count: 1,
-      data: { outcome: "approved", requestId: approval.requestId },
+      data: { interactionId: approval.requestId, outcome: "accepted" },
     });
-    resumed.event("action.result", {
-      count: 1,
-      data: {
-        result: { kind: "tool-result", output: new RegExp(MARKER), toolName: TOOL_NAME },
-        status: "completed",
-      },
+    resumed.calledTool(TOOL_NAME, { output: new RegExp(MARKER), status: "completed", count: 1 });
+    resumed.notEvent("delivery.consumed", {
+      data: { parts: [{ text: /CANDIDATE-OAUTH-OPEN-OK/ }] },
     });
-    resumed.notEvent("message.received", { data: { message: /CANDIDATE-OAUTH-OPEN-OK/ } });
 
     const message = await queued.result();
     message.expectOk();
     message.messageIncludes("CANDIDATE-OAUTH-OPEN-OK");
-    message.notEvent("action.result", {
-      data: { result: { kind: "tool-result", toolName: TOOL_NAME }, status: "completed" },
-    });
+    message.calledTool(TOOL_NAME, { status: "completed", count: 0 });
     t.succeeded();
   },
 });

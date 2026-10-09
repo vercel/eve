@@ -24,8 +24,7 @@ export default defineEval({
     );
 
     // Then the model corrects the input and reports ready plus the validation error; the message cancelled A, which never runs.
-    // The message steers the held turn, so its first step continues that turn's numbering.
-    const rejectedStep = await live.waitForEvent("step.completed");
+    const rejectedStep = await live.waitForEvent("model.settled");
     t.log(
       `Initial tool-call step completed; awaiting correction: ${JSON.stringify(rejectedStep.data)}`,
     );

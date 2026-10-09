@@ -16,7 +16,7 @@ export function getOrCreateEveAgent(chatId: string, options?: ChatSessionOptions
         void persistThreadState(chatId, snapshot);
       },
       onEvent: (event) => {
-        if (event.type === "authorization.required" || event.type === "authorization.completed") {
+        if (event.type === "interaction.opened" || event.type === "interaction.settled") {
           recordAuthorizationEvent(event);
         }
 

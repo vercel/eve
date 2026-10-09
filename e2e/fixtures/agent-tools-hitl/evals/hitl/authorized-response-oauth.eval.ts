@@ -16,26 +16,22 @@ export default defineEval({
       },
     ]);
 
-    const required = await approvalTurn.waitForEvent("authorization.required");
-    if (
-      required?.type !== "authorization.required" ||
-      required.data.authorization?.url === undefined
-    ) {
-      throw new Error("Expected a fake OAuth authorization URL.");
-    }
-    const callbackUrl = new URL(required.data.authorization.url);
+    const required = await approvalTurn.waitForEvent("interaction.opened", {
+      data: { request: { kind: "sign-in" } },
+    });
+    const url = required.data.request.signIn?.url;
+    if (url === undefined) throw new Error("Expected a fake OAuth authorization URL.");
+    const callbackUrl = new URL(url);
     if (callbackUrl.origin !== new URL(t.target.url).origin) {
       throw new Error("Fixture OAuth callback targeted an unexpected origin.");
     }
     // The responder's sign-in holds the turn, so this read stops there; the
     // callback resumes the same turn.
     const held = await approvalTurn.result();
-    held.event("approval.candidate", {
-      data: { outcome: "pending", requestId: approval.requestId },
-      count: 1,
-    });
-    held.event("authorization.required", { count: 1 });
-    held.event("turn.waiting", { data: { on: "input" } });
+    held.event("response.submitted", { data: { interactionId: approval.requestId }, count: 1 });
+    held.event("interaction.opened", { data: { request: { kind: "sign-in" } }, count: 1 });
+    held.notEvent("interaction.settled", { data: { interactionId: approval.requestId } });
+    held.notEvent("turn.settled");
     const resumedTurn = t.target.watchTurn(held.sessionId, {
       startIndex: held.session.state.streamIndex,
     });
@@ -48,25 +44,15 @@ export default defineEval({
 
     const resumed = await resumedTurn.result();
     resumed.expectOk();
-    resumed.event("authorization.completed", {
-      data: { candidateId: required.data.candidateId, outcome: "authorized" },
+    resumed.event("interaction.settled", {
+      data: { interactionId: required.data.interactionId, outcome: "accepted" },
       count: 1,
     });
-    resumed.event("approval.settled", {
-      data: { outcome: "approved", requestId: approval.requestId },
+    resumed.event("interaction.settled", {
+      data: { interactionId: approval.requestId, outcome: "accepted" },
       count: 1,
     });
-    resumed.event("action.result", {
-      data: {
-        result: {
-          kind: "tool-result",
-          output: new RegExp(MARKER),
-          toolName: TOOL_NAME,
-        },
-        status: "completed",
-      },
-      count: 1,
-    });
+    resumed.calledTool(TOOL_NAME, { output: new RegExp(MARKER), status: "completed", count: 1 });
     t.succeeded();
   },
 });

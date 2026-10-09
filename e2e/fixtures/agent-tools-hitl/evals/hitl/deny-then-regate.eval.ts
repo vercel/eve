@@ -14,18 +14,15 @@ export default defineEval({
 
     const denied = await session.respondAll("cancel");
     denied.expectOk();
-    denied.event("action.result", {
+    denied.event("call.settled", {
       data: {
-        result: {
-          kind: "tool-result",
-          output: {
-            approval: { requestId: request.requestId, status: "denied" },
-            code: "TOOL_EXECUTION_DENIED",
-            tool: { result: "not_run" },
-          },
-          toolName: "guarded-echo",
+        callId: request.action.callId,
+        outcome: "rejected",
+        output: {
+          approval: { requestId: request.requestId, status: "denied" },
+          code: "TOOL_EXECUTION_DENIED",
+          tool: { result: "not_run" },
         },
-        status: "rejected",
       },
       count: 1,
     });
