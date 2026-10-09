@@ -4,7 +4,7 @@ import type { ModelMessage } from "ai";
 
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import { pendingTaskToolCalls, type TaskToolCall } from "#execution/tasks/calls.js";
-import type { SessionStateMap, StepInput } from "#harness/types.js";
+import type { SessionStateMap, HarnessStepInput } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import {
   initialSessionProjection,
@@ -94,7 +94,7 @@ export function nextStepIndex(projection: SessionProjection): number {
 }
 
 /** Input the session holds until it can run. */
-export function queuedInput(state: SessionStateMap | undefined): StepInput | undefined {
+export function queuedInput(state: SessionStateMap | undefined): HarnessStepInput | undefined {
   return readTurnState(state).queued;
 }
 

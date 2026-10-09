@@ -20,7 +20,7 @@ import {
 } from "#harness/input-request-resolution.js";
 import { coalesceTurnInputs, createFrameworkUserMessage } from "#harness/messages.js";
 import { resolveSessionLimitContinuation } from "#harness/hitl/budget-request.js";
-import type { StepInput } from "#harness/types.js";
+import type { HarnessStepInput } from "#harness/types.js";
 import { readClientContext } from "#internal/client-context.js";
 import { callSettledFrom } from "#harness/call-facts.js";
 import {
@@ -160,11 +160,11 @@ export function dispatch(
  * Approved calls run before the delivery's own input, as the AI SDK ran them: the model reads
  * their results first. The input waits in the queue, unreceived, for the step after.
  */
-export function deferInput(view: SessionView, input: StepInput): Transition {
+export function deferInput(view: SessionView, input: HarnessStepInput): Transition {
   return { events: [], turn: withQueued(view.turn, input) };
 }
 
-function withQueued(turn: TurnState, queued: StepInput | undefined): TurnState {
+function withQueued(turn: TurnState, queued: HarnessStepInput | undefined): TurnState {
   if (queued === undefined || isEmptyInput(queued)) return turn;
   return {
     ...turn,
@@ -187,7 +187,7 @@ export interface ResponsePolicyPass {
   readonly challenges: readonly AuthorizationChallenge[];
   readonly feedback: readonly string[];
   /** The delivery minus the answers the policies took, plus the settlements they reached. */
-  readonly stepInput?: StepInput;
+  readonly stepInput?: HarnessStepInput;
   readonly audit: ReturnType<typeof getApprovalAuditState>;
   /** Responder sign-ins pending when the pass began. */
   readonly challengesAtStart: readonly AuthorizationChallenge[];
@@ -205,7 +205,7 @@ export interface Answered extends Transition {
    */
   readonly next: "continue" | "park" | "repeat" | "sign-in" | "defer-message";
   /** The turn's input, without the answers `answer` consumed. */
-  readonly input?: StepInput;
+  readonly input?: HarnessStepInput;
   /** Whether a plain-text answer consumed the message. */
   readonly consumedMessage?: boolean;
   /** The batches the delivery resolved, in order. */
@@ -267,12 +267,12 @@ export function answer(
       turn,
       ...answered,
     }) satisfies Answered;
-  const queue = (queued: StepInput | undefined) => {
+  const queue = (queued: HarnessStepInput | undefined) => {
     turn = withQueued(turn, queued);
   };
   // Answers without a policy to pass are admitted as they arrive: they stand, revisable, until
   // their batch has every answer.
-  const admitUnchecked = (delivery: StepInput | undefined) => {
+  const admitUnchecked = (delivery: HarnessStepInput | undefined) => {
     const gated = new Set(
       turn.suspended.flatMap((step) => step.responseAuthRequiredRequestIds ?? []),
     );
@@ -680,7 +680,7 @@ export function grantedApprovalKeys(
  */
 export function approvingSteps(
   view: SessionView,
-  stepInput: StepInput | undefined,
+  stepInput: HarnessStepInput | undefined,
 ): readonly SuspendedStep[] {
   const pending = view.turn.suspended.filter((step) => step.requests.length > 0);
   const options = new Map(
@@ -756,7 +756,7 @@ export function requireSignIn(
   input: {
     readonly challenges: readonly AuthorizationChallenge[];
     readonly callIdsByName?: ReadonlyMap<string, readonly string[]>;
-    readonly queued?: StepInput;
+    readonly queued?: HarnessStepInput;
   },
 ): Transition {
   const { turnId } = turnPosition(view.projection);

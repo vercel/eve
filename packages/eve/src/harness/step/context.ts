@@ -29,7 +29,7 @@ import type {
   HarnessEmitFn,
   HarnessSession,
   StepFn,
-  StepInput,
+  HarnessStepInput,
   StepResult,
   ToolLoopHarnessConfig,
 } from "#harness/types.js";
@@ -114,9 +114,9 @@ export async function openTurn(
   step: Step,
   opened: {
     readonly input: readonly HarnessModelMessage[];
-    readonly message?: StepInput["message"];
+    readonly message?: HarnessStepInput["message"];
     /** The deliveries the turn consumes. */
-    readonly deliveries?: StepInput["deliveries"];
+    readonly deliveries?: HarnessStepInput["deliveries"];
   },
 ): Promise<StepResult | undefined> {
   const { config, ctx } = step;

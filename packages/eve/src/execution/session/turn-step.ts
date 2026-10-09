@@ -40,7 +40,7 @@ import {
 } from "#harness/session-machine/current.js";
 import type { DeliverPayload } from "#channel/types.js";
 import { coalesceTurnInputs, validateHarnessModelMessages } from "#harness/messages.js";
-import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
+import type { HarnessSession, HarnessStepInput, StepResult } from "#harness/types.js";
 import { attributeAnswers } from "#execution/session/answer-caller.js";
 import type {
   DurableStepResult,
@@ -312,11 +312,11 @@ async function runSessionStepBody(
         ? structuredClone(adapterCtx.state)
         : undefined;
     // Run the adapter's deliver hook for each queued payload and coalesce
-    // the resulting StepInput values; runtime results ride the same input.
-    let resolved: StepInput | undefined;
+    // the resulting HarnessStepInput values; runtime results ride the same input.
+    let resolved: HarnessStepInput | undefined;
     let admission: DeliveryAdmission | undefined;
     if (delivery !== undefined) {
-      const delivered: { payload: DeliverPayload; input: StepInput | undefined }[] = [];
+      const delivered: { payload: DeliverPayload; input: HarnessStepInput | undefined }[] = [];
       try {
         for (const payload of delivery.payloads) {
           const result = adapter.deliver
@@ -484,7 +484,7 @@ async function runSessionStepBody(
 
     const runHarnessStep = async (
       lifecycleSession: HarnessSession,
-      stepInput: StepInput | undefined,
+      stepInput: HarnessStepInput | undefined,
       signInCompletions: readonly AuthorizationChallenge[] | undefined,
     ): Promise<StepResult> => {
       const refreshedSession = refreshSessionFromTurnAgent({
