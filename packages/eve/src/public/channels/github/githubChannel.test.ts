@@ -7,6 +7,7 @@ import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { SandboxKey, SessionKey } from "#context/keys.js";
+import { readInputText } from "#internal/input-text.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { mockSandbox, type MockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -407,6 +408,34 @@ describe("githubChannel", () => {
     const [, input] = send.mock.calls[0]!;
     expect(input.message).toBe("Yes");
     expect(input.context).toEqual([expect.stringContaining("<github_context>")]);
+  });
+
+  it("keeps a quote reply model-visible but answers with what the person typed", async () => {
+    const channel = githubChannel({
+      botName: "testbot",
+      credentials: { webhookSecret: SECRET },
+    });
+    const { send } = await firePost(
+      channel,
+      signedRequest(
+        "issue_comment",
+        basePayload({
+          action: "created",
+          comment: {
+            body: "> Approve tool call: deploy\n>\n> 1. Yes\n> 2. No\n\n@testbot Yes",
+            html_url: "https://github.test/vercel/eve/issues/5#issuecomment-10",
+            id: 10,
+            user: { id: 1, login: "octocat", type: "User" },
+          },
+          issue: { number: 5 },
+        }),
+      ),
+    );
+
+    expect(send).toHaveBeenCalledTimes(1);
+    const [, input] = send.mock.calls[0]!;
+    expect(input.message).toBe("> Approve tool call: deploy\n>\n> 1. Yes\n> 2. No\n\nYes");
+    expect(readInputText(input)).toBe("Yes");
   });
 
   it("dispatches Connect-forwarded issue comments without GitHub event headers", async () => {
