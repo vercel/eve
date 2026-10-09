@@ -31,12 +31,12 @@ export default defineEval({
       satisfies(
         (value: unknown) =>
           Array.isArray(value) &&
-          ["turn.started", "step.started"].every((type) =>
+          ["turn.started", "model.started"].every((type) =>
             (value as QueuedAuditEvent[]).some(
-              (entry) => entry.type === type && entry.eventId.length > 0,
+              (entry) => entry.type === type && /^\d+:\d+$/u.test(entry.position),
             ),
           ),
-        "the audit hook queued the first turn's turn.started and step.started before throwing",
+        "the audit hook queued the first turn's turn.started and model.started before throwing",
       ),
     );
   },

@@ -21,7 +21,7 @@ export default defineEval({
     const parked = await t.send('Call the guarded-echo tool with note "openai-approve".');
     const session = parked.session;
     parked.calledTool("guarded-echo", { status: "pending", count: 1 });
-    parked.notEvent("compaction.completed");
+    parked.notEvent("context.settled", { data: { kind: "compaction", outcome: "completed" } });
     session.requireInputRequest({
       display: "confirmation",
       toolName: "guarded-echo",
@@ -31,22 +31,15 @@ export default defineEval({
     // produced when a Telegram reply falls back to an ordinary text message.
     const approved = await session.send("approve");
     approved.expectOk();
-    approved.notEvent("compaction.completed");
-    approved.event("action.result", {
-      data: {
-        result: {
-          kind: "tool-result",
-          output: new RegExp(GUARDED_ECHO_OPENAI_TOKEN),
-          toolName: "guarded-echo",
-        },
-        status: "completed",
-      },
+    approved.notEvent("context.settled", { data: { kind: "compaction", outcome: "completed" } });
+    approved.event("call.settled", {
+      data: { outcome: "completed", output: new RegExp(GUARDED_ECHO_OPENAI_TOKEN) },
       count: 1,
     });
 
     const followup = await session.send("Reply with exactly OPENAI-REPLAY-OK.");
     followup.expectOk();
-    followup.notEvent("compaction.completed");
+    followup.notEvent("context.settled", { data: { kind: "compaction", outcome: "completed" } });
     followup.messageIncludes(/OPENAI-REPLAY-OK/i);
 
     t.succeeded();

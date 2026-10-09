@@ -9,7 +9,7 @@ const ALICE_REWORK =
  * The turn holds on the task until its question parks it. Alice then changes
  * the plan: the model cancels the task, which asks the session to withdraw
  * the question, and sends the same task a note. The session withdraws the
- * question, reports it `cancelled`, and tells the run, so the body returns to
+ * question, reports it `withdrawn`, and tells the run, so the body returns to
  * `receive()` and answers the note on its own run.
  */
 export default defineEval({
@@ -33,27 +33,32 @@ export default defineEval({
     const followed = await t.target
       .watchTurn(parked.sessionId, { startIndex: afterQuestion })
       .result();
-    followed.event("input.resolved", {
+    followed.event("interaction.settled", {
       count: 1,
-      data: { resolutions: [{ outcome: "cancelled", requestId: request.requestId }] },
+      data: { interactionId: request.requestId, outcome: "withdrawn" },
     });
-    followed.event("task.settled", { count: 1, data: { callId: "signoff", status: "cancelled" } });
-    followed.event("task.settled", {
+    followed.event("call.settled", {
+      count: 1,
+      data: { callId: "signoff", outcome: "interrupted" },
+    });
+    followed.event("call.settled", {
       count: 1,
       data: {
         callId: "signoff-note",
         output: { notes: ["rework the plan first"] },
-        status: "completed",
+        outcome: "completed",
       },
     });
     followed.eventOrder([
-      { type: "input.resolved" },
-      { data: { callId: "signoff-note" }, type: "task.settled" },
+      { data: { interactionId: request.requestId }, type: "interaction.settled" },
+      { data: { callId: "signoff-note" }, type: "call.settled" },
     ]);
 
     // The watched stream repeats the session's events, so count distinct calls.
     t.eventsSatisfy("every call reaches the one task the sign-off started", (events) => {
-      const starts = events.flatMap((event) => (event.type === "task.started" ? [event.data] : []));
+      const starts = events.flatMap((event) =>
+        event.type === "call.started" && event.data.taskId !== undefined ? [event.data] : [],
+      );
       const callIds = new Set(starts.map((start) => start.callId));
       const taskIds = new Set(starts.map((start) => start.taskId));
       return (

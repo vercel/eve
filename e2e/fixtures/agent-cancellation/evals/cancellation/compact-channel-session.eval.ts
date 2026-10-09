@@ -63,8 +63,8 @@ export default defineEval({
     const sessionId = started.sessionId!;
 
     const initial = await t.target.watchTurn(sessionId).result();
-    initial.notEvent("turn.failed");
-    initial.notEvent("session.failed");
+    initial.notEvent("turn.settled", { data: { outcome: "failed" } });
+    initial.notEvent("session.ended", { data: { outcome: "failed" } });
 
     const liveCompaction = t.target.watchTurn(sessionId, {
       startIndex: initial.events.length,
@@ -84,16 +84,18 @@ export default defineEval({
     );
 
     const compacted = await liveCompaction.result();
-    compacted.event("compaction.requested", { count: 1 });
-    compacted.event("compaction.completed", { count: 1 });
+    compacted.event("context.started", { count: 1, data: { kind: "compaction" } });
+    compacted.event("context.settled", {
+      count: 1,
+      data: { kind: "compaction", outcome: "completed" },
+    });
     compacted.eventOrder([
-      { type: "compaction.requested" },
-      { type: "compaction.completed" },
-      { type: "session.waiting" },
+      { data: { kind: "compaction" }, type: "context.started" },
+      { data: { kind: "compaction", outcome: "completed" }, type: "context.settled" },
     ]);
     compacted.notEvent("turn.started");
-    compacted.notEvent("turn.failed");
-    compacted.notEvent("session.failed");
+    compacted.notEvent("turn.settled", { data: { outcome: "failed" } });
+    compacted.notEvent("session.ended", { data: { outcome: "failed" } });
 
     const followUpTurn = t.target.watchTurn(sessionId, {
       startIndex: initial.events.length + compacted.events.length,
@@ -111,8 +113,8 @@ export default defineEval({
     );
 
     const followUp = await followUpTurn.result();
-    followUp.notEvent("turn.failed");
-    followUp.notEvent("session.failed");
+    followUp.notEvent("turn.settled", { data: { outcome: "failed" } });
+    followUp.notEvent("session.ended", { data: { outcome: "failed" } });
     followUp.messageIncludes(/COMPACT-FOLLOW-UP-OK/i);
 
     t.succeeded();

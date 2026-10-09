@@ -57,8 +57,8 @@ export default defineEval({
     const sessionId = started.sessionId!;
 
     const initial = await t.target.watchTurn(sessionId).result();
-    initial.notEvent("turn.failed");
-    initial.notEvent("session.failed");
+    initial.notEvent("turn.settled", { data: { outcome: "failed" } });
+    initial.notEvent("session.ended", { data: { outcome: "failed" } });
 
     const liveClear = t.target.watchTurn(sessionId, { startIndex: initial.events.length });
     await new Promise((resolve) => setTimeout(resolve, 250));
@@ -76,11 +76,13 @@ export default defineEval({
     );
 
     const cleared = await liveClear.result();
-    cleared.event("context.cleared", { count: 1 });
-    cleared.eventOrder([{ type: "context.cleared" }, { type: "session.waiting" }]);
+    cleared.event("context.settled", { count: 1, data: { kind: "clear", outcome: "completed" } });
+    cleared.eventOrder([
+      { data: { kind: "clear", outcome: "completed" }, type: "context.settled" },
+    ]);
     cleared.notEvent("turn.started");
-    cleared.notEvent("turn.failed");
-    cleared.notEvent("session.failed");
+    cleared.notEvent("turn.settled", { data: { outcome: "failed" } });
+    cleared.notEvent("session.ended", { data: { outcome: "failed" } });
 
     const followUpTurn = t.target.watchTurn(sessionId, {
       startIndex: initial.events.length + cleared.events.length,
@@ -98,8 +100,8 @@ export default defineEval({
     );
 
     const followUp = await followUpTurn.result();
-    followUp.notEvent("turn.failed");
-    followUp.notEvent("session.failed");
+    followUp.notEvent("turn.settled", { data: { outcome: "failed" } });
+    followUp.notEvent("session.ended", { data: { outcome: "failed" } });
     followUp.messageIncludes(/CLEAR-FOLLOW-UP-OK/i);
 
     t.succeeded();

@@ -20,7 +20,8 @@ export default defineEval({
       toolName: INVENTORY_TOOL,
     });
     parked.calledTool(INVENTORY_TOOL, { count: 1, status: "pending" });
-    parked.notEvent("action.result", { data: { result: { toolName: INVENTORY_TOOL } } });
+    const inventoryCallId = parked.toolCalls.find((call) => call.name === INVENTORY_TOOL)?.callId;
+    parked.notEvent("call.settled", { data: (data) => data.callId === inventoryCallId });
 
     const approved = await session.respondAll("approve");
 

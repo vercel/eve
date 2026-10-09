@@ -1,5 +1,5 @@
-import type { MessageStreamEvent } from "eve/client";
-import { defineEval } from "eve/evals";
+import type { SessionStreamEvent } from "eve/client";
+import { defineEval, toolCallsOf } from "eve/evals";
 
 import { FANOUT_BARRIER_SERVER_URL } from "./shared";
 
@@ -63,7 +63,7 @@ function commandFor(request: (typeof REQUESTS)[number]): string {
 
 function curlCallsReachBarrier(input: {
   readonly barrierSize: number;
-  readonly events: readonly MessageStreamEvent[];
+  readonly events: readonly SessionStreamEvent[];
   readonly expectedRequests: readonly { readonly label: string; readonly query: string }[];
   readonly minimumCalls: number;
 }): boolean {
@@ -86,12 +86,11 @@ function curlCallsReachBarrier(input: {
   );
 }
 
-function curlBarrierResults(events: readonly MessageStreamEvent[]): readonly CurlBarrierResult[] {
-  return events.flatMap((event) => {
-    if (event.type !== "action.result" || event.data.result.kind !== "tool-result") return [];
-    if (event.data.result.toolName !== BASH_TOOL) return [];
+function curlBarrierResults(events: readonly SessionStreamEvent[]): readonly CurlBarrierResult[] {
+  return toolCallsOf(events).flatMap((call) => {
+    if (call.name !== BASH_TOOL || call.status !== "completed") return [];
 
-    return parseCurlBarrierResult(event.data.result.output);
+    return parseCurlBarrierResult(call.output);
   });
 }
 
@@ -118,7 +117,7 @@ function parseCurlBarrierResult(value: unknown): readonly CurlBarrierResult[] {
   return [];
 }
 
-function formatCurlFanoutTrace(events: readonly MessageStreamEvent[]): string {
+function formatCurlFanoutTrace(events: readonly SessionStreamEvent[]): string {
   return JSON.stringify({
     calls: curlBarrierResults(events),
   });

@@ -9,9 +9,9 @@ export default defineEval({
     );
     turn.expectOk();
     const started = turn.events.find(
-      (event) => event.type === "agent.started" && event.data.name === "deny-all",
+      (event) => event.type === "child.opened" && event.data.name === "deny-all",
     );
-    if (started?.type !== "agent.started") {
+    if (started?.type !== "child.opened") {
       throw new Error("Typed sandbox turn did not call the deny-all subagent.");
     }
 

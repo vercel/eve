@@ -82,18 +82,17 @@ export default defineEval({
     observerChild.expectOk();
     observerChild.calledTool("read-workspace-label", { status: "failed" });
     observerChild.calledTool("read-workspace-label", { count: 0, status: "completed" });
-    observerChild.event("action.result", {
+    observerChild.event("call.settled", {
       data: {
         error: { message: /No workspace membership exists for e2e-observer/ },
-        result: { kind: "tool-result", toolName: "read-workspace-label" },
-        status: "failed",
+        outcome: "failed",
       },
     });
 
-    t.event("task.started", { data: { kind: "agent", name: "remote-loopback", taskId }, count: 3 })
+    t.event("call.started", { data: { taskId }, count: 3 })
       .soft()
       .label("every caller continues the same task");
-    t.event("agent.started", { data: { name: "remote-loopback" }, count: 1 })
+    t.event("child.opened", { data: { name: "remote-loopback" }, count: 1 })
       .soft()
       .label("no repeated delegation");
     t.succeeded();
@@ -170,21 +169,25 @@ async function waitForRemoteChild(
   throw new Error("The parent did not call remote-loopback after five turns.");
 }
 
-/** A later call reaches the task's session, which `agent.started` announced once with the task's ID. */
+/** A later call reaches the task's session, which `child.opened` announced once under the task. */
 function findRemoteChild(turn: EveEvalTurn, expected?: RemoteChild): RemoteChild | undefined {
+  if (expected !== undefined) {
+    const reached = turn.events.some(
+      (event) => event.type === "call.started" && event.data.taskId === expected.taskId,
+    );
+    if (reached) return expected;
+    if (turn.events.some((event) => event.type === "task.started")) {
+      throw new Error("The parent turn did not continue the existing remote-loopback task.");
+    }
+    return undefined;
+  }
   for (const event of turn.events) {
     if (event.type !== "task.started" || event.data.name !== "remote-loopback") continue;
-    if (expected !== undefined) {
-      if (event.data.taskId !== expected.taskId) {
-        throw new Error("The parent turn did not continue the existing remote-loopback task.");
-      }
-      return expected;
-    }
     const started = turn.events.find(
       (candidate) =>
-        candidate.type === "agent.started" && candidate.data.taskId === event.data.taskId,
+        candidate.type === "child.opened" && candidate.scope?.taskId === event.data.taskId,
     );
-    if (started?.type === "agent.started") {
+    if (started?.type === "child.opened") {
       return { childSessionId: started.data.sessionId, taskId: event.data.taskId };
     }
   }

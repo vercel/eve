@@ -1,4 +1,5 @@
 import { defineEval } from "eve/evals";
+import { callsReachingTasks } from "./task-calls.shared";
 
 const MEMORABLE_FACT = "The observatory locker code is ORBIT-CEDAR-7319.";
 
@@ -35,16 +36,14 @@ export default defineEval({
 
     t.succeeded();
     t.eventsSatisfy("both turns continue one child session", (events) => {
-      const calls = events.flatMap((event) =>
-        event.type === "task.started" && event.data.name === "agent" ? [event.data] : [],
-      );
+      const calls = callsReachingTasks(events, "agent");
       return (
         calls.length >= 2 &&
         new Set(calls.map((call) => call.taskId)).size === 1 &&
         new Set(calls.map((call) => call.turnId)).size >= 2
       );
     });
-    t.event("agent.started", { data: { name: "agent" }, count: 1 });
+    t.event("child.opened", { data: { name: "agent" }, count: 1 });
     t.noFailedActions();
   },
 });

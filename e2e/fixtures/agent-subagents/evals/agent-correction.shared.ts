@@ -1,4 +1,4 @@
-import type { MessageStreamEvent } from "eve/client";
+import type { SessionStreamEvent } from "eve/client";
 import type { EveEvalContext } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
@@ -15,13 +15,13 @@ export async function correctKeeperWhileItWorks(t: EveEvalContext, tool: string)
     `NOTEBOOK-CORRECT ${tool} Alice corrects the pier she asked about.`,
   );
   corrected.expectOk();
-  corrected.event("task.settled", {
+  corrected.event("call.settled", {
     count: 1,
-    data: { callId: "notebook-correction", output: CORRECTED_MEASUREMENT, status: "completed" },
+    data: { callId: "notebook-correction", output: CORRECTED_MEASUREMENT, outcome: "completed" },
   });
   corrected.messageIncludes(`NOTEBOOK-REPLY ${CORRECTED_MEASUREMENT}`);
 
-  t.event("agent.started", { count: 1, data: { name: tool } });
+  t.event("child.opened", { count: 1, data: { name: tool } });
   t.eventsSatisfy("the correction reaches the task the first call started", (events) => {
     const calls = events.flatMap((event) =>
       event.type === "task.started" && event.data.name === tool ? [event.data] : [],
@@ -30,21 +30,24 @@ export async function correctKeeperWhileItWorks(t: EveEvalContext, tool: string)
   });
 
   const started = corrected.events.find(
-    (event) => event.type === "agent.started" && event.data.name === tool,
+    (event) => event.type === "child.opened" && event.data.name === tool,
   );
-  if (started?.type !== "agent.started") return;
-  const firstTurn: MessageStreamEvent[] = [];
+  if (started?.type !== "child.opened") return;
+  const firstTurn: SessionStreamEvent[] = [];
   for await (const event of corrected.session.agent(started).stream()) {
     firstTurn.push(event);
-    if (event.type === "turn.completed" || event.type === "turn.failed") break;
+    if (event.type === "turn.settled") break;
   }
   t.check(
     firstTurn,
     satisfies(
-      (events: readonly MessageStreamEvent[]) =>
+      (events: readonly SessionStreamEvent[]) =>
         events.some(
           (event) =>
-            event.type === "message.received" && event.data.message.includes(NOTEBOOK_CORRECTION),
+            event.type === "delivery.consumed" &&
+            event.data.parts.some(
+              (part) => part.kind === "text" && part.text.includes(NOTEBOOK_CORRECTION),
+            ),
         ),
       "the keeper's first turn reads the correction before it completes",
     ),

@@ -68,12 +68,7 @@ export default defineEval({
     const sessionId = started.sessionId!;
 
     const live = t.target.watchTurn(sessionId);
-    await live.waitForEvent("actions.requested", {
-      data: {
-        actions: (actions) =>
-          actions.some((action) => action.kind === "tool-call" && action.toolName === TOOL_NAME),
-      },
-    });
+    await live.waitForEvent("call.requested", { data: { capability: { name: TOOL_NAME } } });
     t.log(`Tool call observed mid-turn; stopping thread ${threadId}.`);
 
     const stopped = await postJson<StopResponse>(t.target, `/threads/${threadId}/stop`, {});
@@ -86,11 +81,11 @@ export default defineEval({
     );
 
     const cancelledTurn = await live.result();
-    cancelledTurn.event("turn.cancelled", { count: 1 });
-    cancelledTurn.eventOrder([{ type: "turn.cancelled" }, { type: "session.waiting" }]);
-    cancelledTurn.notEvent("turn.failed");
-    cancelledTurn.notEvent("step.failed");
-    cancelledTurn.notEvent("session.failed");
+    cancelledTurn.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
+    cancelledTurn.eventOrder([{ data: { outcome: "cancelled" }, type: "turn.settled" }]);
+    cancelledTurn.notEvent("turn.settled", { data: { outcome: "failed" } });
+    cancelledTurn.notEvent("model.settled", { data: { outcome: "failed" } });
+    cancelledTurn.notEvent("session.ended", { data: { outcome: "failed" } });
 
     const resumed = await postJson<MessageResponse>(t.target, `/threads/${threadId}/messages`, {
       message: "Reply with exactly CHANNEL-CANCEL-FOLLOW-UP-OK.",
@@ -106,9 +101,9 @@ export default defineEval({
     const followUp = await t.target
       .watchTurn(sessionId, { startIndex: cancelledTurn.events.length })
       .result();
-    followUp.notEvent("turn.cancelled");
-    followUp.notEvent("turn.failed");
-    followUp.notEvent("session.failed");
+    followUp.notEvent("turn.settled", { data: { outcome: "cancelled" } });
+    followUp.notEvent("turn.settled", { data: { outcome: "failed" } });
+    followUp.notEvent("session.ended", { data: { outcome: "failed" } });
     followUp.messageIncludes(/CHANNEL-CANCEL-FOLLOW-UP-OK/i);
 
     t.succeeded();

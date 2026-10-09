@@ -53,10 +53,10 @@ export default defineEval({
       },
     ]);
     stopped.expectOk();
-    stopSession.notEvent("turn.failed");
-    stopSession.notEvent("session.failed");
-    stopSession.notEvent("session.completed");
-    stopSession.event("turn.cancelled");
+    stopSession.notEvent("turn.settled", { data: { outcome: "failed" } });
+    stopSession.notEvent("session.ended", { data: { outcome: "failed" } });
+    stopSession.notEvent("session.ended", { data: { outcome: "completed" } });
+    stopSession.event("turn.settled", { data: { outcome: "cancelled" } });
     t.check(stopped.status, equals("waiting"));
   },
 });

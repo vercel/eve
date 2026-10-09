@@ -10,12 +10,7 @@ export default defineEval({
   async test(t) {
     const session = await t.session();
     const live = await session.start("WORKFLOW-SLEEP-START");
-    await live.waitForEvent("actions.requested", {
-      data: {
-        actions: (actions) =>
-          actions.some((action) => action.kind === "tool-call" && action.toolName === "sleep"),
-      },
-    });
+    await live.waitForEvent("call.requested", { data: { capability: { name: "sleep" } } });
 
     const update = await live.session.start(
       "Alice has the numbers now, so there is no need to wait.",
@@ -27,9 +22,9 @@ export default defineEval({
     await update.result();
 
     turn.calledTool("sleep", { count: 1, output: { interrupted: true } });
-    turn.event("message.received", { count: 2 });
-    turn.event("turn.completed", { count: 1 });
-    turn.notEvent("turn.cancelled");
+    turn.event("delivery.consumed", { count: 2 });
+    turn.event("turn.settled", { count: 1, data: { outcome: "completed" } });
+    turn.notEvent("turn.settled", { data: { outcome: "cancelled" } });
     turn.messageIncludes("WORKFLOW-SLEEP-RESULT Stopped early because a new message arrived.");
     t.noFailedActions();
   },

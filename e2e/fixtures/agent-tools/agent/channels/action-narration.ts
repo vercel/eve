@@ -76,20 +76,18 @@ export default defineChannel({
   ],
 
   events: {
-    "turn.started"(_event, channel) {
+    "turn.started"(_event, { channel }) {
       channel.state.pendingNarration = null;
     },
 
-    "message.completed"(event, channel) {
-      if (event.finishReason !== "tool-calls") return;
-      channel.state.pendingNarration = event.message ? firstNonEmptyLine(event.message) : null;
+    "content.completed"(event, { channel }) {
+      if (event.data.phase !== "narration" || typeof event.data.value !== "string") return;
+      channel.state.pendingNarration = firstNonEmptyLine(event.data.value);
     },
 
-    "actions.requested"(event, channel) {
-      const requestedStreamedAction = event.actions.some(
-        (action) => action.kind === "tool-call" && action.toolName === STREAMED_ACTION_TOOL,
-      );
-      if (!requestedStreamedAction) return;
+    "call.requested"(event, { channel }) {
+      const { capability } = event.data;
+      if (capability.kind !== "tool" || capability.name !== STREAMED_ACTION_TOOL) return;
 
       channel.state.observedNarration = channel.state.pendingNarration;
       channel.state.pendingNarration = null;
