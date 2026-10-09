@@ -380,9 +380,7 @@ export type WorkStreamEvent =
   | AuthorizationCompletedStreamEvent
   | AuthorizationRequiredStreamEvent
   | InputRequestedStreamEvent
-  | InputResolvedStreamEvent
-  | TaskSettledStreamEvent
-  | TaskStartedStreamEvent;
+  | InputResolvedStreamEvent;
 
 /**
  * Creates the `authorization.required` event for one authorization source

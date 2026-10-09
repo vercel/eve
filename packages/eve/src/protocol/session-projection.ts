@@ -400,49 +400,64 @@ export function foldSession<S extends SessionProjection>(
         turnId,
       });
     }
-    case "call.settled": {
-      const { callId, error, outcome } = typed.data;
+    case "call.started": {
+      const { callId, taskId } = typed.data;
       const call = state.calls[callId];
-      // A task's call settles through its task.
-      if (call === undefined || call.taskId !== undefined) return state;
+      if (taskId === undefined || call === undefined || call.taskId === taskId) return state;
+      const task = state.tasks[taskId];
+      if (task === undefined) return state;
+      const next = putTask(
+        state,
+        putTaskCall(task, { callId, turnId: call.turnId, status: "working" }),
+      );
+      const linked: Mutable<SessionCall> = {
+        callId,
+        name: call.name,
+        stepIndex: call.stepIndex,
+        taskId,
+        turnId: call.turnId,
+      };
+      if (call.requestId !== undefined) linked.requestId = call.requestId;
+      return putCall(next, linked);
+    }
+    case "call.settled": {
+      const { callId, error, outcome, outputOf } = typed.data;
+      const call = state.calls[callId];
+      if (call === undefined) return state;
+      if (call.taskId !== undefined)
+        return updateTask(state, call.taskId, (task) => {
+          const running = task.calls[callId];
+          if (running === undefined || running.status !== "working") return task;
+          const status: ConversationTaskCall["status"] =
+            outcome === "completed"
+              ? "completed"
+              : outcome === "interrupted"
+                ? "cancelled"
+                : "failed";
+          const output =
+            typed.data.output !== undefined
+              ? typed.data.output
+              : outputOf === undefined
+                ? undefined
+                : task.calls[outputOf.callId]?.output;
+          const settled = { callId, turnId: call.turnId, status };
+          return putTaskCall(
+            task,
+            status === "completed" && output !== undefined
+              ? { ...settled, output }
+              : status === "failed" && error !== undefined
+                ? { ...settled, error }
+                : settled,
+          );
+        });
       const status: SessionCallStatus =
         outcome === "interrupted" ? "cancelled" : outcome === "abandoned" ? "failed" : outcome;
       return updateCall(state, callId, (current) => settleCall(current, status, error));
     }
     case "task.started": {
-      const { callId, kind, name, taskId, turnId } = typed.data;
-      const task = state.tasks[taskId] ?? { taskId, name, kind, calls: {} };
-      let next: S = state;
-      if (task.calls[callId] === undefined) {
-        next = putTask(next, putTaskCall(task, { callId, turnId, status: "working" }));
-      }
-      const call = next.calls[callId];
-      if (call?.taskId === taskId) return next;
-      const linked: Mutable<SessionCall> = {
-        callId,
-        name: call?.name ?? name,
-        stepIndex: call?.stepIndex ?? 0,
-        taskId,
-        turnId: call?.turnId ?? turnId,
-      };
-      if (call?.requestId !== undefined) linked.requestId = call.requestId;
-      return putCall(next, linked);
-    }
-    case "task.settled": {
-      const { callId, error, output, status, taskId } = typed.data;
-      return updateTask(state, taskId, (task) => {
-        const call = task.calls[callId];
-        if (call === undefined || call.status !== "working") return task;
-        const settled = { callId, turnId: call.turnId, status };
-        return putTaskCall(
-          task,
-          status === "completed" && output !== undefined
-            ? { ...settled, output }
-            : status === "failed" && error !== undefined
-              ? { ...settled, error }
-              : settled,
-        );
-      });
+      const { kind, name, taskId } = typed.data;
+      if (state.tasks[taskId] !== undefined) return state;
+      return putTask(state, { taskId, name, kind: kind === "agent" ? "agent" : "tool", calls: {} });
     }
     case "input.requested": {
       const inputs = { ...state.inputs };

@@ -380,7 +380,11 @@ async function runSessionStepBody(
       }
     }
     if (resolved !== undefined && admission !== undefined && admission.consumed.length > 0) {
-      resolved = { ...resolved, deliveries: admission.consumed };
+      resolved = {
+        ...resolved,
+        deliveries: admission.consumed,
+        responseBindings: [...(resolved.responseBindings ?? []), ...admission.responseBindings],
+      };
     }
     if (runtimeResults !== undefined) {
       if (runtimeResults.acceptedAtMsByCallId !== undefined) {

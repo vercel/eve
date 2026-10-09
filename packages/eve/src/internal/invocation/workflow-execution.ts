@@ -255,7 +255,12 @@ async function readInvocationStream(invocationId: string): Promise<InvocationStr
         const text = reply.flatMap((part) =>
           part.kind === "text" && typeof part.value === "string" ? [part.value] : [],
         );
-        result = structured?.value ?? (text.length === 0 ? undefined : text.join("\n"));
+        result =
+          structured !== undefined
+            ? structured.value
+            : text.length === 0
+              ? undefined
+              : text.join("\n");
         const error = failureOf(event);
         settled =
           error === undefined

@@ -381,22 +381,17 @@ export class EveAcpAdapter {
           sessionUpdate: "tool_call_update",
           toolCallId: callId,
           status: ACP_TOOL_STATUS[status],
-          ...callOutput(event, callId),
+          ...callOutput(event, callId, session.projection),
           ...resultTitle(event, callId),
         });
       }
     }
     // A result reports its content even when its call had already settled, such as the reason
     // for a denial that `input.resolved` decided first.
-    const resultCallId =
-      event.type === "call.settled"
-        ? event.data.callId
-        : event.type === "task.settled"
-          ? event.data.callId
-          : undefined;
+    const resultCallId = event.type === "call.settled" ? event.data.callId : undefined;
     if (resultCallId === undefined || updated.has(resultCallId)) return;
     if (!session.tools.has(resultCallId)) return;
-    const output = callOutput(event, resultCallId);
+    const output = callOutput(event, resultCallId, session.projection);
     const status = callStatus(session.projection, resultCallId);
     if (!("content" in output) || status === undefined) return;
     await notifyUpdate(client, sessionId, {
@@ -667,15 +662,21 @@ function resultTitle(event: SessionStreamEvent, callId: string): { title?: strin
 }
 
 /** The output an event carries for a call, if it reports one. */
-function callOutput(event: SessionStreamEvent, callId: string) {
+function callOutput(event: SessionStreamEvent, callId: string, projection: SessionProjection) {
+  if (event.type !== "call.settled" || event.data.callId !== callId) return {};
+  const outputOf = event.data.outputOf;
+  const shared =
+    outputOf === undefined
+      ? undefined
+      : Object.values(projection.tasks)
+          .flatMap((task) => Object.values(task.calls))
+          .find((call) => call.callId === outputOf.callId)?.output;
   const output =
-    event.type === "call.settled" && event.data.callId === callId
-      ? (event.data.output ?? event.data.error?.message)
-      : event.type === "task.settled" && event.data.callId === callId
-        ? event.data.output !== undefined
-          ? event.data.output
-          : event.data.error?.message
-        : undefined;
+    event.data.output !== undefined
+      ? event.data.output
+      : shared !== undefined
+        ? shared
+        : event.data.error?.message;
   if (output === undefined) return {};
   return {
     content: [

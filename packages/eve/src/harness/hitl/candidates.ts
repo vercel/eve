@@ -72,6 +72,10 @@ interface ApprovalStateTransition {
 /** Creates or deduplicates one responder's candidate decision for a pending request. */
 export function createApprovalCandidate(input: {
   readonly candidateIdPrefix: string;
+  /** Stable response identity, when the delivery boundary supplied one. */
+  readonly candidateId?: string;
+  /** An admitted answer remains revisable while its containing batch is undecided. */
+  readonly revisionPending?: boolean;
   readonly createdAt: number;
   readonly decision: ApprovalCandidateDecision;
   readonly expiresAt: number;
@@ -82,16 +86,23 @@ export function createApprovalCandidate(input: {
   const expiredState = expireApprovalCandidates({ now: input.createdAt, state: input.state });
   const approvalState = readApprovalState(expiredState);
   const settlement = approvalState.settlements[input.requestId];
-  if (settlement !== undefined) {
+  if (settlement !== undefined && input.revisionPending !== true) {
     return { changed: false, state: expiredState };
   }
+  if (
+    input.candidateId !== undefined &&
+    (approvalState.activeCandidates[input.candidateId] !== undefined ||
+      approvalState.candidateHistory.some((entry) => entry.candidateId === input.candidateId))
+  )
+    return { changed: false, state: expiredState };
 
   const responder = input.responder;
   const duplicate = Object.values(approvalState.activeCandidates).find(
     (candidate) =>
       candidate.requestId === input.requestId &&
       candidate.decision === input.decision &&
-      sameResponder(candidate.responder, responder),
+      sameResponder(candidate.responder, responder) &&
+      input.candidateId === undefined,
   );
   if (duplicate !== undefined) {
     return { changed: false, state: expiredState };
@@ -102,9 +113,11 @@ export function createApprovalCandidate(input: {
     approvalState.candidateHistory.some(
       (candidate) => candidate.candidateId === input.candidateIdPrefix,
     );
-  const candidateId = prefixWasUsed
-    ? `${input.candidateIdPrefix}.${approvalState.nextCandidateSequence.toString(36)}`
-    : input.candidateIdPrefix;
+  const candidateId =
+    input.candidateId ??
+    (prefixWasUsed
+      ? `${input.candidateIdPrefix}.${approvalState.nextCandidateSequence.toString(36)}`
+      : input.candidateIdPrefix);
   if (
     approvalState.activeCandidates[candidateId] !== undefined ||
     approvalState.candidateHistory.some((candidate) => candidate.candidateId === candidateId)
@@ -204,6 +217,7 @@ export function expireApprovalCandidates(input: {
  */
 export function settleAllowedCandidate(input: {
   readonly candidateId: string;
+  readonly revisionPending?: boolean;
   readonly settledAt: number;
   readonly state: SessionStateMap | undefined;
 }): ApprovalStateTransition {
@@ -222,6 +236,7 @@ export function settleAllowedCandidate(input: {
   }
   return settleRequest({
     candidateId: candidate.candidateId,
+    revisionPending: input.revisionPending,
     outcome: candidate.decision === "cancel" ? "cancelled" : "allowed",
     requestId: candidate.requestId,
     responder: candidate.responder,
@@ -257,6 +272,8 @@ export function settleUnavailableCandidate(input: {
 /** Atomically settles a direct authenticated approval response. */
 export function settleDirectApprovalResponse(input: {
   readonly actor: SessionAuthContext;
+  readonly responseId?: string;
+  readonly revisionPending?: boolean;
   readonly outcome: "allowed" | "cancelled";
   readonly requestId: string;
   readonly settledAt: number;
@@ -264,6 +281,8 @@ export function settleDirectApprovalResponse(input: {
 }): ApprovalStateTransition {
   const state = expireApprovalCandidates({ now: input.settledAt, state: input.state });
   return settleRequest({
+    candidateId: input.responseId,
+    revisionPending: input.revisionPending,
     outcome: input.outcome,
     requestId: input.requestId,
     responder: input.actor,
@@ -296,6 +315,7 @@ export function getApprovalAuditState(state: SessionStateMap | undefined): {
 
 function settleRequest(input: {
   readonly candidateId?: string;
+  readonly revisionPending?: boolean;
   readonly outcome: ApprovalSettlementAuditRecord["outcome"];
   /** Why the settling candidate failed, for an unavailable request. */
   readonly reason?: string;
@@ -306,7 +326,13 @@ function settleRequest(input: {
 }): ApprovalStateTransition {
   const approvalState = readApprovalState(input.state);
   const existing = approvalState.settlements[input.requestId];
-  if (existing !== undefined) {
+  if (
+    existing !== undefined &&
+    (input.revisionPending !== true ||
+      (existing.candidateId === input.candidateId &&
+        existing.outcome === input.outcome &&
+        sameResponder(existing.actor, input.responder)))
+  ) {
     return { changed: false, state: input.state };
   }
 
@@ -321,11 +347,11 @@ function settleRequest(input: {
   const activeCandidates: Record<string, ActiveApprovalCandidate> = {};
   const candidateHistory = [...approvalState.candidateHistory];
   for (const candidate of Object.values(approvalState.activeCandidates)) {
-    if (candidate.requestId !== input.requestId) {
+    const settling = candidate.candidateId === input.candidateId;
+    if (candidate.requestId !== input.requestId || (input.revisionPending === true && !settling)) {
       activeCandidates[candidate.candidateId] = candidate;
       continue;
     }
-    const settling = candidate.candidateId === input.candidateId;
     candidateHistory.push(
       toCandidateAuditRecord({
         candidate,
