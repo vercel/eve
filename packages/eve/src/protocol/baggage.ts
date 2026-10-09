@@ -6,7 +6,13 @@ import { formatTraceContentCeiling } from "#shared/forwarded-trace-policy.js";
 import type { SessionParent } from "#channel/types.js";
 
 const EVE_AUDIENCE_KEY = "eve.audience";
+const EVE_CONVERSATION_ID_KEY = "eve.conversation.id";
 const EVE_PARENT_SESSION_KEY = "eve.parent_session";
+const EVE_TRACE_BAGGAGE_KEYS = [
+  EVE_AUDIENCE_KEY,
+  EVE_CONVERSATION_ID_KEY,
+  EVE_PARENT_SESSION_KEY,
+] as const;
 const CEILING_PROPERTY_KEY = "ceiling";
 const MAX_BAGGAGE_BYTES = 8192;
 const encoder = new TextEncoder();
@@ -102,6 +108,19 @@ export function writeForwardedAudienceBaggage(
       ? undefined
       : `${assertion.originAudience};${CEILING_PROPERTY_KEY}=${formatTraceContentCeiling(assertion.ceiling)}`,
   );
+}
+
+export function stripEveTraceBaggage(carrier: Record<string, string>): void {
+  let baggage = carrier["baggage"];
+  if (baggage === undefined) return;
+  for (const key of EVE_TRACE_BAGGAGE_KEYS) {
+    baggage = replaceBaggageMember(baggage, key, undefined);
+  }
+  if (baggage === undefined || encoder.encode(baggage).byteLength > MAX_BAGGAGE_BYTES) {
+    delete carrier["baggage"];
+  } else {
+    carrier["baggage"] = baggage;
+  }
 }
 
 /** Recognized members are singular; malformed or oversized input fails closed. */

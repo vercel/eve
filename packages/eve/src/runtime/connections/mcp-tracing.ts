@@ -20,17 +20,12 @@ import {
   withAgentToolSpanContext,
 } from "#tracing/agent-tool-span-context.js";
 import { truncateTelemetryText } from "#tracing/telemetry-budget.js";
-import { replaceBaggageMember } from "#protocol/baggage.js";
+import { stripEveTraceBaggage } from "#protocol/baggage.js";
 import { isObject } from "#shared/guards.js";
 
 const MAX_MCP_TRACE_REQUEST_BYTES = 1024 * 1024;
 const MAX_MCP_TRACE_CONTEXT_BYTES = 8192;
 const utf8Encoder = new TextEncoder();
-const EVE_TRACE_BAGGAGE_KEYS = [
-  "eve.audience",
-  "eve.conversation.id",
-  "eve.parent_session",
-] as const;
 const traceContextSetter: TextMapSetter<Record<string, string>> = {
   set(carrier, key, value) {
     carrier[key] = value;
@@ -299,16 +294,6 @@ type McpTraceContextInjector = (context: Context, carrier: Record<string, string
 
 function injectOpenTelemetryTraceContext(context: Context, carrier: Record<string, string>): void {
   propagation.inject(context, carrier, traceContextSetter);
-}
-
-function stripEveTraceBaggage(carrier: Record<string, string>): void {
-  let baggage = carrier["baggage"];
-  if (baggage === undefined) return;
-  for (const key of EVE_TRACE_BAGGAGE_KEYS) {
-    baggage = replaceBaggageMember(baggage, key, undefined);
-  }
-  if (baggage === undefined) delete carrier["baggage"];
-  else carrier["baggage"] = baggage;
 }
 
 function readJsonRpcRequest(body: RequestInit["body"]): JsonRpcRequest | undefined {

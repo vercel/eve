@@ -19,6 +19,7 @@ import { stepStartedForResolvers } from "#harness/session-machine/resolver-event
 import {
   buildGatewayAttributionHeaders,
   resolveEffectiveRuntimeModel,
+  withGatewayTraceContext,
 } from "#harness/model-call/model.js";
 import { canonicalizeMemoryRecords, shouldCanonicalizeMemory } from "#shared/memory-state.js";
 import {
@@ -196,7 +197,7 @@ export async function maybeCompact(input: {
   const call = {
     abortSignal: input.abortSignal,
     headers: buildGatewayAttributionHeaders(profile, input.runtimeIdentity),
-    model,
+    model: withGatewayTraceContext(model, profile),
     providerOptions,
     telemetry: input.telemetry && { ...input.telemetry, functionId: "eve.compaction" },
   };

@@ -52,7 +52,7 @@ import { requireSessionModelReference, type StepResult } from "#harness/types.js
 import type { InstrumentationAttempt } from "#instrumentation/runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { maybeCompact } from "#harness/compaction/step.js";
-import { buildGatewayAttributionHeaders } from "./model.js";
+import { buildGatewayAttributionHeaders, withGatewayTraceContext } from "./model.js";
 import { isEmptyModelResponse, rethrowNoOutputAsEmptyResponse } from "./recovery.js";
 import {
   modelInstructions,
@@ -344,7 +344,7 @@ export class ModelCaller {
     const settings = {
       headers: this.attributionHeaders,
       instructions,
-      model,
+      model: withGatewayTraceContext(model, this.profile),
       onLanguageModelCallEnd: (event: LanguageModelCallEndEvent) => {
         if (generation.interrupted) return;
         this.interruptedUsage = extractTokenUsageDelta({

@@ -6,3 +6,7 @@ const SUPPRESS_TRACING_KEY = createContextKey("OpenTelemetry SDK Context Key SUP
 export function suppressTracing(context: Context): Context {
   return context.setValue(SUPPRESS_TRACING_KEY, true);
 }
+
+export function isTracingSuppressed(context: Context): boolean {
+  return context.getValue(SUPPRESS_TRACING_KEY) === true;
+}
