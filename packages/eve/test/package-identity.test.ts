@@ -9,6 +9,7 @@ describe("package identity", () => {
   afterEach(() => {
     vi.doUnmock("node:fs");
     vi.doUnmock("node:module");
+    vi.doUnmock("#internal/application/stamped-package-version.js");
   });
 
   it("resolves package identity from the installed package metadata", () => {
@@ -18,7 +19,7 @@ describe("package identity", () => {
     expect(installedPackageInfo.version).toMatch(/\S/);
   });
 
-  it("falls back to bundled package metadata without runtime package resolution", async () => {
+  it("uses the stamped version in bundled output without runtime package resolution", async () => {
     vi.resetModules();
     const resolvePackageJson = vi.fn(() => {
       throw new Error("Unexpected package self-resolution.");
@@ -35,14 +36,51 @@ describe("package identity", () => {
         resolve: resolvePackageJson,
       }),
     }));
+    vi.doMock("#internal/application/stamped-package-version.js", () => ({
+      readStampedPackageVersion: () => "1.2.3",
+    }));
 
     const { resolveInstalledPackageInfo: resolveBundledPackageInfo } =
       await import("#internal/application/package.js");
     const installedPackageInfo = resolveBundledPackageInfo();
 
     expect(installedPackageInfo.name).toBe(EVE_PACKAGE_NAME);
-    expect(installedPackageInfo.version).toBe("0.0.0");
+    expect(installedPackageInfo.version).toBe("1.2.3");
     expect(resolvePackageJson).not.toHaveBeenCalled();
+  });
+
+  it("resolves the workspace package for an unstamped source bundle", async () => {
+    vi.resetModules();
+    const workspacePackageJsonPath = "/workspace/node_modules/eve/package.json";
+    vi.doMock("node:fs", () => ({
+      existsSync: () => false,
+      readFileSync: (path: string) => {
+        if (path === workspacePackageJsonPath) {
+          return JSON.stringify({ name: EVE_PACKAGE_NAME, version: "4.5.6" });
+        }
+
+        throw new Error("File not found.");
+      },
+      realpathSync: Object.assign((path: string) => path, {
+        native: (path: string) => path,
+      }),
+    }));
+    vi.doMock("node:module", () => ({
+      createRequire: () => ({
+        resolve: () => workspacePackageJsonPath,
+      }),
+    }));
+    vi.doMock("#internal/application/stamped-package-version.js", () => ({
+      readStampedPackageVersion: () => undefined,
+    }));
+
+    const { resolveInstalledPackageInfo: resolveSourcePackageInfo } =
+      await import("#internal/application/package.js");
+
+    expect(resolveSourcePackageInfo()).toEqual({
+      name: EVE_PACKAGE_NAME,
+      version: "4.5.6",
+    });
   });
 
   it("does not use metadata from a surrounding package that does not own the module", async () => {
@@ -63,13 +101,16 @@ describe("package identity", () => {
       readFileSync: readPackageJson,
       realpathSync,
     }));
+    vi.doMock("#internal/application/stamped-package-version.js", () => ({
+      readStampedPackageVersion: () => "1.2.3",
+    }));
 
     const { resolveInstalledPackageInfo: resolveBundledPackageInfo } =
       await import("#internal/application/package.js");
 
     expect(resolveBundledPackageInfo()).toEqual({
       name: EVE_PACKAGE_NAME,
-      version: "0.0.0",
+      version: "1.2.3",
     });
     expect(readPackageJson).not.toHaveBeenCalled();
   });
