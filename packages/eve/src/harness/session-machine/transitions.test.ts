@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { requireSignIn } from "#harness/hitl/approvals.js";
 import { sessionView } from "#harness/session-machine/commit.js";
-import { hold } from "#harness/session-machine/transitions.js";
+import { hold, sessionEndedFacts } from "#harness/session-machine/transitions.js";
+import { initialSessionProjection } from "#protocol/session-projection.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import type { HarnessSession } from "#harness/types.js";
 import { withOpenTurn, withPublished } from "#internal/testing/session-machine.js";
@@ -93,5 +94,44 @@ describe("hold", () => {
       data: { deliveryId: "answer-1", outcome: "awaiting-input", turnId },
       type: "delivery.settled",
     });
+  });
+});
+
+describe("hold on tasks", () => {
+  it("awaits the task calls still working after the session restores", () => {
+    const session = withPublished(withOpenTurn(BASE, { sequence: 0, stepIndex: 0, turnId }), [
+      {
+        data: { callId: "child", capability: { kind: "agent", name: "child" }, owner: { runId } },
+        scope: { runId, turnId },
+        type: "call.requested",
+      },
+      {
+        data: { kind: "agent", name: "child", startedBy: { callId: "child" }, taskId: "task-1" },
+        scope: { turnId },
+        type: "task.started",
+      },
+      { data: { callId: "child", taskId: "task-1" }, scope: { turnId }, type: "call.started" },
+    ]);
+    // The checkpoint keeps only what a step reads: the public tables, not reader-side tasks.
+    const restored = sessionView(storedProjection(session.state), session.state);
+
+    const { events } = hold(restored, { on: "tasks" });
+
+    expect(events).toEqual([
+      { data: { awaiting: [{ callId: "child" }], turnId }, scope: { turnId }, type: "turn.paused" },
+    ]);
+  });
+});
+
+describe("sessionEndedFacts", () => {
+  it("starts a session that ends before it started, so the end has something to end", () => {
+    const facts = sessionEndedFacts(initialSessionProjection(), { outcome: "failed" });
+    expect(facts.map((event) => event.type)).toEqual(["session.started", "session.ended"]);
+  });
+
+  it("doesn't start a session twice", () => {
+    const projection = storedProjection(runningCall().state);
+    const facts = sessionEndedFacts(projection, { outcome: "completed" });
+    expect(facts.filter((event) => event.type === "session.started")).toEqual([]);
   });
 });

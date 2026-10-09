@@ -5,7 +5,7 @@ import type {
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
-import { callSettledFrom } from "#harness/call-facts.js";
+import { callSettledFrom, toJsonValue } from "#harness/call-facts.js";
 import { closeFacts, closureFor, notIn, publicViewOf } from "#harness/session-machine/closure.js";
 import {
   activeTurn,
@@ -51,11 +51,11 @@ import {
   nextChangeId,
   nextRunId,
   openRequests,
-  workingTaskCalls,
   type SessionProjection,
 } from "#protocol/session-projection.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
+import type { InteractionOrigin } from "#protocol/session-events/families/interaction.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { Transition } from "./commit.js";
 import type { SuspendedStep, TurnState } from "./state.js";
@@ -327,9 +327,11 @@ export function hold(
   if (turnId === "") return unchanged(view, []);
   const awaiting: TurnAwaiting[] =
     input.on === "tasks"
-      ? [...new Set(workingTaskCalls(projection).map((call) => call.callId))].map((callId) => ({
-          callId,
-        }))
+      ? // The public tables, which the checkpoint keeps: a restored session's projection holds
+        // no reader-side task calls.
+        Object.values(publicViewOf(projection).calls)
+          .filter((call) => call.status === "running" && call.taskId !== undefined)
+          .map(({ callId }) => ({ callId }))
       : [
           ...new Set([
             ...openWork(publicViewOf(projection), { turnId }).interactions.map(
@@ -479,6 +481,11 @@ export function sessionEndedFacts(
   },
 ): SessionEvent[] {
   const facts: SessionEvent[] = [];
+  // A session that ends before it started, as one that fails admitting its first message or a
+  // prewarmed one that expires, starts in the same commit: only a started session ends.
+  if (projection !== undefined && projection.started !== true) {
+    facts.push({ data: {}, type: "session.started" });
+  }
   const { control } = ending;
   if (control !== undefined) facts.push(controlAdmitted(control, "reset"));
   let closed: OpenWork = noWork();
@@ -927,7 +934,11 @@ export function relay(
       if (tables.interactions[request.requestId] !== undefined) continue;
       opening.push(request.requestId);
       events.push(
-        interactionOpened(request, { origin: origin(request.requestId), scope, subject }),
+        interactionOpened(request, {
+          origin: { ...origin(request.requestId), call: askedAbout(request) },
+          scope,
+          subject,
+        }),
       );
     }
   } else {
@@ -953,10 +964,21 @@ export function relay(
         events.push(responseSettled(answer, event.data.outcome, event.data.reason));
     }
   }
-  // A task's request waits on its task, not on the turn.
-  if (opening.length > 0 && taskId === undefined)
+  // A task's request waits on its task, not on the turn, unless the turn already waits on its
+  // tasks: then it waits on the person too, and its deliveries are answered for now.
+  const waiting = turnId === undefined ? undefined : tables.turns[turnId];
+  if (opening.length > 0 && (taskId === undefined || waiting?.status === "paused"))
     events.push(...hold(view, { on: "input", opening }).events);
   return unchanged(view, events);
+}
+
+/** The child's call a relayed request asks about; a budget prompt asks about no call. */
+function askedAbout(request: InputRequest): InteractionOrigin["call"] {
+  if (request.kind === "session-limit") return undefined;
+  const { callId, input, toolName } = request.action;
+  return input === undefined
+    ? { callId, name: toolName }
+    : { callId, input: toJsonValue(input), name: toolName };
 }
 
 /** The asker settled what this session mirrors: the mirror settles the same way. */

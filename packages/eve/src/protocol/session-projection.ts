@@ -15,6 +15,7 @@ import type { SessionView } from "#protocol/session-projection/tables.js";
 import { interactionOwner, openInteractions } from "#protocol/session-projection/selectors.js";
 import type { InputOption, InputRequest, InputResponse } from "#shared/input.js";
 import type { JsonValue } from "#shared/json.js";
+import { isJsonObjectValue } from "#shared/json.js";
 
 // The session's private lifecycle fold: turns, runs, calls, requests, tasks, and sign-ins, with
 // the coordinates the v26 work events still carry. Execution reads it; it folds the v27 facts the
@@ -498,10 +499,14 @@ export function foldSession<S extends SessionProjection>(
       // task. An approval without an origin is this session's own, about its own call.
       const relayed = origin !== undefined || kind === "question";
       const callId = "callId" in subject ? subject.callId : interactionId;
+      // A relayed request is about the asker's call, which this session's tables don't hold.
+      const asked = origin?.call;
       const input: Mutable<SessionInput> = {
         request: inputRequestOf(interactionId, request, kind, {
-          callId,
+          callId: asked?.callId ?? callId,
+          input: asked?.input,
           toolName:
+            asked?.name ??
             state.calls[callId]?.name ??
             (kind === "session-limit" ? SESSION_LIMIT_CONTINUATION_TOOL_NAME : kind),
         }),
@@ -631,10 +636,15 @@ function inputRequestOf(
   requestId: string,
   request: InteractionRequest,
   kind: InputRequest["kind"],
-  action: { readonly callId: string; readonly toolName: string },
+  action: { readonly callId: string; readonly input?: JsonValue; readonly toolName: string },
 ): InputRequest {
   const rebuilt: Mutable<InputRequest> = {
-    action: { callId: action.callId, input: {}, kind: "tool-call", toolName: action.toolName },
+    action: {
+      callId: action.callId,
+      input: isJsonObjectValue(action.input) ? action.input : {},
+      kind: "tool-call",
+      toolName: action.toolName,
+    },
     kind,
     prompt: request.prompt,
     requestId,
