@@ -13,9 +13,9 @@ const STAGED_IMAGE_PATH = /\/workspace\/\.eve\/attachments\/\S+\.png/u;
 function promptStripeColors(request: MockModelRequest): string[] | undefined {
   for (const result of [...request.toolResults].reverse()) {
     if (!Array.isArray(result.output)) continue;
-    for (const part of result.output as { type?: string; data?: { data?: unknown } }[]) {
-      if (part.type === "file" && typeof part.data?.data === "string") {
-        return readStripeColors(Buffer.from(part.data.data, "base64"), STRIPE_COUNT);
+    for (const part of result.output as { type?: string; data?: unknown }[]) {
+      if (part.type === "file-data" && typeof part.data === "string") {
+        return readStripeColors(Buffer.from(part.data, "base64"), STRIPE_COUNT);
       }
     }
   }
@@ -29,12 +29,15 @@ const base = e2eAgentConfig({
       if (request.tools.length === 0) return "Alice asked for the colors of the rendered stripes.";
       const colors = promptStripeColors(request);
       if (colors !== undefined) return colors.join(", ");
-      if (request.lastUserMessage?.includes("`render-stripes` exactly once")) {
-        return { toolCalls: [{ name: "render-stripes", input: {} }] };
-      }
-      const stagedPath = request.lastUserMessage?.match(STAGED_IMAGE_PATH)?.[0];
-      if (stagedPath !== undefined) {
-        return { toolCalls: [{ name: "read_file", input: { filePath: stagedPath } }] };
+      const roles = request.messages.map((message) => message.role);
+      if (roles.lastIndexOf("tool") <= roles.lastIndexOf("user")) {
+        if (request.lastUserMessage?.includes("`render-stripes` exactly once")) {
+          return { toolCalls: [{ name: "render-stripes", input: {} }] };
+        }
+        const stagedPath = request.lastUserMessage?.match(STAGED_IMAGE_PATH)?.[0];
+        if (stagedPath !== undefined) {
+          return { toolCalls: [{ name: "read_file", input: { filePath: stagedPath } }] };
+        }
       }
       // Every later turn answers from the image replayed out of history.
       throw new Error("The render-stripes image is missing from the replayed prompt.");
