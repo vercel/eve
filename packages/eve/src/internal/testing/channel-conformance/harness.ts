@@ -11,7 +11,7 @@ import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-
 import type { SessionAuthContext } from "#channel/types.js";
 import { eveChannel } from "#public/channels/eve.js";
 import { z } from "#compiled/zod/index.js";
-import type { ApprovalResponsePolicy } from "#approval/definition.js";
+import type { ApprovalPrompt, ApprovalResponsePolicy } from "#approval/definition.js";
 import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import { askQuestion } from "#tools/provided/ask-question.js";
@@ -332,8 +332,16 @@ const WAIT_TIMEOUT_MS = 30_000;
 /** Stand-in origin for the agent a {@link ClientDriver} talks to. */
 const CLIENT_HOST = "https://agent.example.com";
 
-/** The test agent's tool that always needs a person's approval before it runs. */
+/**
+ * The test agent's tool that always needs a person's approval before it runs.
+ * Its approval prompt is built from the call's input, as {@link deployPrompt}.
+ */
 export const GATED_TOOL = "deploy_release";
+
+/** The approval prompt {@link GATED_TOOL} shows for `release`. */
+export function deployPrompt(release: string): string {
+  return `Deploy release ${release} to production?`;
+}
 
 /** A second always-gated tool, so two approvals can be pending at once. */
 export const SECOND_GATED_TOOL = "publish_notes";
@@ -676,10 +684,16 @@ async function converse(
         logicalPath: "tools/ask_question.ts",
         loadNamespace: async () => ({ default: askQuestion() }),
       },
-      gatedTool(GATED_TOOL, "Deploys a release.", () => {
-        runs[GATED_TOOL] += 1;
-        return { deployed: true };
-      }),
+      gatedTool(
+        GATED_TOOL,
+        "Deploys a release.",
+        () => {
+          runs[GATED_TOOL] += 1;
+          return { deployed: true };
+        },
+        undefined,
+        ({ input }) => deployPrompt(input.release ?? "unknown"),
+      ),
       gatedTool(SECOND_GATED_TOOL, "Publishes release notes.", () => {
         runs[SECOND_GATED_TOOL] += 1;
         return { published: true };
@@ -1177,12 +1191,16 @@ function gatedTool(
   description: string,
   execute: () => unknown,
   response?: ApprovalResponsePolicy,
+  prompt?: ApprovalPrompt<{ readonly release?: string }>,
 ) {
   return {
     logicalPath: `tools/${name}.ts`,
     loadNamespace: async () => ({
       default: defineTool({
-        approval: response === undefined ? always() : { request: always(), response },
+        approval:
+          response === undefined && prompt === undefined
+            ? always()
+            : { request: always(), prompt, response },
         description: `${description} Only call when asked to use ${name}.`,
         execute: async () => execute(),
         inputSchema: z.object({ release: z.string().optional() }),
