@@ -6,16 +6,16 @@ last_updated: "2026-10-09"
 
 # Session reactions
 
-Read on `main` at `8c55ea7c1`. The runtime was modeled in a standalone prototype: a runner, the authoring sugar, and a toy session, about 700 lines with 12 scenario tests, microbenchmarks, and three small simulations. Nothing in eve was changed. This doc replaces `dynamic-participants.md` and keeps its plan.
+Read on `main` at `8c55ea7c1`, and modeled in a standalone prototype of about 700 lines with 12 scenario tests, microbenchmarks, and three simulations. Nothing in eve was changed. This doc replaces `dynamic-participants.md` and keeps its plan.
 
 ## Summary
 
-Four authoring surfaces react to a session: dynamic resolvers (six kinds), memory providers, hooks, and channels. About a dozen built-in behaviors, such as skill announcements and the compaction trigger, do the same. Each has its own dispatch, timing rules, recording, and replay:
+Four authoring surfaces react to a session (dynamic resolvers, memory providers, hooks, and channels), and so do about a dozen built-ins. Each has its own dispatch, timing, recording, and replay:
 
-- **Participants run on events that never happened.** The state machine hand-builds `session.started`, `turn.started`, and `step.started` to drive resolvers before a model call, on restores, and after redeploys.
-- **Keys fix when, not what.** A resolver keyed on `session.started` that reads the caller keeps the first caller's answer for the whole session.
-- **The same machinery exists many times.** About 3,300 lines of per-kind lifecycles, loaders, normalizers, and memory code each write their own durable keys, revision refresh, validation, and failure handling.
-- **It costs work.** Every event a turn publishes, each streamed delta included, waits on eight dispatchers in turn (memory, hooks, and six resolver kinds), and connection resolvers re-run before every model call.
+- **Participants run on events that never happened.** The state machine hand-builds `session.started`, `turn.started`, and `step.started` to drive resolvers before model calls, on restores, and after redeploys.
+- **Keys fix when, not what.** A `session.started` resolver that reads the caller keeps the first caller's answer for the whole session.
+- **The same machinery exists many times,** in about 3,300 lines of per-kind lifecycles, loaders, normalizers, and memory code.
+- **It costs work.** Every event a turn publishes, deltas included, waits on eight dispatchers in turn, and connection resolvers re-run before every model call.
 
 This doc proposes one primitive underneath all of them, a **reaction**:
 
@@ -24,22 +24,15 @@ select(view, ctx)        what it depends on: synchronous, deterministic JSON
 resolve(selected, ctx)   what it is now: entries, or nothing; may do I/O
 ```
 
-`resolve` is called after its selection changes, and before anything it declared is next read. Nothing else triggers it.
+`resolve` is called after its selection changes, and before anything it returned is next read. Nothing else triggers it.
 
-- **A reaction's latest output is its current state.** eve records it as the reaction's slot, so anything missing from the next output is gone.
-  - Entries are tools, skills, a model, context, data, or **intents**, such as "a compaction is wanted".
-  - The machine acts on an intent once, because it checks its own facts. There's no request queue.
-- **Facts aren't a separate input.** A selection over the view notices them, so authors never declare when a reaction runs, where its output goes, or which events it subscribes to.
-- **`defineHook` is the public reaction.** Everything else is sugar over it:
-  - `defineDynamic` is one definition computed from the session, in that definition's folder.
-  - Memory providers and channels are bundles of reactions.
-  - eve's built-ins use the same primitive.
-  - There's one verb everywhere, `resolve`.
-- **It's events flowing through one state machine.** Inputs and facts come from the machine, slot changes from reactions, and folds turn both into the view. A slot change is the session-log sketch's `capabilities.changed` entry, kept in the checkpoint until there's a log. A full log isn't needed.
-- **It enables behaviors that have no home today:** modes that several capabilities follow, context added mid-turn when a condition becomes true, one policy across every call, state derived from commits exactly once, follow-up turns the agent starts itself, and timers per session.
-- **It's cheap.** In the prototype, 20 unchanged reactions cost about 7 µs per model call. It removes today's per-delta dispatch and per-call connection replays. The costs to manage are selections that scan history, tool changes mid-turn, and re-runs after deploys ([Performance](#performance)).
+- **A reaction's latest output is its current state,** recorded as its slot. Entries are tools, skills, a model, context, data, or **intents** such as "a compaction is wanted", which the machine acts on once.
+- **Selections notice facts too,** so authors never declare when a reaction runs or which events it subscribes to.
+- **`defineHook` is the public reaction.** `defineDynamic`, memory providers, channels, and eve's built-ins are sugar over the same primitive, with one verb: `resolve`.
+- **It enables behaviors that have no home today,** such as modes, context added mid-turn, one policy across every call, and follow-up turns ([What a generic reaction enables](#what-a-generic-reaction-enables)).
+- **It's cheap.** In the prototype, 20 unchanged reactions cost about 7 µs per model call ([Performance](#performance)).
 
-The plan is unchanged. The pipeline lands on `main` behind today's API, the conversation slice moves it onto the v27 commits that announce each use, and the API is the last PR of the break. The runner is how the pipeline is built.
+The plan is unchanged. The pipeline lands on `main` behind today's API, the conversation slice moves it onto v27 commits, and the API is the last PR of the break.
 
 ## The model in one picture
 
@@ -52,20 +45,21 @@ inputs ──▶ machine ──facts─────────────┐
               └─────────── reads the view, slots and intents included
 ```
 
-- **Three kinds of event, each with one writer:**
-  - **Inputs** (deliveries) arrive from outside.
-  - **Facts** come from the machine, which is pure. It does no I/O and is the only writer of facts.
-  - **`reaction.changed`** comes from reactions, which may do I/O and write only their own slot. Effects, such as posting a message, happen inside `resolve`.
-- **Folds are the only way anything becomes state.** Capability assembly, context assembly, and the machine all read the view.
-- **A reaction's input is always a selection.** Facts aren't a separate input: a selection over the view notices them ([Facts are selections too](#facts-are-selections-too)).
-- **What a reaction declares decides the rest:** when eve calls it, what's recorded, and what a failure means. The split that used to be "participants" and "observers" comes down to this:
+It's events flowing through one state machine. There are three kinds, each with one writer:
 
-|                  | Declares something eve reads later                                                            | Declares data, intents, or nothing                                   |
-| ---------------- | --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| Called           | Before anything it declared is next read                                                      | Right after the commit that changed its selection                    |
-| Recorded         | Its slot and a digest of its selection, plus the full selection if a declaration carries code | Its slot and a digest of its selection                               |
-| Retry or restore | The slot is reused; `resolve` re-runs only to rebuild code                                    | The slot is reused; effects repeat at most once, for the last commit |
-| Failure          | Depends on the kind: fail the turn, omit, or contribute nothing                               | Logged, and its intents are withdrawn; the turn continues            |
+- **Inputs,** such as deliveries, arrive from outside.
+- **Facts** come from the machine, which is pure: it does no I/O, and nothing else writes facts.
+- **`reaction.changed`** comes from reactions, which may do I/O but write only their own slot.
+
+Folds are the only way anything becomes state, and capability assembly, context assembly, and the machine all read the view. A slot change is the session-log sketch's `capabilities.changed` entry, kept in the checkpoint until there's a log.
+
+What a reaction returns decides when eve calls it and what a failure means. That's all that remains of the split between "participants" and "observers":
+
+|              | Returns something eve reads later: tools, a model, skills, context | Returns data, intents, or nothing                 |
+| ------------ | ------------------------------------------------------------------ | ------------------------------------------------- |
+| Called       | Before it's next read                                              | Right after the commit that changed its selection |
+| On restore   | The slot is reused                                                 | The slot is reused; effects repeat at most once   |
+| If it throws | The kind's rule: fail the turn, omit, or contribute nothing        | Logged, and its intents are withdrawn             |
 
 ## Today
 
@@ -116,37 +110,25 @@ interface Reaction<S extends Json> {
 }
 ```
 
-That's the whole primitive, and `defineHook` is its public form ([Hooks are the public reaction](#hooks-are-the-public-reaction)). **`resolve` is called after its selection changes, and before anything it declared is next read.** Nothing else triggers it.
+That's the whole primitive, and `defineHook` is its public form ([Hooks are the public reaction](#hooks-are-the-public-reaction)).
 
-- **`select` declares the inputs.**
-  - It's synchronous and deterministic, and returns JSON.
-  - Omitting it means a constant selection, so `resolve` runs once.
-  - Development mode evaluates it twice to catch clock reads.
-  - A `select` that throws, returns something that isn't JSON, or fails the double evaluation is treated like `resolve` throwing: its entries are withdrawn and each kind's failure rule applies. eve logs it once per reaction until `select` succeeds again, and development mode surfaces it at the first evaluation, since the build can't run it.
-- **`resolve` gets the selection, not the view,** so it can't depend on state it didn't select. Its context adds:
-  - services such as `abortSignal`;
-  - `ctx.previous`, its own slot, which is how cursors and counters work;
-  - `ctx.facts`, the facts since its previous evaluation, for reactions called right after each commit.
-- **`KEEP` keeps the current slot** and records that the selection was checked. Publicly, returning nothing keeps the slot and `null` clears it.
-- **The reaction's ID comes from its file path,** like every other eve name.
+- **`select` declares the inputs.** It's synchronous and deterministic, and returns JSON. Omitting it means `resolve` runs once. Development mode evaluates it twice to catch clock reads, and a `select` that throws is treated like `resolve` throwing.
+- **`resolve` gets the selection, not the view,** so it can't depend on state it didn't select. Its context adds services such as `abortSignal`, its own previous slot as `ctx.previous` (for cursors and counters), and the facts since its last call as `ctx.facts`.
+- **Returning nothing keeps the slot,** and `null` clears it. Internally, that's `KEEP`.
+- **IDs come from file paths,** like every other eve name.
 
 ### When `resolve` is called
 
-The rule is the one above: after the selection changes, and before anything the reaction declared is next read. Authors never choose the moment. eve does, from when each kind of entry is read ([Entries](#entries)):
+Authors never choose the moment. eve does, from when each kind of entry is read ([Entries](#entries)):
 
-- **eve may wait until a declaration is needed.** Tools and a model are read at the next model call; skills, instructions, connections, and subagents at the next turn. Waiting can't change the answer, because `resolve` sees only the selection. It only saves runs, outside fetches made before they're needed, and I/O on commits that don't need it.
-  - A prototype simulation of one turn, where a `deployed` selection flips between uses, gave the same answer at all four uses either way. Calling `resolve` after every change took 6 runs; waiting until use took 2.
-- **Anything else is called right after the commit that changed its selection.** Data can be read by anything at any time, an intent is for the machine's next decision, and a reaction that declares nothing has no later read: its timing is the behavior.
-- **"Before the next read" is still "after a commit".** The v27 catalog commits a fact at each moment eve needs an answer, which is why `model.requested` exists. A commit's reactions finish before the next commit, so the machine reads their entries when it writes the next one, such as `model.started`.
-- **There's no session moment.** A reaction whose selection never changes runs at its first evaluation and keeps its slot.
-- **Summary runs** follow today's plan:
-  - the summary uses `compactionModel` if one is configured, otherwise the turn's model;
-  - between turns, the dynamic model is evaluated at the summary run's `model.requested`;
-  - tool reactions never see summary runs.
+- **Entries eve reads later can wait until they're needed:** tools and a model until the next model call, and skills, instructions, connections, and subagents until the next turn. Waiting can't change the answer, because `resolve` sees only the selection; it only saves work. In a prototype simulation where a selection flips between uses, waiting gave the same answers in 2 runs instead of 6.
+- **Everything else is called right after the commit that changed its selection.** Data can be read at any time, intents are for the machine's next decision, and an effect's timing is the behavior.
+- **Either way, it's after a commit.** v27 commits a fact at each moment eve needs an answer, which is why `model.requested` exists, and a commit's reactions finish before the next commit.
+- **Summary runs** follow today's plan: the dynamic model is evaluated at the summary run's `model.requested` unless `compactionModel` is set, and tool reactions never see summary runs.
 
 ### Facts are selections too
 
-The view keeps, for each fact type, the position of its latest occurrence. It's a tiny fold of about 30 numbers. A new fact of a type is then an ordinary change in a selection:
+The view keeps the position of the latest fact of each type, so a new fact is an ordinary change in a selection:
 
 ```ts
 // agent/hooks/audit.ts
@@ -158,48 +140,35 @@ export default defineHook({
 });
 ```
 
-- **Select an identity, not a count.** A prototype simulation audited `call.settled` across six commits, one of which settled two calls:
-  - selecting the count of matching facts missed a settle in the very next commit, because two commits with one settle each look identical;
-  - selecting the latest position caught all five.
-- **Hook `events` maps and channel handlers are typed sugar for this.** eve can recognize the sugar and index reactions by fact type, which is an optimization only.
-- **Filtered facts check their guard in `resolve`,** for example only completed turns, or only compactions.
-- **Declarations that eve reads later don't depend on `ctx.facts`.** eve may wait to call them, so they would miss facts in between. A declaration that depends on what happened selects an aggregate instead, such as `view.succeeded.deploy`.
-- **Restores don't fire again.** The latest positions are in the view, so a fresh process computes the same selections from its checkpoint.
+- **Select an identity, not a count.** Two commits that each settle one call have the same count. In a prototype simulation, counting missed one of five settles, and selecting the latest position caught all of them.
+- **Hook `events` maps and channel handlers are typed sugar for this.** Filters such as "completed turns only" check in `resolve`, and eve can index the sugar by fact type.
+- **Entries eve reads later shouldn't depend on `ctx.facts`,** because eve may wait to call them. They select an aggregate instead, such as `view.succeeded.deploy`.
+- **Restores don't fire again,** because the positions are in the view.
 
 ### Entries
 
-`resolve` returns a list of entries. **A reaction's latest list is its current state:** eve records it as the reaction's slot, and a new list replaces the old one, so anything missing is withdrawn. Returning `[]` withdraws everything.
+`resolve` returns a list of entries, and **the latest list is the reaction's current state.** It replaces the slot, so anything missing is withdrawn. Each kind is read by eve's code for that kind:
 
-Each kind of entry is read by eve's code for that kind, at its own moment:
+| Entry                                            | Read by, and when                                                                       | If `resolve` throws                                 |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| A model                                          | The next model call                                                                     | Fails the turn                                      |
+| Tools (`defineTool` values)                      | Every model call: validated, named, and merged across slots                             | Omitted and logged                                  |
+| Skills, subagents                                | Captured at turn start, for the turn                                                    | Omitted and logged                                  |
+| Instructions                                     | System role: replaced per slot. User role: appended when a new selection resolves to it | Contributes nothing, and never keeps an older value |
+| Connections                                      | Captured at turn start, for the turn                                                    | Parks the session, as today                         |
+| Context (recall, announcements, notes, steering) | Every model call                                                                        | The surface's rule; recall fails the turn           |
+| Data                                             | Other reactions and selectors, through the slot                                         | Logged                                              |
+| Intents                                          | The machine, right after the commit ([Intents](#intents))                               | Withdrawn, so never acted on                        |
 
-| Entry                                            | Read by, and when                                                                                       | If `resolve` throws                                 |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| A model                                          | The next model call                                                                                     | Fails the turn                                      |
-| Tools (`defineTool` values)                      | Every model call: validated, named, and merged across slots                                             | Omitted and logged                                  |
-| Skills, subagents                                | Captured at turn start, for the turn                                                                    | Omitted and logged                                  |
-| Instructions                                     | System role: replaced per slot. User role: appended to context each time a new selection resolves to it | Contributes nothing, and never keeps an older value |
-| Connections                                      | Captured at turn start, for the turn                                                                    | Parks the session, as today                         |
-| Context (recall, announcements, notes, steering) | Every model call                                                                                        | The surface's rule; recall fails the turn           |
-| Data                                             | Other reactions and selectors, through the slot                                                         | Logged                                              |
-| Intents                                          | The machine, right after the commit ([Intents](#intents))                                               | Withdrawn, so never acted on                        |
-
-- **An entry's key is its name, scoped by kind.** `defineDynamic` derives it from the file path or a map key, so authors rarely write one. Entries returned directly write their key, because an entry has no file of its own. Two reactions declaring the same name is an error, as today.
-- **One reaction can return several kinds, in order.** Tools, a skill, instructions, and an intent from one function each apply when their kind is read.
-- **Slots are private and live in the view,** keyed by the reaction's ID. Later reactions read earlier slots through `select`, with no special mechanism. That's how a subagent follows the model, or how tools follow a mode.
-- **There are no delta entries.** The whole list replaces the slot, so withdrawal is implicit, the way React's render returns the full tree and Kubernetes takes a desired spec. A slot change is the session-log sketch's `capabilities.changed` entry, and context is its `contribution.recorded` ([`session-event-lifecycle.md`](./session-event-lifecycle.md#toward-a-session-log)).
-- **Throwing withdraws your entries; `KEEP` keeps them.** The code that reads each kind decides what absence means, as the table shows.
-- **The per-kind logic that's genuinely essential lives with the entry kinds:**
-  - tool naming and durable callbacks;
-  - skill sandbox sync;
-  - connection sign-in entries;
-  - the rule that a subagent needs a description;
-  - the fact that satisfies each intent.
+- **Keys are names, scoped by kind.** `defineDynamic` takes them from the file path or a map key. Two reactions declaring the same name is an error, as today.
+- **One reaction can return several kinds,** and each applies when its kind is read.
+- **Later reactions read earlier slots through `select`.** That's how tools follow a mode, or a subagent follows the model.
+- **There are no deltas.** The whole list replaces the slot, the way React's render returns the full tree, and it's the sketch's `capabilities.changed` entry ([`session-event-lifecycle.md`](./session-event-lifecycle.md#toward-a-session-log)).
+- **Per-kind logic stays only where it's essential:** tool naming and durable callbacks, skill sandbox sync, connection sign-in, and the fact that satisfies each intent.
 
 ### Intents
 
-An intent is an entry the machine reads: a standing wish, such as "a compaction is wanted". The machine acts on it once because it checks its own facts, not because a queue consumed it. It's reconciliation, the way a Kubernetes controller compares desired state with what has happened.
-
-**An intent counts from the position of the slot change that added it, and is satisfied by the first matching fact after that.** Each kind names the fact that satisfies it:
+An intent is an entry the machine reads: a standing wish, such as "a compaction is wanted". The machine acts on it once because it checks its own facts, the way a Kubernetes controller compares desired state with what has happened. **An intent counts from the slot change that added it, and is satisfied by the first matching fact after that:**
 
 | Intent              | Key                                | Satisfied by                                             |
 | ------------------- | ---------------------------------- | -------------------------------------------------------- |
@@ -209,13 +178,10 @@ An intent is an entry the machine reads: a standing wish, such as "a compaction 
 | Open an interaction | The interaction's key              | `interaction.opened` with that key                       |
 | Start a task        | The task's key                     | `task.started` with that key                             |
 
-Steering the running turn isn't an intent: a note for the next model call is a context entry.
+Steering isn't an intent: a note for the next model call is just context.
 
-- **Reactions never write facts.** "A compaction is wanted" is an intent, and the machine commits `context.started`. That keeps the machine the only writer of facts, as in Event Modeling's chain of processor, command, and decider.
-- **The machine can refuse,** for example after the session has closed.
-- **No loops.** A slot changes only when its selection does, and an intent that's already satisfied stays satisfied. Continuations and started work also have caps per delivery.
-- **Withdrawing is cancelling.** An intent removed before the machine acts never happens, and throwing withdraws pending intents with everything else.
-- **Idempotent by construction.** There's no queue to persist: retries and restores see the same slot and the same facts. Keys make starting the same task twice a no-op.
+- **Only the machine writes facts,** and it can refuse, for example after the session has closed.
+- **No loops, and no queue.** A slot changes only when its selection does, and a satisfied intent stays satisfied, so retries and restores can't repeat it. Removing an intent before the machine acts cancels it. Continuations and started work also have caps per delivery.
 - **Authority is explicit:** a turn a reaction starts carries `cause: {reaction}` and the agent's own principal, never the caller's.
 
 <details>
@@ -234,25 +200,11 @@ A prototype simulation (`intents.ts`) models a compaction trigger that selects `
 
 ### Recording
 
-Each time eve calls a reaction:
+Each time, eve evaluates `select`, and reuses the slot if the selection's digest and the code revision match. Otherwise it calls `resolve` and replaces the slot. Equality is over serialized entries, so a re-run that returns the same tools changes nothing, and only a changed slot commits a `reaction.changed`.
 
-1. Evaluate `select` against the view after the commit.
-2. If the selection's digest and the code revision match the slot, reuse it.
-3. Otherwise call `resolve`.
-4. Update the slot. The update is `checked` when `resolve` returns `KEEP` or a list equal to the slot, and `decided` otherwise. Only `decided` changes what readers see, and only it commits a `reaction.changed`.
-
-What's stored depends on what the reaction returns:
-
-| The reaction returns                                                                | eve stores                                                                                    |
-| ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| Entries without code: a model, skill markdown, instructions, context, data, intents | The slot and a digest of the selection                                                        |
-| Entries with code: tools, connections with token callbacks, memory tools            | The slot and the full selection, which a restore passes back to `resolve` to rebuild the code |
-| Nothing                                                                             | A digest of the selection                                                                     |
-
-- **Only full selections are capped,** because only they're stored. Elsewhere a large selection costs CPU, not storage, and development mode warns about it. Auth attributes in a selection aren't persisted unless an entry carries code.
-- **Equality is over serialized entries:** names, descriptions, schemas, and durable callback references with their captures. A re-run that returns the same tools doesn't re-announce anything or change the provider request.
-- **Restores reuse slots.** A fresh process calls `resolve` with each stored selection only to rebuild code, and the recorded entries win.
-- **Redeploys re-resolve lazily.** Slots recorded under an older revision are stale, so each reaction runs again when it's next called. Nothing replays an event, and nothing goes on the stream.
+- **What's stored is small:** the slot and a digest of the selection. Entries with code, such as tools and connections with token callbacks, also store the full selection, which a restore passes back to `resolve` to rebuild the code. Only those selections are capped, and auth attributes in any other selection are never persisted.
+- **Restores reuse slots,** calling `resolve` only to rebuild code.
+- **Redeploys re-resolve lazily.** Slots from an older revision are stale, so each reaction runs again when it's next called. Nothing replays an event.
 - **Calls keep the entries they started under.** A parked call's tools come from the slot recorded at its model call.
 
 <details>
@@ -261,7 +213,7 @@ What's stored depends on what the reaction returns:
 ```ts
 async function afterCommit(commit: Commit, s: Session): Promise<void> {
   for (const r of s.reactions) {
-    // Declarations eve reads later wait until their next read; everything else runs now.
+    // Entries eve reads later wait until their next read; everything else runs now.
     if (!s.callsAfter(r, commit)) continue;
     const selection = r.select?.(s.view, s.selectContext(r)) ?? null;
     const digest = hash(canonical(selection));
@@ -276,58 +228,31 @@ async function afterCommit(commit: Commit, s: Session): Promise<void> {
 }
 ```
 
-In the prototype, the runner and fact dispatch together are about 120 lines. That excludes what eve's entry kinds add: validation, durable callbacks, and merging across slots. The prototype returns one value per reaction rather than a list of entries, queues commands rather than reconciling intents, and stores whole selections. `intents.ts` models intents on their own.
+In the prototype, the runner and fact dispatch together are about 120 lines, before eve's validation, durable callbacks, and merging. The prototype returns one value per reaction rather than a list, queues commands rather than reconciling intents, and stores whole selections; `intents.ts` models intents on their own.
 
-The scenario tests cover:
-
-- reuse;
-- `KEEP`;
-- equal results;
-- reading earlier slots;
-- restores, including detecting a rebuild that differs;
-- redeploys;
-- hooks that fire on a changed selection;
-- the loop rule;
-- a capture cursor across compaction;
-- capped continuations;
-- the selection size cap.
-
-Three simulations cover calling `resolve` after every change against waiting until use, detecting facts by count against by position, and intents across loops, withdrawal, and restores.
+The scenario tests cover reuse, `KEEP`, equal results, reading earlier slots, restores (including a rebuild that differs), redeploys, hooks firing on a change, the loop rule, a capture cursor across compaction, capped continuations, and the selection cap.
 
 </details>
 
 ### Order, loops, and visibility
 
-- **One fixed order after each commit:**
-  - first hooks and channels, right after the write;
-  - then memory, the model, connections, subagents, tools, skills, and instructions, as today.
-
-  A reaction may select the slots of reactions earlier in the order, and never later ones. There's no dependency graph. Because hooks come first, a mode a hook declares is visible to every capability.
-
-- **One ordering change, already made in the pipeline PR:** memory used to run between the write and the hooks, and now runs after them. The only visible effect: a hook that cancels the turn from `turn.started` now stops recall for a turn that won't call the model.
-- **No loops:** a commit that only updates slots triggers no evaluation, and an intent is acted on once.
-- **Visibility is per surface.** Hooks and channels never see model messages, connection reactions get none either, and capture gets the messages it stores.
+- **One fixed order after each commit:** hooks and channels first, then memory, the model, connections, subagents, tools, skills, and instructions. A reaction may select earlier slots and never later ones, so there's no dependency graph, and a mode a hook declares is visible to every capability.
+- **No loops:** a commit that only updates slots triggers no evaluation.
+- **Visibility is per surface.** Hooks and channels never see model messages, connection reactions get none either, and memory capture gets the messages it stores.
 
 ## Authoring
 
 There are three layers, each sugar over the next:
 
 1. **Static files,** for most agents.
-2. **`defineDynamic`:** one definition computed from the session, in that definition's own folder. Memory providers and channels are bundles of reactions.
-3. **`defineHook`:** the reaction itself. It's `select` plus `resolve`, returning effects, data, intents, declarations, or a mix.
+2. **`defineDynamic`:** one definition computed from the session, in that definition's own folder. Memory providers and channels are bundles.
+3. **`defineHook`:** the reaction itself, returning effects, data, intents, declarations, or a mix.
 
-There's one verb everywhere: `resolve(selected, ctx)`.
+Every one of them is `select` plus `resolve`.
 
 ### Dynamic capabilities
 
-**`defineDynamic` wraps exactly what the file would export statically, and `resolve` returns that:**
-
-- a `defineSkill` in `skills/x.ts`;
-- a tool, or a map of tools, in `tools/x.ts`;
-- a `defineAgent` in any `agent.ts`, root or subagent;
-- an extension mount in `extensions/x.ts`.
-
-Settings needed before any session exists sit beside `select` and `resolve`, the way `build` already does for dynamic subagents. `defineDynamic` has one implementation, and the entry point for each kind only types `ctx` and the result.
+**`defineDynamic` wraps exactly what the file would export statically:** a skill in `skills/`, tools in `tools/`, a `defineAgent` in any `agent.ts`, or an extension in `extensions/`. Settings needed before any session exists, such as `build`, sit beside `select` and `resolve`, as they already do for dynamic subagents.
 
 ```ts
 // agent/skills/team_playbook.ts: follows the current caller
@@ -356,14 +281,10 @@ export default defineDynamic({
 });
 ```
 
-- **One shape everywhere.** The root agent, a subagent, a skill, and a tool all look the same, and a definition never contains a `defineDynamic`.
-  - A field can't express absence anyway, such as a skill that's sometimes missing, so wrapping the whole definition is the only form that covers every case.
-  - Returned with the model, `modelOptions` and `modelContextWindowTokens` belong to the model they're for. The dynamic model form forbids both today.
-  - Build-time fields can't vary per session: `build`, `defaultTools`, `experimental`, and `tool` exposure. They sit beside `select` and `resolve`, or must be static ([Open questions](#open-questions)).
-- **Names come from the file or the map key.** One definition is named by its file; a map names each entry by its key, as dynamic maps do today. Those names are the entries' keys.
-- **Select the fact, not the data.** `hasImages(ctx.messages)` changes once, while `ctx.messages.length` changes at every model call.
-- **Data outside eve needs an explicit dependency,** such as the turn.
-- **There's no timing to get wrong.** A skill is read at turn start because it's a skill ([Entries](#entries)), so a skill resolver that silently never runs can't be written.
+- **One shape everywhere.** The root agent looks like a subagent, and no definition contains a `defineDynamic`. A field couldn't express absence anyway, and returning the whole agent lets `modelOptions` travel with the model it's for.
+- **Names come from the file or the map key,** as they do today.
+- **Select the fact, not the data.** `hasImages(ctx.messages)` changes once, while `ctx.messages.length` changes at every model call. Data outside eve needs an explicit dependency, such as the turn.
+- **There's no timing to get wrong.** A skill is read at turn start because it's a skill.
 
 ### Memory
 
@@ -386,10 +307,10 @@ export default defineMemoryProvider({
 });
 ```
 
-- **Recall returns context, which is read before each model call.** eve already keeps recalled records through compaction, so recall runs again only when its selection changes. A provider that wants a fresh recall after compaction selects the latest compaction's ID.
-- **Capture keeps a cursor.** It returns data, how far it has captured, which it reads back as `ctx.previous`. Data is called right after the commit, so capture runs before a compaction removes anything. It sees each message once, and providers stop deduplicating. Today `capture` receives the whole history each time.
-- **At turn start, `ctx.messages` includes the incoming delivery,** so one query works every time recall is evaluated. Today that delivery is only in `ctx.turn.input`.
-- **Isolation by construction.** `resolve` sees only what it selected, so a recall that doesn't select the scope can't query with it.
+- **Recall is context,** read before each model call, and it runs again only when its selection changes. Recalled records already survive compaction.
+- **Capture keeps a cursor in its slot,** so it sees each message once: right after the commit, before compaction removes anything. Providers stop deduplicating.
+- **At turn start, `ctx.messages` includes the incoming delivery,** so one query works every time. Today the delivery is only in `ctx.turn.input`.
+- **Isolation by construction:** a recall that doesn't select the scope can't query with it.
 
 ### Hooks are the public reaction
 
@@ -412,14 +333,14 @@ export default defineHook({
 });
 ```
 
-- **What `resolve` returns is the hook's slot.** Returning nothing keeps it, which is all an effect-only hook needs, and `null` clears it. A hook that declares nothing is called right after any commit that changes its selection. Effects are at-least-once, keyed by `ctx.position`.
-- **Returning `cancel(…)` is the one way to stop a turn,** and `ctx.cancel()` goes away. The intent is keyed by the turn, so it's satisfied once that turn settles.
-- **Event maps stay the typed way to receive facts.** They're sugar for a selection of each key's latest position ([Facts are selections too](#facts-are-selections-too)), and their handlers return the same things. For example, `"turn.started"(fact, ctx)` can return `cancel(fact.data.turnId, "…")`.
-- **Mixed results live in hooks.** A hook can declare tools, skills, instructions, data, and intents together ([Conditional bundles](#conditional-bundles)). Slot folders return only their own kind.
-- **It fills the one gap the event model leaves.** "Nothing is running" is currently `idle(ctx.view)`, checked in whichever handler you guess ends the work. A hook selecting `idle` says it directly, and built-in status lines become hooks selecting `activity`.
-- **Visibility stays per surface.** Hooks never see model messages, even when they declare capabilities.
-- **Channels take the same two forms.** Their handler signature becomes `(fact, ctx)` with `ctx.channel`, so every callback is `(input, ctx)`. Channel event names already break in v27, so the codemod moves the argument at the same time.
-- **It's a public API.** Hooks returning more than effects and `cancel(…)` need their own research doc and e2e tests ([Plan](#plan)).
+- **What `resolve` returns is the hook's slot.** An effect-only hook returns nothing, and is called right after any commit that changes its selection. Effects are at-least-once, keyed by `ctx.position`.
+- **Returning `cancel(…)` is the one way to stop a turn,** and `ctx.cancel()` goes away.
+- **Event maps stay,** as typed sugar whose handlers return the same things.
+- **Mixed results live in hooks** ([Conditional bundles](#conditional-bundles)), and slot folders return only their own kind.
+- **"Nothing is running" becomes a hook selecting `idle`,** instead of a check in whichever handler you guess ends the work. Built-in status lines become hooks selecting `activity`.
+- **Hooks never see model messages,** even when they declare capabilities.
+- **Channels take the same forms,** and their handlers become `(fact, ctx)` with `ctx.channel`, moved by the v27 codemod.
+- **It's a public API,** so hooks returning more than effects and `cancel(…)` need their own doc and e2e tests ([Plan](#plan)).
 
 <details>
 <summary>Under the hood: every surface as sugar</summary>
@@ -479,7 +400,7 @@ reaction({
 
 ### Conditional bundles
 
-A hook can return several kinds, so one condition that gates tools, a skill, and instructions is one file rather than three files with the same `select`:
+One hook can gate several kinds behind one condition, instead of three files with the same `select`:
 
 ```ts
 // agent/hooks/enterprise.ts
@@ -496,9 +417,7 @@ export default defineHook({
 });
 ```
 
-Each entry applies when its kind is read: the tool at the next model call, and the skill and instructions from the next turn.
-
-Whole extensions follow the `defineDynamic` rule. A mount file exports what the extension's default export returns, so a dynamic mount wraps that:
+Each entry applies when its kind is read: the tool at the next model call, and the skill and instructions from the next turn. A whole extension follows the `defineDynamic` rule, since a mount file exports what the extension returns:
 
 ```ts
 // agent/extensions/crm.ts
@@ -508,46 +427,31 @@ export default defineDynamic({
 });
 ```
 
-- **Timing:** membership is read at turn start, and each piece inside then applies at its own moment.
-- **Memory providers are already bundles** of recall, tools, and capture.
-- **Scope:** a dynamic mount gates only session-scoped pieces. Channels, routes, and schedules stay global.
-
-This is a direction, not part of the plan.
+A dynamic mount is read at turn start and gates only session-scoped pieces; channels, routes, and schedules stay global. This is a direction, not part of the plan.
 
 ## What a generic reaction enables
 
-Each row is a hook returning something new, or a built-in doing the same.
+Each row is a hook returning something new:
 
-| Behavior                                                                                                      | The hook returns                                                | Today                                                                 |
-| ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------- |
-| Modes: one hook decides "read-only" or "plan", and tools, approvals, instructions, and the model select on it | Data that later reactions select                                | Each resolver recomputes its own condition                            |
-| Context from state mid-turn: "80% of the budget is used", "deploy failed twice"                               | Context, read before each model call                            | Contributions only at turn start and after compaction                 |
-| Context edits: drop stale tool outputs, collapse resolved errors, redact across tools                         | Context edits, a new entry kind                                 | Only compaction rewrites history; result shaping is per tool          |
-| One policy across every call: approval by session state, arguments from state, recorded mocks in evals        | A clearance, a new entry kind, read after each `call.requested` | `approval` is set per tool; nothing settles a call without running it |
-| Derived state, exactly once: counters, todo lists, cost per tool                                              | Data, called right after each commit                            | Hooks write `defineState` with at-least-once delivery                 |
-| Follow-up turns and steering                                                                                  | A continue intent; a steering note is context                   | Only `ctx.cancel()`                                                   |
-| Timers per session: remind about an open approval, expire a grant                                             | A wake-up intent, a new intent kind                             | A once-a-minute schedule over an application store                    |
-| Request shaping: reasoning effort, cache breakpoints, masking tools instead of removing them                  | Request parameters, a new entry kind                            | Only the model is dynamic                                             |
-| Explaining decisions: "tools changed at r6 because `deployed` went from false to true"                        | Nothing new: slots and their recorded selections already say it | Not possible                                                          |
+| Behavior                                                                                      | The hook returns                                                | Today                                                                 |
+| --------------------------------------------------------------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------- |
+| Modes: one hook decides "read-only" or "plan", and tools, approvals, and the model follow it  | Data that later reactions select                                | Each resolver recomputes its own condition                            |
+| Context from state mid-turn: "80% of the budget is used", "deploy failed twice"               | Context, read before each model call                            | Contributions only at turn start and after compaction                 |
+| Context edits: drop stale tool outputs, collapse resolved errors, redact across tools         | Context edits, a new entry kind                                 | Only compaction rewrites history; result shaping is per tool          |
+| One policy across every call: approval by session state, arguments from state, mocks in evals | A clearance, a new entry kind, read after each `call.requested` | `approval` is set per tool; nothing settles a call without running it |
+| Derived state, exactly once: counters, todo lists, cost per tool                              | Data, called right after each commit                            | Hooks write `defineState` with at-least-once delivery                 |
+| Follow-up turns and steering                                                                  | A continue intent; a steering note is context                   | Only `ctx.cancel()`                                                   |
+| Timers per session: remind about an open approval, expire a grant                             | A wake-up intent, a new intent kind                             | A once-a-minute schedule over an application store                    |
+| Request shaping: reasoning effort, cache breakpoints, masking tools instead of removing them  | Request parameters, a new entry kind                            | Only the model is dynamic                                             |
+| Explaining decisions: "tools changed at r6 because `deployed` went from false to true"        | Nothing new: slots and their recorded selections already say it | Not possible                                                          |
 
-- **Cheap:** modes, mid-turn context, derived state, and explanations fall out of the runner and today's entry kinds.
-- **Needs a new entry kind, and code that reads it:**
-  - intents other than cancel, each with the fact that satisfies it;
-  - clearances, read after each `call.requested`;
-  - context edits;
-  - wake-up intents, which also need committed time in the view;
-  - request parameters.
-
-None of these is part of the plan below.
+Modes, mid-turn context, derived state, and explanations fall out of today's entry kinds. The rest needs a new entry kind and the code that reads it; wake-up intents also need committed time in the view. None of it is part of the plan.
 
 ## Relationship to a session log
 
-Reactions need **entry-shaped commits**: every private change is an entry produced in a commit and folded into the view. They don't need private entries kept as the source of truth. In the meantime, [`session-event-lifecycle.md`](./session-event-lifecycle.md#toward-a-session-log) already asks for exactly that: "new private state should be entry-shaped… even while it's stored in checkpoints."
+Reactions need **entry-shaped commits**: every private change is an entry produced in a commit and folded into the view. They don't need private entries kept as the source of truth. [`session-event-lifecycle.md`](./session-event-lifecycle.md#toward-a-session-log) already asks for exactly that in the meantime: "new private state should be entry-shaped… even while it's stored in checkpoints."
 
-- **Reactions shrink the log's hard problems.** About 30 of the context keys a log would migrate become reaction entries. Reactions also don't need model history derived from entries, which is the hardest part.
-- **Public views can already grow.** The public stream is a log, and server readers fold it from line 0.
-
-Where a checkpoint-only approach runs out, the fixes are narrower than a full log:
+Reactions also shrink a log's hard problems. About 30 of the context keys a log would migrate become reaction entries, and reactions don't need model history derived from entries, which is the hardest part. Where a checkpoint-only approach runs out, the fixes are narrower than a full log:
 
 <details>
 <summary>Four limits, and the narrowest fix for each</summary>
@@ -582,98 +486,56 @@ These numbers come from the prototype on an 8-core Xeon (2.9 GHz) with Node 24. 
 | 10 hooks after a commit                                 | 15 µs                                       |
 | A 50-call turn with 20 reactions, end to end in the toy | 28 µs per model call (510 selects, 20 runs) |
 
-- **The common path is negligible.** Before every model call, the runner costs microseconds, against seconds of model latency.
-- **The equal-result case** is dominated by serializing the new declarations once. The recorded side's digest is stored with the slot.
+Before every model call, the runner costs microseconds, against seconds of model latency. The equal-result case is dominated by serializing the new entries once.
 
 ### Compared with today
 
-- **Per-delta dispatch goes away.** Today every published event, each delta included, waits on eight dispatchers in turn. Entries eve reads later are evaluated only after the commits that announce their use, and everything else only after commits that have facts.
-- **Connection replays go away.** Today connection resolvers re-run before every model call. They become slots that re-run only when their selection changes.
-- **Per-call resolvers get cheaper.** A `step.started` resolver runs in full before every model call. As a reaction, a cheap `select` runs instead, and `resolve` only on a change.
-- **Session-level tool and model resolvers gain one small cost:** a `select` per model call, which disappears when there's nothing to select.
+- **Per-delta dispatch goes away.** Today every published event, each delta included, waits on eight dispatchers in turn. Reactions are evaluated only after commits.
+- **Connection replays go away.** Connection resolvers re-run before every model call today. They become slots that re-run only when their selection changes.
+- **Per-call resolvers get cheaper.** Instead of a full `step.started` resolver before every model call, a cheap `select` runs, and `resolve` only on a change. Session-level tool and model resolvers gain that one `select`.
 
 ### Costs to manage
 
-- **Selections that scan history.** A `select` that walks every message before every call is quadratic over a long turn.
-  - In the prototype, with tiny messages, it took about 0.7 ms in total over 1,000 calls and 16 ms over 5,000. An aggregate kept in the view took about 0.01 ms.
-  - Real messages are larger.
-  - Mitigations: aggregates in the view for common facts (attachments, usage, successful calls by tool), a time budget per `select` in development, and the cap on stored selections.
-- **Tool changes mid-turn and the prompt cache.**
-  - For Anthropic models, eve places a cache breakpoint at the end of the tools block (`harness/prompt-cache.ts`), so a changed tool set misses everything cached up to that point. Anthropic invalidates its whole cache when tool definitions change.
-  - Early cutoff keeps equal re-runs from changing the request.
-  - Separating how a decision is presented from the decision itself would keep rare changes cheap: remove tools only at turn start, and mask or append mid-turn where a provider supports it ([Open questions](#open-questions)).
-- **Churn.** A selection that changes at most evaluations re-runs `resolve` each time. Development mode warns about a reaction that re-runs at most of its evaluations.
-- **Redeploys.**
-  - After a deploy, every active session re-runs every reaction at its next evaluation.
-  - The work is spread over sessions' next turns rather than concentrated at deploy time, and equal results change nothing. The external calls still happen.
-  - A code fingerprint per reaction, instead of the deployment ID, would re-run only what changed.
-- **Restores.**
-  - A fresh process calls `resolve` for each slot whose entries carry code. Today the equivalent is rebinding tool callbacks and re-running connections.
-  - Rebuilding lazily, when a call first needs the code, keeps cold steps cheap.
-- **Storage.**
-  - One current slot per reaction, plus older ones while calls that started under them are open.
-  - Only selections for entries with code are stored whole, under a cap (4 KiB in the prototype). Everything else stores a digest. Declarations are what today's durable tool metadata already stores.
-  - Entries ride the checkpoint and never reach the stream.
+- **Selections that scan history** are quadratic over a long turn. In the prototype, with tiny messages, that took about 16 ms in total over 5,000 calls, against 0.01 ms with an aggregate in the view. Aggregates for common facts (attachments, usage, successful calls by tool) and a development time budget per `select` keep it in check.
+- **Tool changes mid-turn miss the prompt cache.** eve's Anthropic cache breakpoint sits at the end of the tools block (`harness/prompt-cache.ts`). Equal re-runs change nothing, and presenting rare changes differently would keep them cheap ([Open questions](#open-questions)).
+- **Churn.** Development mode warns about a reaction that re-runs at most of its evaluations.
+- **Redeploys** re-run every reaction in every active session at its next evaluation, spread over those sessions' next turns. The external calls still happen. A code fingerprint per reaction would re-run only what changed.
+- **Restores** call `resolve` for slots with code. Rebuilding lazily, when a call first needs the code, keeps cold steps cheap.
+- **Storage** is one slot per reaction, plus older ones while calls that started under them are open. Selections are stored whole only for entries with code, under a cap (4 KiB in the prototype). Entries ride the checkpoint and never reach the stream.
 
-### Not measured
-
-- Workflow step overhead.
-- Checkpoint serialization.
-- Real resolver I/O.
-- The cost of keeping views immutable in eve's fold. The prototype clones the view per commit, and its end-to-end number includes that.
+Not measured: Workflow step overhead, checkpoint serialization, real resolver I/O, and the cost of keeping views immutable in eve's fold.
 
 ## Compatibility
 
 Every dynamic resolver and memory provider changes shape. The change aims to ship in the same release as the event break ([`session-event-lifecycle.md`](./session-event-lifecycle.md#compatibility-at-the-break)), so authors migrate once. It's the last PR of the break, so if it isn't ready, the break ships without it and the API follows in a later release.
 
-- **A codemod keeps today's timing.** Each key maps to the selection that resolves exactly as often:
-  - `session.started` to no `select`;
-  - `turn.started` to the turn's ID;
-  - `step.started` to the requested run's ID.
-- **What the codemod can and can't do:**
-  - Handlers that read nothing from `ctx` convert mechanically.
-  - Of the roughly 210 files that use `defineDynamic`, about half read `ctx` in a handler. This comes from a rough grep, not a parse.
-  - The codemod moves simple reads into the selection. For example, `ctx.session.auth.current` in a `session.started` handler becomes a selection of `auth.initiator`, which is the same caller at session start.
-  - It leaves a TODO where it can't, chiefly in the dozen or so files that read `ctx.messages`, which need to select a fact instead.
-  - Authors can then narrow selections by hand, for example a turn resolver that depends only on the caller. The codemod can't know what data outside eve a resolver depends on.
-- **Memory providers.**
-  - `recall` maps become `{ select, resolve }`. The codemod selects the turn's ID, which preserves today's recall every turn.
-  - `compaction.completed` recall goes away, because recalled records are kept through compaction.
-  - `capture` receives only messages it hasn't seen. A provider that relied on the full history needs a change. One that deduplicated can drop the deduplication.
-  - `tools` become `{ select, resolve }`.
-- **Hooks and channels.**
-  - Hook event keys change with v27's own break. `select` and `resolve` are additive.
-  - `ctx.cancel()` becomes a returned `cancel(…)`, which the codemod rewrites.
-  - If the channel signature change is adopted, `(event, channel, ctx)` becomes `(fact, ctx)`, moved by the same codemod as v27's renames.
-- **Dynamic fields become dynamic files.** `defineAgent({ model: defineDynamic(...) })` becomes an `agent.ts` that exports `defineDynamic` returning `defineAgent({ model })`, the shape dynamic subagents already have. The codemod rewrites it, keeping the agent's other fields static beside `select` and `resolve`.
-- **The old shape fails the build with the fix.** A `defineDynamic` with `events`, or a memory provider with maps, gets an error that points at the codemod. It's an error, not an alias, and it can be removed after a release or two.
-- **The untyped payload goes away.** Reactions receive the typed view instead of an `unknown` event.
-- **Running sessions don't cross the break,** so recorded slots can change shape there.
-  - The pipeline PR on `main` keeps today's durable keys.
-  - If the API ships in a later release, sessions do cross it. Results recorded under today's keys then count as stale, so each reaction runs again at its next evaluation, as after a redeploy.
+- **A codemod keeps today's timing:** `session.started` maps to no `select`, `turn.started` to the turn's ID, and `step.started` to the requested run's ID.
+- **Not every resolver converts mechanically.** About half of the roughly 210 files that use `defineDynamic` read `ctx` in a handler, by a rough grep. The codemod moves simple reads into the selection (`auth.current` at session start becomes `auth.initiator`) and leaves a TODO for the dozen or so that read `ctx.messages`. It can't know what data outside eve a resolver depends on.
+- **Memory providers:** `recall` and `tools` become `{ select, resolve }`, with recall selecting the turn's ID to keep today's timing. `compaction.completed` recall goes away, and `capture` receives only messages it hasn't seen.
+- **Hooks and channels:** `select` and `resolve` are additive, and `ctx.cancel()` becomes a returned `cancel(…)`. If the channel change is adopted, handlers move to `(fact, ctx)` with v27's renames.
+- **Dynamic fields become dynamic files:** `defineAgent({ model: defineDynamic(…) })` becomes a dynamic `agent.ts` returning `defineAgent({ model })`, the shape dynamic subagents already have.
+- **One ordering change is already made in the pipeline PR:** memory now runs after hooks, so a hook that cancels the turn from `turn.started` also stops recall for that turn.
+- **The old shape fails the build** with an error that points at the codemod, not an alias. Reactions get the typed view instead of an `unknown` event.
+- **Running sessions don't cross the break,** so slots can change shape there. If the API ships later, results recorded under today's keys count as stale and re-run, as after a redeploy.
+
+<details>
+<summary>Migration scope</summary>
+
 - **Extension contracts.** Retained epochs whose fixtures author `defineDynamic({ events })` are dropped with a reason: 57 for dynamic tools, 29 for instructions, 28 for skills, 9 for subagents, and 5 for connections. Each capability gets a new epoch.
 - **Third-party extensions and memory providers** built against the old API break until they update.
-- **In this repo,** the migration covers:
-  - 51 e2e fixture files and 19 framework source files that use `defineDynamic`;
-  - the file memory provider and two e2e memory fixtures;
-  - 7 docs pages, two template files, `eve-code`, and one app fixture.
+- **In this repo:** 51 e2e fixture files and 19 framework source files that use `defineDynamic`, the file memory provider and two e2e memory fixtures, 7 docs pages, two template files, `eve-code`, and one app fixture.
+
+</details>
 
 ## Plan
 
-There are three steps in the overall plan ([`session-event-lifecycle.md`](./session-event-lifecycle.md#phases)). What's certain lands first. The API is the least certain part, so it's the last PR of the break and can come last.
+There are three steps in the overall plan ([`session-event-lifecycle.md`](./session-event-lifecycle.md#phases)). What's certain lands first. The API is the least certain part, so it's the last PR of the break.
 
-1. **On `main`, now: the pipeline behind today's API.**
-   - One pipeline runs every participant in the fixed order, after the hooks, and builds the events today's handlers expect in one place.
-   - A table of the keys each kind accepts replaces the `ALLOWED_DYNAMIC_*` sets, and an unsupported key fails the build.
-   - It's shaped as the runner's skeleton: participants are evaluated after the commits that announce their use, in the fixed order. Step 3 then changes what's evaluated, not when.
-   - Tests pin when today's participants run. They assert on handler calls and model input rather than event shapes, so they survive the wire change:
-     - memory recall before the first model call;
-     - dynamic model selection per model call, and for a manual compaction;
-     - skills and instructions only at turn start;
-     - the refresh after a redeploy;
-     - restoring a parked step's tools.
+1. **On `main`, now: the pipeline behind today's API.** One pipeline runs every participant in the fixed order, after the hooks, and builds the events today's handlers expect in one place. A table of the keys each kind accepts replaces the `ALLOWED_DYNAMIC_*` sets, and an unsupported key fails the build. It's shaped as the runner's skeleton, so step 3 changes what's evaluated, not when.
 
-   It changes nothing for authors. It touches `execution/session/turn-step.ts`, `harness/model-call/run.ts`, and `harness/hitl/intake.ts`. HumanInput (#4342–#4344) also changes those files, so whichever lands second rebases rather than waiting.
+   Tests pin when today's participants run, asserting on handler calls and model input so they survive the wire change: recall before the first model call, model selection per model call and for a manual compaction, skills and instructions only at turn start, the refresh after a redeploy, and restoring a parked step's tools.
+
+   It changes nothing for authors. HumanInput (#4342–#4344) touches the same files (`execution/session/turn-step.ts`, `harness/model-call/run.ts`, `harness/hitl/intake.ts`), so whichever lands second rebases rather than waiting.
 
 2. **In the conversation slice: today's API on v27 commits.** The pipeline runs after the v27 commits that announce each use, from one table, instead of on v26 event types. Today's keys become names for those commits:
 
@@ -686,60 +548,51 @@ There are three steps in the overall plan ([`session-event-lifecycle.md`](./sess
    | `compaction.requested` | A commit with `context.started` for a compaction           |
    | `compaction.completed` | A commit with `context.settled` for a completed compaction |
 
-   A handler's first argument is typed `unknown`. The only readers in the repo take the turn's ID (`models/auto.ts`) and its sequence (an e2e instruction fixture). So a minimal private payload with those fields stands in for the event, with its own types once the v26 builders are gone. Durable keys stay as they are.
+   A handler's first argument is typed `unknown`. The only readers in the repo take the turn's ID (`models/auto.ts`) and its sequence (an e2e instruction fixture), so a minimal private payload with those fields stands in for the event. Durable keys stay as they are.
 
-3. **At the top of the integration branch: the API.**
-   - What it adds:
-     - `select` and `resolve`;
-     - the memory reshape;
-     - entries, with reaction slots in place of today's session, turn, and step metadata;
-     - `defineDynamic` wrapping whole definitions, including a dynamic `agent.ts`;
-     - `select` and `resolve` for hooks, with `cancel(…)` as the first intent;
-     - restores from recorded selections;
-     - the development checks;
-     - typed entry points and the selectors reactions need;
-     - the build errors, the codemod, the repo migration, the docs, and the tests.
-   - What it deletes: the private payload, the redeploy refresh, and the callback rebind paths.
-   - It aims to ship in the same release as the break. If it isn't ready, the break merges without it ([Compatibility](#compatibility)).
+3. **At the top of the integration branch: the API.** It adds:
+   - `select` and `resolve` for every surface, with entries and slots in place of today's session, turn, and step metadata;
+   - the memory reshape;
+   - `defineDynamic` wrapping whole definitions, including a dynamic `agent.ts`;
+   - hooks, with `cancel(…)` as the first intent;
+   - restores from recorded selections, and the development checks;
+   - typed entry points and the selectors reactions need;
+   - the build errors, the codemod, the repo migration, the docs, and the tests.
 
-**Size:** a small net reduction, not measured.
+   It deletes the private payload, the redeploy refresh, and the callback rebind paths. If it isn't ready, the break merges without it ([Compatibility](#compatibility)).
 
-- **Removed by the three steps:** a few hundred lines of dispatch and synthetic-event code, across `turn-event-handler.ts` (140), `resolver-events.ts` (29), `memory-event-lifecycle.ts` (76), and the filtering parts of the six `context/dynamic-*-lifecycle.ts` files. The pipeline, selection comparison, and recording add back something smaller.
-- **Also replaced by step 3:** the per-kind recording in `context/dynamic-*.ts`, about 1,600 lines, becomes one slot per reaction. How much of it goes depends on how much of the durable callback and schema replay machinery survives, which isn't estimated here.
+**Size:** a small net reduction, not measured. The three steps remove a few hundred lines of dispatch and synthetic-event code (`turn-event-handler.ts`, `resolver-events.ts`, `memory-event-lifecycle.ts`, and the filtering in the six lifecycle files). Step 3 also replaces the per-kind recording in `context/dynamic-*.ts`, about 1,600 lines, with one slot per reaction; how much goes depends on how much of the durable callback and schema replay machinery survives.
 
 **Beyond the plan, not scheduled:**
 
-- **The channel signature.** It would change the channel handler's arguments in the observer section of `session-event-lifecycle.md`. If it's accepted, it belongs in the conversation slice, next to the channel maps.
-- **Hooks returning more than effects and `cancel(…)`:** data, capabilities, mixed results, and other intents, as minors after the break, each with its own doc and e2e tests.
+- **The channel signature,** which would change the channel handler's arguments in `session-event-lifecycle.md`. If accepted, it belongs in the conversation slice.
+- **Hooks returning more than effects and `cancel(…)`:** data, capabilities, mixed results, and other intents.
 - **Clearances,** read after each `call.requested`, next to the executor's approvals decided by eve.
-- **Timers, context edits, request parameters, and dynamic extension mounts,** as minors after the break, each with its own doc.
+- **Timers, context edits, request parameters, and dynamic extension mounts.**
+
+Each lands as a minor after the break, with its own doc and e2e tests.
 
 ## Open questions
 
 **Semantics:**
 
-1. **Revisions per reaction.** A redeploy re-runs every reaction in every session that takes it over, so every external source gets called after a deploy. A fingerprint per reaction module, instead of the deployment ID, would re-run only reactions whose code changed. Can the bundle provide a stable one?
-2. **Presenting a decision versus making it.** Tools can change at any model call. [Anthropic](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) invalidates the whole cache when tool definitions change, and [OpenAI](https://developers.openai.com/api/docs/guides/prompt-caching) recommends stable tools with `allowed_tools`. Should the harness keep the decision separate from the request, removing tools only at turn start and masking or appending mid-turn where a provider supports it?
-3. **History beyond the operational view.** `ctx.view` prunes closed calls and turns, so a selection can't count earlier deploys or failures. Should reactions be able to declare folded aggregates that survive pruning, as `extendConversation` does for clients? Or should they derive such facts from `ctx.messages`?
-4. **Periodic refresh.** Selecting the turn refreshes every turn. "At most every ten minutes" needs a committed time in the view, such as the `at` of the turn's start commit, and rows don't carry one today. Timers need the same.
-5. **Restores that rebuild something different.** A restore calls `resolve` with the recorded selection, but an outside source may have changed since; the prototype detects the mismatch. When the rebuilt result lacks a recorded tool, or its schema differs, does the call fail, or does the recorded declaration win?
-6. **The cap on stored selections.** Only selections stored to rebuild code are capped. Should the cap be small, as the prototype's 4 KiB, or generous, such as 64 KiB, since it bounds stored data per reaction rather than traffic per commit?
-7. **Revision changes mid-turn in development.** Locally, the revision is the compiled artifacts' key. It changes on a rebuild, possibly while a turn is paused; today the refresh runs at any step start. Under this proposal:
-   - the model and tools re-resolve at the next model call;
-   - everything else re-resolves at the next turn;
-   - code is rebuilt from recorded selections in between.
-
-   Is that intended, and does "only while idle" need a local exception?
+1. **Revisions per reaction.** A redeploy re-runs every reaction in every session that takes it over, so every external source gets called. Can the bundle provide a stable fingerprint per reaction module, so only reactions whose code changed re-run?
+2. **Presenting a decision versus making it.** Tools can change at any model call. [Anthropic](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) invalidates the whole cache when tool definitions change, and [OpenAI](https://developers.openai.com/api/docs/guides/prompt-caching) recommends stable tools with `allowed_tools`. Should the harness remove tools only at turn start, and mask or append mid-turn where a provider supports it?
+3. **History beyond the operational view.** `ctx.view` prunes closed calls and turns, so a selection can't count earlier deploys or failures. Should reactions declare folded aggregates that survive pruning, as `extendConversation` does for clients, or derive such facts from `ctx.messages`?
+4. **Periodic refresh.** Selecting the turn refreshes every turn. "At most every ten minutes", and timers, need a committed time in the view, such as the `at` of the turn's start commit. Rows don't carry one today.
+5. **Restores that rebuild something different.** An outside source may have changed since a selection was recorded, and the prototype detects the mismatch. When the rebuilt result lacks a recorded tool, or its schema differs, does the call fail, or does the recorded declaration win?
+6. **The cap on stored selections.** Should it be small, like the prototype's 4 KiB, or generous, such as 64 KiB, since it bounds stored data per reaction rather than traffic per commit?
+7. **Revision changes mid-turn in development.** Locally, the revision changes on every rebuild, possibly while a turn is paused. Under this proposal, the model and tools re-resolve at the next model call, everything else at the next turn, and code is rebuilt from recorded selections in between. Is that intended, or does "only while idle" need a local exception?
 
 **Authoring:**
 
-8. **Resolvers with several keys.** Seven in this repo, including `self-modification/agent.ts`, handle two keys whose results layer today: a turn result overrides a session result of the same name. With one slot per reaction, the codemod can either merge them under the turn's selection, which redoes the session work every turn, or leave a TODO. Which?
-9. **Session state read around the selection.** `resolve` runs inside the session's async context, so `defineState(...).get()` still reads session state it didn't select, and one fixture (`dynamic-overwrite.ts`) writes state from a resolver. Should `resolve` run outside the session's context, or is "`resolve` reads only its selection" a documented convention? Writes also repeat when a restore calls `resolve` again.
-10. **Recall after compaction.** Memoized recall no longer runs again automatically after a mid-turn compaction, although the recalled records stay in context. Is that acceptable as the default?
+8. **Resolvers with several keys.** Seven in this repo, including `self-modification/agent.ts`, handle two keys whose results layer: a turn result overrides a session result of the same name. With one slot per reaction, should the codemod merge them under the turn's selection, which redoes the session work every turn, or leave a TODO?
+9. **Session state read around the selection.** `resolve` runs inside the session's async context, so `defineState(...).get()` still reads state it didn't select, and one fixture (`dynamic-overwrite.ts`) writes state from a resolver. Should `resolve` run outside the session's context, or is "`resolve` reads only its selection" a documented convention? Writes also repeat when a restore calls `resolve` again.
+10. **Recall after compaction.** Memoized recall no longer runs again after a mid-turn compaction, although the recalled records stay in context. Is that acceptable as the default?
 11. **Build-time fields in a dynamic `agent.ts`.** `build`, `defaultTools`, `experimental`, and `tool` exposure can't vary per session. Should they sit beside `select` and `resolve`, as `build` does for dynamic subagents, or must they be static, with the compiler checking that each result agrees?
 
 **Scope:**
 
 12. **The channel signature.** Should channels move to `(fact, ctx)` in v27, when their event names break anyway, or in a minor after it?
 13. **Intents.** Which come first after cancel, with what caps per delivery, and is `cause: {reaction}` enough attribution? Each new kind also needs the fact that satisfies it.
-14. **Hooks as the public reaction.** In what order do hooks gain data, capabilities, mixed results, and other intents? Once hooks can return an entry kind, that kind is public contract. Do capabilities a hook declares need the same e2e coverage as their own folders?
+14. **Hooks as the public reaction.** In what order do hooks gain data, capabilities, mixed results, and other intents? Once hooks can return an entry kind, it's public contract. Do capabilities a hook declares need the same e2e coverage as their own folders?
