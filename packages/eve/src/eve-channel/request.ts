@@ -29,6 +29,7 @@ import {
   REMOTE_AGENT_PROTOCOL_MISMATCH,
   REMOTE_AGENT_PROTOCOL_VERSION,
   readRemoteAgentProtocolVersion,
+  servesRemoteAgentCaller,
 } from "#protocol/remote-agent-protocol.js";
 import {
   collectUploadPolicyViolations,
@@ -64,7 +65,7 @@ export async function deriveOperationContinuationToken(input: {
 }
 
 export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBody | Response {
-  const payload = input;
+  const payload = withoutLegacyTaskId(input);
   if (payload.inputResponses !== undefined) {
     return Response.json(
       { error: "'inputResponses' is only accepted for an existing session.", ok: false },
@@ -362,6 +363,17 @@ function parseCallbackField(value: unknown): SessionCallback | Response | undefi
   return Response.json({ error: parsed.message, ok: false }, { status: 400 });
 }
 
+/**
+ * An eve 0.66–0.68 caller names the background task it delegates from as `callback.taskId`. This
+ * deployment never relays to such a caller, so the task id has no reader and is dropped.
+ */
+function withoutLegacyTaskId(input: Record<string, unknown>): Record<string, unknown> {
+  const { callback } = input;
+  if (callback === null || typeof callback !== "object" || !("taskId" in callback)) return input;
+  const { taskId: _taskId, ...rest } = callback;
+  return { ...input, callback: rest };
+}
+
 /** Delegating callers must speak a remote agent protocol this deployment serves. */
 function parseProtocolVersionField(value: unknown): number | Response {
   // Only an absent version means protocol 1; 0.66–0.68 callers omit the field.
@@ -372,7 +384,7 @@ function parseProtocolVersionField(value: unknown): number | Response {
     );
   }
   const callerVersion = readRemoteAgentProtocolVersion(value);
-  if (callerVersion === REMOTE_AGENT_PROTOCOL_VERSION) return callerVersion;
+  if (servesRemoteAgentCaller(callerVersion)) return callerVersion;
   return Response.json(
     {
       code: REMOTE_AGENT_PROTOCOL_MISMATCH,

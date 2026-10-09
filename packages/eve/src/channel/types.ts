@@ -526,6 +526,11 @@ export interface RunInput {
    */
   readonly callback?: SessionCallback;
   /**
+   * Set when {@link callback} belongs to a caller on an earlier remote agent protocol. The session
+   * reports its result to that caller, but relays none of its requests.
+   */
+  readonly earlierCallerProtocol?: number;
+  /**
    * Session continuation token for delivery and hook creation. Channels can
    * add a continuation address during the first turn via
    * `ctx.session.continuation.alias(...)` (e.g. Slack adopts its first

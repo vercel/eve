@@ -30,6 +30,8 @@ export interface RemoteAgentBinding {
   readonly name: string;
   readonly resolverId?: string;
   readonly url: string;
+  /** The child's remote agent protocol, when it speaks an earlier one. */
+  readonly earlierProtocol?: number;
 }
 
 interface RemoteAgentStreamCoordinates {
@@ -49,6 +51,7 @@ export async function findRemoteAgentBinding(
             readonly resolverId?: string;
             readonly streamPath: string;
             readonly url: string;
+            readonly earlierProtocol?: number;
           }
         | undefined
       >;
@@ -68,6 +71,7 @@ export async function findRemoteAgentBinding(
     url: recorded.url,
   };
   if (recorded.resolverId !== undefined) binding.resolverId = recorded.resolverId;
+  if (recorded.earlierProtocol !== undefined) binding.earlierProtocol = recorded.earlierProtocol;
   return binding;
 }
 

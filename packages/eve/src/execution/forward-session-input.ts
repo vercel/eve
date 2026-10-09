@@ -2,6 +2,7 @@ import type { SessionEvent } from "#protocol/session-event.js";
 import type { ContextContainer } from "#context/container.js";
 import {
   ContinuationTokenKey,
+  EarlierRemoteCallerKey,
   SessionCallbackKey,
   SessionIdKey,
   SessionInboxKey,
@@ -18,7 +19,8 @@ export async function forwardSessionInput(
   inputSource?: string,
 ): Promise<boolean> {
   const callback = ctx.get(SessionCallbackKey);
-  if (callback === undefined) return false;
+  // A caller on an earlier protocol can't read this session's requests; the turn fails instead.
+  if (callback === undefined || ctx.get(EarlierRemoteCallerKey) !== undefined) return false;
   const view = currentView(ctx);
   const batch =
     event.type === "interaction.opened" && event.data.request.kind !== "sign-in"

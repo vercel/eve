@@ -14,6 +14,8 @@ export interface RemoteChildBinding {
   readonly streamPath: string;
   readonly url: string;
   readonly resolverId?: string;
+  /** The child's remote agent protocol, when it speaks an earlier one: the proxy can't follow it. */
+  readonly earlierProtocol?: number;
 }
 
 function namespaceOf(childSessionId: string): string {
@@ -56,7 +58,7 @@ export async function readRemoteChildBinding(
 
 function parseBinding(value: unknown, childSessionId: string): RemoteChildBinding | undefined {
   if (!isObject(value)) return undefined;
-  const { callId, name, resolverId, streamPath, url } = value;
+  const { callId, earlierProtocol, name, resolverId, streamPath, url } = value;
   if (
     typeof callId !== "string" ||
     typeof name !== "string" ||
@@ -72,5 +74,6 @@ function parseBinding(value: unknown, childSessionId: string): RemoteChildBindin
     url,
   };
   if (typeof resolverId === "string") binding.resolverId = resolverId;
+  if (typeof earlierProtocol === "number") binding.earlierProtocol = earlierProtocol;
   return binding;
 }

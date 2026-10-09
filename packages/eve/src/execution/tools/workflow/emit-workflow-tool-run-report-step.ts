@@ -61,6 +61,7 @@ export async function emitAgentStartedStep(
         url: session.url,
       };
       if (session.resolverId !== undefined) binding.resolverId = session.resolverId;
+      if (session.earlierProtocol !== undefined) binding.earlierProtocol = session.earlierProtocol;
       await recordRemoteChildBinding(parentSessionId, binding);
     }
     const scope: { turnId: string; taskId?: string } = { turnId: from.turnId };

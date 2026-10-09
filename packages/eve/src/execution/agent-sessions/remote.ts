@@ -57,6 +57,8 @@ const UNKNOWN_REMOTE_OUTCOME =
 
 type RemoteAgentSessionCoordinates = {
   readonly sessionId: string;
+  /** The child's protocol, when it speaks an earlier one: its result arrives, nothing else. */
+  readonly earlierProtocol?: number;
 };
 
 export async function startRemoteAgentSession(input: {
@@ -193,7 +195,9 @@ export async function startRemoteAgentSession(input: {
     );
   }
 
-  return { sessionId: parsed.data.sessionId };
+  return receiverVersion === REMOTE_AGENT_PROTOCOL_VERSION
+    ? { sessionId: parsed.data.sessionId }
+    : { earlierProtocol: receiverVersion, sessionId: parsed.data.sessionId };
 }
 
 /** A receiver that speaks another protocol version rejects the create with its own version. */

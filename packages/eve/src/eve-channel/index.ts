@@ -77,6 +77,11 @@ import {
   requireSessionId,
 } from "#eve-channel/request.js";
 import { attachClientContext } from "#internal/client-context.js";
+import {
+  REMOTE_AGENT_PROTOCOL_MISMATCH,
+  REMOTE_AGENT_PROTOCOL_VERSION,
+  formatEarlierRemoteChildStreamError,
+} from "#protocol/remote-agent-protocol.js";
 import type { ParsedCreateBody } from "#eve-channel/create-request.js";
 import {
   findRemoteAgentBinding,
@@ -324,6 +329,13 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           );
         }
 
+        // A caller on an earlier remote agent protocol gets its result but can't answer for the
+        // session, which can't relay its requests in a shape that caller reads.
+        const earlierCallerProtocol =
+          body.protocolVersion === undefined ||
+          body.protocolVersion === REMOTE_AGENT_PROTOCOL_VERSION
+            ? undefined
+            : body.protocolVersion;
         let handle: Awaited<ReturnType<typeof createSession>>;
         try {
           handle = await createSession({
@@ -336,8 +348,12 @@ export function eveChannel(input: EveChannelInput): EveChannel {
                     token: crypto.randomUUID(),
                   },
             auth: messageResult.auth,
-            capabilities: body.capabilities ?? { requestInput: true },
+            capabilities:
+              earlierCallerProtocol === undefined
+                ? (body.capabilities ?? { requestInput: true })
+                : { requestInput: false },
             callback: body.callback,
+            earlierCallerProtocol,
             continuationToken: operationToken,
             initiatorAuth: forwarded.accepted ? forwarded.initiatorAuth : undefined,
             input: attachClientContext(
@@ -686,6 +702,19 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           binding = found;
         } catch {
           return Response.json({ error: "Subagent stream not found.", ok: false }, { status: 404 });
+        }
+        if (binding.earlierProtocol !== undefined) {
+          return Response.json(
+            {
+              code: REMOTE_AGENT_PROTOCOL_MISMATCH,
+              error: formatEarlierRemoteChildStreamError({
+                childVersion: binding.earlierProtocol,
+                name: binding.name,
+              }),
+              ok: false,
+            },
+            { status: 409 },
+          );
         }
 
         const resolveHeaders = readRemoteAgentStreamHeadersResolver(args);
