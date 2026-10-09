@@ -1,6 +1,7 @@
 import type { SessionAuthContext } from "#channel/types.js";
 import type { ChannelFrom } from "#channel/channel-operations.js";
 
+import { attachInputText } from "#internal/input-text.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { GitHubBotNameResolver } from "#public/channels/github/auth.js";
 import { buildGitHubBinding } from "#public/channels/github/binding.js";
@@ -284,6 +285,7 @@ async function dispatchCommentTurn(input: {
     event: input.event,
     isMentioned: trigger !== null,
     message,
+    typedText: trigger?.typedText,
     context: mergeGitHubContext({
       github: await buildPullRequestContext(input.config, input.state, input.event.delivery.id),
       hook: result.context,
@@ -320,6 +322,7 @@ async function sendGitHubTurn(input: {
   readonly from: ChannelFrom<GitHubChannelState>;
   readonly state: GitHubChannelState;
   readonly title: string | undefined;
+  readonly typedText?: string;
 }): Promise<void> {
   const contextBlock = formatGitHubContextBlock({
     botName: input.botName,
@@ -334,12 +337,19 @@ async function sendGitHubTurn(input: {
   });
 
   try {
-    await input.from(continuationTokenFromState(input.state)).send(input.message, {
-      auth: input.auth,
-      context: [contextBlock, ...(input.context ?? [])],
-      state: input.state,
-      title: input.title,
-    });
+    await input.from(continuationTokenFromState(input.state)).send(
+      input.message,
+      // The quote stays model-visible; pending input matches what the person typed.
+      attachInputText(
+        {
+          auth: input.auth,
+          context: [contextBlock, ...(input.context ?? [])],
+          state: input.state,
+          title: input.title,
+        },
+        input.typedText,
+      ),
+    );
   } catch (error) {
     logError(log, input.logMessage ?? "GitHub delivery failed", error, {
       deliveryId: input.event.delivery.id,

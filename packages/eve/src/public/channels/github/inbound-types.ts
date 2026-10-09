@@ -245,4 +245,6 @@ export interface GitHubCommentTrigger {
   readonly kind: "mention";
   readonly message: string;
   readonly token: string;
+  /** What the person typed: the message without quoted lines. Pending requests resolve against it. */
+  readonly typedText: string;
 }
