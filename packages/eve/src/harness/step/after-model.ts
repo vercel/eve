@@ -32,12 +32,7 @@ import {
   createToolResultMessagePartFromToolError,
   isToolResultError,
 } from "#harness/action-result-helpers.js";
-import {
-  extractToolApprovalInputRequests,
-  hasRunnableQueue,
-  parkOnApprovals,
-  stopForToolSignIn,
-} from "#harness/hitl/index.js";
+import { hasRunnableQueue, parkOnApprovals, stopForToolSignIn } from "#harness/hitl/index.js";
 import {
   getInvalidToolCallInputError,
   isInvalidToolCall,
@@ -105,10 +100,7 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
     messages: rawResponseMessages,
     providerExecutedOutcomeIds,
   });
-  // eve runs approved calls itself, so the SDK's approval parts never reach history.
-  const responseMessages = await stageToolResultMedia(
-    withoutApprovalParts(normalizedProviderHistory.messages),
-  );
+  const responseMessages = await stageToolResultMedia(normalizedProviderHistory.messages);
 
   step.session = setRequestEnvelopeTokens(
     {
@@ -124,11 +116,7 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
       : undefined,
   );
 
-  const approvalRequests = extractToolApprovalInputRequests({
-    content: result.content ?? [],
-    excludedCallIds: invalidInputToolCallIds,
-    tools: input.catalog,
-  });
+  const approvalRequests = result.approvalRequests ?? [];
   // Only unanswered calls can dispatch: automatic denials already have results.
   const blockedCallIds = new Set([
     ...approvalRequests.map((request) => request.action.callId),
@@ -141,7 +129,7 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
 
   const authorizationInterrupt = resolveInlineAuthorizationInterrupt({
     messages: [...promptMessages, ...responseMessages],
-    toolResults: result.toolResults,
+    signIns: result.signIns ?? [],
   });
 
   // --- Park on approvals or runtime calls ----------------------------------
@@ -269,18 +257,6 @@ function answerCallsThatWontRun(
   return answers
     .filter((part) => !answered.has(part.toolCallId))
     .reduce<ModelMessage[]>((next, part) => withResult(next, part), [...messages]);
-}
-
-/** The SDK's approval parts: eve answers approvals itself, so history never holds them. */
-export function withoutApprovalParts(messages: readonly ModelMessage[]): ModelMessage[] {
-  return messages.flatMap((message): ModelMessage[] => {
-    if (message.role !== "assistant" && message.role !== "tool") return [message];
-    if (!Array.isArray(message.content)) return [message];
-    const content = message.content.filter(
-      (part) => part.type !== "tool-approval-request" && part.type !== "tool-approval-response",
-    );
-    return content.length === 0 ? [] : [{ ...message, content } as ModelMessage];
-  });
 }
 
 /**

@@ -4,9 +4,10 @@ import {
   type LanguageModel,
   type LanguageModelCallEndEvent,
   type ModelMessage,
+  type TelemetryOptions,
   ToolLoopAgent,
   type ToolSet,
-  type TypedToolResult,
+  type TypedToolCall,
 } from "ai";
 
 import { AuthKey, HistoryStateKey } from "#context/keys.js";
@@ -17,7 +18,7 @@ import {
   moveToolResultFilesToUserMessages,
 } from "#harness/attachment-staging.js";
 import { emitStreamContent } from "#harness/emission.js";
-import { toEntryStep, toEntryStream, toEntryTelemetry } from "#harness/execute-call.js";
+import { toEntryStep, toEntryStream } from "#harness/execute-call.js";
 import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import type { GenerationSteering } from "#harness/generation-steering.js";
 import { interruptStreamOnFailure } from "#harness/interruptible-stream.js";
@@ -45,7 +46,6 @@ import {
   readGatewayGenerationId,
 } from "#harness/step-hooks.js";
 import { estimateTokens } from "#harness/token-estimate.js";
-import { buildToolApproval } from "#harness/tools.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { addTurnUsage, type TokenUsageDelta } from "#harness/turn-tag-state.js";
 import { requireSessionModelReference, type StepResult } from "#harness/types.js";
@@ -60,14 +60,14 @@ import {
   type RequestMessages,
   withTrailingUserNote,
 } from "./request.js";
-import {
-  appendMissingToolResultMessages,
-  answerSkippedToolCalls,
-  extractToolResultCallIds,
-  withAccumulatedResponseMessages,
-} from "./response.js";
+import { answerSkippedToolCalls, extractToolResultCallIds, withCallResults } from "./response.js";
 import { runModelCallWithRetries } from "./retry.js";
-import { logToolExecutionError, prepareModelTools } from "./tools.js";
+import { prepareModelTools } from "./tools.js";
+import {
+  executeInlineCalls,
+  type InlineCallResults,
+  NO_INLINE_CALLS,
+} from "#harness/call-executor.js";
 import { extractGatewayCostUsd, extractTokenUsageDelta } from "./usage.js";
 
 const environment = process.env.NODE_ENV ?? "unknown";
@@ -118,6 +118,8 @@ export class ModelCaller {
   private interruptedUsage: TokenUsageDelta | undefined;
   private compactionFailure: { readonly error: unknown } | undefined;
   private attemptIndex = 0;
+  /** Calls the latest attempt announced that haven't received a result yet, by tool name. */
+  private readonly unsettledActions = new Map<string, string>();
 
   private readonly step: Step;
   private readonly prompt: Prompt;
@@ -142,21 +144,13 @@ export class ModelCaller {
 
   /** Calls the model, retrying transient failures. */
   async call(options: ModelCallOptions): Promise<HarnessStepResult> {
-    // Calls the current attempt announced that haven't received a result yet, by tool name.
-    let unsettledActionToolNames = new Map<string, string>();
     return await runModelCallWithRetries(
       async (attempt) => {
-        if (attempt > 1) {
-          await this.settleRetriedActions(unsettledActionToolNames);
-          unsettledActionToolNames = new Map<string, string>();
-        }
-        return await this.attempt(
-          {
-            ...options,
-            suppressStepStartedEmission: attempt === 1 ? options.suppressStepStartedEmission : true,
-          },
-          unsettledActionToolNames,
-        );
+        if (attempt > 1) await this.settleDiscardedActions();
+        return await this.attempt({
+          ...options,
+          suppressStepStartedEmission: attempt === 1 ? options.suppressStepStartedEmission : true,
+        });
       },
       {
         canRetry: () => this.compactionFailure === undefined,
@@ -168,15 +162,15 @@ export class ModelCaller {
   }
 
   /**
-   * Answers the calls a discarded attempt announced, so none stays open once the replacement
-   * attempt starts. The replacement re-requests whatever the model still wants to run.
+   * Answers the calls a discarded attempt announced, so none stays open: a retry's replacement
+   * attempt, or the step steering runs again, re-requests whatever the model still wants to run.
    */
-  private async settleRetriedActions(unsettled: Map<string, string>): Promise<void> {
+  private async settleDiscardedActions(): Promise<void> {
     // One call per transition: publishing isn't atomic, so a publish that fails partway leaves
     // only the calls it didn't reach for the next attempt to settle.
-    for (const [callId, toolName] of unsettled) {
+    for (const [callId, toolName] of this.unsettledActions) {
       await this.step.apply(discardAttempt(this.step.view(), { calls: [{ callId, toolName }] }));
-      unsettled.delete(callId);
+      this.unsettledActions.delete(callId);
     }
   }
 
@@ -189,6 +183,10 @@ export class ModelCaller {
   async steered(): Promise<StepResult> {
     const { step } = this;
     throwIfTurnAborted(step.config.abortSignal);
+    this.input.generation.end();
+    // The cut response never reaches history, so the calls it announced never run, even once its
+    // response ended and only their approvals were being decided.
+    await this.settleDiscardedActions();
     step.ctx?.set(HistoryStateKey, this.request.historyState);
     if (this.interruptedUsage !== undefined) {
       step.session = addTurnUsage(step.session, step.position().turnId, this.interruptedUsage);
@@ -236,7 +234,6 @@ export class ModelCaller {
     const tools = await prepareModelTools(this.step, {
       catalog: this.input.catalog,
       disabledProviderTools: options.disabledProviderTools,
-      generation: this.input.generation,
       profile: this.profile,
     });
     this.request = this.buildRequest();
@@ -291,12 +288,9 @@ export class ModelCaller {
     return await this.prepare(options);
   }
 
-  private async attempt(
-    options: ModelCallOptions,
-    unsettledActionToolNames: Map<string, string>,
-  ): Promise<HarnessStepResult> {
+  private async attempt(options: ModelCallOptions): Promise<HarnessStepResult> {
     const { step } = this;
-    const { catalog, generation, model } = this.input;
+    const { generation, model } = this.input;
     const tools = await this.compact(options, await this.prepare(options));
     // New announcements join durable history, so they must not inflate the
     // envelope baseline and hide instruction growth on the next step.
@@ -352,8 +346,6 @@ export class ModelCaller {
           usage: event.usage,
         });
       },
-      onToolExecutionEnd: (event: Parameters<typeof logToolExecutionError>[0]) =>
-        logToolExecutionError(event, catalog.resolve),
       // Replaces the AI SDK's default `console.error`; the harness reports failures as events.
       onError(event: { error: unknown }) {
         if (generation.interrupted) return;
@@ -368,12 +360,7 @@ export class ModelCaller {
       reasoning: step.session.agent.modelReference?.reasoning ?? step.session.agent.reasoning,
       runtimeContext,
       stopWhen: isStepCount(1),
-      telemetry: toEntryTelemetry(attempt?.telemetry, catalog.resolve),
-      toolApproval: buildToolApproval({
-        abortSignal: generation.signal,
-        approvedTools: this.input.approvedTools,
-        resolve: catalog.resolve,
-      }),
+      telemetry: attempt?.telemetry,
       tools,
     };
     const agent = new ToolLoopAgent(settings);
@@ -383,7 +370,7 @@ export class ModelCaller {
         agent,
         callMessages,
         hooks.stepResult,
-        unsettledActionToolNames,
+        attempt?.telemetry,
       );
       await attempt?.complete();
       return result;
@@ -395,24 +382,21 @@ export class ModelCaller {
     }
   }
 
-  /** Streams the call, publishing its content as it arrives. */
+  /**
+   * Streams the call, publishing its content as it arrives. `telemetry` is the attempt's, so the
+   * calls it runs are traced inside it, as the AI SDK traced the calls it ran.
+   */
   private async stream(
     agent: ToolLoopAgent,
     messages: ModelMessage[],
     stepResultPromise: Promise<HarnessStepResult>,
-    unsettledActionToolNames: Map<string, string>,
+    telemetry: TelemetryOptions | undefined,
   ): Promise<HarnessStepResult> {
     const { step } = this;
     const { catalog, generation } = this.input;
     const excludedActionToolNames = new Set([REPLY_TOOL_NAME]);
     const streamResult = await agent.stream({ abortSignal: generation.signal, messages });
-    const {
-      emittedActionCallIds,
-      handledInlineToolResultCallIds,
-      invalidInputToolCallIds,
-      inlineAuthorizationResults,
-      trailingInlineToolResultParts,
-    } = await emitStreamContent(
+    const { invalidInputToolCallIds, trailingInlineToolResultParts } = await emitStreamContent(
       step.publish,
       step.position(),
       toEntryStream(
@@ -423,59 +407,63 @@ export class ModelCaller {
         excludedActionToolNames,
         hidesHeldText: this.input.hidesHeldText && workingTaskIds(step.session).length > 0,
         tools: catalog,
-        unsettledActionToolNames,
+        unsettledActionToolNames: this.unsettledActions,
       },
     );
     throwIfTurnAborted(step.config.abortSignal);
     generation.check();
-    const [stepResult, accumulatedResponseMessages] = toEntryStep(
+    const [stepResult, responseMessages] = toEntryStep(
       ...(await Promise.all([stepResultPromise, streamResult.responseMessages])),
       catalog.resolve,
     );
-    assertUsableResponse(
-      stepResult,
-      accumulatedResponseMessages,
-      inlineAuthorizationResults.length > 0 || trailingInlineToolResultParts.length > 0,
-    );
-    const skipped = answerSkippedToolCalls(stepResult, catalog);
-    await emitStepActions(
-      step.publish,
-      step.position(),
-      skipped.length === 0
-        ? stepResult
-        : withAccumulatedResponseMessages({
-            stepResult,
-            responseMessages: appendMissingToolResultMessages({
-              append: skipped,
-              responseMessages: stepResult.response.messages,
-            }),
-          }),
-      {
-        emittedActionCallIds,
-        excludedActionCallIds: invalidInputToolCallIds,
-        excludedActionToolNames,
-        handledInlineToolResultCallIds,
-        tools: catalog,
-      },
-    );
-    const toolResultsByCallId = new Map(
-      (stepResult.toolResults as TypedToolResult<ToolSet>[]).map((toolResult) => [
-        toolResult.toolCallId,
-        toolResult,
-      ]),
-    );
-    for (const toolResult of inlineAuthorizationResults) {
-      toolResultsByCallId.set(toolResult.toolCallId, toolResult);
-    }
-    return withAccumulatedResponseMessages({
-      invalidInputToolCallIds,
-      responseMessages: appendMissingToolResultMessages({
-        append: [...trailingInlineToolResultParts, ...answerSkippedToolCalls(stepResult, catalog)],
-        responseMessages: accumulatedResponseMessages,
-      }),
-      stepResult,
-      toolResults: [...toolResultsByCallId.values()],
+    assertUsableResponse(stepResult, responseMessages, trailingInlineToolResultParts.length > 0);
+    const calls = await this.runInlineCalls(stepResult, messages, {
+      excludedCallIds: invalidInputToolCallIds,
+      telemetry,
     });
+    for (const part of calls.parts) this.unsettledActions.delete(part.toolCallId);
+    const notRun = answerSkippedToolCalls(stepResult, catalog, invalidInputToolCallIds);
+    await emitStepActions(step.publish, step.position(), stepResult, notRun);
+    return withCallResults({
+      answers: [...trailingInlineToolResultParts, ...notRun],
+      calls,
+      invalidInputToolCallIds,
+      responseMessages,
+      stepResult,
+    });
+  }
+
+  /**
+   * Runs the response's local calls, unless it ended early: then they don't run, and
+   * `answerSkippedToolCalls` tells the model so.
+   */
+  private async runInlineCalls(
+    stepResult: HarnessStepResult,
+    messages: readonly ModelMessage[],
+    options: {
+      readonly excludedCallIds?: ReadonlySet<string>;
+      readonly telemetry: TelemetryOptions | undefined;
+    },
+  ): Promise<InlineCallResults> {
+    const { finishReason } = stepResult;
+    if (finishReason !== "stop" && finishReason !== "tool-calls") return NO_INLINE_CALLS;
+    const { step } = this;
+    const results = await executeInlineCalls({
+      abortSignal: this.input.generation.signal,
+      approvedTools: this.input.approvedTools,
+      beforeExecute: () => this.input.generation.protectToolExecution(),
+      excludedCallIds: options.excludedCallIds ?? new Set(),
+      messages,
+      modelCallId: stepResult.callId,
+      position: { ...step.position(), turnId: activeTurnId(step.position()) },
+      publish: step.publish,
+      telemetry: options.telemetry,
+      toolCalls: (stepResult.toolCalls ?? []) as TypedToolCall<ToolSet>[],
+      tools: this.input.catalog,
+    });
+    // A cancelled turn settles its calls itself, so whatever a cut call returned is dropped.
+    throwIfTurnAborted(step.config.abortSignal);
+    return results;
   }
 }
 
@@ -483,6 +471,7 @@ export class ModelCaller {
  * A filtered response fails the step, and an empty one, without output or any tool result, is
  * retried by the empty-response recovery.
  */
+
 function assertUsableResponse(
   stepResult: HarnessStepResult,
   responseMessages: Parameters<typeof extractToolResultCallIds>[0],

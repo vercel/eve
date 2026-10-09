@@ -328,6 +328,74 @@ describe("generation steering with the real AI SDK", () => {
     ]);
   });
 
+  it("settles a call steering cut while its approval was decided, after the response ended", async () => {
+    const steering = new AbortController();
+    const execute = vi.fn(async () => "saved");
+    const events: UnstampedMessageStreamEvent[] = [];
+    const model = new MockLanguageModelV3({
+      doStream: async () => ({
+        stream: new ReadableStream<Part>({
+          start(controller) {
+            controller.enqueue({
+              type: "tool-call",
+              toolCallId: "save-1",
+              toolName: "save",
+              input: "{}",
+            });
+            controller.enqueue({
+              type: "finish",
+              finishReason: { unified: "tool-calls", raw: undefined },
+              usage,
+            });
+            controller.close();
+          },
+        }),
+      }),
+    });
+    const harness = createToolLoopHarness({
+      steeringSignal: steering.signal,
+      resolveModel: async () => model,
+      handleEvent: foldingHandler(async (event) => {
+        events.push(event);
+      }),
+      tools: new Map([
+        [
+          "save",
+          {
+            // The correction lands once the response has ended, while the call's approval is
+            // still being decided.
+            approval: async () => {
+              steering.abort();
+              return "not-applicable" as const;
+            },
+            name: "save",
+            description: "Save once",
+            inputSchema: jsonSchema({ type: "object" }),
+            execute,
+          },
+        ],
+      ]),
+    });
+    const ctx = new ContextContainer();
+    ctx.set(SessionKey, {
+      auth: { current: null, initiator: null },
+      sessionId: session().sessionId,
+      turn: { id: "turn_0", sequence: 0 },
+    });
+
+    const result = await contextStorage.run(ctx, () =>
+      harness(session(), { message: "Save this" }),
+    );
+
+    expect(result.steered).toBe(true);
+    expect(execute).not.toHaveBeenCalled();
+    // The call the response announced settles, so no reader keeps a call that never ran.
+    const settled = events.flatMap((event) =>
+      event.type === "action.result" ? [event.data.result.callId] : [],
+    );
+    expect(settled).toEqual(["save-1"]);
+  });
+
   it("finishes a local tool once and preserves its result for the corrected model call", async () => {
     const steering = new AbortController();
     const executing = Promise.withResolvers<void>();

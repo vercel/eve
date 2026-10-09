@@ -262,10 +262,6 @@ export function authorizationPendingModelText(connections: readonly string[]): s
   return `Authorization required for ${connections.join(", ")}. Waiting for the user to sign in.`;
 }
 
-export function isPendingAuthorizationToolOutput(value: unknown): boolean {
-  return isAuthorizationPendingModelOutput(value) || isAuthorizationSignal(value);
-}
-
 /**
  * Physical hook token embedded in a session's authorization callback URLs.
  * The callback route resumes exactly this hook, so it is the stable inbox's

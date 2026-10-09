@@ -337,7 +337,7 @@ export async function runApprovedLocalCalls(
   if (attempt !== undefined) setAttemptScope(attempt.scope);
   const executed = await Promise.all(
     local.map(async ({ requests, tools }) => {
-      if (requests.length === 0) return { settled: [], toolResults: [] };
+      if (requests.length === 0) return { settled: [], signIns: [] };
       return await runApprovedCalls({
         abortSignal: step.config.abortSignal,
         approvedTools: grantedApprovalKeys(step.view(), (request) =>
@@ -357,7 +357,7 @@ export async function runApprovedLocalCalls(
   throwIfTurnAborted(step.config.abortSignal);
   const signIn = resolveInlineAuthorizationInterrupt({
     messages: [],
-    toolResults: executed.flatMap((run) => run.toolResults),
+    signIns: executed.flatMap((run) => run.signIns),
   });
   if (signIn === undefined) return undefined;
   await step.apply(
