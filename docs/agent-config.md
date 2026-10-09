@@ -154,16 +154,10 @@ Run `eve set model --reasoning high` to update this field from the command line.
 
 ## Prompt caching
 
-eve turns on prompt caching for AI Gateway models with
-`providerOptions.gateway.caching: "auto"`; set it to `false` to opt out. For
-Anthropic models it calls directly, eve places Anthropic cache breakpoints at
-the end of the tools, the system prompt, and the conversation. It recognizes
-these models from the provider (`anthropic`, `vertex.anthropic`) or from a
-Bedrock model id that names Anthropic (`anthropic.claude-…`).
-
-Use `modelOptions.promptCache` to declare breakpoints for an Anthropic model
-eve can't recognize, such as a Bedrock application inference profile, or to
-change how long cache entries live:
+eve caches prompts automatically for AI Gateway models and for Anthropic models
+it recognizes by provider or model id. Set `modelOptions.promptCache` on a
+directly called model to mark an unrecognized model as Anthropic (such as a
+Bedrock application inference profile) or to use a 1-hour cache:
 
 ```ts title="agent/agent.ts"
 import { bedrock } from "@ai-sdk/amazon-bedrock";
@@ -173,23 +167,15 @@ export default defineAgent({
   model: bedrock(process.env.BEDROCK_INFERENCE_PROFILE_ARN!),
   modelContextWindowTokens: 200_000,
   modelOptions: {
-    promptCache: { anthropic: { ttl: "1h" } },
+    promptCache: { anthropic: { ttl: "1h" } }, // or { anthropic: {} } for the default 5m
   },
 });
 ```
 
-`ttl` is `"5m"` (the default) or `"1h"`, and applies to every breakpoint in
-the request. Anthropic bills a 1-hour cache write at 2x the base input price,
-compared with 1.25x for a 5-minute write, so `"1h"` pays off when turns often
-land between five minutes and an hour apart. Past an hour, the entry has expired
-either way. Only some Claude models accept a 1-hour TTL, so check that yours
-does on the provider you call. Use `promptCache: { anthropic: {} }` to turn
-breakpoints on with the default lifetime.
-
-`promptCache` applies only to models eve calls directly. eve rejects it on an
-AI Gateway model, at build time for a static model and when a dynamic resolver
-returns the selection. A dynamic selection can return its own `promptCache` in
-`modelOptions`.
+A 1-hour write costs 2x base input versus 1.25x for 5 minutes, so it pays off
+when turns are often 5–60 minutes apart. Not every Claude model supports it.
+eve rejects `promptCache` on Gateway models; use `providerOptions.gateway.caching`
+instead.
 
 ## Compaction
 
