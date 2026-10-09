@@ -8,7 +8,7 @@ last_updated: "2026-10-08"
 
 Companion docs:
 
-- [`session-reactions.md`](./session-reactions.md) puts one primitive under dynamic resolvers, memory providers, hooks, channels, and eve's built-ins: a reaction that selects from the session view at points eve defines, instead of naming events, and records its output only when it changes. The model-call point is an event this proposal adds, `model.requested`. Its pipeline is independent of this proposal; its API change is the last PR of the break, and nothing else in the break depends on it.
+- [`session-reactions.md`](./session-reactions.md) puts one primitive under dynamic resolvers, memory providers, hooks, channels, and eve's built-ins: a reaction that selects from the session view instead of naming events, runs when its selection changes, and returns entries: declarations recorded as its slot, and requests the machine decides on. Declarations eve reads before a model call wait for `model.requested`, an event this proposal adds. Its pipeline is independent of this proposal; its API change is the last PR of the break, and nothing else in the break depends on it.
 - [`session-machine-simplification.md`](./session-machine-simplification.md) covers structural cleanup in the session machine. Two of its items help this proposal land.
 
 ## Introduction
