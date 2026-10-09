@@ -1,7 +1,7 @@
 import { isObject } from "#shared/guards.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import { toError, walkCauseChain } from "#shared/errors.js";
-import { summarizeKnownError } from "#harness/semantic-errors/index.js";
+import { matchesContextOverflow, summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { isTurnCancellation } from "#harness/turn-cancellation.js";
 import type { ContextOverflowTokens } from "#harness/compaction/engine.js";
 
@@ -277,10 +277,15 @@ export function isNoOutputGeneratedError(error: unknown): boolean {
 /**
  * True when the provider rejected the request as longer than the model's context window. The
  * classification is unchanged (a rejected 4xx stays terminal); `recoverModelCall` reads this to
- * compact and reissue the call once first.
+ * compact and reissue the call once first. Checked directly rather than through the catalog's
+ * first-matching rule, so an earlier rule can't hide it.
  */
 export function isContextOverflowError(error: unknown): boolean {
-  return summarizeKnownError(error)?.tags.includes("context-overflow") === true;
+  for (const candidate of walkCauseChain(error)) {
+    // The AI SDK's own classification (vercel/ai#22461); once it ships, this replaces the prose.
+    if (readStringField(candidate, "failureReason") === "context-length-exceeded") return true;
+  }
+  return matchesContextOverflow(error);
 }
 
 /**

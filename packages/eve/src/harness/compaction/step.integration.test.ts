@@ -187,12 +187,24 @@ const REPORT_FIGURES = "Q3 revenue by region and product line. ".repeat(7_500);
  */
 async function runTurnWith(
   stepModel: MockLanguageModelV3,
-  history: HarnessSession["history"] = [
-    { content: "Please prepare the quarterly report.", kind: "user", role: "user" },
-    { content: "I gathered the sales figures.", role: "assistant" },
-  ],
+  {
+    history = [
+      { content: "Please prepare the quarterly report.", kind: "user", role: "user" },
+      { content: "I gathered the sales figures.", role: "assistant" },
+    ],
+    steering,
+  }: {
+    readonly history?: HarnessSession["history"];
+    /** Steers while the summary call is in flight. */
+    readonly steering?: AbortController;
+  } = {},
 ) {
-  const summaryModel = new MockLanguageModelV3({ doStream: async () => summaryStream() });
+  const summaryModel = new MockLanguageModelV3({
+    doStream: async () => {
+      steering?.abort();
+      return summaryStream();
+    },
+  });
   const fetchReport = vi.fn(async () => ({ figures: REPORT_FIGURES }));
   const events: UnstampedMessageStreamEvent[] = [];
   const session: HarnessSession = {
@@ -213,6 +225,7 @@ async function runTurnWith(
     },
     resolveModel: async (reference) =>
       reference.id === "summary-model" ? summaryModel : stepModel,
+    steeringSignal: steering?.signal,
     tools: new Map([
       [
         "fetch_report",
@@ -226,7 +239,10 @@ async function runTurnWith(
     ]),
   });
   let result = await harness(session, { message: "Now draft the outline." });
-  while (typeof result.next === "function") result = await result.next(result.session);
+  // A steered step hands back to the caller, which reruns it with the steering message.
+  while (typeof result.next === "function" && result.steered !== true) {
+    result = await result.next(result.session);
+  }
   return { events, fetchReport, result, summaryCalls: summaryModel.doStreamCalls.length };
 }
 
@@ -261,6 +277,7 @@ describe("context-overflow recovery", () => {
     expect(retryPrompt).toContain("call_report");
     expect(retryPrompt).toContain("Truncated by eve");
     expect(retryPrompt).toContain("I gathered the sales figures.");
+    expect(retryPrompt).toContain("Do not repeat writes");
     expect(retryPrompt.length).toBeLessThan(REPORT_FIGURES.length);
     expect(ofType(events, "compaction.requested")).toHaveLength(1);
     expect(ofType(events, "compaction.completed")).toHaveLength(1);
@@ -276,7 +293,7 @@ describe("context-overflow recovery", () => {
 
     const { events, result, summaryCalls } = await runTurnWith(
       new MockLanguageModelV3({ doStream }),
-      japaneseHistory,
+      { history: japaneseHistory },
     );
 
     expect(doStream).toHaveBeenCalledTimes(2);
@@ -296,6 +313,23 @@ describe("context-overflow recovery", () => {
     });
   });
 
+  it("restarts the step when steering lands during the compaction", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const doStream = vi
+      .fn<MockLanguageModelV3["doStream"]>()
+      .mockRejectedValueOnce(anthropicOverflowError(70_000, 60_000))
+      .mockImplementation(async () => answerStream());
+
+    const { events, result, summaryCalls } = await runTurnWith(
+      new MockLanguageModelV3({ doStream }),
+      { history: japaneseHistory, steering: new AbortController() },
+    );
+
+    expect(summaryCalls).toBe(1);
+    expect(result.steered).toBe(true);
+    expect(ofType(events, "step.failed")).toHaveLength(0);
+  });
+
   it("fails the step after one compaction when the retry overflows too", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -303,10 +337,9 @@ describe("context-overflow recovery", () => {
       throw anthropicOverflowError(70_000, 60_000);
     });
 
-    const { events, summaryCalls } = await runTurnWith(
-      new MockLanguageModelV3({ doStream }),
-      japaneseHistory,
-    );
+    const { events, summaryCalls } = await runTurnWith(new MockLanguageModelV3({ doStream }), {
+      history: japaneseHistory,
+    });
 
     expect(doStream).toHaveBeenCalledTimes(2);
     expect(summaryCalls).toBe(1);

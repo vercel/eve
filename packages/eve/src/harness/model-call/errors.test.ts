@@ -346,10 +346,9 @@ describe("isContextOverflowError", () => {
       }),
     },
     {
-      title: "OpenAI-compatible body code with other prose",
-      error: directApiCallError({
-        data: { error: { code: "context_length_exceeded", message: "Request too large." } },
-        statusCode: 400,
+      title: "AI SDK failureReason",
+      error: Object.assign(directApiCallError({ message: "Request too large.", statusCode: 400 }), {
+        failureReason: "context-length-exceeded",
       }),
     },
     {

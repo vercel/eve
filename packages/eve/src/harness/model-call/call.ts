@@ -278,7 +278,9 @@ export class ModelCaller {
       });
       if (compaction.failure !== undefined) throw compaction.failure.error;
     } catch (error) {
-      this.compactionFailure = { error };
+      // A reissued call compacts after the first attempt began generating, so steering can
+      // interrupt the compaction's events. That restarts the step rather than failing it.
+      if (!this.input.generation.interrupted) this.compactionFailure = { error };
       throw error;
     }
     step.session = compaction.session;

@@ -9,8 +9,6 @@ import type { ErrorLink, ErrorSignals } from "./signals.js";
  * - `transient` — the failure is expected to clear on retry.
  * - `recoverable` — the current request cannot proceed, but the same session
  *   remains useful after an external fix.
- * - `context-overflow` — the provider rejected the request as longer than the
- *   model's context window. The harness compacts and reissues the call once.
  */
 export type SemanticErrorTag =
   | "gateway"
@@ -20,8 +18,7 @@ export type SemanticErrorTag =
   | "system"
   | "config"
   | "transient"
-  | "recoverable"
-  | "context-overflow";
+  | "recoverable";
 
 /** A predicate over one extracted cause-chain link. */
 export type LinkPredicate = (link: ErrorLink) => boolean;

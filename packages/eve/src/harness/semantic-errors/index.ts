@@ -5,7 +5,7 @@ import {
 } from "./rule.js";
 import { extractErrorSignals } from "./signals.js";
 import { GATEWAY_RULES } from "./rules/gateway.js";
-import { MODEL_PROVIDER_RULES } from "./rules/model-provider.js";
+import { isContextOverflowLink, MODEL_PROVIDER_RULES } from "./rules/model-provider.js";
 import { SANDBOX_RULES } from "./rules/sandbox.js";
 import { SYSTEM_RULES } from "./rules/system.js";
 import { WORKFLOW_RULES } from "./rules/workflow.js";
@@ -40,4 +40,9 @@ const CATALOG: readonly SemanticErrorRule[] = [
  */
 export function summarizeKnownError(error: unknown): SemanticErrorSummary | null {
   return evaluateSemanticErrorRules(CATALOG, extractErrorSignals(error));
+}
+
+/** True when any link on the error's cause chain is a provider's context-window rejection. */
+export function matchesContextOverflow(error: unknown): boolean {
+  return extractErrorSignals(error).chain.some(isContextOverflowLink);
 }
