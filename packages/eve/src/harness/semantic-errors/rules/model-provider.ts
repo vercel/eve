@@ -13,8 +13,8 @@ import {
  * "prompt is too long" or "exceed context limit"; Bedrock says "Input is too long"; OpenAI says
  * "maximum context length" (Chat Completions) or "exceeds the context window" (Responses); Gemini
  * says "input token count ... exceeds the maximum". AI Gateway relays the upstream message. The
- * prose only counts on a 400/413 rejection, so another error that quotes it isn't misread. A
- * custom LanguageModel signals overflow by throwing with `code: "context_length_exceeded"`.
+ * prose only counts on a 400/413 rejection, so another error that quotes it isn't misread.
+ * OpenAI stream errors carry `code: "context_length_exceeded"` instead.
  *
  * Message prose is a stopgap until the AI SDK classifies this itself (vercel/ai#22461).
  */

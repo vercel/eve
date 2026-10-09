@@ -79,18 +79,20 @@ export function shouldCompact(
 
 /** What a provider's context-overflow rejection reported, when its message carries counts. */
 export interface ContextOverflowTokens {
-  /** Tokens the rejected request measured, including any reserved output. */
+  /** Input tokens the rejected request measured. */
   readonly inputTokens?: number;
-  /** The provider's limit for that measure. */
-  readonly maxInputTokens?: number;
+  /** Output tokens the request reserved, when the provider counted them toward the limit. */
+  readonly reservedOutputTokens?: number;
+  /** The provider's context limit. */
+  readonly limitTokens?: number;
 }
 
 /**
  * The compaction threshold, in eve's estimated tokens, that fits a request the provider rejected
- * as too long. `estimatedTokens` is what eve counted for that request. The provider's count is
- * the truth, so the threshold shrinks by how far eve undercounted, and to the provider's limit
- * when that is below the configured one. Without counts, the rejection still proves the request
- * reached at least the configured context window.
+ * as too long. `estimatedTokens` is what eve counted for that request's input. The provider's
+ * count is the truth, so the threshold shrinks by how far eve undercounted, and to the provider's
+ * limit (less any reserved output) when that is below the configured one. Without counts, the
+ * rejection still proves the input reached at least the configured context window.
  */
 export function overflowCompactionThreshold(
   config: CompactionConfig,
@@ -98,9 +100,10 @@ export function overflowCompactionThreshold(
   overflow: ContextOverflowTokens,
 ): number {
   const thresholdPercent = config.thresholdPercent ?? 0.9;
-  const limit = overflow.maxInputTokens ?? config.threshold / thresholdPercent;
-  const actualTokens = Math.max(overflow.inputTokens ?? limit, estimatedTokens, 1);
-  const target = Math.min(config.threshold, limit * thresholdPercent);
+  const limit = overflow.limitTokens ?? config.threshold / thresholdPercent;
+  const inputLimit = Math.max(1, limit - (overflow.reservedOutputTokens ?? 0));
+  const actualTokens = Math.max(overflow.inputTokens ?? inputLimit, estimatedTokens, 1);
+  const target = Math.min(config.threshold, inputLimit * thresholdPercent);
   return Math.max(1, Math.floor((target * estimatedTokens) / actualTokens));
 }
 

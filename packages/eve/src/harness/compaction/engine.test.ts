@@ -462,14 +462,20 @@ describe("overflowCompactionThreshold", () => {
     // eve counted 60k of a 120k request: half the threshold fits.
     {
       estimated: 60_000,
-      overflow: { inputTokens: 120_000, maxInputTokens: 100_000 },
+      overflow: { inputTokens: 120_000, limitTokens: 100_000 },
       expected: 45_000,
     },
     // The provider's limit is below the configured window, so the target shrinks to it too.
     {
       estimated: 40_000,
-      overflow: { inputTokens: 80_000, maxInputTokens: 50_000 },
+      overflow: { inputTokens: 80_000, limitTokens: 50_000 },
       expected: 22_500,
+    },
+    // Reserved output takes part of the limit; the input alone is what eve estimated.
+    {
+      estimated: 45_000,
+      overflow: { inputTokens: 90_000, limitTokens: 100_000, reservedOutputTokens: 20_000 },
+      expected: 36_000,
     },
     // Without counts the request was at least the configured window.
     { estimated: 60_000, overflow: {}, expected: 54_000 },

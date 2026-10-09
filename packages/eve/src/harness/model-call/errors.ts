@@ -297,33 +297,34 @@ export function readContextOverflowTokens(error: unknown): ContextOverflowTokens
   for (const candidate of walkCauseChain(error)) {
     const message = readErrorMessage(candidate);
     const anthropic = /prompt is too long: (\d+) tokens > (\d+) maximum/i.exec(message);
-    if (anthropic) return overflowCounts(anthropic[1], anthropic[2]);
-    // The reserved output counts toward the limit, so it counts toward the request.
+    if (anthropic) return overflowCounts(anthropic[1], undefined, anthropic[2]);
     const withOutput = /exceed context limit: (\d+) \+ (\d+) > (\d+)/i.exec(message);
-    if (withOutput) {
-      return overflowCounts(Number(withOutput[1]) + Number(withOutput[2]), withOutput[3]);
-    }
+    if (withOutput) return overflowCounts(withOutput[1], withOutput[2], withOutput[3]);
     const openai = /maximum context length is (\d+) tokens/i.exec(message);
     if (openai) {
+      const split = /\((\d+) in the messages, (\d+) in the completion\)/i.exec(message);
+      if (split) return overflowCounts(split[1], split[2], openai[1]);
       const requested = /(?:resulted in|requested) (\d+) tokens/i.exec(message);
-      return overflowCounts(requested?.[1], openai[1]);
+      return overflowCounts(requested?.[1], undefined, openai[1]);
     }
     const gemini =
       /input token count(?: \((\d+)\))? exceeds the maximum number of tokens allowed \(?(\d+)/i.exec(
         message,
       );
-    if (gemini) return overflowCounts(gemini[1], gemini[2]);
+    if (gemini) return overflowCounts(gemini[1], undefined, gemini[2]);
   }
   return {};
 }
 
 function overflowCounts(
-  input: string | number | undefined,
-  max: string | undefined,
+  input: string | undefined,
+  reservedOutput: string | undefined,
+  limit: string | undefined,
 ): ContextOverflowTokens {
-  const tokens: { inputTokens?: number; maxInputTokens?: number } = {};
+  const tokens: { inputTokens?: number; limitTokens?: number; reservedOutputTokens?: number } = {};
   if (input !== undefined) tokens.inputTokens = Number(input);
-  if (max !== undefined) tokens.maxInputTokens = Number(max);
+  if (reservedOutput !== undefined) tokens.reservedOutputTokens = Number(reservedOutput);
+  if (limit !== undefined) tokens.limitTokens = Number(limit);
   return tokens;
 }
 

@@ -378,9 +378,16 @@ describe("isContextOverflowError", () => {
       error: gatewayOverflowError(),
     },
     {
-      title: "custom LanguageModel code",
-      error: Object.assign(new Error("Request exceeds the proxy limit."), {
+      title: "OpenAI stream error code",
+      error: Object.assign(new Error("Your input exceeds the context window of this model."), {
         code: "context_length_exceeded",
+        name: "AI_StreamProviderError",
+      }),
+    },
+    {
+      title: "custom LanguageModel failureReason",
+      error: Object.assign(new Error("Request exceeds the proxy limit."), {
+        failureReason: "context-length-exceeded",
       }),
     },
   ])("recognizes $title", ({ error }) => {
@@ -412,26 +419,31 @@ describe("readContextOverflowTokens", () => {
   it.each([
     {
       message: "prompt is too long: 215000 tokens > 200000 maximum",
-      expected: { inputTokens: 215_000, maxInputTokens: 200_000 },
+      expected: { inputTokens: 215_000, limitTokens: 200_000 },
     },
     {
       message:
         "input length and `max_tokens` exceed context limit: 198000 + 8192 > 200000, decrease input length or `max_tokens` and try again",
-      expected: { inputTokens: 206_192, maxInputTokens: 200_000 },
+      expected: { inputTokens: 198_000, limitTokens: 200_000, reservedOutputTokens: 8_192 },
     },
     {
       message:
         "This model's maximum context length is 128000 tokens. However, your messages resulted in 130000 tokens.",
-      expected: { inputTokens: 130_000, maxInputTokens: 128_000 },
+      expected: { inputTokens: 130_000, limitTokens: 128_000 },
+    },
+    {
+      message:
+        "This model's maximum context length is 128000 tokens. However, you requested 130000 tokens (120000 in the messages, 10000 in the completion).",
+      expected: { inputTokens: 120_000, limitTokens: 128_000, reservedOutputTokens: 10_000 },
     },
     {
       message:
         "The input token count (1200000) exceeds the maximum number of tokens allowed (1048576).",
-      expected: { inputTokens: 1_200_000, maxInputTokens: 1_048_576 },
+      expected: { inputTokens: 1_200_000, limitTokens: 1_048_576 },
     },
     {
       message: "The input token count exceeds the maximum number of tokens allowed 1048576.",
-      expected: { maxInputTokens: 1_048_576 },
+      expected: { limitTokens: 1_048_576 },
     },
     {
       message: "Your input exceeds the context window of this model.",

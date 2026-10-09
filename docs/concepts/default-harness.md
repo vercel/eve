@@ -35,7 +35,13 @@ usual `compaction.requested` and `compaction.completed` events. If the reissued
 call is rejected too, the step fails. eve recognizes the context-window errors
 from Anthropic, Amazon Bedrock, OpenAI, and Gemini, including through AI Gateway.
 A custom `LanguageModel` can opt in by throwing an error with
-`code: "context_length_exceeded"`.
+`failureReason: "context-length-exceeded"`.
+
+Some errors carry no token counts, including OpenAI's Responses API and Amazon
+Bedrock. eve then assumes the request was the size of the configured context
+window. If the model's real limit is smaller than that window, the reissued call
+can be rejected again and the step fails. Set `modelContextWindowTokens` to the
+model's real limit to avoid this.
 
 First-class [memory](../memory) participates in a separate lifecycle. eve asks
 providers to capture before compaction, excludes attributed recalled records
