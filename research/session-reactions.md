@@ -13,7 +13,7 @@ This doc proposes one primitive, the **reaction**, underneath eve's dynamic capa
 - **eve is a state machine.** Everything that happens in a session is a function of its state, and everything that happens adds to that state ([eve is a state machine](#eve-is-a-state-machine)).
 - **A reaction is that idea as code.** `select` reads what it depends on, and `resolve` returns what it contributes. `resolve` is called right after the commit that changes its selection, and nothing else triggers it ([The primitive](#the-primitive)).
 - **Reactions are sync or async.** Authors write sync reactions, which finish before the next commit. Async reactions, such as a model run, are a direction for eve's own loop, and aren't needed to ship this ([Sync and async reactions](#sync-and-async-reactions)).
-- **Today's surfaces become sugar.** `defineDynamic`, memory providers, and hook event maps all desugar to `defineHook`, the public reaction ([Today's concepts as reactions](#todays-concepts-as-reactions)).
+- **Today's surfaces become sugar.** `defineDynamic`, memory providers, channels, and hook event maps all desugar to `defineHook`, the public reaction ([Today's concepts as reactions](#todays-concepts-as-reactions)).
 - **Hooks gain what has no home today:** several kinds of capability behind one condition, intents such as "compact now", agent-wide policies, and dynamic extension mounts ([Advanced examples](#advanced-examples)).
 - **It's approachable now.** The session machine, state deltas, and fewer durable steps have landed on `main`, and the v27 stack makes stopping, waiting, and calls one path each ([Why this is approachable now](#why-this-is-approachable-now)).
 - **It's cheap.** 20 unchanged reactions cost about 7 µs per commit ([Performance](#performance)).
@@ -513,6 +513,80 @@ export default defineHook({
 });
 ```
 
+### Channels
+
+A channel has two sides. Its routes turn platform requests into inputs, and they stay as they are. Its outbound side becomes hooks scoped to the sessions the channel owns.
+
+Today, `events` handlers receive `(event, channel, ctx)` and keep their own state in `channel.state`:
+
+```ts
+// agent/channels/support.ts
+export default defineChannel({
+  routes: [
+    POST("/threads/:threadId/messages", async (request, { from, params }) => {
+      const { message } = await request.json();
+      const session = await from(params.threadId).send(message, { auth: null });
+      return Response.json({ sessionId: session.id });
+    }),
+  ],
+  events: {
+    "message.completed"(event, channel) {
+      return postMessage(channel.continuation.token, event.message);
+    },
+    async "step.started"(_event, channel) {
+      channel.state.statusId = await setStatus(channel, channel.state.statusId, "Thinking…");
+    },
+    async "input.requested"(_event, channel) {
+      channel.state.statusId = await setStatus(channel, channel.state.statusId, "Waiting for you");
+    },
+    async "turn.completed"(_event, channel) {
+      await setStatus(channel, channel.state.statusId, null);
+    },
+  },
+});
+```
+
+The status line depends on listing every event that changes it, so a failed or cancelled turn leaves it stale. A retried step repeats the handlers, and channel handlers run before the event is written, so a channel can post about an event whose write then fails.
+
+Proposed, the routes stay as they are, the event map uses v27's names with `(fact, ctx)`, and the status line is a hook that selects state:
+
+```ts
+// agent/channels/support.ts
+export default defineChannel({
+  routes: [/* as today */],
+  events: {
+    "turn.settled"(fact, ctx) {
+      if (fact.data.outcome === "completed") {
+        return postMessage(ctx.channel.continuation.token, replyText(fact));
+      }
+    },
+  },
+  hooks: {
+    status: defineHook({
+      select: (view) => activity(view), // "thinking" | "waiting" | "idle"
+      resolve: async (activity, ctx) => {
+        const statusId = await setStatus(ctx.channel, ctx.previous?.statusId, STATUS[activity]);
+        return data({ statusId });
+      },
+    }),
+  },
+});
+```
+
+As reactions, a channel is a bundle of hooks that eve mounts only for the sessions it owns, with `ctx.channel` in their context. The `status` hook runs as written, and the event map desugars like a hook's:
+
+```ts
+defineHook({
+  select: (view) => view.latest["turn.settled"] ?? null,
+  resolve: (_position, ctx) => dispatch(events, ctx.facts),
+});
+```
+
+- **Routes are inputs.** `send`, `respond`, `cancel`, and `compact` from `from(address)` reach the machine like any other input.
+- **Handlers run after the commit,** so a channel only posts about facts that were written. That's the order the lifecycle doc asks for: write, then channel handlers, then hooks ([`session-event-lifecycle.md`](./session-event-lifecycle.md#observers-hooks-and-channels)).
+- **The status follows the session.** Selecting `activity(view)` updates it once per change, whichever fact caused it. The status message's ID lives in the slot, so a restore updates the same message.
+- **`channel.state` keeps per-delivery data,** such as what `deliver` merges in. Data a channel's hooks own moves into their slots.
+
 ### Memory
 
 Today, a provider has handlers keyed by lifecycle points:
@@ -738,7 +812,7 @@ Every dynamic resolver and memory provider changes shape. The change aims to shi
 - **Not every resolver converts mechanically.** About half of the roughly 210 files that use `defineDynamic` read `ctx` in a handler, by a rough grep. The codemod moves simple reads into the selection (`auth.current` at session start becomes `auth.initiator`) and leaves a TODO for the dozen or so that read `ctx.messages`. It can't know what data outside eve a resolver depends on.
 - **Dynamic fields become dynamic files:** `defineAgent({ model: defineDynamic(…) })` becomes a dynamic `agent.ts` that returns `defineAgent({ model })`.
 - **Memory providers:** `recall` and `tools` become `{ select, resolve }`, with recall selecting the latest turn start to keep today's timing. `compaction.completed` recall goes away, and `capture` receives only messages it hasn't seen.
-- **Hooks and channels:** event maps stay, with v27's names, and `select` and `resolve` are additive. `ctx.cancel()` becomes a returned `cancel(…)`. Hooks gain the conversation through the view. If the channel change is adopted, handlers move to `(fact, ctx)`.
+- **Hooks and channels:** event maps stay, with v27's names, and `select` and `resolve` are additive. `ctx.cancel()` becomes a returned `cancel(…)`. Hooks gain the conversation through the view. If the channel change is adopted, handlers move to `(fact, ctx)` with `ctx.channel`, and channels can bundle hooks scoped to their sessions.
 - **One ordering change is already made in the pipeline PR:** memory now runs after hooks, so a hook that cancels the turn from `turn.started` also stops recall for that turn.
 - **The old shape fails the build** with an error that points at the codemod, not an alias.
 - **Running sessions don't cross the break,** so slots can change shape there. If the API ships later, results recorded under today's keys count as stale and re-run, as after a redeploy.
@@ -791,7 +865,7 @@ There are three steps in the overall plan ([`session-event-lifecycle.md`](./sess
 - hooks returning more than effects and `cancel(…)`: data, capabilities, mixed results, and other intents, including `requireApproval`;
 - dynamic extension mounts;
 - timers, context edits, and request parameters;
-- the channel signature, which would belong in the conversation slice if accepted;
+- the channel signature, which would belong in the conversation slice if accepted, and channel-scoped hooks;
 - async reactions for eve's own loop.
 
 ## Open questions
