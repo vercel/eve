@@ -36,9 +36,12 @@ export interface Transition {
   readonly signIns?: readonly AuthorizationChallenge[];
 }
 
-/** Publishes one event; `messages` is the conversation hooks see with it. */
+/**
+ * Publishes one event, or one transition's events as one commit; `messages` is the conversation
+ * the participants of the events that read history see.
+ */
 export type Publish = (
-  event: UnstampedMessageStreamEvent,
+  publication: UnstampedMessageStreamEvent | readonly UnstampedMessageStreamEvent[],
   messages?: readonly ModelMessage[],
 ) => Promise<void>;
 
@@ -56,8 +59,8 @@ export function sessionView(
 }
 
 /**
- * The events hooks and resolvers read the conversation at: a turn's and a step's boundaries. The
- * session starts before any history, so `session.started` never carries the turn's input.
+ * The events resolvers read the conversation at: a turn's and a step's boundaries. The session
+ * starts before any history, so `session.started` never carries the turn's input.
  */
 const READS_HISTORY: ReadonlySet<string> = new Set([
   "turn.started",
@@ -65,9 +68,14 @@ const READS_HISTORY: ReadonlySet<string> = new Set([
   "turn.completed",
 ]);
 
+/** True for an event whose participants read the conversation. */
+export function readsHistory(type: string): boolean {
+  return READS_HISTORY.has(type);
+}
+
 /**
- * Publishes a transition's events, then saves what it changed. A transition that changes history
- * needs a session restored with it.
+ * Publishes a transition's events as one commit, then saves what it changed. A transition that
+ * changes history needs a session restored with it.
  */
 export async function applyTransition<T extends HarnessSessionBase>(
   session: T,
@@ -75,9 +83,7 @@ export async function applyTransition<T extends HarnessSessionBase>(
   publish: Publish,
   messages?: readonly ModelMessage[],
 ): Promise<T> {
-  for (const event of transition.events) {
-    await publish(event, READS_HISTORY.has(event.type) ? messages : undefined);
-  }
+  if (transition.events.length > 0) await publish(transition.events, messages);
   const state =
     transition.signIns === undefined
       ? session.state

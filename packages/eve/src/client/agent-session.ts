@@ -1,4 +1,4 @@
-import { followStreamIterable } from "#client/open-stream.js";
+import { followStreamIterable, type FollowedEvent } from "#client/open-stream.js";
 import type { ClientSessionContext } from "#client/session.js";
 import type { StreamOptions } from "#client/types.js";
 import type { AgentStartedStreamEvent, MessageStreamEvent } from "#protocol/message.js";
@@ -35,13 +35,13 @@ export class ClientAgentSession {
    * parent session's cursor. The child cursor starts at `0`; pass `startIndex`
    * to resume. Stop at a child turn boundary with `isCurrentTurnBoundaryEvent`.
    */
-  stream(options?: StreamOptions): AsyncIterable<MessageStreamEvent> {
+  async *stream(options?: StreamOptions): AsyncGenerator<MessageStreamEvent> {
+    for await (const { event } of this.follow(options)) yield event;
+  }
+
+  /** @internal The child's events with the cursor to resume from after each. */
+  follow(options?: StreamOptions): AsyncIterable<FollowedEvent> {
     const startIndex = options?.startIndex ?? 0;
-    if (options?.follow === false && startIndex < 0) {
-      throw new Error(
-        "agent(started).stream({ follow: false }) requires a nonnegative startIndex; a tail-relative cursor cannot be bounded.",
-      );
-    }
     return followStreamIterable({
       follow: options?.follow,
       host: this.#context.host,

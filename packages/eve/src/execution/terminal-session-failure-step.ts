@@ -13,6 +13,8 @@ export async function emitTerminalSessionFailureStep(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly turnId?: string;
   readonly usage: TokenUsage | undefined;
+  /** The position of the line the event takes. */
+  readonly position?: number;
 }): Promise<void> {
   "use step";
 
@@ -45,6 +47,7 @@ export async function emitTerminalSessionFailureStep(input: {
     errorId: typeof details.errorId === "string" ? details.errorId : undefined,
     event: sessionFailed({ code, details, message, sessionId, usage: input.usage }),
     sessionWritable: input.sessionWritable,
+    position: input.position,
     serializedContext: input.serializedContext,
     turnId: input.turnId,
   });

@@ -194,11 +194,12 @@ export interface StreamReconnectRetryPolicy {
 
 /** Configurable policy used when automatic stream reconnection is enabled. */
 export interface ResolvedStreamReconnectPolicy {
-  /** Retry policy for opening an HTTP stream connection. */
+  /**
+   * Retry policy for opening an HTTP stream connection. Its `maxAttempts` also bounds how many
+   * consecutive transport failures a bounded read (`follow: false`) retries. A read that follows
+   * retries failures for as long as it runs, and stops on what it reads.
+   */
   readonly streamOpenReconnectPolicy?: StreamReconnectRetryPolicy;
-
-  /** Retry policy for reconnecting streams that make no progress. */
-  readonly streamIdleReconnectPolicy?: StreamReconnectRetryPolicy;
 
   /** HTTP response statuses that may be retried while opening a stream. */
   readonly retryableErrorStatuses?: readonly number[];
@@ -218,9 +219,8 @@ export interface StreamOptions {
   readonly streamReconnectPolicy?: StreamReconnectPolicy;
 
   /**
-   * Absolute event index to start from. Negative values read relative to the
-   * current tail (`-1` starts at the latest event). Relative-tail streams do
-   * not reconnect automatically because their absolute cursor is unknown.
+   * Position of the line to start from. Negative values read relative to the
+   * current tail (`-1` starts at the latest line).
    */
   readonly startIndex?: number;
 

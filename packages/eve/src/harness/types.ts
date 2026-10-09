@@ -266,16 +266,15 @@ export interface ResolvedCall<T extends ToolCallLike> {
 export type CallResolver = <T extends ToolCallLike>(toolCall: T) => ResolvedCall<T> | undefined;
 
 /**
- * Callback that writes one event to the event stream.
- *
- * Composed by the runtime from the underlying writable and the channel's
- * event handler, then injected into the harness so it can emit lifecycle
- * events without knowing about writables or handlers.
+ * What one publish writes: one event, or every event of one transition, which the writer commits
+ * as one line so readers never see half of it.
  */
-export type HarnessEmitFn = (
-  event: UnstampedMessageStreamEvent,
-  messages?: readonly import("ai").ModelMessage[],
-) => Promise<void>;
+export type SessionPublication =
+  | UnstampedMessageStreamEvent
+  | readonly UnstampedMessageStreamEvent[];
+
+/** The sink the harness emits to: see {@link HandleEventFn}. */
+export type HarnessEmitFn = HandleEventFn;
 
 /** Where a model call stands: its turn and its step within the turn. */
 export interface StepCoordinates {
@@ -305,14 +304,12 @@ export interface StepParticipants {
 }
 
 /**
- * Unified event handler: emits the event to the stream, then dispatches it to hook subscribers
- * and the session's participants.
- *
- * Same signature as {@link HarnessEmitFn} but semantically broader — every event goes through
- * channel adapter, stream write, hooks, and participants in one call.
+ * Publishes one event or one commit to the session: the stream write, then the channel, hooks,
+ * and participants. Composed by the runtime and injected into the harness, so the harness emits
+ * lifecycle without knowing about writables or handlers.
  */
 export type HandleEventFn = (
-  event: UnstampedMessageStreamEvent,
+  publication: SessionPublication,
   messages?: readonly import("ai").ModelMessage[],
 ) => Promise<void>;
 

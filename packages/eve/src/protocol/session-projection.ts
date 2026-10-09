@@ -137,6 +137,11 @@ export interface SessionProjection {
   readonly latestTurn?: Pick<SessionTurn, "sequence" | "turnId">;
   /** The sequence the next turn takes. */
   readonly nextSequence: number;
+  /**
+   * Lines written to the session's stream so far: the position of the next one. The writer
+   * counts them, so every checkpoint knows its position without reading the stream.
+   */
+  readonly position?: number;
   readonly turns: Readonly<Record<string, SessionTurn>>;
   /** By `requestId`. */
   readonly inputs: Readonly<Record<string, SessionInput>>;

@@ -50,6 +50,7 @@ import {
   withParkedStep,
   withPublished,
   withQueuedInput,
+  eachEvent,
 } from "#internal/testing/session-machine.js";
 import type { HarnessSession, StepFn, StepInput, StepResult } from "#harness/types.js";
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
@@ -1291,10 +1292,10 @@ describe("turnStep", () => {
       vi.mocked(createExecutionNodeStep).mockImplementation((input) =>
         createToolLoopHarness({
           abortSignal: input.abortSignal,
-          handleEvent: async (event, messages) => {
+          handleEvent: eachEvent(async (event, messages) => {
             events.push(event);
             await input.handleEvent?.(event, messages);
-          },
+          }),
           resolveModel: async () => model,
           tools: new Map([
             [

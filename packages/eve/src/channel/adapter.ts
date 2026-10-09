@@ -4,6 +4,7 @@ import { attachClientContext, readClientContext } from "#internal/client-context
 import { attachInputText, readInputText } from "#internal/input-text.js";
 import { createLogger } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { FactPosition } from "#protocol/session-events/envelope.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { DeliverPayload } from "#channel/types.js";
 import type {
@@ -53,6 +54,9 @@ export interface ChannelAdapterContext<TState = Record<string, unknown>> {
 
   /** @internal Independent source of a relayed child input batch. */
   readonly inputSource?: string;
+
+  /** Where the event a handler observes sits on the stream: its line, and its index there. */
+  readonly position?: FactPosition;
 }
 
 /**
@@ -253,32 +257,32 @@ export function getAdapterKind(adapter: ChannelAdapter): string {
  * Throwing handlers are logged and swallowed so a downstream delivery
  * failure does not corrupt the event stream write path.
  */
+/**
+ * Runs the channel adapter's handler for one written event. Handlers observe; they never shape
+ * what is written, because the write already happened.
+ */
 export async function callAdapterEventHandler(
   adapter: ChannelAdapter,
   event: UnstampedMessageStreamEvent,
   ctx: ChannelAdapterContext,
-): Promise<UnstampedMessageStreamEvent> {
-  const eventForHandler = withWaitingContinuationToken(event, ctx);
+): Promise<void> {
   const handler = adapter[event.type] as
     | ((data: unknown, ctx: ChannelAdapterContext) => void | Promise<void>)
     | undefined;
-
-  if (handler !== undefined) {
-    try {
-      await handler("data" in eventForHandler ? eventForHandler.data : undefined, ctx);
-    } catch (error) {
-      log.error("adapter event handler threw — event swallowed", {
-        adapterKind: getAdapterKind(adapter),
-        eventType: event.type,
-        error,
-      });
-    }
+  if (handler === undefined) return;
+  try {
+    await handler("data" in event ? event.data : undefined, ctx);
+  } catch (error) {
+    log.error("adapter event handler threw — event swallowed", {
+      adapterKind: getAdapterKind(adapter),
+      eventType: event.type,
+      error,
+    });
   }
-
-  return withWaitingContinuationToken(eventForHandler, ctx);
 }
 
-function withWaitingContinuationToken(
+/** `session.waiting` carries the channel's continuation token, filled in before the write. */
+export function withWaitingContinuationToken(
   event: UnstampedMessageStreamEvent,
   ctx: ChannelAdapterContext,
 ): UnstampedMessageStreamEvent {

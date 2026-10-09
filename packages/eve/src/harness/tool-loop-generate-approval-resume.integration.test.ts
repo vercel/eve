@@ -36,6 +36,7 @@ import {
   parkedSteps,
   withOpenTurn,
   withParkedStep,
+  eachEvent,
 } from "#internal/testing/session-machine.js";
 
 /** Runs each harness call as a durable step: a context that enters, and folds, the projection. */
@@ -223,11 +224,10 @@ function attemptInstrumentation(
     installAiSdkWarningLogger: () => {},
     runStep: async (input, run) =>
       await run({
-        createHandleEvent:
-          ({ getAttemptScope }) =>
-          async (event) => {
+        createHandleEvent: ({ getAttemptScope }) =>
+          eachEvent(async (event) => {
             onEvent?.(event, getAttemptScope?.()?.attemptIndex);
-          },
+          }),
         prepareAttempt: ({ attemptIndex, stepIndex, turnId }) => ({
           complete: async () => {},
           fail: async () => {},
@@ -421,7 +421,7 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
       provider: "eve-integration-mock",
     });
     const config = {
-      handleEvent: async (event, messages) => {
+      handleEvent: eachEvent(async (event, messages) => {
         if (
           event.type === "session.started" ||
           event.type === "turn.started" ||
@@ -441,7 +441,7 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
           )?.version;
           order.push(`step.started:${String(version)}`);
         }
-      },
+      }),
       participants: restoringParticipants(ctx, [resolver]),
       resolveModel: async (): Promise<LanguageModel> => model,
       tools: new Map(),
@@ -737,9 +737,9 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
     const requested: InputRequest[] = [];
     const config = {
       ...createConfig(model, execute, once()),
-      handleEvent: async (event) => {
+      handleEvent: eachEvent(async (event) => {
         if (event.type === "input.requested") requested.push(...event.data.requests);
-      },
+      }),
     } satisfies ToolLoopHarnessConfig;
 
     const result = await contextStorage.run(createApprovalContext(), () =>
@@ -780,9 +780,9 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
     const requested: InputRequest[] = [];
     const config = {
       ...createConfig(model, execute, once()),
-      handleEvent: async (event) => {
+      handleEvent: eachEvent(async (event) => {
         if (event.type === "input.requested") requested.push(...event.data.requests);
-      },
+      }),
     } satisfies ToolLoopHarnessConfig;
     const ctx = createApprovalContext();
     const runStep = createToolLoopHarness(config);

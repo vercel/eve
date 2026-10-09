@@ -1,3 +1,4 @@
+import { encodeTestLine } from "../src/internal/testing/events.js";
 import { TEST_USAGE } from "#internal/testing/events.js";
 import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 
@@ -20,7 +21,6 @@ import {
   createSessionWaitingEvent,
   createTurnCompletedEvent,
   createTurnStartedEvent,
-  stampMessageStreamEvent,
   type UnstampedMessageStreamEvent,
 } from "../src/protocol/message.js";
 import { createTestAgentInfoResult } from "../src/internal/testing/agent-info-fixture.js";
@@ -46,9 +46,7 @@ function createControlledStreamResponse(deliveryId = "delivery_turn_001"): {
       controller?.error(error);
     },
     pushEvent(event) {
-      controller?.enqueue(
-        encoder.encode(`${JSON.stringify(stampMessageStreamEvent(event, [deliveryId]))}\n`),
-      );
+      controller?.enqueue(encoder.encode(encodeTestLine(event, [deliveryId])));
     },
     response: new Response(
       new ReadableStream<Uint8Array>({
@@ -101,11 +99,7 @@ function createEagerStreamResponse(
     new ReadableStream<Uint8Array>({
       start(controller) {
         for (const event of events) {
-          controller.enqueue(
-            encoder.encode(
-              `${JSON.stringify(stampMessageStreamEvent(event, [acceptedDeliveryId]))}\n`,
-            ),
-          );
+          controller.enqueue(encoder.encode(encodeTestLine(event, [acceptedDeliveryId])));
         }
         controller.close();
       },

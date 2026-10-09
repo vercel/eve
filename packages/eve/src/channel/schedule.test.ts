@@ -32,6 +32,7 @@ function createMockRuntime(): Runtime {
     dispatchContinuation: vi.fn().mockResolvedValue({ status: "session_not_active" }),
     dispatchSession: vi.fn(),
     getEventStream: vi.fn().mockResolvedValue(new ReadableStream<MessageStreamEvent>()),
+    getLineStream: vi.fn().mockResolvedValue(new ReadableStream()),
     getStreamTailIndex: vi.fn().mockResolvedValue(-1),
     resolveContinuation: vi
       .fn()

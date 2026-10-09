@@ -1,4 +1,5 @@
 import type { HandleMessageStreamEvent } from "../../protocol/message.js";
+import type { FactPosition } from "../../protocol/session-events/envelope.js";
 import type { SessionContext } from "./callback-context.js";
 import type { ExactDefinition } from "./exact.js";
 
@@ -78,6 +79,11 @@ export interface HookContext extends SessionContext {
     readonly continuationToken?: string;
   };
   /**
+   * Where the event sits on the session's stream: the position of its line, and its index in
+   * that line. Positions never change, so a hook can record how far it has handled the stream.
+   */
+  readonly position: FactPosition;
+  /**
    * Cancels the running turn. The event's remaining subscribers still run,
    * then the turn settles like `session.cancel()`: `turn.cancelled`, then
    * `session.waiting`. Returns `void` because the turn stops after the hook
@@ -103,8 +109,9 @@ export type StreamEventHook<TEvent> = (event: TEvent, ctx: HookContext) => void 
 /**
  * Map of stream-event subscribers an authored hook file may declare.
  *
- * `*` matches every accepted runtime stream event and runs after the
- * typed handler for that event (if any).
+ * `*` matches every fact the session commits and runs after the typed handler for that event
+ * (if any). Progress (streamed deltas and partial results) reaches a hook only through its own
+ * key, such as `message.appended`.
  */
 export type StreamEventHooks<TKey extends HookEventKey = HookEventKey> = {
   readonly [TKey_ in TKey]?: StreamEventHook<HookEvent<TKey_>>;
