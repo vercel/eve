@@ -32,7 +32,9 @@ export {
   toolResultFrom,
   type MatchedConnectionResult,
   type MatchedToolResult,
+  type SettledCallRow,
   type ToolResultFromFn,
+  type ToolResultSource,
 } from "#public/tools/result.js";
 
 export {

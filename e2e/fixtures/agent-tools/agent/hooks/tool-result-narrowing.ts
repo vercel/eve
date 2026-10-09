@@ -4,8 +4,8 @@ import structuredEcho from "../tools/structured-echo";
 
 const hook: HookDefinition = defineHook({
   events: {
-    "action.result"(event) {
-      const match = toolResultFrom(event.data.result, structuredEcho);
+    "call.settled"(event, ctx) {
+      const match = toolResultFrom(ctx.view.calls[event.data.callId], structuredEcho);
       if (match === undefined) return;
 
       if (typeof match.output !== "object" || match.output === null) {
