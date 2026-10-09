@@ -268,6 +268,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.3
+      '@vercel/blob':
+        specifier: 2.8.0
+        version: 2.8.0
       js-yaml:
         specifier: 4.3.2
         version: 4.3.2

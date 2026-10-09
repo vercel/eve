@@ -76,6 +76,8 @@ function buildSummaryArtifact(summary: EveEvalRunSummary): Record<string, unknow
       })),
       error: result.error,
       skipReason: result.skipReason,
+      startedAt: result.startedAt,
+      completedAt: result.completedAt,
       traceContexts: result.result.traceContexts,
     })),
   };
@@ -90,6 +92,8 @@ function buildResultLine(result: EveEvalResult): Record<string, unknown> {
     assertions: result.assertions,
     error: result.error,
     skipReason: result.skipReason,
+    startedAt: result.startedAt,
+    completedAt: result.completedAt,
     traceContexts: result.result.traceContexts,
   };
 }
@@ -112,6 +116,8 @@ function buildEvalArtifact(result: EveEvalResult): Record<string, unknown> {
     assertions: result.assertions,
     error: result.error,
     skipReason: result.skipReason,
+    startedAt: result.startedAt,
+    completedAt: result.completedAt,
   };
 }
 

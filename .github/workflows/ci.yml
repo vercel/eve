@@ -98,6 +98,9 @@ jobs:
       - name: Test workflow helpers
         run: node --test .github/scripts/*.test.mjs
 
+      - name: Test eval benchmark scripts
+        run: pnpm test:eval-benchmark
+
   test-integration:
     name: test-integration (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
