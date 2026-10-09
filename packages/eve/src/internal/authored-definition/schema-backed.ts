@@ -120,9 +120,9 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
     if (record.fallback === undefined) {
       return { kind: "web-search-tool", selection: { provider } };
     }
-    if (provider !== "openai") {
+    if (provider !== "native") {
       throw new Error(
-        `${message} "fallback" applies only to provider "openai"; provider "${provider}" serves every AI Gateway model.`,
+        `${message} "fallback" applies only to provider "native"; provider "${provider}" serves every AI Gateway model.`,
       );
     }
     const fallback = expectOneOf(

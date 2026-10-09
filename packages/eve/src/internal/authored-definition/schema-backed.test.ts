@@ -115,7 +115,7 @@ describe("normalizeToolDefinition", () => {
     expect(entry).toEqual({ kind: "disabled" });
   });
 
-  it.each(["exa", "parallel", "browserbase", "openai"] as const)(
+  it.each(["exa", "parallel", "browserbase", "native"] as const)(
     "normalizes the %s web search provider",
     (provider) => {
       expect(normalizeToolDefinition(webSearch({ provider }), FAILURE_MESSAGE)).toEqual({
@@ -127,14 +127,14 @@ describe("normalizeToolDefinition", () => {
 
   it("normalizes a web search fallback provider", () => {
     expect(
-      normalizeToolDefinition(webSearch({ fallback: "exa", provider: "openai" }), FAILURE_MESSAGE),
-    ).toEqual({ kind: "web-search-tool", selection: { fallback: "exa", provider: "openai" } });
+      normalizeToolDefinition(webSearch({ fallback: "exa", provider: "native" }), FAILURE_MESSAGE),
+    ).toEqual({ kind: "web-search-tool", selection: { fallback: "exa", provider: "native" } });
   });
 
   it("rejects a fallback that can't serve every Gateway model", () => {
     expect(() =>
       normalizeToolDefinition(
-        { fallback: "openai", kind: "eve:web-search-tool", provider: "openai" },
+        { fallback: "native", kind: "eve:web-search-tool", provider: "native" },
         FAILURE_MESSAGE,
       ),
     ).toThrow('Expected "fallback" to be one of: exa, parallel, browserbase');
@@ -146,7 +146,7 @@ describe("normalizeToolDefinition", () => {
         { fallback: "parallel", kind: "eve:web-search-tool", provider: "exa" },
         FAILURE_MESSAGE,
       ),
-    ).toThrow('"fallback" applies only to provider "openai"');
+    ).toThrow('"fallback" applies only to provider "native"');
   });
 
   it("rejects an unsupported web search provider", () => {

@@ -14,12 +14,14 @@ const GATEWAY_MODEL_REQUEST_REJECTED_MESSAGE =
  * that AI Gateway returns when a fallback provider cannot serve a
  * provider-specific tool (e.g. Bedrock rejecting `web_search_20250305`).
  *
- * The phrasing comes from the gateway's own provider attempt projection
- * and is stable across the Bedrock and Vertex Anthropic backends. We
- * anchor the match on the literal `tool type` prefix to avoid sweeping
- * in unrelated "not supported" errors.
+ * The gateway reports a single rejecting host as `tool type 'X' is not
+ * supported`. When every host fails, it surfaces each host's raw error, and
+ * Bedrock's reads `Input tag 'X' found using 'type' does not match`. Both
+ * alternatives are anchored on their literal phrasing to avoid sweeping in
+ * unrelated "not supported" errors.
  */
-const UNSUPPORTED_TOOL_TYPE_REGEX = /tool type ['"]([\w.-]+)['"] is not supported/i;
+const UNSUPPORTED_TOOL_TYPE_REGEX =
+  /tool type ['"]([\w.-]+)['"] is not supported|Input tag ['"]([\w.-]+)['"] found using ['"]type['"] does not match/i;
 
 /**
  * The most informative human-readable rejection a model-call error
@@ -122,10 +124,8 @@ export function extractUnsupportedProviderToolTypes(error: unknown): readonly st
         // includes a large request snapshot. Fall back to a raw string
         // scan so we still surface the tool name when the regex match
         // lies before the truncation boundary.
-        const match = UNSUPPORTED_TOOL_TYPE_REGEX.exec(responseBody);
-        if (match?.[1] !== undefined) {
-          found.add(match[1]);
-        }
+        const type = matchUnsupportedToolType(responseBody);
+        if (type !== undefined) found.add(type);
       }
     }
   }
@@ -133,14 +133,17 @@ export function extractUnsupportedProviderToolTypes(error: unknown): readonly st
   return [...found];
 }
 
+function matchUnsupportedToolType(text: string): string | undefined {
+  const match = UNSUPPORTED_TOOL_TYPE_REGEX.exec(text);
+  return match?.[1] ?? match?.[2];
+}
+
 function collectUnsupportedToolTypesFromValue(value: unknown, out: Set<string>): void {
   if (value === null || value === undefined) return;
 
   if (typeof value === "string") {
-    const match = UNSUPPORTED_TOOL_TYPE_REGEX.exec(value);
-    if (match?.[1] !== undefined) {
-      out.add(match[1]);
-    }
+    const type = matchUnsupportedToolType(value);
+    if (type !== undefined) out.add(type);
     return;
   }
 

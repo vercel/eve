@@ -511,6 +511,26 @@ describe("extractUnsupportedProviderToolTypes", () => {
     expect(extractUnsupportedProviderToolTypes(error)).toEqual(["web_search_20250305"]);
   });
 
+  it("returns the upstream tool type from Bedrock's raw rejection when every host failed", () => {
+    const upstream = Object.assign(new Error("Bad Request"), {
+      data: {
+        providerAttempts: [
+          {
+            error:
+              "tools.0: Input tag 'web_search_20250305' found using 'type' does not match any of the expected tags: 'bash_20250124', 'custom'",
+            provider: "bedrock",
+          },
+          { error: "Bad Request", provider: "vertexAnthropic" },
+        ],
+      },
+    });
+    const error = Object.assign(new Error("gateway", { cause: upstream }), {
+      name: "GatewayInternalServerError",
+    });
+
+    expect(extractUnsupportedProviderToolTypes(error)).toEqual(["web_search_20250305"]);
+  });
+
   it("deduplicates when multiple providerAttempts reference the same tool type", () => {
     const error = gatewayProviderToolFailure({
       unsupportedTypes: ["web_search_20250305", "web_search_20250305"],

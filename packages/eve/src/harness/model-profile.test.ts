@@ -8,7 +8,12 @@ function model(provider: string, modelId = "test-model"): LanguageModel {
   return new MockLanguageModelV3({ modelId, provider });
 }
 
-const direct = { anthropicCache: false, filesOutsideToolResults: false, gateway: false };
+const direct = {
+  anthropicCache: false,
+  filesOutsideToolResults: false,
+  gateway: false,
+  googleSearchDropsTools: false,
+};
 
 describe("resolveModelProfile", () => {
   it.each<[string, LanguageModel, ModelProfile]>([
@@ -50,6 +55,16 @@ describe("resolveModelProfile", () => {
       { ...direct, filesOutsideToolResults: true, provider: "openai" },
     ],
     ["the ChatGPT subscription", model("codex.responses"), { ...direct, provider: "codex" }],
+    [
+      "a Gateway Gemini model older than Gemini 3",
+      "google/gemini-2.5-flash",
+      { ...direct, gateway: true, googleSearchDropsTools: true, provider: "google" },
+    ],
+    [
+      "a direct Gemini model older than Gemini 3",
+      model("google.generative-ai", "models/gemini-2.5-pro"),
+      { ...direct, googleSearchDropsTools: true, provider: "google" },
+    ],
     ["a provider-less test double", {} as LanguageModel, { ...direct, provider: "" }],
   ])("describes %s", (_, input, expected) => {
     expect(resolveModelProfile(input)).toEqual(expected);

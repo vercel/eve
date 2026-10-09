@@ -71,26 +71,33 @@ export function resolveWebSearchOutputSchema(
 }
 
 /**
- * Determines the web search backend for a model: the selected search provider on AI Gateway
- * (Exa by default), or its fallback when the provider can't serve the model; the provider's
- * native search for direct OpenAI, Anthropic, and Google models; and none (`null`) otherwise.
+ * Determines the web search backend for a model. On AI Gateway it is the selected search
+ * provider (Exa by default); `native` selects the model vendor's own search, or the fallback
+ * when the model has none. Direct models always use their provider's native search. A model
+ * left without a backend gets none (`null`).
  */
 export function resolveWebSearchBackend(
   profile: ModelProfile,
   selection: WebSearchSelection = { provider: "exa" },
 ): WebSearchBackend | null {
-  if (profile.gateway) {
-    // OpenAI's hosted search serves only OpenAI models.
-    return selection.provider === "openai" && profile.provider !== "openai"
-      ? (selection.fallback ?? null)
-      : selection.provider;
-  }
-  return NATIVE_WEB_SEARCH_PROVIDERS.has(profile.provider)
-    ? (profile.provider as WebSearchBackend)
-    : null;
+  if (!profile.gateway) return resolveNativeWebSearchBackend(profile);
+  if (selection.provider !== "native") return selection.provider;
+  return resolveNativeWebSearchBackend(profile) ?? selection.fallback ?? null;
 }
 
-const NATIVE_WEB_SEARCH_PROVIDERS: ReadonlySet<string> = new Set(["anthropic", "google", "openai"]);
+function resolveNativeWebSearchBackend(profile: ModelProfile): NativeWebSearchBackend | null {
+  if (!NATIVE_WEB_SEARCH_BACKENDS.has(profile.provider)) return null;
+  if (profile.provider === "google" && profile.googleSearchDropsTools) return null;
+  return profile.provider as NativeWebSearchBackend;
+}
+
+type NativeWebSearchBackend = "anthropic" | "google" | "openai";
+
+const NATIVE_WEB_SEARCH_BACKENDS: ReadonlySet<string> = new Set<NativeWebSearchBackend>([
+  "anthropic",
+  "google",
+  "openai",
+]);
 
 /**
  * Constructs the AI SDK provider tool for web search based on the resolved

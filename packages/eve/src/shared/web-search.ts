@@ -2,10 +2,10 @@
 export const WEB_SEARCH_FALLBACK_PROVIDERS = ["exa", "parallel", "browserbase"] as const;
 
 /**
- * Web search providers available through Vercel AI Gateway. `openai` is OpenAI's hosted search,
- * which serves only OpenAI models.
+ * Web search providers available through Vercel AI Gateway. `native` is the model vendor's own
+ * hosted search, which only some vendors' models have.
  */
-export const WEB_SEARCH_PROVIDERS = [...WEB_SEARCH_FALLBACK_PROVIDERS, "openai"] as const;
+export const WEB_SEARCH_PROVIDERS = [...WEB_SEARCH_FALLBACK_PROVIDERS, "native"] as const;
 
 export type WebSearchProvider = (typeof WEB_SEARCH_PROVIDERS)[number];
 

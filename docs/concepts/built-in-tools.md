@@ -218,23 +218,27 @@ export default webSearch({ provider: "browserbase" });
 
 Use a [Gateway model ID](../agent-config#set-the-model) to route searches through Browserbase. AI Gateway executes the search using `AI_GATEWAY_API_KEY` or Vercel project OIDC credentials; no `BROWSERBASE_API_KEY` is needed. See [Browserbase Search on AI Gateway](https://vercel.com/docs/ai-gateway/models-and-providers/web-search#using-browserbase-search).
 
-Select OpenAI's hosted web search for an OpenAI model routed through AI Gateway:
+Select the model vendor's own hosted search for a model routed through AI Gateway:
 
 ```ts title="agent/tools/web_search.ts"
 import { webSearch } from "eve/tools/web_search";
 
-export default webSearch({ provider: "openai" });
+export default webSearch({ provider: "native" });
 ```
 
-OpenAI runs the search server-side and returns URL citations, and AI Gateway uses its usual credentials, so no `OPENAI_API_KEY` is needed. OpenAI hosted search serves only OpenAI models, so any other Gateway model, including one picked by a dynamic model resolver, doesn't get `web_search`. eve picks the search tool from the requested model, so when AI Gateway's own `models` fallback serves a call with a non-OpenAI model, that call runs without search. Set `fallback` to give those models a provider that works with any Gateway model (`"exa"`, `"parallel"`, or `"browserbase"`):
+The vendor runs the search server-side and returns citations: OpenAI models use OpenAI web search, Anthropic models use Anthropic web search, and Gemini 3 and later models use Google Search grounding. AI Gateway uses its usual credentials, so no `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or Google key is needed. Every other Gateway model, including one picked by a dynamic model resolver, doesn't get `web_search`. That includes Gemini models before Gemini 3, which can't use Google Search alongside other tools.
+
+eve picks the search tool from the requested model, so when AI Gateway's own `models` fallback serves a call with a model from another vendor, that call can run without search. Anthropic web search runs only on Anthropic's own API. AI Gateway tries another host when Amazon Bedrock or Google Vertex AI rejects the tool. If no host accepts it, eve retries the step without `web_search`.
+
+Set `fallback` to give models without native search a provider that works with any Gateway model (`"exa"`, `"parallel"`, or `"browserbase"`):
 
 ```ts title="agent/tools/web_search.ts"
 import { webSearch } from "eve/tools/web_search";
 
-export default webSearch({ provider: "openai", fallback: "exa" });
+export default webSearch({ provider: "native", fallback: "exa" });
 ```
 
-The `provider` setting applies only to AI Gateway models. Unsupported direct providers omit `web_search`.
+The `provider` setting applies only to AI Gateway models. Direct OpenAI, Anthropic, and Gemini 3 and later models always use their native search; other direct models omit `web_search`.
 
 Replace provider-managed search with an authored implementation:
 

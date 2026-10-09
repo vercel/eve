@@ -22,9 +22,9 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 83,
+    current: 84,
     supported: [
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 76, 77, 78, 80, 81, 82, 83,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 76, 77, 78, 80, 81, 82, 84,
     ],
     dropped: {
       14: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
@@ -84,6 +84,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       74: "eve/ai evaluate was renamed to decide and AI SDK evaluation models became decision models; import decide from eve/ai",
       75: "eve/ai evaluate was renamed to decide and AI SDK evaluation models became decision models; import decide from eve/ai",
       79: "Sandbox provider handle hooks were renamed to onSandboxStop and onSandboxDelete.",
+      83: 'webSearch provider "openai" was replaced by "native" before it shipped in a release',
     },
   },
   dynamicTool: {

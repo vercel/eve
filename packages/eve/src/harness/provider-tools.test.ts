@@ -93,11 +93,15 @@ describe("resolveWebSearchBackend", () => {
   it.each<[string, WebSearchSelection | undefined, string | null]>([
     ["openai/gpt-5.4", undefined, "exa"],
     ["openai/gpt-5.4", { provider: "parallel" }, "parallel"],
-    ["openai/gpt-5.4", { provider: "openai" }, "openai"],
     ["anthropic/claude-opus-4.6", undefined, "exa"],
-    // OpenAI's hosted search serves only OpenAI models: other models use the fallback, if any.
-    ["anthropic/claude-opus-4.6", { provider: "openai" }, null],
-    ["anthropic/claude-opus-4.6", { fallback: "parallel", provider: "openai" }, "parallel"],
+    ["openai/gpt-5.4", { provider: "native" }, "openai"],
+    ["anthropic/claude-opus-4.6", { provider: "native" }, "anthropic"],
+    ["google/gemini-3-flash", { provider: "native" }, "google"],
+    // Native search would drop a pre-Gemini 3 model's other tools; models without one use the
+    // fallback, if any.
+    ["google/gemini-2.5-flash", { provider: "native" }, null],
+    ["xai/grok-4", { provider: "native" }, null],
+    ["xai/grok-4", { fallback: "parallel", provider: "native" }, "parallel"],
   ])("uses Gateway search for Gateway model %s with %o", (model, selection, expected) => {
     expect(resolveWebSearchBackend(resolveModelProfile(model), selection)).toBe(expected);
   });
@@ -106,12 +110,16 @@ describe("resolveWebSearchBackend", () => {
     ["openai.responses", "openai"],
     ["anthropic.messages", "anthropic"],
     ["google.generative-ai", "google"],
+    ["google.generative-ai", null, "gemini-2.5-pro"],
     ["openrouter.chat", null],
     ["some-provider", null],
-  ] as const)("uses native search for direct provider %s when it has one", (provider, expected) => {
-    const model = new MockLanguageModelV3({ provider });
-    expect(resolveWebSearchBackend(resolveModelProfile(model))).toBe(expected);
-  });
+  ] as const)(
+    "uses native search for direct provider %s when it has one",
+    (provider, expected, modelId?: string) => {
+      const model = new MockLanguageModelV3({ modelId, provider });
+      expect(resolveWebSearchBackend(resolveModelProfile(model))).toBe(expected);
+    },
+  );
 
   it("uses Anthropic webSearch_20250305 to avoid the unsupported beta header", async () => {
     const tool = await resolveWebSearchProviderTool("anthropic");

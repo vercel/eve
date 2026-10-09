@@ -20,6 +20,11 @@ export interface ModelProfile {
   readonly anthropicCache: boolean;
   /** Chat Completions APIs can't carry files in tool results, so they move to user messages. */
   readonly filesOutsideToolResults: boolean;
+  /**
+   * A Gemini model older than Gemini 3, which can't combine Google Search with function tools:
+   * the request keeps the search and drops every other tool.
+   */
+  readonly googleSearchDropsTools: boolean;
 }
 
 export function resolveModelProfile(model: LanguageModel): ModelProfile {
@@ -31,6 +36,7 @@ export function resolveModelProfile(model: LanguageModel): ModelProfile {
       anthropicCache: false,
       filesOutsideToolResults: false,
       gateway: true,
+      googleSearchDropsTools: PRE_GEMINI_3_MODEL.test(modelId),
       provider: modelId.split("/")[0]!,
     };
   }
@@ -42,9 +48,13 @@ export function resolveModelProfile(model: LanguageModel): ModelProfile {
       (provider.includes("bedrock") && modelId.includes("anthropic")),
     filesOutsideToolResults: provider.endsWith(".chat"),
     gateway: false,
+    googleSearchDropsTools: PRE_GEMINI_3_MODEL.test(modelId),
     provider: topLevelProvider,
   };
 }
+
+// Mirrors the Gemini generations `@ai-sdk/google` treats as pre-Gemini 3.
+const PRE_GEMINI_3_MODEL = /(^|\/)gemini-(?:[12](?:[.-]|$)|pro(?:-vision)?$)/i;
 
 /** A test double may omit `provider` or `modelId`; it reads as a direct model with no known provider. */
 function lowerCaseOrEmpty(value: unknown): string {

@@ -323,7 +323,7 @@ describe("compileAgentManifest source graph", () => {
   it.each<WebSearchToolInput>([
     { provider: "parallel" },
     { provider: "browserbase" },
-    { fallback: "exa", provider: "openai" },
+    { fallback: "exa", provider: "native" },
   ])(
     "preserves the %o search selection through serialization and runtime preparation",
     async (selection) => {

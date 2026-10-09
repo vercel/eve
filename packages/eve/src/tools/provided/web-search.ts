@@ -11,9 +11,12 @@ const WEB_SEARCH_TOOL_KIND = "eve:web-search-tool";
  */
 export type WebSearchToolInput =
   | {
-      /** OpenAI's hosted search, which serves only OpenAI models. */
-      readonly provider: "openai";
-      /** Provider for non-OpenAI Gateway models. Without it, those models don't get `web_search`. */
+      /**
+       * The model vendor's own hosted search: OpenAI's for OpenAI models, Anthropic's for Claude,
+       * and Google Search grounding for Gemini 3 and later.
+       */
+      readonly provider: "native";
+      /** Provider for Gateway models without native search. Without it, they don't get `web_search`. */
       readonly fallback?: WebSearchFallbackProvider;
     }
   | {
