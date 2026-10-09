@@ -1,9 +1,9 @@
 import { readDurableSession } from "#execution/durable-session-store.js";
-import {
-  relaySessionEvents,
-  type PublishedSessionEvents,
-  type SessionStepState,
+import type {
+  PublishedSessionEvents,
+  SessionStepState,
 } from "#execution/publish-session-events.js";
+import { commitSessionStep } from "#execution/session/commit-step.js";
 import {
   withSessionStateDelta,
   type SessionStateTransition,
@@ -11,11 +11,9 @@ import {
 import type { WorkflowToolRunControlMessage } from "#execution/tools/workflow/messages.js";
 import { ignoreGoneTarget } from "#execution/tasks/workflow-target.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
-import { getProxyInputRequests } from "#harness/hitl/session-state.js";
+import { readHitlState } from "#harness/hitl/session-state.js";
 import type { ProxyInputRequest } from "#harness/hitl/relays.js";
-import { sessionView } from "#harness/session-machine/commit.js";
 import { finishRun } from "#harness/session-machine/transitions.js";
-import { storedProjection } from "#harness/session-machine/view.js";
 
 /**
  * Decides a run's request to withdraw a question. A question the session
@@ -75,10 +73,11 @@ export async function relayWithdrawnRequests(
   input: SessionStepState,
   select: (requestId: string, route: ProxyInputRequest) => boolean,
 ): Promise<PublishedSessionEvents> {
-  const session = readDurableSession(input.sessionState);
-  const requestIds = [...getProxyInputRequests(session.state)]
+  const { state } = readDurableSession(input.sessionState);
+  const requestIds = [...readHitlState(state).relays]
     .filter(([requestId, route]) => select(requestId, route))
     .map(([requestId]) => requestId);
-  const view = sessionView(storedProjection(session.state), session.state);
-  return await relaySessionEvents(input, finishRun(view, { requestIds }).events);
+  return await commitSessionStep(input, (view) => [finishRun(view, { requestIds })], {
+    origin: "relayed",
+  });
 }

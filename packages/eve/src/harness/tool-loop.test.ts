@@ -53,7 +53,9 @@ import {
   createUserMessage,
   type HarnessModelMessage,
 } from "#harness/messages.js";
-import { getPendingAuthorization } from "#harness/hitl/session-state.js";
+
+import { readHitlState } from "#harness/hitl/session-state.js";
+
 import { modelFacingAuthorizationOutput, requestAuthorization } from "#harness/authorization.js";
 import { applyTransition, sessionView } from "#harness/session-machine/commit.js";
 import { requireSignIn } from "#harness/hitl/approvals.js";
@@ -6406,9 +6408,7 @@ describe("createToolLoopHarness", () => {
 
       expect(result.next).toBeNull();
       expect(result.settledTurn).toBeUndefined();
-      expect(getPendingAuthorization(result.session.state)).toEqual({
-        challenges: full.challenges,
-      });
+      expect(readHitlState(result.session.state).signIns).toEqual(full.challenges);
       expect(events.filter((event) => event.type === "authorization.required")).toEqual([
         expect.objectContaining({
           data: expect.objectContaining({
@@ -6527,9 +6527,7 @@ describe("createToolLoopHarness", () => {
 
       expect(result.next).toBeNull();
       expect(result.settledTurn).toBeUndefined();
-      expect(getPendingAuthorization(result.session.state)).toEqual({
-        challenges: full.challenges,
-      });
+      expect(readHitlState(result.session.state).signIns).toEqual(full.challenges);
 
       const authRequired = events.filter((event) => event.type === "authorization.required");
       expect(authRequired).toHaveLength(1);

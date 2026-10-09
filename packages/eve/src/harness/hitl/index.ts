@@ -46,7 +46,7 @@ export {
 } from "./intake.js";
 export { extractToolApprovalInputRequests } from "#harness/input-extraction.js";
 export { hasRunnableQueue } from "./approvals.js";
-export { discardClearedHumanInput } from "./session-state.js";
+export { discardClearedHitlState as discardClearedHumanInput } from "./session-state.js";
 
 /**
  * A model step made calls that need a person's approval: the step parks on them beside any

@@ -136,6 +136,14 @@
  *             events, so nothing changes without readers hearing it. The model
  *             step's streamed content (its calls and their inline results) is
  *             built where it streams.
+ *   rule 52 — Only `harness/hitl/session-state.ts` touches human-in-the-loop
+ *             session state: it alone names the state keys, and modules
+ *             outside `harness/hitl/` use only its read view
+ *             (`readHitlState`). Its other accessors,
+ *             called by name or through an alias, are counted per file
+ *             against allowances that may only shrink from origin/main's
+ *             (`hitl-state-readers.mjs`). A change to the records is a
+ *             session-machine transition, which the machine's save applies.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -147,6 +155,14 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { load as loadYaml } from "js-yaml";
 import { checkExtensionCapabilityContracts } from "./extension-capability-contracts.mjs";
+import {
+  HITL_SESSION_STATE_FILE,
+  allowanceGrowth,
+  baseAllowances,
+  countHitlStateReads,
+  hitlStateAccessors,
+  namesHitlStateKey,
+} from "./hitl-state-readers.mjs";
 
 const require = createRequire(import.meta.url);
 const extractorRequire = createRequire(require.resolve("@microsoft/api-extractor/package.json"));
@@ -257,6 +273,12 @@ function isTsLike(relPath) {
  *   rule48: Violation[];
  *   rule50: Violation[];
  *   rule51: Violation[];
+ *   rule52: {
+ *     accessors: readonly string[];
+ *     baseline: Record<string, number>;
+ *     current: Map<string, number>;
+ *     keys: Violation[];
+ *   };
  *   symlinks: string[];
  * }} state
  */
@@ -292,6 +314,7 @@ async function scanRepo(state) {
     checkRule48(posix, lines, state.rule48);
     checkRule50(posix, lines, state.rule50);
     checkRule51(posix, lines, state.rule51);
+    checkRule52(posix, lines, state.rule52);
   }
 }
 
@@ -575,6 +598,36 @@ function checkRule51(posix, lines, violations) {
       });
     }
   });
+}
+
+// ---------- Rule 52: only harness/hitl/session-state.ts touches HITL session state ----------
+
+/**
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {{ accessors: readonly string[]; current: Map<string, number>; keys: Violation[] }} state
+ */
+function checkRule52(posix, lines, state) {
+  if (
+    !posix.startsWith("packages/eve/src/") ||
+    posix === HITL_SESSION_STATE_FILE ||
+    posix.startsWith("packages/eve/src/internal/testing/") ||
+    /\.(?:test|integration\.test|scenario\.test)\.ts$/.test(posix) ||
+    posix.includes("/test/")
+  )
+    return;
+  const source = lines.join("\n");
+  if (namesHitlStateKey(source)) {
+    state.keys.push({
+      rule: 52,
+      file: posix,
+      message:
+        "names a human-in-the-loop session-state key. Only harness/hitl/session-state.ts names them: read the records through `readHitlState`, and change them with a session-machine transition.",
+    });
+  }
+  if (posix.startsWith(HUMAN_INPUT_DIR)) return;
+  const count = countHitlStateReads(source, state.accessors);
+  if (count > 0) state.current.set(posix, count);
 }
 
 // ---------- Rule 48: remote agent protocol 1 stays compartmentalized ----------
@@ -1698,6 +1751,14 @@ async function main() {
     rule48: /** @type {Violation[]} */ ([]),
     rule50: /** @type {Violation[]} */ ([]),
     rule51: /** @type {Violation[]} */ ([]),
+    rule52: {
+      accessors: hitlStateAccessors(
+        await readFile(join(REPO_ROOT, HITL_SESSION_STATE_FILE), "utf8"),
+      ),
+      baseline: baseline.rule52_hitlStateAccessorsByFile ?? {},
+      current: new Map(),
+      keys: /** @type {Violation[]} */ ([]),
+    },
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1815,6 +1876,28 @@ async function main() {
   violations.push(...(await checkFrameworkActionIdentity()));
   violations.push(...state.rule50);
   violations.push(...state.rule51);
+  violations.push(...state.rule52.keys);
+  for (const { file, was, now } of diffCounts(state.rule52.current, state.rule52.baseline)) {
+    violations.push({
+      rule: 52,
+      file,
+      message: `${now} use${now === 1 ? "" : "s"} of human-in-the-loop session state past \`readHitlState\` outside harness/hitl/ (baseline: ${was}). Read the records through \`readHitlState\`, change them with a session-machine transition committed by \`commitSessionStep\`, or move the logic into harness/hitl/. The baseline may shrink, never grow.`,
+    });
+  }
+  for (const { file, was, now } of allowanceGrowth(
+    state.rule52.baseline,
+    baseAllowances(
+      REPO_ROOT,
+      "scripts/guard-invariants-baseline.json",
+      "rule52_hitlStateAccessorsByFile",
+    ),
+  )) {
+    violations.push({
+      rule: 52,
+      file,
+      message: `guard-invariants-baseline.json allows ${now} use${now === 1 ? "" : "s"} of human-in-the-loop session state here; its base allows ${was} (origin/main's, or the commit that introduced them). The allowance may shrink, never grow: move the use into harness/hitl/ instead.`,
+    });
+  }
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

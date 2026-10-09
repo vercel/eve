@@ -13,9 +13,9 @@ import {
   writeTaskTable,
   type TaskTable,
 } from "#execution/tasks/table.js";
-import { upsertProxyInputRequestState } from "#harness/hitl/session-state.js";
+
 import type { HarnessSession } from "#harness/types.js";
-import { withPublished } from "#internal/testing/session-machine.js";
+import { withPublished, withRelays } from "#internal/testing/session-machine.js";
 import { createInputRequestedEvent } from "#protocol/message.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 
@@ -24,20 +24,26 @@ import { createTestSessionState } from "#internal/testing/session-state.js";
 // reach the session's own instrumentation.
 vi.mock("#internal/workflow/runtime.js", () => ({ resumeHook: vi.fn(async () => {}) }));
 const { published } = vi.hoisted(() => ({ published: [] as unknown[] }));
-vi.mock("#execution/publish-session-events.js", () => {
-  const publisher =
-    (origin: "own" | "relayed") =>
-    async (
+vi.mock("#execution/session/commit-step.js", async () => {
+  const { readDurableSession } = await import("#execution/durable-session-store.js");
+  const { sessionView } = await import("#harness/session-machine/commit.js");
+  const { storedProjection } = await import("#harness/session-machine/view.js");
+  return {
+    commitSessionStep: async (
       target: {
         readonly serializedContext: Record<string, unknown>;
-        readonly sessionState: unknown;
+        readonly sessionState: Parameters<typeof readDurableSession>[0];
       },
-      events: readonly unknown[],
+      decide: (view: ReturnType<typeof sessionView>) => readonly { readonly events: unknown[] }[],
+      options: { readonly origin: "own" | "relayed" },
     ) => {
-      published.push(...events.map((event) => ({ event, origin })));
+      const { state } = readDurableSession(target.sessionState);
+      for (const transition of decide(sessionView(storedProjection(state), state))) {
+        published.push(...transition.events.map((event) => ({ event, origin: options.origin })));
+      }
       return { serializedContext: target.serializedContext, sessionState: target.sessionState };
-    };
-  return { publishSessionEvents: publisher("own"), relaySessionEvents: publisher("relayed") };
+    },
+  };
 });
 
 const REQUEST_EVENT = { sequence: 3, stepIndex: 1, turnId: "turn_1" };
@@ -215,22 +221,24 @@ function withQuestion(session: DurableSession, runId: string): DurableSession {
       ...REQUEST_EVENT,
     }),
   ]);
-  const state = upsertProxyInputRequestState({
-    entries: [
-      [
-        requestId,
-        {
-          childContinuationToken: requestId,
-          event: REQUEST_EVENT,
-          kind: "question",
-          runId,
-          workflowAsk: { control: `${runId}-control` },
-          reply: {},
-        },
+  const state = withRelays(
+    { state: session.state },
+    {
+      entries: [
+        [
+          requestId,
+          {
+            childContinuationToken: requestId,
+            event: REQUEST_EVENT,
+            kind: "question",
+            runId,
+            workflowAsk: { control: `${runId}-control` },
+            reply: {},
+          },
+        ],
       ],
-    ],
-    forChildContinuationToken: requestId,
-    state: session.state,
-  });
+      forChildContinuationToken: requestId,
+    },
+  ).state;
   return { ...session, state };
 }

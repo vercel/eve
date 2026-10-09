@@ -1,21 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { matchAuthorizationCallbacks } from "#execution/authorization-callback-match.js";
-import type { PendingAuthorizationState } from "#harness/hitl/session-state.js";
+import type { AuthorizationChallenge } from "#harness/authorization.js";
 
 describe("matchAuthorizationCallbacks", () => {
   it.each([undefined, "another-attempt"])("ignores an unmatched attempt %s", (attemptId) => {
     const result = matchAuthorizationCallbacks(
-      {
-        challenges: [
-          {
-            attemptId: "attempt-1",
-            name: "crm",
-            hookUrl: "https://app.example/callback",
-            challenge: {},
-            principal: { type: "app" },
-          },
-        ],
-      },
+      [
+        {
+          attemptId: "attempt-1",
+          name: "crm",
+          hookUrl: "https://app.example/callback",
+          challenge: {},
+          principal: { type: "app" },
+        },
+      ],
       [
         {
           authorizationCallback: {
@@ -39,17 +37,15 @@ describe("matchAuthorizationCallbacks", () => {
     };
     const message = { message: "Continue after signing in" };
     const result = matchAuthorizationCallbacks(
-      {
-        challenges: [
-          {
-            attemptId: "attempt-1",
-            name: "crm",
-            hookUrl: "https://app.example/callback",
-            challenge: {},
-            principal: { type: "app" },
-          },
-        ],
-      },
+      [
+        {
+          attemptId: "attempt-1",
+          name: "crm",
+          hookUrl: "https://app.example/callback",
+          challenge: {},
+          principal: { type: "app" },
+        },
+      ],
       [callback, message, callback],
     );
     expect(result.matches).toHaveLength(1);
@@ -57,20 +53,18 @@ describe("matchAuthorizationCallbacks", () => {
   });
 
   it("carries the resolved connection instance into the callback result", () => {
-    const pending: PendingAuthorizationState = {
-      challenges: [
-        {
-          attemptId: "attempt-1",
-          challenge: { url: "https://auth.example.com" },
-          hookUrl: "https://app.example.com/callback",
-          instanceId: "connection:instance-a",
-          name: "crm",
-          principal: { type: "app" },
-        },
-      ],
-    };
+    const signIns: AuthorizationChallenge[] = [
+      {
+        attemptId: "attempt-1",
+        challenge: { url: "https://auth.example.com" },
+        hookUrl: "https://app.example.com/callback",
+        instanceId: "connection:instance-a",
+        name: "crm",
+        principal: { type: "app" },
+      },
+    ];
 
-    const result = matchAuthorizationCallbacks(pending, [
+    const result = matchAuthorizationCallbacks(signIns, [
       {
         authorizationCallback: {
           attemptId: "attempt-1",

@@ -1,6 +1,7 @@
 import type { AuthorizationChallenge } from "#harness/authorization.js";
-import { withSignIns } from "./sign-ins.js";
+import { resolveActiveAuthorizationChallenges } from "./sign-ins.js";
 import type { HarnessSessionBase, SessionStateMap } from "#harness/types.js";
+import { isObject } from "#shared/guards.js";
 
 import type { ActiveApprovalCandidate, DurableApprovalState } from "./candidates.js";
 import { parseProxyInputRequest, type ProxyInputRequest } from "./relays.js";
@@ -16,6 +17,75 @@ export const HITL_STATE_KEYS = {
   signIns: "eve.runtime.pendingAuthorization",
   relays: "eve.runtime.proxyInputRequests",
 } as const;
+
+/**
+ * A read-only snapshot of the human-in-the-loop records, the one way code outside `harness/hitl/`
+ * reads them.
+ */
+export interface HitlState {
+  /** The sign-in attempts the session waits on. */
+  readonly signIns: readonly AuthorizationChallenge[];
+  /** Requests this session relays for a child session or a workflow run, by `requestId`. */
+  readonly relays: ReadonlyMap<string, ProxyInputRequest>;
+}
+
+/** Each record is parsed on first read: most readers want one. */
+export function readHitlState(state: SessionStateMap | undefined): HitlState {
+  let signIns: readonly AuthorizationChallenge[] | undefined;
+  let relays: ReadonlyMap<string, ProxyInputRequest> | undefined;
+  return {
+    get signIns() {
+      return (signIns ??= readSignIns(state));
+    },
+    get relays() {
+      return (relays ??= new Map(Object.entries(readRelays(state))));
+    },
+  };
+}
+
+/**
+ * Whether the session holds a sign-in or relayed request, or a record of them it can't read.
+ * Settling the last one deletes its record; a malformed record that ordinary readers read as
+ * empty must not let a session hand off.
+ */
+export function holdsHitlRequests(state: SessionStateMap | undefined): boolean {
+  if (state?.[HITL_STATE_KEYS.signIns] !== undefined) return true;
+  const relays = state?.[HITL_STATE_KEYS.relays];
+  return relays !== undefined && (!isObject(relays) || Object.keys(relays).length > 0);
+}
+
+/** What a session-machine transition changes in these records. */
+export interface HitlStateChange {
+  /** Every sign-in the session waits on once the change applies; `[]` withdraws them all. */
+  readonly signIns?: readonly AuthorizationChallenge[];
+  readonly relays?: RelayChange;
+}
+
+/** Relay routes a transition records or retires. */
+export interface RelayChange {
+  /** A child's fresh batch: it replaces the routes that child's input source held. */
+  readonly upsert?: {
+    readonly entries: readonly (readonly [requestId: string, route: ProxyInputRequest])[];
+    readonly forChildContinuationToken: string;
+    readonly inputSource?: string;
+  };
+  /** Routes whose answers went down to the asker, or whose request closed. */
+  readonly retire?: readonly string[];
+}
+
+/** Writes a transition's change. Only the session machine's save calls it. */
+export function writeHitlState<T extends { readonly state?: SessionStateMap }>(
+  session: T,
+  change: HitlStateChange,
+): T {
+  let state = session.state;
+  if (change.signIns !== undefined) {
+    state = writeSignIns(state, resolveActiveAuthorizationChallenges(change.signIns));
+  }
+  if (change.relays?.upsert !== undefined) state = upsertRelays(state, change.relays.upsert);
+  if (change.relays?.retire !== undefined) state = retireRelays(state, change.relays.retire);
+  return state === session.state ? session : { ...session, state };
+}
 
 // ---------------------------------------------------------------------------
 // Approval candidates
@@ -87,9 +157,9 @@ export function writeApprovalState(
  * Drops what a cleared context owned: sign-in attempts and responders' approval progress. `clear`
  * reported each close; relay routes for live tasks stay.
  */
-export function discardClearedHumanInput<T extends HarnessSessionBase>(session: T): T {
+export function discardClearedHitlState<T extends HarnessSessionBase>(session: T): T {
   const { [HITL_STATE_KEYS.approvals]: _approvals, ...state } =
-    clearPendingAuthorization(session.state) ?? {};
+    writeSignIns(session.state, []) ?? {};
   return { ...session, state: Object.keys(state).length > 0 ? state : undefined };
 }
 
@@ -97,212 +167,75 @@ export function discardClearedHumanInput<T extends HarnessSessionBase>(session: 
 // Pending sign-ins
 // ---------------------------------------------------------------------------
 
-export interface PendingAuthorizationState {
-  readonly challenges: readonly AuthorizationChallenge[];
+function readSignIns(state: SessionStateMap | undefined): readonly AuthorizationChallenge[] {
+  const value = state?.[HITL_STATE_KEYS.signIns];
+  return isObject(value)
+    ? ((value as { challenges?: readonly AuthorizationChallenge[] }).challenges ?? [])
+    : [];
 }
 
-export function setPendingAuthorization(
-  sessionState: Record<string, unknown> | undefined,
-  value: PendingAuthorizationState,
-): Record<string, unknown> {
-  return {
-    ...sessionState,
-    [HITL_STATE_KEYS.signIns]: {
-      challenges: withSignIns(
-        getPendingAuthorization(sessionState)?.challenges ?? [],
-        value.challenges,
-      ),
-    },
-  };
-}
-
-export function clearPendingAuthorization(
-  sessionState: Record<string, unknown> | undefined,
-  attemptIds?: readonly string[],
-): Record<string, unknown> | undefined {
-  if (sessionState === undefined || sessionState[HITL_STATE_KEYS.signIns] === undefined) {
-    return sessionState;
-  }
-
-  if (attemptIds !== undefined) {
-    if (attemptIds.length === 0) return sessionState;
-
-    const pending = getPendingAuthorization(sessionState);
-    if (pending !== undefined) {
-      const completedAttemptIds = new Set(attemptIds);
-      const challenges = pending.challenges.filter(
-        (challenge) => !completedAttemptIds.has(authorizationAttemptKey(challenge)),
-      );
-      if (challenges.length > 0) {
-        return {
-          ...sessionState,
-          [HITL_STATE_KEYS.signIns]: { challenges },
-        };
-      }
-    }
-  }
-
-  const state = { ...sessionState };
-  delete state[HITL_STATE_KEYS.signIns];
-  return Object.keys(state).length > 0 ? state : undefined;
-}
-
-function authorizationAttemptKey(challenge: AuthorizationChallenge): string {
-  return challenge.attemptId ?? challenge.candidateId ?? challenge.name;
-}
-
-export function getPendingAuthorization(
-  sessionState: Record<string, unknown> | undefined,
-): PendingAuthorizationState | undefined {
-  if (!sessionState) return undefined;
-  const v = sessionState[HITL_STATE_KEYS.signIns];
-  if (typeof v !== "object" || v === null) return undefined;
-  return v as PendingAuthorizationState;
+function writeSignIns(
+  state: SessionStateMap | undefined,
+  challenges: readonly AuthorizationChallenge[],
+): SessionStateMap | undefined {
+  if (state?.[HITL_STATE_KEYS.signIns] === undefined && challenges.length === 0) return state;
+  const { [HITL_STATE_KEYS.signIns]: _signIns, ...rest } = state ?? {};
+  if (challenges.length > 0) return { ...rest, [HITL_STATE_KEYS.signIns]: { challenges } };
+  return Object.keys(rest).length > 0 ? rest : undefined;
 }
 
 // ---------------------------------------------------------------------------
 // Relayed requests
 // ---------------------------------------------------------------------------
 
-/** `requestId → route` map stored on the parent session. */
-type ProxyInputRequestMap = Readonly<Record<string, ProxyInputRequest>>;
-
-/**
- * Returns the proxy-routing map as a fresh `Map`. Never returns a live
- * reference so accidental mutation cannot corrupt session state.
- */
-export function getProxyInputRequests(
+function readRelays(
   state: SessionStateMap | undefined,
-): ReadonlyMap<string, ProxyInputRequest> {
-  return new Map(Object.entries(readMap(state)));
-}
-
-/**
- * Returns true when the session is currently proxying one or more
- * HITL requests on behalf of a descendant subagent.
- */
-export function hasProxyInputRequests(state: SessionStateMap | undefined): boolean {
-  for (const _ of Object.keys(readMap(state))) {
-    return true;
-  }
-  return false;
-}
-
-/**
- * Replaces prior entries for the destination and input source with the provided
- * ones. A child raising a fresh batch overwrites its prior batch so the
- * parent never keeps stale request metadata. Other sources' routes stay
- * independently answerable.
- */
-export function upsertProxyInputRequests<S extends HarnessSessionBase>(input: {
-  readonly inputSource?: string;
-  readonly entries: readonly (readonly [requestId: string, route: ProxyInputRequest])[];
-  readonly forChildContinuationToken: string;
-  readonly session: S;
-}): S {
-  return {
-    ...input.session,
-    state: upsertProxyInputRequestState({
-      entries: input.entries,
-      forChildContinuationToken: input.forChildContinuationToken,
-      inputSource: input.inputSource,
-      state: input.session.state,
-    }),
-  };
-}
-
-/** State-only variant for control-plane steps that already hold a durable projection. */
-export function upsertProxyInputRequestState(input: {
-  readonly inputSource?: string;
-  readonly entries: readonly (readonly [requestId: string, route: ProxyInputRequest])[];
-  readonly forChildContinuationToken: string;
-  readonly state: SessionStateMap | undefined;
-}): SessionStateMap | undefined {
-  const next: Record<string, ProxyInputRequest> = {};
-
-  for (const [requestId, route] of Object.entries(readMap(input.state))) {
-    if (
-      route.childContinuationToken !== input.forChildContinuationToken ||
-      route.inputSource !== input.inputSource
-    ) {
-      next[requestId] = route;
-    }
-  }
-
-  for (const [requestId, route] of input.entries) {
-    next[requestId] = route;
-  }
-
-  const state = { ...input.state };
-  if (Object.keys(next).length === 0) {
-    delete state[HITL_STATE_KEYS.relays];
-  } else {
-    state[HITL_STATE_KEYS.relays] = next;
-  }
-  return Object.keys(state).length > 0 ? state : undefined;
-}
-
-/** Removes every proxy route the predicate selects. */
-export function clearProxyInputRequestsWhere<T extends { readonly state?: SessionStateMap }>(
-  session: T,
-  select: (route: ProxyInputRequest, requestId: string) => boolean,
-): T {
-  const requestIds = Object.entries(readMap(session.state))
-    .filter(([requestId, route]) => select(route, requestId))
-    .map(([requestId]) => requestId);
-  return retireProxyInputRequests(session, requestIds);
-}
-
-/** Removes only the request IDs whose responses were successfully forwarded. */
-export function retireProxyInputRequests<T extends { readonly state?: SessionStateMap }>(
-  session: T,
-  requestIds: readonly string[],
-): T {
-  const current = readMap(session.state);
-  const next = { ...current };
-  let changed = false;
-
-  for (const requestId of requestIds) {
-    if (Object.hasOwn(next, requestId)) {
-      delete next[requestId];
-      changed = true;
-    }
-  }
-
-  return changed ? writeMap(session, next) : session;
-}
-
-function readMap(state: SessionStateMap | undefined): ProxyInputRequestMap {
+): Readonly<Record<string, ProxyInputRequest>> {
   const raw = state?.[HITL_STATE_KEYS.relays];
-
-  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
-    return {};
-  }
-
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return {};
   const result: Record<string, ProxyInputRequest> = {};
-  for (const [key, value] of Object.entries(raw)) {
-    const request = parseProxyInputRequest(value, key);
-    if (request !== undefined) {
-      result[key] = request;
-    }
+  for (const [requestId, value] of Object.entries(raw)) {
+    const request = parseProxyInputRequest(value, requestId);
+    if (request !== undefined) result[requestId] = request;
   }
   return result;
 }
 
-function writeMap<T extends { readonly state?: SessionStateMap }>(
-  session: T,
-  entries: Record<string, ProxyInputRequest>,
-): T {
-  const state = { ...session.state };
+function writeRelays(
+  state: SessionStateMap | undefined,
+  relays: Readonly<Record<string, ProxyInputRequest>>,
+): SessionStateMap | undefined {
+  const { [HITL_STATE_KEYS.relays]: _relays, ...rest } = state ?? {};
+  if (Object.keys(relays).length > 0) return { ...rest, [HITL_STATE_KEYS.relays]: relays };
+  return Object.keys(rest).length > 0 ? rest : undefined;
+}
 
-  if (Object.keys(entries).length === 0) {
-    delete state[HITL_STATE_KEYS.relays];
-    return {
-      ...session,
-      state: Object.keys(state).length > 0 ? state : undefined,
-    };
-  }
+/**
+ * A child raising a fresh batch replaces the routes it held for that input source, so the parent
+ * never keeps stale request metadata. Other sources' routes stay independently answerable.
+ */
+function upsertRelays(
+  state: SessionStateMap | undefined,
+  upsert: NonNullable<RelayChange["upsert"]>,
+): SessionStateMap | undefined {
+  const kept = Object.entries(readRelays(state)).filter(
+    ([, route]) =>
+      route.childContinuationToken !== upsert.forChildContinuationToken ||
+      route.inputSource !== upsert.inputSource,
+  );
+  return writeRelays(state, Object.fromEntries([...kept, ...upsert.entries]));
+}
 
-  state[HITL_STATE_KEYS.relays] = entries;
-  return { ...session, state };
+function retireRelays(
+  state: SessionStateMap | undefined,
+  requestIds: readonly string[],
+): SessionStateMap | undefined {
+  const relays = readRelays(state);
+  if (!requestIds.some((requestId) => Object.hasOwn(relays, requestId))) return state;
+  return writeRelays(
+    state,
+    Object.fromEntries(
+      Object.entries(relays).filter(([requestId]) => !requestIds.includes(requestId)),
+    ),
+  );
 }
