@@ -96,7 +96,7 @@ t.score("reply-brevity", {
 t.score("faithfulness", gradeFaithfulness(reply, reference)); // your own async evaluator
 ```
 
-A score is tracked only: it lands in reports and artifacts with no verdict and never changes the eval's outcome. Chain a rule when the measurement should also decide:
+Without a rule, a score has no verdict: it lands in reports and artifacts, and the eval's outcome does not depend on it. Chain a rule to make the measurement decide:
 
 ```ts
 t.score("faithfulness", gradeFaithfulness(reply, reference)).gate(0.9); // fails the eval below 0.9
