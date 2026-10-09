@@ -1,6 +1,7 @@
 import type { TaskCancelResult, TaskWaitResult } from "#execution/tasks/calls.js";
 import type { WorkflowToolRunCall } from "#execution/tools/workflow/messages.js";
 import type { SessionStateMap } from "#harness/types.js";
+import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { isNonEmptyString, isObject } from "#shared/guards.js";
 import type { JsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
@@ -200,6 +201,17 @@ export function taskCancelResult(table: TaskTable, taskId: string): TaskCancelRe
     status: isTaskWorking(record) ? "cancelled" : "already_finished",
     tool: record.name,
   };
+}
+
+/**
+ * Every run the session started and hasn't seen finish: the calls a turn waits on, and every
+ * task's run, including cancelled runs that haven't confirmed yet.
+ */
+export function liveRuns(state: SessionStateMap | undefined): readonly TaskRunAddress[] {
+  return [
+    ...getBlockingWorkflowToolRuns(state).map((run) => run.address),
+    ...liveTaskRuns(readTaskTable(state)),
+  ];
 }
 
 /** Runs that may still be doing work, including cancelled runs that haven't confirmed yet. */
