@@ -610,6 +610,69 @@ describe("extractUnsupportedProviderToolTypes", () => {
     expect(extractUnsupportedProviderToolTypes(error)).toEqual([]);
   });
 
+  it("returns the include value an OpenAI-compatible endpoint rejected", () => {
+    // Bedrock Mantle's response when the request carries OpenAI web search.
+    const body = {
+      error: {
+        code: "invalid_value",
+        message:
+          "Invalid value: 'web_search_call.action.sources'. Supported values are: 'reasoning.encrypted_content'.",
+        param: "include",
+        type: "invalid_request_error",
+      },
+    };
+    const error = Object.assign(new Error(body.error.message), {
+      data: body,
+      name: "AI_APICallError",
+      responseBody: JSON.stringify(body),
+      statusCode: 400,
+    });
+
+    expect(extractUnsupportedProviderToolTypes(error)).toEqual(["web_search_call.action.sources"]);
+  });
+
+  it("returns only the rejected value, not the supported values listed after it", () => {
+    const upstream = Object.assign(new Error("Bad Request"), {
+      responseBody: JSON.stringify({
+        error: {
+          message:
+            "Invalid value: 'file_search_call.results'. Supported values are: 'web_search_call.action.sources'.",
+          param: "include",
+        },
+      }),
+      statusCode: 400,
+    });
+
+    expect(extractUnsupportedProviderToolTypes(upstream)).toEqual(["file_search_call.results"]);
+  });
+
+  it("returns OpenAI's web search type when AI Gateway routed it to a host without web search", () => {
+    // AI Gateway's response for OpenAI web search routed to Bedrock.
+    const body = {
+      error: {
+        message: "web search is not supported for this request",
+        param: {
+          message: "web search is not supported for this request",
+          name: "AI_APICallError",
+          statusCode: 400,
+        },
+        type: "AI_APICallError",
+      },
+    };
+    const upstream = Object.assign(new Error(body.error.message), {
+      data: body,
+      name: "AI_APICallError",
+      responseBody: JSON.stringify(body),
+      statusCode: 400,
+    });
+    const error = Object.assign(new Error(body.error.message, { cause: upstream }), {
+      name: "GatewayInternalServerError",
+      statusCode: 400,
+    });
+
+    expect(extractUnsupportedProviderToolTypes(error)).toEqual(["web_search"]);
+  });
+
   it("returns empty for plain Error and null/undefined inputs", () => {
     expect(extractUnsupportedProviderToolTypes(new Error("mystery"))).toEqual([]);
     expect(extractUnsupportedProviderToolTypes(null)).toEqual([]);

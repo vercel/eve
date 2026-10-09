@@ -18,13 +18,13 @@ import type { WebSearchSelection } from "#shared/web-search.js";
 type WebSearchBackend = "anthropic" | "exa" | "google" | "openai" | "parallel" | "browserbase";
 
 /**
- * Maps an upstream provider tool type (the literal `type` string the AI SDK
- * sends to the provider) back to the framework tool name that injected it.
+ * Maps an upstream identifier back to the framework tool name that injected it: a provider tool
+ * type (the literal `type` string the AI SDK sends to the provider), or a request value the AI SDK
+ * adds only for that tool.
  *
- * Used when the AI Gateway routes a request to a fallback provider that
- * does not support a provider-specific tool — the upstream error references
- * the provider-specific type (e.g. `web_search_20250305`), but the harness
- * needs to drop the framework tool by its public name (`web_search`).
+ * Used when a host does not support a provider-specific tool — the upstream error references
+ * the provider-specific identifier (e.g. `web_search_20250305`), but the harness needs to drop
+ * the framework tool by its public name (`web_search`).
  *
  * Adding a new provider tool requires adding the corresponding mapping
  * entry here alongside its {@link resolveWebSearchProviderTool} switch
@@ -35,6 +35,10 @@ const UPSTREAM_TOOL_TYPE_TO_FRAMEWORK_NAME: Readonly<Record<string, string>> = {
   // Anthropic backends reject this type because they only host the
   // older Claude Messages surface.
   web_search_20250305: WEB_SEARCH_TOOL_NAME,
+  // OpenAI's web search tool, which OpenAI-compatible hosts such as Bedrock may not serve.
+  web_search: WEB_SEARCH_TOOL_NAME,
+  // The `include` value `@ai-sdk/openai` adds only alongside OpenAI web search.
+  "web_search_call.action.sources": WEB_SEARCH_TOOL_NAME,
 };
 
 /**
@@ -42,7 +46,7 @@ const UPSTREAM_TOOL_TYPE_TO_FRAMEWORK_NAME: Readonly<Record<string, string>> = {
  * `type`, or `null` when the type is not one we know how to remove.
  *
  * Used by the harness recovery path to decide which tools to drop when a
- * gateway fallback provider rejects a tool. Unknown types fall through to
+ * host rejects a tool. Unknown types fall through to
  * the existing terminal/recoverable handling.
  */
 export function resolveFrameworkToolFromUpstreamType(type: string): string | null {

@@ -5138,6 +5138,72 @@ describe("createToolLoopHarness", () => {
       );
     });
 
+    it("leaves out the web search a direct model's host rejected on later turns", async () => {
+      // An OpenAI-compatible endpoint (Bedrock Mantle) that rejects every request carrying
+      // OpenAI web search.
+      const body = {
+        error: {
+          message:
+            "Invalid value: 'web_search_call.action.sources'. Supported values are: 'reasoning.encrypted_content'.",
+          param: "include",
+        },
+      };
+      const rejection = Object.assign(new Error(body.error.message), {
+        data: body,
+        isRetryable: false,
+        name: "AI_APICallError",
+        responseBody: JSON.stringify(body),
+        statusCode: 400,
+      });
+      const successResult = {
+        finishReason: "stop",
+        response: { messages: [{ content: "ok", role: "assistant" }] },
+        text: "ok",
+        toolCalls: [],
+        toolResults: [],
+      };
+      vi.mocked(ToolLoopAgent).mockImplementation(function (
+        this: Record<string, unknown>,
+        settings: MockAgentSettings & { tools: Record<string, unknown> },
+      ) {
+        const { tools } = settings;
+        this.stream = vi.fn().mockImplementation(async () => {
+          if (tools.web_search !== undefined) throw rejection;
+          void Promise.resolve().then(() => settings.onStepEnd?.(successResult));
+          return createMockStreamResult(successResult);
+        });
+        return this as unknown as ToolLoopAgent;
+      } as unknown as MockAgentConstructor);
+
+      const model = { modelId: "gpt-5.6-sol", provider: "openai.responses" } as LanguageModel;
+      const session = createTestSession({
+        agent: {
+          modelReference: { id: "gpt-5.6-sol" },
+          system: "You are a test assistant.",
+          tools: [{ description: "Web search.", name: "web_search", inputSchema: null }],
+        },
+      });
+      const runStep = createToolLoopHarness({
+        handleEvent: createEventCollector().emit,
+        resolveModel: vi.fn().mockResolvedValue(model),
+        tools: new Map([
+          [
+            "web_search",
+            { description: "Web search.", inputSchema: jsonSchema({}), name: "web_search" },
+          ],
+        ]),
+      });
+
+      const first = await runStep(session, { message: "Hi" });
+      await runStep(first.session, { message: "Again" });
+
+      // The rejected call and its retry, then the second turn's call without web search.
+      const toolsPerCall = vi
+        .mocked(ToolLoopAgent)
+        .mock.calls.map(([settings]) => Object.keys(settings.tools as object));
+      expect(toolsPerCall).toEqual([["web_search"], [], []]);
+    });
+
     it("falls through to terminal cascade when recovery retry also fails", async () => {
       const logs = captureLogRecords();
       // Both attempts fail with the same unsupported-tool error. The
