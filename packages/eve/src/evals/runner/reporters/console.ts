@@ -11,7 +11,10 @@ import {
   formatAssertionFailureDetailLines,
   formatAssertionFailureHeadline,
 } from "#evals/runner/reporters/assertion-diagnostics.js";
-import { groupAssertionScores } from "#evals/runner/reporters/assertion-scores.js";
+import {
+  exportedAssertionName,
+  groupAssertionScores,
+} from "#evals/runner/reporters/assertion-scores.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 
 /**
@@ -83,7 +86,7 @@ class ConsoleReporter implements EvalReporter {
 
     // Braintrust and Datadog report one score per name, so repeated names
     // collapse to their lowest member. Surface that where the author is looking.
-    const groups = groupAssertionScores(assertions, (a) => `${a.severity}:${a.name}`);
+    const groups = groupAssertionScores(assertions, exportedAssertionName);
     for (const group of groups.values()) {
       if (group.assertions.length < 2) continue;
       const name = group.assertions[0]!.name;

@@ -3,6 +3,7 @@ import { resolveRuntimeTraceLinks } from "#evals/runner/reporters/datadog-runtim
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 import {
   composeAssertionScoreMetadata,
+  exportedAssertionName,
   groupAssertionScores,
 } from "#evals/runner/reporters/assertion-scores.js";
 import {
@@ -500,7 +501,7 @@ function resolveEvaluationMetrics(result: EveEvalResult): DatadogEvaluationMetri
   const metrics: DatadogEvaluationMetricInput[] = [];
   const usedLabels = new Set<string>(BUILT_IN_METRIC_LABELS);
   const groups = groupAssertionScores(result.assertions, (assertion) =>
-    toDatadogMetricLabel(assertion.severity === "gate" ? `gate_${assertion.name}` : assertion.name),
+    toDatadogMetricLabel(exportedAssertionName(assertion)),
   );
 
   for (const [label, group] of groups) {

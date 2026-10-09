@@ -1,6 +1,7 @@
 import type { EveEval, EveEvalResult, EveEvalRunSummary, EveEvalTarget } from "#evals/types.js";
 import {
   composeAssertionScoreMetadata,
+  exportedAssertionName,
   groupAssertionScores,
 } from "#evals/runner/reporters/assertion-scores.js";
 import { resolveLocalGitMetadata } from "#evals/runner/resolve-git-metadata.js";
@@ -133,13 +134,8 @@ class BraintrustReporter implements EvalReporter {
     if (!this.#experiment) return;
     const evaluation = this.#evaluations.get(result.id);
 
-    // Soft assertions log under their own name; gate assertions log as binary
-    // scores under a `gate:` prefix so experiments diff gate regressions the
-    // same way they diff soft-score regressions.
     const scores: Record<string, number> = {};
-    const groups = groupAssertionScores(result.assertions, (assertion) =>
-      assertion.severity === "gate" ? `gate:${assertion.name}` : assertion.name,
-    );
+    const groups = groupAssertionScores(result.assertions, exportedAssertionName);
     for (const [name, group] of groups) {
       scores[name] = group.score;
     }
