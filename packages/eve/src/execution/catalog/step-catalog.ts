@@ -127,9 +127,10 @@ export interface StepCatalog extends HarnessToolLookup {
   describe(definition: HarnessToolDefinition): string;
   /**
    * Resolves a model tool call to the entry it runs. An `eve__tool` call that
-   * names a deferred entry becomes the call to that entry, and an `eve__skill`
-   * call becomes the call to load its skill; any other call runs the listed
-   * tool it names. A call that reaches none of these resolves to nothing.
+   * names an entry `callableByName` accepts becomes the call to that entry, and
+   * an `eve__skill` call becomes the call to load its skill; any other call runs
+   * the listed tool it names. A call that reaches none of these resolves to
+   * nothing.
    */
   readonly resolve: CallResolver;
 }
@@ -300,8 +301,7 @@ function connectionEntryNamed(
 /**
  * The model sees one fixed schema. Validation resolves the named entry and
  * checks `input` against that entry's own schema, so a call that reaches
- * `eve__tool` always names a deferred entry with valid input, as a direct call
- * names a listed tool.
+ * `eve__tool` always names an entry `callableByName` accepts, with valid input.
  */
 function createCallTool(
   catalog: StepCatalog,
