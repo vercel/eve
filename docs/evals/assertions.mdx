@@ -166,7 +166,7 @@ Every assertion returns a chainable handle. Severity rides on the assertion, so 
 - `.gate(threshold?)` is hard. A miss marks the eval `failed` and `eve eval` exits non-zero.
 - `.soft(threshold?)` is tracked data. A below-threshold miss marks the eval `scored`, fatal only under `--strict`. With no threshold, it is tracked-only and never fails.
 - `.atLeast(threshold)` is soft with a bar (equivalent to `.soft(threshold)`).
-- `.label(name)` adds a stable name when an eval records several assertions from the same family.
+- `.label(name)` adds a stable name when an eval records several assertions from the same family. Braintrust and Datadog report one score per name and keep the lowest, so `eve eval` warns under an eval that records the same name more than once.
 
 The defaults are chosen so you rarely set severity. Run-level methods and `includes`/`equals`/`matches` are gates; `similarity` and every `t.judge(...)` assertion are soft. Annotate only when you deviate:
 

@@ -38,7 +38,7 @@ export default defineEval({
 });
 ```
 
-The reporter config takes an optional `projectName` and `experimentName`, plus a base experiment (by name or id) to diff against. Gate assertions log as binary scores under a `gate:` prefix so experiments diff gate regressions the same way they diff soft-score regressions. Assertions that share a name, such as several unlabeled judges, log one score: the lowest. Use `.label(name)` to group or separate them. Each assertion's score is stored in the Braintrust metadata under `eveAssertionScores` and failed assertion details under `eveFailedAssertions`; observed traces are stored under `eveTraceIds` and `eveTraceContexts`.
+The reporter config takes an optional `projectName` and `experimentName`, plus a base experiment (by name or id) to diff against. Gate assertions log as binary scores under a `gate:` prefix so experiments diff gate regressions the same way they diff soft-score regressions. Assertions that share a name, such as several unlabeled judges, log one score: the lowest. The console warns under the eval when that happens; use `.label(name)` to group or separate them. Each assertion's score is stored in the Braintrust metadata under `eveAssertionScores` and failed assertion details under `eveFailedAssertions`; observed traces are stored under `eveTraceIds` and `eveTraceContexts`.
 
 A reporter instance observes the evals that reference it. Share one instance across several evals (the config, a `shared.ts` export, or every entry of a dataset array) and their results land in a single experiment. Listing the same config reporter on an eval too does not double-report it.
 
