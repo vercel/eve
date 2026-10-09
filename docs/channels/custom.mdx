@@ -387,8 +387,8 @@ export default defineChannel({
     }),
   ],
   events: {
-    "turn.started"(eventData, channel) {
-      channel.state.internalCounter += 1;
+    "turn.started"(_event, ctx) {
+      ctx.channel.state.internalCounter += 1;
     },
   },
 });

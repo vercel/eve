@@ -352,7 +352,7 @@ const session = await ctx.resolveSession({ target });
 
 ### Slack API calls outside a handler
 
-Inside inbound webhook handlers such as `onAppMention`, `onEvent`, `onInteraction`, `onShortcut`, `onSlashCommand`, and `onInputResponse`, `ctx.slack.request(operation, body)` is the raw-API escape hatch. Inside a [renderer](#customize-rendering)'s event handler, use `channel.slack.request(...)` instead. Outside those contexts there is no handle — a schedule resolving reactions on old
+Inside inbound webhook handlers such as `onAppMention`, `onEvent`, `onInteraction`, `onShortcut`, `onSlashCommand`, and `onInputResponse`, `ctx.slack.request(operation, body)` is the raw-API escape hatch. Inside a [renderer](#customize-rendering)'s event handler, use `ctx.channel.slack.request(...)` instead. Outside those contexts there is no handle — a schedule resolving reactions on old
 messages, for example, has no inbound Slack request. For that, call the
 same primitive the handle uses directly:
 
@@ -438,7 +438,7 @@ This applies to the turn's final reply only. A failed status update, tool-call n
 
 When the model replies while its tasks keep working, that reply posts like any other, and the reply after the results posts as another message. A schedule's session posts only the final reply.
 
-Outbound text preserves bare `@` tokens as literal text. To mention a user, embed Slack's `<@USER_ID>` syntax directly or use `channel.thread.mentionUser(userId)`.
+Outbound text preserves bare `@` tokens as literal text. To mention a user, embed Slack's `<@USER_ID>` syntax directly or use `ctx.channel.thread.mentionUser(userId)` in a renderer.
 
 ### Task card
 
@@ -741,7 +741,7 @@ Pass `{ channelId }` as the target to start a new thread. The agent's first post
 
 The default mention handler lets teammates continue the session by mentioning the app in the thread. To accept replies without a mention, [configure an `onMessage` hook and the required Slack subscriptions and scopes](#continue-conversations-without-repeated-mentions).
 
-For a Slack post without an agent turn, use `ctx.thread.post(...)` in an inbound handler or `channel.thread.post(...)` in a renderer's event handler. Outside a handler, use [`callSlackApi(...)`](#slack-api-calls-outside-a-handler).
+For a Slack post without an agent turn, use `ctx.thread.post(...)` in an inbound handler or `ctx.channel.thread.post(...)` in a renderer's event handler. Outside a handler, use [`callSlackApi(...)`](#slack-api-calls-outside-a-handler).
 
 ### Attachments
 

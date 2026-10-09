@@ -140,7 +140,7 @@ This policy controls overlapping eve turns. Chat SDK's separate `concurrency` op
 
 The default handlers post the agent's reply back to the thread — no `events` override required. Completed assistant messages are posted as markdown (`{ markdown: … }`) so adapters render rich text and email HTML rather than a raw string.
 
-Streaming is on by default: the channel posts an initial message and edits it as tokens arrive (`message.appended`), throttled by `streamingEditIntervalMs` (default `1000`). Set `streaming: false` for surfaces that deliver one message per turn — email, for example — so the reply posts once on completion instead of editing:
+Streaming is on by default: the channel posts an initial message and edits it as tokens arrive (`content.delta`), throttled by `streamingEditIntervalMs` (default `1000`). Set `streaming: false` for surfaces that deliver one message per turn — email, for example — so the reply posts once on completion instead of editing:
 
 ```ts
 chatSdkChannel({
@@ -151,7 +151,7 @@ chatSdkChannel({
 });
 ```
 
-Typing indicators post automatically where the adapter supports them: `Working…` on `turn.started`, and on `actions.requested`, each call's [label](/docs/tools#label-tool-activity) or a readable form of its name. They leave out the model's own `eve__task_wait` and `eve__task_cancel` calls.
+Typing indicators post automatically where the adapter supports them: `Working…` on `turn.started`, and on `call.requested`, each call's [label](/docs/tools#label-tool-activity) or a readable form of its name. They leave out the model's own `eve__task_wait` and `eve__task_cancel` calls.
 
 ### Optional capabilities degrade gracefully
 
@@ -161,7 +161,7 @@ Adapters do not all implement every operation. When an adapter's `startTyping` o
 import { isNotImplemented } from "eve/channels/chat-sdk";
 ```
 
-Override any default by passing `events`. Handlers receive `(eventData, channel, ctx)`, with the rebuilt Chat SDK thread on `channel.thread`:
+Override any default by passing `events`. Handlers receive `(event, ctx)`, with the rebuilt Chat SDK thread on `ctx.channel.thread`:
 
 ```ts
 chatSdkChannel({
@@ -169,9 +169,10 @@ chatSdkChannel({
   adapters: { resend: createResendAdapter({ fromAddress: "hello@example.com" }) },
   state: createMemoryState(),
   events: {
-    "message.completed"(eventData, channel) {
-      if (eventData.finishReason === "tool-calls" || !eventData.message || !channel.thread) return;
-      return channel.thread.post({ markdown: eventData.message });
+    "content.completed"(event, ctx) {
+      const { phase, value } = event.data;
+      if (phase !== "reply" || typeof value !== "string" || !ctx.channel.thread) return;
+      return ctx.channel.thread.post({ markdown: value });
     },
   },
 });
