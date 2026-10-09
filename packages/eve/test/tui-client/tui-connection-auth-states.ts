@@ -1,4 +1,5 @@
 import type { SessionEvent } from "#protocol/session-event.js";
+import type { InteractionSettledData } from "#protocol/session-events/families/interaction.js";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { Client } from "eve/client";
@@ -46,8 +47,10 @@ function signInTurn(input: {
   const runId = `${turnId}.run`;
   const scope = { turnId };
   const interactionId = `${input.name}-attempt`;
+  const opening: SessionEvent[] =
+    input.started === true ? [] : [{ type: "session.started", data: {} }];
   return [
-    ...(input.started === true ? [] : [{ type: "session.started", data: {} } as const]),
+    ...opening,
     { type: "delivery.admitted", data: { deliveryId } },
     { type: "turn.started", data: { cause: { deliveryId }, follows: null, turnId }, scope },
     { type: "delivery.consumed", data: { deliveryId, parts: [], turnId }, scope },
@@ -88,6 +91,12 @@ function callbackTurn(input: {
   const interactionId = `${input.name}-attempt`;
   const deliveryId = `${input.name}-callback`;
   const responseId = `${input.name}-response`;
+  const settled: { -readonly [K in keyof InteractionSettledData]: InteractionSettledData[K] } = {
+    cause: { responseId },
+    interactionId,
+    outcome: input.outcome,
+  };
+  if (input.reason !== undefined) settled.reason = input.reason;
   return [
     { type: "delivery.admitted", data: { deliveryId, source: { callback: input.name } } },
     { type: "response.submitted", data: { deliveryId, interactionId, responseId } },
@@ -97,12 +106,7 @@ function callbackTurn(input: {
     },
     {
       type: "interaction.settled",
-      data: {
-        cause: { responseId },
-        interactionId,
-        outcome: input.outcome,
-        ...(input.reason === undefined ? {} : { reason: input.reason }),
-      },
+      data: settled,
       scope,
     },
     { type: "turn.resumed", data: { cause: { deliveryId }, turnId }, scope },
