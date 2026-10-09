@@ -1,6 +1,7 @@
 import type { TaskCancelResult, TaskWaitResult } from "#execution/tasks/calls.js";
 import type { WorkflowToolRunCall } from "#execution/tools/workflow/messages.js";
 import type { SessionStateMap } from "#harness/types.js";
+import { readRunningWork, writeRunningWork } from "#harness/running-work.js";
 import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { isNonEmptyString, isObject } from "#shared/guards.js";
 import type { JsonValue } from "#shared/json.js";
@@ -8,12 +9,11 @@ import type { TokenUsage } from "#shared/token-usage.js";
 import type { TaskCancelReason } from "#protocol/message.js";
 import { UNREADABLE_TASK_ERROR } from "#execution/tasks/render.js";
 
-// The session's task table. Every write to a task record goes through this
-// module; callers read with the helpers below and write with `writeTaskTable`.
-// Readers run inside the workflow driver, so validation avoids schema runtimes.
-
-const TASK_TABLE_STATE_KEY = "eve.taskTable";
-const TASK_TABLE_VERSION = 1;
+// The session's task table: the tasks part of its record of running work
+// (`harness/running-work.ts`), which also holds the workflow runs a turn waits on.
+// Every write to a task record goes through this module; callers read with the
+// helpers below and write with `writeTaskTable`. Readers run inside the workflow
+// driver, so validation avoids schema runtimes.
 
 /** At most this many tasks work at once in one session: a backstop normal use shouldn't reach. */
 export const MAX_WORKING_TASKS = 32;
@@ -102,11 +102,9 @@ export interface TaskTable {
 const EMPTY_TABLE: TaskTable = { tasks: [] };
 
 export function readTaskTable(state: SessionStateMap | undefined): TaskTable {
-  const stored = state?.[TASK_TABLE_STATE_KEY];
-  if (!isObject(stored) || stored.version !== TASK_TABLE_VERSION || !Array.isArray(stored.tasks)) {
-    return EMPTY_TABLE;
-  }
-  const tasks = Array.from(stored.tasks as unknown[]).flatMap((value) => {
+  const stored = readRunningWork(state).tasks;
+  if (stored.length === 0) return EMPTY_TABLE;
+  const tasks = stored.flatMap((value) => {
     const record = decodeTaskRecord(value);
     return record === undefined ? [] : [record];
   });
@@ -117,14 +115,10 @@ export function writeTaskTable<T extends { readonly state?: SessionStateMap }>(
   session: T,
   table: TaskTable,
 ): T {
-  const tasks = pruneFinishedRecords(table.tasks);
-  if (tasks.length === 0) {
-    const state = { ...session.state };
-    delete state[TASK_TABLE_STATE_KEY];
-    return { ...session, state: Object.keys(state).length === 0 ? undefined : state };
-  }
-  const stored = { tasks, version: TASK_TABLE_VERSION };
-  return { ...session, state: { ...session.state, [TASK_TABLE_STATE_KEY]: stored } };
+  return {
+    ...session,
+    state: writeRunningWork(session.state, { tasks: pruneFinishedRecords(table.tasks) }),
+  };
 }
 
 // ---------------------------------------------------------------------------

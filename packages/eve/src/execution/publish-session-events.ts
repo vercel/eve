@@ -324,6 +324,18 @@ export interface SessionEventPublisher {
   publish(publication: SessionPublication): Promise<void>;
 }
 
+/**
+ * Whether publication checks each line against the event contract before writing it: on under
+ * `eve dev` and with `EVE_CHECK_SESSION_EVENTS=1`, off with `EVE_CHECK_SESSION_EVENTS=0`. A
+ * violation fails the publication instead of writing a line readers can't fold.
+ */
+function checksSessionEvents(): boolean {
+  const configured = process.env.EVE_CHECK_SESSION_EVENTS;
+  if (configured === "1") return true;
+  if (configured === "0") return false;
+  return process.env.EVE_DEV === "1";
+}
+
 export function openSessionEventPublisher(input: {
   readonly ctx: ContextContainer;
   readonly origin: SessionEventOrigin;
@@ -337,7 +349,7 @@ export function openSessionEventPublisher(input: {
   const writer = openSessionEventWriter(input.sessionWritable);
   let checker: StreamChecker | undefined;
   const emitOne = async (publication: SessionPublication): Promise<readonly WrittenEvent[]> => {
-    if (process.env.EVE_CHECK_SESSION_EVENTS === "1" && checker === undefined) {
+    if (checker === undefined && checksSessionEvents()) {
       const { schemaViolation } = await import("#protocol/session-events/schemas.js");
       checker = createStreamChecker({
         seed: currentProjection(ctx).view,
