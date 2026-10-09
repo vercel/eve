@@ -5138,7 +5138,7 @@ describe("createToolLoopHarness", () => {
       );
     });
 
-    it("leaves out the web search a direct model's host rejected on later turns", async () => {
+    it("retries without web search when an OpenAI-compatible endpoint rejects its include value", async () => {
       // An OpenAI-compatible endpoint (Bedrock Mantle) that rejects every request carrying
       // OpenAI web search.
       const body = {
@@ -5194,14 +5194,13 @@ describe("createToolLoopHarness", () => {
         ]),
       });
 
-      const first = await runStep(session, { message: "Hi" });
-      await runStep(first.session, { message: "Again" });
+      const result = await runStep(session, { message: "Hi" });
 
-      // The rejected call and its retry, then the second turn's call without web search.
+      expect(result.next).toBeNull();
       const toolsPerCall = vi
         .mocked(ToolLoopAgent)
         .mock.calls.map(([settings]) => Object.keys(settings.tools as object));
-      expect(toolsPerCall).toEqual([["web_search"], [], []]);
+      expect(toolsPerCall).toEqual([["web_search"], []]);
     });
 
     it("falls through to terminal cascade when recovery retry also fails", async () => {

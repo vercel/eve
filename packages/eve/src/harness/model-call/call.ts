@@ -66,7 +66,6 @@ import {
   extractToolResultCallIds,
   withAccumulatedResponseMessages,
 } from "./response.js";
-import { withRejectedProviderTools } from "./recovery.js";
 import { runModelCallWithRetries } from "./retry.js";
 import { logToolExecutionError, prepareModelTools } from "./tools.js";
 import { extractGatewayCostUsd, extractTokenUsageDelta } from "./usage.js";
@@ -233,10 +232,7 @@ export class ModelCaller {
   private async prepare(options: ModelCallOptions): Promise<ToolSet> {
     const tools = await prepareModelTools(this.step, {
       catalog: this.input.catalog,
-      disabledProviderTools: withRejectedProviderTools(
-        this.input.model,
-        options.disabledProviderTools,
-      ),
+      disabledProviderTools: options.disabledProviderTools,
       generation: this.input.generation,
       profile: this.profile,
     });

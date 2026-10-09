@@ -1,5 +1,3 @@
-import type { LanguageModel } from "ai";
-
 import { createLogger } from "#internal/logging.js";
 import {
   EmptyModelResponseError,
@@ -8,36 +6,9 @@ import {
 } from "#harness/model-call/errors.js";
 import type { HarnessStepResult } from "#harness/step-hooks.js";
 import { resolveAssistantStepText } from "#harness/messages.js";
-import { resolveModelProfile } from "#harness/model-profile.js";
 import { resolveFrameworkToolFromUpstreamType } from "#harness/provider-tools.js";
 
 const log = createLogger("harness.tool-loop");
-
-/**
- * Provider tools a direct model's host rejected. A direct host rejects every request carrying the
- * tool, so later calls leave it out rather than fail first. AI Gateway models aren't remembered:
- * there the rejection depends on which host the request was routed to.
- */
-const rejectedProviderTools = new WeakMap<object, ReadonlySet<string>>();
-
-/** The tools a call to `model` leaves out: those its host rejected, plus `disabled`. */
-export function withRejectedProviderTools(
-  model: LanguageModel,
-  disabled: ReadonlySet<string> | undefined,
-): ReadonlySet<string> | undefined {
-  const rejected = typeof model === "string" ? undefined : rejectedProviderTools.get(model);
-  if (rejected === undefined) return disabled;
-  return disabled === undefined ? rejected : new Set([...rejected, ...disabled]);
-}
-
-function rememberRejectedProviderTools(model: LanguageModel, tools: readonly string[]): void {
-  if (typeof model === "string" || resolveModelProfile(model).gateway) return;
-  rejectedProviderTools.set(
-    model,
-    new Set([...(rejectedProviderTools.get(model) ?? []), ...tools]),
-  );
-}
-
 /** How a recovery reissues the call. */
 type RecoveryCall = (options: {
   readonly disabledProviderTools?: ReadonlySet<string>;
@@ -54,7 +25,7 @@ type RecoveryCall = (options: {
  * 1. The host rejected a provider-specific tool it can't serve (an AI Gateway fallback provider,
  *    or an OpenAI-compatible endpoint without OpenAI web search): the call is reissued without
  *    it, and a system note tells the model which capability went away. Only known provider tools
- *    are dropped, never an authored one. A direct model's later calls leave the tool out.
+ *    are dropped, never an authored one.
  * 2. The response was empty (see {@link EmptyModelResponseError}), including the first
  *    recovery's: the call is reissued with {@link EMPTY_RESPONSE_NUDGE}, repeating what the first
  *    recovery removed.
@@ -65,7 +36,6 @@ type RecoveryCall = (options: {
 export async function recoverModelCall(input: {
   readonly error: unknown;
   readonly call: RecoveryCall;
-  readonly model: LanguageModel;
   readonly sessionId: string;
   readonly turnId: string;
 }): Promise<{ readonly result: HarnessStepResult } | { readonly error: unknown }> {
@@ -85,7 +55,6 @@ export async function recoverModelCall(input: {
       disabled,
       upstreamTypes: unsupportedTypes,
     });
-    rememberRejectedProviderTools(input.model, disabled);
     options = {
       disabledProviderTools: new Set(disabled),
       extraSystemNote: buildDisabledToolNote(disabled),

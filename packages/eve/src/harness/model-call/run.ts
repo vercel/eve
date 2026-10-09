@@ -134,7 +134,6 @@ export async function runModelStep(
     const recovery = await recoverModelCall({
       call: (options) => caller.call(options),
       error,
-      model: model.model,
       sessionId: step.session.sessionId,
       turnId: step.position().turnId,
     });

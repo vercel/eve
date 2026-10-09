@@ -240,7 +240,7 @@ export default webSearch({ provider: "native", fallback: "exa" });
 
 The `provider` setting applies only to AI Gateway models. Direct OpenAI, Anthropic, and Gemini 3 and later models always use their native search; other direct models omit `web_search`.
 
-eve identifies a direct model's vendor by its AI SDK provider name, so a `createOpenAI()` model pointed at an OpenAI-compatible endpoint, such as Amazon Bedrock's, gets OpenAI web search. When the endpoint rejects it, eve retries the step without `web_search` and leaves the tool out of that model's later calls while the server process runs. To skip the rejected first call, give the provider its own name:
+eve identifies a direct model's vendor by its AI SDK provider name, so a `createOpenAI()` model pointed at an OpenAI-compatible endpoint, such as Amazon Bedrock's, gets OpenAI web search. When the endpoint rejects it, eve retries the step without `web_search`, so each step makes one rejected call first. To skip it, give the provider its own name:
 
 ```ts title="agent/agent.ts"
 import { createOpenAI } from "@ai-sdk/openai";
