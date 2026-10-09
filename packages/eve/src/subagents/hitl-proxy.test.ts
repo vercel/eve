@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { retireProxyInputRequests, upsertProxyInputRequests } from "#harness/hitl/session-state.js";
+import { writeHitlState } from "#harness/hitl/session-state.js";
+
 import { toProxyInputRequestEntries } from "#harness/hitl/relays.js";
 import type { HarnessSession } from "#harness/types.js";
-import { withParkedStep } from "#internal/testing/session-machine.js";
+import { withParkedStep, withRelays } from "#internal/testing/session-machine.js";
 import type { InputRequest } from "#shared/input.js";
 import { routeDeliverPayload } from "#subagents/hitl-proxy.js";
 
@@ -26,7 +27,7 @@ function createSession(state?: Record<string, unknown>): HarnessSession {
 
 describe("routeDeliverPayload", () => {
   it("keeps original child inboxes separate when they share a continuation alias", () => {
-    const session = upsertProxyInputRequests({
+    const session = withRelays(createSession(), {
       entries: [
         [
           "req-a",
@@ -48,7 +49,6 @@ describe("routeDeliverPayload", () => {
         ],
       ],
       forChildContinuationToken: "child-alias",
-      session: createSession(),
     });
 
     const routed = routeDeliverPayload({
@@ -76,15 +76,8 @@ describe("routeDeliverPayload", () => {
   });
 
   it("routes responses to matching descendants and keeps unknown ones on forSelf", () => {
-    const session = upsertProxyInputRequests({
-      entries: [
-        [
-          "req-a",
-          { childContinuationToken: "child-a", event: REQUEST_EVENT, kind: "tool-approval" },
-        ],
-      ],
-      forChildContinuationToken: "child-a",
-      session: upsertProxyInputRequests({
+    const session = withRelays(
+      withRelays(createSession(), {
         entries: [
           [
             "req-b",
@@ -92,9 +85,17 @@ describe("routeDeliverPayload", () => {
           ],
         ],
         forChildContinuationToken: "child-b",
-        session: createSession(),
       }),
-    });
+      {
+        entries: [
+          [
+            "req-a",
+            { childContinuationToken: "child-a", event: REQUEST_EVENT, kind: "tool-approval" },
+          ],
+        ],
+        forChildContinuationToken: "child-a",
+      },
+    );
 
     const routed = routeDeliverPayload({
       payload: {
@@ -133,7 +134,7 @@ describe("routeDeliverPayload", () => {
   });
 
   it("returns forSelf as undefined when every response routes to a descendant", () => {
-    const session = upsertProxyInputRequests({
+    const session = withRelays(createSession(), {
       entries: [
         [
           "req-a",
@@ -141,7 +142,6 @@ describe("routeDeliverPayload", () => {
         ],
       ],
       forChildContinuationToken: "child-a",
-      session: createSession(),
     });
 
     const routed = routeDeliverPayload({
@@ -156,7 +156,7 @@ describe("routeDeliverPayload", () => {
   });
 
   it("asks the parent to cancel after routing Stop to a descendant session-limit request", () => {
-    const session = upsertProxyInputRequests({
+    const session = withRelays(createSession(), {
       entries: [
         [
           "req-limit",
@@ -164,7 +164,6 @@ describe("routeDeliverPayload", () => {
         ],
       ],
       forChildContinuationToken: "child-a",
-      session: createSession(),
     });
 
     const routed = routeDeliverPayload({
@@ -199,7 +198,7 @@ describe("routeDeliverPayload source coordinates", () => {
   it("keeps distinct input batches for one remote session separate", () => {
     let session = createSession();
     for (const [index, name] of ["alice", "bob"].entries()) {
-      session = upsertProxyInputRequests({
+      session = withRelays(session, {
         entries: [
           [
             `ask-${name}`,
@@ -218,7 +217,6 @@ describe("routeDeliverPayload source coordinates", () => {
         ],
         forChildContinuationToken: "remote-inbox",
         inputSource: `workflow-${name}`,
-        session,
       });
     }
     const routed = routeDeliverPayload({
@@ -264,7 +262,7 @@ describe("routeDeliverPayload message resolution", () => {
   ): HarnessSession {
     let session = createSession();
     for (const [requestId, question] of questions) {
-      session = upsertProxyInputRequests({
+      session = withRelays(session, {
         entries: [
           [
             requestId,
@@ -285,7 +283,6 @@ describe("routeDeliverPayload message resolution", () => {
           ],
         ],
         forChildContinuationToken: `hook-${requestId}`,
-        session,
       });
     }
     return session;
@@ -395,21 +392,8 @@ describe("routeDeliverPayload message resolution", () => {
   });
 
   it("does not answer a later question while a request it can't match comes first", () => {
-    const session = upsertProxyInputRequests({
-      entries: [
-        [
-          "ask-1",
-          {
-            workflowAsk: { control: "control-ask-1" },
-            reply: { allowFreeform: true },
-            childContinuationToken: "hook-ask-1",
-            event: REQUEST_EVENT,
-            kind: "question",
-          },
-        ],
-      ],
-      forChildContinuationToken: "hook-ask-1",
-      session: upsertProxyInputRequests({
+    const session = withRelays(
+      withRelays(createSession(), {
         entries: [
           [
             "child-ask",
@@ -417,9 +401,23 @@ describe("routeDeliverPayload message resolution", () => {
           ],
         ],
         forChildContinuationToken: "child-token",
-        session: createSession(),
       }),
-    });
+      {
+        entries: [
+          [
+            "ask-1",
+            {
+              workflowAsk: { control: "control-ask-1" },
+              reply: { allowFreeform: true },
+              childContinuationToken: "hook-ask-1",
+              event: REQUEST_EVENT,
+              kind: "question",
+            },
+          ],
+        ],
+        forChildContinuationToken: "hook-ask-1",
+      },
+    );
     const routed = routeDeliverPayload({
       payload: { message: "Use the canary pool" },
       resolveMessage: true,
@@ -431,7 +429,7 @@ describe("routeDeliverPayload message resolution", () => {
   });
 
   function childPromptSession(requests: readonly InputRequest[]): HarnessSession {
-    return upsertProxyInputRequests({
+    return withRelays(createSession(), {
       entries: toProxyInputRequestEntries({
         callId: "call-1",
         childContinuationToken: "child-token",
@@ -441,7 +439,6 @@ describe("routeDeliverPayload message resolution", () => {
         subagentName: "reviewer",
       }),
       forChildContinuationToken: "child-token",
-      session: createSession(),
     });
   }
 
@@ -491,7 +488,7 @@ describe("routeDeliverPayload message resolution", () => {
     const second = routeDeliverPayload({
       payload: { message: "cancel" },
       resolveMessage: true,
-      state: retireProxyInputRequests(session, ["approve-1"]).state,
+      state: writeHitlState(session, { relays: { retire: ["approve-1"] } }).state,
     });
     expect(second.forChildren).toMatchObject([
       {
@@ -518,7 +515,7 @@ describe("routeDeliverPayload message resolution", () => {
   });
 
   it("answers the first of two children's prompts with a typed reply", () => {
-    const session = upsertProxyInputRequests({
+    const session = withRelays(childPromptSession([childPrompt("approve-1", "tool-approval")]), {
       entries: toProxyInputRequestEntries({
         callId: "call-2",
         childContinuationToken: "other-child-token",
@@ -528,7 +525,6 @@ describe("routeDeliverPayload message resolution", () => {
         subagentName: "deployer",
       }),
       forChildContinuationToken: "other-child-token",
-      session: childPromptSession([childPrompt("approve-1", "tool-approval")]),
     });
     const routed = routeDeliverPayload({
       payload: { message: "approve" },

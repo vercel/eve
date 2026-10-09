@@ -49,5 +49,9 @@
     "packages/eve/src/tools/provided/web-search.ts",
     "packages/eve/src/tools/provided/workflow.ts",
     "packages/eve/src/tools/provided/write-file.ts"
-  ]
+  ],
+  "rule52_hitlStateAccessorsByFile": {
+    "packages/eve/src/execution/session/checkpoint-migrations.ts": 4,
+    "packages/eve/src/harness/session-machine/commit.ts": 2
+  }
 }

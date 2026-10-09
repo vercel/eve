@@ -17,7 +17,7 @@ import { SessionIdKey, StaticModelReferenceKey } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { mockModel } from "#evals/mock-model.js";
 import { CallbackBaseUrlKey, PendingAuthorizationResultKey } from "#harness/authorization.js";
-import { clearPendingAuthorization, getPendingAuthorization } from "#harness/hitl/session-state.js";
+import { readHitlState, writeHitlState } from "#harness/hitl/session-state.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession, HarnessToolMap, StepInput, StepResult } from "#harness/types.js";
 import {
@@ -343,7 +343,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
     // A connection tool parks the turn for sign-in, then runs once the user signs in.
     reply(calls(call("items", CALL_TOOL_NAME, { name: "private__list_items" })));
     const signingIn = await drive({ message: "Alice wants the items in the private catalog." });
-    const [challenge] = getPendingAuthorization(signingIn.session.state)?.challenges ?? [];
+    const [challenge] = readHitlState(signingIn.session.state).signIns;
     expect(challenge?.name).toBe("private");
     expect(privateCatalog.signIns).toHaveLength(1);
     // Delivers the callback the way the turn step does when the user signs in.
@@ -356,10 +356,11 @@ describe("step catalog in the harness (real AI SDK)", () => {
         name: "private",
       },
     ]);
-    driver.session = {
-      ...driver.session,
-      state: clearPendingAuthorization(driver.session.state, [challenge!.attemptId!]),
-    };
+    driver.session = writeHitlState(driver.session, {
+      signIns: readHitlState(driver.session.state).signIns.filter(
+        (pending) => pending.attemptId !== challenge!.attemptId,
+      ),
+    });
     reply(
       calls(call("items-after-sign-in", CALL_TOOL_NAME, { name: "private__list_items" })),
       text("The private catalog has Alice's lamp."),

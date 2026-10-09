@@ -21,7 +21,8 @@ import {
   type ApprovalCandidateDecision,
   type ApprovalSettlementAuditRecord,
 } from "#harness/hitl/candidates.js";
-import { clearPendingAuthorization, getPendingAuthorization } from "./session-state.js";
+import { readHitlState, writeHitlState } from "./session-state.js";
+import { signInAttemptKey } from "./sign-ins.js";
 import {
   getAuthorizationResult,
   isAuthorizationSignal,
@@ -86,17 +87,20 @@ export async function coordinateApprovalDelivery(input: {
   const expiredCandidates = getApprovalAuditState(input.session.state).activeCandidates.filter(
     (candidate) => candidate.expiresAt <= now,
   );
-  const expiredChallengeIds = expiredCandidates.flatMap(
-    (candidate) =>
-      candidate.authorizationChallenges?.map(
-        (challenge) => challenge.attemptId ?? challenge.candidateId ?? challenge.name,
-      ) ?? [],
+  const expiredChallengeIds = new Set(
+    expiredCandidates.flatMap(
+      (candidate) => candidate.authorizationChallenges?.map(signInAttemptKey) ?? [],
+    ),
   );
   const expiredState = expireApprovalCandidates({ now, state: input.session.state });
-  let session: HarnessSession = {
-    ...input.session,
-    state: clearPendingAuthorization(expiredState, expiredChallengeIds),
-  };
+  let session: HarnessSession = { ...input.session, state: expiredState };
+  if (expiredChallengeIds.size > 0) {
+    session = writeHitlState(session, {
+      signIns: readHitlState(expiredState).signIns.filter(
+        (challenge) => !expiredChallengeIds.has(signInAttemptKey(challenge)),
+      ),
+    });
+  }
   const audit = getApprovalAuditState(session.state);
   const batches = suspendedSteps(session.state).filter((step) => step.requests.length > 0);
   const pendingRequestIds = new Set(
@@ -230,7 +234,7 @@ export async function coordinateApprovalDelivery(input: {
   // Candidates are persisted in an earlier pass. Run pending candidates and
   // resume only authorization-required candidates whose callback arrived.
   const parkedChallengeNames = new Set(
-    getPendingAuthorization(session.state)?.challenges.map((challenge) => challenge.name) ?? [],
+    readHitlState(session.state).signIns.map((challenge) => challenge.name),
   );
   for (const candidate of candidatesAtStart) {
     if (candidate.status === "authorization-required") {

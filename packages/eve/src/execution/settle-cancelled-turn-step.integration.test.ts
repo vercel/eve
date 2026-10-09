@@ -1,17 +1,16 @@
 import { describe, expect, it } from "vitest";
 
+import { readHitlState } from "#harness/hitl/session-state.js";
+
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 import { readDurableSession } from "#execution/durable-session-store.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
-import {
-  getProxyInputRequests,
-  upsertProxyInputRequestState,
-} from "#harness/hitl/session-state.js";
+
 import type { ProxyInputRequest } from "#harness/hitl/relays.js";
 import { filterEventsByType } from "#internal/testing/events.js";
 import { createInputRequestedEvent, type MessageStreamEvent } from "#protocol/message.js";
 import type { InputRequest } from "#shared/input.js";
-import { withPublished } from "#internal/testing/session-machine.js";
+import { withPublished, withRelays } from "#internal/testing/session-machine.js";
 import {
   accumulateTurnUsage,
   getTurnUsageState,
@@ -138,7 +137,7 @@ describe("settleCancelledTurnStep", () => {
       [{ kind: "question", outcome: "cancelled", requestId: "deploy-run-ask-1" }],
       [{ kind: "tool-approval", outcome: "cancelled", requestId: "reviewer-approval-1" }],
     ]);
-    expect(getProxyInputRequests(readDurableSession(result.sessionState).state).size).toBe(0);
+    expect(readHitlState(readDurableSession(result.sessionState).state).relays.size).toBe(0);
   });
 });
 
@@ -158,11 +157,13 @@ function relay(
   const published = withPublished({ ...openSession, state }, [
     createInputRequestedEvent({ callId: `${requestId}-served`, requests: [request], ...event }),
   ]);
-  return upsertProxyInputRequestState({
-    entries: [[requestId, { ...route, childContinuationToken: requestId, event }]],
-    forChildContinuationToken: requestId,
-    state: published.state,
-  });
+  return withRelays(
+    { state: published.state },
+    {
+      entries: [[requestId, { ...route, childContinuationToken: requestId, event }]],
+      forChildContinuationToken: requestId,
+    },
+  ).state;
 }
 
 const openSession: HarnessSession = {
