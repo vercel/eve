@@ -25,6 +25,7 @@ import {
   compactMessages,
   type CompactionSummarizer,
   type ContextOverflowTokens,
+  extrapolateInputTokenCount,
   getInputTokenCount,
   overflowCompactionThreshold,
   shouldCompact,
@@ -189,6 +190,15 @@ export async function maybeCompact(input: {
               getRequestEnvelopeTokens(session),
             ),
             input.contextOverflow,
+            {
+              contextWindowTokens: session.agent.modelReference?.contextWindowTokens,
+              extrapolatedTokens: extrapolateInputTokenCount(
+                projectedPromptMessages,
+                session.compaction,
+                input.requestEnvelopeTokens,
+                getRequestEnvelopeTokens(session),
+              ),
+            },
           ),
         };
   const needsSummary =

@@ -38,10 +38,12 @@ A custom `LanguageModel` can opt in by throwing an error with
 `failureReason: "context-length-exceeded"`.
 
 Some errors carry no token counts, including OpenAI's Responses API and Amazon
-Bedrock. eve then assumes the request was the size of the configured context
-window. If the model's real limit is smaller than that window, the reissued call
-can be rejected again and the step fails. Set `modelContextWindowTokens` to the
-model's real limit to avoid this.
+Bedrock. eve then assumes the request was 25% larger than the biggest size it is
+known to have reached: its own estimate, that estimate corrected by the provider's
+last reported count for the session, or the model's context window. A request
+even larger than that can be rejected again, and the step fails. If you set
+`modelContextWindowTokens`, set it to the model's real limit, since eve uses it as
+the size of an uncounted rejection.
 
 First-class [memory](../memory) participates in a separate lifecycle. eve asks
 providers to capture before compaction, excludes attributed recalled records

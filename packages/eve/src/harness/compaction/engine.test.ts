@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { COMPACTION_PROMPT_ENVELOPE } from "#harness/compaction/prompt.js";
 import {
   compactMessages,
+  extrapolateInputTokenCount,
   getInputTokenCount,
   overflowCompactionThreshold,
   shouldCompact,
@@ -477,10 +478,52 @@ describe("overflowCompactionThreshold", () => {
       overflow: { inputTokens: 90_000, limitTokens: 100_000, reservedOutputTokens: 20_000 },
       expected: 36_000,
     },
-    // Without counts the request was at least the configured window.
-    { estimated: 60_000, overflow: {}, expected: 54_000 },
-  ])("calibrates $estimated against $overflow", ({ estimated, overflow, expected }) => {
-    expect(overflowCompactionThreshold(window, estimated, overflow)).toBe(expected);
+    // Without counts, the request was at least the context window, plus headroom.
+    {
+      estimated: 60_000,
+      overflow: {},
+      known: { contextWindowTokens: 100_000 },
+      expected: 43_200,
+    },
+    // The session's last reported count shows the request was larger than the window.
+    {
+      estimated: 60_000,
+      overflow: {},
+      known: { contextWindowTokens: 100_000, extrapolatedTokens: 150_000 },
+      expected: 28_800,
+    },
+    // With no window either, the request sat at the provider's limit.
+    { estimated: 60_000, overflow: {}, expected: 43_200 },
+  ])(
+    "calibrates $estimated against $overflow and $known",
+    ({ estimated, overflow, known, expected }) => {
+      expect(overflowCompactionThreshold(window, estimated, overflow, known)).toBe(expected);
+    },
+  );
+});
+
+describe("extrapolateInputTokenCount", () => {
+  const prior: ModelMessage[] = [{ content: "x".repeat(4_000), role: "user" }];
+  const newer: ModelMessage[] = [{ content: "y".repeat(4_000), role: "user" }];
+
+  it("scales newer messages by how far the estimate undercounted the measured ones", () => {
+    const priorEstimate = estimateTokens(prior);
+    const config: CompactionConfig = {
+      lastKnownInputTokens: priorEstimate * 3,
+      lastKnownPromptMessageCount: 1,
+      recentWindowSize: 10,
+      threshold: 90_000,
+    };
+
+    expect(extrapolateInputTokenCount([...prior, ...newer], config)).toBeCloseTo(
+      priorEstimate * 3 + estimateTokens(newer) * 3,
+      -1,
+    );
+  });
+
+  it("has nothing to calibrate from without a reported count", () => {
+    const config: CompactionConfig = { recentWindowSize: 10, threshold: 90_000 };
+    expect(extrapolateInputTokenCount([...prior, ...newer], config)).toBeUndefined();
   });
 });
 
