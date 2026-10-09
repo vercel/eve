@@ -237,7 +237,7 @@ it("decides through the Gateway connection selected by /login", async () => {
   );
 
   const result = await model.doDecide({
-    state: "Alice requests a routine summary.",
+    state: [{ type: "text", text: "Alice requests a routine summary." }],
     questions: {
       route: {
         type: "choice",

@@ -7,6 +7,7 @@ import {
   extractModelCallErrorDetails,
   extractUnsupportedProviderToolTypes,
   isNoOutputGeneratedError,
+  ModelStreamStalledError,
   normalizeModelStreamError,
   extractUpstreamRejectionMessage,
 } from "#harness/model-call/errors.js";
@@ -173,6 +174,11 @@ describe("classifyModelCallError", () => {
     // "retry" would re-run executeModelCall against step hooks whose
     // one-shot stepResult promise already resolved with the empty result.
     expect(classifyModelCallError(new EmptyModelResponseError())).toBe("recoverable");
+  });
+
+  it("retries a stalled model stream", () => {
+    const timeout = new DOMException("Chunk timeout of 600000ms exceeded", "TimeoutError");
+    expect(classifyModelCallError(new ModelStreamStalledError({ cause: timeout }))).toBe("retry");
   });
 
   it("returns terminal for a turn cancellation, even when marked retryable", () => {

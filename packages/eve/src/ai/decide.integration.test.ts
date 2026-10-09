@@ -91,7 +91,7 @@ describe("decide", () => {
     expect(localDecisionModel).not.toHaveBeenCalled();
     expect(decider.doDecide).toHaveBeenCalledWith(
       expect.objectContaining({
-        state,
+        state: [{ type: "json", value: state }],
         questions,
         abortSignal,
         headers: expect.objectContaining({ "x-request-id": "request-1" }),
