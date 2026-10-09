@@ -461,10 +461,10 @@ eve writes the card from the session's own events as they happen, and only when 
 Without `renderers`, eve renders everything above with its default renderer. Pass `renderers` to change what the agent posts without replacing that default. Each renderer wraps the ones after it, ending with eve's default renderer, and has three optional parts:
 
 - `received(message, channel, next)` acknowledges a mention or DM the moment it arrives, and another channel message once `onMessage` dispatches it. eve's default sets `Thinking...`.
-- `events` handles session events such as `message.completed` or `input.requested`. Each handler receives `(eventData, channel, ctx, next)`, with Slack platform handles on `channel.thread` and `channel.slack`; a `session.failed` handler receives `(eventData, channel, next)`.
+- `events` handles session facts such as `content.completed` or `interaction.opened`. Each handler receives `(event, ctx, next)`: the whole fact with its `type`, `data`, and `scope`, and a context whose `ctx.channel` holds Slack's platform handles, `ctx.channel.thread` and `ctx.channel.slack`, along with `ctx.position` and `ctx.view`.
 - `taskCard(view, next)` returns the task card's blocks and notification text, or `null` for no card.
 
-Call `next()` to run the rest of the chain, ending with eve's default. Call it after your own work, before it, or with changed data, as in `next({ ...event, message })`; the rest of the chain runs at most once. Skip `next` to replace the default for that event. This renderer adds feedback buttons below each final reply and a context row to the finished task card:
+Call `next()` to run the rest of the chain, ending with eve's default. Call it after your own work, before it, or with a changed fact, as in `next({ ...event, data: { ...event.data, value } })`; the rest of the chain runs at most once. Skip `next` to replace the default for that event. This renderer adds feedback buttons below each final reply and a context row to the finished task card:
 
 ```ts title="agent/channels/slack.ts"
 import { connectSlackCredentials } from "@vercel/connect/eve";
@@ -472,10 +472,10 @@ import { defineSlackRenderer, slackChannel } from "eve/channels/slack";
 
 const feedback = defineSlackRenderer({
   events: {
-    async "message.completed"(event, channel, _ctx, next) {
+    async "content.completed"(event, ctx, next) {
       await next(); // eve posts the reply, or uploads a long one as a snippet
-      if (event.finishReason === "tool-calls") return;
-      await channel.thread.post({
+      if (event.data.phase !== "reply" || event.data.kind !== "text") return;
+      await ctx.channel.thread.post({
         blocks: [
           {
             type: "context_actions",
@@ -513,7 +513,7 @@ export default slackChannel({
 });
 ```
 
-A `message.completed` handler that posts the final reply itself, instead of calling `next()`, owns that delivery. If it throws, eve logs the error, posts the content-free notice described in [Delivery](#delivery), and tells the model on the next message. eve doesn't retry or re-send your reply, because your renderer may post elsewhere, change the content, or attach data eve can't reproduce. If you post the reply and then a separate follow-up message, as the feedback example above does, catch the follow-up's errors in your handler. Otherwise eve posts the notice even though the reply arrived.
+A `content.completed` handler that posts the reply itself, instead of calling `next()`, owns that delivery. If it throws, eve logs the error, posts the content-free notice described in [Delivery](#delivery), and tells the model on the next message. eve doesn't retry or re-send your reply, because your renderer may post elsewhere, change the content, or attach data eve can't reproduce. If you post the reply and then a separate follow-up message, as the feedback example above does, catch the follow-up's errors in your handler. Otherwise eve posts the notice even though the reply arrived.
 
 To get eve's fallbacks for a reply you render, post it with `postCompletedSlackReply`. You choose the content; eve makes the Slack calls:
 
@@ -528,14 +528,15 @@ import { defineSlackRenderer, postCompletedSlackReply, slackChannel } from "eve/
 
 const sourcedReplies = defineSlackRenderer({
   events: {
-    async "message.completed"(event, channel, _ctx, next) {
-      if (event.finishReason === "tool-calls" || !event.message) return next();
-      await postCompletedSlackReply(channel, {
+    async "content.completed"(event, ctx, next) {
+      const { kind, phase, value } = event.data;
+      if (phase !== "reply" || kind !== "text" || typeof value !== "string") return next();
+      await postCompletedSlackReply(ctx.channel, {
         blocks: [
-          { type: "markdown", text: event.message },
+          { type: "markdown", text: value },
           { type: "context", elements: [{ type: "mrkdwn", text: "Sources: internal docs" }] },
         ],
-        markdown: event.message,
+        markdown: value,
       });
     },
   },
@@ -544,7 +545,7 @@ const sourcedReplies = defineSlackRenderer({
 export default slackChannel({ renderers: [sourcedReplies] });
 ```
 
-Pass a string, as in `postCompletedSlackReply(channel, reply)`, to deliver Markdown alone the way eve's default does.
+Pass a string, as in `postCompletedSlackReply(ctx.channel, reply)`, to deliver Markdown alone the way eve's default does.
 
 `taskCard` runs for every turn that calls a tool, and receives the same view eve's default renders from:
 
@@ -645,7 +646,7 @@ The callback receives the `InputRequest` and current `SessionContext`, so it can
 
 When a tool approval resolves, eve retires the messages it posted for it. The card loses its buttons and shows the answer and who gave it, the separate tool-input post is deleted, and a direct-message request's `Waiting on approval` note in the thread changes to the outcome. This also happens when the approval ends without a click, for example when the person replies in the thread instead, in which case the card reads `No longer needed`.
 
-A renderer's `input.requested` handler can extend delivery and then hand the requests on to eve with `next()`. For example, an application can add non-sensitive context to the Slack thread before eve renders the actionable controls. The configured `approvalChannel` still sends sensitive reviews to a DM and keeps ordinary requests in the thread:
+A renderer's `interaction.opened` handler can extend delivery and then hand the request on to eve with `next()`. For example, an application can add non-sensitive context to the Slack thread before eve renders the actionable controls. The configured `approvalChannel` still sends sensitive reviews to a DM and keeps ordinary requests in the thread:
 
 ```ts title="agent/channels/slack.ts"
 import { slackChannel } from "eve/channels/slack";
@@ -658,8 +659,9 @@ export default slackChannel({
   renderers: [
     {
       events: {
-        async "input.requested"(_event, channel, _ctx, next) {
-          await channel.thread.post({
+        async "interaction.opened"(event, ctx, next) {
+          if (event.data.request.kind === "sign-in" || !("thread" in ctx.channel)) return next();
+          await ctx.channel.thread.post({
             blocks: [
               {
                 type: "context",
@@ -698,9 +700,9 @@ deriveHitlResponse({ actionId: button.action_id, value: button.value });
 // { response: { optionId: "approve", requestId: request.requestId } }
 ```
 
-Use them to test a custom renderer against eve's wire format, or to post eve's controls from your own renderer. A click on these controls in the session's Slack thread resumes the session through `onInputResponse`, the same as eve's own controls. eve does not track controls you post yourself, so update or remove those messages from your renderer's `approval.settled` and `input.resolved` handlers. To pass `response` to `respond()` yourself, validate it first with `parseInputResponses` from `eve/client`.
+Use them to test a custom renderer against eve's wire format, or to post eve's controls from your own renderer. A click on these controls in the session's Slack thread resumes the session through `onInputResponse`, the same as eve's own controls. eve does not track controls you post yourself, so update or remove those messages from your renderer's `interaction.settled` handler. To pass `response` to `respond()` yourself, validate it first with `parseInputResponses` from `eve/client`.
 
-Authorization prompts split public status from private credentials. A sign-in challenge (OAuth URL, device code) is a credential. Anyone who completes it binds their identity to the session's connection. The default `authorization.required` handler posts a public, link-free status in the thread, delivers the actual challenge ephemerally to the Slack user behind the event's `principalId`, device code included, and then updates that public status when `authorization.completed` fires. A renderer's `authorization.required` handler receives a private-delivery context with `postEphemeral`, `postDirectMessage` (needs the `im:write` scope), and `state`. There is, intentionally, no public `post` and no raw API access. Its `next()` reaches eve's default, which posts the public status; skip `next` to deliver the challenge yourself, as this handler does by direct message. `state.slackUsersByPrincipal` maps each principal eve has seen in the thread, through a message or an input response, to its Slack user ID. If the principal has no entry, the challenge is not sent privately.
+Authorization prompts split public status from private credentials. A sign-in challenge (OAuth URL, device code) is a credential. Anyone who completes it binds their identity to the session's connection. A sign-in is an `interaction.opened` with `request.kind: "sign-in"`. The default handler posts a public, link-free status in the thread, delivers the actual challenge ephemerally to the Slack user behind the interaction's `audience.principalIds`, device code included, and then updates that public status when its `interaction.settled` fires. For a sign-in, a renderer's `interaction.opened` handler receives a private-delivery context as `ctx.channel`, with `postEphemeral`, `postDirectMessage` (needs the `im:write` scope), and `state`. There is, intentionally, no public `post` and no raw API access. Its `next()` reaches eve's default, which posts the public status; skip `next` to deliver the challenge yourself, as this handler does by direct message. `state.slackUsersByPrincipal` maps each principal eve has seen in the thread, through a message or an input response, to its Slack user ID. If the principal has no entry, the challenge is not sent privately.
 
 The default private prompt names the service, says the agent is paused, and pairs a **Connect** button with **Cancel**. Cancel ends the held turn and removes the prompt; the public status, "Paused: waiting for @user to connect Linear…", then reads "Linear sign-in cancelled". Approval cards say the agent is paused until someone approves or cancels.
 
@@ -708,13 +710,14 @@ The default private prompt names the service, says the agent is paused, and pair
 renderers: [
   {
     events: {
-      "authorization.required"(eventData, channel) {
+      "interaction.opened"(event, ctx, next) {
+        const { audience, request } = event.data;
+        if (request.kind !== "sign-in") return next();
+        const principalId = audience?.principalIds[0];
         const userId =
-          eventData.principalId === undefined
-            ? undefined
-            : channel.state.slackUsersByPrincipal?.[eventData.principalId];
-        if (!userId || !eventData.authorization?.url) return;
-        return channel.postDirectMessage(userId, `Sign in to continue: ${eventData.authorization.url}`);
+          principalId === undefined ? undefined : ctx.channel.state.slackUsersByPrincipal?.[principalId];
+        if (!userId || !request.signIn?.url) return;
+        return ctx.channel.postDirectMessage(userId, `Sign in to continue: ${request.signIn.url}`);
       },
     },
   },
