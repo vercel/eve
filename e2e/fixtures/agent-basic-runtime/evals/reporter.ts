@@ -1,3 +1,4 @@
+import type { EveEvalResult } from "eve/evals";
 import type { EvalReporter } from "eve/evals/reporters";
 
 const scheduled = new Set<string>();
@@ -33,6 +34,7 @@ export const evalLifecycleReporter: EvalReporter = {
     if (targetKind === "local" && context.traceContexts.length === 0) {
       throw new Error(`Local eval exposed no trace context: ${result.id}`);
     }
+    if (result.id === "runtime/scores") assertScoreContract(result);
     completed.add(result.id);
   },
   onRunComplete(summary) {
@@ -43,6 +45,30 @@ export const evalLifecycleReporter: EvalReporter = {
     }
   },
 };
+
+/** Proves `t.score` results keep the raw score and report the rule separately. */
+function assertScoreContract(result: EveEvalResult): void {
+  const brevity = result.assertions.find((assertion) => assertion.key === "reply-brevity");
+  const ping = result.assertions.find((assertion) => assertion.key === "mentions-ping");
+  if (brevity === undefined || ping === undefined) {
+    throw new Error(`Keyed scores missing: ${JSON.stringify(result.assertions)}`);
+  }
+  if (
+    typeof brevity.score !== "number" ||
+    brevity.passed !== undefined ||
+    brevity.threshold !== undefined
+  ) {
+    throw new Error(`Tracked-only score carried a verdict: ${JSON.stringify(brevity)}`);
+  }
+  if (
+    ping.score !== 1 ||
+    ping.threshold !== 1 ||
+    ping.passed !== true ||
+    ping.severity !== "gate"
+  ) {
+    throw new Error(`Gated score lost its measurement or rule: ${JSON.stringify(ping)}`);
+  }
+}
 
 function assertTraceContext(trace: {
   readonly spanId: string;

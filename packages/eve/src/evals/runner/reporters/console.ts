@@ -64,7 +64,9 @@ class ConsoleReporter implements EvalReporter {
         ? this.#formatGateCount(gates.filter((gate) => gate.passed).length, gates.length)
         : "";
     const scoreText = softs
-      .map((assertion) => this.#formatScore(assertion.name, assertion.score))
+      .flatMap((assertion) =>
+        assertion.score === undefined ? [] : [this.#formatScore(assertion.name, assertion.score)],
+      )
       .join("  ");
 
     const line = [icon, this.#colors.dim(result.id), gateText, scoreText]
@@ -73,7 +75,7 @@ class ConsoleReporter implements EvalReporter {
     this.#log(line);
 
     for (const assertion of assertions) {
-      if (assertion.passed) continue;
+      if (assertion.passed !== false) continue;
       this.#log(`  ${this.#colors.red(`✗ ${formatAssertionFailureHeadline(assertion)}`)}`);
       for (const detailLine of formatAssertionFailureDetailLines(assertion)) {
         this.#log(`    ${this.#colors.red(detailLine)}`);
@@ -188,7 +190,7 @@ class ConsoleReporter implements EvalReporter {
 
     for (const result of results) {
       for (const assertion of result.assertions) {
-        if (assertion.severity !== "soft") continue;
+        if (assertion.severity !== "soft" || assertion.score === undefined) continue;
         const entry = totals.get(assertion.name);
         if (entry) {
           entry.sum += assertion.score;

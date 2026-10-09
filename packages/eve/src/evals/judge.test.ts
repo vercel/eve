@@ -97,7 +97,7 @@ describe("judge", () => {
     expect(decide.mock.calls[0]?.[0].questions.outcome).not.toHaveProperty("expected");
     const assertions = await collector.finalize(emptyTaskResult());
     expect(assertions.map(({ name, score, passed }) => ({ name, score, passed }))).toEqual([
-      { name: "judge.boolean.accurate", score: 0.2, passed: true },
+      { name: "judge.boolean.accurate", score: 0.2, passed: undefined },
       { name: "judge.score.clarity", score: 0.75, passed: false },
       { name: "judge.choice.outcome", score: 1, passed: true },
     ]);

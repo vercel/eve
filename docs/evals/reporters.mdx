@@ -38,7 +38,7 @@ export default defineEval({
 });
 ```
 
-The reporter config takes an optional `projectName` and `experimentName`, plus a base experiment (by name or id) to diff against. Gate assertions log as binary scores under a `gate:` prefix so experiments diff gate regressions the same way they diff soft-score regressions. Assertions that share a name, such as several unlabeled judges, log one score: the lowest. Use `.label(name)` to group or separate them. Each assertion's score is stored in the Braintrust metadata under `eveAssertionScores` and failed assertion details under `eveFailedAssertions`; observed traces are stored under `eveTraceIds` and `eveTraceContexts`.
+The reporter config takes an optional `projectName` and `experimentName`, plus a base experiment (by name or id) to diff against. Gate assertions log as binary scores under a `gate:` prefix so experiments diff gate regressions the same way they diff soft-score regressions. Assertions that share a name, such as several unlabeled judges, log one score: the lowest. Use `.label(name)` to group or separate them. Errored assertions log no score. Each assertion's score is stored in the Braintrust metadata under `eveAssertionScores` and failed assertion details under `eveFailedAssertions`; observed traces are stored under `eveTraceIds` and `eveTraceContexts`.
 
 A reporter instance observes the evals that reference it. Share one instance across several evals (the config, a `shared.ts` export, or every entry of a dataset array) and their results land in a single experiment. Listing the same config reporter on an eval too does not double-report it.
 
@@ -96,6 +96,8 @@ interface EvalReporter {
 - `onEvalStart` fires when an eval is scheduled. It includes the eval definition, target, and start time.
 - `onSessionStart` fires once for each session after eve receives its first trace context. It includes `sessionId`, `primary`, and `traceContext` with `traceId`, `spanId`, and `traceFlags`.
 - `onEvalComplete` fires with the checks, scores, and verdict. The runner also supplies `context`, including every distinct trace context collected across the eval's sessions. The same list is available as `result.result.traceContexts`.
+
+Each entry in `result.assertions` is an `AssertionResult`. `name` is the display label, `key` the stable identifier from `t.score(key, …)` or `.label(key)`, and `score` the raw measurement. `threshold` and `passed` describe the acceptance rule and are absent when the entry is tracked only, so persist them as-is. When a scorer threw, `errored` is `true`, `message` carries the error, and `score` is absent. The `.eve/evals/` artifacts write the same fields.
 
 An eval can create several sessions, and a long session can produce several traces, so completion exposes a list instead of a single trace id. `onEvalStart` does not include a trace because the agent session has not started yet. If the target has no tracing configured, `onSessionStart` does not fire and the completed trace list is empty.
 

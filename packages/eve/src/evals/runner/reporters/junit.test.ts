@@ -73,6 +73,7 @@ function makeSummary(): EveEvalRunSummary {
             name: "contains",
             score: 0,
             severity: "gate",
+            threshold: 1,
             passed: false,
             errored: false,
             message: "expected hello",

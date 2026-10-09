@@ -2,7 +2,8 @@ import type { AssertionResult } from "#evals/types.js";
 
 /** Assertions reported under one name, scored together. */
 export interface AssertionScoreGroup {
-  readonly score: number;
+  /** Lowest completed score in the group; absent when every member errored. */
+  readonly score: number | undefined;
   readonly assertions: readonly AssertionResult[];
 }
 
@@ -21,7 +22,7 @@ export function groupAssertionScores(
     const name = getName(assertion);
     const group = groups.get(name);
     groups.set(name, {
-      score: Math.min(group?.score ?? assertion.score, assertion.score),
+      score: minScore(group?.score, assertion.score),
       assertions: [...(group?.assertions ?? []), assertion],
     });
   }
@@ -30,5 +31,11 @@ export function groupAssertionScores(
 
 /** Per-assertion scores retained in row metadata once repeated assertions share one score. */
 export function composeAssertionScoreMetadata(assertions: readonly AssertionResult[]) {
-  return assertions.map(({ name, severity, score }) => ({ name, severity, score }));
+  return assertions.map(({ key, name, severity, score }) => ({ key, name, severity, score }));
+}
+
+function minScore(current: number | undefined, next: number | undefined): number | undefined {
+  if (current === undefined) return next;
+  if (next === undefined) return current;
+  return Math.min(current, next);
 }

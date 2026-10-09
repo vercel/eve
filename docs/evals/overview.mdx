@@ -154,6 +154,7 @@ Each surface matches a genuinely different kind of judgment:
 
 - **Scoped methods** read the final whole run on `t`, snapshot one independent session when invoked there, or inspect one immutable `EveEvalTurn`. See [Assertions](./assertions).
 - **`t.check(value, assertion)`** grades an explicit value with a deterministic builder from `eve/evals/expect`, such as `t.check(turn.message, includes("sunny"))`. Grade `turn.message`, an intermediate draft, parsed JSON, or anything else. See [Assertions](./assertions).
+- **`t.score(key, evaluation)`** records a measurement you computed yourself, such as a length ratio or your own evaluator's result, tracked only until you chain `.gate()` or `.atLeast()`. See [Assertions](./assertions#scores-with-tscore).
 - **`t.judge(...)`** is the LLM-as-judge surface, like `t.judge("cites a source")`. It grades the most recently settled turn’s assistant message by default; pass `{ on: turn.session.transcript }` to grade a multi-turn conversation. The judge uses the configured judge model, never the agent under test. See [Judge](./judge).
 
 ## Gate vs soft
@@ -161,7 +162,7 @@ Each surface matches a genuinely different kind of judgment:
 Every assertion returns a chainable handle, so severity rides on the assertion itself. There is no separate thresholds map.
 
 - **Gates** are hard. A failed gate marks the eval `failed` and `eve eval` exits non-zero. Run-level methods, `includes`, `equals`, and `matches` are gates by default.
-- **Soft** assertions are tracked data. They land in reports and artifacts, and a below-threshold soft assertion marks the eval `scored` (visible but not fatal, unless you pass `--strict`). `similarity` and every `t.judge(...)` assertion are soft by default. A soft assertion with no threshold is tracked-only and never fails.
+- **Soft** assertions are tracked data. They land in reports and artifacts, and a below-threshold soft assertion marks the eval `scored` (visible but not fatal, unless you pass `--strict`). `similarity`, every `t.judge(...)` assertion, and every `t.score(...)` are soft by default. A soft assertion with no threshold is tracked only: it records no verdict and never fails.
 
 Override per assertion: `.gate(threshold?)` promotes to a hard gate, `.soft(threshold?)` demotes to tracked, and `.atLeast(threshold)` is a soft assertion with a bar.
 

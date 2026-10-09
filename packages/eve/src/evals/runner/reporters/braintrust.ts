@@ -141,11 +141,11 @@ class BraintrustReporter implements EvalReporter {
       assertion.severity === "gate" ? `gate:${assertion.name}` : assertion.name,
     );
     for (const [name, group] of groups) {
-      scores[name] = group.score;
+      if (group.score !== undefined) scores[name] = group.score;
     }
 
     const failedAssertions = result.assertions
-      .filter((assertion) => !assertion.passed)
+      .filter((assertion) => assertion.passed === false)
       .map((assertion) => ({ ...assertion }));
 
     const metadata: Record<string, unknown> = {

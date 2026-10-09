@@ -483,7 +483,7 @@ function resolveResultMetadata(
   }
   if (recordAssertionDetails) {
     const failedAssertions = result.assertions
-      .filter((assertion) => !assertion.passed)
+      .filter((assertion) => assertion.passed === false)
       .map((assertion) => ({ name: assertion.name, message: assertion.message }));
     if (failedAssertions.length > 0) {
       metadata.eveFailedAssertions = failedAssertions;
@@ -504,12 +504,13 @@ function resolveEvaluationMetrics(result: EveEvalResult): DatadogEvaluationMetri
   );
 
   for (const [label, group] of groups) {
+    if (group.score === undefined) continue;
     metrics.push({
       label: reserveDatadogMetricLabel(label, usedLabels),
       value: group.score,
       tags: {
         assertion_severity: group.assertions[0]?.severity ?? "soft",
-        assertion_passed: String(group.assertions.every((assertion) => assertion.passed)),
+        assertion_passed: String(group.assertions.every((assertion) => assertion.passed !== false)),
         assertion_count: String(group.assertions.length),
       },
     });

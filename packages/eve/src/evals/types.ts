@@ -234,21 +234,29 @@ export interface AssertionHandle {
   gate(threshold?: number): this;
   soft(threshold?: number): this;
   atLeast(threshold: number): this;
-  /** Adds a stable human-readable label to this recorded assertion. */
+  /** Sets this entry's stable `key` and appends the label to its display name. */
   label(label: string): this;
 }
 
 /**
- * The recorded outcome of one assertion, consumed by the verdict, reporters,
- * and artifacts. A boolean assertion has `score` 0 or 1.
+ * The recorded outcome of one assertion or `t.score` measurement, consumed by
+ * the verdict, reporters, and artifacts. `score` is the raw measurement and is
+ * never rewritten by a rule; `threshold` and `passed` describe the acceptance
+ * rule and are absent when none applies. A boolean assertion has `score` 0 or 1.
  */
 export interface AssertionResult {
+  /** Display name, e.g. `judge.boolean [citation]`. */
   readonly name: string;
-  readonly score: number;
+  /** Stable identifier from `t.score(key, …)` or `.label(key)`; absent for unlabeled assertions. */
+  readonly key?: string;
+  /** Raw measurement; absent when the scorer threw. */
+  readonly score?: number;
   readonly severity: AssertionSeverity;
+  /** Effective minimum passing score (a gate defaults to 1); absent when no rule applies. */
   readonly threshold?: number;
-  readonly passed: boolean;
-  /** Whether the assertion failed because its scorer threw instead of producing a score. */
+  /** Verdict of the acceptance rule; absent when the entry is tracked only. */
+  readonly passed?: boolean;
+  /** Whether the scorer threw; an errored entry is always a failed outcome. */
   readonly errored: boolean;
   /** Human-readable failure detail, shown in console output and artifacts. */
   readonly message?: string;
@@ -500,6 +508,15 @@ export interface EveEvalContext<TContext = unknown> extends EveEvalAssertions {
 
   /** Apply a value-level assertion (from `eve/evals/expect`) to a value. */
   check(value: unknown, assertion: Assertion): AssertionHandle;
+  /**
+   * Record a raw measurement under a stable `key`. The score is tracked only
+   * until a rule is chained: `.gate(0.9)` fails the eval below the bar,
+   * `.atLeast(0.9)` marks it `scored`. The measurement is never rewritten.
+   */
+  score(
+    key: string,
+    evaluation: number | AssertionEvaluation | Promise<number | AssertionEvaluation>,
+  ): AssertionHandle;
   /** Record an immediate gate and abort dependent control flow when it fails. */
   require<T>(value: T, assertion: Assertion): Promise<T>;
   /** Mark this eval as intentionally skipped and stop executing its test body. */

@@ -69,12 +69,22 @@ describe("computeEvalVerdict", () => {
     ).toBe("failed");
   });
 
-  it("passes when a tracked soft assertion has no threshold", () => {
+  it("passes when a tracked soft assertion has no verdict", () => {
     expect(
       computeEvalVerdict({
-        assertions: [assertion({ severity: "soft", score: 0.1, passed: true, errored: false })],
+        assertions: [assertion({ severity: "soft", score: 0.1, passed: undefined })],
       }),
     ).toBe("passed");
+  });
+
+  it("fails when a scorer errored without producing a score", () => {
+    expect(
+      computeEvalVerdict({
+        assertions: [
+          assertion({ severity: "gate", score: undefined, passed: false, errored: true }),
+        ],
+      }),
+    ).toBe("failed");
   });
 
   it("returns skipped when an eval intentionally skips without another failure", () => {

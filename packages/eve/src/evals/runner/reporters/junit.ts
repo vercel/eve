@@ -91,7 +91,7 @@ function buildFailureDetail(result: EveEvalResult): Record<string, unknown> {
 
 function failureMessage(result: EveEvalResult): string {
   if (result.error !== undefined) return result.error;
-  const failed = result.assertions.filter((assertion) => !assertion.passed);
+  const failed = result.assertions.filter((assertion) => assertion.passed === false);
   if (failed.length > 0) {
     return truncateDiagnostic(failed.map(formatAssertionFailureHeadline).join("; "), 1_000);
   }
