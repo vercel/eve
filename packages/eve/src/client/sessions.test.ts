@@ -94,7 +94,7 @@ describe("Client.sessions", () => {
     try {
       await vi.waitFor(() => expect(settled).toHaveBeenCalledOnce());
       expect(settled).toHaveBeenCalledWith(
-        expect.objectContaining({ data: { answer: "child-result" }, status: "completed" }),
+        expect.objectContaining({ data: { answer: "child-result" }, status: "waiting" }),
       );
       expect(streamSignal?.aborted).toBe(true);
       expect(session.state.streamIndex).toBe(events.length);

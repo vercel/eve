@@ -60,12 +60,10 @@ function summarizeBoundaryStatus(
   boundary: SessionEvent | undefined,
   failure: ErrorInfo | undefined,
 ): TurnEventSummary["status"] {
-  if (boundary?.type === "turn.paused") return "waiting";
-  if (boundary?.type === "delivery.settled" && boundary.data.outcome === "awaiting-input") {
-    return "waiting";
-  }
   if (failure !== undefined) return "failed";
-  return "completed";
+  // A response ends "waiting" while its session stays open for the next message or answer;
+  // only a session that ended has completed.
+  return boundary?.type === "session.ended" ? "completed" : "waiting";
 }
 
 /** The failure an event reports: a turn's, a run's, or the session's. */

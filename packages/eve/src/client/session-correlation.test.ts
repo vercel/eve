@@ -4,6 +4,7 @@ import { ClientSession } from "#client/session.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/message.js";
 import { encodeTestLine, testTurnFacts as turn } from "#internal/testing/events.js";
+import { linesOf } from "#protocol/session-lines.js";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -67,6 +68,27 @@ describe("accepted message correlation", () => {
     const result = await (await session().send("new report")).result();
     expect(result.message).toBe("NEW REPORT");
     expect(result.events).toHaveLength(current.length + other.length);
+  });
+
+  it("starts with the whole line that admits the delivery, as a prewarmed session's start", async () => {
+    const current = turn(0, "HELLO", ["new-delivery"]);
+    const started: SessionEvent = { data: {}, type: "session.started" };
+    const first = linesOf([started, current[0]!], "2026-01-01T00:00:00.000Z")
+      .map((line) => `${JSON.stringify(line)}\n`)
+      .join("");
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(accepted())
+      .mockResolvedValueOnce(
+        new Response(first + current.slice(1).map(encodeTestLine).join(""), {
+          headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+        }),
+      );
+    const result = await (await session().send("hello")).result();
+    expect(result.events.map((event) => event.type).slice(0, 2)).toEqual([
+      "session.started",
+      "delivery.admitted",
+    ]);
+    expect(result.events).toHaveLength(current.length + 1);
   });
 
   it("fails explicitly when the server does not identify the accepted message", async () => {
