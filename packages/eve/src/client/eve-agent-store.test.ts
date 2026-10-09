@@ -2530,6 +2530,7 @@ describe("EveAgentStore cancellation", () => {
 
     const cancellation = store.cancel();
     await vi.waitFor(() => expect(cancelRequests()).toHaveLength(1));
+    expect(JSON.parse(String(cancelRequests()[0]?.[1]?.body))).toEqual({ turnId: "turn_1" });
 
     live.emit(resumed[2]!);
     live.emit(resumed[3]!);
