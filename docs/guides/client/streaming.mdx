@@ -1,6 +1,6 @@
 ---
 title: "Streaming"
-description: "Consume eve client stream events live, reconnect by event index, and aggregate turn results."
+description: "Consume eve client stream events live, reconnect by line position, and aggregate turn results."
 ---
 
 Every `ClientSession.send()` call posts the turn, then reads the session's NDJSON (newline-delimited JSON) event stream. `MessageResponse` gives you two ways to consume that stream, aggregating it with `result()` or iterating it live.
@@ -22,16 +22,16 @@ const result = await resultPromise;
 The cancellation result is discriminated by `status`: only `accepted` includes
 `sessionId`; `no_active_turn` has no session identity field.
 
-Cancellation does not replace stream consumption. Continue reading the response to observe its terminal `turn.cancelled` and `session.waiting` boundary and to advance the client session cursor normally. Use `session.cancel({ turnId })` instead when you have only a fixed session handle and an observed turn ID.
+Cancellation does not replace stream consumption. Continue reading the response to observe its `turn.settled` with `outcome: "cancelled"` and its delivery's settlement and to advance the client session cursor normally. Use `session.cancel({ turnId })` instead when you have only a fixed session handle and an observed turn ID.
 
-Between turns, `session.compact()` queues context compaction without sending model input. An accepted request reports the session id; consume the durable stream through the following `session.waiting` boundary before sending the next turn. `compaction.completed` confirms that summarization succeeded; without it, eve preserves the previous history, including when the model returns an empty summary. A never-started session returns `no_active_session` as a successful no-op.
+Between turns, `session.compact()` queues context compaction without sending model input. An accepted request reports the session id; consume the durable stream through its `context.settled` before sending the next turn. A `context.settled` with `outcome: "completed"` confirms that summarization succeeded; otherwise eve preserves the previous history, including when the model returns an empty summary. A never-started session returns `no_active_session` as a successful no-op.
 
 ```ts
 const compaction = await session.compact();
 console.log(compaction.status);
 ```
 
-Use `session.clear()` to remove model-message history while retaining the session and its durable resources. Consume `context.cleared` and the following `session.waiting` before sending the next turn.
+Use `session.clear()` to remove model-message history while retaining the session and its durable resources. Consume its `context.settled` (`kind: "clear"`) before sending the next turn.
 
 ```ts
 const cleared = await session.clear();
@@ -51,31 +51,26 @@ console.log(result.message);
 console.log(result.events.length);
 ```
 
-This consumes the stream until the current turn boundary:
+This consumes the stream until the message's delivery settles (`delivery.settled` for its
+`deliveryId`), finishing that line, or until the session ends first. A delivery settles when the
+turn that consumed it settles (`handled`), or when the turn pauses on a person
+(`awaiting-input`), such as for an approval or question. A sign-in pauses the turn too, but the
+response stays attached through it; see [authorization pauses](#authorization-pauses).
 
-- `session.waiting`
-- `session.completed`
-- `session.failed`
-- `turn.waiting` with `on: "input"`, which the turn emits while a person must
-  act on an approval or question. A sign-in emits it too, but the response stays
-  attached through it; see [authorization pauses](#authorization-pauses)
+A turn that pauses on its [tasks](/docs/tools/workflows#run-calls-as-tasks-task) stays open:
+`result()` keeps reading to its final reply. The text the model wrote before the pause is
+narration, not the reply. When a call the turn runs asks a question, such as a workflow tool's
+`ctx.ask()`, `result()` returns `status: "waiting"` with the question in `inputRequests`. Answer it
+with `respond()`, which keeps reading the same turn. A question stays pending until its
+`interaction.settled`, which the session you answer on also emits for a subagent's or workflow
+tool's question.
 
-A `turn.waiting` with `on: "tasks"` is informational: the turn stays open, and
-`result()` keeps reading to its final reply. When a call the turn
-runs asks a question, such as a workflow tool's `ctx.ask()`, `result()` returns
-`status: "waiting"` with the question in `inputRequests`. Answer it with
-`respond()`, which keeps reading the same turn. A question stays pending until
-its `input.resolved`, which the session you answer on also emits for a
-subagent's or workflow tool's question.
-
-A turn that waits on its [tasks](/docs/tools/workflows#run-calls-as-tasks-task)
-emits `turn.waiting` with `on: "tasks"`. The text the model wrote
-before the wait is not the reply: `result()` resolves with the final reply
-after the tasks finish.
+`result().status` is `"waiting"` while the session stays open for the next message or an answer,
+`"completed"` once the session ended, and `"failed"` when the turn or session failed.
 
 `result()` closes that HTTP stream, including when fetch instrumentation clones
 the response for tracing. The durable session remains available for follow-up
-turns after `session.waiting`.
+turns.
 
 ## Stream events live
 
@@ -85,97 +80,88 @@ Use `for await...of` when you want to render progress:
 const response = await session.send("Draft a plan and show your work.");
 
 for await (const event of response) {
-  if (event.type === "message.appended") {
-    process.stdout.write(event.data.messageDelta);
+  if (event.type === "content.delta") {
+    process.stdout.write(event.data.delta);
   }
 
-  if (event.type === "message.completed" && event.data.finishReason !== "tool-calls") {
-    console.log("\nmessage:", event.data.message);
+  if (event.type === "content.completed" && event.data.phase === "reply") {
+    console.log("\nreply:", event.data.value);
   }
 }
 ```
 
-`message.appended`, `reasoning.appended`, and `action.input.appended` are incremental delta events. Each carries only its new text and existing stream coordinates. eve may combine adjacent deltas for the same event type, stream coordinates, and tool `callId` while a durable stream write is in flight, but preserves their text and event ordering. The completed text forms, `message.completed` and `reasoning.completed`, carry the authoritative value for each finalized block and remain the compatibility path for clients that don't render deltas. A streamed tool input is complete when the matching validated call arrives in `actions.requested`.
+`content.delta` and `call.input` are progress records that carry only their new text. eve may merge adjacent deltas for the same part or call when the writer is busy; the text and ordering stay the same.
 
-The default message reducer accumulates these events for you. A raw stream consumer can apply the same rule directly:
+The default message reducer accumulates these for you. A raw stream consumer can apply the same rule directly, keyed by part:
 
 ```ts
-let message = "";
+const parts = new Map<string, string>();
 
 for await (const event of response) {
-  if (event.type !== "message.appended") continue;
-
-  message += event.data.messageDelta;
+  if (event.type !== "content.delta") continue;
+  parts.set(event.data.partId, (parts.get(event.data.partId) ?? "") + event.data.delta);
 }
 ```
 
-After reconnecting without local state, replay the earlier events or wait for the completed event instead of appending a later delta to an empty value. Apply the same rule to `reasoningDelta` and `inputTextDelta`. If a model provider fails after partial output and eve retries the call, the durable stream keeps events from both attempts. A later completed event replaces provisional text only when the failed attempt did not already complete that block; the protocol has no attempt identity with which to retract earlier completed blocks.
+After reconnecting without local state, replay the earlier lines or wait for the part's `content.completed`, which carries its whole value, instead of appending a later delta to an empty value.
 
-The eve client validates the stream version on every connection. It accepts v21 through v26. v25 and v26 events already use the current delta-only `MessageStreamEvent` contract, and the client normalizes v21–v24 cumulative message and reasoning append events and v24 offset-based tool-input appends to it. This also applies when an automatic reconnect reaches a newer deployment. A missing or unsupported `x-eve-stream-version` header fails the stream instead of treating unknown JSON as the current event type.
+The eve client validates the stream version on every connection and accepts version 27. A missing or different version fails instead of being read as current events.
 
 ## Handle event types
 
-Import event types from `eve/client` when you want exhaustiveness or helpers. Events read from a stream are `MessageStreamEvent`: the same union, with the `meta` envelope guaranteed present.
-
-`HandleMessageStreamEvent` remains available as a deprecated alias, so existing type imports continue to compile.
+Import event types from `eve/client`, or the full catalog, the shared fold, and selectors from `eve/events`. Events read from a stream are `SessionStreamEvent`: a fact or progress record with its `meta` envelope.
 
 ```ts
-import type { MessageStreamEvent } from "eve/client";
-import { isCurrentTurnBoundaryEvent } from "eve/client";
+import type { SessionStreamEvent } from "eve/client";
+import { endsTurn } from "eve/client";
 
-function handleEvent(event: MessageStreamEvent) {
-  console.log(event.meta.id, event.meta.at);
+function handleEvent(event: SessionStreamEvent) {
+  console.log(event.meta.position, event.meta.at);
 
-  if (isCurrentTurnBoundaryEvent(event)) {
-    console.log("turn settled:", event.type);
+  if (endsTurn(event)) {
+    console.log("turn ended or paused on a person:", event.type);
   }
 }
 ```
 
 The most common UI events are:
 
-| Event                   | Use                                                                            |
-| ----------------------- | ------------------------------------------------------------------------------ |
-| `message.received`      | Confirm the user message landed; `data.parts` includes text and file metadata. |
-| `reasoning.appended`    | Render reasoning deltas when the model provides them.                          |
-| `message.appended`      | Render assistant text deltas.                                                  |
-| `action.input.appended` | Accumulate raw tool-input deltas before validation completes.                  |
-| `actions.requested`     | Show tool calls as the model requests them, before execution.                  |
-| `action.partial`        | Update a generator tool's provisional output snapshot.                         |
-| `action.result`         | Show tool call results.                                                        |
-| `task.started`          | Show a task call; `action.result` is a receipt. `kind: "agent"` marks agents.  |
-| `task.settled`          | Show the task's result, error, or cancellation for the call's `callId`.        |
-| `input.requested`       | Pause the UI for approval or a question answer.                                |
-| `input.resolved`        | Record the server-accepted outcome and response for each human-input request.  |
-| `result.completed`      | Read structured output from an [output schema](./output-schema).               |
-| `session.waiting`       | Enable the composer; the same fixed session handle accepts the next message.   |
-| `session.completed`     | Mark the conversation terminal.                                                |
-| `session.failed`        | Mark the conversation failed.                                                  |
+| Event                 | Use                                                                                                                      |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `delivery.consumed`   | Confirm the user message landed; `data.parts` includes text and file metadata.                                           |
+| `content.delta`       | Render text and reasoning deltas as they stream.                                                                         |
+| `content.completed`   | A finished part. `phase` tells a `"reply"` from `"narration"`; `kind: "result"` is [structured output](./output-schema). |
+| `call.input`          | Accumulate raw tool-input deltas before validation completes.                                                            |
+| `call.requested`      | Show tool calls as the model requests them, before execution.                                                            |
+| `call.progress`       | Update a generator tool's provisional output snapshot.                                                                   |
+| `call.settled`        | Show a call's result, error, or rejection.                                                                               |
+| `task.started`        | Show a task; `kind: "agent"` marks agents. Its calls carry its `taskId` on `call.started`.                               |
+| `interaction.opened`  | Pause the UI for an approval, question, budget prompt, or sign-in.                                                       |
+| `interaction.settled` | Record how a request was decided.                                                                                        |
+| `turn.settled`        | The turn ended: enable the composer.                                                                                     |
+| `session.ended`       | Mark the conversation terminal or failed.                                                                                |
 
-For the complete event table, see [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming).
+For the complete catalog, see [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming).
 
-For `action.input.appended`, the default message reducer accumulates accepted deltas into a `dynamic-tool` part with `state: "input-streaming"`; its `inputText` field contains cumulative raw text that may be incomplete JSON. The matching `actions.requested` event upgrades the same `toolCallId` to `state: "input-available"` and puts the validated value in `input`.
+For `call.input`, the default message reducer accumulates accepted deltas into a `dynamic-tool` part with `state: "input-streaming"`; its `inputText` field contains cumulative raw text that may be incomplete JSON. `call.requested` replaces it with the validated input.
 
-A call to a tool that runs as a [task](/docs/tools/workflows#run-calls-as-tasks-task) returns a receipt as its `action.result` and settles later with `task.settled`, matched by `callId`. The model receives the result as a message in its history, but the stream reports it only as `task.settled`, so render the result from that event. `task.settled` repeats the tool `name` and `kind` from `task.started`, so you can label a result without keeping the start event. Events recorded by earlier eve versions omit both fields.
+A call to a tool that runs as a [task](/docs/tools/workflows#run-calls-as-tasks-task) starts with `call.started` carrying its `taskId` and settles later with its own `call.settled`. The model receives the result in its history.
 
-When a submitted message includes attachments, `message.received.data.message` stays the
-flattened compatibility summary, while `message.received.data.parts` carries renderable text and
-file metadata. File parts never include raw bytes or internal sandbox paths; `url` appears only for
-client-resolvable `http(s)` and `data:` URLs.
+File parts in `delivery.consumed.data.parts` never include raw bytes or internal sandbox paths; `url` appears only for client-resolvable `http(s)` and `data:` URLs.
 
 ## Authorization pauses
 
-`authorization.required` is different from the normal `session.waiting` boundary. It means a connection needs OAuth or another authorization challenge before the parked turn can continue. Chat UIs should render the authorization prompt, disable ordinary text input for that session, and persist the event with the rest of the chat history.
+A sign-in is an `interaction.opened` whose `request.kind` is `"sign-in"`. It means a connection needs OAuth or another authorization challenge before the paused turn can continue. Chat UIs should render the sign-in prompt from `request.signIn`, disable ordinary text input for that session, and persist the event with the rest of the chat history.
 
-The sign-in holds the turn open, and the stream emits `turn.waiting` with `on: "input"` while the authorization callback is pending. An active `send()` or `respond()` response stays attached across it until the authorization resolves and the resumed turn reaches its next boundary. If you support refresh while an authorization prompt is pending, keep the session cursor from the started session and rehydrate the saved events on load; the callback or a structured decline resumes the same eve session.
+The sign-in holds the turn open, and the stream emits `turn.paused` awaiting it while the callback is pending. An active `send()` or `respond()` response stays attached across it until the sign-in settles and the resumed turn reaches its next boundary. If you support refresh while an authorization prompt is pending, keep the session cursor from the started session and rehydrate the saved events on load; the callback or a structured decline resumes the same eve session.
 
 ## Reconnection
 
-HTTP connections can end before a run does. The client reconnects from the number of events already consumed, so long turns continue without replaying events. By default, a turn response keeps reconnecting until it reaches a turn boundary or is aborted, including while the turn is paused for authorization. A manually opened `session.stream()` eventually stops after repeated empty streams when it can no longer make progress.
+HTTP connections can end before a run does. The client reconnects from the next line it hasn't read, so long turns continue without replaying events. By default, a turn response keeps reconnecting until its delivery settles or it is aborted, including while the turn is paused for a sign-in. A stream ends for good on `{"$eve":"stream.ended"}`, which the server sends once the session has ended.
 
 Browser network failures use the same reconnect policy, both when opening a stream (`TypeError: Failed to fetch`, `TypeError: Load failed`, or `TypeError: NetworkError when attempting to fetch resource.`) and while reading a response body (any `TypeError`, such as `TypeError: network error`). Invalid stream events still fail the read.
 
-If your consumer persists events, key on `event.meta.id`. It is stable across reconnects and rewinds, so an overlapping replay is safe to ingest twice. See [the event envelope](../../concepts/sessions-runs-and-streaming#the-event-envelope).
+If your consumer persists events, key on `event.meta.position`. It is stable across reconnects and rewinds, so an overlapping replay is safe to ingest twice. See [Positions](../../concepts/sessions-runs-and-streaming#positions).
 
 Set `streamReconnectPolicy: { reconnect: false }` when a relay or proxy owns the cursor and reconnection policy. This makes a single stream GET attempt and returns when that connection ends; it does not stop the server-side turn:
 
@@ -213,7 +199,7 @@ for await (const event of session.stream({ startIndex: 0 })) {
 }
 ```
 
-Nonnegative values are absolute event indexes. Negative values read relative to the stream's current tail, so `-1` reads the latest event:
+Nonnegative values are line positions. Negative values read relative to the stream's current tail, so `-1` reads the latest line:
 
 ```ts
 for await (const event of session.stream({ startIndex: -1 })) {
@@ -232,7 +218,7 @@ Pass `follow: false` to read from the cursor to the durable tail and then stop, 
 for await (const event of session.stream({ follow: false })) {
   console.log(event.type);
 }
-// Returns once every event recorded before the stream opened is consumed.
+// Returns once every line recorded before the stream opened is consumed.
 ```
 
 The first connection pins the bound to the tail the server reports at open time; events recorded afterward are not part of the read. Reconnects during the read keep that original bound, and the session's stored `streamIndex` still advances past the consumed events, so a follow-up `stream()` or `send()` picks up exactly where the bounded read ended. When the cursor is already at or past the tail, the iterator returns immediately without yielding.
@@ -248,49 +234,49 @@ as one value, such as when hydrating a server-rendered chat:
 const session = client.sessions.attach(sessionId);
 const snapshot = await session.snapshot();
 
-// snapshot.events contains event indexes 0 through snapshot.session.streamIndex - 1.
+// snapshot.events holds lines 0 through snapshot.session.streamIndex - 1.
 ```
 
 The read pins the durable tail when it opens, just like
 `stream({ follow: false })`. Events written afterward are not included, and
-`snapshot.session.streamIndex` is the exact index from which a live consumer can
-continue. `snapshot()` always reads from index `0`; use a bounded stream directly
+`snapshot.session.streamIndex` is the exact line from which a live consumer can
+continue. `snapshot()` always reads from line `0`; use a bounded stream directly
 when you only need the unread suffix from an existing cursor.
 
 Unlike `stream()`, `snapshot()` does not advance the originating
 `ClientSession`. Its returned cursor contains the fixed session ID and the exact
-stream index after the captured prefix.
+line after the captured prefix.
 
 ## Follow a subagent
 
-A delegated subagent reports its progress on its own child session. The parent stream announces each child session with `agent.started`, whether the model called a subagent tool or a [workflow tool](/docs/tools/workflows#delegate-work-ctxagent) opened the session with `ctx.agent`. Pass the event to `agent()` on the parent's session handle to get the child's handle, then follow it with `stream()`:
+A delegated subagent reports its progress on its own child session. The parent stream announces each child session with `child.opened`, whether the model called a subagent tool or a [workflow tool](/docs/tools/workflows#delegate-work-ctxagent) opened the session with `ctx.agent`. Pass the event to `agent()` on the parent's session handle to get the child's handle, then follow it with `stream()`:
 
 ```ts
-import { isCurrentTurnBoundaryEvent } from "eve/client";
+import { endsTurn } from "eve/client";
 
 const session = client.sessions.attach(parentSessionId);
 const { events } = await session.snapshot();
-const started = events.find((event) => event.type === "agent.started");
+const opened = events.find((event) => event.type === "child.opened");
 
-if (started?.type === "agent.started") {
-  const child = session.agent(started);
+if (opened?.type === "child.opened") {
+  const child = session.agent(opened);
   for await (const event of child.stream()) {
     console.log(child.name, event.type);
-    if (isCurrentTurnBoundaryEvent(event)) break;
+    if (endsTurn(event)) break;
   }
 }
 ```
 
-`stream()` reads the event's `streamPath` with the parent session's host and credentials, so the same client works for local and [remote](../remote-agents) children:
+`stream()` reads the event's `stream` path with the parent session's host and credentials, so the same client works for local and [remote](../remote-agents) children:
 
 - A local child's path is its own session stream route on the same deployment. The channel's usual session authorization applies.
 - A remote child's path is a proxy route on the parent deployment. The parent checks that its session recorded the child for that tool call, then relays the remote child's stream with the remote agent's authored `auth` and `headers`. The client never needs the remote URL or its credentials.
 
-The child has its own cursor, starting at `0`, and reading it never advances the parent's `streamIndex`. Pass `startIndex` to resume, `follow: false` for a bounded read, and `signal` to detach. A child parks after answering and can be continued later, so stop at a turn boundary with `isCurrentTurnBoundaryEvent` when you only need the current turn.
+The child has its own cursor, starting at `0`, and reading it never advances the parent's `streamIndex`. Pass `startIndex` to resume, `follow: false` for a bounded read, and `signal` to detach. A child parks after answering and can be continued later, so stop at a turn boundary with `endsTurn` when you only need the current turn. A parent follows only a child that speaks the current remote agent protocol; an earlier remote child's result still arrives, but its live stream route answers `409`.
 
 ## Abort a request
 
-Pass an `AbortSignal` to cancel the POST or stream. Aborting is local transport cancellation: turns are resumable across disconnects, so detaching never stops server-side work. Use `session.cancel()` to stop the active turn. Cancellation is asynchronous; watch the stream for `turn.cancelled` followed by `session.waiting`.
+Pass an `AbortSignal` to cancel the POST or stream. Aborting is local transport cancellation: turns are resumable across disconnects, so detaching never stops server-side work. Use `session.cancel()` to stop the active turn. Cancellation is asynchronous; watch the stream for `turn.settled` with `outcome: "cancelled"`.
 
 Arm the timeout before awaiting `send()` so it covers the POST as well as the stream:
 
@@ -315,4 +301,4 @@ Once a response is aborted, create a new send for the next turn. Don't reuse the
 
 - [Messages](./messages): the send APIs that create streams
 - [Continuations](./continuations): how stream cursors are persisted
-- [Output schema](./output-schema): consume `result.completed`
+- [Output schema](./output-schema): read a `content.completed` with `kind: "result"`
