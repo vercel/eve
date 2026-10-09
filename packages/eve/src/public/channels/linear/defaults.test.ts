@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { emitFailedStep } from "#harness/emission.js";
+import type { HarnessEmitFn } from "#harness/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import { createDefaultEvents } from "#public/channels/linear/defaults.js";
 import type {
@@ -37,18 +39,19 @@ function buildChannelStub(): LinearEventContext {
 }
 
 function buildEvents() {
-  const fetch = vi.fn().mockResolvedValue(
-    new Response(
-      JSON.stringify({
-        data: {
-          agentActivityCreate: {
-            agentActivity: { id: "activity_1" },
-            success: true,
+  const fetch = vi.fn().mockImplementation(
+    async () =>
+      new Response(
+        JSON.stringify({
+          data: {
+            agentActivityCreate: {
+              agentActivity: { id: "activity_1" },
+              success: true,
+            },
           },
-        },
-      }),
-      { headers: { "content-type": "application/json" }, status: 200 },
-    ),
+        }),
+        { headers: { "content-type": "application/json" }, status: 200 },
+      ),
   );
   return {
     events: createDefaultEvents({
@@ -66,6 +69,51 @@ function activityInput(fetch: ReturnType<typeof vi.fn>): Record<string, unknown>
   };
   return body.variables.input;
 }
+
+/** Routes harness emissions to the default handlers the way the channel adapter does. */
+function emitToDefaults(events: ReturnType<typeof buildEvents>["events"]): HarnessEmitFn {
+  const channel = buildChannelStub();
+  const ctx = sessionContext();
+  return async (event) => {
+    const handler = events[event.type as keyof typeof events] as
+      | ((data: unknown, channel: LinearEventContext, ctx: SessionContext) => Promise<void>)
+      | undefined;
+    await handler?.("data" in event ? event.data : undefined, channel, ctx);
+  };
+}
+
+function errorActivityBodies(fetch: ReturnType<typeof vi.fn>): string[] {
+  return fetch.mock.calls
+    .map((call) => {
+      const body = JSON.parse(String((call[1] as RequestInit).body)) as {
+        variables: { input: { content: { body?: string; type: string } } };
+      };
+      return body.variables.input.content;
+    })
+    .filter((content) => content.type === "error")
+    .map((content) => content.body ?? "");
+}
+
+describe("createDefaultEvents failure notices", () => {
+  it("posts only the restart notice when a failed turn ends the session", async () => {
+    const { events, fetch } = buildEvents();
+
+    await emitFailedStep(
+      emitToDefaults(events),
+      { sessionStarted: true, sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      {
+        code: "MODEL_CALL_FAILED",
+        details: { errorId: "err_4064" },
+        message: "The provider rejected the request",
+        sessionId: "test-session",
+      },
+    );
+
+    expect(errorActivityBodies(fetch)).toEqual([
+      expect.stringContaining("Start a new Linear agent session to continue."),
+    ]);
+  });
+});
 
 describe("createDefaultEvents authorization.required", () => {
   it("posts Linear's native auth elicitation for the triggering user", async () => {
