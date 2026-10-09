@@ -8,7 +8,7 @@ import type { AuthorizationChallenge } from "#harness/authorization.js";
 import { authorizationEventFields } from "#harness/authorization-event-fields.js";
 import { callSettledFrom } from "#harness/call-facts.js";
 import { closeFacts, closureFor, notIn, publicViewOf } from "#harness/session-machine/closure.js";
-import { type OpenWork, openWork } from "#protocol/session-projection/selectors.js";
+import { activeTurn, type OpenWork, openWork } from "#protocol/session-projection/selectors.js";
 import {
   createAuthorizationCompletedEvent,
   createAuthorizationRequiredEvent,
@@ -321,7 +321,7 @@ interface TurnEnding {
  * deliveries it answered.
  */
 function closeTurn(projection: SessionProjection, ending: TurnEnding): SessionEvent[] {
-  const turnId = projection.activeTurnId;
+  const turnId = activeTurn(publicViewOf(projection))?.turnId ?? projection.activeTurnId;
   return turnId === undefined ? [] : turnClosure(projection, turnId, ending).facts;
 }
 
@@ -431,16 +431,25 @@ export function sessionEndedFacts(
 ): SessionEvent[] {
   const facts: SessionEvent[] = [];
   let closed: OpenWork = { calls: [], changes: [], deliveries: [], runs: [] };
-  const turnId = projection?.activeTurnId;
-  if (projection !== undefined && turnId !== undefined) {
-    const turn = turnClosure(projection, turnId, {
-      error: ending.error,
-      outcome: ending.outcome === "failed" ? "failed" : "cancelled",
-    });
-    facts.push(...turn.facts);
-    closed = turn.closed;
-  }
   const tables = publicViewOf(projection);
+  // The shared tables, not an execution pointer, decide which turns are still open. This
+  // also works for degraded terminal publication from a checkpoint without live turn state.
+  if (projection !== undefined) {
+    for (const row of Object.values(tables.turns)) {
+      if (row.status === "settled") continue;
+      const turn = turnClosure(projection, row.turnId, {
+        error: ending.error,
+        outcome: ending.outcome === "failed" ? "failed" : "cancelled",
+      });
+      facts.push(...turn.facts);
+      closed = {
+        calls: [...closed.calls, ...turn.closed.calls],
+        changes: [...closed.changes, ...turn.closed.changes],
+        deliveries: [...closed.deliveries, ...turn.closed.deliveries],
+        runs: [...closed.runs, ...turn.closed.runs],
+      };
+    }
+  }
   const rest = notIn(openWork(tables, { session: true }), closed);
   const { deliveries, work } = closeFacts(
     tables,
@@ -984,6 +993,10 @@ export function clear(
       ...openSignIns(projection).map((attempt) =>
         signInWithdrawn(attempt, "The context was cleared."),
       ),
+      // Clear runs between turns. A paused turn still owns a lifecycle; end it and its
+      // non-task work before selecting an empty conversation, instead of dropping only its
+      // private suspended steps and leaving the public turn and calls open forever.
+      ...closeTurn(projection, { cause: input.cause, outcome: "cancelled" }),
       contextStarted({ cause: input.cause, changeId, kind: "clear" }),
       {
         data: { changeId, kind: "clear", outcome: "completed", selects: null },

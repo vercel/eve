@@ -38,14 +38,11 @@ import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { createLogger } from "#internal/logging.js";
 import { eventsOfLine, linesOf } from "#protocol/session-lines.js";
 import type { SessionEvent, SessionStreamEvent } from "#protocol/session-event.js";
-import {
-  encodeLine,
-  type FactPosition,
-  type StoredLine,
-} from "#protocol/session-events/envelope.js";
+import { encodeLineBytes, type FactPosition } from "#protocol/session-events/envelope.js";
 import { type SessionProjection } from "#protocol/session-projection.js";
 import type { Cause, ErrorInfo } from "#protocol/session-events/envelope.js";
 import { sessionEndedFacts } from "#harness/session-machine/transitions.js";
+import { createStreamChecker, type StreamChecker } from "#protocol/session-events/checker.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
 const log = createLogger("execution.publish-session-events");
@@ -114,7 +111,7 @@ async function publishEventsFromStep(
   const { published } = await publishFromSessionStep(restored, {
     origin,
     async publish(emit) {
-      for (const event of events) await emit(event);
+      await emit(events);
     },
   });
   return published;
@@ -281,7 +278,7 @@ export interface WrittenEvent {
 
 interface StreamWriter extends SessionEventWriter {
   /** Writes one line: one chunk, so a crash leaves all of it or none. */
-  write(line: StoredLine): Promise<void>;
+  write(bytes: Uint8Array): Promise<void>;
 }
 
 /** Dispatches a session's written events to its channel and stream-event hooks. */
@@ -333,18 +330,48 @@ export function openSessionEventPublisher(input: {
   // Opened after the dispatcher, so a context that cannot build one leaves the
   // stream unlocked for the terminal event's fallback write.
   const writer = openSessionEventWriter(input.sessionWritable);
+  let checker: StreamChecker | undefined;
   const emit = async (publication: SessionPublication): Promise<readonly WrittenEvent[]> => {
+    if (process.env.EVE_CHECK_SESSION_EVENTS === "1" && checker === undefined) {
+      const { schemaViolation } = await import("#protocol/session-events/schemas.js");
+      checker = createStreamChecker({
+        seed: currentProjection(ctx).view,
+        validate: schemaViolation,
+      });
+    }
     const events = eventsOf(publication);
     const at = new Date().toISOString();
     const written: WrittenEvent[] = [];
-    for (const line of linesOf(events, at)) {
+    // Preflight every line before the first write: an oversize progress record must not leave
+    // an earlier part of the publication durably written.
+    const lines = linesOf(events, at).map((line) => ({ line, bytes: encodeLineBytes(line) }));
+    lines.forEach(({ line }, index) => {
+      const violations = checker?.check(line, nextLinePosition(ctx) + index);
+      if (violations !== undefined && violations.length > 0) {
+        checker = undefined;
+        throw new Error(
+          `Session event contract: ${violations
+            .map(
+              (violation) =>
+                `${violation.rule} at ${violation.position}:${violation.index ?? "progress"}: ${violation.message}`,
+            )
+            .join("; ")}`,
+        );
+      }
+    });
+    for (const { line, bytes } of lines) {
       const position = nextLinePosition(ctx);
-      await writer.write(line);
+      await writer.write(bytes).catch((error: unknown) => {
+        // Validation ran ahead of the write. A failed write must not leave the checker ahead
+        // of the checkpoint; a later publication reseeds it from what actually committed.
+        checker = undefined;
+        throw error;
+      });
       const lineEvents = eventsOfLine(line, position, at);
       recordPublishedLine(ctx, line, position, lineEvents);
       const progress = "progress" in line;
-      lineEvents.forEach((event, index) =>
-        written.push({ event, position: { index, line: position }, progress }),
+      lineEvents.forEach((event) =>
+        written.push({ event, position: event.meta.position, progress }),
       );
     }
     await dispatcher.deliver(written);
@@ -409,8 +436,8 @@ function openSessionEventWriter(sessionWritable: WritableStream<Uint8Array>): St
     streamWriter.releaseLock();
   };
   return {
-    async write(line) {
-      await streamWriter.write(textEncoder.encode(encodeLine(line)));
+    async write(bytes) {
+      await streamWriter.write(bytes);
     },
     close: async () => {
       await streamWriter.close();
@@ -419,8 +446,6 @@ function openSessionEventWriter(sessionWritable: WritableStream<Uint8Array>): St
     release,
   };
 }
-
-const textEncoder = new TextEncoder();
 
 /** The session's projection as of the last event it published. */
 export function readSessionProjection(ctx: ContextContainer): SessionProjection {
@@ -531,9 +556,8 @@ async function writeUnroutedSessionEvent(
 ): Promise<void> {
   const writer = openSessionEventWriter(sessionWritable);
   try {
-    for (const line of linesOf(facts, new Date().toISOString())) {
-      await writer.write(line);
-    }
+    const lines = linesOf(facts, new Date().toISOString()).map(encodeLineBytes);
+    for (const bytes of lines) await writer.write(bytes);
     await writer.close();
   } finally {
     writer.release();

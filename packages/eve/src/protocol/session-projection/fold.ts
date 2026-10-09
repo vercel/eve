@@ -333,6 +333,10 @@ function foldFact(
 
     case "task.started": {
       const { kind, name, startedBy, taskId } = fact.data;
+      // A same-named record without v27 ownership is not a task introduction. In the
+      // conversation slice, legacy work records share this name but stay in the private fold.
+      if (startedBy === undefined || startedBy === null || typeof startedBy.callId !== "string")
+        return;
       if (view.tasks[taskId] !== undefined) return;
       view.tasks[taskId] = { ...introduced, kind, name, startedBy, status: "running", taskId };
       return;

@@ -53,6 +53,8 @@ interface StreamActionEmissionOptions {
    */
   readonly hidesHeldText?: boolean;
   readonly tools: HarnessToolLookup;
+  /** A deliberate turn cancel or steering interrupt, not a provider failure/retry. */
+  readonly interruptSignal?: AbortSignal;
 }
 
 /**
@@ -291,124 +293,161 @@ async function consumeStreamContent(
     }
   };
 
-  for await (const part of fullStream) {
-    if (streamError !== undefined) {
-      continue;
-    }
+  try {
+    for await (const part of fullStream) {
+      if (streamError !== undefined) {
+        continue;
+      }
 
-    switch (part.type) {
-      case "reasoning-delta": {
-        await providerActionBatch.flush();
-        currentReasoning += part.text;
-        const announces = reasoningPartId === undefined;
-        reasoningPartId ??= nextPartId();
-        await emitFn(
-          announces
-            ? {
-                data: { delta: part.text, kind: "reasoning", partId: reasoningPartId },
-                scope,
-                type: "content.delta",
-              }
-            : { data: { delta: part.text, partId: reasoningPartId }, type: "content.delta" },
-        );
-        break;
-      }
-      case "text-delta": {
-        await providerActionBatch.flush();
-        // Flush accumulated reasoning before text begins.
-        await flushCurrentReasoning();
-        currentMessage += part.text;
-        const announces = messagePartId === undefined;
-        messagePartId ??= nextPartId();
-        await emitFn(
-          announces
-            ? {
-                data: { delta: part.text, kind: "text", partId: messagePartId },
-                scope,
-                type: "content.delta",
-              }
-            : { data: { delta: part.text, partId: messagePartId }, type: "content.delta" },
-        );
-        break;
-      }
-      case "tool-input-start": {
-        if (
-          options === undefined ||
-          part.providerExecuted === true ||
-          options.excludedActionToolNames.has(part.toolName)
-        ) {
+      switch (part.type) {
+        case "reasoning-delta": {
+          await providerActionBatch.flush();
+          currentReasoning += part.text;
+          const announces = reasoningPartId === undefined;
+          reasoningPartId ??= nextPartId();
+          await emitFn(
+            announces
+              ? {
+                  data: { delta: part.text, kind: "reasoning", partId: reasoningPartId },
+                  scope,
+                  type: "content.delta",
+                }
+              : { data: { delta: part.text, partId: reasoningPartId }, type: "content.delta" },
+          );
+          break;
+        }
+        case "text-delta": {
+          await providerActionBatch.flush();
+          // Flush accumulated reasoning before text begins.
+          await flushCurrentReasoning();
+          currentMessage += part.text;
+          const announces = messagePartId === undefined;
+          messagePartId ??= nextPartId();
+          await emitFn(
+            announces
+              ? {
+                  data: { delta: part.text, kind: "text", partId: messagePartId },
+                  scope,
+                  type: "content.delta",
+                }
+              : { data: { delta: part.text, partId: messagePartId }, type: "content.delta" },
+          );
+          break;
+        }
+        case "tool-input-start": {
+          if (
+            options === undefined ||
+            part.providerExecuted === true ||
+            options.excludedActionToolNames.has(part.toolName)
+          ) {
+            streamingActionInputs.delete(part.id);
+            break;
+          }
+          await providerActionBatch.flush();
+          if (currentMessage.trim().length > 0) {
+            await flushCurrentMessage();
+          }
+          streamingActionInputs.set(part.id, { announced: false, toolName: part.toolName });
+          break;
+        }
+        case "tool-input-delta": {
+          if (!streamingActionInputs.has(part.id)) {
+            break;
+          }
+          await providerActionBatch.flush();
+          await emitActionInput(part.id, part.delta);
+          break;
+        }
+        case "tool-input-end":
           streamingActionInputs.delete(part.id);
           break;
-        }
-        await providerActionBatch.flush();
-        if (currentMessage.trim().length > 0) {
-          await flushCurrentMessage();
-        }
-        streamingActionInputs.set(part.id, { announced: false, toolName: part.toolName });
-        break;
-      }
-      case "tool-input-delta": {
-        if (!streamingActionInputs.has(part.id)) {
+        case "tool-call": {
+          const toolCall = part as TypedToolCall<ToolSet>;
+          streamingActionInputs.delete(toolCall.toolCallId);
+          if (toolCall.providerExecuted === true) {
+            await collectProviderToolCall(toolCall);
+          } else {
+            await providerActionBatch.flush();
+            await emitToolCall(toolCall);
+          }
           break;
         }
-        await providerActionBatch.flush();
-        await emitActionInput(part.id, part.delta);
-        break;
-      }
-      case "tool-input-end":
-        streamingActionInputs.delete(part.id);
-        break;
-      case "tool-call": {
-        const toolCall = part as TypedToolCall<ToolSet>;
-        streamingActionInputs.delete(toolCall.toolCallId);
-        if (toolCall.providerExecuted === true) {
-          await collectProviderToolCall(toolCall);
-        } else {
+        // eve runs local calls after the stream, so only the provider's own results and errors
+        // arrive here.
+        case "tool-result": {
+          const providerResult = part as TypedToolResult<ToolSet>;
+          if (providerResult.providerExecuted !== true || providerResult.preliminary === true)
+            break;
+          await collectProviderToolCall({
+            input: "input" in providerResult ? providerResult.input : undefined,
+            toolCallId: providerResult.toolCallId,
+            toolName: providerResult.toolName,
+          });
           await providerActionBatch.flush();
-          await emitToolCall(toolCall);
+          await emitActionResult(createRuntimeToolResultFromStepResult(providerResult));
+          break;
         }
-        break;
+        case "tool-error": {
+          const toolError = part as TypedToolError<ToolSet>;
+          if (toolError.providerExecuted !== true) break;
+          await collectProviderToolCall(toolError);
+          await providerActionBatch.flush();
+          await emitActionResult(createRuntimeToolResultFromToolError(toolError));
+          break;
+        }
+        case "finish-step":
+          finishReason = normalizeAssistantStepFinishReason(part.finishReason);
+          await providerActionBatch.flush();
+          break;
+        case "error":
+          // `part.error` is typed as `unknown` — AI SDK providers emit
+          // whatever the upstream service threw. Coerce through `toError`
+          // so plain-object shapes (structured-clone survivors, typed
+          // gateway payloads) keep their `message`, `name`, `stack`, and
+          // `cause` instead of degrading to `new Error("[object Object]")`.
+          streamError = normalizeModelStreamError(part.error);
+          break;
+        case "abort":
+          // The SDK does not resolve step results for aborted in-flight steps.
+          throw new DOMException(part.reason ?? "The model stream was aborted.", "AbortError");
+        default:
+          break;
       }
-      // eve runs local calls after the stream, so only the provider's own results and errors
-      // arrive here.
-      case "tool-result": {
-        const providerResult = part as TypedToolResult<ToolSet>;
-        if (providerResult.providerExecuted !== true || providerResult.preliminary === true) break;
-        await collectProviderToolCall({
-          input: "input" in providerResult ? providerResult.input : undefined,
-          toolCallId: providerResult.toolCallId,
-          toolName: providerResult.toolName,
-        });
-        await providerActionBatch.flush();
-        await emitActionResult(createRuntimeToolResultFromStepResult(providerResult));
-        break;
-      }
-      case "tool-error": {
-        const toolError = part as TypedToolError<ToolSet>;
-        if (toolError.providerExecuted !== true) break;
-        await collectProviderToolCall(toolError);
-        await providerActionBatch.flush();
-        await emitActionResult(createRuntimeToolResultFromToolError(toolError));
-        break;
-      }
-      case "finish-step":
-        finishReason = normalizeAssistantStepFinishReason(part.finishReason);
-        await providerActionBatch.flush();
-        break;
-      case "error":
-        // `part.error` is typed as `unknown` — AI SDK providers emit
-        // whatever the upstream service threw. Coerce through `toError`
-        // so plain-object shapes (structured-clone survivors, typed
-        // gateway payloads) keep their `message`, `name`, `stack`, and
-        // `cause` instead of degrading to `new Error("[object Object]")`.
-        streamError = normalizeModelStreamError(part.error);
-        break;
-      case "abort":
-        // The SDK does not resolve step results for aborted in-flight steps.
-        throw new DOMException(part.reason ?? "The model stream was aborted.", "AbortError");
-      default:
-        break;
     }
+  } catch (error) {
+    // Interrupted text stands; a failed/retried attempt instead leaves its incomplete previews
+    // behind. Complete the streamed prefixes as one content transition before the run closes.
+    if (options?.interruptSignal?.aborted === true) {
+      const completed: SessionEvent[] = [];
+      if (reasoningPartId !== undefined && currentReasoning.length > 0)
+        completed.push({
+          type: "content.completed",
+          scope,
+          data: {
+            partId: reasoningPartId,
+            runId,
+            kind: "reasoning",
+            phase: "narration",
+            value: currentReasoning,
+            interrupted: true,
+          },
+        });
+      if (messagePartId !== undefined && currentMessage.length > 0)
+        completed.push({
+          type: "content.completed",
+          scope,
+          data: {
+            partId: messagePartId,
+            runId,
+            kind: "text",
+            phase: "narration",
+            value: currentMessage,
+            interrupted: true,
+          },
+        });
+      if (completed.length > 0) await emitFn(completed);
+    }
+    throw error;
   }
 
   await providerActionBatch.flush();
