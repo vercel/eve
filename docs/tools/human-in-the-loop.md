@@ -234,6 +234,27 @@ When a subagent requests input, eve emits the same `input.requested` event on it
 
 Approval is consent only. An approved tool call runs with the requesting user's identity, connections, and credentials, including its policy recheck. The approver's access is never lent to the call. Subsequent tool calls in the turn also stay with the original owner.
 
+A tool can still act on the approver's behalf when it chooses to. While an approved call runs, `ctx.approval.responder` is the principal who approved it, and `ctx.approval.getToken()` resolves that person's token for an inline provider, as `ctx.getToken()` does for the requester. `ctx.session.auth.current` stays the requester. `ctx.approval` is absent for calls that needed no approval, and `ctx.approval.getToken()` never starts a sign-in: when the approver has no token, the call fails.
+
+```ts
+export default defineTool({
+  description: "Grant the requester access to a repository.",
+  inputSchema: z.object({ repo: z.string() }),
+  approval: {
+    request: always(),
+    response: ({ response }) =>
+      itAdmins.includes(response.principal.principalId)
+        ? { status: "allowed" }
+        : { status: "rejected" },
+  },
+  async execute({ repo }, ctx) {
+    const admin = await ctx.approval?.getToken(github);
+    if (admin === undefined) throw new Error("An IT admin must approve this grant.");
+    return await grantAccess(repo, ctx.session.auth.current, admin.token);
+  },
+});
+```
+
 For approval requests, a follow-up message that doesn't match an option steers the turn instead of answering it. eve cancels the turn's pending approval, so the call doesn't run and `input.resolved` reports `outcome: "ignored"`, and the model reads the message next. This happens even when the message is sent with `turnPolicy: "queue"`, because a turn held on a person can't end until they act. Calls the person already approved in the same batch still run. A message from someone other than the person the turn serves waits until the turn ends. Cancelling the turn withdraws its approval: the call doesn't run, `input.resolved` reports `outcome: "cancelled"`, and a later answer to it approves nothing.
 
 ### Several requests at once

@@ -37,6 +37,11 @@ export interface ApprovalResponderIdentity {
 
 export interface ApprovalSettlementAuditRecord {
   readonly actor: ApprovalResponderIdentity;
+  /**
+   * The full auth of the person who approved, present only when allowed. The approved call reads
+   * it as `ctx.approval.responder`; it never runs as it.
+   */
+  readonly responder?: SessionAuthContext;
   /** `unavailable`: the request's entry was gone, so its call is reported unavailable, never run. */
   readonly outcome: "allowed" | "cancelled" | "unavailable";
   readonly requestId: string;
@@ -310,6 +315,7 @@ function settleRequest(input: {
 
   const settlement: ApprovalSettlementAuditRecord = {
     actor: projectResponder(input.responder),
+    ...(input.outcome === "allowed" && { responder: input.responder }),
     candidateId: input.candidateId,
     outcome: input.outcome,
     requestId: input.requestId,
@@ -401,4 +407,12 @@ export function retireActiveCandidates(
     });
   }
   return next;
+}
+
+/** The full auth of whoever approved `requestId`, when a person allowed it. */
+export function responderOfRequest(
+  state: SessionStateMap | undefined,
+  requestId: string,
+): SessionAuthContext | undefined {
+  return readApprovalState(state).settlements[requestId]?.responder;
 }
