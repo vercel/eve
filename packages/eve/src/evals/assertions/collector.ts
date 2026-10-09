@@ -87,7 +87,7 @@ export class AssertionCollector {
     return makeHandle(entry);
   }
 
-  /** Record a keyed measurement, tracked only until its handle chains a rule. */
+  /** Record a keyed score. It has no verdict unless the handle chains `.gate()` or `.atLeast()`. */
   recordScore(key: string, evaluation: ScoreInput): AssertionHandle {
     const normalizedKey = key.trim();
     if (normalizedKey.length === 0) throw new Error("t.score(key) requires a non-empty key.");

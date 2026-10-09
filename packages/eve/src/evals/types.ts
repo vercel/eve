@@ -254,7 +254,7 @@ export interface AssertionResult {
   readonly severity: AssertionSeverity;
   /** Effective minimum passing score (a gate defaults to 1); absent when no rule applies. */
   readonly threshold?: number;
-  /** Verdict of the acceptance rule; absent when the entry is tracked only. */
+  /** Verdict of the acceptance rule; absent when no rule applies. */
   readonly passed?: boolean;
   /** Whether the scorer threw; an errored entry is always a failed outcome. */
   readonly errored: boolean;
@@ -509,9 +509,9 @@ export interface EveEvalContext<TContext = unknown> extends EveEvalAssertions {
   /** Apply a value-level assertion (from `eve/evals/expect`) to a value. */
   check(value: unknown, assertion: Assertion): AssertionHandle;
   /**
-   * Record a raw measurement under a stable `key`. The score is tracked only
-   * until a rule is chained: `.gate(0.9)` fails the eval below the bar,
-   * `.atLeast(0.9)` marks it `scored`. The measurement is never rewritten.
+   * Record a raw score under a stable `key`. On its own the score never passes
+   * or fails the eval. Chain `.gate(0.9)` to fail the eval below 0.9, or
+   * `.atLeast(0.9)` to mark it `scored`. The score itself is never rewritten.
    */
   score(
     key: string,

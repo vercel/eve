@@ -154,7 +154,7 @@ Each surface matches a genuinely different kind of judgment:
 
 - **Scoped methods** read the final whole run on `t`, snapshot one independent session when invoked there, or inspect one immutable `EveEvalTurn`. See [Assertions](./assertions).
 - **`t.check(value, assertion)`** grades an explicit value with a deterministic builder from `eve/evals/expect`, such as `t.check(turn.message, includes("sunny"))`. Grade `turn.message`, an intermediate draft, parsed JSON, or anything else. See [Assertions](./assertions).
-- **`t.score(key, evaluation)`** records a measurement you computed yourself, such as a length ratio or your own evaluator's result, tracked only until you chain `.gate()` or `.atLeast()`. See [Assertions](./assertions#scores-with-tscore).
+- **`t.score(key, evaluation)`** records a score you computed yourself, such as a length ratio or your own evaluator's result. On its own it never passes or fails the eval; chain `.gate(threshold)` or `.atLeast(threshold)` to make it decide. See [Assertions](./assertions#scores-with-tscore).
 - **`t.judge(...)`** is the LLM-as-judge surface, like `t.judge("cites a source")`. It grades the most recently settled turn’s assistant message by default; pass `{ on: turn.session.transcript }` to grade a multi-turn conversation. The judge uses the configured judge model, never the agent under test. See [Judge](./judge).
 
 ## Gate vs soft
