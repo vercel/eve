@@ -1,10 +1,12 @@
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import { isNonEmptyString, isObject } from "#shared/guards.js";
 import type { SessionStateMap } from "#harness/types.js";
+import { readRunningWork, writeRunningWork } from "#harness/running-work.js";
 
-export const WORKFLOW_TOOL_RUNS_STATE_KEY = "eve.workflowTool";
-// Version 4 records only runs a turn waits on; earlier versions also held session-owned runs.
-const WORKFLOW_TOOL_RUNS_VERSION = 4;
+/**
+ * The workflow runs a turn waits on, by the call each serves: the calls part of the session's
+ * record of running work (`running-work.ts`), which also holds its tasks.
+ */
 
 /** One workflow tool call the originating turn waits on. */
 export interface BlockingWorkflowToolRun {
@@ -12,12 +14,6 @@ export interface BlockingWorkflowToolRun {
   readonly toolName: string;
   readonly origin: { readonly turnId: string; readonly stepIndex: number };
   readonly address: { readonly runId: string; readonly hookToken: string };
-}
-
-interface WorkflowToolRunRegistry {
-  readonly version: typeof WORKFLOW_TOOL_RUNS_VERSION;
-  readonly runs: readonly BlockingWorkflowToolRun[];
-  readonly [key: string]: unknown;
 }
 
 // These readers run inside the workflow driver: importing a schema runtime here also
@@ -38,73 +34,40 @@ function isWorkflowToolRun(value: unknown): value is BlockingWorkflowToolRun {
   );
 }
 
-function parseRegistry(value: unknown): WorkflowToolRunRegistry {
-  if (
-    !isObject(value) ||
-    value.version !== WORKFLOW_TOOL_RUNS_VERSION ||
-    !Array.isArray(value.runs) ||
-    !Array.from(value.runs).every(isWorkflowToolRun)
-  ) {
-    throw new Error("Corrupt workflow tool run registry: invalid version or run.");
+function parseRuns(value: readonly unknown[]): readonly BlockingWorkflowToolRun[] {
+  if (!value.every(isWorkflowToolRun)) {
+    throw new Error("Corrupt workflow tool run registry: invalid run.");
   }
   const identities = new Set<string>();
-  for (const entry of value.runs) {
+  for (const entry of value) {
     const identity = JSON.stringify([entry.origin.turnId, entry.callId]);
     if (identities.has(identity))
       throw new Error("Corrupt workflow tool run registry: Run identities must be unique.");
     identities.add(identity);
   }
-  return {
-    ...value,
-    version: WORKFLOW_TOOL_RUNS_VERSION,
-    runs: value.runs.map(copyWorkflowToolRun),
-  };
+  return value.map(copyWorkflowToolRun);
 }
 
 function copyWorkflowToolRun(entry: BlockingWorkflowToolRun): BlockingWorkflowToolRun {
   return { ...entry, origin: { ...entry.origin }, address: { ...entry.address } };
 }
 
-function readRegistry(state: SessionStateMap | undefined): WorkflowToolRunRegistry {
-  const raw = state?.[WORKFLOW_TOOL_RUNS_STATE_KEY];
-  if (isUnsupportedState(state, raw)) {
-    throw new Error(
-      "Unsupported workflow tool run state: start a new session or import its conversation.",
-    );
-  }
-  if (raw === undefined) return { version: WORKFLOW_TOOL_RUNS_VERSION, runs: [] };
-  return parseRegistry(raw);
+function readRuns(state: SessionStateMap | undefined): readonly BlockingWorkflowToolRun[] {
+  return parseRuns(readRunningWork(state).calls);
 }
 
-function isUnsupportedState(state: SessionStateMap | undefined, raw: unknown): boolean {
-  const hasRetiredStore =
-    state?.["eve.tasks"] !== undefined || state?.["eve.runtime.workflowToolRuns"] !== undefined;
-  const hasEarlierVersion = isObject(raw) && raw.version !== WORKFLOW_TOOL_RUNS_VERSION;
-  return hasRetiredStore || hasEarlierVersion;
+function writeRuns(
+  state: SessionStateMap | undefined,
+  runs: readonly BlockingWorkflowToolRun[],
+): SessionStateMap | undefined {
+  return writeRunningWork(state, { calls: parseRuns(runs) });
 }
 
 export function getBlockingWorkflowToolRuns(
   state: SessionStateMap | undefined,
   turnId?: string,
 ): readonly BlockingWorkflowToolRun[] {
-  return readRegistry(state).runs.filter(
-    (entry) => turnId === undefined || entry.origin.turnId === turnId,
-  );
-}
-
-function writeRegistry(
-  state: SessionStateMap | undefined,
-  registry: WorkflowToolRunRegistry,
-): SessionStateMap | undefined {
-  if (registry.runs.length === 0) {
-    const next = { ...state };
-    delete next[WORKFLOW_TOOL_RUNS_STATE_KEY];
-    return Object.keys(next).length === 0 ? undefined : next;
-  }
-  return {
-    ...state,
-    [WORKFLOW_TOOL_RUNS_STATE_KEY]: parseRegistry(registry),
-  };
+  return readRuns(state).filter((entry) => turnId === undefined || entry.origin.turnId === turnId);
 }
 
 /** Registration is idempotent by originating turn and call. */
@@ -112,8 +75,7 @@ export function registerWorkflowToolRun<T extends { readonly state?: SessionStat
   session: T,
   entry: BlockingWorkflowToolRun,
 ): T {
-  const registry = readRegistry(session.state);
-  const runs = [...registry.runs];
+  const runs = [...readRuns(session.state)];
   const index = runs.findIndex(
     (candidate) =>
       candidate.origin.turnId === entry.origin.turnId && candidate.callId === entry.callId,
@@ -130,7 +92,7 @@ export function registerWorkflowToolRun<T extends { readonly state?: SessionStat
       origin: previous.origin,
       address: { ...previous.address, ...entry.address },
     };
-  return { ...session, state: writeRegistry(session.state, { ...registry, runs }) };
+  return { ...session, state: writeRuns(session.state, runs) };
 }
 
 /** Removes this turn's waiting calls, or only one of them when `callId` is given. */
@@ -139,14 +101,13 @@ export function removeBlockingWorkflowToolRuns<T extends { readonly state?: Sess
   turnId: string,
   callId?: string,
 ): T {
-  const registry = readRegistry(session.state);
-  const entries = registry.runs;
+  const entries = readRuns(session.state);
   const remaining = entries.filter(
     (entry) => entry.origin.turnId !== turnId || (callId !== undefined && entry.callId !== callId),
   );
   return remaining.length === entries.length
     ? session
-    : { ...session, state: writeRegistry(session.state, { ...registry, runs: remaining }) };
+    : { ...session, state: writeRuns(session.state, remaining) };
 }
 
 /** Results without an originating turn may bind only when exactly one recorded turn owns the call. */

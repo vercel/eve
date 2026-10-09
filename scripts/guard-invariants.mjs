@@ -107,11 +107,16 @@
  *             tool that needs a private hook means authors cannot build the
  *             same tool. Files that predate the rule are baselined and may
  *             only leave the baseline.
- *   rule 46 — Tasks own their records and their words. Only
- *             `execution/tasks/table*.ts` names the session's task table, so
- *             every record write goes through it, and the model-facing task
- *             markers appear only in `execution/tasks/render.ts`, which holds
- *             all of the tasks' model text.
+ *   rule 46 — Running work owns its record, and tasks their words. Only
+ *             `harness/running-work.ts` names the session's one record of
+ *             running work, and only its two owners read or write it:
+ *             `execution/tasks/table*.ts` for tasks and
+ *             `harness/workflow-tool-runs.ts` for the runs a turn waits on.
+ *             `execution/session/checkpoint-migrations.ts` may also name it:
+ *             its upgrades pin the shapes released builds wrote.
+ *             The model-facing task markers appear only in
+ *             `execution/tasks/render.ts`, which holds all of the tasks'
+ *             model text.
  *   rule 47 — A caller hears from its session only at a turn's real end.
  *             Only `execution/session/program.ts` sends the caller's reply,
  *             after the turn loop returns, and `execution/session/finalization.ts`
@@ -437,7 +442,14 @@ function checkRule45(posix, lines, state) {
 const TASKS_DIR = "packages/eve/src/execution/tasks/";
 const TASK_TABLE_FILE_RE = /^packages\/eve\/src\/execution\/tasks\/table[\w-]*\.ts$/;
 const TASK_RENDER_FILE = `${TASKS_DIR}render.ts`;
-const TASK_TABLE_KEY = '"eve.taskTable"';
+const RUNNING_WORK_FILE = "packages/eve/src/harness/running-work.ts";
+const CHECKPOINT_MIGRATIONS_FILE = "packages/eve/src/execution/session/checkpoint-migrations.ts";
+const RUNNING_WORK_KEY = '"eve.work"';
+const RUNNING_WORK_ACCESS_RE = /\b(?:readRunningWork|writeRunningWork)\(/;
+const RUNNING_WORK_OWNER_FILES = new Set([
+  RUNNING_WORK_FILE,
+  "packages/eve/src/harness/workflow-tool-runs.ts",
+]);
 const TASK_MODEL_MARKERS = ["<task_result", "[Tasks]", "Started task ", "Sent to task "];
 
 /**
@@ -448,13 +460,30 @@ const TASK_MODEL_MARKERS = ["<task_result", "[Tasks]", "Started task ", "Sent to
 function checkRule46(posix, lines, violations) {
   if (!posix.startsWith("packages/eve/src/") || posix.endsWith(".test.ts")) return;
   lines.forEach((line, idx) => {
-    if (line.includes(TASK_TABLE_KEY) && !TASK_TABLE_FILE_RE.test(posix)) {
+    if (
+      line.includes(RUNNING_WORK_KEY) &&
+      posix !== RUNNING_WORK_FILE &&
+      posix !== CHECKPOINT_MIGRATIONS_FILE
+    ) {
       violations.push({
         rule: 46,
         file: posix,
         line: idx + 1,
         message:
-          "names the session's task table outside execution/tasks/table*.ts. Read and write task records through the table module's helpers.",
+          "names the session's record of running work outside harness/running-work.ts. Read and write it through its owners' helpers.",
+      });
+    }
+    if (
+      RUNNING_WORK_ACCESS_RE.test(line) &&
+      !RUNNING_WORK_OWNER_FILES.has(posix) &&
+      !TASK_TABLE_FILE_RE.test(posix)
+    ) {
+      violations.push({
+        rule: 46,
+        file: posix,
+        line: idx + 1,
+        message:
+          "reads or writes the record of running work outside its owners. Use execution/tasks/table.ts for tasks and harness/workflow-tool-runs.ts for the runs a turn waits on.",
       });
     }
     if (posix === TASK_RENDER_FILE || /^\s*(?:\/?\*|\/\/)/.test(line)) return;

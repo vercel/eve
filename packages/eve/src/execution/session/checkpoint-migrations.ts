@@ -1,7 +1,6 @@
 import { SESSION_CHECKPOINT_VERSION, type SessionCheckpoint } from "#execution/session/handoff.js";
 import { isObject } from "#shared/guards.js";
 import { initialSessionProjection } from "#protocol/session-projection.js";
-import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { LEGACY_HITL_STATE_KEYS, upgradeLegacyHitlState } from "#harness/hitl/requests.js";
 
 /**
@@ -107,6 +106,8 @@ const CHECKPOINT_UPGRADES: Readonly<
       sessionState: { ...sessionState, snapshot: { ...snapshot, session: { ...session, state } } },
     };
   },
+  // The task table and the workflow runs a turn waits on moved into one record of running work.
+  14: upgradeRunningWork,
 };
 
 /**
@@ -183,12 +184,7 @@ function upgradeIdleLifecycle(checkpoint: CheckpointRecord): CheckpointRecord {
     (routes !== undefined && (!isObject(routes) || Object.keys(routes).length > 0))
   )
     refuse("session holds relayed input");
-  try {
-    if (getBlockingWorkflowToolRuns(state).length > 0) refuse("session holds workflow runs");
-  } catch (error) {
-    if (error instanceof CheckpointRefusal) throw error;
-    refuse("workflow tool run registry is incompatible");
-  }
+  if (readWorkflowToolRuns(state).length > 0) refuse("session holds workflow runs");
   const approvals = state[LEGACY_HITL_STATE_KEYS.approvals];
   if (
     approvals !== undefined &&
@@ -226,6 +222,65 @@ function upgradeIdleLifecycle(checkpoint: CheckpointRecord): CheckpointRecord {
       snapshot: { ...snapshot, session: { ...session, state: nextState } },
     },
   };
+}
+
+/**
+ * Version 13 kept the task table (`eve.taskTable`, version 1) and the workflow runs a turn waits on
+ * (`eve.workflowTool`, version 4) apart. Both move into the session's one record of running work.
+ */
+function upgradeRunningWork(checkpoint: CheckpointRecord): CheckpointRecord {
+  const sessionState = readRecord(checkpoint, "sessionState");
+  const snapshot = readRecord(sessionState, "snapshot");
+  const session = readRecord(snapshot, "session");
+  if (session.state === undefined) return checkpoint;
+  const state = readRecord(session, "state");
+  if (state["eve.taskTable"] === undefined && state["eve.workflowTool"] === undefined) {
+    return checkpoint;
+  }
+  if (state["eve.work"] !== undefined)
+    refuse("v13 checkpoint already holds the running-work record");
+  const calls = readWorkflowToolRuns(state);
+  const tasks = readTasks(state);
+  const nextState = omitKeys(state, ["eve.taskTable", "eve.workflowTool"]);
+  if (calls.length > 0 || tasks.length > 0) {
+    const record: CheckpointRecord = { version: 1 };
+    if (calls.length > 0) record.calls = calls;
+    if (tasks.length > 0) record.tasks = tasks;
+    nextState["eve.work"] = record;
+  }
+  return {
+    ...checkpoint,
+    sessionState: {
+      ...sessionState,
+      snapshot: { ...snapshot, session: { ...session, state: nextState } },
+    },
+  };
+}
+
+/** The runs of a version-4 workflow tool run registry, as checkpoints 11 through 13 hold it. */
+function readWorkflowToolRuns(state: CheckpointRecord): unknown[] {
+  const registry = state["eve.workflowTool"];
+  if (registry === undefined) return [];
+  if (
+    state["eve.tasks"] !== undefined ||
+    state["eve.runtime.workflowToolRuns"] !== undefined ||
+    !isObject(registry) ||
+    registry.version !== 4 ||
+    !Array.isArray(registry.runs)
+  ) {
+    refuse("workflow tool run registry is incompatible");
+  }
+  return Array.from(registry.runs as unknown[]);
+}
+
+/** The tasks of a version-1 task table, as checkpoint 13 holds it. */
+function readTasks(state: CheckpointRecord): unknown[] {
+  const table = state["eve.taskTable"];
+  if (table === undefined) return [];
+  if (!isObject(table) || table.version !== 1 || !Array.isArray(table.tasks)) {
+    refuse("task table is malformed");
+  }
+  return Array.from(table.tasks as unknown[]);
 }
 
 function isCurrentCheckpoint(value: unknown): value is SessionCheckpoint {
