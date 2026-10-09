@@ -114,19 +114,23 @@ async function applyTaskRunMessage(
       // The run's final spend lands while its task is still open, before `task.ended`.
       if (spend !== undefined) events.push(spendFact(events, message.from.callId, spend, taskId));
       spend = undefined;
+      // Nobody can answer what a finished run relayed, so channels stop offering it. The
+      // withdrawals commit first, so the task's own end leaves them alone.
+      withdrawn = finishRun(viewOf(session), {
+        requestIds: runRequestIds(session, message.from.runId),
+        taskId,
+      }).events;
       events.push(
         ...endTask(viewOf(session), {
           taskId,
           outcome,
           closedCallIds: settled.settled.map((call) => call.callId),
+          closedInteractionIds: withdrawn.flatMap((event) =>
+            event.type === "interaction.settled" ? [event.data.interactionId] : [],
+          ),
         }).events,
       );
       table = finishTaskRun(settled.table, taskId, message.from.runId);
-      // Nobody can answer what a finished run relayed, so channels stop offering it.
-      withdrawn = finishRun(viewOf(session), {
-        requestIds: runRequestIds(session, message.from.runId),
-        taskId,
-      }).events;
       break;
     }
   }

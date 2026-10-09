@@ -1,14 +1,11 @@
+import type { ChildOpened } from "#protocol/session-events/families/child.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { Experimental_DecisionModel as DecisionModel } from "ai";
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { ClientAgentSession } from "#client/agent-session.js";
-import type {
-  RuntimeIdentity,
-  RuntimeTraceContext,
-  AgentStartedStreamEvent,
-} from "#protocol/message.js";
+import type { RuntimeIdentity, RuntimeTraceContext } from "#protocol/message.js";
 import type {
   CancelSessionResult,
   ClientSessionState,
@@ -83,8 +80,6 @@ export interface EveEvalSubagentCall {
   readonly childSessionId?: string;
   /** Subagent name. */
   readonly name: string;
-  /** Remote agent URL for remote delegations (`agent.started` remote metadata). */
-  readonly remoteUrl?: string;
   /** Output from `call.settled`, resolving shared replies; absent until it completes. */
   readonly output?: JsonValue;
   /** `working` until this call settles; interruptions present as `cancelled`. */
@@ -376,7 +371,7 @@ interface EveEvalSessionDriver {
    * `agent.started`. Its `stream()` follows the child through this parent session
    * with the eval client's credentials, and stops with the eval unless given a `signal`.
    */
-  agent(started: AgentStartedStreamEvent): EveEvalAgentSession;
+  agent(opened: ChildOpened): EveEvalAgentSession;
 }
 
 /** A session an agent run opened, reached through the parent eval session. */

@@ -28,6 +28,9 @@ import {
 import type { ResolvedInputBatch } from "#harness/input-request-resolution.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
 import { eventsOf } from "#harness/publication.js";
+import { inputRequestOf } from "#channel/interaction-prompts.js";
+import { currentView } from "#harness/session-machine/current.js";
+import type { InputRequest } from "#shared/input.js";
 import type { HandleEventFn } from "#harness/types.js";
 import type { FactOf } from "#protocol/session-events/facts.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
@@ -88,8 +91,16 @@ export function createInstrumentationHandleEvent(
       await publishActionStart(event, input, hooks, publishedActions, startedAtMs, activeTurnId);
     } else if (event.type === "call.settled") {
       await publishActionTerminal(event, input, hooks);
-    } else if (event.type === "input.requested") {
-      await publishInputStarts(event, input, hooks, publishedInputs);
+    } else if (event.type === "interaction.opened") {
+      // Published already, so the line's tables hold the request with the call it's about.
+      const ctx = contextStorage.getStore();
+      const view = ctx === undefined ? undefined : currentView(ctx);
+      const row = view?.interactions[event.data.interactionId];
+      const request =
+        view === undefined || row === undefined ? undefined : inputRequestOf(view, row);
+      const turnId = event.scope?.turnId ?? activeTurnId;
+      if (request !== undefined && turnId !== undefined)
+        await publishInputStarts({ requests: [request], turnId }, input, hooks, publishedInputs);
     }
     return activeTurnId;
   }
@@ -126,7 +137,7 @@ function deliveryEnding(event: SessionEvent):
 }
 
 async function publishInputStarts(
-  event: Extract<SessionEvent, { type: "input.requested" }>,
+  event: { readonly requests: readonly InputRequest[]; readonly turnId: string },
   input: CreateInstrumentationHandleEventInput,
   hooks: InstrumentationHooks,
   published: Set<string>,
@@ -135,12 +146,8 @@ async function publishInputStarts(
   if (scope === undefined) return;
   const capturesOutputs = hooks.capturesOutputs ?? hooks.capturesContent;
 
-  for (const request of event.data.requests) {
-    const idempotencyKey = inputIdempotencyKey(
-      input.sessionId,
-      event.data.turnId,
-      request.requestId,
-    );
+  for (const request of event.requests) {
+    const idempotencyKey = inputIdempotencyKey(input.sessionId, event.turnId, request.requestId);
     if (published.has(idempotencyKey)) continue;
     published.add(idempotencyKey);
     rememberInstrumentationInputScope(idempotencyKey, scope);

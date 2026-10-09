@@ -4,7 +4,7 @@
  * version, and the receiver's response names its own. Deployments from before
  * the version existed speak 1.
  */
-export const REMOTE_AGENT_PROTOCOL_VERSION = 2;
+export const REMOTE_AGENT_PROTOCOL_VERSION = 3;
 
 /** Error code a receiver answers when the caller speaks another protocol version. */
 export const REMOTE_AGENT_PROTOCOL_MISMATCH = "REMOTE_AGENT_PROTOCOL_MISMATCH";

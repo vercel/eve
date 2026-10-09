@@ -1586,8 +1586,9 @@ export class EveTUIRunner {
           });
         }
         break;
-      case "agent.started":
-        diagnostics.recordSubagentDispatch(event.data.callId);
+      case "child.opened":
+        if ("callId" in event.data.owner)
+          diagnostics.recordSubagentDispatch(event.data.owner.callId);
         break;
       case "usage.recorded":
         diagnostics.recordStepUsage(event.data.usage);

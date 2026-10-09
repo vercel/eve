@@ -62,9 +62,7 @@ export interface EveEvalSubagentCallMatchOptions {
   readonly callId?: EveEvalValueMatcher<string | undefined>;
   /** Matcher over the id of the agent's session. */
   readonly childSessionId?: EveEvalValueMatcher<string | undefined>;
-  /** Matcher over the `agent.started` remote URL. */
-  readonly remoteUrl?: EveEvalValueMatcher<string | undefined>;
-  /** Matcher over the output of the call's `task.settled`. */
+  /** Matcher over the output of the call's `call.settled`. */
   readonly output?: EveEvalValueMatcher;
   /** Required lifecycle outcome. Defaults to `"completed"`. */
   readonly status?: EveEvalSubagentCall["status"];
@@ -146,7 +144,7 @@ export function toolCallMatches(
 }
 
 /**
- * Returns true when one derived subagent call satisfies the `remoteUrl`/
+ * Returns true when one derived subagent call satisfies the `callId`, `childSessionId`, and
  * `output` constraints.
  */
 export function subagentCallMatches(
@@ -160,9 +158,6 @@ export function subagentCallMatches(
     options.childSessionId !== undefined &&
     !matchesValue(options.childSessionId, call.childSessionId)
   ) {
-    return false;
-  }
-  if (options.remoteUrl !== undefined && !matchesValue(options.remoteUrl, call.remoteUrl)) {
     return false;
   }
   if (options.output !== undefined && !matchesValue(options.output, call.output)) {

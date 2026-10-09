@@ -2,18 +2,18 @@ import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { followStreamIterable, type FollowedEvent } from "#client/open-stream.js";
 import type { ClientSessionContext } from "#client/session.js";
 import type { StreamOptions } from "#client/types.js";
-import type { AgentStartedStreamEvent } from "#protocol/message.js";
+import type { ChildOpened } from "#protocol/session-events/families/child.js";
 
 /**
  * A session an agent run opened, reached through the parent session whose
- * stream announced it with `agent.started`. Get one with
- * `session.agent(started)`. Every read uses the parent's host and
+ * stream linked it with `child.opened`. Get one with
+ * `session.agent(opened)`. Every read uses the parent's host and
  * credentials: a local child's own route, or the parent-origin proxy for a
  * remote child, which the parent deployment authenticates to the remote agent
  * after checking that it recorded the child.
  */
 export class ClientAgentSession {
-  /** The agent's name, as `agent.started` reports it. */
+  /** The agent's name, as `child.opened` reports it. */
   readonly name: string;
   /** The child session's id. */
   readonly sessionId: string;
@@ -23,12 +23,14 @@ export class ClientAgentSession {
   readonly #streamPath: string;
 
   /** @internal */
-  constructor(context: ClientSessionContext, started: AgentStartedStreamEvent) {
+  constructor(context: ClientSessionContext, opened: ChildOpened) {
     this.#context = context;
-    this.#streamPath = started.data.streamPath;
-    this.name = started.data.name;
-    this.sessionId = started.data.sessionId;
-    this.taskId = started.data.taskId;
+    this.#streamPath = opened.data.stream;
+    this.name = opened.data.name;
+    this.sessionId = opened.data.sessionId;
+    this.taskId =
+      opened.scope?.taskId ??
+      ("taskId" in opened.data.owner ? opened.data.owner.taskId : undefined);
   }
 
   /**

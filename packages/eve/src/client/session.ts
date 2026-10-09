@@ -1,6 +1,6 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { ResponseSegment } from "#client/session-utils.js";
-import type { AgentStartedStreamEvent } from "#protocol/message.js";
+import type { ChildOpened } from "#protocol/session-events/families/child.js";
 import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
 import {
   EVE_SESSION_ROUTE_PATH,
@@ -208,13 +208,13 @@ export class ClientSession {
   }
 
   /**
-   * The session an agent run opened, as this session's stream announced it.
-   * Pass an `agent.started` event from this session, then follow the child
+   * The session an agent run opened, as this session's stream linked it.
+   * Pass a `child.opened` event from this session, then follow the child
    * with `stream()`; reads use this session's host and credentials, for local
    * and remote agents alike.
    */
-  agent(started: AgentStartedStreamEvent): ClientAgentSession {
-    return new ClientAgentSession(this.#context, started);
+  agent(opened: ChildOpened): ClientAgentSession {
+    return new ClientAgentSession(this.#context, opened);
   }
 
   [followSession](options: FollowSessionOptions): AsyncIterable<SessionStreamEvent> {

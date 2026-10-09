@@ -1,3 +1,4 @@
+import { withTypedBindings } from "#harness/response-bindings.js";
 import type { UserContent } from "ai";
 
 import { resolveTextToResponse, resolveTextToResponses } from "#channel/resolve-text.js";
@@ -86,6 +87,7 @@ export function resolveTextInput(
     inputResponses: [...(stepInput.inputResponses ?? []), ...responses],
     message: undefined,
     messageConsumed: true,
+    responseBindings: withTypedBindings(stepInput, responses),
   });
 }
 
@@ -120,6 +122,7 @@ export function resolveTypedApproval(
     inputResponses: [...(stepInput.inputResponses ?? []), response],
     message: undefined,
     messageConsumed: true,
+    responseBindings: withTypedBindings(stepInput, [response]),
   };
 }
 

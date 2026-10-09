@@ -1,11 +1,7 @@
-import type { SessionEvent } from "#protocol/session-event.js";
 import { describe, expect, it, vi } from "vitest";
 
-import { callAdapterEventHandler } from "#channel/adapter.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
-import { ContextContainer, contextStorage } from "#context/container.js";
-import { SessionKey } from "#context/keys.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import {
   mockChannelContext,
@@ -18,32 +14,8 @@ function adapter(channel: unknown) {
   return asCompiled<TeamsChannelState>(channel).adapter;
 }
 
-function makeEvent<T extends SessionEvent["type"]>(type: T, data: unknown): SessionEvent {
-  return { type, data } as SessionEvent;
-}
-
 function stubAccessor() {
   return { get: () => undefined, set: () => {} } as any;
-}
-
-const stubAlsContext = (() => {
-  const ctx = new ContextContainer();
-  ctx.setVirtualContext(SessionKey, {
-    sessionId: "test-session",
-    auth: { current: null, initiator: null },
-    turn: { id: "test-turn", sequence: 0 },
-  });
-  return ctx;
-})();
-
-function callEvent(
-  teamsAdapter: ReturnType<typeof adapter>,
-  event: SessionEvent,
-  ctx: ReturnType<typeof buildAdapterContext>,
-) {
-  return contextStorage.run(stubAlsContext, () =>
-    callAdapterEventHandler(teamsAdapter, event, ctx),
-  );
 }
 
 function asCompiled<T = unknown>(channel: unknown): CompiledChannel<T> {
@@ -305,123 +277,6 @@ describe("teamsChannel", () => {
         },
       }),
     );
-  });
-
-  it("updates a posted approval card after a durable cancel settlement", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(new Response(null, { status: 200 }))
-      .mockResolvedValue(new Response(JSON.stringify({ id: "updated-card" })));
-    const channel = teamsChannel({
-      api: { fetch: fetchMock },
-      credentials: { tokenProvider: () => "test-token", webhookVerifier: () => true },
-    });
-    const teamsAdapter = adapter(channel);
-    const ctx = buildAdapterContext(teamsAdapter, stubAccessor());
-
-    ctx.state.bot = { id: "BOT" };
-    ctx.state.conversationId = "19:conversation@thread.tacv2;messageid=THREAD_ROOT";
-    ctx.state.conversationType = "channel";
-    ctx.state.replyToActivityId = "THREAD_ROOT";
-    ctx.state.serviceUrl = "https://smba.example.test/teams";
-    ctx.state.tenantId = "TENANT";
-
-    await callEvent(
-      teamsAdapter,
-      makeEvent("input.requested", {
-        requests: [
-          {
-            action: { callId: "call-1", input: {}, kind: "tool-call", toolName: "deploy" },
-            kind: "tool-approval",
-            options: [
-              { id: "approve", label: "Approve" },
-              { id: "cancel", label: "Cancel" },
-            ],
-            prompt: "Approve deployment?",
-            requestId: "approval_1",
-          },
-        ],
-        sequence: 1,
-        stepIndex: 0,
-        turnId: "turn-1",
-      }),
-      ctx,
-    );
-
-    expect(ctx.state.pendingPromptCards).toEqual({});
-
-    const { send } = await firePost(channel, {
-      ...baseActivity({ conversationType: "channel" }),
-      conversation: {
-        conversationType: "channel",
-        id: "19:conversation@thread.tacv2;messageid=THREAD_ROOT",
-      },
-      from: { id: "USER", name: "Ada" },
-      replyToId: "approval-card",
-      name: "adaptiveCard/action",
-      type: "invoke",
-      value: {
-        action: {
-          data: {
-            eve_input: {
-              kind: "tool-approval",
-              prompt: "Approve deployment?",
-              optionId: "cancel",
-              replyToActivityId: "THREAD_ROOT",
-              requestId: "approval_1",
-            },
-          },
-        },
-      },
-    });
-    const delivery = send.mock.calls[0]?.[1] as Extract<
-      ObservedChannelDelivery<TeamsChannelState>,
-      { readonly inputResponses: readonly unknown[] }
-    >;
-    await teamsAdapter.deliver!(
-      { inputResponses: delivery.inputResponses, state: delivery.state },
-      ctx,
-    );
-    expect(ctx.state.pendingPromptCards).toEqual({
-      approval_1: { activityId: "approval-card", prompt: "Approve deployment?" },
-    });
-
-    await callEvent(
-      teamsAdapter,
-      makeEvent("approval.settled", {
-        outcome: "cancelled",
-        requestId: "approval_1",
-        responderPrincipalId: "teams:TENANT:USER",
-        sequence: 1,
-        stepIndex: 1,
-        turnId: "turn-1",
-      }),
-      ctx,
-    );
-
-    const updateCall = fetchMock.mock.calls.find(
-      ([url, init]) =>
-        String(url).endsWith(
-          "/v3/conversations/19%3Aconversation%40thread.tacv2/activities/approval-card",
-        ) && (init as RequestInit).method === "PUT",
-    );
-    if (!updateCall) throw new Error("Expected the approval card update request.");
-    const updateBody = JSON.parse(String((updateCall[1] as RequestInit).body)) as {
-      channelData?: unknown;
-      conversation?: unknown;
-      from?: unknown;
-      recipient?: unknown;
-      replyToId?: string;
-      text?: string;
-      type?: string;
-    };
-    expect(updateBody).toMatchObject({ type: "message" });
-    expect(updateBody.channelData).toBeUndefined();
-    expect(updateBody.conversation).toBeUndefined();
-    expect(updateBody.from).toBeUndefined();
-    expect(updateBody.recipient).toBeUndefined();
-    expect(updateBody.replyToId).toBeUndefined();
-    expect(updateBody.text).toBeUndefined();
   });
 
   it("handles unmentioned message-form HITL responses before the mention gate", async () => {

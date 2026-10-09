@@ -38,7 +38,7 @@ export type AgentObservation =
       readonly conversation?: ConversationState;
     };
 
-/** A session a run opened with `ctx.agent`, as its `agent.started` announced it. */
+/** A session a run opened with `ctx.agent`, as its `child.opened` linked it. */
 export interface ConversationAgentSession {
   readonly sessionId: string;
   readonly name: string;

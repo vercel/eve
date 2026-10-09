@@ -59,9 +59,13 @@ function reduceConversationLifecycle(
   event: EveAgentReducerEvent,
 ): ConversationState {
   switch (event.type) {
-    case "agent.started": {
-      const { callId, name, sessionId, taskId, turnId } = event.data;
-      if (state.agents[sessionId] !== undefined) return state;
+    case "child.opened": {
+      const { name, owner, sessionId } = event.data;
+      const turnId = event.scope?.turnId;
+      const taskId = event.scope?.taskId ?? ("taskId" in owner ? owner.taskId : undefined);
+      const callId = "callId" in owner ? owner.callId : undefined;
+      if (state.agents[sessionId] !== undefined || callId === undefined || turnId === undefined)
+        return state;
       const agent: Mutable<ConversationAgentSession> = {
         sessionId,
         name,

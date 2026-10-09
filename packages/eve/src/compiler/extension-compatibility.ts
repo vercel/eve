@@ -22,9 +22,10 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 83,
+    current: 84,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 76, 77, 78, 80, 81, 82, 83,
+      84,
     ],
     dropped: {
       14: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
@@ -131,8 +132,8 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   channel: {
-    current: 57,
-    supported: [57],
+    current: 58,
+    supported: [58],
     dropped: {
       1: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
       2: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
@@ -190,11 +191,12 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       54: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
       55: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
       56: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
+      57: "v27 interaction, response, and child facts replace the v26 input, approval, authorization, and agent.started event keys; key handlers on interaction.opened and interaction.settled, response.submitted, response.admitted, and response.settled, and child.opened, then rebuild the extension",
     },
   },
   schedule: {
-    current: 30,
-    supported: [30],
+    current: 31,
+    supported: [31],
     dropped: {
       1: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
       2: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
@@ -225,6 +227,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       27: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
       28: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
       29: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
+      30: "v27 interaction, response, and child facts replace the v26 input, approval, authorization, and agent.started event keys; key handlers on interaction.opened and interaction.settled, response.submitted, response.admitted, and response.settled, and child.opened, then rebuild the extension",
     },
   },
   subagent: {
@@ -263,8 +266,8 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   hook: {
-    current: 44,
-    supported: [44],
+    current: 45,
+    supported: [45],
     dropped: {
       1: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       2: "Model identity moved from session.started runtime metadata to step.started call attribution.",
@@ -309,6 +312,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       41: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
       42: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
       43: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
+      44: "v27 interaction, response, and child facts replace the v26 input, approval, authorization, and agent.started event keys; key handlers on interaction.opened and interaction.settled, response.submitted, response.admitted, and response.settled, and child.opened, then rebuild the extension",
     },
   },
   skill: { current: 3, supported: [1, 2, 3], dropped: {} },

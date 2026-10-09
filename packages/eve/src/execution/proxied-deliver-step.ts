@@ -1,7 +1,10 @@
 import { userPartsOf } from "#harness/user-parts.js";
-import type { SessionEvent } from "#protocol/session-event.js";
 import { sessionView } from "#harness/session-machine/commit.js";
-import { routeAnswer, hold, receiveRelayedAnswer } from "#harness/session-machine/transitions.js";
+import { routeAnswer, hold } from "#harness/session-machine/transitions.js";
+import { principalOf } from "#execution/session/delivery-facts.js";
+import { publicViewOf } from "#harness/session-machine/closure.js";
+import { interactionOwner } from "#protocol/session-projection/selectors.js";
+import type { ResponseSubmittedData } from "#protocol/session-events/families/response.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
@@ -16,7 +19,6 @@ import {
   replaceDurableSessionSnapshot,
 } from "#execution/durable-session-store.js";
 import {
-  publishSessionEvents,
   relaySessionEvents,
   type PublishedSessionEvents,
   type SessionStepState,
@@ -103,8 +105,12 @@ async function routeProxiedDeliver(
   const resolvedRequests = new Set<string>();
   // A message that answers a question is still the person's turn in the
   // conversation, so the stream records it with its delivery ids.
-  const answerMessages: SessionEvent[] = [];
   const answerDeliveryIds: string[] = [];
+  // A delivery that carried only relayed answers is this session's to record: it took effect
+  // once forwarded, or, as a message, joins the turn that asked.
+  const tables = publicViewOf(storedProjection(durableSession.state));
+  const routedDeliveries: Parameters<typeof routeAnswer>[1]["deliveries"][number][] = [];
+  const answers: ResponseSubmittedData[] = [];
 
   for (const [sourcePayloadIndex, payload] of sourceDelivery.payloads.entries()) {
     const routed = routeDeliverPayload({
@@ -115,6 +121,46 @@ async function routeProxiedDeliver(
     });
     parentAction ??= routed.parentAction;
     if (routed.forSelf !== undefined) parentPayloads.set(sourcePayloadIndex, routed.forSelf);
+    const payloadMetadata = (sourceDelivery.deliveryMetadata ?? []).filter(
+      (metadata) => metadata.payloadIndex === sourcePayloadIndex,
+    );
+    const answeredBy = payloadMetadata[0]?.deliveryId;
+    if (routed.forSelf === undefined && routed.forChildren.length > 0 && answeredBy !== undefined) {
+      const message = routed.forChildren.find((forChild) => forChild.message !== undefined);
+      const askedIn = message?.payload.inputResponses
+        .map((response) => tables.interactions[response.requestId])
+        .find((row) => row !== undefined);
+      const turnId = askedIn === undefined ? undefined : interactionOwner(tables, askedIn).turnId;
+      for (const metadata of payloadMetadata) {
+        const entry: {
+          -readonly [
+            K in keyof (typeof routedDeliveries)[number]
+          ]: (typeof routedDeliveries)[number][K];
+        } = {
+          deliveryId: metadata.deliveryId,
+        };
+        const principal = principalOf(sourceDelivery.auth);
+        if (principal !== undefined) entry.principal = principal;
+        if (metadata.channelKind !== undefined) entry.source = { channel: metadata.channelKind };
+        if (message?.message !== undefined && turnId !== undefined)
+          entry.consumed = { parts: userPartsOf(message.message), turnId };
+        routedDeliveries.push(entry);
+      }
+      for (const forChild of routed.forChildren) {
+        for (const response of forChild.payload.inputResponses) {
+          const index = (payload.inputResponses ?? []).indexOf(response);
+          const value: { optionId?: string; text?: string } = {};
+          if (response.optionId !== undefined) value.optionId = response.optionId;
+          if (response.text !== undefined) value.text = response.text;
+          answers.push({
+            deliveryId: answeredBy,
+            interactionId: response.requestId,
+            responseId: `response_${answeredBy}_${index === -1 ? `typed_0` : String(index)}`,
+            value,
+          });
+        }
+      }
+    }
 
     for (const [childIndex, forChild] of routed.forChildren.entries()) {
       if (forChild.workflowAsk !== undefined || forChild.message !== undefined) {
@@ -122,17 +168,10 @@ async function routeProxiedDeliver(
           resolvedRequests.add(requestId);
       }
       if (forChild.message !== undefined) {
-        const { turnId } = forChild.resolved.event;
-        const deliveryIds = (sourceDelivery.deliveryMetadata ?? [])
-          .filter((metadata) => metadata.payloadIndex === sourcePayloadIndex)
-          .map((metadata) => metadata.deliveryId);
-        answerDeliveryIds.push(...deliveryIds);
-        answerMessages.push(
-          ...receiveRelayedAnswer({
-            deliveryIds,
-            parts: userPartsOf(forChild.message),
-            turnId,
-          }),
+        answerDeliveryIds.push(
+          ...(sourceDelivery.deliveryMetadata ?? [])
+            .filter((metadata) => metadata.payloadIndex === sourcePayloadIndex)
+            .map((metadata) => metadata.deliveryId),
         );
       }
       const key = JSON.stringify([
@@ -217,7 +256,13 @@ async function routeProxiedDeliver(
     retired = true;
   }
   const view = sessionView(storedProjection(durableSession.state), durableSession.state);
-  const resolvedEvents = [...routeAnswer(view, { children: answered }).events];
+  const resolvedEvents = [
+    ...routeAnswer(view, {
+      decided: answered.flatMap((child) => child.resolutions),
+      deliveries: routedDeliveries,
+      forwarded: answers,
+    }).events,
+  ];
   // Answers that leave other requests pending, and nothing for the turn itself, keep the
   // open turn held, so it parks again as after a partial approval answer. A forwarded approval
   // stays open until its child settles it, but it no longer waits on the person.
@@ -241,18 +286,12 @@ async function routeProxiedDeliver(
       ? replaceDurableSessionSnapshot({ session: durableSession, state: input.sessionState })
       : input.sessionState,
   };
-  if (answerMessages.length > 0) {
-    // Like a steering message, the answer joins the open turn, so the turn's
-    // later events carry its delivery ids too.
-    published = await publishSessionEvents(
-      {
-        serializedContext: joinTurnDeliveryIds(published.serializedContext, answerDeliveryIds),
-        sessionState: published.sessionState,
-        sessionWritable: input.sessionWritable,
-      },
-      answerMessages,
-    );
-  }
+  // Like a steering message, an answering message joins the open turn, so the turn's later events
+  // carry its delivery ids too.
+  published = {
+    ...published,
+    serializedContext: joinTurnDeliveryIds(published.serializedContext, answerDeliveryIds),
+  };
   const context = await relaySessionEvents(
     { ...published, sessionWritable: input.sessionWritable },
     resolvedEvents,

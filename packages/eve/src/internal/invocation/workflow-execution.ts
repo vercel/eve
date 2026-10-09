@@ -20,9 +20,9 @@ import {
 } from "#internal/invocation/metadata.js";
 import type { RouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { getRun, getWorld } from "#internal/workflow/runtime.js";
-import type { AuthorizationRequiredStreamEvent } from "#protocol/message.js";
 import {
   foldSessionEvents,
+  type OpenSignIn,
   openInputs,
   type SessionProjection,
 } from "#protocol/session-projection.js";
@@ -190,8 +190,8 @@ interface InvocationStream {
   readonly batches: readonly InputBatch[];
   /** The latest batch with requests still open, narrowed to them. */
   readonly pending: InputBatch | undefined;
-  /** The prompt of each sign-in still open, in the order they were required. */
-  readonly signIns: readonly AuthorizationRequiredStreamEvent["data"][];
+  /** Each sign-in still open, in the order they opened. */
+  readonly signIns: readonly OpenSignIn[];
   /** The latest turn's final message. */
   readonly result: JsonValue | undefined;
   /** How the latest turn ended; reset when a turn starts or a park resumes. */
@@ -203,6 +203,7 @@ async function readInvocationStream(invocationId: string): Promise<InvocationStr
   let result: JsonValue | undefined;
   let settled: InvocationStream["settled"];
   const parts = new Map<string, { readonly kind: string; readonly value: JsonValue | undefined }>();
+  const opened: { readonly key: string; readonly line: number; readonly ids: string[] }[] = [];
   const events = streamSessionEvents(invocationId, { follow: false });
   const { projection, signIns } = await foldSessionEvents(events, (event, before) => {
     switch (event.type) {
@@ -211,27 +212,18 @@ async function readInvocationStream(invocationId: string): Promise<InvocationStr
         settled = undefined;
         parts.clear();
         break;
-      case "input.requested": {
-        // The projection keeps the first request under an id, so a batch claims only new ids.
-        const introduced = event.data.requests.filter(
-          (request) => before.inputs[request.requestId] === undefined,
-        );
-        if (introduced.length === 0) break;
-        batches.push(
-          new Map(
-            introduced.map((request) => [
-              invocationInputRequestId(
-                `${event.meta.position.line}.${event.meta.position.index}`,
-                request.requestId,
-              ),
-              request,
-            ]),
-          ),
-        );
+      case "interaction.opened": {
+        // One commit's requests are one batch. The projection keeps the first request under an
+        // id, so a batch claims only new ids.
+        if (event.data.request.kind === "sign-in") break;
+        if (before.inputs[event.data.interactionId] !== undefined) break;
+        const { line, index } = event.meta.position;
+        const current = opened.at(-1);
+        if (current?.line === line) current.ids.push(event.data.interactionId);
+        else opened.push({ ids: [event.data.interactionId], key: `${line}.${index}`, line });
         break;
       }
-      case "input.resolved":
-      case "authorization.completed":
+      case "interaction.settled":
         settled = undefined;
         break;
       case "content.completed":
@@ -278,6 +270,18 @@ async function readInvocationStream(invocationId: string): Promise<InvocationStr
       }
     }
   });
+  for (const batch of opened) {
+    batches.push(
+      new Map(
+        batch.ids.flatMap((id) => {
+          const request = projection.inputs[id]?.request;
+          return request === undefined
+            ? []
+            : [[invocationInputRequestId(batch.key, request.requestId), request] as const];
+        }),
+      ),
+    );
+  }
   const open = new Set(openInputs(projection).map((input) => input.request.requestId));
   let pending: InputBatch | undefined;
   for (const batch of batches.toReversed()) {
@@ -287,6 +291,37 @@ async function readInvocationStream(invocationId: string): Promise<InvocationStr
     break;
   }
   return { batches, pending, projection, result, settled, signIns };
+}
+
+/** An open sign-in as the invocation API reports it. */
+function authorizationRequestOf(open: OpenSignIn): AgentInvocationAuthorizationRequest {
+  const request: {
+    -readonly [
+      K in keyof AgentInvocationAuthorizationRequest
+    ]: AgentInvocationAuthorizationRequest[K];
+  } = {
+    description: open.prompt,
+    name: open.name,
+  };
+  const signIn = open.signIn;
+  if (signIn === undefined) return request;
+  const challenge: {
+    url?: string;
+    userCode?: string;
+    expiresAt?: string;
+    instructions?: string;
+    displayName?: string;
+  } = {};
+  if (signIn.url !== undefined) challenge.url = signIn.url;
+  if (signIn.userCode !== undefined) challenge.userCode = signIn.userCode;
+  if (signIn.expiresAt !== undefined) challenge.expiresAt = signIn.expiresAt;
+  if (signIn.instructions !== undefined) challenge.instructions = signIn.instructions;
+  if (signIn.displayName !== undefined) challenge.displayName = signIn.displayName;
+  if (signIn.callbackUrl !== undefined) {
+    request.authorization = challenge;
+    request.webhookUrl = signIn.callbackUrl;
+  }
+  return request;
 }
 
 /** True when `responses` exactly repeats the answers eve accepted for the latest batch. */
@@ -331,14 +366,7 @@ function projectInvocation(
   // A pending batch can outlive its session (timeout, failure); nobody can answer it then.
   if (runStatus === "failed" || failure?.terminal === true) return failed();
   if (runStatus === "completed") return { ...base, result, status: "completed" };
-  const authorizations = stream.signIns.map(
-    ({ authorization, description, name, webhookUrl }): AgentInvocationAuthorizationRequest => ({
-      description,
-      name,
-      ...(authorization !== undefined && { authorization }),
-      ...(webhookUrl !== undefined && { webhookUrl }),
-    }),
-  );
+  const authorizations = stream.signIns.map(authorizationRequestOf);
   if (authorizations.length > 0) {
     return {
       ...base,

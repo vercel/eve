@@ -159,14 +159,11 @@ export interface TwilioChannelEvents {
   readonly "call.settled"?: TwilioEventHandler<"call.settled">;
   readonly "content.completed"?: TwilioEventHandler<"content.completed">;
   readonly "content.delta"?: TwilioEventHandler<"content.delta">;
-  readonly "input.requested"?: TwilioEventHandler<"input.requested">;
-  readonly "input.resolved"?: TwilioEventHandler<"input.resolved">;
-  readonly "approval.settled"?: TwilioEventHandler<"approval.settled">;
+  readonly "interaction.opened"?: TwilioEventHandler<"interaction.opened">;
+  readonly "interaction.settled"?: TwilioEventHandler<"interaction.settled">;
   readonly "turn.settled"?: TwilioEventHandler<"turn.settled">;
   readonly "session.ended"?: TwilioEventHandler<"session.ended">;
   readonly "delivery.settled"?: TwilioEventHandler<"delivery.settled">;
-  readonly "authorization.required"?: TwilioEventHandler<"authorization.required">;
-  readonly "authorization.completed"?: TwilioEventHandler<"authorization.completed">;
 }
 
 /** SMS/Messaging defaults for Twilio outbound replies. */

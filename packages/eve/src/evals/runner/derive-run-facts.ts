@@ -1,5 +1,6 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
-import type { AgentStartedStreamEvent } from "#protocol/message.js";
+import type { ChildOpenedData } from "#protocol/session-events/families/child.js";
+import { foldSession, initialSessionProjection } from "#protocol/session-projection.js";
 import type { TaskStartedData } from "#protocol/session-events/families/task.js";
 import type { CallOutcome } from "#protocol/session-events/families/call.js";
 import type { InputRequest } from "#shared/input.js";
@@ -67,9 +68,9 @@ export function deriveRunFacts(
   );
   const agentCallIds = new Set<string>();
   const outputs = new Map<string, JsonValue | undefined>();
-  const agentSessions: AgentStartedStreamEvent["data"][] = (options?.usageEvents ?? [])
-    .filter((event) => event.type === "agent.started")
-    .map((event) => event.data);
+  const agentSessions: AgentSession[] = (options?.usageEvents ?? []).flatMap((event) =>
+    event.type === "child.opened" ? [agentSessionOf(event)] : [],
+  );
   const inputRequests: InputRequest[] = [];
   const turnIndexes = new Map<string, number>();
   let turnIndex = -1;
@@ -99,7 +100,10 @@ export function deriveRunFacts(
     return call;
   };
 
+  // The private fold rebuilds each request with the call it's about.
+  let requests = initialSessionProjection();
   for (const event of events) {
+    requests = foldSession(requests, event);
     switch (event.type) {
       case "turn.started": {
         if (!turnIndexes.has(event.data.turnId)) {
@@ -175,12 +179,13 @@ export function deriveRunFacts(
         agentCalls.push({ callId, name: task.name, taskId, turnIndex: Math.max(index, 0) });
         break;
       }
-      case "agent.started": {
-        agentSessions.push(event.data);
+      case "child.opened": {
+        agentSessions.push(agentSessionOf(event));
         break;
       }
-      case "input.requested": {
-        inputRequests.push(...event.data.requests);
+      case "interaction.opened": {
+        const request = requests.inputs[event.data.interactionId]?.request;
+        if (request !== undefined) inputRequests.push(request);
         break;
       }
       case "content.completed": {
@@ -241,13 +246,30 @@ function sessionUsage(events: readonly SessionStreamEvent[]): TokenUsage | undef
   return total;
 }
 
+/** A session a run opened, by the task whose run opened it. */
+interface AgentSession {
+  readonly sessionId: string;
+  readonly taskId?: string;
+}
+
+function agentSessionOf(event: {
+  readonly data: ChildOpenedData;
+  readonly scope?: { readonly taskId?: string };
+}): AgentSession {
+  const taskId =
+    event.scope?.taskId ?? ("taskId" in event.data.owner ? event.data.owner.taskId : undefined);
+  return taskId === undefined
+    ? { sessionId: event.data.sessionId }
+    : { sessionId: event.data.sessionId, taskId };
+}
+
 function deriveSubagentCalls(input: {
   readonly agentCalls: readonly AgentCall[];
-  readonly agentSessions: readonly AgentStartedStreamEvent["data"][];
+  readonly agentSessions: readonly AgentSession[];
   readonly sessionId: string | undefined;
   readonly settledTaskCalls: ReadonlyMap<string, AgentCallSettlement>;
 }): EveEvalSubagentCall[] {
-  const agentSessionsByTaskId = new Map<string, AgentStartedStreamEvent["data"]>();
+  const agentSessionsByTaskId = new Map<string, AgentSession>();
   for (const session of input.agentSessions) {
     if (session.taskId !== undefined) agentSessionsByTaskId.set(session.taskId, session);
   }
@@ -259,7 +281,6 @@ function deriveSubagentCalls(input: {
       childSessionId: session?.sessionId,
       name: call.name,
       output: settled?.output,
-      remoteUrl: session?.remote?.url,
       sessionId: input.sessionId,
       status: settled?.status ?? "working",
       turnIndex: call.turnIndex,

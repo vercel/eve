@@ -10,12 +10,11 @@ import type { HookEventType } from "#public/definitions/hook.js";
  * Settlement events stay false: cancelling there would give the turn a second terminal.
  */
 const HOOK_CANCELLABLE_EVENTS = {
-  "agent.started": false,
-  "approval.candidate": true,
-  "approval.settled": true,
-  "authorization.completed": true,
-  "authorization.required": true,
   "call.input": true,
+  "child.opened": false,
+  "interaction.opened": true,
+  // A settlement is a terminal fact: cancelling there would give its work a second terminal.
+  "interaction.settled": false,
   "call.progress": true,
   "call.requested": true,
   "call.settled": true,
@@ -27,8 +26,9 @@ const HOOK_CANCELLABLE_EVENTS = {
   "delivery.admitted": true,
   "delivery.consumed": true,
   "delivery.settled": false,
-  "input.requested": true,
-  "input.resolved": true,
+  "response.admitted": true,
+  "response.settled": false,
+  "response.submitted": true,
   "model.requested": true,
   "model.settled": true,
   "model.started": true,

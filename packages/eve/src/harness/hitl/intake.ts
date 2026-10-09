@@ -144,6 +144,11 @@ export async function acceptHumanInput(
       challengesAtStart,
     },
     takeQueued: delivered.takeQueued,
+    // Every answer the delivery carried, typed or pressed, before any pass consumed it.
+    submitted: [
+      ...(steered?.responseBindings ?? []),
+      ...(coordinated.stepInput?.responseBindings ?? []),
+    ],
   });
   for (const batch of decision.resolved) {
     await step.instrumentation?.publishInputResolutions({

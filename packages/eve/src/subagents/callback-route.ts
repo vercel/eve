@@ -1,9 +1,10 @@
-import { renameLegacyTaskCallback } from "#execution/legacy-remote-agent/protocol.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { z } from "#compiled/zod/index.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
-import { inputRequestSchema, inputResponseSchema } from "#shared/input.js";
+import { inputRequestSchema } from "#shared/input.js";
+import { RESPONSE_OUTCOMES } from "#protocol/session-events/catalog.js";
+import { interactionSchemas } from "#protocol/session-events/families/interaction.js";
 import { agentTurnOutcomeWithCostSchema } from "#shared/agent-turn-outcome.js";
 import { jsonValueSchema } from "#shared/json-schemas.js";
 
@@ -39,97 +40,24 @@ const sessionInputCallbackSchema = z.object({
   }),
 });
 
+// A child's interaction changes keep its own ids; the parent mirrors them. Unknown fields are
+// dropped, so a newer child's additions don't refuse the relay.
 const sessionAuthorizationCallbackSchema = z.object({
   callId: z.string().min(1),
   childSessionId: z.string().min(1),
   kind: z.literal("subagent-authorization-event"),
   subagentName: z.string().min(1),
   event: z.discriminatedUnion("type", [
+    interactionSchemas["interaction.opened"],
+    interactionSchemas["interaction.settled"],
     z.object({
-      type: z.literal("approval.candidate"),
-      data: z
-        .object({
-          candidateId: z.string(),
-          outcome: z.enum(["pending", "rejected", "failed", "timed-out", "stale"]),
-          requestId: z.string(),
-          responderPrincipalId: z.string(),
-          reason: z.string().optional(),
-          sequence: z.number(),
-          stepIndex: z.number(),
-          turnId: z.string(),
-        })
-        .passthrough(),
-    }),
-    z.object({
-      type: z.literal("approval.settled"),
-      data: z
-        .object({
-          outcome: z.enum(["approved", "cancelled"]),
-          requestId: z.string(),
-          responderPrincipalId: z.string(),
-          sequence: z.number(),
-          stepIndex: z.number(),
-          turnId: z.string(),
-        })
-        .passthrough(),
-    }),
-    z.object({
-      type: z.literal("input.resolved"),
-      data: z
-        .object({
-          resolutions: z.array(
-            z
-              .object({
-                kind: z.enum(["question", "session-limit", "tool-approval"]),
-                outcome: z.enum([
-                  "answered",
-                  "approved",
-                  "cancelled",
-                  "denied",
-                  "ignored",
-                  "invalid",
-                ]),
-                requestId: z.string(),
-                response: inputResponseSchema.optional(),
-              })
-              .passthrough(),
-          ),
-          sequence: z.number(),
-          stepIndex: z.number(),
-          turnId: z.string(),
-        })
-        .passthrough(),
-    }),
-    z.object({
-      type: z.literal("authorization.required"),
-      data: z
-        .object({
-          description: z.string(),
-          name: z.string(),
-          sequence: z.number(),
-          stepIndex: z.number(),
-          turnId: z.string(),
-          webhookUrl: z.string().optional(),
-          attemptId: z.string().optional(),
-          taskId: z.string().optional(),
-          principalId: z.string().optional(),
-        })
-        .passthrough(),
-    }),
-    z.object({
-      type: z.literal("authorization.completed"),
-      data: z
-        .object({
-          name: z.string(),
-          outcome: z.enum(["authorized", "declined", "failed", "timed-out"]),
-          sequence: z.number(),
-          stepIndex: z.number(),
-          turnId: z.string(),
-          attemptId: z.string().optional(),
-          taskId: z.string().optional(),
-          principalId: z.string().optional(),
-        })
-        .passthrough(),
+      type: z.literal("response.settled"),
+      data: z.object({
+        deliveryId: z.string().optional(),
+        interactionId: z.string(),
+        outcome: z.enum(RESPONSE_OUTCOMES),
+        reason: z.string().optional(),
+      }),
     }),
   ]),
 });
@@ -163,7 +91,7 @@ export async function handleSessionCallbackRequest(
 
   let body: unknown;
   try {
-    body = renameLegacyTaskCallback(await request.json());
+    body = await request.json();
   } catch {
     return Response.json({ error: "Invalid JSON body.", ok: false }, { status: 400 });
   }

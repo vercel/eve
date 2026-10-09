@@ -241,8 +241,7 @@ export class EveAcpAdapter {
           const turnId = data !== undefined && "turnId" in data ? data.turnId : undefined;
           if (typeof turnId === "string") active.turnId = turnId;
 
-          if (event.type === "input.requested") inputRequests.push(...event.data.requests);
-          if (event.type === "authorization.required") {
+          if (event.type === "interaction.opened" && event.data.request.kind === "sign-in") {
             unsupportedEvent = unsupported(
               "Connection authorization cannot be completed through eve ACP mode.",
             );
@@ -250,6 +249,11 @@ export class EveAcpAdapter {
           if (event.type === "turn.settled" && event.data.outcome === "cancelled") cancelled = true;
           failure = failureOf(event) ?? failure;
           await this.#projectEvent(params.sessionId, session, event, client);
+          // The projection rebuilds the request with the call it's about.
+          if (event.type === "interaction.opened") {
+            const request = session.projection.inputs[event.data.interactionId]?.request;
+            if (request !== undefined) inputRequests.push(request);
+          }
         }
 
         if (active.protocolCancelled) {
