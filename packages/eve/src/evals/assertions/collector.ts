@@ -87,13 +87,10 @@ export class AssertionCollector {
     return makeHandle(entry);
   }
 
-  /** Record a keyed score. It has no verdict unless the handle chains `.gate()` or `.atLeast()`. */
-  recordScore(key: string, evaluation: ScoreInput): AssertionHandle {
-    const normalizedKey = key.trim();
-    if (normalizedKey.length === 0) throw new Error("t.score(key) requires a non-empty key.");
+  /** Record a raw score. It has no verdict unless the handle chains `.gate()` or `.atLeast()`. */
+  recordScore(evaluation: ScoreInput): AssertionHandle {
     return this.recordValue({
-      name: normalizedKey,
-      key: normalizedKey,
+      name: "score",
       severity: "soft",
       score: async () => toOutcome(await evaluation),
     });

@@ -247,7 +247,7 @@ export interface AssertionHandle {
 export interface AssertionResult {
   /** Display name, e.g. `judge.boolean [citation]`. */
   readonly name: string;
-  /** Stable identifier from `t.score(key, …)` or `.label(key)`; absent for unlabeled assertions. */
+  /** Stable identifier set by `.label(key)`; absent for unlabeled assertions. */
   readonly key?: string;
   /** Raw measurement; absent when the scorer threw. */
   readonly score?: number;
@@ -509,12 +509,12 @@ export interface EveEvalContext<TContext = unknown> extends EveEvalAssertions {
   /** Apply a value-level assertion (from `eve/evals/expect`) to a value. */
   check(value: unknown, assertion: Assertion): AssertionHandle;
   /**
-   * Record a raw score under a stable `key`. On its own the score never passes
-   * or fails the eval. Chain `.gate(0.9)` to fail the eval below 0.9, or
-   * `.atLeast(0.9)` to mark it `scored`. The score itself is never rewritten.
+   * Record a raw score you computed yourself. Chain `.label(key)` to name it
+   * for reporters and stores. On its own the score never passes or fails the
+   * eval. Chain `.gate(0.9)` to fail the eval below 0.9, or `.atLeast(0.9)` to
+   * mark it `scored`. The score itself is never rewritten.
    */
   score(
-    key: string,
     evaluation: number | AssertionEvaluation | Promise<number | AssertionEvaluation>,
   ): AssertionHandle;
   /** Record an immediate gate and abort dependent control flow when it fails. */

@@ -19,18 +19,20 @@ function taskResult(): EveEvalTaskResult {
 describe("AssertionCollector.recordScore", () => {
   it("records a bare measurement with no verdict and never fails the eval", async () => {
     const collector = new AssertionCollector();
-    collector.recordScore("fidelity", 0.82);
-    collector.recordScore("misses", {
-      score: 0,
-      message: "nothing matched",
-      metadata: { hits: 0 },
-    });
+    collector.recordScore(0.82).label("fidelity");
+    collector
+      .recordScore({
+        score: 0,
+        message: "nothing matched",
+        metadata: { hits: 0 },
+      })
+      .label("misses");
 
     const assertions = await collector.finalize(taskResult());
 
     expect(assertions).toEqual([
       expect.objectContaining({
-        name: "fidelity",
+        name: "score [fidelity]",
         key: "fidelity",
         score: 0.82,
         severity: "soft",
@@ -51,7 +53,7 @@ describe("AssertionCollector.recordScore", () => {
 
   it("keeps the raw score when a gate threshold fails", async () => {
     const collector = new AssertionCollector();
-    collector.recordScore("fidelity", Promise.resolve(0.82)).gate(0.9);
+    collector.recordScore(Promise.resolve(0.82)).label("fidelity").gate(0.9);
 
     const assertions = await collector.finalize(taskResult());
 
@@ -68,8 +70,8 @@ describe("AssertionCollector.recordScore", () => {
 
   it("passes exactly at the threshold and only demotes under a soft bar", async () => {
     const collector = new AssertionCollector();
-    collector.recordScore("exact", 0.9).gate(0.9);
-    collector.recordScore("wording", 0.5).atLeast(0.6);
+    collector.recordScore(0.9).label("exact").gate(0.9);
+    collector.recordScore(0.5).label("wording").atLeast(0.6);
 
     const assertions = await collector.finalize(taskResult());
 
@@ -84,8 +86,8 @@ describe("AssertionCollector.recordScore", () => {
 
   it("reports the implicit gate threshold of 1", async () => {
     const collector = new AssertionCollector();
-    collector.recordScore("full", 1).gate();
-    collector.recordScore("partial", 0.99).gate();
+    collector.recordScore(1).label("full").gate();
+    collector.recordScore(0.99).label("partial").gate();
 
     const assertions = await collector.finalize(taskResult());
 
@@ -97,8 +99,11 @@ describe("AssertionCollector.recordScore", () => {
 
   it("reports a thrown evaluator as an errored outcome with no score", async () => {
     const collector = new AssertionCollector();
-    collector.recordScore("judge", Promise.reject(new Error("model unavailable"))).atLeast(0.5);
-    collector.recordScore("fidelity", 0.82);
+    collector
+      .recordScore(Promise.reject(new Error("model unavailable")))
+      .label("judge")
+      .atLeast(0.5);
+    collector.recordScore(0.82).label("fidelity");
 
     const assertions = await collector.finalize(taskResult());
 
@@ -117,17 +122,13 @@ describe("AssertionCollector.recordScore", () => {
 
   it("treats a non-finite score as an errored outcome", async () => {
     const collector = new AssertionCollector();
-    collector.recordScore("ratio", Number.NaN);
+    collector.recordScore(Number.NaN);
 
     const [assertion] = await collector.finalize(taskResult());
 
     expect(assertion).toMatchObject({ errored: true, passed: false });
     expect(assertion?.score).toBeUndefined();
     expect(assertion?.message).toContain("finite");
-  });
-
-  it("requires a non-empty key", () => {
-    expect(() => new AssertionCollector().recordScore("  ", 1)).toThrow("non-empty key");
   });
 });
 

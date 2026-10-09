@@ -13,10 +13,12 @@ export default defineEval({
     t.succeeded();
 
     const reply = turn.message ?? "";
-    t.score("reply-brevity", {
+    t.score({
       score: Math.max(0, 1 - reply.length / 400),
       metadata: { length: reply.length },
-    });
-    t.score("mentions-ping", reply.includes("score ping") ? 1 : 0).gate();
+    }).label("reply-brevity");
+    t.score(reply.includes("score ping") ? 1 : 0)
+      .label("mentions-ping")
+      .gate();
   },
 });

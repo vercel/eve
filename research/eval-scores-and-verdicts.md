@@ -24,17 +24,17 @@ reflects that.
 
 ## Authoring contract
 
-`t.score(key, evaluation)` records a measurement under a stable key and returns
-the ordinary `AssertionHandle`. `evaluation` is a number or
+`t.score(evaluation)` records a measurement and returns the ordinary
+`AssertionHandle`; `.label(key)` names it, as for every other assertion. `evaluation` is a number or
 `{ score, message?, metadata? }`, or a promise of either, so code and model
 evaluators both fit. Scores are numeric; boolean assertions keep scoring 0 or 1.
 
 ```ts
 const grade = await evaluator.evaluate({ input, output, reference });
-t.score("faithfulness", grade); // tracked only: no verdict, never fails
+t.score(grade).label("faithfulness"); // no verdict, never fails
 
-t.score("faithfulness", grade).gate(0.9); // fails the eval below 0.9
-t.score("faithfulness", grade).atLeast(0.9); // marks it `scored`, fatal under --strict
+t.score(grade).label("faithfulness").gate(0.9); // fails the eval below 0.9
+t.score(grade).label("faithfulness").atLeast(0.9); // marks it `scored`, fatal under --strict
 ```
 
 Recording imposes no acceptance rule, and a rule never rewrites the score or
@@ -48,7 +48,7 @@ Every finalized `AssertionResult`, in reporters' `onEvalComplete` and in the
 
 | field       | meaning                                                                             |
 | ----------- | ----------------------------------------------------------------------------------- |
-| `key`       | stable identifier from `t.score(key, …)` or `.label(key)`; else absent              |
+| `key`       | stable identifier set by `.label(key)`; else absent                                 |
 | `score`     | raw measurement; absent when the scorer threw                                       |
 | `threshold` | effective minimum passing score (a gate defaults to 1); absent when no rule applies |
 | `passed`    | verdict of the rule; absent when the entry is tracked only                          |

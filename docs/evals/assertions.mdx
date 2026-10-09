@@ -85,22 +85,22 @@ Pick the cheapest builder that captures what "correct" means. When exact match i
 
 ## Scores with `t.score`
 
-`t.score(key, evaluation)` records a measurement you computed yourself, from code or from your own model call, without wrapping it in an assertion. The `key` is a stable identifier that reporters and artifacts expose as `key`, so a results store can compare runs without parsing display names. The evaluation is a number or `{ score, message?, metadata? }`, or a promise of either:
+`t.score(evaluation)` records a measurement you computed yourself, from code or from your own model call, without wrapping it in an assertion. The evaluation is a number or `{ score, message?, metadata? }`, or a promise of either. Chain `.label(key)` to name it: reporters and artifacts expose the label as `key`, so a results store can compare runs without parsing display names. Without a label the score reports as `score`, and several unlabeled scores share that name.
 
 ```ts
 const reply = turn.message ?? "";
-t.score("reply-brevity", {
+t.score({
   score: Math.max(0, 1 - reply.length / 400),
   metadata: { length: reply.length },
-});
-t.score("faithfulness", gradeFaithfulness(reply, reference)); // your own async evaluator
+}).label("reply-brevity");
+t.score(gradeFaithfulness(reply, reference)).label("faithfulness"); // your own async evaluator
 ```
 
 Without a rule, a score has no verdict: it lands in reports and artifacts, and the eval's outcome does not depend on it. Chain a rule to make the measurement decide:
 
 ```ts
-t.score("faithfulness", gradeFaithfulness(reply, reference)).gate(0.9); // fails the eval below 0.9
-t.score("reply-brevity", brevity).atLeast(0.5); // marks the eval `scored`, fatal under --strict
+t.score(gradeFaithfulness(reply, reference)).label("faithfulness").gate(0.9); // fails below 0.9
+t.score(brevity).label("reply-brevity").atLeast(0.5); // marks the eval `scored`, fatal under --strict
 ```
 
 The rule never rewrites the measurement. A `0.82` gated at `0.9` is reported as `score: 0.82`, `threshold: 0.9`, `passed: false`. An evaluator that throws or returns a non-finite number records an errored outcome with the error message and no score, and fails the eval.
@@ -120,7 +120,7 @@ The same entries land in the [run artifacts](./running#artifacts) under `.eve/ev
 
 ```json
 {
-  "name": "reply-brevity",
+  "name": "score [reply-brevity]",
   "key": "reply-brevity",
   "score": 0.84,
   "severity": "soft",
