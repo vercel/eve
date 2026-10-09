@@ -31,6 +31,7 @@ import {
   SKILL_ENTRY_NAME,
   SKILL_TOOL_NAME,
 } from "#protocol/catalog-tools.js";
+import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
@@ -126,9 +127,10 @@ export interface StepCatalog extends HarnessToolLookup {
   describe(definition: HarnessToolDefinition): string;
   /**
    * Resolves a model tool call to the entry it runs. An `eve__tool` call that
-   * names a deferred entry becomes the call to that entry, and an `eve__skill`
-   * call becomes the call to load its skill; any other call runs the listed
-   * tool it names. A call that reaches none of these resolves to nothing.
+   * names an entry `callableByName` accepts becomes the call to that entry, and
+   * an `eve__skill` call becomes the call to load its skill; any other call runs
+   * the listed tool it names. A call that reaches none of these resolves to
+   * nothing.
    */
   readonly resolve: CallResolver;
 }
@@ -187,7 +189,9 @@ export function buildStepCatalog(input: {
       if (toolCall.toolName === CALL_TOOL_NAME && catalogTools.tools) {
         const name = targetName(toolCall.input);
         const definition = name === undefined ? undefined : toolEntry(name);
-        if (name === undefined || definition?.deferred !== true) return undefined;
+        if (name === undefined || definition === undefined || !callableByName(definition)) {
+          return undefined;
+        }
         return { call: asEntryCall(toolCall, name), definition };
       }
       if (toolCall.toolName === SKILL_TOOL_NAME && catalogTools.skills) {
@@ -297,8 +301,7 @@ function connectionEntryNamed(
 /**
  * The model sees one fixed schema. Validation resolves the named entry and
  * checks `input` against that entry's own schema, so a call that reaches
- * `eve__tool` always names a deferred entry with valid input, as a direct call
- * names a listed tool.
+ * `eve__tool` always names an entry `callableByName` accepts, with valid input.
  */
 function createCallTool(
   catalog: StepCatalog,
@@ -379,6 +382,21 @@ function runResolved(
   return runEntryCall(resolved, options);
 }
 
+/**
+ * Whether `eve__tool` runs `definition`: a deferred entry, or a listed tool eve
+ * runs itself. A model that routes a listed tool through `eve__tool` then gets
+ * the same result as a direct call instead of a wasted step; nothing it reads
+ * says this works. The tools in eve's reserved namespace, and tools a provider
+ * or client runs, stay direct-only.
+ */
+function callableByName(definition: HarnessToolDefinition): boolean {
+  return (
+    definition.deferred === true ||
+    (eveNamespaceReservation(definition.name) === undefined &&
+      (definition.execute !== undefined || definition.workflowId !== undefined))
+  );
+}
+
 interface ToolInput {
   readonly input?: unknown;
   readonly name: string;
@@ -391,7 +409,7 @@ async function resolveToolInput(
 ): Promise<StandardSchemaV1.Result<ToolInput>> {
   const definition = toolEntry(name);
   if (definition === undefined) return failure("name", unknownEntryMessage(name, catalog));
-  if (definition.deferred !== true) {
+  if (!callableByName(definition)) {
     return failure("name", `"${name}" is in your tool list; call it directly.`);
   }
   const checked = await checkToolCallInput(definition, input, "");

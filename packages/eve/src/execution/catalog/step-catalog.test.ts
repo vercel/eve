@@ -307,10 +307,12 @@ describe("buildStepCatalog", () => {
       ).toBe("# PDF forms");
     });
 
-    it("resolves a direct call only to a listed tool", () => {
+    it("resolves a direct call only to a listed tool, and eve__tool to a listed tool too", () => {
       expect(catalog.resolve({ input: {}, toolName: "add" })?.definition).toBe(add);
       expect(catalog.resolve({ input: {}, toolName: "refund_invoice" })).toBeUndefined();
-      expect(catalog.resolve({ input: { name: "add" }, toolName: CALL_TOOL_NAME })).toBeUndefined();
+      expect(
+        catalog.resolve({ input: { input: { a: 1 }, name: "add" }, toolName: CALL_TOOL_NAME }),
+      ).toEqual({ call: { input: { a: 1 }, toolName: "add" }, definition: add });
       expect(
         catalog.resolve({ input: { name: "refund_invoice" }, toolName: SKILL_TOOL_NAME }),
       ).toBeUndefined();
@@ -338,8 +340,28 @@ describe("buildStepCatalog", () => {
         }),
         inlineTool("refund_payment", { deferred: true }),
         inlineTool("stripe_list_disputes", { deferred: true }),
+        workflowTool("research", "task"),
+        // eve's built-in tools and static agents are marked as framework tools.
+        inlineTool("bash", { frameworkTool: true }),
+        subagentTool("billing_specialist", { frameworkTool: true }),
+        {
+          ...inlineTool("web_search"),
+          behavior: { availability: [], handling: { kind: "provider-tool", provider: "parallel" } },
+          execute: undefined,
+        },
       ],
     });
+
+    it.each([
+      ["an authored tool", "add", {}],
+      ["a built-in tool", "bash", {}],
+      ["a static agent", "billing_specialist", { message: "Review Bob's dispute." }],
+    ])(
+      "eve__tool accepts %s in the model's tool list, with its own input",
+      async (_case, name, input) => {
+        expect(await validateTool(catalog, { input, name })).toEqual({ value: { input, name } });
+      },
+    );
 
     it.each([
       [
@@ -352,7 +374,21 @@ describe("buildStepCatalog", () => {
         "weather",
         'No tool named "weather". Find tools with eve__search.',
       ],
-      ["a tool in the model's tool list", "add", '"add" is in your tool list; call it directly.'],
+      [
+        "eve__search",
+        SEARCH_TOOL_NAME,
+        `"${SEARCH_TOOL_NAME}" is in your tool list; call it directly.`,
+      ],
+      [
+        "a task tool",
+        TASK_WAIT_TOOL_NAME,
+        `"${TASK_WAIT_TOOL_NAME}" is in your tool list; call it directly.`,
+      ],
+      [
+        "a tool its provider runs",
+        "web_search",
+        '"web_search" is in your tool list; call it directly.',
+      ],
       [
         "eve__tool itself",
         CALL_TOOL_NAME,
