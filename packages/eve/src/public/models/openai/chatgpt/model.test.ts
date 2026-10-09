@@ -158,6 +158,23 @@ describe("Codex model", () => {
     expect(JSON.parse(requests[0]?.body ?? "{}").prompt_cache_key).toBe("session-key");
   });
 
+  it("serves a -fast model id as the base slug on the priority tier", async () => {
+    const requests: RecordedRequest[] = [];
+    const model = createCodexSubscriptionModel(
+      { model: "gpt-6-luna-fast" },
+      { broker: fakeBroker(), fetch: createRecordingFetch(requests) },
+    );
+
+    await model.doGenerate({
+      prompt: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
+    });
+
+    // Codex rejects `gpt-6-luna-fast` with a ChatGPT account.
+    const body = JSON.parse(requests[0]?.body ?? "{}");
+    expect(body.model).toBe("gpt-6-luna");
+    expect(body.service_tier).toBe("priority");
+  });
+
   it("groups summaries by reasoning item and preserves encrypted-only items", async () => {
     const requests: RecordedRequest[] = [];
     const model = createCodexSubscriptionModel(
