@@ -11,5 +11,6 @@ export type {
   ApprovalResponsePolicy,
   ApprovalResponseSession,
   ApprovalStatus,
+  ConnectionToolAnnotations,
 } from "#approval/definition.js";
 export { resolveApprovalPolicy } from "#approval/definition.js";

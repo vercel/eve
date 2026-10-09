@@ -17,8 +17,33 @@ export interface ApprovalContext<TInput = Record<string, unknown>> extends Sessi
   readonly abortSignal: AbortSignal;
   readonly approvedTools: ReadonlySet<string>;
   readonly callId: string;
+  /**
+   * Behavior hints the connection's server declared for this tool, such as
+   * MCP's `readOnlyHint` and `destructiveHint`. Absent for authored tools and
+   * for servers that declare none. Hints are only as trustworthy as the server.
+   */
+  readonly toolAnnotations?: ConnectionToolAnnotations;
   readonly toolInput?: ApprovalToolInput<TInput>;
   readonly toolName: string;
+}
+
+/**
+ * Behavior hints a connection's server declares for one of its tools. The
+ * named fields follow MCP's `ToolAnnotations`; other keys pass through as the
+ * server sent them.
+ */
+export interface ConnectionToolAnnotations {
+  /** Human-readable tool title. */
+  readonly title?: string;
+  /** The tool does not modify its environment. */
+  readonly readOnlyHint?: boolean;
+  /** The tool may perform destructive updates. Meaningful only when not read-only. */
+  readonly destructiveHint?: boolean;
+  /** Repeating a call with the same arguments has no additional effect. */
+  readonly idempotentHint?: boolean;
+  /** The tool may interact with an open world of external entities. */
+  readonly openWorldHint?: boolean;
+  readonly [key: string]: unknown;
 }
 
 /** Request-time approval decision returned by an {@link ApprovalPolicy}. */
