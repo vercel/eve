@@ -40,8 +40,8 @@ import { APPROVED_CALL_INTERRUPTED_MESSAGE } from "#harness/hitl/approved-calls.
 import { textStreamResult } from "#internal/testing/approval-resume.js";
 import { openInputs } from "#protocol/session-projection.js";
 import type { InputRequest } from "#shared/input.js";
-import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
-import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { getPendingAuthorization, setPendingAuthorization } from "#harness/hitl/session-state.js";
+import { upsertProxyInputRequests } from "#harness/hitl/session-state.js";
 import {
   parkedSteps,
   positionOf,

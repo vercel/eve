@@ -125,7 +125,8 @@
  *             so telemetry ownership survives renamed and namespaced tools.
  *   rule 50 — The human-in-the-loop lifecycle in `harness/hitl/` is
  *             reached only through its `index.ts`, its request vocabulary
- *             (`approval-prompt`, `budget-request`), so replacing it changes one
+ *             (`approval-prompt`, `budget-request`, `relays`, `sign-ins`) and
+ *             its session state (`session-state`), so replacing it changes one
  *             seam.
  *   rule 51 — Only the session machine (`harness/session-machine/`) and the
  *             human-in-the-loop lifecycle it delegates to
@@ -501,7 +502,7 @@ function checkRule47(posix, lines, violations) {
 
 const HUMAN_INPUT_DIR = "packages/eve/src/harness/hitl/";
 const HUMAN_INPUT_PRIVATE_IMPORT_RE =
-  /["'](?:#harness\/|(?:\.\.?\/)+)hitl\/(?!(?:index|approval-prompt|budget-request)\.js["'])/;
+  /["'](?:#harness\/|(?:\.\.?\/)+)hitl\/(?!(?:index|approval-prompt|budget-request|relays|session-state|sign-ins)\.js["'])/;
 
 /** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
 function checkRule50(posix, lines, violations) {

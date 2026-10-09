@@ -1,22 +1,19 @@
 import { getSessionUsage } from "#harness/turn-tag-state.js";
 import type { ModelMessage } from "ai";
 
-import {
-  getPendingAuthorization,
-  setPendingAuthorization,
-  type AuthorizationChallenge,
-} from "#harness/authorization.js";
+import { getPendingAuthorization, setPendingAuthorization } from "#harness/hitl/session-state.js";
+import type { AuthorizationChallenge } from "#harness/authorization.js";
 import {
   clearProxyInputRequestsWhere,
   getProxyInputRequests,
-} from "#harness/proxy-input-requests.js";
+} from "#harness/hitl/session-state.js";
 import { validateHarnessModelMessages } from "#harness/messages.js";
 import type { HarnessSession, HarnessSessionBase, SessionStateMap } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { SessionProjection } from "#protocol/session-projection.js";
 import { readTurnState, writeTurnState, type TurnState } from "./state.js";
 import type { SessionView } from "./view.js";
-import { clearPendingAuthorization } from "#harness/authorization.js";
+import { clearPendingAuthorization } from "#harness/hitl/session-state.js";
 
 // The save side of the machine. A transition returns the events that report what changed and
 // the execution state that follows; `applyTransition` publishes the events in order (the publish

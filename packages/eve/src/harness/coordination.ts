@@ -11,7 +11,7 @@ import { SKILL_ENTRY_NAME, SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { markRuntimeWorkflowToolAction } from "#shared/action-types.js";
 import { skillTarget } from "#shared/action-request-name.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
-import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { getProxyInputRequests } from "#harness/hitl/session-state.js";
 import {
   findBlockingWorkflowToolRun,
   removeBlockingWorkflowToolRuns,

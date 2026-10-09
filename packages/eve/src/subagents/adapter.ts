@@ -5,7 +5,7 @@ import type {
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
 import { ContinuationTokenKey, SessionIdKey, SessionInboxKey } from "#context/keys.js";
-import { resolvedForParent } from "#harness/proxy-input-requests.js";
+import { resolvedForParent } from "#harness/hitl/relays.js";
 import { SUBAGENT_ADAPTER_KIND, isSubagentAdapterState } from "#subagents/adapter-state.js";
 import { createErrorId, createLogger } from "#internal/logging.js";
 

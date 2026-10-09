@@ -1,5 +1,5 @@
 import type { HarnessModelMessage } from "#harness/messages.js";
-import { hasProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { hasProxyInputRequests } from "#harness/hitl/session-state.js";
 import type { HarnessSession, HarnessSessionBase, SessionStateMap } from "#harness/types.js";
 import { projectToDurableSession } from "#execution/session.js";
 import type { SandboxState } from "#sandbox/state.js";

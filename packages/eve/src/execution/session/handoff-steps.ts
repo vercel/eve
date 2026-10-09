@@ -1,6 +1,7 @@
 import { queuedInput, storedProjection } from "#harness/session-machine/view.js";
 import { openInputs, openSignIns } from "#protocol/session-projection.js";
 import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
+import { HITL_STATE_KEYS } from "#harness/hitl/session-state.js";
 import {
   EntityConflictError,
   RunExpiredError,
@@ -34,7 +35,7 @@ export function isSessionStateIdleForHandoff(input: {
   // These registries are deleted when work settles. Their ordinary readers
   // tolerate malformed values as absent; that must not authorize a handoff.
   const pendingKeys = [
-    "eve.runtime.pendingAuthorization",
+    HITL_STATE_KEYS.signIns,
     "eve.runtime.pendingInputBatch",
     "eve.runtime.pendingCoordinationBatch",
     "eve.runtime.deferredStepInput",
@@ -43,7 +44,7 @@ export function isSessionStateIdleForHandoff(input: {
   if (pendingKeys.some((key) => state?.[key] !== undefined)) return false;
   const batches = state?.["eve.runtime.pendingInputBatches"];
   if (batches !== undefined && (!Array.isArray(batches) || batches.length > 0)) return false;
-  const proxyRequests = state?.["eve.runtime.proxyInputRequests"];
+  const proxyRequests = state?.[HITL_STATE_KEYS.relays];
   if (
     proxyRequests !== undefined &&
     (!isObject(proxyRequests) || Object.keys(proxyRequests).length > 0)

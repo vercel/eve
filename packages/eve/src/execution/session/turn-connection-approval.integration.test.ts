@@ -16,7 +16,8 @@ import {
   getApprovalAuditState,
   markApprovalCandidateAuthorizationRequired,
 } from "#harness/hitl/candidates.js";
-import { CallbackBaseUrlKey, setPendingAuthorization } from "#harness/authorization.js";
+import { CallbackBaseUrlKey } from "#harness/authorization.js";
+import { setPendingAuthorization } from "#harness/hitl/session-state.js";
 import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import { defineInteractiveAuthorization } from "#shared/connection-types.js";
 import { suspendedSteps } from "#harness/session-machine/view.js";

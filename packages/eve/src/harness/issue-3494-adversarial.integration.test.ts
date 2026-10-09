@@ -6,7 +6,7 @@ import {
   getApprovalAuditState,
   markApprovalCandidateAuthorizationRequired,
 } from "#harness/hitl/candidates.js";
-import { setPendingAuthorization } from "#harness/authorization.js";
+import { setPendingAuthorization } from "#harness/hitl/session-state.js";
 import { z } from "zod";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
