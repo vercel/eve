@@ -30,7 +30,11 @@ import {
   signInInteractionId,
   signInOpened,
 } from "#harness/interaction-facts.js";
-import type { DeliverySource } from "#protocol/session-events/families/delivery.js";
+import type {
+  DeliveryAdmittedData,
+  DeliverySource,
+} from "#protocol/session-events/families/delivery.js";
+import type { ControlDelivery } from "#harness/types.js";
 import type { ResponseSubmittedData } from "#protocol/session-events/families/response.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type {
@@ -450,10 +454,14 @@ export function sessionEndedFacts(
   ending: {
     readonly outcome: "completed" | "failed";
     readonly cause?: Cause;
+    /** The reset control that ends the session: admitted first, applied before the end. */
+    readonly control?: ControlDelivery;
     readonly error?: ErrorInfo;
   },
 ): SessionEvent[] {
   const facts: SessionEvent[] = [];
+  const { control } = ending;
+  if (control !== undefined) facts.push(controlAdmitted(control, "reset"));
   let closed: OpenWork = noWork();
   const tables = publicViewOf(projection);
   // The shared tables, not an execution pointer, decide which turns are still open. This
@@ -484,12 +492,14 @@ export function sessionEndedFacts(
     closureFor({ error: ending.error, session: ending.outcome }),
   );
   facts.push(...work, ...deliveries);
+  if (control !== undefined) facts.push(deliveryApplied(control.deliveryId));
   const data: {
     -readonly [K in keyof FactOf<"session.ended">["data"]]: FactOf<"session.ended">["data"][K];
   } = {
     outcome: ending.outcome,
   };
-  if (ending.cause !== undefined) data.cause = ending.cause;
+  const cause = control === undefined ? ending.cause : { deliveryId: control.deliveryId };
+  if (cause !== undefined) data.cause = cause;
   if (ending.error !== undefined) data.error = ending.error;
   facts.push({ data, type: "session.ended" });
   return facts;
@@ -1000,7 +1010,8 @@ function decidedOutcome(outcome: InputResolution["outcome"]) {
 
 /**
  * Answers to requests this session relays went on to their askers. Each delivery that carried
- * only such answers is admitted here: a message that answered joins the turn that asked, and
+ * such answers is admitted here, with the answers it forwarded: a message that answered joins
+ * the turn that asked, one that also carries input for this session goes on to its turn, and
  * any other took effect once forwarded. A question this session decides settles now; an
  * approval stays open until its asker settles it.
  */
@@ -1013,6 +1024,8 @@ export function routeAnswer(
       readonly source?: DeliverySource;
       /** A message that answered: the turn that asked consumes it. */
       readonly consumed?: { readonly turnId: string; readonly parts: readonly UserPart[] };
+      /** The delivery also carries input for this session, whose turn consumes and settles it. */
+      readonly continues?: true;
     }[];
     /** Every answer forwarded, as admitted. */
     readonly forwarded: readonly ResponseSubmittedData[];
@@ -1079,7 +1092,12 @@ export function routeAnswer(
     );
   }
   for (const delivery of input.deliveries) {
-    if (delivery.consumed !== undefined || !admitted.has(delivery.deliveryId)) continue;
+    if (
+      delivery.consumed !== undefined ||
+      delivery.continues === true ||
+      !admitted.has(delivery.deliveryId)
+    )
+      continue;
     events.push({
       data: { deliveryId: delivery.deliveryId, outcome: "applied" },
       type: "delivery.settled",
@@ -1122,7 +1140,11 @@ export function runSignIn(
 // Sign-ins
 // ---------------------------------------------------------------------------
 
-/** Sign-in callbacks arrived: each attempt the session still waits on is accepted. */
+/**
+ * Sign-in callbacks arrived: each attempt the session still waits on is accepted. A callback is a
+ * delivery whose response carries no value: the provider's payload stays private, and the
+ * public record says only that the attempt completed.
+ */
 export function completeSignIn(
   view: SessionView,
   input: { readonly completions: readonly AuthorizationChallenge[] },
@@ -1130,11 +1152,24 @@ export function completeSignIn(
   const tables = publicViewOf(view.projection);
   return unchanged(
     view,
-    input.completions.flatMap((challenge) => {
+    input.completions.flatMap((challenge): SessionEvent[] => {
       const interactionId = signInInteractionId(challenge);
-      return tables.interactions[interactionId]?.status === "open"
-        ? [interactionSettled(interactionId, "accepted")]
-        : [];
+      const row = tables.interactions[interactionId];
+      if (row?.status !== "open") return [];
+      // One callback per attempt reaches the session, so the attempt names its delivery.
+      const deliveryId = `callback_${interactionId}`;
+      const responseId = `response_${deliveryId}`;
+      const owner = interactionOwner(tables, row);
+      const scope: { turnId?: string; taskId?: string } = {};
+      if (owner.turnId !== undefined) scope.turnId = owner.turnId;
+      if (owner.taskId !== undefined) scope.taskId = owner.taskId;
+      return [
+        { data: { deliveryId, source: { callback: "authorization" } }, type: "delivery.admitted" },
+        responseSubmitted({ deliveryId, interactionId, responseId }),
+        responseSettled(responseId, "applied"),
+        interactionSettled(interactionId, "accepted", { cause: { responseId }, scope }),
+        deliveryApplied(deliveryId),
+      ];
     }),
   );
 }
@@ -1155,6 +1190,51 @@ export function ownOpenRequestIds(view: Omit<SessionView, "turn">): ReadonlySet<
       )
       .map((input) => input.request.requestId),
   );
+}
+
+/**
+ * The delivery a clear or compact arrived as. One that names none, from a caller that predates
+ * control ids, is named by the position it applies at.
+ */
+export function controlDeliveryFor(view: SessionView, given?: ControlDelivery): ControlDelivery {
+  return given ?? { deliveryId: `control_${String(view.projection.position ?? 0)}` };
+}
+
+/** A control's admission: the delivery it arrived as, its kind, and who sent it. */
+export function controlAdmitted(delivery: ControlDelivery, control: string): SessionEvent {
+  const data: { -readonly [K in keyof DeliveryAdmittedData]: DeliveryAdmittedData[K] } = {
+    deliveryId: delivery.deliveryId,
+    source: { control },
+  };
+  if (delivery.principal !== undefined) data.principal = delivery.principal;
+  return { data, type: "delivery.admitted" };
+}
+
+/** A control or callback delivery's settlement once what it asked has happened. */
+export function deliveryApplied(deliveryId: string): SessionEvent {
+  return { data: { deliveryId, outcome: "applied" }, type: "delivery.settled" };
+}
+
+/**
+ * A control's transition as a delivery: admitted before what it changes and applied after, in
+ * the same commit, with what it changes naming it as the cause. A control that names no
+ * delivery changes the session on its own.
+ */
+export function controlled(
+  delivery: ControlDelivery | undefined,
+  control: string,
+  build: (cause: Cause | undefined) => Transition,
+): Transition {
+  if (delivery === undefined) return build(undefined);
+  const transition = build({ deliveryId: delivery.deliveryId });
+  return {
+    ...transition,
+    events: [
+      controlAdmitted(delivery, control),
+      ...transition.events,
+      deliveryApplied(delivery.deliveryId),
+    ],
+  };
 }
 
 /** What the model reads for a call its turn's cancellation stopped before the call settled. */

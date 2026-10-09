@@ -125,7 +125,7 @@ async function routeProxiedDeliver(
       (metadata) => metadata.payloadIndex === sourcePayloadIndex,
     );
     const answeredBy = payloadMetadata[0]?.deliveryId;
-    if (routed.forSelf === undefined && routed.forChildren.length > 0 && answeredBy !== undefined) {
+    if (routed.forChildren.length > 0 && answeredBy !== undefined) {
       const message = routed.forChildren.find((forChild) => forChild.message !== undefined);
       const askedIn = message?.payload.inputResponses
         .map((response) => tables.interactions[response.requestId])
@@ -142,7 +142,9 @@ async function routeProxiedDeliver(
         const principal = principalOf(sourceDelivery.auth);
         if (principal !== undefined) entry.principal = principal;
         if (metadata.channelKind !== undefined) entry.source = { channel: metadata.channelKind };
-        if (message?.message !== undefined && turnId !== undefined)
+        // Input left for this session goes on to its turn, which admits nothing twice.
+        if (routed.forSelf !== undefined) entry.continues = true;
+        else if (message?.message !== undefined && turnId !== undefined)
           entry.consumed = { parts: userPartsOf(message.message), turnId };
         routedDeliveries.push(entry);
       }
@@ -155,7 +157,8 @@ async function routeProxiedDeliver(
           answers.push({
             deliveryId: answeredBy,
             interactionId: response.requestId,
-            responseId: `response_${answeredBy}_${index === -1 ? `typed_0` : String(index)}`,
+            // Named apart from the answers this session's turn admits from the same delivery.
+            responseId: `response_${answeredBy}_forwarded_${index === -1 ? `typed_0` : String(index)}`,
             value,
           });
         }

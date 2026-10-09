@@ -1,7 +1,11 @@
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
-import type { RuntimeActionResultHookPayload } from "#channel/types.js";
-import type { DeliveryAdmission, SessionInputQueue } from "#execution/session/input-queue.js";
+import type { RuntimeActionResultHookPayload, SessionControlIdentity } from "#channel/types.js";
+import type {
+  ControlOrigin,
+  DeliveryAdmission,
+  SessionInputQueue,
+} from "#execution/session/input-queue.js";
 import { isWorkflowMessage, type SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import {
   decodeSessionInboxPayload,
@@ -13,7 +17,7 @@ import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.
 /** One canonical admission result, after wire decoding but before turn policy. */
 type SessionAdmission =
   | { readonly admission: DeliveryAdmission; readonly kind: "delivery" }
-  | { readonly kind: "cancel" }
+  | { readonly kind: "cancel"; readonly origin?: ControlOrigin }
   | { readonly kind: "consumed" }
   | { readonly kind: "runtime-action-result"; readonly payload: RuntimeActionResultHookPayload }
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage };
@@ -56,7 +60,7 @@ export async function admitSessionInboxPayload(
       return { admission: input.queue.enqueueDelivery(command), kind: "delivery" };
     case "clear":
     case "compact":
-      input.queue.enqueueControl(command.kind);
+      input.queue.enqueueControl(command.kind, controlOrigin(command));
       return { kind: "consumed" };
     case "session-timeout":
       // A previous owner's timer may fire after handoff; only this owner's deadline counts.
@@ -65,9 +69,19 @@ export async function admitSessionInboxPayload(
       }
       return { kind: "consumed" };
     case "reset":
-      input.queue.enqueueControl("reset");
+      input.queue.enqueueControl("reset", controlOrigin(command));
       return { kind: "cancel" };
-    case "cancel":
-      return { kind: "cancel" };
+    case "cancel": {
+      const origin = controlOrigin(command);
+      return origin === undefined ? { kind: "cancel" } : { kind: "cancel", origin };
+    }
   }
+}
+
+/** The delivery a control arrived as, when its sender named one. */
+export function controlOrigin(command: SessionControlIdentity): ControlOrigin | undefined {
+  if (typeof command.deliveryId !== "string" || command.deliveryId.length === 0) return undefined;
+  return command.auth === undefined
+    ? { deliveryId: command.deliveryId }
+    : { auth: command.auth, deliveryId: command.deliveryId };
 }

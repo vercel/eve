@@ -13,6 +13,7 @@ import type {
   SessionAuthContext,
   SessionCallback,
   TurnPolicy,
+  SessionControlOptions,
 } from "#channel/types.js";
 import {
   type InputResponse,
@@ -57,13 +58,15 @@ export interface ChannelSource<TState = undefined> {
     options: ChannelRespondOptions<TState>,
   ): Promise<Session>;
   /** Cooperatively cancels the active turn without creating a session. */
-  cancel(options?: { readonly turnId?: string }): Promise<CancelTurnResult>;
+  cancel(options?: { readonly turnId?: string } & SessionControlOptions): Promise<CancelTurnResult>;
   /** Queues context compaction without creating a session. */
-  compact(): Promise<CompactSessionResult>;
+  compact(options?: SessionControlOptions): Promise<CompactSessionResult>;
   /** Clears model-message history without creating a session. */
-  clear(): Promise<ClearSessionResult>;
+  clear(options?: SessionControlOptions): Promise<ClearSessionResult>;
   /** Retires the current owner without creating a replacement. */
-  reset(options?: { readonly reason?: string }): Promise<ResetSessionResult>;
+  reset(
+    options?: { readonly reason?: string } & SessionControlOptions,
+  ): Promise<ResetSessionResult>;
 }
 
 /** Binds a raw channel-local continuation address to its current-owner operations. */
@@ -125,11 +128,11 @@ export function createChannelOperations<TState = undefined>(input: {
         async cancel(options) {
           return await bound.cancel(options);
         },
-        async compact() {
-          return await bound.compact();
+        async compact(options) {
+          return await bound.compact(options);
         },
-        async clear() {
-          return await bound.clear();
+        async clear(options) {
+          return await bound.clear(options);
         },
         async reset(options) {
           return await bound.reset(options);
