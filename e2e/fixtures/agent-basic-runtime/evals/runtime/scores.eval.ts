@@ -1,9 +1,8 @@
 import { defineEval } from "eve/evals";
 
 /**
- * A `t.score` without a rule has no verdict, and a gated one reports its
- * threshold with the score unchanged. The fixture reporter checks the
- * finalized shape after the CLI/runtime boundary.
+ * Runs `t.score` end to end: one score without a rule, one gated score that
+ * decides the eval.
  */
 export default defineEval({
   description: "Scores with and without a rule.",
