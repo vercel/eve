@@ -48,7 +48,8 @@ const EveConfigSchema = z.looseObject({
       notifiedAt: z.string().optional(),
       projectSalt: z.string().optional(),
       internalTeamHash: z.string().optional(),
-      internal: z.boolean().optional(),
+      internal: z.boolean().nullable().optional(),
+      internalCheckedAt: z.number().optional(),
     })
     .optional(),
 });
@@ -93,7 +94,7 @@ export async function readOrCreateEveTelemetryIdentity(): Promise<EveCliTelemetr
 }
 
 async function updateEveTelemetryPreference(
-  update: Record<string, boolean | number | string>,
+  update: Record<string, boolean | number | string | null>,
 ): Promise<void> {
   const path = eveConfigPath();
   let existing: Record<string, unknown> = {};
@@ -131,7 +132,9 @@ export async function markEveTelemetryNotified(): Promise<void> {
 
 type EveTelemetryInternalTeam = {
   readonly teamHash: string;
-  readonly internal: boolean;
+  /** Undefined when the lookup got an error response. */
+  readonly internal: boolean | undefined;
+  readonly checkedAt: number;
 };
 
 export async function readEveTelemetryInternalTeam(): Promise<
@@ -144,7 +147,11 @@ export async function readEveTelemetryInternalTeam(): Promise<
     if (telemetry?.internalTeamHash === undefined || telemetry.internal === undefined) {
       return undefined;
     }
-    return { teamHash: telemetry.internalTeamHash, internal: telemetry.internal };
+    return {
+      teamHash: telemetry.internalTeamHash,
+      internal: telemetry.internal ?? undefined,
+      checkedAt: telemetry.internalCheckedAt ?? 0,
+    };
   } catch {
     return undefined;
   }
@@ -155,6 +162,7 @@ export async function writeEveTelemetryInternalTeam(
 ): Promise<void> {
   await updateEveTelemetryPreference({
     internalTeamHash: entry.teamHash,
-    internal: entry.internal,
+    internal: entry.internal ?? null,
+    internalCheckedAt: entry.checkedAt,
   });
 }

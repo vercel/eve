@@ -6,7 +6,10 @@ import {
   readEveTelemetryInternalTeam,
   writeEveTelemetryInternalTeam,
 } from "#cli/telemetry/preference.js";
-import { readVercelCliTeam, readVercelCliToken } from "#internal/model-auth/vercel-cli.js";
+import { readVercelCliFileConnection } from "#internal/model-auth/vercel-cli.js";
+
+const NOW = 1_000_000_000_000;
+const DAY_MS = 24 * 60 * 60 * 1_000;
 
 vi.mock("#cli/telemetry/identity.js", () => ({
   hashEveTelemetryProject: vi.fn(
@@ -23,8 +26,10 @@ vi.mock("#cli/telemetry/preference.js", () => ({
   writeEveTelemetryInternalTeam: vi.fn(async () => {}),
 }));
 vi.mock("#internal/model-auth/vercel-cli.js", () => ({
-  readVercelCliTeam: vi.fn(async () => "team_selected"),
-  readVercelCliToken: vi.fn(async () => "cli-token"),
+  readVercelCliFileConnection: vi.fn(async () => ({
+    token: "cli-token",
+    teamId: "team_selected",
+  })),
 }));
 
 function stubTeam(body: unknown, status = 200) {
@@ -34,28 +39,45 @@ function stubTeam(body: unknown, status = 200) {
 }
 
 beforeEach(() => {
+  vi.spyOn(Date, "now").mockReturnValue(NOW);
   vi.mocked(isEphemeralEveTelemetryEnvironment).mockReturnValue(false);
   vi.mocked(readEveTelemetryInternalTeam).mockResolvedValue(undefined);
-  vi.mocked(readVercelCliTeam).mockResolvedValue("team_selected");
-  vi.mocked(readVercelCliToken).mockResolvedValue("cli-token");
+  vi.mocked(readVercelCliFileConnection).mockResolvedValue({
+    token: "cli-token",
+    teamId: "team_selected",
+  });
 });
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
 });
 
 describe("resolveEveTelemetryInternal", () => {
-  it("treats an environment marked internal as internal without a lookup", async () => {
-    vi.stubEnv("EVE_TELEMETRY_INTERNAL", "1");
-    vi.mocked(isEphemeralEveTelemetryEnvironment).mockReturnValue(true);
-    const fetchMock = stubTeam({ emailDomain: "example.com" });
+  it.each(["1", "true", "TRUE"])(
+    "treats EVE_TELEMETRY_INTERNAL=%s as internal without a lookup",
+    async (value) => {
+      vi.stubEnv("EVE_TELEMETRY_INTERNAL", value);
+      vi.mocked(isEphemeralEveTelemetryEnvironment).mockReturnValue(true);
+      const fetchMock = stubTeam({ emailDomain: "example.com" });
 
-    await expect(resolveEveTelemetryInternal()).resolves.toBe(true);
-    expect(readVercelCliTeam).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
+      await expect(resolveEveTelemetryInternal()).resolves.toBe(true);
+      expect(readVercelCliFileConnection).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["0", "false", "no"])(
+    "does not treat EVE_TELEMETRY_INTERNAL=%s as internal",
+    async (value) => {
+      vi.stubEnv("EVE_TELEMETRY_INTERNAL", value);
+      stubTeam({ emailDomain: "example.com" });
+
+      await expect(resolveEveTelemetryInternal()).resolves.toBe(false);
+    },
+  );
 
   it("flags a selected team whose sign-up email domain is vercel.com and saves the result", async () => {
     const fetchMock = stubTeam({ id: "team_selected", emailDomain: "vercel.com" });
@@ -69,6 +91,7 @@ describe("resolveEveTelemetryInternal", () => {
     expect(writeEveTelemetryInternalTeam).toHaveBeenCalledWith({
       teamHash: "salt:team_selected",
       internal: true,
+      checkedAt: NOW,
     });
   });
 
@@ -85,6 +108,7 @@ describe("resolveEveTelemetryInternal", () => {
     vi.mocked(readEveTelemetryInternalTeam).mockResolvedValue({
       teamHash: "salt:team_selected",
       internal: true,
+      checkedAt: NOW - 365 * DAY_MS,
     });
 
     await expect(resolveEveTelemetryInternal()).resolves.toBe(true);
@@ -96,6 +120,7 @@ describe("resolveEveTelemetryInternal", () => {
     vi.mocked(readEveTelemetryInternalTeam).mockResolvedValue({
       teamHash: "salt:team_previous",
       internal: true,
+      checkedAt: NOW,
     });
 
     await expect(resolveEveTelemetryInternal()).resolves.toBe(false);
@@ -103,23 +128,47 @@ describe("resolveEveTelemetryInternal", () => {
     expect(writeEveTelemetryInternalTeam).toHaveBeenCalledWith({
       teamHash: "salt:team_selected",
       internal: false,
+      checkedAt: NOW,
     });
   });
 
-  it("stays unknown without a selected team, a CLI login, or a successful lookup", async () => {
-    const fetchMock = stubTeam({ error: { code: "forbidden" } }, 403);
-    await expect(resolveEveTelemetryInternal()).resolves.toBeUndefined();
+  it("saves an error response so the lookup is not repeated on every command", async () => {
+    stubTeam({ error: { code: "forbidden" } }, 403);
 
+    await expect(resolveEveTelemetryInternal()).resolves.toBeUndefined();
+    expect(writeEveTelemetryInternalTeam).toHaveBeenCalledWith({
+      teamHash: "salt:team_selected",
+      internal: undefined,
+      checkedAt: NOW,
+    });
+  });
+
+  it("retries a failed lookup only after a day", async () => {
+    const fetchMock = stubTeam({ emailDomain: "vercel.com" });
+    vi.mocked(readEveTelemetryInternalTeam).mockResolvedValue({
+      teamHash: "salt:team_selected",
+      internal: undefined,
+      checkedAt: NOW - DAY_MS + 1,
+    });
+    await expect(resolveEveTelemetryInternal()).resolves.toBeUndefined();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    vi.mocked(readEveTelemetryInternalTeam).mockResolvedValue({
+      teamHash: "salt:team_selected",
+      internal: undefined,
+      checkedAt: NOW - DAY_MS,
+    });
+    await expect(resolveEveTelemetryInternal()).resolves.toBe(true);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("stays unknown without a file-stored CLI login or when the network fails", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
     await expect(resolveEveTelemetryInternal()).resolves.toBeUndefined();
 
-    vi.mocked(readVercelCliToken).mockResolvedValue(undefined);
+    vi.mocked(readVercelCliFileConnection).mockResolvedValue(undefined);
     await expect(resolveEveTelemetryInternal()).resolves.toBeUndefined();
 
-    vi.mocked(readVercelCliTeam).mockResolvedValue(undefined);
-    await expect(resolveEveTelemetryInternal()).resolves.toBeUndefined();
-
-    expect(fetchMock).toHaveBeenCalledOnce();
     expect(writeEveTelemetryInternalTeam).not.toHaveBeenCalled();
   });
 
@@ -128,7 +177,7 @@ describe("resolveEveTelemetryInternal", () => {
     const fetchMock = stubTeam({ emailDomain: "vercel.com" });
 
     await expect(resolveEveTelemetryInternal()).resolves.toBeUndefined();
-    expect(readVercelCliTeam).not.toHaveBeenCalled();
+    expect(readVercelCliFileConnection).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
