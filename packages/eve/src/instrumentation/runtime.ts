@@ -70,6 +70,7 @@ import {
 } from "#instrumentation/runtime-global.js";
 import { initializeSessionInstrumentation } from "#instrumentation/session-init.js";
 import { ensureAiSdkWarningLogger } from "#instrumentation/ai-sdk-warnings.js";
+import { createGatewayTraceContextHeaders } from "#tracing/gateway-trace-context.js";
 
 export { getInstrumentationRuntime, registerInstrumentationRuntime };
 export { initializeSessionInstrumentation };
@@ -83,6 +84,7 @@ interface InstrumentedStepSession {
 }
 
 export interface InstrumentationStepScope<TSession> {
+  readonly gatewayTraceContextHeaders?: () => Record<string, string> | undefined;
   readonly createHandleEvent: (
     input: Omit<
       CreateInstrumentationHandleEventInput,
@@ -415,6 +417,7 @@ export function bindInstrumentationRuntime(
         };
         const run = () =>
           execute({
+            gatewayTraceContextHeaders: createGatewayTraceContextHeaders,
             createHandleEvent: (eventInput) =>
               createInstrumentationHandleEvent({
                 ...eventInput,
