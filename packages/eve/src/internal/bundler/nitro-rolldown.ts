@@ -12,6 +12,8 @@ type RolldownOutputChunk = {
   readonly fileName: string;
   readonly imports: readonly string[];
   readonly dynamicImports: readonly string[];
+  readonly isEntry: boolean;
+  readonly name: string;
 };
 
 type RolldownOutputAsset = {
