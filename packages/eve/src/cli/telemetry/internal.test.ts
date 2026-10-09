@@ -9,10 +9,17 @@ import {
 import { readVercelCliTeam, readVercelCliToken } from "#internal/model-auth/vercel-cli.js";
 
 vi.mock("#cli/telemetry/identity.js", () => ({
+  hashEveTelemetryProject: vi.fn(
+    (identity: { projectSalt: string }, value: string) => `${identity.projectSalt}:${value}`,
+  ),
   isEphemeralEveTelemetryEnvironment: vi.fn(() => false),
 }));
 vi.mock("#cli/telemetry/preference.js", () => ({
   readEveTelemetryInternalTeam: vi.fn(async () => undefined),
+  readOrCreateEveTelemetryIdentity: vi.fn(async () => ({
+    installationId: "installation_123",
+    projectSalt: "salt",
+  })),
   writeEveTelemetryInternalTeam: vi.fn(async () => {}),
 }));
 vi.mock("#internal/model-auth/vercel-cli.js", () => ({
@@ -60,7 +67,7 @@ describe("resolveEveTelemetryInternal", () => {
       expect.objectContaining({ headers: { authorization: "Bearer cli-token" } }),
     );
     expect(writeEveTelemetryInternalTeam).toHaveBeenCalledWith({
-      teamId: "team_selected",
+      teamHash: "salt:team_selected",
       internal: true,
     });
   });
@@ -76,7 +83,7 @@ describe("resolveEveTelemetryInternal", () => {
   it("reuses a saved result while the selected team is unchanged", async () => {
     const fetchMock = stubTeam({ emailDomain: "example.com" });
     vi.mocked(readEveTelemetryInternalTeam).mockResolvedValue({
-      teamId: "team_selected",
+      teamHash: "salt:team_selected",
       internal: true,
     });
 
@@ -87,14 +94,14 @@ describe("resolveEveTelemetryInternal", () => {
   it("looks the team up again when the selected team changes", async () => {
     const fetchMock = stubTeam({ emailDomain: "example.com" });
     vi.mocked(readEveTelemetryInternalTeam).mockResolvedValue({
-      teamId: "team_previous",
+      teamHash: "salt:team_previous",
       internal: true,
     });
 
     await expect(resolveEveTelemetryInternal()).resolves.toBe(false);
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(writeEveTelemetryInternalTeam).toHaveBeenCalledWith({
-      teamId: "team_selected",
+      teamHash: "salt:team_selected",
       internal: false,
     });
   });

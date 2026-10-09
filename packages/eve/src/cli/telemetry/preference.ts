@@ -47,7 +47,7 @@ const EveConfigSchema = z.looseObject({
       noticeVersion: z.number().int().positive().optional(),
       notifiedAt: z.string().optional(),
       projectSalt: z.string().optional(),
-      internalTeamId: z.string().optional(),
+      internalTeamHash: z.string().optional(),
       internal: z.boolean().optional(),
     })
     .optional(),
@@ -130,7 +130,7 @@ export async function markEveTelemetryNotified(): Promise<void> {
 }
 
 type EveTelemetryInternalTeam = {
-  readonly teamId: string;
+  readonly teamHash: string;
   readonly internal: boolean;
 };
 
@@ -141,10 +141,10 @@ export async function readEveTelemetryInternalTeam(): Promise<
     const telemetry = EveConfigSchema.safeParse(
       JSON.parse(await readFile(eveConfigPath(), "utf8")) as unknown,
     ).data?.telemetry;
-    if (telemetry?.internalTeamId === undefined || telemetry.internal === undefined) {
+    if (telemetry?.internalTeamHash === undefined || telemetry.internal === undefined) {
       return undefined;
     }
-    return { teamId: telemetry.internalTeamId, internal: telemetry.internal };
+    return { teamHash: telemetry.internalTeamHash, internal: telemetry.internal };
   } catch {
     return undefined;
   }
@@ -154,7 +154,7 @@ export async function writeEveTelemetryInternalTeam(
   entry: EveTelemetryInternalTeam,
 ): Promise<void> {
   await updateEveTelemetryPreference({
-    internalTeamId: entry.teamId,
+    internalTeamHash: entry.teamHash,
     internal: entry.internal,
   });
 }
