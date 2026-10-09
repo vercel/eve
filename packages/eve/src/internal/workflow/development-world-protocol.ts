@@ -4,6 +4,7 @@ import {
   resolveConfiguredWorkflowWorld,
   resolveWorkflowWorldImport,
 } from "#internal/workflow/world-target.js";
+import type { WorldOperation } from "#internal/workflow/world-protocol.js";
 
 export const DEVELOPMENT_WORKFLOW_WORLD_ROUTE = "/eve/v1/dev/internal/workflow-world";
 
@@ -37,9 +38,37 @@ export const DEVELOPMENT_WORKFLOW_DELIVERY_HEADER = "x-eve-dev-workflow-delivery
  * members NOT listed are the deliberate exceptions — `streams.get` returns
  * a live stream over its own route, `createQueueHandler` runs entirely in
  * the worker, and `start`/`close` belong to the parent's lifecycle.
+ *
+ * Only operations `@workflow/world-local` implements belong here. The
+ * client defines a forwarder for every entry and the workflow runtime
+ * feature-detects optional ones (`typeof world.events.createBatch`), so an
+ * entry the parent lacks would be called and answer `undefined`. The
+ * world-hub transport forwards the wider `WORLD_OPERATIONS`, filtered by
+ * what its server advertises.
  */
-export { WORLD_OPERATIONS as DEVELOPMENT_WORLD_OPERATIONS } from "#internal/workflow/world-protocol.js";
-import { WORLD_OPERATIONS as DEVELOPMENT_WORLD_OPERATIONS } from "#internal/workflow/world-protocol.js";
+export const DEVELOPMENT_WORLD_OPERATIONS = [
+  "events.create",
+  "events.get",
+  "events.list",
+  "events.listByCorrelationId",
+  "hooks.get",
+  "hooks.getByToken",
+  "hooks.list",
+  "getDeploymentId",
+  "queue",
+  "resolveLatestDeploymentId",
+  "runs.experimentalSetAttributes",
+  "runs.get",
+  "runs.list",
+  "steps.get",
+  "steps.list",
+  "streams.close",
+  "streams.getChunks",
+  "streams.getInfo",
+  "streams.list",
+  "streams.write",
+  "streams.writeMulti",
+] as const satisfies readonly WorldOperation[];
 
 export type DevelopmentWorldOperation = (typeof DEVELOPMENT_WORLD_OPERATIONS)[number];
 
