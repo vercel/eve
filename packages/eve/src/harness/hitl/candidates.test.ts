@@ -286,11 +286,13 @@ describe("approval candidate state", () => {
       create({ candidateId: "candidate-1", principalId: "U1" }).state,
     ).activeCandidates[0]!;
     const state: SessionStateMap = {
-      "eve.runtime.hitl.approvalState": {
-        activeCandidates: { "candidate-1": persisted },
-        candidateHistory: [],
-        nextCandidateSequence: 1,
-        settlements: {},
+      "eve.runtime.hitl.requests": {
+        approvals: {
+          activeCandidates: { "candidate-1": persisted },
+          candidateHistory: [],
+          nextCandidateSequence: 1,
+          settlements: {},
+        },
       },
     };
 

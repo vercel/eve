@@ -2,7 +2,7 @@ import { SESSION_CHECKPOINT_VERSION, type SessionCheckpoint } from "#execution/s
 import { isObject } from "#shared/guards.js";
 import { initialSessionProjection } from "#protocol/session-projection.js";
 import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
-import { HITL_STATE_KEYS } from "#harness/hitl/session-state.js";
+import { LEGACY_HITL_STATE_KEYS, upgradeLegacyHitlState } from "#harness/hitl/session-state.js";
 
 /**
  * Oldest checkpoint a successor upgrades (eve 0.66.0). Earlier checkpoints
@@ -95,6 +95,18 @@ const CHECKPOINT_UPGRADES: Readonly<
   // Version 13 prevents older deployments from ignoring stubs and running real tools.
   // Existing checkpoints need no data changes.
   12: (checkpoint) => checkpoint,
+  // Approval candidates, sign-ins and relayed requests moved under one requests key.
+  13: (checkpoint) => {
+    const sessionState = readRecord(checkpoint, "sessionState");
+    const snapshot = readRecord(sessionState, "snapshot");
+    const session = readRecord(snapshot, "session");
+    if (session.state === undefined) return checkpoint;
+    const state = upgradeLegacyHitlState(readRecord(session, "state"));
+    return {
+      ...checkpoint,
+      sessionState: { ...sessionState, snapshot: { ...snapshot, session: { ...session, state } } },
+    };
+  },
 };
 
 /**
@@ -154,7 +166,7 @@ function upgradeIdleLifecycle(checkpoint: CheckpointRecord): CheckpointRecord {
     refuse("lifecycle position is malformed or a turn is still open");
 
   const retiredPendingKeys = [
-    HITL_STATE_KEYS.signIns,
+    LEGACY_HITL_STATE_KEYS.signIns,
     "eve.runtime.pendingInputBatch",
     "eve.runtime.pendingCoordinationBatch",
     "eve.runtime.deferredStepInput",
@@ -165,7 +177,7 @@ function upgradeIdleLifecycle(checkpoint: CheckpointRecord): CheckpointRecord {
   const batches = state["eve.runtime.pendingInputBatches"];
   if (batches !== undefined && (!Array.isArray(batches) || batches.length > 0))
     refuse("session holds pending input");
-  const routes = state[HITL_STATE_KEYS.relays];
+  const routes = state[LEGACY_HITL_STATE_KEYS.relays];
   if (
     sessionState.hasProxyInputRequests !== false ||
     (routes !== undefined && (!isObject(routes) || Object.keys(routes).length > 0))
@@ -177,7 +189,7 @@ function upgradeIdleLifecycle(checkpoint: CheckpointRecord): CheckpointRecord {
     if (error instanceof CheckpointRefusal) throw error;
     refuse("workflow tool run registry is incompatible");
   }
-  const approvals = state[HITL_STATE_KEYS.approvals];
+  const approvals = state[LEGACY_HITL_STATE_KEYS.approvals];
   if (
     approvals !== undefined &&
     (!isObject(approvals) ||
@@ -201,7 +213,6 @@ function upgradeIdleLifecycle(checkpoint: CheckpointRecord): CheckpointRecord {
       "eve.harness.emission",
       "eve.runtime.hitl.approvedTools",
       "eve.runtime.pendingInputBatches",
-      HITL_STATE_KEYS.relays,
     ]),
     "eve.harness.sessionProjection": projection,
   };
