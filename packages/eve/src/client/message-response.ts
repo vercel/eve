@@ -12,6 +12,8 @@ interface MessageResponseInput {
     source?: AsyncIterable<MessageStreamEvent>,
   ) => AsyncGenerator<MessageStreamEvent>;
   readonly deliveryId?: string;
+  /** Answers resume a turn that started before their stream, so its `input.resolved` names it. */
+  readonly resumesTurn?: boolean;
   readonly sessionId: string;
 }
 
@@ -36,6 +38,7 @@ export class MessageResponse<TOutput = unknown> implements AsyncIterable<Message
   #cancellation: Promise<CancelSessionResult> | undefined;
   #consumed = false;
   readonly #createStream: MessageResponseInput["createStream"];
+  readonly #resumesTurn: boolean;
   #settled = false;
   readonly #turnId = Promise.withResolvers<string | undefined>();
 
@@ -45,6 +48,7 @@ export class MessageResponse<TOutput = unknown> implements AsyncIterable<Message
     this.sessionId = input.sessionId;
     this[acceptedDeliveryId] = input.deliveryId;
     this.#createStream = input.createStream;
+    this.#resumesTurn = input.resumesTurn ?? false;
   }
 
   /**
@@ -114,7 +118,10 @@ export class MessageResponse<TOutput = unknown> implements AsyncIterable<Message
   ): AsyncGenerator<MessageStreamEvent> {
     try {
       for await (const event of this.#createStream(source)) {
-        if (event.type === "turn.started") {
+        if (
+          event.type === "turn.started" ||
+          (this.#resumesTurn && event.type === "input.resolved")
+        ) {
           this.#turnId.resolve(event.data.turnId);
         } else if (isCurrentTurnBoundaryEvent(event)) {
           this.#settled = true;

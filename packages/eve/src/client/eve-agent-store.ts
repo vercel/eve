@@ -357,8 +357,8 @@ export class EveAgentStore<TData> {
   /**
    * Requests cooperative cancellation of the active durable turn.
    *
-   * If the server has not emitted `turn.started` yet, the request waits for
-   * that turn ID. The event stream stays attached until the turn settles.
+   * If the stream has not identified the turn yet, the request waits for its
+   * turn ID. The event stream stays attached until the turn settles.
    */
   cancel(): Promise<CancelSessionResult> {
     const turn = this.#activeTurn;

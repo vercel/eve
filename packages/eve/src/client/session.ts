@@ -238,6 +238,7 @@ export class ClientSession {
       createStream: (source) =>
         this.#createEventStream(initialStreamIndex, input, deliveryId, source),
       deliveryId,
+      resumesTurn: input.inputResponses !== undefined,
       sessionId: this.#state.sessionId,
     });
   }
