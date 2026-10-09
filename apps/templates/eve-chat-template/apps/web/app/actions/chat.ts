@@ -1,6 +1,6 @@
 "use server";
 
-import type { ClientSessionState, MessageStreamEvent } from "eve/client";
+import type { ClientSessionState, SessionStreamEvent } from "eve/client";
 import {
   appendChatEvent,
   clearChatPendingMessage,
@@ -70,7 +70,7 @@ export async function checkSendLimitAction(input?: { readonly message?: string }
 
 export async function saveChatSnapshotAction(input: {
   readonly chatId: string;
-  readonly events: readonly MessageStreamEvent[];
+  readonly events: readonly SessionStreamEvent[];
   readonly session: ClientSessionState | undefined;
 }) {
   const viewer = await requireViewer();
@@ -113,7 +113,7 @@ export async function clearChatPendingMessageAction(chatId: string) {
 
 export async function skipChatAuthorizationAction(input: {
   readonly chatId: string;
-  readonly events: readonly MessageStreamEvent[];
+  readonly events: readonly SessionStreamEvent[];
   readonly session: ClientSessionState | undefined;
 }) {
   const viewer = await requireViewer();
@@ -128,7 +128,7 @@ export async function skipChatAuthorizationAction(input: {
 
 export async function appendChatEventAction(input: {
   readonly chatId: string;
-  readonly event: MessageStreamEvent;
+  readonly event: SessionStreamEvent;
   readonly eventIndex: number;
 }) {
   const viewer = await requireViewer();

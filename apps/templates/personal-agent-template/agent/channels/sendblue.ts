@@ -35,7 +35,8 @@ interface SendblueChannelState {
   fromNumber: string | null;
   groupId: string | null;
   isGroup: boolean;
-  pendingToolCallMessage: string | null;
+  /** The model run whose tool calls this thread already announced. */
+  announcedRunId: string | null;
 }
 
 interface SendblueChannelContext {
@@ -202,7 +203,7 @@ async function dispatchInbound(
       fromNumber,
       groupId: payload.group_id?.length ? payload.group_id : null,
       isGroup: Boolean(payload.group_id?.length),
-      pendingToolCallMessage: null,
+      announcedRunId: null,
     } satisfies SendblueChannelState,
   } satisfies ChannelSendOptions<SendblueChannelState>;
 
@@ -235,7 +236,7 @@ export default defineChannel<SendblueChannelState, SendblueChannelContext>({
     fromNumber: null,
     groupId: null,
     isGroup: false,
-    pendingToolCallMessage: null,
+    announcedRunId: null,
   },
 
   metadata(state) {
@@ -307,7 +308,7 @@ export default defineChannel<SendblueChannelState, SendblueChannelContext>({
   ],
 
   events: {
-    async "turn.started"(_event, channel) {
+    async "turn.started"(_event, { channel }) {
       const threadId = threadIdForState(channel.sendblue, channel.state);
       if (!threadId || channel.state.isGroup) {
         return;
@@ -316,70 +317,81 @@ export default defineChannel<SendblueChannelState, SendblueChannelContext>({
       await channel.sendblue.startTyping(threadId).catch(() => undefined);
     },
 
-    async "actions.requested"(event, channel) {
+    async "content.completed"(event, { channel }) {
+      const threadId = threadIdForState(channel.sendblue, channel.state);
+      if (!threadId || event.data.kind !== "text" || typeof event.data.value !== "string") {
+        return;
+      }
+
+      // Narration is what the model said before calling tools; post its first line.
+      if (event.data.phase === "narration") {
+        const narration = firstNonEmptyLine(event.data.value);
+        if (narration) {
+          channel.state.announcedRunId = event.data.runId;
+          await postToThread(threadId, narration);
+        }
+        return;
+      }
+
+      if (event.data.value) {
+        await postToThread(threadId, event.data.value);
+      }
+    },
+
+    async "call.requested"(event, { channel }) {
       const threadId = threadIdForState(channel.sendblue, channel.state);
       if (!threadId || channel.state.isGroup) {
         return;
       }
 
-      const pending = channel.state.pendingToolCallMessage;
-      channel.state.pendingToolCallMessage = null;
-
-      if (pending) {
-        await postToThread(threadId, pending);
+      const runId = "runId" in event.data.owner ? event.data.owner.runId : null;
+      if (runId !== null && channel.state.announcedRunId !== runId) {
+        channel.state.announcedRunId = runId;
+        await postToThread(threadId, "Working on that — I'll reply in a moment.");
         return;
       }
 
       await channel.sendblue.startTyping(threadId).catch(() => undefined);
-      void event;
     },
 
-    async "message.completed"(event, channel) {
+    async "interaction.opened"(event, ctx) {
+      const { channel } = ctx;
       const threadId = threadIdForState(channel.sendblue, channel.state);
       if (!threadId) {
         return;
       }
 
-      if (event.finishReason === "tool-calls") {
-        const pending = event.message ? (firstNonEmptyLine(event.message) ?? null) : null;
-        channel.state.pendingToolCallMessage = pending;
-
-        if (pending) {
-          await postToThread(threadId, pending);
-        } else {
-          await postToThread(threadId, "Working on that — I'll reply in a moment.");
-        }
+      const { request } = event.data;
+      if (request.kind === "sign-in") {
+        const signIn = request.signIn;
+        const name = signIn?.displayName ?? signIn?.name ?? "this integration";
+        const lines = signIn?.url
+          ? [
+              `Sign in to ${name} to continue: ${signIn.url}`,
+              ...(signIn.userCode ? [`Code: ${signIn.userCode}`] : []),
+            ]
+          : [
+              `Authorization is required for ${name}.`,
+              `Open ${profileSettingsUrl()} to connect integrations, then try again.`,
+            ];
+        await postToThread(threadId, lines.join("\n"));
         return;
       }
 
-      channel.state.pendingToolCallMessage = null;
+      const { subject } = event.data;
+      const call = "callId" in subject ? ctx.view.calls[subject.callId] : undefined;
+      const pending: PendingInputRequest = {
+        requestId: event.data.interactionId,
+        toolName: call?.capability.name ?? "",
+      };
 
-      if (!event.message) {
-        return;
-      }
-
-      await postToThread(threadId, event.message);
-    },
-
-    async "input.requested"(event, channel) {
-      const threadId = threadIdForState(channel.sendblue, channel.state);
-      if (!threadId || event.requests.length === 0) {
-        return;
-      }
-
-      const pending = event.requests.map((request) => ({
-        requestId: request.requestId,
-        toolName: request.action.toolName,
-      }));
-      const onlySaveMemory = pending.every(isSaveMemoryRequest);
-
-      if (onlySaveMemory && inflightSend) {
+      if (isSaveMemoryRequest(pending) && inflightSend) {
         await postToThread(
           threadId,
           `Memory saves need the web profile on iMessage — skipping. Edit at ${profileSettingsUrl()}.`,
         );
         try {
-          await inflightSend.source.respond(denyResponses(pending), {
+          await inflightSend.source.respond(denyResponses([pending]), {
             auth: inflightSend.auth,
           });
         } catch (error) {
@@ -388,9 +400,9 @@ export default defineChannel<SendblueChannelState, SendblueChannelContext>({
         return;
       }
 
-      pendingInputByThread.set(threadId, pending);
+      pendingInputByThread.set(threadId, [...(pendingInputByThread.get(threadId) ?? []), pending]);
 
-      if (onlySaveMemory) {
+      if (isSaveMemoryRequest(pending)) {
         await postToThread(
           threadId,
           `Memory saves are not available in iMessage. Edit your profile at ${profileSettingsUrl()}.`,
@@ -398,34 +410,15 @@ export default defineChannel<SendblueChannelState, SendblueChannelContext>({
         return;
       }
 
-      const prompts = event.requests.map((request) => request.prompt).join("\n\n");
-      await postToThread(threadId, [prompts, "", "Reply YES to approve or NO to skip."].join("\n"));
+      await postToThread(
+        threadId,
+        [request.prompt, "", "Reply YES to approve or NO to skip."].join("\n"),
+      );
     },
 
-    async "authorization.required"(event, channel) {
+    async "turn.settled"(event, { channel }) {
       const threadId = threadIdForState(channel.sendblue, channel.state);
-      if (!threadId) {
-        return;
-      }
-
-      const url = event.authorization?.url;
-      const userCode = event.authorization?.userCode;
-      const lines = url
-        ? [
-            `Sign in to ${event.name} to continue: ${url}`,
-            ...(userCode ? [`Code: ${userCode}`] : []),
-          ]
-        : [
-            `Authorization is required for ${event.name}.`,
-            `Open ${profileSettingsUrl()} to connect integrations, then try again.`,
-          ];
-
-      await postToThread(threadId, lines.join("\n"));
-    },
-
-    async "turn.failed"(event, channel) {
-      const threadId = threadIdForState(channel.sendblue, channel.state);
-      if (!threadId) {
+      if (!threadId || event.data.outcome !== "failed") {
         return;
       }
 
@@ -437,13 +430,11 @@ export default defineChannel<SendblueChannelState, SendblueChannelContext>({
           "Please try again, rephrase, or open the web chat if it keeps failing.",
         ].join("\n"),
       );
-
-      void event;
     },
 
-    async "session.failed"(event, channel) {
+    async "session.ended"(event, { channel }) {
       const threadId = threadIdForState(channel.sendblue, channel.state);
-      if (!threadId) {
+      if (!threadId || event.data.outcome !== "failed") {
         return;
       }
 
@@ -455,8 +446,6 @@ export default defineChannel<SendblueChannelState, SendblueChannelContext>({
           "Send a new message to start again.",
         ].join("\n"),
       );
-
-      void event;
     },
   },
 });

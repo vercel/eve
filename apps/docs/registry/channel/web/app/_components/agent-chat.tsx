@@ -295,17 +295,14 @@ function getLatestTurnFailure(
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
 
-    if (event.type === "turn.failed") {
-      return event.data.code === "MODEL_CALL_FAILED"
+    if (event.type === "turn.settled") {
+      if (event.data.outcome !== "failed") return undefined;
+      return event.data.error?.code === "MODEL_CALL_FAILED"
         ? "The model is temporarily unavailable. Please try again."
-        : event.data.message;
+        : (event.data.error?.message ?? "The turn failed.");
     }
 
-    if (event.type === "turn.completed" || event.type === "turn.cancelled") {
-      return undefined;
-    }
-
-    if (event.type === "message.received") {
+    if (event.type === "delivery.consumed") {
       return undefined;
     }
   }
