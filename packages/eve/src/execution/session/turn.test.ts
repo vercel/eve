@@ -13,6 +13,7 @@ import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#chann
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { publishTurnWaitingStep } from "#execution/session/turn-waiting-step.js";
+import { publishSessionEvents } from "#execution/publish-session-events.js";
 import {
   withSessionStateDelta,
   type SessionStateValues,
@@ -48,6 +49,25 @@ vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
 }));
 vi.mock("#execution/coordination-dispatch-step.js", () => ({ dispatchCoordinationStep: vi.fn() }));
 
+// A task run's late spend publishes a fact; this suite's sessions carry no bundle to publish with.
+vi.mock("#execution/publish-session-events.js", async (importOriginal) => {
+  const unchanged = vi.fn(
+    async (target: { serializedContext: Record<string, unknown>; sessionState: unknown }) => ({
+      serializedContext: target.serializedContext,
+      sessionState: target.sessionState,
+    }),
+  );
+  return {
+    ...(await importOriginal()),
+    publishSessionEvents: unchanged,
+    relaySessionEvents: vi.fn(
+      async (target: { serializedContext: Record<string, unknown>; sessionState: unknown }) => ({
+        serializedContext: target.serializedContext,
+        sessionState: target.sessionState,
+      }),
+    ),
+  };
+});
 vi.mock("#execution/session/turn-step.js", () => ({
   turnStep: vi.fn(),
 }));
@@ -1181,6 +1201,16 @@ describe("SessionExecution checkpoints", () => {
       inputTokens: 250,
       outputTokens: 25,
     });
+    // No call is open to own it, so the spend is the task's own late usage.
+    expect(vi.mocked(publishSessionEvents)).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.arrayContaining([
+        expect.objectContaining({
+          data: expect.objectContaining({ kind: "delegated-late" }),
+          type: "usage.recorded",
+        }),
+      ]),
+    );
   });
 
   it("hands the step each workflow run's delegated usage once, even when its outcome arrives twice", async () => {
@@ -1265,10 +1295,11 @@ describe("SessionExecution checkpoints", () => {
       }),
     ).resolves.toMatchObject({ kind: "done" });
 
-    expect(vi.mocked(turnStep).mock.calls[1]?.[0].input?.runtimeResults?.delegatedUsage).toEqual([
-      spent(300),
-      spent(500),
-    ]);
+    // Each call owns what its run spent.
+    expect(vi.mocked(turnStep).mock.calls[1]?.[0].input?.runtimeResults?.delegatedUsage).toEqual({
+      "draft-call": spent(300),
+      "review-call": spent(500),
+    });
   });
 
   it("does not let steering that woke a wait interrupt the step that reads it", async () => {
