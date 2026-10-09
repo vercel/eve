@@ -425,7 +425,7 @@ The cuts above keep state in checkpoints, consistent through one commit path. Th
 - **Steps pass positions, not state.** Today every step journals the complete `SessionStepState`. With a log, a step receives a position and a snapshot reference, folds the suffix, acts, and commits.
 - **Checkpoints become snapshots,** `{position, foldVersion, state}`, written periodically and at handoff. A fold-version mismatch folds again from an earlier snapshot.
 - **Recovery reads the truth.** A retried step sees exactly what it committed, and the projection's counter can't drift from the stream. Zombie writers can still interleave; a conditional append ("expected position N") would be the natural fence if Workflow offers one.
-- **Participants record results as entries.** Restores rebuild code from their recorded selections, and redeploys re-resolve at the next turn's change points ([`dynamic-participants.md`](./dynamic-participants.md)).
+- **Participants record results as entries.** Restores rebuild code from their recorded selections, and redeploys re-resolve at the next turn's change points ([`session-reactions.md`](./session-reactions.md)).
 - **Compaction stops being destructive,** because raw history stays in the log. That's what rewinding past a compaction needs.
 
 **After 1.0, without breaking clients.** The public view keeps producing exactly the v27 facts, so clients, hooks, and channels see nothing change.
