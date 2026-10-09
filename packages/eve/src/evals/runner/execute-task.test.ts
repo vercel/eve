@@ -1,12 +1,9 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Client } from "#client/client.js";
 import { ClientSession } from "#client/session.js";
-import {
-  EVE_MESSAGE_STREAM_VERSION,
-  EVE_STREAM_VERSION_HEADER,
-  type UnstampedMessageStreamEvent,
-} from "#protocol/message.js";
+import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/message.js";
 import { stampTestEvents } from "#internal/testing/events.js";
 import { executeTask } from "#evals/runner/execute-task.js";
 import type { EveEval, EveEvalContext } from "#evals/types.js";
@@ -1129,11 +1126,11 @@ describe("executeTask", () => {
 });
 
 function createScriptedServer(
-  turns: readonly { events: readonly UnstampedMessageStreamEvent[]; sessionId: string }[],
+  turns: readonly { events: readonly SessionEvent[]; sessionId: string }[],
   options: {
     readonly cancelStatus?: "accepted" | "no_active_turn";
     readonly streams?: readonly {
-      readonly events: readonly UnstampedMessageStreamEvent[];
+      readonly events: readonly SessionEvent[];
       readonly sessionId: string;
     }[];
   } = {},
@@ -1141,7 +1138,7 @@ function createScriptedServer(
   const pendingTurns = [...turns];
   const streamQueues = new Map<
     string,
-    { events: readonly UnstampedMessageStreamEvent[]; deliveryId?: string }[]
+    { events: readonly SessionEvent[]; deliveryId?: string }[]
   >();
   const posts: Array<{ body: unknown; method: string; url: string }> = [];
   const cancels: string[] = [];
@@ -1209,10 +1206,7 @@ function createScriptedServer(
   };
 }
 
-function streamResponse(
-  events: readonly UnstampedMessageStreamEvent[],
-  deliveryId?: string,
-): Response {
+function streamResponse(events: readonly SessionEvent[], deliveryId?: string): Response {
   const encoder = new TextEncoder();
   return new Response(
     new ReadableStream<Uint8Array>({
@@ -1233,18 +1227,18 @@ function streamResponse(
 function turnStarted(
   turnId: string,
   trace?: { readonly spanId: string; readonly traceFlags: number; readonly traceId: string },
-): UnstampedMessageStreamEvent {
+): SessionEvent {
   return { data: { sequence: 0, trace, turnId }, type: "turn.started" };
 }
 
-function messageReceived(message: string, turnId: string): UnstampedMessageStreamEvent {
+function messageReceived(message: string, turnId: string): SessionEvent {
   return {
     data: { message, parts: [{ text: message, type: "text" }], sequence: 1, turnId },
     type: "message.received",
   };
 }
 
-function turnCompleted(turnId: string): UnstampedMessageStreamEvent {
+function turnCompleted(turnId: string): SessionEvent {
   return { data: { sequence: 3, turnId }, type: "turn.completed" };
 }
 
@@ -1252,33 +1246,29 @@ function usage(inputTokens: number, outputTokens = 1, costUsd?: number): TokenUs
   return { cacheReadTokens: 0, cacheWriteTokens: 0, costUsd, inputTokens, outputTokens };
 }
 
-function sessionWaiting(usage?: TokenUsage): UnstampedMessageStreamEvent {
+function sessionWaiting(usage?: TokenUsage): SessionEvent {
   return {
     data: { continuationToken: "session-id", wait: "next-user-message", ...(usage && { usage }) },
     type: "session.waiting",
   };
 }
 
-function sessionCompleted(): UnstampedMessageStreamEvent {
+function sessionCompleted(): SessionEvent {
   return { type: "session.completed" };
 }
 
-function stepStarted(modelId: string, turnId: string, stepIndex = 0): UnstampedMessageStreamEvent {
+function stepStarted(modelId: string, turnId: string, stepIndex = 0): SessionEvent {
   return { data: { modelId, sequence: 1, stepIndex, turnId }, type: "step.started" };
 }
 
-function messageCompleted(message: string, turnId: string): UnstampedMessageStreamEvent {
+function messageCompleted(message: string, turnId: string): SessionEvent {
   return {
     data: { finishReason: "stop", message, sequence: 1, stepIndex: 0, turnId },
     type: "message.completed",
   };
 }
 
-function inputRequested(
-  turnId: string,
-  requestId: string,
-  toolName: string,
-): UnstampedMessageStreamEvent {
+function inputRequested(turnId: string, requestId: string, toolName: string): SessionEvent {
   return {
     data: {
       requests: [
@@ -1303,11 +1293,7 @@ function inputRequested(
   };
 }
 
-function actionResult(
-  turnId: string,
-  toolName: string,
-  output: string,
-): UnstampedMessageStreamEvent {
+function actionResult(turnId: string, toolName: string, output: string): SessionEvent {
   return {
     data: {
       result: { callId: "call_1", kind: "tool-result", output, toolName },
@@ -1320,11 +1306,7 @@ function actionResult(
   };
 }
 
-function actionsRequested(
-  turnId: string,
-  toolName: string,
-  callId = "call_weather",
-): UnstampedMessageStreamEvent {
+function actionsRequested(turnId: string, toolName: string, callId = "call_weather"): SessionEvent {
   return {
     data: {
       actions: [{ callId, input: { city: "Lisbon" }, kind: "tool-call", toolName }],
@@ -1336,7 +1318,7 @@ function actionsRequested(
   };
 }
 
-function agentStarted(sessionId: string, name: string): UnstampedMessageStreamEvent {
+function agentStarted(sessionId: string, name: string): SessionEvent {
   return {
     data: {
       callId: "call_subagent",

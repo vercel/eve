@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
 import { hydrateWorkflowArguments } from "@workflow/core/serialization";
@@ -20,7 +21,6 @@ import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import { defineHook } from "#public/definitions/hook.js";
 import { defineDynamic } from "#dynamic/definition.js";
 import { sessions } from "#public/server/index.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import type { Approval } from "#approval/definition.js";
 import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
@@ -560,7 +560,7 @@ describe("workflowEntry integration", () => {
         },
       ]);
       const stream = captureTurnEvents(run);
-      let firstTurn: readonly MessageStreamEvent[];
+      let firstTurn: readonly SessionStreamEvent[];
       try {
         firstTurn = await stream.nextTurn();
       } finally {
@@ -646,7 +646,7 @@ describe("workflowEntry integration", () => {
         },
       ]);
       const stream = captureTurnEvents(run);
-      let firstTurn: readonly MessageStreamEvent[];
+      let firstTurn: readonly SessionStreamEvent[];
       try {
         firstTurn = await stream.nextTurn();
       } finally {
@@ -654,7 +654,7 @@ describe("workflowEntry integration", () => {
       }
 
       try {
-        const events: MessageStreamEvent[] = [];
+        const events: SessionStreamEvent[] = [];
         for await (const event of sessions.attach(run.runId).stream({ follow: false })) {
           events.push(event);
         }

@@ -1,4 +1,4 @@
-import type { MessageStreamEvent } from "#protocol/message.js";
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { isCurrentTurnBoundaryEvent } from "#protocol/message.js";
 
 function isDevelopmentMessageStreamDisconnectError(error: unknown): boolean {
@@ -43,10 +43,10 @@ export interface DevelopmentMessageStream {
    * configured boundary predicate matches or the response closes.
    */
   readEvents(input: {
-    onEvent?(event: MessageStreamEvent): void;
+    onEvent?(event: SessionStreamEvent): void;
     startAfterBoundaryCount?: number;
-    stopWhen?(event: MessageStreamEvent): boolean;
-  }): Promise<MessageStreamEvent[]>;
+    stopWhen?(event: SessionStreamEvent): boolean;
+  }): Promise<SessionStreamEvent[]>;
 }
 
 class BufferedDevelopmentMessageStream implements DevelopmentMessageStream {
@@ -97,10 +97,10 @@ class BufferedDevelopmentMessageStream implements DevelopmentMessageStream {
   }
 
   async readEvents(input: {
-    onEvent?(event: MessageStreamEvent): void;
+    onEvent?(event: SessionStreamEvent): void;
     startAfterBoundaryCount?: number;
-    stopWhen?(event: MessageStreamEvent): boolean;
-  }): Promise<MessageStreamEvent[]> {
+    stopWhen?(event: SessionStreamEvent): boolean;
+  }): Promise<SessionStreamEvent[]> {
     if (this.#closed) {
       return [];
     }
@@ -118,12 +118,12 @@ class BufferedDevelopmentMessageStream implements DevelopmentMessageStream {
     this.#isReading = true;
 
     try {
-      const events: MessageStreamEvent[] = [];
+      const events: SessionStreamEvent[] = [];
       const stopWhen = input.stopWhen ?? isCurrentTurnBoundaryEvent;
       const startAfterBoundaryCount = input.startAfterBoundaryCount ?? 0;
       let shouldCollect = startAfterBoundaryCount <= this.#boundaryCount;
 
-      const handleEvent = (event: MessageStreamEvent): boolean => {
+      const handleEvent = (event: SessionStreamEvent): boolean => {
         const isBoundaryEvent = isCurrentTurnBoundaryEvent(event);
 
         if (shouldCollect) {
@@ -160,7 +160,7 @@ class BufferedDevelopmentMessageStream implements DevelopmentMessageStream {
             continue;
           }
 
-          const event = JSON.parse(line) as MessageStreamEvent;
+          const event = JSON.parse(line) as SessionStreamEvent;
 
           if (handleEvent(event)) {
             return events;
@@ -209,7 +209,7 @@ class BufferedDevelopmentMessageStream implements DevelopmentMessageStream {
       this.#buffer = "";
 
       if (trailingLine.length > 0) {
-        const event = JSON.parse(trailingLine) as MessageStreamEvent;
+        const event = JSON.parse(trailingLine) as SessionStreamEvent;
         handleEvent(event);
       }
 

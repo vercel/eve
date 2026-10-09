@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { eachEvent } from "#internal/testing/session-machine.js";
 import { describe, expect, it, vi } from "vitest";
 
@@ -10,7 +11,6 @@ import {
   createMessageCompletedEvent,
   createReasoningAppendedEvent,
 } from "#protocol/message.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 function deferred(): { readonly promise: Promise<void>; resolve(): void } {
   let resolve!: () => void;
@@ -61,8 +61,8 @@ function input(callId: string, delta: string) {
 describe("createOrderedStreamEmitter", () => {
   it("keeps consuming while a write is active and preserves the latest event payload", async () => {
     const firstWrite = deferred();
-    const events: UnstampedMessageStreamEvent[] = [];
-    const emitFn = vi.fn(async (event: UnstampedMessageStreamEvent) => {
+    const events: SessionEvent[] = [];
+    const emitFn = vi.fn(async (event: SessionEvent) => {
       events.push(event);
       if (events.length === 1) await firstWrite.promise;
     });
@@ -81,8 +81,8 @@ describe("createOrderedStreamEmitter", () => {
 
   it("coalesces adjacent deltas without content-level boundaries", async () => {
     const firstWrite = deferred();
-    const events: UnstampedMessageStreamEvent[] = [];
-    const emitFn = vi.fn(async (event: UnstampedMessageStreamEvent) => {
+    const events: SessionEvent[] = [];
+    const emitFn = vi.fn(async (event: SessionEvent) => {
       events.push(event);
       if (events.length === 1) await firstWrite.promise;
     });
@@ -101,8 +101,8 @@ describe("createOrderedStreamEmitter", () => {
 
   it("coalesces adjacent input deltas for the same tool call", async () => {
     const firstWrite = deferred();
-    const events: UnstampedMessageStreamEvent[] = [];
-    const emitFn = vi.fn(async (event: UnstampedMessageStreamEvent) => {
+    const events: SessionEvent[] = [];
+    const emitFn = vi.fn(async (event: SessionEvent) => {
       events.push(event);
       if (events.length === 1) await firstWrite.promise;
     });
@@ -126,8 +126,8 @@ describe("createOrderedStreamEmitter", () => {
 
   it("treats other event types and stream coordinates as ordering barriers", async () => {
     const firstWrite = deferred();
-    const events: UnstampedMessageStreamEvent[] = [];
-    const emitFn = vi.fn(async (event: UnstampedMessageStreamEvent) => {
+    const events: SessionEvent[] = [];
+    const emitFn = vi.fn(async (event: SessionEvent) => {
       events.push(event);
       if (events.length === 1) await firstWrite.promise;
     });
@@ -161,8 +161,8 @@ describe("createOrderedStreamEmitter", () => {
 
   it("keeps the newest adjacent partial for each call and preserves terminal barriers", async () => {
     const firstWrite = deferred();
-    const events: UnstampedMessageStreamEvent[] = [];
-    const emitFn = vi.fn(async (event: UnstampedMessageStreamEvent) => {
+    const events: SessionEvent[] = [];
+    const emitFn = vi.fn(async (event: SessionEvent) => {
       events.push(event);
       if (events.length === 1) await firstWrite.promise;
     });
@@ -215,7 +215,7 @@ describe("createOrderedStreamEmitter", () => {
 
   it("counts merged empty deltas toward the pending-event limit", async () => {
     const firstWrite = deferred();
-    const events: UnstampedMessageStreamEvent[] = [];
+    const events: SessionEvent[] = [];
     const emitter = createOrderedStreamEmitter(
       eachEvent(async (event) => {
         events.push(event);

@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { createHmac } from "node:crypto";
 
 import { afterAll, afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
@@ -20,7 +21,6 @@ import {
   mockChannelContext,
   type ObservedChannelDelivery,
 } from "#internal/testing/mocks/mock-channel-operations.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { decodeSlackApiBody } from "#internal/testing/slack-api-body.js";
 import {
   HITL_ACTION_PREFIX,
@@ -223,19 +223,11 @@ const stubAlsContext = (() => {
   return ctx;
 })();
 
-function callEvent(
-  adapter: ChannelAdapter,
-  event: UnstampedMessageStreamEvent,
-  ctx: any,
-): Promise<void> {
+function callEvent(adapter: ChannelAdapter, event: SessionEvent, ctx: any): Promise<void> {
   return contextStorage.run(stubAlsContext, () => callAdapterEventHandler(adapter, event, ctx));
 }
 
-function callCompletionHandler(
-  adapter: ChannelAdapter,
-  event: UnstampedMessageStreamEvent,
-  ctx: any,
-) {
+function callCompletionHandler(adapter: ChannelAdapter, event: SessionEvent, ctx: any) {
   if (event.type !== "message.completed") throw new Error("Expected message.completed");
   return contextStorage.run(stubAlsContext, () => adapter["message.completed"]!(event.data, ctx));
 }
@@ -271,11 +263,8 @@ function captureAccessor(initialContinuationToken: string): {
   };
 }
 
-function makeEvent<T extends UnstampedMessageStreamEvent["type"]>(
-  type: T,
-  data: unknown,
-): UnstampedMessageStreamEvent {
-  return { type, data } as UnstampedMessageStreamEvent;
+function makeEvent<T extends SessionEvent["type"]>(type: T, data: unknown): SessionEvent {
+  return { type, data } as SessionEvent;
 }
 
 const THREAD_STATE = {

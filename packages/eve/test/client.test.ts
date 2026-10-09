@@ -6,8 +6,8 @@ import {
   Client,
   ClientError,
   type AgentInfoResult,
-  type HandleMessageStreamEvent,
-  type MessageStreamEvent,
+  type SessionStreamEvent,
+  type SessionStreamEvent,
 } from "../src/client/index.js";
 import {
   EVE_SESSION_ID_HEADER,
@@ -21,7 +21,7 @@ import {
   createSessionWaitingEvent,
   createTurnCompletedEvent,
   createTurnStartedEvent,
-  type UnstampedMessageStreamEvent,
+  type SessionEvent,
 } from "../src/protocol/message.js";
 import { createTestAgentInfoResult } from "../src/internal/testing/agent-info-fixture.js";
 
@@ -32,7 +32,7 @@ import { createTestAgentInfoResult } from "../src/internal/testing/agent-info-fi
 function createControlledStreamResponse(deliveryId = "delivery_turn_001"): {
   close(): void;
   error(error: Error): void;
-  pushEvent(event: UnstampedMessageStreamEvent): void;
+  pushEvent(event: SessionEvent): void;
   response: Response;
 } {
   const encoder = new TextEncoder();
@@ -81,10 +81,7 @@ function createResumedMessageResponse(deliveryId = "delivery_turn_002"): Respons
   });
 }
 
-function createEagerStreamResponse(
-  events: readonly UnstampedMessageStreamEvent[],
-  deliveryId?: string,
-): Response {
+function createEagerStreamResponse(events: readonly SessionEvent[], deliveryId?: string): Response {
   let turnId = "turn_001";
   for (const event of events) {
     if ("data" in event && event.data !== undefined && "turnId" in event.data) {
@@ -114,7 +111,7 @@ function singleTurnEvents(input: {
   message: string;
   sequence: number;
   turnId: string;
-}): UnstampedMessageStreamEvent[] {
+}): SessionEvent[] {
   return [
     createTurnStartedEvent({ sequence: input.sequence, turnId: input.turnId }),
     createMessageReceivedEvent({
@@ -137,8 +134,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it("keeps HandleMessageStreamEvent as an alias for MessageStreamEvent", () => {
-  expectTypeOf<HandleMessageStreamEvent>().toEqualTypeOf<MessageStreamEvent>();
+it("keeps SessionStreamEvent as an alias for SessionStreamEvent", () => {
+  expectTypeOf<SessionStreamEvent>().toEqualTypeOf<SessionStreamEvent>();
 });
 
 // ---------------------------------------------------------------------------
@@ -304,7 +301,7 @@ describe("Session.send (result)", () => {
   });
 
   it("returns status 'failed' when the session fails without throwing", async () => {
-    const events: UnstampedMessageStreamEvent[] = [
+    const events: SessionEvent[] = [
       createTurnStartedEvent({ sequence: 1, turnId: "turn_001" }),
       createSessionFailedEvent({
         usage: TEST_USAGE,
@@ -327,7 +324,7 @@ describe("Session.send (result)", () => {
   });
 
   it("returns status 'completed' when the session completes", async () => {
-    const events: UnstampedMessageStreamEvent[] = [
+    const events: SessionEvent[] = [
       createTurnStartedEvent({ sequence: 1, turnId: "turn_001" }),
       createMessageCompletedEvent({
         message: "Done",
@@ -356,7 +353,7 @@ describe("Session.send (result)", () => {
       required: ["title"],
       type: "object",
     } as const;
-    const events: UnstampedMessageStreamEvent[] = [
+    const events: SessionEvent[] = [
       createTurnStartedEvent({ sequence: 1, turnId: "turn_001" }),
       createMessageReceivedEvent({
         message: "Summarize",
@@ -397,7 +394,7 @@ describe("Session.send (result)", () => {
   });
 
   it("keeps the handle pinned after session.completed", async () => {
-    const firstEvents: UnstampedMessageStreamEvent[] = [
+    const firstEvents: SessionEvent[] = [
       createTurnStartedEvent({ sequence: 1, turnId: "turn_001" }),
       createMessageCompletedEvent({
         message: "Done",
@@ -454,7 +451,7 @@ describe("Session.send (stream)", () => {
 
     const session = new Client({ host: "http://localhost:3000" }).sessions.attach("session_001");
     const res = await session.send("Hello");
-    const collected: MessageStreamEvent[] = [];
+    const collected: SessionStreamEvent[] = [];
 
     const iterationPromise = (async () => {
       for await (const event of res) {
@@ -531,7 +528,7 @@ describe("Session.send (stream)", () => {
 describe("Session.send (reconnection)", () => {
   it("reconnects when the stream disconnects mid-turn", async () => {
     const firstStream = createControlledStreamResponse();
-    const reconnectEvents: UnstampedMessageStreamEvent[] = [
+    const reconnectEvents: SessionEvent[] = [
       createMessageReceivedEvent({ message: "Hello", sequence: 1, turnId: "turn_001" }),
       createMessageCompletedEvent({
         message: "Reply",
@@ -703,7 +700,7 @@ describe("Session.stream", () => {
   });
 
   it("uses the session sessionId and streamIndex", async () => {
-    const events: UnstampedMessageStreamEvent[] = [
+    const events: SessionEvent[] = [
       createMessageCompletedEvent({
         message: "Hi",
         sequence: 2,
@@ -720,7 +717,7 @@ describe("Session.stream", () => {
     const client = new Client({ host: "http://localhost:3000" });
     const session = client.sessions.attach("session_001", { streamIndex: 10 });
 
-    const collected: MessageStreamEvent[] = [];
+    const collected: SessionStreamEvent[] = [];
     for await (const event of session.stream()) {
       collected.push(event);
       // stream() follows the durable log across transport ends; the boundary

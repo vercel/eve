@@ -1,8 +1,9 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { expect, it } from "vitest";
 
 import { publishTerminalSessionEvent } from "#execution/publish-session-events.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
-import { createSessionFailedEvent, type MessageStreamEvent } from "#protocol/message.js";
+import { createSessionFailedEvent } from "#protocol/message.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 
 const serializedContext = {
@@ -25,12 +26,12 @@ function failedEvent() {
 
 /** A session writable that records writes and the close, in order. */
 function recordingWritable() {
-  const ops: Array<{ kind: "write"; event: MessageStreamEvent } | { kind: "close" }> = [];
+  const ops: Array<{ kind: "write"; event: SessionStreamEvent } | { kind: "close" }> = [];
   const sessionWritable = new WritableStream<Uint8Array>({
     write(chunk) {
       ops.push({
         kind: "write",
-        event: JSON.parse(new TextDecoder().decode(chunk)) as MessageStreamEvent,
+        event: JSON.parse(new TextDecoder().decode(chunk)) as SessionStreamEvent,
       });
     },
     close() {

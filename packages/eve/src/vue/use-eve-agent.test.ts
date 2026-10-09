@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { effectScope } from "vue";
 
@@ -21,7 +22,6 @@ import {
   createMessageReceivedEvent,
   createSessionWaitingEvent,
   createSessionFailedEvent,
-  type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import { TEST_USAGE, stampTestEvents } from "#internal/testing/events.js";
 
@@ -35,7 +35,7 @@ function createStartedMessageResponse(sessionId: string, continuationToken: stri
   });
 }
 
-function createEagerStreamResponse(events: readonly UnstampedMessageStreamEvent[]): Response {
+function createEagerStreamResponse(events: readonly SessionEvent[]): Response {
   const encoder = new TextEncoder();
   return new Response(
     new ReadableStream<Uint8Array>({
@@ -53,7 +53,7 @@ function createEagerStreamResponse(events: readonly UnstampedMessageStreamEvent[
 }
 
 function createBoundedStreamResponse(
-  events: readonly UnstampedMessageStreamEvent[],
+  events: readonly SessionEvent[],
   tailIndex = events.length - 1,
 ): Response {
   const response = createEagerStreamResponse(events);
@@ -187,7 +187,7 @@ describe("EveAgentStore (Vue composable backing store)", () => {
       reducer: defaultMessageReducer(),
     });
 
-    const seenEvents: UnstampedMessageStreamEvent[] = [];
+    const seenEvents: SessionEvent[] = [];
     const seenSessions: Array<ClientSessionState | undefined> = [];
     store.setCallbacks({
       onEvent(event) {

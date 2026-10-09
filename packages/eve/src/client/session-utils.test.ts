@@ -1,6 +1,5 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { describe, expect, it } from "vitest";
-
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 import { collectTurnEvents, summarizeTurnEvents, TurnSegment } from "./session-utils.js";
 
@@ -36,7 +35,7 @@ describe("summarizeTurnEvents", () => {
         type: "session.waiting",
         data: { continuationToken: "session-id", wait: "next-user-message" },
       },
-    ] satisfies UnstampedMessageStreamEvent[];
+    ] satisfies SessionEvent[];
 
     expect(summarizeTurnEvents(events)).toMatchObject({
       boundary: { type: "session.waiting" },
@@ -91,7 +90,7 @@ describe("summarizeTurnEvents", () => {
         type: "session.waiting",
         data: { continuationToken: "session-id", wait: "next-user-message" },
       },
-    ] satisfies UnstampedMessageStreamEvent[];
+    ] satisfies SessionEvent[];
     expect(summarizeTurnEvents(events).inputRequests).toEqual([request("open")]);
   });
 
@@ -107,7 +106,7 @@ describe("summarizeTurnEvents", () => {
         type: "authorization.completed",
         data: { ...eventData, attemptId: "alice", name: "linear", outcome: "authorized" },
       },
-    ] satisfies UnstampedMessageStreamEvent[];
+    ] satisfies SessionEvent[];
     expect(summarizeTurnEvents(events).pendingAuthorizations).toEqual([required("bob").data]);
   });
 
@@ -121,7 +120,7 @@ describe("summarizeTurnEvents", () => {
         type: "authorization.completed",
         data: { ...eventData, attemptId: "alice", name: "linear", outcome: "authorized" },
       },
-    ] satisfies UnstampedMessageStreamEvent[];
+    ] satisfies SessionEvent[];
     expect(summarizeTurnEvents(events).pendingAuthorizations).toEqual([events[0]!.data]);
   });
 
@@ -143,7 +142,7 @@ describe("summarizeTurnEvents", () => {
         type: "session.waiting",
         data: { continuationToken: "session-id", wait: "next-user-message" },
       },
-    ] satisfies UnstampedMessageStreamEvent[];
+    ] satisfies SessionEvent[];
 
     expect(summarizeTurnEvents(events)).toMatchObject({
       failure: { type: "turn.failed", data: { message: "Unavailable" } },
@@ -155,7 +154,7 @@ describe("summarizeTurnEvents", () => {
 
 describe("collectTurnEvents", () => {
   it("stops at the current-turn boundary", async () => {
-    async function* stream(): AsyncGenerator<UnstampedMessageStreamEvent> {
+    async function* stream(): AsyncGenerator<SessionEvent> {
       yield {
         type: "session.waiting",
         data: { continuationToken: "session-id", wait: "next-user-message" },
@@ -173,17 +172,17 @@ describe("collectTurnEvents", () => {
 });
 
 describe("TurnSegment", () => {
-  const signIn: UnstampedMessageStreamEvent = {
+  const signIn: SessionEvent = {
     type: "authorization.required",
     data: { ...eventData, description: "Sign in", name: "linear", webhookUrl: "https://auth" },
   };
-  const held: UnstampedMessageStreamEvent = {
+  const held: SessionEvent = {
     type: "turn.waiting",
     data: { on: "input", sequence: 1, turnId: "turn_1" },
   };
 
   it("reads past a held sign-in only while following its callback", () => {
-    const resumed: UnstampedMessageStreamEvent[] = [
+    const resumed: SessionEvent[] = [
       {
         type: "authorization.completed",
         data: { ...eventData, name: "linear", outcome: "authorized" },
@@ -207,7 +206,7 @@ describe("TurnSegment", () => {
 
   it("stops at a held sign-in when an approval also waits on the person", () => {
     const segment = new TurnSegment({ followCallbacks: true });
-    const approval: UnstampedMessageStreamEvent = {
+    const approval: SessionEvent = {
       type: "input.requested",
       data: {
         ...eventData,

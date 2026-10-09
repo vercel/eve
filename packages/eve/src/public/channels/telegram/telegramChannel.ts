@@ -1,3 +1,5 @@
+import type { ChannelEventContext } from "#public/definitions/channel.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import type { TelegramInstrumentationMetadata } from "#public/channels/telegram/index.js";
 import { defaultDeliverResult, type ChannelAdapterContext } from "#channel/adapter.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
@@ -7,7 +9,6 @@ import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { createLogger, logError } from "#internal/logging.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   answerTelegramCallbackQuery,
   callTelegramApi,
@@ -73,8 +74,8 @@ import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
 const log = createLogger("telegram.channel");
 
-type EventData<T extends UnstampedMessageStreamEvent["type"]> =
-  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
+type EventData<T extends SessionEvent["type"]> =
+  Extract<SessionEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /** Minimal Telegram context (only `telegram`, no `state` or session ops), passed to `onMessage` and `onCallbackQuery` hooks before a session exists. Event handlers receive the richer {@link TelegramEventContext}. */
 export interface TelegramContext {
@@ -138,33 +139,25 @@ export type TelegramInboundResult = {
 /** Sync or async {@link TelegramInboundResult}. */
 export type TelegramInboundResultOrPromise = TelegramInboundResult | Promise<TelegramInboundResult>;
 
-type TelegramEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
+type TelegramEventHandler<T extends SessionEvent["type"]> = (
   data: EventData<T>,
   channel: TelegramEventContext,
-  ctx: SessionContext,
+  ctx: ChannelEventContext,
 ) => void | Promise<void>;
 
-type TelegramSessionFailedHandler = (
-  data: EventData<"session.failed">,
-  channel: TelegramEventContext,
-) => void | Promise<void>;
-
-/** Per-event handlers for `telegramChannel({ events })`. Each entry overrides the built-in default (handlers merge over {@link defaultEvents}). `session.failed` receives `(data, channel)` and exposes the ID as `data.sessionId`; all others also receive the {@link SessionContext}. */
+/** Per-event handlers for `telegramChannel({ events })`. Each entry overrides the built-in default (handlers merge over {@link defaultEvents}). Every handler receives the event's data, the channel context, and the {@link SessionContext}. */
 export interface TelegramChannelEvents {
   readonly "turn.started"?: TelegramEventHandler<"turn.started">;
-  readonly "actions.requested"?: TelegramEventHandler<"actions.requested">;
-  readonly "action.partial"?: TelegramEventHandler<"action.partial">;
-  readonly "action.result"?: TelegramEventHandler<"action.result">;
-  readonly "message.completed"?: TelegramEventHandler<"message.completed">;
-  readonly "message.appended"?: TelegramEventHandler<"message.appended">;
+  readonly "call.requested"?: TelegramEventHandler<"call.requested">;
+  readonly "call.progress"?: TelegramEventHandler<"call.progress">;
+  readonly "call.settled"?: TelegramEventHandler<"call.settled">;
+  readonly "content.completed"?: TelegramEventHandler<"content.completed">;
+  readonly "content.delta"?: TelegramEventHandler<"content.delta">;
   readonly "input.requested"?: TelegramEventHandler<"input.requested">;
   readonly "input.resolved"?: TelegramEventHandler<"input.resolved">;
-  readonly "turn.failed"?: TelegramEventHandler<"turn.failed">;
-  readonly "turn.completed"?: TelegramEventHandler<"turn.completed">;
-  readonly "turn.cancelled"?: TelegramEventHandler<"turn.cancelled">;
-  readonly "session.failed"?: TelegramSessionFailedHandler;
-  readonly "session.completed"?: TelegramEventHandler<"session.completed">;
-  readonly "session.waiting"?: TelegramEventHandler<"session.waiting">;
+  readonly "turn.settled"?: TelegramEventHandler<"turn.settled">;
+  readonly "session.ended"?: TelegramEventHandler<"session.ended">;
+  readonly "delivery.settled"?: TelegramEventHandler<"delivery.settled">;
   readonly "authorization.required"?: TelegramEventHandler<"authorization.required">;
   readonly "authorization.completed"?: TelegramEventHandler<"authorization.completed">;
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Client } from "../../src/client/client.js";
-import { type MessageStreamEvent, isCurrentTurnBoundaryEvent } from "../../src/protocol/message.js";
+import { type SessionStreamEvent, isCurrentTurnBoundaryEvent } from "../../src/protocol/message.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { startEveDev } from "./dev-server-harness.js";
 
@@ -100,7 +100,7 @@ export default defineAgent({
     try {
       const client = new Client({ host: server.url });
       const { session, response } = await client.sessions.create({ message: "Who won in 2026?" });
-      const events: MessageStreamEvent[] = [];
+      const events: SessionStreamEvent[] = [];
       const started = Promise.withResolvers<void>();
       const collecting = (async () => {
         for await (const event of response) {

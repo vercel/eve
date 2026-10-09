@@ -1,12 +1,12 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { RequestError, type AgentContext } from "#compiled/@agentclientprotocol/sdk/index.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { EveAcpAdapter } from "#acp/adapter.js";
 import { ClientError } from "#client/client-error.js";
 import type { SendTurnInput, SendTurnPayload } from "#client/types.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
 
-type TestStreamEvent<T = HandleMessageStreamEvent> = T extends unknown ? Omit<T, "meta"> : never;
+type TestStreamEvent<T = SessionStreamEvent> = T extends unknown ? Omit<T, "meta"> : never;
 
 class FakeClientSession {
   readonly cancel = vi.fn(async () => ({ sessionId: "session_test", status: "accepted" }));
@@ -18,17 +18,17 @@ class FakeClientSession {
     this.#turns = turns;
   }
 
-  async send(message: SendTurnInput["message"]): Promise<AsyncIterable<HandleMessageStreamEvent>> {
+  async send(message: SendTurnInput["message"]): Promise<AsyncIterable<SessionStreamEvent>> {
     return await this.#next({ message });
   }
 
   async respond(
     inputResponses: NonNullable<SendTurnPayload["inputResponses"]>,
-  ): Promise<AsyncIterable<HandleMessageStreamEvent>> {
+  ): Promise<AsyncIterable<SessionStreamEvent>> {
     return await this.#next({ inputResponses });
   }
 
-  async #next(input: SendTurnPayload): Promise<AsyncIterable<HandleMessageStreamEvent>> {
+  async #next(input: SendTurnPayload): Promise<AsyncIterable<SessionStreamEvent>> {
     this.sends.push(input);
     const events = this.#turns.shift() ?? [];
     return (async function* () {
@@ -36,7 +36,7 @@ class FakeClientSession {
         yield {
           ...event,
           meta: { at: "2026-07-29T00:00:00.000Z", id: `event-${index}` },
-        } as HandleMessageStreamEvent;
+        } as SessionStreamEvent;
       }
     })();
   }
@@ -448,11 +448,11 @@ describe("EveAcpAdapter", () => {
         yield {
           type: "turn.cancelled",
           data: { sequence: 1, turnId: "turn-1" },
-        } as HandleMessageStreamEvent;
+        } as SessionStreamEvent;
         yield {
           type: "session.waiting",
           data: { continuationToken: "session-id", wait: "next-user-message" },
-        } as HandleMessageStreamEvent;
+        } as SessionStreamEvent;
       })();
     });
     const adapter = new EveAcpAdapter({
@@ -489,16 +489,16 @@ describe("EveAcpAdapter", () => {
         yield {
           type: "turn.started",
           data: { sequence: 0, turnId: "turn-1" },
-        } as HandleMessageStreamEvent;
+        } as SessionStreamEvent;
         await pending;
         yield {
           type: "turn.cancelled",
           data: { sequence: 1, turnId: "turn-1" },
-        } as HandleMessageStreamEvent;
+        } as SessionStreamEvent;
         yield {
           type: "session.waiting",
           data: { continuationToken: "session-id", wait: "next-user-message" },
-        } as HandleMessageStreamEvent;
+        } as SessionStreamEvent;
       })();
     });
     const adapter = new EveAcpAdapter({

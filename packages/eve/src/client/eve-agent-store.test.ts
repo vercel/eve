@@ -1,3 +1,4 @@
+import type { SessionEvent, SessionStreamEvent } from "#protocol/session-event.js";
 import { encodeTestLine } from "#internal/testing/events.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -31,14 +32,12 @@ import {
   EVE_MESSAGE_STREAM_VERSION,
   EVE_SESSION_ID_HEADER,
   EVE_STREAM_VERSION_HEADER,
-  type UnstampedMessageStreamEvent,
-  type MessageStreamEvent,
 } from "#protocol/message.js";
 import type { MessageStreamVersion } from "#client/stream-version.js";
 
-type MessageStreamEventForVersion<_Version extends MessageStreamVersion> = MessageStreamEvent;
+type MessageStreamEventForVersion<_Version extends MessageStreamVersion> = SessionStreamEvent;
 
-function turnEvents(): MessageStreamEvent[] {
+function turnEvents(): SessionStreamEvent[] {
   return stampTestEvents([
     createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
     createMessageCompletedEvent({
@@ -49,10 +48,10 @@ function turnEvents(): MessageStreamEvent[] {
       turnId: "turn_1",
     }),
     createSessionWaitingEvent(TEST_USAGE),
-  ] as UnstampedMessageStreamEvent[]);
+  ] as SessionEvent[]);
 }
 
-function streamingTurnEvents(): MessageStreamEvent[] {
+function streamingTurnEvents(): SessionStreamEvent[] {
   return stampTestEvents([
     createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
     createTurnStartedEvent({ sequence: 1, turnId: "turn_1" }),
@@ -76,7 +75,7 @@ function streamingTurnEvents(): MessageStreamEvent[] {
       turnId: "turn_1",
     }),
     createSessionWaitingEvent(TEST_USAGE),
-  ] as UnstampedMessageStreamEvent[]);
+  ] as SessionEvent[]);
 }
 
 function startedResponse(deliveryId = "delivery_1"): Response {
@@ -114,11 +113,11 @@ function versionedStreamResponse<Version extends MessageStreamVersion>(
   );
 }
 
-function streamResponse(events: readonly MessageStreamEvent[]): Response {
+function streamResponse(events: readonly SessionStreamEvent[]): Response {
   return versionedStreamResponse(EVE_MESSAGE_STREAM_VERSION, events);
 }
 
-function disconnectingStreamResponse(events: readonly MessageStreamEvent[]): Response {
+function disconnectingStreamResponse(events: readonly SessionStreamEvent[]): Response {
   return versionedDisconnectingStreamResponse(EVE_MESSAGE_STREAM_VERSION, events);
 }
 
@@ -147,7 +146,7 @@ function versionedDisconnectingStreamResponse<Version extends MessageStreamVersi
 }
 
 function boundedStreamResponse(
-  events: readonly MessageStreamEvent[],
+  events: readonly SessionStreamEvent[],
   tailIndex = events.length - 1,
 ): Response {
   const response = streamResponse(events);
@@ -171,7 +170,7 @@ function controlledStreamResponse() {
 
   return {
     close: () => controller?.close(),
-    emit: (event: MessageStreamEvent) => {
+    emit: (event: SessionStreamEvent) => {
       controller?.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
     },
     response,
@@ -186,7 +185,7 @@ function acceptedCancellationResponse(): Response {
   });
 }
 
-function preV20MessageCompletedEvent(): MessageStreamEvent {
+function preV20MessageCompletedEvent(): SessionStreamEvent {
   return {
     ...createMessageCompletedEvent({
       finishReason: "stop",
@@ -196,11 +195,11 @@ function preV20MessageCompletedEvent(): MessageStreamEvent {
       turnId: "turn_legacy",
     }),
     meta: { at: "2026-07-27T18:04:11.912Z" },
-  } as MessageStreamEvent;
+  } as SessionStreamEvent;
 }
 
 const cleanupStores: Array<() => void> = [];
-function colorApprovalRequested(requestId: string): MessageStreamEvent {
+function colorApprovalRequested(requestId: string): SessionStreamEvent {
   return stampTestEvents([
     {
       type: "input.requested",
@@ -224,7 +223,7 @@ function colorApprovalRequested(requestId: string): MessageStreamEvent {
         stepIndex: 0,
         turnId: "turn_1",
       },
-    } as UnstampedMessageStreamEvent,
+    } as SessionEvent,
   ])[0]!;
 }
 
@@ -259,7 +258,7 @@ describe("EveAgentStore lifecycle", () => {
       .mockReturnValueOnce(start.promise)
       .mockResolvedValueOnce(streamResponse(events));
     const store = createStore({ reducer: defaultMessageReducer() });
-    const seenEvents: MessageStreamEvent[] = [];
+    const seenEvents: SessionStreamEvent[] = [];
     const seenStreamIndexes: Array<number | undefined> = [];
     store.setCallbacks({
       onEvent: (event) => seenEvents.push(event),
@@ -554,7 +553,7 @@ describe("EveAgentStore agent-session following", () => {
       .join("");
   };
 
-  const childStore = (parent: readonly MessageStreamEvent[], followSubagents = true) =>
+  const childStore = (parent: readonly SessionStreamEvent[], followSubagents = true) =>
     createStore({
       host: "http://localhost",
       initialSession: { sessionId: "session_1", streamIndex: parent.length },
@@ -1108,7 +1107,7 @@ describe("EveAgentStore stream overlap", () => {
       reducer: defaultMessageReducer(),
     });
 
-    const seen: MessageStreamEvent[] = [];
+    const seen: SessionStreamEvent[] = [];
     store.setCallbacks({ onEvent: (event) => seen.push(event) });
 
     await store.send({ message: "Hello" });
@@ -1143,7 +1142,7 @@ describe("EveAgentStore stream overlap", () => {
       .mockResolvedValueOnce(streamResponse([legacy, boundary]));
 
     const store = createStore({ reducer: defaultMessageReducer() });
-    const seen: MessageStreamEvent[] = [];
+    const seen: SessionStreamEvent[] = [];
     store.setCallbacks({ onEvent: (event) => seen.push(event) });
 
     await store.send({ message: "Hello" });
@@ -1469,7 +1468,7 @@ describe("EveAgentStore session resume", () => {
         turnId: "turn_1",
       }),
       createSessionWaitingEvent(TEST_USAGE),
-    ] as UnstampedMessageStreamEvent[]);
+    ] as SessionEvent[]);
     const initialEvents = [received!, started!];
     const live = controlledStreamResponse();
     const fetchMock = vi
@@ -1580,7 +1579,7 @@ describe("EveAgentStore session resume", () => {
         turnId: "turn_2",
       }),
       createSessionWaitingEvent(TEST_USAGE),
-    ] as UnstampedMessageStreamEvent[]);
+    ] as SessionEvent[]);
     const settled = events.slice(0, 3);
     const live = controlledStreamResponse();
     live.response.headers.set("x-eve-stream-tail-index", String(settled.length - 1));
@@ -1665,7 +1664,7 @@ describe("EveAgentStore session resume", () => {
         turnId: "turn_1",
       }),
       createSessionWaitingEvent(TEST_USAGE),
-    ] as UnstampedMessageStreamEvent[]);
+    ] as SessionEvent[]);
     const live = controlledStreamResponse();
     live.response.headers.set("x-eve-stream-tail-index", "1");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(live.response);
@@ -1721,7 +1720,7 @@ describe("EveAgentStore session resume", () => {
           turnId: "turn_1",
         }),
         createSessionWaitingEvent(TEST_USAGE),
-      ] as UnstampedMessageStreamEvent[]);
+      ] as SessionEvent[]);
     const live = controlledStreamResponse();
     live.response.headers.set("x-eve-stream-tail-index", "2");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(live.response);
@@ -1775,7 +1774,7 @@ describe("EveAgentStore session resume", () => {
         turnId: "turn_2",
       }),
       createSessionWaitingEvent(TEST_USAGE),
-    ] as UnstampedMessageStreamEvent[]);
+    ] as SessionEvent[]);
     const settled = events.slice(0, 3);
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -1804,7 +1803,7 @@ describe("EveAgentStore session resume", () => {
         turnId: "turn_1",
       }),
       createSessionWaitingEvent(TEST_USAGE),
-    ] as UnstampedMessageStreamEvent[]);
+    ] as SessionEvent[]);
     const live = controlledStreamResponse();
     const requests: string[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (request) => {
@@ -2059,7 +2058,7 @@ describe("EveAgentStore steering", () => {
           turnId: "turn_1",
         }),
         createSessionWaitingEvent(TEST_USAGE),
-      ] as UnstampedMessageStreamEvent[]).map((event) => ({
+      ] as SessionEvent[]).map((event) => ({
         ...event,
         meta: { ...event.meta, deliveryIds: ["delivery_1"] },
       }));
@@ -2100,7 +2099,7 @@ describe("EveAgentStore steering", () => {
         }),
         createMessageReceivedEvent({ message: "Second", sequence: 3, turnId: "turn_1" }),
         createSessionWaitingEvent(TEST_USAGE),
-      ] as UnstampedMessageStreamEvent[]).map((event, index) => ({
+      ] as SessionEvent[]).map((event, index) => ({
         ...event,
         meta: { ...event.meta, deliveryIds: [index === 3 ? "second" : "first"] },
       }));
@@ -2155,7 +2154,7 @@ describe("EveAgentStore steering", () => {
         turnId: "turn_1",
       }),
       createSessionWaitingEvent(TEST_USAGE),
-    ] as UnstampedMessageStreamEvent[]).map((event, index) => ({
+    ] as SessionEvent[]).map((event, index) => ({
       ...event,
       meta: {
         ...event.meta,
@@ -2216,7 +2215,7 @@ describe("EveAgentStore steering", () => {
         turnId: "turn_2",
       }),
       createSessionWaitingEvent(TEST_USAGE),
-    ] as UnstampedMessageStreamEvent[]).map((event, index) => ({
+    ] as SessionEvent[]).map((event, index) => ({
       ...event,
       meta: { ...event.meta, deliveryIds: [index < 3 ? "first-delivery" : "delivery_1"] },
     }));
@@ -2278,7 +2277,7 @@ describe("EveAgentStore steering", () => {
         turnId: "turn_2",
       }),
       createSessionWaitingEvent(TEST_USAGE),
-    ] as UnstampedMessageStreamEvent[]).map((event, index) => ({
+    ] as SessionEvent[]).map((event, index) => ({
       ...event,
       meta: { ...event.meta, deliveryIds: [index < 4 ? "first-delivery" : "delivery_1"] },
     }));
@@ -2376,7 +2375,7 @@ describe("EveAgentStore cancellation", () => {
       createTurnStartedEvent({ sequence: 0, turnId: "turn_1" }),
       createTurnCancelledEvent({ sequence: 1, turnId: "turn_1" }),
       createSessionWaitingEvent(TEST_USAGE),
-    ] as UnstampedMessageStreamEvent[]);
+    ] as SessionEvent[]);
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(startedResponse())

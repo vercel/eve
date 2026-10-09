@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useEveAgent } from "#svelte/use-eve-agent.js";
@@ -10,7 +11,6 @@ import {
   createMessageCompletedEvent,
   createMessageReceivedEvent,
   createSessionWaitingEvent,
-  type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import { TEST_USAGE, stampTestEvents } from "#internal/testing/events.js";
 
@@ -24,7 +24,7 @@ function createStartedMessageResponse(sessionId: string, continuationToken: stri
   });
 }
 
-function createEagerStreamResponse(events: readonly UnstampedMessageStreamEvent[]): Response {
+function createEagerStreamResponse(events: readonly SessionEvent[]): Response {
   const encoder = new TextEncoder();
   return new Response(
     new ReadableStream<Uint8Array>({
@@ -42,7 +42,7 @@ function createEagerStreamResponse(events: readonly UnstampedMessageStreamEvent[
 }
 
 function createBoundedStreamResponse(
-  events: readonly UnstampedMessageStreamEvent[],
+  events: readonly SessionEvent[],
   tailIndex = events.length - 1,
 ): Response {
   const response = createEagerStreamResponse(events);
@@ -115,7 +115,7 @@ describe("useEveAgent (Svelte rune binding)", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(createBoundedStreamResponse(events))
       .mockResolvedValueOnce(createBoundedStreamResponse([], events.length - 1));
-    const seenEvents: UnstampedMessageStreamEvent[] = [];
+    const seenEvents: SessionEvent[] = [];
 
     useEveAgent({
       initialSession: { sessionId: "session_1", streamIndex: 0 },
@@ -138,7 +138,7 @@ describe("useEveAgent (Svelte rune binding)", () => {
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(createStartedMessageResponse("session_1", "http:session_1"))
       .mockResolvedValueOnce(createEagerStreamResponse(events));
-    const seenEvents: UnstampedMessageStreamEvent[] = [];
+    const seenEvents: SessionEvent[] = [];
 
     const agent = useEveAgent({
       prewarm: false,

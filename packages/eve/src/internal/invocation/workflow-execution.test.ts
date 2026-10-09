@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
@@ -9,7 +10,6 @@ import {
 } from "#internal/invocation/metadata.js";
 import { WorkflowAgentInvocationExecution } from "#internal/invocation/workflow-execution.js";
 import type { RouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 
 const runsGet = vi.fn();
@@ -129,7 +129,7 @@ describe("WorkflowAgentInvocationExecution", () => {
           type: "turn.started",
           data: { turnId: "turn_1" },
           meta: { at: "2026-07-20T00:00:00.000Z", id: "event_1" },
-        } as HandleMessageStreamEvent,
+        } as SessionStreamEvent,
         {
           type: "input.requested",
           data: {
@@ -152,7 +152,7 @@ describe("WorkflowAgentInvocationExecution", () => {
             ],
           },
           meta: { at: "2026-07-20T00:00:01.000Z", id: "event_2" },
-        } as HandleMessageStreamEvent,
+        } as SessionStreamEvent,
         ...turnSettledEvents("turn_1"),
       ]),
     );
@@ -170,7 +170,7 @@ describe("WorkflowAgentInvocationExecution", () => {
     const requestId = invocationInputRequestId("event_1", "question");
     const responses = [{ optionId: "yes", requestId }] as const;
     runsGet.mockResolvedValue(run({ status: "running" }));
-    let events: HandleMessageStreamEvent[] = [
+    let events: SessionStreamEvent[] = [
       {
         type: "input.requested",
         data: {
@@ -193,7 +193,7 @@ describe("WorkflowAgentInvocationExecution", () => {
           ],
         },
         meta: { at: "2026-07-20T00:00:00.000Z", id: "event_1" },
-      } as HandleMessageStreamEvent,
+      } as SessionStreamEvent,
     ];
     getReadable.mockImplementation(() => eventStream(events));
     respond.mockResolvedValue({ sessionId: "wrun_invocation" });
@@ -254,7 +254,7 @@ describe("WorkflowAgentInvocationExecution", () => {
   it("rejects delayed retries when a later batch reuses an internal request id", async () => {
     const pendingRun = run({ status: "running" });
     runsGet.mockResolvedValue(pendingRun);
-    let events: HandleMessageStreamEvent[] = [inputRequestedEvent("event_first", ["question"])];
+    let events: SessionStreamEvent[] = [inputRequestedEvent("event_first", ["question"])];
     getReadable.mockImplementation(() => eventStream(events));
     respond.mockResolvedValue({ sessionId: "wrun_invocation" });
 
@@ -400,7 +400,7 @@ describe("WorkflowAgentInvocationExecution", () => {
         },
         meta: { at: "2026-07-20T00:00:00.000Z", id: `event_${type}_${id}` },
         type,
-      }) as HandleMessageStreamEvent;
+      }) as SessionStreamEvent;
     getReadable.mockImplementation(() =>
       eventStream([
         attempt("authorization.required", "first"),
@@ -434,7 +434,7 @@ describe("WorkflowAgentInvocationExecution", () => {
         webhookUrl: "https://agent.example/connections/linear/callback/token",
       },
       meta: { at: "2026-07-20T00:00:00.000Z", id: "event_1" },
-    } as HandleMessageStreamEvent;
+    } as SessionStreamEvent;
     getReadable.mockImplementation(() => eventStream([required, ...turnSettledEvents("turn_1")]));
 
     await expect(
@@ -468,7 +468,7 @@ describe("WorkflowAgentInvocationExecution", () => {
             turnId: "turn_1",
           },
           meta: { at: "2026-07-20T00:00:01.000Z", id: "event_2" },
-        } as HandleMessageStreamEvent,
+        } as SessionStreamEvent,
       ]),
     );
     await expect(
@@ -494,7 +494,7 @@ describe("WorkflowAgentInvocationExecution", () => {
           },
           meta: { at: "2026-07-20T00:00:00.000Z", id: "event_1" },
           type: "authorization.required",
-        } as HandleMessageStreamEvent,
+        } as SessionStreamEvent,
       ],
       expected: { error: { message: "Invocation failed." }, status: "failed" },
       runStatus: "failed",
@@ -524,7 +524,7 @@ describe("WorkflowAgentInvocationExecution", () => {
             turnId: "turn_1",
           },
           meta: { at: "2026-07-20T00:00:00.000Z", id: "event_1" },
-        } as HandleMessageStreamEvent,
+        } as SessionStreamEvent,
       ]),
     );
 
@@ -549,7 +549,7 @@ describe("WorkflowAgentInvocationExecution", () => {
               turnId: "turn_1",
             },
             meta: { at: "2026-07-20T00:00:00.000Z", id: "event_1" },
-          } as HandleMessageStreamEvent,
+          } as SessionStreamEvent,
         ],
         { trailingNewline: false },
       ),
@@ -597,7 +597,7 @@ describe("WorkflowAgentInvocationExecution", () => {
             sessionId: "wrun_invocation",
           },
           meta: { at: "2026-07-20T00:00:00.000Z", id: "event_1" },
-        } as HandleMessageStreamEvent,
+        } as SessionStreamEvent,
       ]),
     );
 
@@ -634,12 +634,12 @@ describe("WorkflowAgentInvocationExecution", () => {
             turnId: "turn_1",
           },
           meta: { at: "2026-07-20T00:00:00.000Z", id: "event_1" },
-        } as HandleMessageStreamEvent,
+        } as SessionStreamEvent,
         {
           data: {},
           meta: { at: "2026-07-20T00:00:01.000Z", id: "event_2" },
           type: "session.waiting",
-        } as HandleMessageStreamEvent,
+        } as SessionStreamEvent,
       ]),
     );
 
@@ -667,7 +667,7 @@ describe("WorkflowAgentInvocationExecution", () => {
           type: "session.failed",
           data: { code: "MODEL_CALL_FAILED", message, sessionId: "wrun_invocation" },
           meta: { at: "2026-07-20T00:00:00.000Z", id: "event_1" },
-        } as HandleMessageStreamEvent,
+        } as SessionStreamEvent,
       ]),
     );
 
@@ -740,7 +740,7 @@ function run(input: { error?: unknown; ownerKey?: string; status: string }) {
   };
 }
 
-function inputRequestedEvent(id: string, requestIds: readonly string[]): HandleMessageStreamEvent {
+function inputRequestedEvent(id: string, requestIds: readonly string[]): SessionStreamEvent {
   return {
     data: {
       requests: requestIds.map((requestId) => ({
@@ -766,7 +766,7 @@ function inputRequestedEvent(id: string, requestIds: readonly string[]): HandleM
 function messageCompletedEvent(
   message: string,
   finishReason: "length" | "stop" = "stop",
-): HandleMessageStreamEvent {
+): SessionStreamEvent {
   return {
     data: { finishReason, message, sequence: 0, stepIndex: 0, turnId: "turn_1" },
     meta: { at: "2026-07-20T00:00:00.000Z", id: "event_message" },
@@ -774,7 +774,7 @@ function messageCompletedEvent(
   };
 }
 
-function appendedEvents(count: number): HandleMessageStreamEvent[] {
+function appendedEvents(count: number): SessionStreamEvent[] {
   return Array.from({ length: count }, (_, index) => ({
     data: { messageDelta: "word ", sequence: 0, stepIndex: 0, turnId: "turn_1" },
     meta: { at: "2026-07-20T00:00:01.000Z", id: `event_delta_${String(index)}` },
@@ -782,7 +782,7 @@ function appendedEvents(count: number): HandleMessageStreamEvent[] {
   }));
 }
 
-function turnSettledEvents(turnId: string): HandleMessageStreamEvent[] {
+function turnSettledEvents(turnId: string): SessionStreamEvent[] {
   return [
     {
       data: { sequence: 0, turnId },
@@ -793,14 +793,14 @@ function turnSettledEvents(turnId: string): HandleMessageStreamEvent[] {
       data: {},
       meta: { at: "2026-07-20T00:00:02.000Z", id: "event_session_waiting" },
       type: "session.waiting",
-    } as HandleMessageStreamEvent,
+    } as SessionStreamEvent,
   ];
 }
 
 function inputResolvedEvent(
   id: string,
   responses: readonly { optionId?: string; requestId: string; text?: string }[],
-): HandleMessageStreamEvent {
+): SessionStreamEvent {
   return {
     data: {
       resolutions: responses.map((response) => ({

@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import {
   conversationProjection,
   withConversationProjection,
@@ -9,7 +10,6 @@ import type {
 } from "#client/conversation-state.js";
 import { defaultMessageReducer } from "#client/message-reducer.js";
 import type { EveAgentReducer, EveAgentReducerEvent } from "#client/reducer.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import { initialSessionProjection } from "#protocol/session-projection.js";
 
 /**
@@ -22,7 +22,7 @@ export type ClientAgentEvent =
       readonly type: "client.agent.following" | "client.agent.idle" | "client.agent.unavailable";
     }
   | {
-      readonly data: { readonly event: MessageStreamEvent; readonly sessionId: string };
+      readonly data: { readonly event: SessionStreamEvent; readonly sessionId: string };
       readonly type: "client.agent.observed";
     };
 

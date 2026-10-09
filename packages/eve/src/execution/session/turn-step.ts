@@ -34,8 +34,10 @@ import { activeTurnId, isBetweenTurns, turnPosition } from "#harness/session-mac
 import {
   currentProjection,
   enterSessionProjection,
+  nextLinePosition,
   saveSessionProjection,
 } from "#harness/session-machine/current.js";
+import type { DeliverPayload } from "#channel/types.js";
 import { coalesceTurnInputs, validateHarnessModelMessages } from "#harness/messages.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import { attributeAnswers } from "#execution/session/answer-caller.js";
@@ -47,6 +49,9 @@ import type {
 import { pausedOrParked, resolveSessionStepResult } from "#execution/session/turn-step-result.js";
 import { withSessionStateDelta } from "#execution/session/state-delta.js";
 import { openSessionEventPublisher } from "#execution/publish-session-events.js";
+import { admitDeliveries, type DeliveryAdmission } from "#execution/session/delivery-facts.js";
+import { getAdapterKind } from "#channel/adapter.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import { eventsOf } from "#harness/publication.js";
 import { createTurnEventHandler } from "#execution/session/turn-event-handler.js";
 import {
@@ -292,9 +297,13 @@ async function runSessionStepBody(
       publisher,
     });
     const handleEvent: HandleEventFn = async (publication, messages) => {
-      if (eventsOf(publication).some((event) => event.type === "compaction.completed")) {
-        compacted = true;
-      }
+      const completesCompaction = eventsOf(publication).some(
+        (event) =>
+          event.type === "context.settled" &&
+          event.data.kind === "compaction" &&
+          event.data.outcome === "completed",
+      );
+      if (completesCompaction) compacted = true;
       await emitTurnEvent(publication, messages);
     };
     const previousAdapterState =
@@ -304,23 +313,28 @@ async function runSessionStepBody(
     // Run the adapter's deliver hook for each queued payload and coalesce
     // the resulting StepInput values; runtime results ride the same input.
     let resolved: StepInput | undefined;
+    let admission: DeliveryAdmission | undefined;
     if (delivery !== undefined) {
-      const results: StepInput[] = [];
+      const delivered: { payload: DeliverPayload; input: StepInput | undefined }[] = [];
       try {
         for (const payload of delivery.payloads) {
           const result = adapter.deliver
             ? await adapter.deliver(payload, adapterCtx)
             : defaultDeliverResult(payload);
-
-          if (result !== undefined && result !== null) {
-            results.push(result);
-          }
+          delivered.push({ input: result ?? undefined, payload });
         }
       } catch (error) {
         await failChannelDeliveries(error);
         throw error;
       }
+      const results = delivered.flatMap(({ input }) => (input === undefined ? [] : [input]));
       resolved = results.length === 0 ? undefined : results.reduce(coalesceTurnInputs);
+      admission = admitDeliveries({
+        channelKind: getAdapterKind(adapter),
+        delivery: rawDelivery ?? delivery,
+        payloads: delivered,
+        position: nextLinePosition(ctx),
+      });
     }
     // A delivery without auth acts as the session's current identity, so
     // only a delivery that names its sender can be answered by someone else.
@@ -365,6 +379,9 @@ async function runSessionStepBody(
         ctx.set(TurnDeliveryIdsKey, [ctx.require(ChannelDeliveryKey).deliveryId]);
       }
     }
+    if (resolved !== undefined && admission !== undefined && admission.consumed.length > 0) {
+      resolved = { ...resolved, deliveries: admission.consumed };
+    }
     if (runtimeResults !== undefined) {
       if (runtimeResults.acceptedAtMsByCallId !== undefined) {
         ctx.set(RuntimeActionSettlementTimesKey, runtimeResults.acceptedAtMsByCallId);
@@ -377,7 +394,25 @@ async function runSessionStepBody(
       setChannelContext(ctx, updatedAdapter);
     }
 
+    /** The admission commit: the session's start if it hasn't, then each delivery admitted. */
+    const publishAdmission = async (runtime: ReturnType<typeof buildRuntimeIdentity>) => {
+      if (admission === undefined || admission.facts.length === 0) return;
+      const facts: SessionEvent[] = [];
+      if (!turnPosition(currentProjection(ctx)).sessionStarted) {
+        const parent = ctx.get(ParentSessionKey);
+        facts.push({
+          data:
+            parent === undefined
+              ? { runtime }
+              : { parent: { callId: parent.callId, sessionId: parent.sessionId }, runtime },
+          type: "session.started",
+        });
+      }
+      await contextStorage.run(ctx, () => handleEvent([...facts, ...admission.facts]));
+    };
+
     if (delivery !== undefined && resolved === undefined && startedBetweenTurns) {
+      await publishAdmission(buildRuntimeIdentity(effectiveNode));
       await contextStorage.run(ctx, () =>
         instrumentation?.instrumentChannelDelivery({
           ctx,
@@ -420,6 +455,13 @@ async function runSessionStepBody(
               turnId: activeTurnId(initialEmissionState),
             },
       });
+    } catch (error) {
+      await failChannelDeliveries(error);
+      throw error;
+    }
+
+    try {
+      await publishAdmission(runtimeIdentity);
     } catch (error) {
       await failChannelDeliveries(error);
       throw error;

@@ -1,8 +1,10 @@
+import type { SessionEvent } from "#protocol/session-event.js";
+import type { ConsumedDelivery } from "#harness/session-machine/transitions.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { LanguageModel, ModelMessage, UserContent } from "ai";
 
 import type { SessionAuthContext, SessionCapabilities } from "#channel/types.js";
-import type { RuntimeIdentity, UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { RuntimeIdentity } from "#protocol/message.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { InputResponse } from "#shared/input.js";
@@ -172,6 +174,11 @@ export interface StepInput {
    * produced by channels.
    */
   readonly runtimeActionResults?: readonly RuntimeActionResult[];
+  /**
+   * The deliveries this input carries, each with what its person sent, which the turn consumes.
+   * Set at the delivery boundary; never produced by channels.
+   */
+  readonly deliveries?: readonly ConsumedDelivery[];
 }
 
 /**
@@ -269,9 +276,7 @@ export type CallResolver = <T extends ToolCallLike>(toolCall: T) => ResolvedCall
  * What one publish writes: one event, or every event of one transition, which the writer commits
  * as one line so readers never see half of it.
  */
-export type SessionPublication =
-  | UnstampedMessageStreamEvent
-  | readonly UnstampedMessageStreamEvent[];
+export type SessionPublication = SessionEvent | readonly SessionEvent[];
 
 /** The sink the harness emits to: see {@link HandleEventFn}. */
 export type HarnessEmitFn = HandleEventFn;

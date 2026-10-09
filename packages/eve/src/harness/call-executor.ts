@@ -35,7 +35,7 @@ import {
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { HandleEventFn, HarnessToolLookup } from "#harness/types.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { createActionPartialEvent, createActionResultEvent } from "#protocol/message.js";
+import { callProgress, callSettledFrom, callStarted } from "#harness/call-facts.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { toError } from "#shared/errors.js";
 import type { InputRequest } from "#shared/input.js";
@@ -81,6 +81,20 @@ export interface CallOutcome {
   readonly signIn?: ToolSignIn;
 }
 
+/** Where a call's facts belong: its turn, and the run that made it when it's open. */
+export interface CallPosition {
+  readonly turnId: string;
+  readonly runId?: string;
+  readonly sequence?: number;
+  readonly stepIndex?: number;
+}
+
+export function scopeOf(position: CallPosition): { turnId: string; runId?: string } {
+  return position.runId === undefined
+    ? { turnId: position.turnId }
+    : { runId: position.runId, turnId: position.turnId };
+}
+
 /**
  * Runs one local call: it decides the approval, streams the call's progress and result, and
  * returns the result the model reads. A call a person approved revalidates its input first.
@@ -92,11 +106,7 @@ export async function executeToolCall(
     readonly approvedTools?: ReadonlySet<string>;
     readonly definition: RunnableTool;
     readonly messages: readonly ModelMessage[];
-    readonly position: {
-      readonly sequence: number;
-      readonly stepIndex: number;
-      readonly turnId: string;
-    };
+    readonly position: CallPosition;
     readonly publish: HandleEventFn;
     readonly telemetry?: TelemetryOptions;
     /** The AI SDK's ID for the model call that made a fresh call. */
@@ -108,11 +118,7 @@ export async function executeToolCall(
 ): Promise<CallOutcome> {
   const { callId, toolName, input: args } = call;
   const { definition } = input;
-  const at = {
-    sequence: input.position.sequence,
-    stepIndex: input.position.stepIndex,
-    turnId: input.position.turnId,
-  };
+  const at = scopeOf(input.position);
   const settled: CallResult[] = [];
   const toolResults: TypedToolResult<ToolSet>[] = [];
   // Once the tool runs, the call settles even if the turn is cancelled: a result reaches the
@@ -130,15 +136,10 @@ export async function executeToolCall(
     if (validation?.success === false) {
       const message = `The approved input is no longer valid for tool "${toolName}". Request a new tool call and approval.`;
       await input.publish(
-        createActionResultEvent({
-          ...at,
-          result: createRuntimeToolResultFromValue({
-            callId,
-            isError: true,
-            output: message,
-            toolName,
-          }),
-        }),
+        callSettledFrom(
+          createRuntimeToolResultFromValue({ callId, isError: true, output: message, toolName }),
+          { scope: at },
+        ),
       );
       return {
         settled: [
@@ -197,6 +198,7 @@ export async function executeToolCall(
         try {
           input.beforeExecute?.();
           started = true;
+          await input.publish(callStarted(callId, { scope: at }));
           const executed = invokeTool(definition, args, {
             abortSignal: input.abortSignal,
             messages: [...input.messages],
@@ -210,20 +212,13 @@ export async function executeToolCall(
               output = partial;
               const visible = withoutSignInSecrets(partial);
               await input.publish(
-                createActionPartialEvent({
-                  ...at,
-                  presentation: projectDeltaPresentation(
-                    definition,
-                    callId,
-                    parseJsonObject(args),
-                    visible,
-                  ),
-                  result: createRuntimeToolResultFromValue({
-                    callId,
-                    output: visible,
-                    toolName,
-                  }),
-                }),
+                callProgress(
+                  callId,
+                  visible,
+                  projectDeltaPresentation(definition, callId, parseJsonObject(args), visible)?.[
+                    callId
+                  ]?.label,
+                ),
               );
             }
           } else {
@@ -278,13 +273,16 @@ export async function executeToolCall(
     };
     settled.push(completed);
     await input.publish(
-      createActionResultEvent({
-        ...at,
-        presentation: failed
-          ? undefined
-          : projectResultPresentation(definition, callId, parseJsonObject(args), output),
-        result: createRuntimeToolResultFromValue({ callId, isError: failed, output, toolName }),
-      }),
+      callSettledFrom(
+        createRuntimeToolResultFromValue({ callId, isError: failed, output, toolName }),
+        {
+          scope: at,
+          title: failed
+            ? undefined
+            : projectResultPresentation(definition, callId, parseJsonObject(args), output)?.[callId]
+                ?.label,
+        },
+      ),
     );
     return { settled, toolResults };
   } catch (error) {
@@ -296,15 +294,10 @@ export async function executeToolCall(
     const message = toError(error).message;
     logError(log, "tool call failed", error, { toolName, toolCallId: callId });
     await input.publish(
-      createActionResultEvent({
-        ...at,
-        result: createRuntimeToolResultFromValue({
-          callId,
-          isError: true,
-          output: message,
-          toolName,
-        }),
-      }),
+      callSettledFrom(
+        createRuntimeToolResultFromValue({ callId, isError: true, output: message, toolName }),
+        { scope: at },
+      ),
     );
     return {
       settled: [
@@ -475,11 +468,7 @@ export async function executeInlineCalls(input: {
   readonly approvedTools: ReadonlySet<string>;
   /** The conversation the tools read as `ctx.messages`. */
   readonly messages: readonly ModelMessage[];
-  readonly position: {
-    readonly sequence: number;
-    readonly stepIndex: number;
-    readonly turnId: string;
-  };
+  readonly position: CallPosition;
   readonly publish: HandleEventFn;
   readonly abortSignal: AbortSignal | undefined;
   readonly telemetry?: TelemetryOptions;
@@ -529,11 +518,7 @@ async function decideDeferredCall(
   input: {
     readonly abortSignal: AbortSignal | undefined;
     readonly approvedTools: ReadonlySet<string>;
-    readonly position: {
-      readonly sequence: number;
-      readonly stepIndex: number;
-      readonly turnId: string;
-    };
+    readonly position: CallPosition;
     readonly publish: HandleEventFn;
   },
 ): Promise<CallOutcome> {
@@ -562,11 +547,7 @@ async function publishDenial(
   call: { readonly callId: string; readonly input: unknown; readonly toolName: string },
   input: {
     readonly approval: "evaluate" | "recheck";
-    readonly position: {
-      readonly sequence: number;
-      readonly stepIndex: number;
-      readonly turnId: string;
-    };
+    readonly position: CallPosition;
     readonly publish: HandleEventFn;
     readonly reason: string | undefined;
   },
@@ -577,16 +558,15 @@ async function publishDenial(
     toolName: call.toolName,
     type: "tool-result",
   } satisfies ToolResultPart;
+  const scope = scopeOf(input.position);
   await input.publish(
     input.approval === "evaluate"
-      ? createActionResultEvent({
-          ...input.position,
-          result: createRuntimeToolResultFromMessagePart(part, call.toolName),
-        })
-      : createActionResultEvent({
-          ...input.position,
+      ? callSettledFrom(createRuntimeToolResultFromMessagePart(part, call.toolName), {
           rejected: true,
-          result: {
+          scope,
+        })
+      : callSettledFrom(
+          {
             callId: call.callId,
             isError: true,
             kind: "tool-result",
@@ -597,7 +577,8 @@ async function publishDenial(
             },
             toolName: call.toolName,
           },
-        }),
+          { rejected: true, scope },
+        ),
   );
   return { settled: [{ part }], toolResults: [] };
 }

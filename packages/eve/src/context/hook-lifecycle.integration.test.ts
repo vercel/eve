@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { setLogRecordSubscriber, type LogRecord } from "#internal/logging.js";
 
@@ -7,7 +8,6 @@ import {
   createSessionFailedEvent,
   createStepStartedEvent,
   createTurnStartedEvent,
-  type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import { TEST_USAGE, stampTestEvent } from "#internal/testing/events.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
@@ -88,7 +88,7 @@ describe("dispatchStreamEventHooks", () => {
       hook("metrics", {
         events: {
           "*": async (event) => {
-            calls.push(`wildcard:${(event as UnstampedMessageStreamEvent).type}`);
+            calls.push(`wildcard:${(event as SessionEvent).type}`);
           },
         },
       }),

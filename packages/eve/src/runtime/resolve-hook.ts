@@ -1,8 +1,9 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import type { CompiledHookDefinition } from "../compiler/manifest.js";
 import type { CompiledModuleMap } from "../compiler/module-map.js";
 import { expectFunction, expectObjectRecord } from "../internal/authored-module.js";
-import type { MessageStreamEvent } from "../protocol/message.js";
 import type { StreamEventHook } from "../public/definitions/hook.js";
+import { removedEventKeyMessage } from "../public/definitions/removed-event-keys.js";
 import { toErrorMessage } from "../shared/errors.js";
 import { loadResolvedModuleExport, ResolveAgentError } from "./resolve-helpers.js";
 import type { ResolvedHookDefinition } from "./types.js";
@@ -33,7 +34,7 @@ export async function resolveHookDefinition(
       describe(definition, "to return an object"),
     );
 
-    const events: Record<string, StreamEventHook<MessageStreamEvent>> = {};
+    const events: Record<string, StreamEventHook<SessionEvent>> = {};
 
     const eventsRaw = resolvedRecord.events;
     if (eventsRaw !== undefined) {
@@ -43,11 +44,18 @@ export async function resolveHookDefinition(
       );
       for (const [key, value] of Object.entries(eventsRecord)) {
         if (value === undefined) continue;
+        const removed = removedEventKeyMessage(key);
+        if (removed !== undefined) {
+          throw new ResolveAgentError(`Hook "${definition.logicalPath}" handles ${removed}`, {
+            logicalPath: definition.logicalPath,
+            sourceId: definition.sourceId,
+          });
+        }
         const handler = expectFunction(
           value,
           describe(definition, `to provide a function for "events.${key}"`),
         );
-        events[key] = handler as StreamEventHook<MessageStreamEvent>;
+        events[key] = handler as StreamEventHook<SessionEvent>;
       }
     }
 

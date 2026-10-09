@@ -15,7 +15,7 @@ import {
   admitApprovedWork,
   discardClearedHumanInput,
 } from "#harness/hitl/index.js";
-import { clear } from "#harness/session-machine/transitions.js";
+import { clear, join } from "#harness/session-machine/transitions.js";
 import { activeTurnId, turnPosition } from "#harness/session-machine/view.js";
 import { createStep, openTurn, type Step } from "#harness/step/context.js";
 import { prepareTurnInput, settleRuntimeWork } from "#harness/step/intake.js";
@@ -134,10 +134,14 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     });
     if (intake.opensTurn) {
       const failed = await openTurn(step, {
+        deliveries: input?.deliveries,
         input: [...turn.ephemeral, ...turn.messages],
         message: intake.message,
       });
       if (failed !== undefined) return failed;
+    } else if (input?.deliveries !== undefined && input.deliveries.length > 0) {
+      // An answer joins the turn it resumes; between turns, it has nothing to join.
+      await step.apply(join(step.view(), { deliveries: input.deliveries }));
     }
     await admitApprovedWork(step, intake.approved);
 
@@ -158,9 +162,24 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
   return runStep;
 }
 
-/** `session.clear()`: the machine withdraws what the cleared history asked, and history empties. */
+/**
+ * `session.clear()`: the machine withdraws what the cleared history asked, and history empties.
+ * The control is a delivery, applied in the same commit as the clear.
+ */
 async function clearContext(step: Step): Promise<StepResult> {
-  await step.apply(clear(step.view(), { sessionId: step.session.sessionId }));
+  const deliveryId = `control_${String(step.view().projection.position ?? 0)}`;
+  const transition = clear(step.view(), {
+    cause: { deliveryId },
+    sessionId: step.session.sessionId,
+  });
+  await step.apply({
+    ...transition,
+    events: [
+      { data: { deliveryId, source: { control: "clear" } }, type: "delivery.admitted" },
+      ...transition.events,
+      { data: { deliveryId, outcome: "applied" }, type: "delivery.settled" },
+    ],
+  });
   const cleared = discardClearedHumanInput({
     ...step.session,
     state: clearMemorySessionState(step.session.state),

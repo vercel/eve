@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import {
   readDurableSession,
   replaceDurableSessionSnapshot,
@@ -45,7 +46,7 @@ import { finishRun, settleTask } from "#harness/session-machine/transitions.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import { stopRuns, waitedCallRuns, type RunStopTarget } from "#execution/stop-runs.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
-import type { TaskCancelReason, UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { TaskCancelReason } from "#protocol/message.js";
 
 /** The messages a task's run sends that change its record. */
 export type TaskRunMessage = Extract<
@@ -74,8 +75,8 @@ async function applyTaskRunMessage(
     return { serializedContext: input.serializedContext, sessionState: input.sessionState };
   }
   let table = readTaskTable(session.state);
-  const events: UnstampedMessageStreamEvent[] = [];
-  let withdrawn: readonly UnstampedMessageStreamEvent[] = [];
+  const events: SessionEvent[] = [];
+  let withdrawn: readonly SessionEvent[] = [];
   switch (message.kind) {
     case "started": {
       const started = markTaskRunStarted(table, taskId, message.from.runId);
@@ -147,9 +148,9 @@ async function cancelTasks(
 ): Promise<PublishedSessionEvents> {
   const session = readDurableSession(input.sessionState);
   let table = readTaskTable(session.state);
-  const events: UnstampedMessageStreamEvent[] = [];
+  const events: SessionEvent[] = [];
   const view = viewOf(session);
-  const withdrawn: UnstampedMessageStreamEvent[] = [];
+  const withdrawn: SessionEvent[] = [];
   const outcome: TaskOutcome = { reason: input.reason, status: "cancelled" };
   const targets: RunStopTarget[] = [];
   const taskOfRun = new Map<string, string>();
@@ -197,7 +198,7 @@ function taskSettledEvents(
   record: TaskRecord | undefined,
   calls: readonly TaskCall[],
   outcome: TaskOutcome,
-): readonly UnstampedMessageStreamEvent[] {
+): readonly SessionEvent[] {
   if (record === undefined) return [];
   return settleTask(viewOf(session), { calls, outcome, task: record }).events;
 }

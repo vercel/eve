@@ -2,7 +2,7 @@ import { publishTerminalSessionEvent } from "#execution/publish-session-events.j
 import type { TokenUsage } from "#shared/token-usage.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { createLogger, formatError } from "#internal/logging.js";
-import { sessionFailed } from "#harness/session-machine/transitions.js";
+import type { SessionProjection } from "#protocol/session-projection.js";
 
 const log = createLogger("execution.workflow-entry");
 
@@ -13,8 +13,8 @@ export async function emitTerminalSessionFailureStep(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly turnId?: string;
   readonly usage: TokenUsage | undefined;
-  /** The position of the line the event takes. */
-  readonly position?: number;
+  /** The session's last checkpointed projection. */
+  readonly projection?: SessionProjection;
 }): Promise<void> {
   "use step";
 
@@ -36,19 +36,22 @@ export async function emitTerminalSessionFailureStep(input: {
   const code = typeof details.name === "string" ? details.name : "WORKFLOW_EXECUTION_FAILED";
   const message = typeof details.message === "string" ? details.message : String(input.error);
   const sessionId = (input.serializedContext["eve.sessionId"] as string | undefined) ?? "";
-
-  log.error("workflow loop threw — emitting terminal session.failed", {
+  log.error("workflow loop threw — ending the session failed", {
     sessionId,
     errorId: typeof details.errorId === "string" ? details.errorId : undefined,
     code,
   });
 
   await publishTerminalSessionEvent({
+    ending: {
+      cause: input.turnId === undefined ? undefined : { turnId: input.turnId },
+      error: { code, message },
+      outcome: "failed",
+    },
     errorId: typeof details.errorId === "string" ? details.errorId : undefined,
-    event: sessionFailed({ code, details, message, sessionId, usage: input.usage }),
-    sessionWritable: input.sessionWritable,
-    position: input.position,
+    projection: input.projection,
     serializedContext: input.serializedContext,
+    sessionWritable: input.sessionWritable,
     turnId: input.turnId,
   });
 }

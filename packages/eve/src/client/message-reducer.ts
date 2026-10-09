@@ -18,7 +18,7 @@ import {
   createToolMetadata,
   mergeToolMetadata,
   normalizeActionRequest,
-  normalizeActionResult,
+  normalizeCapability,
   settledLabel,
   stringifyUnknown,
   toMessageInputRequest,
@@ -54,12 +54,6 @@ export type {
 } from "#client/message-reducer-types.js";
 
 type EveAssistantMessage = EveMessage & { readonly role: "assistant" };
-type MessageReceivedEvent = Extract<EveAgentReducerEvent, { readonly type: "message.received" }>;
-
-function receivedMessageEventId(event: MessageReceivedEvent): string {
-  const eventId: string | undefined = event.meta.id;
-  return eventId ?? `${event.data.turnId}:${event.data.sequence}`;
-}
 
 /**
  * Creates a UIMessage-compatible eve reducer for chat and agent UIs.
@@ -84,7 +78,7 @@ export function defaultMessageReducer(): EveAgentReducer<EveMessageData> {
 
 function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): EveMessageData {
   const projection = foldSession(conversationProjection(data), event);
-  const content = withConversationProjection(reduceContent(data, event), projection);
+  const content = withConversationProjection(reduceContent(data, event, projection), projection);
   const callIds = toolCallIds(content, event);
   return withConversationProjection(
     callIds.length === 0 ? content : withToolPartStates(content, callIds),
@@ -92,8 +86,28 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
   );
 }
 
-/** What an event says about the conversation's messages and parts. */
-function reduceContent(data: EveMessageData, event: EveAgentReducerEvent): EveMessageData {
+/** Where a model run's parts go: its turn, and its step in the turn. */
+function runPlace(
+  before: SessionProjection,
+  after: SessionProjection,
+  runId: string | undefined,
+): { readonly turnId: string; readonly stepIndex: number } | undefined {
+  if (runId === undefined) return undefined;
+  const run = after.runs?.[runId] ?? before.runs?.[runId];
+  if (run?.turnId === undefined) return undefined;
+  return { stepIndex: run.stepIndex ?? 0, turnId: run.turnId };
+}
+
+/**
+ * What an event says about the conversation's messages and parts. `after` is the projection with
+ * the event folded in; the data still carries the one before it.
+ */
+function reduceContent(
+  data: EveMessageData,
+  event: EveAgentReducerEvent,
+  after: SessionProjection,
+): EveMessageData {
+  const before = conversationProjection(data);
   switch (event.type) {
     case "client.message.submitted":
     case "client.message.failed":
@@ -111,100 +125,143 @@ function reduceContent(data: EveMessageData, event: EveAgentReducerEvent): EveMe
         event.data.turnId,
       );
 
-    case "message.received":
+    case "delivery.consumed":
+      // An answer or context-only delivery sends no message.
+      if (event.data.parts.length === 0) return data;
       return upsertMessage(
         data,
         {
-          id: `${receivedMessageEventId(event)}:user`,
+          id: `${event.data.deliveryId}:user`,
           metadata: {
             status: "complete",
             turnId: event.data.turnId,
           },
-          parts: projectReceivedParts(event.data.parts, event.data.message),
+          parts: projectReceivedParts(event.data.parts),
           role: "user",
         },
         event.data.turnId,
       );
 
-    case "step.started":
-      return updateAssistantMessage(data, event.data.turnId, (message) =>
-        ensureStepStartPart(message, event.data.stepIndex),
+    case "model.requested": {
+      const place = runPlace(before, after, event.data.runId);
+      if (place === undefined) return data;
+      return updateAssistantMessage(data, place.turnId, (message) =>
+        ensureStepStartPart(message, place.stepIndex),
       );
+    }
 
-    case "step.completed": {
+    case "model.settled": {
+      const place = runPlace(before, after, event.data.runId);
+      if (place === undefined) return data;
       const existing = data.messages.find(
-        (message) => message.role === "assistant" && message.metadata?.turnId === event.data.turnId,
+        (message) => message.role === "assistant" && message.metadata?.turnId === place.turnId,
       );
       if (existing === undefined) return data;
-      return updateAssistantMessage(data, event.data.turnId, (message) => ({
+      // A run a retry replaced leaves its unfinished output behind.
+      return updateAssistantMessage(data, place.turnId, (message) => ({
         ...message,
-        parts: closeStreamingRuns(message.parts, event.data.stepIndex),
+        parts:
+          event.data.outcome === "abandoned"
+            ? message.parts.filter(
+                (part) =>
+                  !(
+                    (part.type === "text" || part.type === "reasoning") &&
+                    part.state === "streaming" &&
+                    part.stepIndex === place.stepIndex
+                  ) && !(part.type === "dynamic-tool" && part.state === "input-streaming"),
+              )
+            : closeStreamingRuns(message.parts, place.stepIndex),
       }));
     }
 
-    case "reasoning.appended":
-      return updateAssistantMessage(data, event.data.turnId, (message) =>
-        messageRun.transition(ensureStepStartPart(message, event.data.stepIndex), {
+    case "content.delta": {
+      const { delta, kind, partId } = event.data;
+      const existing = findRunPart(data, partId);
+      const place = existing ?? runPlace(before, after, event.scope?.runId);
+      const declared = kind ?? existing?.type;
+      const type = isRunKind(declared) ? declared : undefined;
+      if (place === undefined || type === undefined) return data;
+      return updateAssistantMessage(data, place.turnId, (message) =>
+        messageRun.transition(ensureStepStartPart(message, place.stepIndex), {
+          delta,
+          id: partId,
           kind: "append",
-          delta: event.data.reasoningDelta,
-          id: event.meta?.id,
-          stepIndex: event.data.stepIndex,
-          type: "reasoning",
+          stepIndex: place.stepIndex,
+          type,
         }),
       );
+    }
 
-    case "reasoning.completed":
-      return updateAssistantMessage(data, event.data.turnId, (message) =>
-        messageRun.transition(ensureStepStartPart(message, event.data.stepIndex), {
+    case "content.completed": {
+      const { kind, partId, runId, value } = event.data;
+      const place = runPlace(before, after, runId) ?? findRunPart(data, partId);
+      if (place === undefined) return data;
+      if (kind === "result") {
+        return updateAssistantMessage(data, place.turnId, (message) => ({
+          ...message,
+          metadata: { ...message.metadata, result: value },
+        }));
+      }
+      const type = isRunKind(kind) ? kind : undefined;
+      if (type === undefined || typeof value !== "string") return data;
+      return updateAssistantMessage(data, place.turnId, (message) =>
+        messageRun.transition(ensureStepStartPart(message, place.stepIndex), {
+          id: partId,
           kind: "complete",
-          stepIndex: event.data.stepIndex,
-          text: event.data.reasoning,
-          id: event.meta?.id,
-          type: "reasoning",
+          stepIndex: place.stepIndex,
+          text: value,
+          type,
         }),
       );
+    }
 
-    case "action.input.appended": {
+    case "call.input": {
       const existing = findToolPart(data, event.data.callId);
       if (existing !== undefined && existing.state !== "input-streaming") return data;
+      const place =
+        findToolPlace(data, event.data.callId) ?? runPlace(before, after, event.scope?.runId);
+      if (place === undefined) return data;
+      const toolName = event.data.name ?? existing?.toolName ?? "unknown";
       const inputText =
-        (existing?.state === "input-streaming" ? existing.inputText : "") +
-        event.data.inputTextDelta;
-      return upsertToolPart(data, event.data.turnId, event.data.stepIndex, {
+        (existing?.state === "input-streaming" ? existing.inputText : "") + event.data.delta;
+      return upsertToolPart(data, place.turnId, place.stepIndex, {
         input: undefined,
         inputText,
         state: "input-streaming",
-        stepIndex: event.data.stepIndex,
+        stepIndex: place.stepIndex,
         toolCallId: event.data.callId,
-        toolMetadata: existing?.toolMetadata ?? {
-          eve: { kind: "unknown", name: event.data.toolName },
-        },
-        toolName: event.data.toolName,
+        toolMetadata: existing?.toolMetadata ?? { eve: { kind: "unknown", name: toolName } },
+        toolName,
         type: "dynamic-tool",
       });
     }
 
-    case "actions.requested": {
-      let next = data;
-      for (const action of event.data.actions) {
-        const existing = findToolPart(next, action.callId);
-        if (existing !== undefined && existing.state !== "input-streaming") continue;
-        const descriptor = normalizeActionRequest(action);
-        next = updateAssistantMessage(next, event.data.turnId, (message) =>
-          upsertPart(ensureStepStartPart(message, event.data.stepIndex), {
-            input: "input" in action ? action.input : undefined,
-            state: "input-available",
-            stepIndex: event.data.stepIndex,
-            toolCallId: action.callId,
-            toolMetadata: createToolMetadata(descriptor, {
-              label: actionLabel(action, event.data.presentation),
-            }),
-            toolName: descriptor.toolName,
-            type: "dynamic-tool",
+    case "call.requested": {
+      const { callId, capability, owner } = event.data;
+      const existing = findToolPart(data, callId);
+      if (existing !== undefined && existing.state !== "input-streaming") return data;
+      const call = after.calls[callId];
+      const place =
+        "runId" in owner
+          ? runPlace(before, after, owner.runId)
+          : call === undefined
+            ? undefined
+            : { stepIndex: call.stepIndex, turnId: call.turnId };
+      if (place === undefined) return data;
+      const descriptor = normalizeCapability(capability);
+      return updateAssistantMessage(data, place.turnId, (message) =>
+        upsertPart(ensureStepStartPart(message, place.stepIndex), {
+          input: event.data.input,
+          state: "input-available",
+          stepIndex: place.stepIndex,
+          toolCallId: callId,
+          toolMetadata: createToolMetadata(descriptor, {
+            label: settledLabel(undefined, capability.title, descriptor),
           }),
-        );
-      }
-      return next;
+          toolName: descriptor.toolName,
+          type: "dynamic-tool",
+        }),
+      );
     }
 
     case "input.requested": {
@@ -238,80 +295,64 @@ function reduceContent(data: EveMessageData, event: EveAgentReducerEvent): EveMe
       return next;
     }
 
-    case "action.result": {
-      // A task call's result is only its start receipt, which can arrive after the task settled.
-      if (conversationProjection(data).calls[event.data.result.callId]?.taskId !== undefined)
+    case "call.settled": {
+      const { callId } = event.data;
+      // A task's call settles through its task; its own result was the start receipt.
+      if (before.calls[callId]?.taskId !== undefined && event.scope?.taskId === undefined) {
         return data;
-      // A retried model-call attempt's calls never ran; the replacement attempt re-requests them.
-      if (event.data.error?.code === "MODEL_CALL_ATTEMPT_RETRIED") {
-        return updateAssistantMessage(data, event.data.turnId, (message) => ({
-          ...message,
-          parts: message.parts.filter(
-            (part) => part.type !== "dynamic-tool" || part.toolCallId !== event.data.result.callId,
-          ),
-        }));
       }
-      const existing = findToolPart(data, event.data.result.callId);
-      const descriptor = normalizeActionResult(event.data.result);
-      const succeeded =
-        event.data.status === undefined || event.data.status === "completed"
-          ? event.data.result.isError !== true && event.data.error === undefined
-          : false;
+      // A retried model-call attempt's calls may never have run; the replacement re-requests them.
+      if (event.data.outcome === "abandoned") {
+        return removeToolPart(data, callId);
+      }
+      const existing = findToolPart(data, callId);
+      const call = before.calls[callId];
+      const turnId = call?.turnId ?? event.scope?.turnId;
+      if (existing === undefined && turnId === undefined) return data;
       const part = {
         ...existing,
         input: existing?.input,
-        stepIndex: existing?.stepIndex ?? event.data.stepIndex,
-        toolCallId: event.data.result.callId,
-        toolMetadata: mergeToolMetadata(
-          existing?.toolMetadata,
-          createToolMetadata(descriptor, {
-            label: settledLabel(
-              existing?.toolMetadata,
-              event.data.presentation?.[event.data.result.callId]?.label,
-              descriptor,
-            ),
-          }),
-        ),
-        toolName: existing?.toolName ?? descriptor.toolName,
+        stepIndex: existing?.stepIndex ?? call?.stepIndex ?? 0,
+        toolCallId: callId,
+        toolMetadata: mergeToolMetadata(existing?.toolMetadata, {
+          eve: {
+            kind: existing?.toolMetadata?.eve?.kind ?? "tool-call",
+            label: event.data.title,
+            name: existing?.toolMetadata?.eve?.name ?? call?.name ?? "unknown",
+          },
+        }),
+        toolName: existing?.toolName ?? call?.name ?? "unknown",
         type: "dynamic-tool" as const,
       };
-      const outcome = succeeded
-        ? { errorText: undefined, output: event.data.result.output }
-        : {
-            errorText: event.data.error?.message ?? stringifyUnknown(event.data.result.output),
-            output: undefined,
-          };
-      return upsertToolPart(data, event.data.turnId, event.data.stepIndex, {
+      const outcome =
+        event.data.outcome === "completed"
+          ? { errorText: undefined, output: event.data.output }
+          : {
+              errorText: event.data.error?.message ?? stringifyUnknown(event.data.output),
+              output: undefined,
+            };
+      return upsertToolPart(data, turnId ?? "", part.stepIndex, {
         ...part,
         ...outcome,
         partial: undefined,
       } as EveDynamicToolPart);
     }
 
-    case "action.partial": {
-      const existing = findToolPart(data, event.data.result.callId);
-      if (existing !== undefined && isSettledToolPart(existing)) return data;
-      const descriptor = normalizeActionResult(event.data.result);
-      return upsertToolPart(data, event.data.turnId, event.data.stepIndex, {
+    case "call.progress": {
+      const existing = findToolPart(data, event.data.callId);
+      if (existing === undefined || isSettledToolPart(existing)) return data;
+      return replaceToolPart(data, {
         ...existing,
-        input: existing?.input,
-        output: event.data.result.output,
+        output: event.data.output,
         partial: true,
         state: "output-available",
-        stepIndex: existing?.stepIndex ?? event.data.stepIndex,
-        toolCallId: event.data.result.callId,
-        toolMetadata: mergeToolMetadata(
-          existing?.toolMetadata,
-          createToolMetadata(descriptor, {
-            label: settledLabel(
-              existing?.toolMetadata,
-              event.data.presentation?.[event.data.result.callId]?.label,
-              descriptor,
-            ),
-          }),
-        ),
-        toolName: existing?.toolName ?? descriptor.toolName,
-        type: "dynamic-tool",
+        toolMetadata: mergeToolMetadata(existing.toolMetadata, {
+          eve: {
+            kind: existing.toolMetadata?.eve?.kind ?? "tool-call",
+            label: event.data.title,
+            name: existing.toolMetadata?.eve?.name ?? "unknown",
+          },
+        }),
       } as EveDynamicToolPart);
     }
 
@@ -355,55 +396,22 @@ function reduceContent(data: EveMessageData, event: EveAgentReducerEvent): EveMe
     case "authorization.completed":
       return completeAuthorization(data, event);
 
-    case "message.appended":
-      return updateAssistantMessage(data, event.data.turnId, (message) =>
-        messageRun.transition(ensureStepStartPart(message, event.data.stepIndex), {
-          kind: "append",
-          delta: event.data.messageDelta,
-          id: event.meta?.id,
-          stepIndex: event.data.stepIndex,
-          type: "text",
-        }),
-      );
-
-    case "message.completed":
-      return updateAssistantMessage(data, event.data.turnId, (message) =>
-        messageRun.transition(ensureStepStartPart(message, event.data.stepIndex), {
-          kind: "complete",
-          stepIndex: event.data.stepIndex,
-          text: event.data.message,
-          id: event.meta?.id,
-          type: "text",
-        }),
-      );
-
-    case "result.completed":
-      return updateAssistantMessage(data, event.data.turnId, (message) => ({
-        ...message,
-        metadata: { ...message.metadata, result: event.data.result },
-      }));
-
-    case "turn.completed":
-    case "turn.cancelled":
-    case "turn.failed": {
+    case "turn.settled": {
       // A failed turn that streamed nothing has no message to finalize. Otherwise finalize what
-      // the turn streamed: no completion follows a partial append.
+      // the turn streamed.
+      const { outcome, turnId } = event.data;
       if (
-        event.type === "turn.failed" &&
+        outcome === "failed" &&
         !data.messages.some(
-          (message) =>
-            message.role === "assistant" && message.metadata?.turnId === event.data.turnId,
+          (message) => message.role === "assistant" && message.metadata?.turnId === turnId,
         )
       ) {
         return data;
       }
-      return updateAssistantMessage(data, event.data.turnId, (message) => ({
+      return updateAssistantMessage(data, turnId, (message) => ({
         ...message,
         metadata: { ...message.metadata, status: "complete" },
-        parts: removeUnsettledToolParts(
-          closeStreamingRuns(message.parts),
-          conversationProjection(data),
-        ),
+        parts: removeUnsettledToolParts(closeStreamingRuns(message.parts), after),
       }));
     }
 
@@ -417,13 +425,13 @@ function toolCallIds(data: EveMessageData, event: EveAgentReducerEvent): readonl
   const byRequest = (requestId: string) =>
     findToolPartByApprovalId(data, requestId)?.toolCallId ?? [];
   switch (event.type) {
-    case "actions.requested":
-      return event.data.actions.map((action) => action.callId);
+    case "call.requested":
+    case "call.started":
+    case "call.settled":
+    case "call.progress":
+      return [event.data.callId];
     case "input.requested":
       return event.data.requests.map((request) => request.action.callId);
-    case "action.result":
-    case "action.partial":
-      return [event.data.result.callId];
     case "task.started":
     case "task.settled":
       return [event.data.callId];
@@ -610,6 +618,58 @@ function completeAuthorization(
   return updateAssistantMessage(data, turnId, (message) =>
     upsertPart(ensureStepStartPart(message, next.stepIndex), next),
   );
+}
+
+/** True for the content kinds a message streams as text: its text and its reasoning. */
+function isRunKind(kind: string | undefined): kind is "text" | "reasoning" {
+  return kind === "text" || kind === "reasoning";
+}
+
+/** Where a text or reasoning part already sits: its turn and step, and its type. */
+function findRunPart(
+  data: EveMessageData,
+  partId: string,
+):
+  | { readonly turnId: string; readonly stepIndex: number; readonly type: "text" | "reasoning" }
+  | undefined {
+  for (const message of data.messages) {
+    if (message.role !== "assistant" || message.metadata?.turnId === undefined) continue;
+    for (const part of message.parts) {
+      if ((part.type === "text" || part.type === "reasoning") && part.id === partId) {
+        return { stepIndex: part.stepIndex ?? 0, turnId: message.metadata.turnId, type: part.type };
+      }
+    }
+  }
+  return undefined;
+}
+
+/** Where a tool part already sits: its turn and step. */
+function findToolPlace(
+  data: EveMessageData,
+  toolCallId: string,
+): { readonly turnId: string; readonly stepIndex: number } | undefined {
+  for (const message of data.messages) {
+    if (message.role !== "assistant" || message.metadata?.turnId === undefined) continue;
+    for (const part of message.parts) {
+      if (part.type === "dynamic-tool" && part.toolCallId === toolCallId) {
+        return { stepIndex: part.stepIndex ?? 0, turnId: message.metadata.turnId };
+      }
+    }
+  }
+  return undefined;
+}
+
+function removeToolPart(data: EveMessageData, toolCallId: string): EveMessageData {
+  const message = data.messages.find((candidate) =>
+    candidate.parts.some((part) => part.type === "dynamic-tool" && part.toolCallId === toolCallId),
+  );
+  if (message === undefined) return data;
+  return upsertMessage(data, {
+    ...message,
+    parts: message.parts.filter(
+      (part) => part.type !== "dynamic-tool" || part.toolCallId !== toolCallId,
+    ),
+  });
 }
 
 function findToolPart(data: EveMessageData, toolCallId: string): EveDynamicToolPart | undefined {

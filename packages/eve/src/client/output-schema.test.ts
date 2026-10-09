@@ -1,15 +1,12 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { describe, expect, it } from "vitest";
 
 import { extractCompletedResult } from "#client/output-schema.js";
-import {
-  createResultCompletedEvent,
-  createTurnCompletedEvent,
-  type UnstampedMessageStreamEvent,
-} from "#protocol/message.js";
+import { createResultCompletedEvent, createTurnCompletedEvent } from "#protocol/message.js";
 
 describe("output schema client helpers", () => {
   it("extracts the most recent completed structured result", () => {
-    const events: UnstampedMessageStreamEvent[] = [
+    const events: SessionEvent[] = [
       createResultCompletedEvent({
         result: { title: "First" },
         sequence: 0,

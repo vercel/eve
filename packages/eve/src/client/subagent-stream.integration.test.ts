@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { RouteHandlerArgs } from "#channel/routes.js";
@@ -12,7 +13,6 @@ import {
   EVE_STREAM_VERSION_HEADER,
   createAgentStartedEvent,
   type AgentStartedStreamEvent,
-  type MessageStreamEvent,
 } from "#protocol/message.js";
 import { EVE_SUBAGENT_STREAM_ROUTE_PATTERN } from "#protocol/routes.js";
 import { none } from "#public/channels/auth.js";
@@ -50,7 +50,7 @@ describe("ClientSession.agent through the parent proxy", () => {
     });
 
     const session = new Client({ host: PARENT_ORIGIN }).sessions.attach("parent-1");
-    const received: MessageStreamEvent[] = [];
+    const received: SessionStreamEvent[] = [];
     for await (const event of session.agent(started).stream({ follow: false })) {
       received.push(event);
     }
@@ -111,7 +111,7 @@ function createStarted(overrides: { readonly callId?: string } = {}): AgentStart
 
 /** The parent deployment's real eve channel route over one recorded parent event. */
 function createParentRoute(
-  parentEvent: MessageStreamEvent,
+  parentEvent: SessionStreamEvent,
 ): (request: Request) => Promise<Response> {
   const channel = eveChannel({ auth: none() });
   const route = channel.routes.find(
@@ -140,7 +140,7 @@ function createParentRoute(
       return new ReadableStream();
     },
     async getEventStream() {
-      return new ReadableStream<MessageStreamEvent>({
+      return new ReadableStream<SessionStreamEvent>({
         start(controller) {
           controller.enqueue(parentEvent);
           controller.close();

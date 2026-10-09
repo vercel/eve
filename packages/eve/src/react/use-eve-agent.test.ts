@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { createElement, StrictMode, useEffect, useRef, useState } from "react";
 import { act, create as createRenderer } from "react-test-renderer";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -17,7 +18,6 @@ import {
   createSessionWaitingEvent,
   createStepFailedEvent,
   createTurnFailedEvent,
-  type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import { TEST_USAGE, stampTestEvents } from "#internal/testing/events.js";
 import type { ClientSessionState } from "#client/types.js";
@@ -32,7 +32,7 @@ function createStartedMessageResponse(sessionId: string, continuationToken: stri
   });
 }
 
-function createEagerStreamResponse(events: readonly UnstampedMessageStreamEvent[]): Response {
+function createEagerStreamResponse(events: readonly SessionEvent[]): Response {
   const encoder = new TextEncoder();
 
   return new Response(
@@ -51,7 +51,7 @@ function createEagerStreamResponse(events: readonly UnstampedMessageStreamEvent[
 }
 
 function createBoundedStreamResponse(
-  events: readonly UnstampedMessageStreamEvent[],
+  events: readonly SessionEvent[],
   tailIndex = events.length - 1,
 ): Response {
   const response = createEagerStreamResponse(events);
@@ -522,7 +522,7 @@ describe("useEveAgent", () => {
       .mockResolvedValueOnce(createEagerStreamResponse(events));
 
     const lifecycle: string[] = [];
-    const seenEvents: UnstampedMessageStreamEvent[] = [];
+    const seenEvents: SessionEvent[] = [];
     const seenSessions: Array<ClientSessionState | undefined> = [];
     let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
 

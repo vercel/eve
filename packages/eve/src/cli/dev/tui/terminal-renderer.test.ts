@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { describe, expect, it, vi } from "vitest";
 
 import type { AgentInfoResult } from "#client/index.js";
@@ -23,7 +24,6 @@ import {
   createTurnStartedEvent,
   createTurnWaitingEvent,
   createTaskSettledEvent,
-  type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import {
   tuiSessionReducer,
@@ -3804,7 +3804,7 @@ describe("setup interaction transitions", () => {
 
 describe("TerminalRenderer conversation", () => {
   let sequence = 0;
-  const stamped = (event: UnstampedMessageStreamEvent) => stampTestEvent(event, ++sequence);
+  const stamped = (event: SessionEvent) => stampTestEvent(event, ++sequence);
 
   it("keeps live tasks above approval with a shared divider and state in the header", async () => {
     const { screen, input, renderer } = makeRenderer(100, 30);

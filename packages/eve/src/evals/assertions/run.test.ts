@@ -1,6 +1,6 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { describe, expect, it } from "vitest";
 
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { stampTestEvents } from "#internal/testing/events.js";
 import { createEmptyDerivedFacts } from "#evals/runner/derive-run-facts.js";
 import type {
@@ -13,7 +13,7 @@ import * as Run from "#evals/assertions/run.js";
 
 function makeResult(overrides: {
   status?: EveEvalTaskResult["status"];
-  events?: readonly UnstampedMessageStreamEvent[];
+  events?: readonly SessionEvent[];
   derived?: Partial<EveEvalDerivedFacts>;
   output?: unknown;
 }): EveEvalTaskResult {
@@ -46,16 +46,16 @@ function subagentCall(name: string, status: EveEvalSubagentCall["status"]): EveE
   };
 }
 
-function message(text: string): UnstampedMessageStreamEvent {
+function message(text: string): SessionEvent {
   return {
     type: "message.completed",
     data: { finishReason: "stop", message: text, sequence: 1, stepIndex: 0, turnId: "t1" },
-  } as UnstampedMessageStreamEvent;
+  } as SessionEvent;
 }
 
 function actionsRequested(
   actions: readonly { readonly callId: string; readonly toolName: string }[],
-): UnstampedMessageStreamEvent {
+): SessionEvent {
   return {
     type: "actions.requested",
     data: {
@@ -67,7 +67,7 @@ function actionsRequested(
   };
 }
 
-function actionResult(callId: string, toolName: string): UnstampedMessageStreamEvent {
+function actionResult(callId: string, toolName: string): SessionEvent {
   return {
     type: "action.result",
     data: {
@@ -84,7 +84,7 @@ function failedSubagentResult(input: {
   callId: string;
   output: unknown;
   subagentName: string;
-}): UnstampedMessageStreamEvent {
+}): SessionEvent {
   return {
     type: "action.result",
     data: {
@@ -127,7 +127,7 @@ describe("run assertions", () => {
         stepIndex: 0,
         turnId: "t1",
       },
-    } as UnstampedMessageStreamEvent;
+    } as SessionEvent;
 
     expect(
       (await Run.succeeded().evaluate(makeResult({ status: "completed", events: [failedEvent] })))
@@ -317,11 +317,11 @@ describe("run assertions", () => {
     const called = {
       type: "task.started",
       data: { callId: "c", kind: "agent", name: "child", taskId: "child-1", turnId: "t" },
-    } as UnstampedMessageStreamEvent;
+    } as SessionEvent;
     const completed = {
       type: "task.settled",
       data: { callId: "c", output: "ok", status: "completed", taskId: "child-1" },
-    } as UnstampedMessageStreamEvent;
+    } as SessionEvent;
     const result = makeResult({ events: [called, called, completed] });
 
     expect(
@@ -381,11 +381,11 @@ describe("run assertions", () => {
     const called = {
       type: "task.started",
       data: { callId: "c", kind: "agent", name: "child", taskId: "child-1", turnId: "t" },
-    } as UnstampedMessageStreamEvent;
+    } as SessionEvent;
     const completed = {
       type: "task.settled",
       data: { callId: "c", output: "ok", status: "completed", taskId: "child-1" },
-    } as UnstampedMessageStreamEvent;
+    } as SessionEvent;
     const result = makeResult({ events: [called, completed, called] });
 
     expect(

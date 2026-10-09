@@ -1,6 +1,6 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { getAdapterKind } from "#channel/adapter.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import type { FactPosition } from "#protocol/session-events/envelope.js";
 import type { HookContext } from "#public/definitions/hook.js";
 import type { RuntimeHookRegistry } from "#runtime/hooks/registry.js";
@@ -8,6 +8,7 @@ import { buildCallbackContext } from "#context/build-callback-context.js";
 import type { ContextContainer } from "./container.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { ContinuationTokenKey } from "./keys.js";
+import { currentView } from "#harness/session-machine/current.js";
 
 const log = createLogger("hooks");
 
@@ -19,7 +20,7 @@ const log = createLogger("hooks");
 export async function dispatchStreamEventHooks(input: {
   readonly ctx: ContextContainer;
   readonly registry: RuntimeHookRegistry;
-  readonly event: MessageStreamEvent;
+  readonly event: SessionStreamEvent;
   /** Where the event sits on the stream. */
   readonly position: FactPosition;
   /** It rode as progress: only handlers keyed on its type hear it, never `*`. */
@@ -34,7 +35,12 @@ export async function dispatchStreamEventHooks(input: {
     return;
   }
 
-  const baseCtx = { ...buildHookContext(input.ctx), position: input.position };
+  const { meta: _meta, ...event } = input.event;
+  const baseCtx = {
+    ...buildHookContext(input.ctx),
+    position: input.position,
+    view: currentView(input.ctx),
+  };
   let dispatching = true;
   for (const entry of [...typed, ...wildcard]) {
     const hookCtx: HookContext = {
@@ -58,7 +64,7 @@ export async function dispatchStreamEventHooks(input: {
       },
     };
     try {
-      await entry.handler(input.event, hookCtx);
+      await entry.handler(event, hookCtx);
     } catch (error) {
       logError(log, "stream event hook failed", error, {
         hook: entry.slug,
@@ -74,7 +80,9 @@ export async function dispatchStreamEventHooks(input: {
 }
 
 /** Builds the {@link HookContext} fields shared by every handler of one event. */
-function buildHookContext(ctx: ContextContainer): Omit<HookContext, "cancel" | "position"> {
+function buildHookContext(
+  ctx: ContextContainer,
+): Omit<HookContext, "cancel" | "position" | "view"> {
   const bundle = ctx.require(BundleKey);
   const channelAdapter = ctx.get(ChannelKey);
   const continuationToken = ctx.get(ContinuationTokenKey);

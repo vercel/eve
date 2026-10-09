@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
 
@@ -18,7 +19,6 @@ import {
 } from "#compiled/@agentclientprotocol/sdk/index.js";
 import { Client, ClientError } from "#client/index.js";
 import type { ClientOptions, SendTurnInput, SendTurnPayload } from "#client/types.js";
-import type { ActionPresentationByCallId, HandleMessageStreamEvent } from "#protocol/message.js";
 import {
   callStatus,
   foldSession,
@@ -45,10 +45,8 @@ interface ActivePrompt {
 }
 
 interface AdapterClientSession {
-  send(message: SendTurnInput["message"]): Promise<AsyncIterable<HandleMessageStreamEvent>>;
-  respond(
-    inputResponses: readonly InputResponse[],
-  ): Promise<AsyncIterable<HandleMessageStreamEvent>>;
+  send(message: SendTurnInput["message"]): Promise<AsyncIterable<SessionStreamEvent>>;
+  respond(inputResponses: readonly InputResponse[]): Promise<AsyncIterable<SessionStreamEvent>>;
   cancel(options?: { turnId?: string }): Promise<unknown>;
   reset(): Promise<unknown>;
 }
@@ -56,7 +54,7 @@ interface AdapterClientSession {
 interface AdapterClient {
   readonly sessions: {
     create(input: SendTurnInput): Promise<{
-      readonly response: AsyncIterable<HandleMessageStreamEvent>;
+      readonly response: AsyncIterable<SessionStreamEvent>;
       readonly session: AdapterClientSession;
     }>;
   };
@@ -208,7 +206,7 @@ export class EveAcpAdapter {
       }
       let input: SendTurnPayload = { message };
       for (;;) {
-        let response: AsyncIterable<HandleMessageStreamEvent>;
+        let response: AsyncIterable<SessionStreamEvent>;
         if (session.client === undefined) {
           if (input.message === undefined) {
             throw new Error("ACP session has not started.");
@@ -229,7 +227,7 @@ export class EveAcpAdapter {
         const inputRequests: InputRequest[] = [];
         let cancelled = false;
         let failure:
-          | Extract<HandleMessageStreamEvent, { type: "turn.failed" | "session.failed" }>
+          | Extract<SessionStreamEvent, { type: "turn.failed" | "session.failed" }>
           | undefined;
         let unsupportedEvent: RequestError | undefined;
 
@@ -355,7 +353,7 @@ export class EveAcpAdapter {
   async #projectEvent(
     sessionId: string,
     session: AcpSession,
-    event: HandleMessageStreamEvent,
+    event: SessionStreamEvent,
     client: AgentContext,
   ): Promise<void> {
     const before = session.projection;
@@ -427,7 +425,7 @@ export class EveAcpAdapter {
   async #projectContent(
     sessionId: string,
     session: AcpSession,
-    event: HandleMessageStreamEvent,
+    event: SessionStreamEvent,
     client: AgentContext,
   ): Promise<void> {
     switch (event.type) {
@@ -622,7 +620,7 @@ function unsupported(message: string): RequestError {
 }
 
 function eveFailure(
-  event: Extract<HandleMessageStreamEvent, { type: "turn.failed" | "session.failed" }>,
+  event: Extract<SessionStreamEvent, { type: "turn.failed" | "session.failed" }>,
 ): RequestError {
   return new RequestError(ERROR_CODE_EVE, event.data.message, {
     code: event.data.code,
@@ -650,7 +648,7 @@ function resultTitle(event: HandleMessageStreamEvent, callId: string): { title?:
 }
 
 /** The output an event carries for a call, if it reports one. */
-function callOutput(event: HandleMessageStreamEvent, callId: string) {
+function callOutput(event: SessionStreamEvent, callId: string) {
   const output =
     event.type === "action.result" && event.data.result.callId === callId
       ? event.data.result.output

@@ -8,12 +8,12 @@ import type {
   ToolSet,
   ToolResultPart,
 } from "ai";
-import {
-  createActionResultEvent,
-  createStepCompletedEvent,
-  type StepCompletedProviderMetadata,
-} from "#protocol/message.js";
 import { createRuntimeToolResultFromMessagePart } from "#harness/action-result-helpers.js";
+import { callSettledFrom, toJsonValue } from "#harness/call-facts.js";
+import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
+import { isInvalidToolCall } from "#harness/tool-call-input-errors.js";
+import type { SessionEvent } from "#protocol/session-event.js";
+import type { Usage } from "#protocol/session-events/envelope.js";
 import type { ToolSignIn } from "#harness/call-executor.js";
 import type { TurnPosition } from "#harness/session-machine/view.js";
 import { normalizeAssistantStepFinishReason } from "#harness/finish-reason.js";
@@ -198,8 +198,9 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
 // ---------------------------------------------------------------------------
 
 /**
- * Ends a step's events: the calls that didn't run report why, then `step.completed`. The stream
- * published the calls, and eve published the results of the calls it ran as they settled.
+ * Ends a step's run: the calls that didn't run settle with why, then one commit holds the run's
+ * structured result, if it has one, its settlement, and its usage. The stream published the calls,
+ * and eve published the results of the calls it ran as they settled.
  */
 export async function emitStepActions(
   emitFn: HarnessEmitFn,
@@ -207,82 +208,78 @@ export async function emitStepActions(
   step: HarnessStepResult,
   notRun: readonly ToolResultPart[],
 ): Promise<void> {
+  const { runId, turnId } = state;
+  const scope = runId === undefined ? { turnId } : { runId, turnId };
   for (const part of notRun) {
     await emitFn(
-      createActionResultEvent({
-        result: createRuntimeToolResultFromMessagePart(part, part.toolName),
-        sequence: state.sequence,
-        stepIndex: state.stepIndex,
-        turnId: state.turnId,
-      }),
+      callSettledFrom(createRuntimeToolResultFromMessagePart(part, part.toolName), { scope }),
     );
   }
-  await emitFn(
-    createStepCompletedEvent({
-      finishReason: normalizeAssistantStepFinishReason(step.finishReason),
-      providerMetadata: extractStepProviderMetadata(step.providerMetadata),
-      sequence: state.sequence,
-      stepIndex: state.stepIndex,
-      turnId: state.turnId,
-      usage: extractStepUsage({
-        costUsd: extractGatewayCostUsd(step.providerMetadata),
-        usage: step.usage,
-      }),
-    }),
-  );
+  if (runId === undefined) return;
+  const commit: SessionEvent[] = [];
+  const result = finalOutputOf(step);
+  if (result !== undefined) {
+    commit.push({
+      data: { kind: "result", partId: `${runId}.result`, phase: "reply", runId, value: result },
+      scope,
+      type: "content.completed",
+    });
+  }
+  const settled: {
+    runId: string;
+    outcome: "completed";
+    finishReason: string;
+    generationId?: string;
+  } = {
+    finishReason: normalizeAssistantStepFinishReason(step.finishReason),
+    outcome: "completed",
+    runId,
+  };
+  const generationId = readGatewayGenerationId(step.providerMetadata);
+  if (generationId !== undefined) settled.generationId = generationId;
+  commit.push({ data: settled, scope, type: "model.settled" });
+  const usage = runUsageOf({
+    costUsd: extractGatewayCostUsd(step.providerMetadata),
+    usage: step.usage,
+  });
+  if (usage !== undefined) {
+    commit.push({
+      data: { kind: "model", owner: { runId }, usage },
+      scope,
+      type: "usage.recorded",
+    });
+  }
+  await emitFn(commit);
 }
 
-/**
- * Projects the AI SDK's `LanguageModelUsage` into the flat `step.completed`
- * event usage shape. Returns `undefined` when the SDK reports no usage.
- */
-function extractStepUsage(input: {
+/** The run's structured result: the input of its valid `eve__reply` call. */
+function finalOutputOf(step: HarnessStepResult) {
+  const call = (step.toolCalls ?? []).find(
+    (candidate) => candidate.toolName === REPLY_TOOL_NAME && !isInvalidToolCall(candidate),
+  );
+  return call === undefined ? undefined : toJsonValue(call.input);
+}
+
+/** A run's usage as `usage.recorded` carries it, or `undefined` when the SDK reported none. */
+export function runUsageOf(input: {
   readonly costUsd: number | undefined;
   readonly usage: LanguageModelUsage | undefined;
-}):
-  | {
-      costUsd?: number;
-      inputTokens?: number;
-      outputTokens?: number;
-      cacheReadTokens?: number;
-      cacheWriteTokens?: number;
-    }
-  | undefined {
-  const result: {
-    costUsd?: number;
-    inputTokens?: number;
-    outputTokens?: number;
-    cacheReadTokens?: number;
-    cacheWriteTokens?: number;
-  } = {};
-
-  if (input.costUsd !== undefined) result.costUsd = input.costUsd;
-
-  const usage = input.usage;
-  if (usage === undefined) {
-    return Object.keys(result).length > 0 ? result : undefined;
-  }
-
-  if (usage.inputTokens !== undefined) result.inputTokens = usage.inputTokens;
-  if (usage.outputTokens !== undefined) result.outputTokens = usage.outputTokens;
-  if (usage.inputTokenDetails?.cacheReadTokens !== undefined) {
-    result.cacheReadTokens = usage.inputTokenDetails.cacheReadTokens;
-  }
-  if (usage.inputTokenDetails?.cacheWriteTokens !== undefined) {
-    result.cacheWriteTokens = usage.inputTokenDetails.cacheWriteTokens;
-  }
-
-  return Object.keys(result).length > 0 ? result : undefined;
+}): Usage | undefined {
+  const { usage } = input;
+  if (usage === undefined && input.costUsd === undefined) return undefined;
+  const recorded: { -readonly [K in keyof Usage]: Usage[K] } = {
+    cacheReadTokens: usage?.inputTokenDetails?.cacheReadTokens ?? 0,
+    cacheWriteTokens: usage?.inputTokenDetails?.cacheWriteTokens ?? 0,
+    inputTokens: usage?.inputTokens ?? 0,
+    outputTokens: usage?.outputTokens ?? 0,
+  };
+  if (input.costUsd !== undefined) recorded.costUsd = input.costUsd;
+  return recorded;
 }
 
-function extractStepProviderMetadata(
+export function extractGatewayCostUsd(
   providerMetadata: ProviderMetadata | undefined,
-): StepCompletedProviderMetadata | undefined {
-  const generationId = readGatewayGenerationId(providerMetadata);
-  return generationId === undefined ? undefined : { gateway: { generationId } };
-}
-
-function extractGatewayCostUsd(providerMetadata: ProviderMetadata | undefined): number | undefined {
+): number | undefined {
   const gateway = readGatewayMetadata(providerMetadata);
   const cost = gateway?.cost;
   if (typeof cost === "number" && Number.isFinite(cost)) {

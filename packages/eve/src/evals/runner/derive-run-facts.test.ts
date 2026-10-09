@@ -1,6 +1,6 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { describe, expect, it } from "vitest";
 
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { JsonObject } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import { stampTestEvents } from "#internal/testing/events.js";
@@ -9,19 +9,19 @@ import type { EveEvalDerivedFacts } from "#evals/types.js";
 
 /** Fixtures are authored without envelopes; stamp them the way the wire would. */
 function derive(
-  events: readonly UnstampedMessageStreamEvent[],
+  events: readonly SessionEvent[],
   options?: DeriveRunFactsOptions,
 ): EveEvalDerivedFacts {
   return deriveRunFacts(stampTestEvents(events), options);
 }
 
-function turnStarted(turnId: string, sequence: number): UnstampedMessageStreamEvent {
+function turnStarted(turnId: string, sequence: number): SessionEvent {
   return { type: "turn.started", data: { turnId, sequence } };
 }
 
 function actionsRequested(
   actions: readonly { callId: string; toolName: string; input?: JsonObject }[],
-): UnstampedMessageStreamEvent {
+): SessionEvent {
   return {
     type: "actions.requested",
     data: {
@@ -44,7 +44,7 @@ function actionResult(input: {
   output?: unknown;
   status?: "completed" | "failed" | "rejected";
   isError?: boolean;
-}): UnstampedMessageStreamEvent {
+}): SessionEvent {
   return {
     type: "action.result",
     data: {
@@ -63,20 +63,20 @@ function actionResult(input: {
   };
 }
 
-function stepStarted(modelId: string, stepIndex: number): UnstampedMessageStreamEvent {
+function stepStarted(modelId: string, stepIndex: number): SessionEvent {
   return { type: "step.started", data: { modelId, sequence: 1, stepIndex, turnId: "t1" } };
 }
 
 const USAGE = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 40, outputTokens: 8 };
 
-function sessionFailed(usage: TokenUsage): UnstampedMessageStreamEvent {
+function sessionFailed(usage: TokenUsage): SessionEvent {
   return {
     type: "session.failed",
     data: { code: "MODEL_CALL_FAILED", message: "failed", sessionId: "s1", usage },
   };
 }
 
-function sessionWaiting(usage: TokenUsage | undefined): UnstampedMessageStreamEvent {
+function sessionWaiting(usage: TokenUsage | undefined): SessionEvent {
   return {
     type: "session.waiting",
     data: { continuationToken: "", wait: "next-user-message", ...(usage && { usage }) },
@@ -88,7 +88,7 @@ function taskStarted(
   name: string,
   taskId: string,
   kind: "agent" | "tool",
-): UnstampedMessageStreamEvent {
+): SessionEvent {
   return { type: "task.started", data: { callId, kind, name, taskId, turnId: "t1" } };
 }
 
@@ -97,7 +97,7 @@ function agentStarted(
   name: string,
   taskId: string,
   remote?: { readonly url: string },
-): UnstampedMessageStreamEvent {
+): SessionEvent {
   const data = {
     callId,
     name,
@@ -109,7 +109,7 @@ function agentStarted(
   return { type: "agent.started", data: remote === undefined ? data : { ...data, remote } };
 }
 
-function inputRequested(requestIds: readonly string[]): UnstampedMessageStreamEvent {
+function inputRequested(requestIds: readonly string[]): SessionEvent {
   return {
     type: "input.requested",
     data: {
@@ -150,7 +150,7 @@ describe("deriveRunFacts", () => {
   });
 
   it("pairs tool calls with their results by call id", () => {
-    const events: UnstampedMessageStreamEvent[] = [
+    const events: SessionEvent[] = [
       turnStarted("t1", 0),
       actionsRequested([
         { callId: "c1", toolName: "get_weather", input: { city: "Brooklyn" } },
@@ -189,7 +189,7 @@ describe("deriveRunFacts", () => {
   });
 
   it("uses the normalized failed lifecycle status for error results", () => {
-    const events: UnstampedMessageStreamEvent[] = [
+    const events: SessionEvent[] = [
       actionsRequested([{ callId: "c1", toolName: "bash" }]),
       actionResult({ callId: "c1", toolName: "bash", isError: true }),
     ];
@@ -199,7 +199,7 @@ describe("deriveRunFacts", () => {
   });
 
   it("distinguishes pending, completed, failed, and rejected tool calls", () => {
-    const events: UnstampedMessageStreamEvent[] = [
+    const events: SessionEvent[] = [
       actionsRequested([
         { callId: "pending", toolName: "pending" },
         { callId: "completed", toolName: "completed" },
@@ -235,7 +235,7 @@ describe("deriveRunFacts", () => {
   });
 
   it("pairs HITL tool calls with resumed results by call id", () => {
-    const events: UnstampedMessageStreamEvent[] = [
+    const events: SessionEvent[] = [
       turnStarted("t1", 0),
       inputRequested(["approval"]),
       turnStarted("t2", 1),
@@ -277,7 +277,7 @@ describe("deriveRunFacts", () => {
   });
 
   it("deduplicates tool calls surfaced by request and HITL events", () => {
-    const events: UnstampedMessageStreamEvent[] = [
+    const events: SessionEvent[] = [
       turnStarted("t1", 0),
       actionsRequested([{ callId: "approval-call", toolName: "bash" }]),
       inputRequested(["approval"]),
@@ -287,7 +287,7 @@ describe("deriveRunFacts", () => {
   });
 
   it("stamps the turn index from turn.started boundaries", () => {
-    const events: UnstampedMessageStreamEvent[] = [
+    const events: SessionEvent[] = [
       turnStarted("t1", 0),
       actionsRequested([{ callId: "c1", toolName: "first_tool" }]),
       actionResult({ callId: "c1", toolName: "first_tool" }),
@@ -301,7 +301,7 @@ describe("deriveRunFacts", () => {
   });
 
   it("counts message.completed events whose step completed without tool calls", () => {
-    const events: UnstampedMessageStreamEvent[] = [
+    const events: SessionEvent[] = [
       {
         type: "message.completed",
         data: { finishReason: "stop", message: "hello", stepIndex: 0, turnId: "t1", sequence: 1 },
@@ -326,7 +326,7 @@ describe("deriveRunFacts", () => {
   });
 
   it("counts reasoning.completed events", () => {
-    const events: UnstampedMessageStreamEvent[] = [
+    const events: SessionEvent[] = [
       {
         type: "reasoning.completed",
         data: { reasoning: "thinking...", stepIndex: 0, turnId: "t1", sequence: 1 },
@@ -473,7 +473,7 @@ describe("deriveRunFacts", () => {
   });
 
   it("captures failure code from session.failed event", () => {
-    const events: UnstampedMessageStreamEvent[] = [
+    const events: SessionEvent[] = [
       {
         type: "session.failed",
         data: {
@@ -488,16 +488,13 @@ describe("deriveRunFacts", () => {
   });
 
   it("collects HITL input requests", () => {
-    const events: UnstampedMessageStreamEvent[] = [
-      turnStarted("t1", 0),
-      inputRequested(["r1", "r2"]),
-    ];
+    const events: SessionEvent[] = [turnStarted("t1", 0), inputRequested(["r1", "r2"])];
     const facts = derive(events);
     expect(facts.inputRequests.map((request) => request.requestId)).toEqual(["r1", "r2"]);
   });
 
   it("marks the run parked when it ends on unanswered input requests", () => {
-    const events: UnstampedMessageStreamEvent[] = [
+    const events: SessionEvent[] = [
       turnStarted("t1", 0),
       inputRequested(["r1"]),
       { type: "turn.completed", data: { sequence: 1, turnId: "t1" } },
@@ -505,14 +502,14 @@ describe("deriveRunFacts", () => {
         type: "session.waiting",
         data: { continuationToken: "session-id", wait: "next-user-message" },
       },
-    ] as UnstampedMessageStreamEvent[];
+    ] as SessionEvent[];
 
     const facts = derive(events);
     expect(facts.parked).toBe(true);
   });
 
   it("does not mark the run parked when the turn continued past the input request", () => {
-    const events: UnstampedMessageStreamEvent[] = [
+    const events: SessionEvent[] = [
       turnStarted("t1", 0),
       inputRequested(["r1"]),
       {
@@ -524,7 +521,7 @@ describe("deriveRunFacts", () => {
         type: "session.waiting",
         data: { continuationToken: "session-id", wait: "next-user-message" },
       },
-    ] as UnstampedMessageStreamEvent[];
+    ] as SessionEvent[];
 
     const facts = derive(events);
     expect(facts.parked).toBe(false);

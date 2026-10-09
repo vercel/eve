@@ -111,51 +111,28 @@ export type {
 // ---------------------------------------------------------------------------
 
 export type {
-  ActionPartialStreamEvent,
-  ActionResultStreamEvent,
-  ActionsRequestedStreamEvent,
   AgentStartedStreamEvent,
-  AssistantStepFinishReason,
   AuthorizationOutcome,
-  CompactionCompletedStreamEvent,
-  CompactionRequestedStreamEvent,
   AuthorizationCompletedStreamEvent,
   ConnectionAuthorizationOutcome,
   AuthorizationRequiredStreamEvent,
-  HandleMessageStreamEvent,
-  MessageStreamEventMeta,
   InputResolution,
   InputResolutionOutcome,
   InputResolvedStreamEvent,
   InputRequestedStreamEvent,
-  MessageAppendedStreamEvent,
-  MessageCompletedStreamEvent,
-  MessageReceivedPart,
-  MessageReceivedStreamEvent,
-  ReasoningAppendedStreamEvent,
-  ReasoningCompletedStreamEvent,
-  ResultCompletedStreamEvent,
   RuntimeTraceContext,
-  SessionCompletedStreamEvent,
-  SessionFailedStreamEvent,
-  SessionStartedStreamEvent,
-  SessionWaitingStreamEvent,
-  MessageStreamEvent,
-  StepCompletedStreamEvent,
-  StepFailedStreamEvent,
-  StepStartedStreamEvent,
   TaskSettledStreamEvent,
   TaskStartedStreamEvent,
-  TurnCancelledStreamEvent,
-  TurnCompletedStreamEvent,
-  TurnFailedStreamEvent,
-  TurnStartedStreamEvent,
-  TurnFailureStreamEvent,
-  TurnWaitingOn,
-  TurnWaitingStreamEvent,
+  WorkStreamEvent,
 } from "#protocol/message.js";
-
-export { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";
+export type {
+  ConversationFact,
+  SessionEvent,
+  SessionEventMeta,
+  SessionStreamEvent,
+} from "#protocol/session-event.js";
+export type * from "#protocol/session-events/index.js";
+export { endsTurn, failureOf } from "#client/session-utils.js";
 
 export type { InputOption, InputRequest, InputRequestKind, InputResponse } from "#shared/input.js";
 export {

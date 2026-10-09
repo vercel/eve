@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import type { ModelMessage } from "ai";
 
 import { contextStorage } from "#context/container.js";
@@ -26,7 +27,6 @@ import {
   createSessionStartedEvent,
   createStepStartedEvent,
   createTurnStartedEvent,
-  type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import { initialSessionProjection } from "#protocol/session-projection.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
@@ -39,7 +39,7 @@ import type { InputRequest } from "#shared/input.js";
 /** The session as publishing `events` leaves it. */
 export function withPublished(
   session: HarnessSession,
-  events: readonly UnstampedMessageStreamEvent[],
+  events: readonly SessionEvent[],
 ): HarnessSession {
   const projection = stepProjection(undefined, session.state);
   for (const event of events) projection.record(event);
@@ -52,7 +52,7 @@ export function withOpenTurn(
   position: { readonly sequence: number; readonly turnId: string; readonly stepIndex?: number },
 ): HarnessSession {
   const projection = storedProjection(session.state);
-  const events: UnstampedMessageStreamEvent[] = [];
+  const events: SessionEvent[] = [];
   if (projection.started !== true) events.push(createSessionStartedEvent());
   if (projection.activeTurnId !== position.turnId) {
     events.push(createTurnStartedEvent({ sequence: position.sequence, turnId: position.turnId }));
@@ -129,7 +129,7 @@ export function foldingHandler(handleEvent?: TestEventHandler): HarnessEmitFn {
 
 /** A test's event handler: one event at a time, with the conversation its participants read. */
 export type TestEventHandler = (
-  event: UnstampedMessageStreamEvent,
+  event: SessionEvent,
   messages?: readonly ModelMessage[],
 ) => void | Promise<void>;
 

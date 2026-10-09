@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { UserContent } from "ai";
 import { RunExpiredError, WorkflowRunNotFoundError } from "#compiled/@workflow/errors/index.js";
 
@@ -18,10 +19,7 @@ import {
 } from "#internal/invocation/metadata.js";
 import type { RouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { getRun, getWorld } from "#internal/workflow/runtime.js";
-import type {
-  AuthorizationRequiredStreamEvent,
-  HandleMessageStreamEvent,
-} from "#protocol/message.js";
+import type { AuthorizationRequiredStreamEvent } from "#protocol/message.js";
 import {
   foldSessionEvents,
   openInputs,
@@ -181,7 +179,7 @@ export class WorkflowAgentInvocationExecution {
 type InputBatch = ReadonlyMap<string, InputRequest>;
 
 type InvocationFailureEvent = Extract<
-  HandleMessageStreamEvent,
+  SessionStreamEvent,
   { type: "session.failed" | "turn.failed" }
 >;
 

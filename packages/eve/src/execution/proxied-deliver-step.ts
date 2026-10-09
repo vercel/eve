@@ -1,3 +1,5 @@
+import { userPartsOf } from "#harness/user-parts.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import { sessionView } from "#harness/session-machine/commit.js";
 import { routeAnswer, hold, receiveRelayedAnswer } from "#harness/session-machine/transitions.js";
 import { storedProjection } from "#harness/session-machine/view.js";
@@ -37,7 +39,7 @@ import {
 } from "#execution/tools/workflow/answer.js";
 import type { StepCoordinates as PendingInputBatchEvent } from "#harness/session-machine/view.js";
 import type { WorkflowAskRoute } from "#harness/proxy-input-requests.js";
-import { type InputResolution, type UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { type InputResolution } from "#protocol/message.js";
 import { getProxyInputRequests, retireProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { InputResponse } from "#shared/input.js";
 
@@ -101,7 +103,7 @@ async function routeProxiedDeliver(
   const resolvedRequests = new Set<string>();
   // A message that answers a question is still the person's turn in the
   // conversation, so the stream records it with its delivery ids.
-  const answerMessages: UnstampedMessageStreamEvent[] = [];
+  const answerMessages: SessionEvent[] = [];
   const answerDeliveryIds: string[] = [];
 
   for (const [sourcePayloadIndex, payload] of sourceDelivery.payloads.entries()) {
@@ -120,13 +122,18 @@ async function routeProxiedDeliver(
           resolvedRequests.add(requestId);
       }
       if (forChild.message !== undefined) {
-        const { sequence, turnId } = forChild.resolved.event;
-        answerMessages.push(receiveRelayedAnswer({ message: forChild.message, sequence, turnId }));
-        for (const metadata of sourceDelivery.deliveryMetadata ?? []) {
-          if (metadata.payloadIndex === sourcePayloadIndex) {
-            answerDeliveryIds.push(metadata.deliveryId);
-          }
-        }
+        const { turnId } = forChild.resolved.event;
+        const deliveryIds = (sourceDelivery.deliveryMetadata ?? [])
+          .filter((metadata) => metadata.payloadIndex === sourcePayloadIndex)
+          .map((metadata) => metadata.deliveryId);
+        answerDeliveryIds.push(...deliveryIds);
+        answerMessages.push(
+          ...receiveRelayedAnswer({
+            deliveryIds,
+            parts: userPartsOf(forChild.message),
+            turnId,
+          }),
+        );
       }
       const key = JSON.stringify([
         forChild.childContinuationToken,

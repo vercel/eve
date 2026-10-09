@@ -1,6 +1,7 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { runUntilAborted } from "#evals/abort.js";
 import type { Client } from "#client/client.js";
-import type { MessageStreamEvent, RuntimeIdentity } from "#protocol/message.js";
+import type { RuntimeIdentity } from "#protocol/message.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { addTokenUsage, type TokenUsage } from "#shared/token-usage.js";
 import type {
@@ -211,7 +212,7 @@ function selectPrimarySessionId(sessions: readonly EveEvalSessionResult[]): stri
  * in the stream, if present.
  */
 function extractRuntimeIdentity(
-  events: readonly MessageStreamEvent[],
+  events: readonly SessionStreamEvent[],
 ): RuntimeIdentity | undefined {
   for (const event of events) {
     if (event.type === "session.started" && event.data.runtime !== undefined) {

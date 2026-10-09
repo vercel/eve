@@ -1,4 +1,4 @@
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import {
   foldSession,
   initialSessionProjection,
@@ -14,10 +14,10 @@ import {
 export interface SessionContractViolation {
   readonly rule: "turn-order" | "resolved-twice" | "open-after-owner" | "unsettled-call";
   readonly message: string;
-  readonly event: UnstampedMessageStreamEvent;
+  readonly event: SessionEvent;
 }
 
-const TURN_CONTENT: ReadonlySet<UnstampedMessageStreamEvent["type"]> = new Set([
+const TURN_CONTENT: ReadonlySet<SessionEvent["type"]> = new Set([
   "step.started",
   "message.appended",
   "reasoning.appended",
@@ -37,7 +37,7 @@ export function createSessionContract() {
     get projection(): SessionProjection {
       return projection;
     },
-    observe(event: UnstampedMessageStreamEvent): readonly SessionContractViolation[] {
+    observe(event: SessionEvent): readonly SessionContractViolation[] {
       const violations: SessionContractViolation[] = [];
       const violate = (rule: SessionContractViolation["rule"], message: string) =>
         violations.push({ event, message, rule });
@@ -99,7 +99,7 @@ export function createSessionContract() {
 }
 
 /** Throws on the first event that breaks the contract, naming the rule. */
-export function assertSessionContract(events: readonly UnstampedMessageStreamEvent[]): void {
+export function assertSessionContract(events: readonly SessionEvent[]): void {
   const contract = createSessionContract();
   for (const [index, event] of events.entries()) {
     const [violation] = contract.observe(event);

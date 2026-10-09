@@ -10,21 +10,13 @@ import type {
 type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
 type InlineToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
 
-import type { AssistantStepFinishReason } from "#protocol/message.js";
-import {
-  createActionsRequestedEvent,
-  createActionInputAppendedEvent,
-  createActionResultEvent,
-  createMessageAppendedEvent,
-  createMessageCompletedEvent,
-  createReasoningAppendedEvent,
-  createReasoningCompletedEvent,
-} from "#protocol/message.js";
+import type { AssistantStepFinishReason } from "#harness/finish-reason.js";
+import { callRequested, callSettledFrom } from "#harness/call-facts.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import type { JsonObject } from "#shared/json.js";
 import {
   createRuntimeToolResultFromStepResult,
   createRuntimeToolResultFromToolError,
-  toActionResult,
   createToolResultMessagePartFromToolError,
 } from "#harness/action-result-helpers.js";
 import {
@@ -34,7 +26,6 @@ import {
 } from "#harness/tool-call-input-errors.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import {
-  collectActionPresentation,
   createPresentedRuntimeActionRequestFromToolCall,
   type RuntimeActionRequestProjection,
 } from "#harness/action-presentation.js";
@@ -106,13 +97,14 @@ export async function emitStreamContent(
   }
 }
 
-/** A hidden held turn's text step isn't its reply, so it reports `"tool-calls"` as channels expect. */
-function reportedFinishReason(
-  finishReason: AssistantStepFinishReason,
-  hidesHeldText: boolean,
-): AssistantStepFinishReason {
-  if (hidesHeldText && finishReason === "stop") return "tool-calls";
-  return finishReason;
+/**
+ * Whether the run's last text replies. Text the turn continues after narrates: text before calls,
+ * and a held turn's text, which waits on its tasks before the turn can reply.
+ */
+function finalPhase(finishReason: AssistantStepFinishReason, hidesHeldText: boolean) {
+  if (finishReason === "tool-calls") return "narration";
+  if (hidesHeldText && finishReason === "stop") return "narration";
+  return "reply";
 }
 
 async function consumeStreamContent(
@@ -122,8 +114,14 @@ async function consumeStreamContent(
   providerActionBatch: ReturnType<typeof createProviderStreamActionBatch>,
   options?: StreamActionEmissionOptions,
 ): Promise<EmittedStreamContent> {
+  const runId = state.runId ?? `${state.turnId}.run`;
+  const scope = { runId, turnId: state.turnId };
+  let partCount = 0;
+  const nextPartId = () => `${runId}.${String(partCount++)}`;
   let currentReasoning = "";
+  let reasoningPartId: string | undefined;
   let currentMessage = "";
+  let messagePartId: string | undefined;
   let finishReason: AssistantStepFinishReason = "stop";
   let streamError: Error | undefined;
   const emittedActionCallIds = new Set<string>();
@@ -132,40 +130,43 @@ async function consumeStreamContent(
   const invalidInputToolCallIds = new Set<string>();
   const trailingInlineToolResultParts: InlineToolResultPart[] = [];
   const actionInputs = new Map<string, JsonObject>();
-  const streamingActionInputs = new Map<string, { toolName: string }>();
+  const streamingActionInputs = new Map<string, { toolName: string; announced: boolean }>();
 
-  const flushCurrentMessage = async (): Promise<void> => {
-    if (currentMessage.length === 0) {
-      return;
-    }
-    await emitFn(
-      createMessageCompletedEvent({
-        finishReason: "tool-calls",
-        message: currentMessage,
-        sequence: state.sequence,
-        stepIndex: state.stepIndex,
-        turnId: state.turnId,
-      }),
-    );
-    currentMessage = "";
+  const completePart = async (
+    partId: string,
+    kind: "text" | "reasoning",
+    value: string,
+    phase: "narration" | "reply",
+  ): Promise<void> => {
+    await emitFn({ data: { kind, partId, phase, runId, value }, scope, type: "content.completed" });
   };
 
-  const emitActionInput = async (
-    callId: string,
-    toolName: string,
-    inputTextDelta: string,
-  ): Promise<void> => {
-    await emitFn(
-      createActionInputAppendedEvent({
-        callId,
-        inputTextDelta,
-        sequence: state.sequence,
-        stepIndex: state.stepIndex,
-        toolName,
-        turnId: state.turnId,
-      }),
-    );
-    options?.unsettledActionToolNames?.set(callId, toolName);
+  const flushCurrentMessage = async (): Promise<void> => {
+    if (currentMessage.length === 0 || messagePartId === undefined) {
+      return;
+    }
+    await completePart(messagePartId, "text", currentMessage, "narration");
+    currentMessage = "";
+    messagePartId = undefined;
+  };
+
+  const flushCurrentReasoning = async (): Promise<void> => {
+    if (currentReasoning.trim().length > 0 && reasoningPartId !== undefined) {
+      await completePart(reasoningPartId, "reasoning", currentReasoning, "narration");
+    }
+    currentReasoning = "";
+    reasoningPartId = undefined;
+  };
+
+  const emitActionInput = async (callId: string, delta: string): Promise<void> => {
+    const input = streamingActionInputs.get(callId);
+    if (input === undefined) return;
+    const event: SessionEvent = input.announced
+      ? { data: { callId, delta }, type: "call.input" }
+      : { data: { callId, delta, name: input.toolName }, scope, type: "call.input" };
+    input.announced = true;
+    await emitFn(event);
+    options?.unsettledActionToolNames?.set(callId, input.toolName);
   };
 
   const emitActionRequest = async (
@@ -184,13 +185,7 @@ async function consumeStreamContent(
     emittedActionCallIds.add(action.callId);
     actionInputs.set(action.callId, action.input);
     await emitFn(
-      createActionsRequestedEvent({
-        actions: [action],
-        presentation: collectActionPresentation([projection]),
-        sequence: state.sequence,
-        stepIndex: state.stepIndex,
-        turnId: state.turnId,
-      }),
+      callRequested({ action, owner: { runId }, scope, title: projection.presentationLabel }),
     );
     options?.unsettledActionToolNames?.set(action.callId, toolName);
   };
@@ -216,7 +211,10 @@ async function consumeStreamContent(
     const resolved = resolveProviderToolCallRequest(toolCall, options?.tools ?? new Map());
     if (resolved.toolError !== undefined) {
       invalidInputToolCallIds.add(toolCall.toolCallId);
-      await emitActionResult(createRuntimeToolResultFromToolError(resolved.toolError));
+      await emitInvalidCall(
+        { callId: toolCall.toolCallId, input: {}, kind: "tool-call", toolName: toolCall.toolName },
+        createRuntimeToolResultFromToolError(resolved.toolError),
+      );
       trailingInlineToolResultParts.push(
         createToolResultMessagePartFromToolError(resolved.toolError),
       );
@@ -225,6 +223,25 @@ async function consumeStreamContent(
 
     actionInputs.set(resolved.request.action.callId, resolved.request.action.input);
     providerActionBatch.observe(resolved.request, toolCall.toolName);
+  };
+
+  /** A call whose input didn't validate is introduced with its error, and fails at once. */
+  const emitInvalidCall = async (
+    action: Parameters<typeof callRequested>[0]["action"],
+    result: RuntimeToolResultActionResult,
+  ): Promise<void> => {
+    emittedActionCallIds.add(action.callId);
+    const message =
+      typeof result.output === "string" ? result.output : JSON.stringify(result.output ?? null);
+    await emitFn(
+      callRequested({
+        action,
+        inputError: { code: "INVALID_TOOL_INPUT", message },
+        owner: { runId },
+        scope,
+      }),
+    );
+    await emitActionResult(result);
   };
 
   const emitActionResult = async (result: RuntimeToolResultActionResult): Promise<void> => {
@@ -242,13 +259,7 @@ async function consumeStreamContent(
             result.output,
           );
     await emitFn(
-      createActionResultEvent({
-        presentation: resultPresentation,
-        result: toActionResult(result, actionInputs.get(result.callId)),
-        sequence: state.sequence,
-        stepIndex: state.stepIndex,
-        turnId: state.turnId,
-      }),
+      callSettledFrom(result, { scope, title: resultPresentation?.[result.callId]?.label }),
     );
     options?.unsettledActionToolNames?.delete(result.callId);
   };
@@ -277,7 +288,15 @@ async function consumeStreamContent(
         if (currentMessage.trim().length > 0) {
           await flushCurrentMessage();
         }
-        await emitActionResult(createRuntimeToolResultFromToolError(toolError));
+        await emitInvalidCall(
+          {
+            callId: toolCall.toolCallId,
+            input: {},
+            kind: "tool-call",
+            toolName: toolCall.toolName,
+          },
+          createRuntimeToolResultFromToolError(toolError),
+        );
         trailingInlineToolResultParts.push(createToolResultMessagePartFromToolError(toolError));
         return;
       }
@@ -291,42 +310,40 @@ async function consumeStreamContent(
     }
 
     switch (part.type) {
-      case "reasoning-delta":
+      case "reasoning-delta": {
         await providerActionBatch.flush();
         currentReasoning += part.text;
+        const announces = reasoningPartId === undefined;
+        reasoningPartId ??= nextPartId();
         await emitFn(
-          createReasoningAppendedEvent({
-            reasoningDelta: part.text,
-            sequence: state.sequence,
-            stepIndex: state.stepIndex,
-            turnId: state.turnId,
-          }),
+          announces
+            ? {
+                data: { delta: part.text, kind: "reasoning", partId: reasoningPartId },
+                scope,
+                type: "content.delta",
+              }
+            : { data: { delta: part.text, partId: reasoningPartId }, type: "content.delta" },
         );
         break;
-      case "text-delta":
+      }
+      case "text-delta": {
         await providerActionBatch.flush();
         // Flush accumulated reasoning before text begins.
-        if (currentReasoning.trim().length > 0) {
-          await emitFn(
-            createReasoningCompletedEvent({
-              reasoning: currentReasoning,
-              sequence: state.sequence,
-              stepIndex: state.stepIndex,
-              turnId: state.turnId,
-            }),
-          );
-          currentReasoning = "";
-        }
+        await flushCurrentReasoning();
         currentMessage += part.text;
+        const announces = messagePartId === undefined;
+        messagePartId ??= nextPartId();
         await emitFn(
-          createMessageAppendedEvent({
-            messageDelta: part.text,
-            sequence: state.sequence,
-            stepIndex: state.stepIndex,
-            turnId: state.turnId,
-          }),
+          announces
+            ? {
+                data: { delta: part.text, kind: "text", partId: messagePartId },
+                scope,
+                type: "content.delta",
+              }
+            : { data: { delta: part.text, partId: messagePartId }, type: "content.delta" },
         );
         break;
+      }
       case "tool-input-start": {
         if (
           options === undefined ||
@@ -340,16 +357,15 @@ async function consumeStreamContent(
         if (currentMessage.trim().length > 0) {
           await flushCurrentMessage();
         }
-        streamingActionInputs.set(part.id, { toolName: part.toolName });
+        streamingActionInputs.set(part.id, { announced: false, toolName: part.toolName });
         break;
       }
       case "tool-input-delta": {
-        const input = streamingActionInputs.get(part.id);
-        if (input === undefined) {
+        if (!streamingActionInputs.has(part.id)) {
           break;
         }
         await providerActionBatch.flush();
-        await emitActionInput(part.id, input.toolName, part.delta);
+        await emitActionInput(part.id, part.delta);
         break;
       }
       case "tool-input-end":
@@ -414,26 +430,19 @@ async function consumeStreamContent(
     throw streamError;
   }
 
-  if (currentReasoning.trim().length > 0) {
-    await emitFn(
-      createReasoningCompletedEvent({
-        reasoning: currentReasoning,
-        sequence: state.sequence,
-        stepIndex: state.stepIndex,
-        turnId: state.turnId,
-      }),
-    );
-  }
+  await flushCurrentReasoning();
 
-  if (finishReason !== "content-filter" && currentMessage.trim().length > 0) {
-    await emitFn(
-      createMessageCompletedEvent({
-        finishReason: reportedFinishReason(finishReason, options?.hidesHeldText === true),
-        message: currentMessage,
-        sequence: state.sequence,
-        stepIndex: state.stepIndex,
-        turnId: state.turnId,
-      }),
+  // Text a content filter cut off never completes: its preview goes with the run.
+  if (
+    finishReason !== "content-filter" &&
+    currentMessage.trim().length > 0 &&
+    messagePartId !== undefined
+  ) {
+    await completePart(
+      messagePartId,
+      "text",
+      currentMessage,
+      finalPhase(finishReason, options?.hidesHeldText === true),
     );
   }
 

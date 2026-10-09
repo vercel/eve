@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { context as otelContext, trace } from "#compiled/@opentelemetry/api/index.js";
 import {
   type FilePart,
@@ -31,7 +32,6 @@ import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox
 import { attachClientContext } from "#internal/client-context.js";
 import { pngBytes } from "#internal/testing/media-fixtures.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { InstrumentationStepStartedEventInput } from "#public/instrumentation/index.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
 import type { ResolvedDynamicInstructionsResolver } from "#runtime/types.js";
@@ -371,16 +371,16 @@ function setDelegatedParent(ctx: ContextContainer): void {
 
 function createEventCollector(): {
   emit: HarnessEmitFn;
-  events: UnstampedMessageStreamEvent[];
+  events: SessionEvent[];
 } {
-  const events: UnstampedMessageStreamEvent[] = [];
+  const events: SessionEvent[] = [];
   const emit: HarnessEmitFn = eachEvent(async (event) => {
     events.push(event);
   });
   return { emit, events };
 }
 
-function getCompatibilityEventTypes(events: readonly UnstampedMessageStreamEvent[]): string[] {
+function getCompatibilityEventTypes(events: readonly SessionEvent[]): string[] {
   return events
     .filter((event) => event.type !== "message.appended" && event.type !== "reasoning.appended")
     .map((event) => event.type);
@@ -722,11 +722,11 @@ function withDelegatedSpend(overrides?: Parameters<typeof createTestSession>[0])
 }
 
 function lastSessionEvent<T extends "session.waiting" | "session.failed">(
-  events: readonly UnstampedMessageStreamEvent[],
+  events: readonly SessionEvent[],
   type: T,
-): Extract<UnstampedMessageStreamEvent, { type: T }> | undefined {
+): Extract<SessionEvent, { type: T }> | undefined {
   return events.findLast(
-    (event): event is Extract<UnstampedMessageStreamEvent, { type: T }> => event.type === type,
+    (event): event is Extract<SessionEvent, { type: T }> => event.type === type,
   );
 }
 
@@ -796,7 +796,7 @@ describe("createToolLoopHarness", () => {
         throw new DynamicModelSelectionError(new Error("flag service unavailable"));
       }
     });
-    const events: UnstampedMessageStreamEvent[] = [];
+    const events: SessionEvent[] = [];
 
     await createToolLoopHarness(createTestConfig(emit))(
       withDelegatedSpend({ outputSchema: { type: "object" } }),
@@ -1341,7 +1341,7 @@ describe("createToolLoopHarness", () => {
 
   it("emits a terminal failure when a turn-scoped dynamic model resolver throws", async () => {
     const logs = captureLogRecords();
-    const events: UnstampedMessageStreamEvent[] = [];
+    const events: SessionEvent[] = [];
     const emit: HarnessEmitFn = eachEvent(async (event) => {
       events.push(event);
       if (event.type === "turn.started") {
@@ -4682,7 +4682,7 @@ describe("createToolLoopHarness", () => {
         webhookUrl: challenge.hookUrl,
       }),
       { data: { on: "input", sequence: 0, turnId: "turn_0" }, type: "turn.waiting" },
-    ] as UnstampedMessageStreamEvent[]);
+    ] as SessionEvent[]);
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(
       createTestConfig(emit, { signInCompletions: [challenge] as never }),
@@ -7407,7 +7407,7 @@ describe("createToolLoopHarness", () => {
         toolCalls: [],
         toolResults: [],
       });
-      const events: UnstampedMessageStreamEvent[] = [];
+      const events: SessionEvent[] = [];
       declareTelemetry({ tracePolicy: () => true });
       const runStep = createToolLoopHarness(
         createTestConfig(async (event) => {
@@ -7675,7 +7675,7 @@ describe("createToolLoopHarness", () => {
       });
 
       const order: string[] = [];
-      const events: UnstampedMessageStreamEvent[] = [];
+      const events: SessionEvent[] = [];
       const emit: HarnessEmitFn = eachEvent(async (event) => {
         order.push(event.type);
         events.push(event);

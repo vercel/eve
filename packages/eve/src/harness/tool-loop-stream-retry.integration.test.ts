@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { eachEvent } from "#internal/testing/session-machine.js";
 import { jsonSchema, type LanguageModel } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
@@ -7,7 +8,6 @@ import { defaultMessageReducer } from "#client/message-reducer.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
 import { stampTestEvents } from "#internal/testing/events.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 type StreamResult = Awaited<ReturnType<MockLanguageModelV3["doStream"]>>;
 type StreamPart = StreamResult["stream"] extends ReadableStream<infer Part> ? Part : never;
@@ -36,9 +36,9 @@ function createSession(): HarnessSession {
 
 function createEventCollector(): {
   readonly emit: HarnessEmitFn;
-  readonly events: UnstampedMessageStreamEvent[];
+  readonly events: SessionEvent[];
 } {
-  const events: UnstampedMessageStreamEvent[] = [];
+  const events: SessionEvent[] = [];
   return {
     emit: eachEvent(async (event) => {
       events.push(event);
@@ -291,7 +291,7 @@ describe("tool loop streamed provider retries", () => {
         },
       ],
     ]);
-    const events: UnstampedMessageStreamEvent[] = [];
+    const events: SessionEvent[] = [];
     let sinkFailed = false;
     const emit: HarnessEmitFn = eachEvent(async (event) => {
       if (!sinkFailed && event.type === "action.result" && event.data.result.callId === "call_a2") {

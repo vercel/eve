@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { ConversationState } from "#client/conversation-state.js";
 import { AgentStreamFollower } from "#client/agent-stream-follower.js";
 import {
@@ -11,7 +12,6 @@ import { assertAnswerable } from "#client/eve-agent-store-helpers.js";
 import type { SendTurnPayload } from "#client/types.js";
 import type { EveAgentReducerEvent } from "#client/reducer.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import type { InputResponse } from "#shared/input.js";
 import {
   SessionEventStream,
@@ -104,12 +104,12 @@ export class ConversationClient<TData = ConversationState> {
 
   /** Admit and project a root event before the agent sessions it announces are followed. */
   observe(
-    event: MessageStreamEvent,
+    event: SessionStreamEvent,
     options: {
       /** The store reconciles optimistic messages instead of directly appending the event. */
-      project?: (event: MessageStreamEvent) => void;
+      project?: (event: SessionStreamEvent) => void;
       /** Record the accepted event before projection or child notifications. */
-      onAccepted?: (event: MessageStreamEvent) => void;
+      onAccepted?: (event: SessionStreamEvent) => void;
       /** The store publishes after updating its event log and status. */
       notify?: boolean;
     } = {},
@@ -131,14 +131,14 @@ export class ConversationClient<TData = ConversationState> {
   }
 
   /** Admit and project a hydrated root event without notifying subscribers. */
-  hydrate(event: MessageStreamEvent): boolean {
+  hydrate(event: SessionStreamEvent): boolean {
     if (!this.#seenEvents.admit(event)) return false;
     this.#appendRoot(event);
     return true;
   }
 
   /** Start following the agent sessions the root stream has announced so far. */
-  follow(session: ClientSession, events: readonly MessageStreamEvent[] = []): void {
+  follow(session: ClientSession, events: readonly SessionStreamEvent[] = []): void {
     this.#follower?.abortAll();
     const follower = new AgentStreamFollower({
       session,

@@ -1,8 +1,5 @@
-import type {
-  AgentStartedStreamEvent,
-  MessageStreamEvent,
-  TaskSettledStreamEvent,
-} from "#protocol/message.js";
+import type { SessionStreamEvent } from "#protocol/session-event.js";
+import type { AgentStartedStreamEvent, TaskSettledStreamEvent } from "#protocol/message.js";
 import { requestedSkill } from "#shared/action-request-name.js";
 import type { InputRequest } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
@@ -46,7 +43,7 @@ export interface DeriveRunFactsOptions {
  * event before them is `input.requested`, the run ended parked on unanswered
  * HITL input.
  */
-const PARKING_EVENT_TYPES: ReadonlySet<MessageStreamEvent["type"]> = new Set([
+const PARKING_EVENT_TYPES: ReadonlySet<SessionStreamEvent["type"]> = new Set([
   "turn.waiting",
   "turn.completed",
   "session.waiting",
@@ -62,7 +59,7 @@ const PARKING_EVENT_TYPES: ReadonlySet<MessageStreamEvent["type"]> = new Set([
  * scorers, and reporters.
  */
 export function deriveRunFacts(
-  events: readonly MessageStreamEvent[],
+  events: readonly SessionStreamEvent[],
   options?: DeriveRunFactsOptions,
 ): EveEvalDerivedFacts {
   const sessionId = options?.sessionId;
@@ -275,7 +272,7 @@ export function createEmptyDerivedFacts(): EveEvalDerivedFacts {
  * `session.waiting`), or a call the turn runs asked and the open turn parked
  * (`turn.waiting`).
  */
-function endedParkedOnInput(events: readonly MessageStreamEvent[]): boolean {
+function endedParkedOnInput(events: readonly SessionStreamEvent[]): boolean {
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
     if (event === undefined || PARKING_EVENT_TYPES.has(event.type)) continue;

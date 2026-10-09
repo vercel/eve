@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
@@ -17,7 +18,7 @@ import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { positionOf, withOpenTurn } from "#internal/testing/session-machine.js";
 import { createSessionLimitContinuationRequest } from "#harness/hitl/budget-request.js";
 import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
-import { createAuthorizationRequiredEvent, type MessageStreamEvent } from "#protocol/message.js";
+import { createAuthorizationRequiredEvent } from "#protocol/message.js";
 import type { HookContext } from "#public/definitions/hook.js";
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import {
@@ -30,11 +31,11 @@ import { routeDeliverPayload } from "#subagents/hitl-proxy.js";
 
 function fixture() {
   const order: string[] = [];
-  const events: MessageStreamEvent[] = [];
-  const typed = vi.fn(async (event: MessageStreamEvent, _ctx: HookContext) => {
+  const events: SessionStreamEvent[] = [];
+  const typed = vi.fn(async (event: SessionStreamEvent, _ctx: HookContext) => {
     order.push(`typed:${event.type}`);
   });
-  const wildcard = vi.fn((event: MessageStreamEvent, _ctx: HookContext) => {
+  const wildcard = vi.fn((event: SessionStreamEvent, _ctx: HookContext) => {
     order.push(`wildcard:${event.type}`);
   });
   const adapter: ChannelAdapter = {
@@ -105,7 +106,7 @@ function fixture() {
   };
   const sessionWritable = new WritableStream<Uint8Array>({
     write(chunk) {
-      const event = JSON.parse(new TextDecoder().decode(chunk)) as MessageStreamEvent;
+      const event = JSON.parse(new TextDecoder().decode(chunk)) as SessionStreamEvent;
       events.push(event);
       order.push(`stream:${event.type}`);
     },

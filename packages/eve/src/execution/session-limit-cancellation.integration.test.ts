@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { describe, expect, it } from "vitest";
 import { resumeHook, start } from "#internal/workflow/runtime.js";
@@ -10,7 +11,6 @@ import {
 } from "#internal/testing/events.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { workflowEntry } from "#execution/session/entry.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 /**
  * Declining a session-limit continuation prompt cancels the in-flight turn
@@ -37,7 +37,7 @@ function buildSerializedContext(overrides: {
   };
 }
 
-function expectNoFailureEvents(events: readonly UnstampedMessageStreamEvent[]): void {
+function expectNoFailureEvents(events: readonly SessionEvent[]): void {
   const types = events.map((event) => event.type);
   for (const failureType of FAILURE_EVENT_TYPES) {
     expect(types).not.toContain(failureType);
@@ -70,7 +70,7 @@ async function deliver(
   }
 }
 
-function requestIdFromPromptTurn(events: readonly UnstampedMessageStreamEvent[]): string {
+function requestIdFromPromptTurn(events: readonly SessionEvent[]): string {
   const requested = filterEventsByType(events, "input.requested");
   expect(requested).toHaveLength(1);
   const requestId = requested[0]?.data.requests[0]?.requestId;

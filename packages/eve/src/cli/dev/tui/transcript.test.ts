@@ -1,3 +1,4 @@
+import type { SessionEvent, SessionStreamEvent } from "#protocol/session-event.js";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import {
   initialConversationState,
@@ -24,8 +25,6 @@ import {
   createTurnFailedEvent,
   createTurnStartedEvent,
   createTurnWaitingEvent,
-  type MessageStreamEvent,
-  type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import { type Block, renderBlockLines } from "./blocks.js";
 import { createTheme } from "./theme.js";
@@ -40,7 +39,7 @@ const options: TranscriptOptions = {
 };
 
 let stamp = 0;
-function event(value: UnstampedMessageStreamEvent): MessageStreamEvent {
+function event(value: SessionEvent): SessionStreamEvent {
   return stampTestEvent(value, ++stamp);
 }
 
@@ -118,7 +117,7 @@ function parentText(message: string) {
   );
 }
 
-function observe(events: readonly UnstampedMessageStreamEvent[]): ConversationEvent[] {
+function observe(events: readonly SessionEvent[]): ConversationEvent[] {
   return events.map((childEvent) => ({
     type: "client.agent.observed" as const,
     data: { sessionId: "child_1", event: event(childEvent) },

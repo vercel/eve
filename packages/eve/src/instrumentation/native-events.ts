@@ -1,4 +1,4 @@
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import { contextStorage } from "#context/container.js";
 import { instrumentChannelDelivery } from "#instrumentation/channel-delivery.js";
 import type {
@@ -11,7 +11,6 @@ import type {
   InstrumentationParentLineage,
   InstrumentationPointEvent,
   InstrumentationTraceContext,
-  InstrumentationUsage,
 } from "#instrumentation/lifecycle.js";
 import {
   actionIdempotencyKey,
@@ -30,13 +29,8 @@ import type { ResolvedInputBatch } from "#harness/input-request-resolution.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
 import { eventsOf } from "#harness/publication.js";
 import type { HandleEventFn } from "#harness/types.js";
-import {
-  isRuntimeWorkflowToolAction,
-  type RuntimeActionRequest,
-  type RuntimeActionResult,
-} from "#shared/action-types.js";
+import type { FactOf } from "#protocol/session-events/facts.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
-import { requestedSkill } from "#shared/action-request-name.js";
 
 export interface CreateInstrumentationHandleEventInput {
   readonly isFrameworkTool?: (name: string) => boolean;
@@ -77,51 +71,22 @@ export function createInstrumentationHandleEvent(
   };
 
   async function instrumentEvent(
-    event: UnstampedMessageStreamEvent,
+    event: SessionEvent,
     turnId: string | undefined,
     startedAtMs: number,
   ): Promise<string | undefined> {
     let activeTurnId = turnId;
-    const lifecycleEvent = toLifecycleEvent(event, input, activeTurnId);
+    const lifecycleEvents = toLifecycleEvents(event, input, activeTurnId);
     if (event.type === "turn.started") activeTurnId = event.data.turnId;
-    if (
-      event.type === "turn.cancelled" ||
-      event.type === "turn.completed" ||
-      event.type === "turn.failed" ||
-      event.type === "session.completed" ||
-      event.type === "session.failed"
-    ) {
+    const ending = deliveryEnding(event);
+    if (ending !== undefined) {
       const ctx = contextStorage.getStore();
-      if (ctx !== undefined) {
-        await instrumentChannelDelivery({
-          ctx,
-          error:
-            event.type === "turn.failed" || event.type === "session.failed"
-              ? new Error(event.data.message)
-              : undefined,
-          errorCode:
-            event.type === "turn.failed" || event.type === "session.failed"
-              ? event.data.code
-              : undefined,
-          hooks,
-          includeTurn:
-            event.type === "turn.cancelled" ||
-            event.type === "turn.completed" ||
-            event.type === "turn.failed" ||
-            event.type === "session.failed",
-          outcome:
-            event.type === "turn.failed" || event.type === "session.failed"
-              ? "failed"
-              : event.type === "turn.cancelled"
-                ? "cancelled"
-                : "completed",
-        });
-      }
+      if (ctx !== undefined) await instrumentChannelDelivery({ ctx, hooks, ...ending });
     }
-    if (lifecycleEvent !== undefined) await hooks.publish(lifecycleEvent);
-    if (event.type === "actions.requested") {
-      await publishActionStarts(event, input, hooks, publishedActions, startedAtMs);
-    } else if (event.type === "action.result") {
+    for (const lifecycleEvent of lifecycleEvents) await hooks.publish(lifecycleEvent);
+    if (event.type === "call.requested") {
+      await publishActionStart(event, input, hooks, publishedActions, startedAtMs, activeTurnId);
+    } else if (event.type === "call.settled") {
       await publishActionTerminal(event, input, hooks);
     } else if (event.type === "input.requested") {
       await publishInputStarts(event, input, hooks, publishedInputs);
@@ -130,8 +95,38 @@ export function createInstrumentationHandleEvent(
   }
 }
 
+/** How a turn's or session's end ends the channel delivery it served. */
+function deliveryEnding(event: SessionEvent):
+  | {
+      readonly error?: Error;
+      readonly errorCode?: string;
+      readonly includeTurn: boolean;
+      readonly outcome: "completed" | "failed" | "cancelled";
+    }
+  | undefined {
+  if (event.type === "turn.settled") {
+    const { error, outcome } = event.data;
+    return {
+      error: error === undefined ? undefined : new Error(error.message),
+      errorCode: error?.code,
+      includeTurn: true,
+      outcome,
+    };
+  }
+  if (event.type === "session.ended") {
+    const { error, outcome } = event.data;
+    return {
+      error: error === undefined ? undefined : new Error(error.message),
+      errorCode: error?.code,
+      includeTurn: outcome === "failed",
+      outcome,
+    };
+  }
+  return undefined;
+}
+
 async function publishInputStarts(
-  event: Extract<UnstampedMessageStreamEvent, { type: "input.requested" }>,
+  event: Extract<SessionEvent, { type: "input.requested" }>,
   input: CreateInstrumentationHandleEventInput,
   hooks: InstrumentationHooks,
   published: Set<string>,
@@ -208,87 +203,89 @@ export async function publishInputResolutions(input: {
   }
 }
 
-async function publishActionStarts(
-  event: Extract<UnstampedMessageStreamEvent, { type: "actions.requested" }>,
+async function publishActionStart(
+  event: FactOf<"call.requested">,
   input: CreateInstrumentationHandleEventInput,
   hooks: InstrumentationHooks,
   published: Set<string>,
   startedAtMs: number,
+  turnId: string | undefined,
 ): Promise<void> {
   const scope = input.getAttemptScope?.();
   if (scope === undefined) return;
   const capturesInputs = hooks.capturesInputs ?? hooks.capturesContent;
-
-  for (const action of event.data.actions) {
-    const deferred =
-      isRuntimeWorkflowToolAction(action) ||
-      action.kind === "subagent-call" ||
-      action.kind === "remote-agent-call";
-    const idempotencyKey = actionIdempotencyKey(input.sessionId, event.data.turnId, action.callId);
-    if (published.has(idempotencyKey)) continue;
-    published.add(idempotencyKey);
-    rememberInstrumentationActionScope(
-      idempotencyKey,
-      scope,
-      deferred
-        ? {
-            type: "tool.call.started",
-            callId: action.callId,
-            toolName: actionName(action),
-            frameworkTool: isFrameworkAction(action, input),
-            scope,
-            idempotencyKey: toolCallIdempotencyKey(scope, action.callId, 0),
-            startedAtMs: Date.now(),
-            input: capturesInputs ? action.input : undefined,
-          }
-        : undefined,
-    );
-    await hooks.publish(
-      Object.freeze({
-        callId: action.callId,
-        startedAtMs,
-        idempotencyKey,
-        input: capturesInputs ? action.input : undefined,
-        ...(deferred ? { isWorkflowTool: true } : undefined),
-        kind: action.kind === "workflow-tool-call" ? "tool-call" : action.kind,
-        toolName: actionName(action),
-        frameworkTool: isFrameworkAction(action, input),
-        scope,
-        type: "tool.call.started",
-      } satisfies InstrumentationToolCallStartedEvent),
-    );
-  }
+  const { callId, capability } = event.data;
+  const name = capability.name;
+  // Agent calls run in their own sessions; the runtime reports their start.
+  const deferred = capability.kind === "agent";
+  const idempotencyKey = actionIdempotencyKey(input.sessionId, turnId ?? "", callId);
+  if (published.has(idempotencyKey)) return;
+  published.add(idempotencyKey);
+  // A skill load runs eve's skill loader; any other call is eve's when its tool is.
+  const frameworkTool = capability.kind === "skill" || input.isFrameworkTool?.(name) === true;
+  rememberInstrumentationActionScope(
+    idempotencyKey,
+    scope,
+    deferred
+      ? {
+          type: "tool.call.started",
+          callId,
+          toolName: name,
+          frameworkTool,
+          scope,
+          idempotencyKey: toolCallIdempotencyKey(scope, callId, 0),
+          startedAtMs: Date.now(),
+          input: capturesInputs ? event.data.input : undefined,
+        }
+      : undefined,
+  );
+  const started: {
+    -readonly [
+      K in keyof InstrumentationToolCallStartedEvent
+    ]: InstrumentationToolCallStartedEvent[K];
+  } = {
+    callId,
+    frameworkTool,
+    idempotencyKey,
+    input: capturesInputs ? event.data.input : undefined,
+    kind:
+      capability.kind === "agent"
+        ? "subagent-call"
+        : capability.kind === "skill"
+          ? "load-skill"
+          : "tool-call",
+    scope,
+    startedAtMs,
+    toolName: name,
+    type: "tool.call.started",
+  };
+  if (deferred) started.isWorkflowTool = true;
+  await hooks.publish(Object.freeze(started));
 }
 
 async function publishActionTerminal(
-  event: Extract<UnstampedMessageStreamEvent, { type: "action.result" }>,
+  event: FactOf<"call.settled">,
   input: CreateInstrumentationHandleEventInput,
   hooks: InstrumentationHooks,
 ): Promise<void> {
-  const correlation = takeInstrumentationActionScopeForCall(
-    input.sessionId,
-    event.data.result.callId,
-  );
+  const { callId } = event.data;
+  const correlation = takeInstrumentationActionScopeForCall(input.sessionId, callId);
   if (correlation === undefined) return;
   const { idempotencyKey, scope } = correlation;
   const capturesOutputs = hooks.capturesOutputs ?? hooks.capturesContent;
+  const acceptedAtMs = contextStorage.getStore()?.get(RuntimeActionSettlementTimesKey)?.[callId];
 
-  if (event.data.status === "completed") {
+  if (event.data.outcome === "completed") {
     await hooks.publish(
       Object.freeze({
-        acceptedAtMs: contextStorage.getStore()?.get(RuntimeActionSettlementTimesKey)?.[
-          event.data.result.callId
-        ],
+        acceptedAtMs,
         idempotencyKey,
         outcome: "completed",
         output: Object.freeze(
-          capturesOutputs
-            ? { output: event.data.result.output, type: "result" }
-            : { type: "result" },
+          capturesOutputs ? { output: event.data.output, type: "result" } : { type: "result" },
         ),
         scope,
         type: "tool.call.completed",
-        usage: actionUsage(event.data.result),
       }),
     );
     return;
@@ -296,127 +293,112 @@ async function publishActionTerminal(
 
   const error = capturesOutputs
     ? event.data.error === undefined
-      ? event.data.result.output
+      ? event.data.output
       : Object.assign(new Error(event.data.error.message), { code: event.data.error.code })
     : undefined;
   await hooks.publish(
     Object.freeze({
-      acceptedAtMs: contextStorage.getStore()?.get(RuntimeActionSettlementTimesKey)?.[
-        event.data.result.callId
-      ],
+      acceptedAtMs,
       error,
       errorCode: event.data.error?.code,
       idempotencyKey,
-      outcome: event.data.status,
+      outcome: event.data.outcome === "rejected" ? "rejected" : "failed",
       scope,
       type: "tool.call.failed",
-      usage: actionUsage(event.data.result),
     } satisfies InstrumentationToolCallFailedEvent),
   );
 }
 
-function actionUsage(result: RuntimeActionResult): InstrumentationUsage | undefined {
-  if (
-    result.kind !== "subagent-result" ||
-    result.origin !== "child" ||
-    result.usage === undefined
-  ) {
-    return undefined;
-  }
-  const usage: {
-    -readonly [K in keyof InstrumentationUsage]: InstrumentationUsage[K];
-  } = {
-    inputTokenDetails: {
-      cacheReadTokens: result.usage.cacheReadTokens,
-      cacheWriteTokens: result.usage.cacheWriteTokens,
-    },
-    inputTokens: result.usage.inputTokens,
-    outputTokens: result.usage.outputTokens,
-  };
-  if (result.usage.costUsd !== undefined) usage.costUsd = result.usage.costUsd;
-  return usage;
-}
-
-/** A skill load runs eve's skill loader; any other call is eve's when its tool is. */
-function isFrameworkAction(
-  action: RuntimeActionRequest,
-  input: Pick<CreateInstrumentationHandleEventInput, "isFrameworkTool">,
-): boolean {
-  return action.kind === "load-skill" || input.isFrameworkTool?.(actionName(action)) === true;
-}
-
-function actionName(action: RuntimeActionRequest): string {
-  if (action.kind === "tool-call" || action.kind === "workflow-tool-call") return action.toolName;
-  if (action.kind === "load-skill") return requestedSkill(action);
-  return action.name;
-}
-
-function toLifecycleEvent(
-  event: UnstampedMessageStreamEvent,
+function toLifecycleEvents(
+  event: SessionEvent,
   input: CreateInstrumentationHandleEventInput,
   activeTurnId: string | undefined,
-): InstrumentationPointEvent | undefined {
+): InstrumentationPointEvent[] {
   switch (event.type) {
     case "session.started":
-      return {
-        agentName: input.agentName,
-        channelAudience: input.channelAudience,
-        channelKind: input.channelKind,
-        idempotencyKey: sessionIdempotencyKey(input.sessionId),
-        parentLineage: input.parentLineage,
-        parentTraceContext: input.parentTraceContext,
-        rootSessionId: input.rootSessionId ?? input.sessionId,
-        traceSessionId: input.traceSessionId,
-        scheduleId: input.scheduleId,
-        sessionId: input.sessionId,
-        title: input.title,
-        type: "session.started",
-      };
-    case "session.completed":
-    case "session.waiting":
-      return {
-        idempotencyKey: sessionIdempotencyKey(input.sessionId),
-        sessionId: input.sessionId,
-        turnId: activeTurnId,
-        type: event.type,
-      };
-    case "session.failed":
-      return {
-        error: new Error(event.data.message),
-        idempotencyKey: sessionIdempotencyKey(input.sessionId),
-        sessionId: input.sessionId,
-        turnId: activeTurnId,
-        type: "session.failed",
-      };
+      return [
+        {
+          agentName: input.agentName,
+          channelAudience: input.channelAudience,
+          channelKind: input.channelKind,
+          idempotencyKey: sessionIdempotencyKey(input.sessionId),
+          parentLineage: input.parentLineage,
+          parentTraceContext: input.parentTraceContext,
+          rootSessionId: input.rootSessionId ?? input.sessionId,
+          traceSessionId: input.traceSessionId,
+          scheduleId: input.scheduleId,
+          sessionId: input.sessionId,
+          title: input.title,
+          type: "session.started",
+        },
+      ];
+    case "session.ended":
+      return event.data.outcome === "completed"
+        ? [
+            {
+              idempotencyKey: sessionIdempotencyKey(input.sessionId),
+              sessionId: input.sessionId,
+              turnId: activeTurnId,
+              type: "session.completed",
+            },
+          ]
+        : [
+            {
+              error: new Error(event.data.error?.message ?? "The session failed."),
+              idempotencyKey: sessionIdempotencyKey(input.sessionId),
+              sessionId: input.sessionId,
+              turnId: activeTurnId,
+              type: "session.failed",
+            },
+          ];
     case "turn.started":
-      return {
-        idempotencyKey: turnIdempotencyKey(input.sessionId, event.data.turnId),
-        parentLineage: input.parentLineage,
-        parentTraceContext: input.parentTraceContext,
-        rootSessionId: input.rootSessionId ?? input.sessionId,
-        traceSessionId: input.traceSessionId,
-        sequence: event.data.sequence,
-        sessionId: input.sessionId,
-        turnId: event.data.turnId,
-        type: "turn.started",
-      };
-    case "turn.completed":
-    case "turn.cancelled":
-      return {
-        idempotencyKey: turnIdempotencyKey(input.sessionId, event.data.turnId),
-        sessionId: input.sessionId,
-        turnId: event.data.turnId,
-        type: event.type,
-      };
-    case "turn.failed":
-      return {
-        error: new Error(event.data.message),
-        idempotencyKey: turnIdempotencyKey(input.sessionId, event.data.turnId),
-        sessionId: input.sessionId,
-        turnId: event.data.turnId,
-        type: "turn.failed",
-      };
+      return [
+        {
+          idempotencyKey: turnIdempotencyKey(input.sessionId, event.data.turnId),
+          parentLineage: input.parentLineage,
+          parentTraceContext: input.parentTraceContext,
+          rootSessionId: input.rootSessionId ?? input.sessionId,
+          traceSessionId: input.traceSessionId,
+          sequence: turnSequence(event.data.turnId),
+          sessionId: input.sessionId,
+          turnId: event.data.turnId,
+          type: "turn.started",
+        },
+      ];
+    case "turn.settled": {
+      const key = turnIdempotencyKey(input.sessionId, event.data.turnId);
+      const ended: InstrumentationPointEvent =
+        event.data.outcome === "failed"
+          ? {
+              error: new Error(event.data.error?.message ?? "The turn failed."),
+              idempotencyKey: key,
+              sessionId: input.sessionId,
+              turnId: event.data.turnId,
+              type: "turn.failed",
+            }
+          : {
+              idempotencyKey: key,
+              sessionId: input.sessionId,
+              turnId: event.data.turnId,
+              type: event.data.outcome === "cancelled" ? "turn.cancelled" : "turn.completed",
+            };
+      // Instrumentation still marks the session waiting once a turn ends.
+      return [
+        ended,
+        {
+          idempotencyKey: sessionIdempotencyKey(input.sessionId),
+          sessionId: input.sessionId,
+          turnId: event.data.turnId,
+          type: "session.waiting",
+        },
+      ];
+    }
     default:
-      return undefined;
+      return [];
   }
+}
+
+function turnSequence(turnId: string): number {
+  const match = /^turn_(\d+)$/.exec(turnId);
+  return match === null ? 0 : Number(match[1]);
 }

@@ -1,18 +1,15 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { describe, expect, it } from "vitest";
 import { EveAgentProjection } from "#client/eve-agent-projection.js";
 import { defaultMessageReducer } from "#client/message-reducer.js";
 import { OptimisticMessageSubmissions } from "#client/optimistic-message-submissions.js";
 import { stampTestEvents } from "#internal/testing/events.js";
-import {
-  createMessageCompletedEvent,
-  createMessageReceivedEvent,
-  type MessageStreamEvent,
-} from "#protocol/message.js";
+import { createMessageCompletedEvent, createMessageReceivedEvent } from "#protocol/message.js";
 
 function received(
   message: string,
   deliveryIds: readonly string[],
-): Extract<MessageStreamEvent, { readonly type: "message.received" }> {
+): Extract<SessionStreamEvent, { readonly type: "message.received" }> {
   const event = createMessageReceivedEvent({
     message,
     sequence: 0,
