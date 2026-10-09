@@ -7,36 +7,63 @@ import type { HarnessSession } from "#harness/types.js";
 import { openSignIns, type SessionProjection } from "#protocol/session-projection.js";
 
 /**
- * Derives the workflow fields used to select the next action at the park boundary. Whether the
- * session awaits input or a sign-in is the projection's; which callbacks resume it, and which
- * calls wait on the runtime, is execution state.
+ * What a paused turn waits on, which is one kind of thing at a time. The turn keeps it to resume;
+ * the stream reports the pause as `turn.waiting`.
  */
-export function derivePendingState(
-  session: HarnessSession,
-  projection: SessionProjection,
-): {
-  readonly authorizationAttemptIds?: readonly string[];
-  readonly hasPendingAuthorization: boolean;
-  readonly hasPendingInputBatch: boolean;
-  /** The pending batch has workflow tool runs to start; task tool calls are answered by the session. */
-  readonly hasRunsToDispatch?: boolean;
-  readonly pendingCoordinationCallIds?: readonly string[];
-  readonly pendingTaskToolCalls?: readonly TaskToolCall[];
-} {
-  const pendingAuth = getPendingAuthorization(session.state);
-  const base = {
-    authorizationAttemptIds: pendingAuth?.challenges.flatMap((challenge) =>
+export type TurnPause =
+  /** Sign-ins whose callbacks resume the turn, and questions and approvals a person answers. */
+  | {
+      readonly on: "person";
+      readonly attemptIds: readonly string[];
+      readonly requestIds: readonly string[];
+    }
+  /** Working tasks. Any of them settling resumes the turn. */
+  | { readonly on: "tasks"; readonly taskIds: readonly string[] }
+  /**
+   * Calls whose results resume the turn, task tool calls included. `dispatch` starts their
+   * workflow tool runs before the wait; the session answers `taskToolCalls` itself.
+   */
+  | {
+      readonly on: "calls";
+      readonly callIds: readonly string[];
+      readonly dispatch: boolean;
+      readonly taskToolCalls: readonly TaskToolCall[];
+    };
+
+/** The turn waits on the sign-ins and the answers it asked a person for. */
+export function pausedOnPerson(session: HarnessSession, projection: SessionProjection): TurnPause {
+  const challenges = getPendingAuthorization(session.state)?.challenges ?? [];
+  return {
+    attemptIds: challenges.flatMap((challenge) =>
       challenge.attemptId === undefined ? [] : [challenge.attemptId],
     ),
-    hasPendingAuthorization: openSignIns(projection).length > 0,
-    hasPendingInputBatch: ownOpenRequestIds(sessionView(projection, session.state)).size > 0,
+    on: "person",
+    requestIds: [...ownOpenRequestIds(sessionView(projection, session.state))],
   };
+}
+
+/** The model ended the turn while tasks work, so the turn waits for one of them. */
+export function pausedOnTasks(taskIds: readonly string[]): TurnPause {
+  return { on: "tasks", taskIds };
+}
+
+/** The turn waits on calls the runtime runs, or on none. */
+export function pausedOnCalls(session: HarnessSession): TurnPause | undefined {
   const waiting = runtimeWait(session.state);
-  if (waiting === undefined) return base;
+  if (waiting === undefined) return undefined;
   return {
-    ...base,
-    hasRunsToDispatch: waiting.tasks.length > 0,
-    pendingCoordinationCallIds: waiting.callIds,
-    pendingTaskToolCalls: waiting.taskToolCalls,
+    callIds: waiting.callIds,
+    dispatch: waiting.tasks.length > 0,
+    on: "calls",
+    taskToolCalls: waiting.taskToolCalls,
   };
+}
+
+/** Whether the turn waits on a sign-in, an answer, or a call, which ends a batch of model calls. */
+export function waitsOnAnything(session: HarnessSession, projection: SessionProjection): boolean {
+  return (
+    openSignIns(projection).length > 0 ||
+    ownOpenRequestIds(sessionView(projection, session.state)).size > 0 ||
+    (runtimeWait(session.state)?.callIds.length ?? 0) > 0
+  );
 }
