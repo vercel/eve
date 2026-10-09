@@ -154,6 +154,57 @@ describe("migrateSessionCheckpoint", () => {
     },
   );
 
+  it("moves a v13 checkpoint's task table and waiting runs into one record of running work", () => {
+    const run = {
+      callId: "call",
+      toolName: "report",
+      origin: { turnId: "turn_0", stepIndex: 0 },
+      address: { runId: "run", hookToken: "hook" },
+    };
+    const task = { taskId: "task_1", status: "working" };
+    const result = migrateSessionCheckpoint(
+      v13Checkpoint({
+        "app.counter": 4,
+        "eve.taskTable": { version: 1, tasks: [task] },
+        "eve.workflowTool": { version: 4, runs: [run] },
+      }),
+    );
+    if (result.kind !== "current") throw new Error(result.detail);
+    expect(result.checkpoint.sessionState.snapshot.session.state).toEqual({
+      "app.counter": 4,
+      "eve.work": { version: 1, calls: [run], tasks: [task] },
+    });
+  });
+
+  it("drops a v13 checkpoint's empty stores of running work", () => {
+    const result = migrateSessionCheckpoint(
+      v13Checkpoint({
+        "app.counter": 4,
+        "eve.taskTable": { version: 1, tasks: [] },
+        "eve.workflowTool": { version: 4, runs: [] },
+      }),
+    );
+    if (result.kind !== "current") throw new Error(result.detail);
+    expect(result.checkpoint.sessionState.snapshot.session.state).toEqual({ "app.counter": 4 });
+  });
+
+  it.each([
+    [{ "eve.taskTable": { version: 2, tasks: [] } }, "task table is malformed"],
+    [
+      { "eve.workflowTool": { version: 3, runs: [] } },
+      "workflow tool run registry is incompatible",
+    ],
+    [
+      { "eve.taskTable": { version: 1, tasks: [] }, "eve.work": { version: 1 } },
+      "v13 checkpoint already holds the running-work record",
+    ],
+  ])("refuses v13 running work it cannot move (%j)", (state, detail) => {
+    expect(migrateSessionCheckpoint(v13Checkpoint(state))).toEqual({
+      kind: "incompatible",
+      detail: `checkpoint version 13: ${detail}`,
+    });
+  });
+
   it.each([7, SESSION_CHECKPOINT_VERSION + 1])("refuses checkpoint version %s", (version) => {
     expect(migrateSessionCheckpoint({ ...eve066Checkpoint(), version })).toMatchObject({
       kind: "incompatible",
@@ -173,6 +224,22 @@ function v11Checkpoint(state: Record<string, unknown>) {
       continuationToken: "token",
       hasProxyInputRequests: false,
       emissionState: { sessionStarted: true, sequence: 3, stepIndex: 0, turnId: "" },
+      snapshot: { session: { sessionId: "session-1", continuationToken: "token", state } },
+    },
+  };
+}
+
+function v13Checkpoint(state: Record<string, unknown>) {
+  return {
+    version: 13,
+    serializedContext: {},
+    history: [{ role: "user", kind: "user", content: "Alice asks for a report." }],
+    sessionTimeoutMs: false,
+    sessionState: {
+      version: 2,
+      sessionId: "session-1",
+      continuationToken: "token",
+      hasProxyInputRequests: false,
       snapshot: { session: { sessionId: "session-1", continuationToken: "token", state } },
     },
   };
