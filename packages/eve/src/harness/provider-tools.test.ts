@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
+import { MockLanguageModelV3 } from "ai/test";
+
+import { resolveModelProfile } from "#harness/model-profile.js";
+import type { WebSearchSelection } from "#shared/web-search.js";
 import {
   WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA,
   WEB_SEARCH_EXA_OUTPUT_SCHEMA,
@@ -87,86 +90,27 @@ describe("resolveWebSearchBackend", () => {
     openaiWebSearch.mockClear();
   });
 
-  it("returns 'exa' for an OpenAI gateway model by default", () => {
-    const ref: RuntimeModelReference = { id: "openai/gpt-5.4" };
-    expect(resolveWebSearchBackend(ref)).toBe("exa");
+  it.each<[string, WebSearchSelection | undefined, string | null]>([
+    ["openai/gpt-5.4", undefined, "exa"],
+    ["openai/gpt-5.4", { provider: "parallel" }, "parallel"],
+    ["openai/gpt-5.4", { provider: "openai" }, "openai"],
+    ["anthropic/claude-opus-4.6", undefined, "exa"],
+    // OpenAI's hosted search serves only OpenAI models: other models use the fallback, if any.
+    ["anthropic/claude-opus-4.6", { provider: "openai" }, null],
+    ["anthropic/claude-opus-4.6", { fallback: "parallel", provider: "openai" }, "parallel"],
+  ])("uses Gateway search for Gateway model %s with %o", (model, selection, expected) => {
+    expect(resolveWebSearchBackend(resolveModelProfile(model), selection)).toBe(expected);
   });
 
-  it("does not use a Gateway backend for a live model from another provider", () => {
-    const ref: RuntimeModelReference = { id: "openrouter/openai/gpt-5" };
-    expect(resolveWebSearchBackend(ref, "exa", "openrouter.chat")).toBeNull();
-  });
-
-  it("returns the configured Parallel provider for a gateway model", () => {
-    const ref: RuntimeModelReference = { id: "openai/gpt-5.4" };
-    expect(resolveWebSearchBackend(ref, "parallel")).toBe("parallel");
-  });
-
-  it("returns 'openai' for a BYO OpenAI model", () => {
-    const ref: RuntimeModelReference = {
-      id: "openai.chat/gpt-5.4",
-      source: {
-        exportName: "openai",
-        sourceKind: "module",
-        logicalPath: "agent.ts",
-        sourceId: "agent.ts",
-      },
-    };
-    expect(resolveWebSearchBackend(ref, "exa")).toBe("openai");
-  });
-
-  it("returns 'exa' for an Anthropic gateway model", () => {
-    const ref: RuntimeModelReference = { id: "anthropic/claude-opus-4.6" };
-    expect(resolveWebSearchBackend(ref)).toBe("exa");
-  });
-
-  it("returns 'anthropic' for a BYO Anthropic model", () => {
-    const ref: RuntimeModelReference = {
-      id: "anthropic.messages/claude-opus-4.6",
-      source: {
-        exportName: "anthropic",
-        sourceKind: "module",
-        logicalPath: "agent.ts",
-        sourceId: "agent.ts",
-      },
-    };
-    expect(resolveWebSearchBackend(ref)).toBe("anthropic");
-  });
-
-  it("returns 'google' for a BYO Google model", () => {
-    const ref: RuntimeModelReference = {
-      id: "google.generative-ai/gemini-3.1-pro",
-      source: {
-        exportName: "google",
-        sourceKind: "module",
-        logicalPath: "agent.ts",
-        sourceId: "agent.ts",
-      },
-    };
-    expect(resolveWebSearchBackend(ref)).toBe("google");
-  });
-
-  it("returns 'exa' for a Google model on AI Gateway", () => {
-    const ref: RuntimeModelReference = { id: "google/gemini-3.1-pro" };
-    expect(resolveWebSearchBackend(ref)).toBe("exa");
-  });
-
-  it("returns 'exa' for any other AI Gateway model", () => {
-    const ref: RuntimeModelReference = { id: "mistral/mistral-large" };
-    expect(resolveWebSearchBackend(ref)).toBe("exa");
-  });
-
-  it("returns null for a BYO non-OpenAI/Anthropic/Google model", () => {
-    const ref: RuntimeModelReference = {
-      id: "some-provider/some-model",
-      source: {
-        exportName: "model",
-        sourceKind: "module",
-        logicalPath: "agent.ts",
-        sourceId: "agent.ts",
-      },
-    };
-    expect(resolveWebSearchBackend(ref)).toBeNull();
+  it.each([
+    ["openai.responses", "openai"],
+    ["anthropic.messages", "anthropic"],
+    ["google.generative-ai", "google"],
+    ["openrouter.chat", null],
+    ["some-provider", null],
+  ] as const)("uses native search for direct provider %s when it has one", (provider, expected) => {
+    const model = new MockLanguageModelV3({ provider });
+    expect(resolveWebSearchBackend(resolveModelProfile(model))).toBe(expected);
   });
 
   it("uses Anthropic webSearch_20250305 to avoid the unsupported beta header", async () => {

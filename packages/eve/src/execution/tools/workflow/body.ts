@@ -1,4 +1,7 @@
+import { findStubTarget, stubCallId } from "#tool-stubs/target.js";
+import { toolStubOutput } from "#tool-stubs/output.js";
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
+import { callToolStubStep } from "#execution/tool-stubs/steps.js";
 
 import type { SessionContext } from "#context/session-context.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
@@ -172,6 +175,17 @@ async function executeCallBody(
   from: WorkflowToolRunRef,
 ): Promise<WorkflowToolRunOutcome> {
   try {
+    const target = findStubTarget(input.agentContext.toolStubs, input.toolName);
+    if (target !== undefined) {
+      const result = await callToolStubStep(target.scope, {
+        callId: stubCallId(input.session.id, input.session.turn.id, input.callId),
+        tool: target.tool,
+        input: input.input,
+      });
+      if (result.kind === "error") throw new Error(result.error);
+      if (result.kind === "stub")
+        return { output: toolStubOutput(result.outcome), status: "completed" };
+    }
     const entryPoint = resolveWorkflowEntryPoint<WorkflowCallEntryPoint>(input);
     const result = entryPoint(input.executeInput ?? input.input, ctx);
     let output: JsonValue;

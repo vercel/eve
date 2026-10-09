@@ -182,6 +182,10 @@ export const AcmeSandbox = defineSandboxProvider<
     const client = createAcmeClient(options);
 
     return {
+      async onSessionEnd(_ctx, _artifact, state, { reason }) {
+        await client.delete({ id: state.remoteId, reason });
+      },
+
       async prepare(ctx) {
         const temporary = await client.createTemporary({
           files: await ctx.files.list(),
@@ -213,7 +217,11 @@ export const AcmeSandbox = defineSandboxProvider<
 });
 ```
 
-`prepare()` returns the complete JSON-serializable artifact. Core calls `start()` once for a new durable sandbox session and persists its minimal JSON-compatible state. Process restarts call `resume()` with only the current context, that state, and the target deployment's exact artifact. Provider handles implement `onSessionStop()`, `onRuntimeShutdown()`, and `onSessionDelete()`.
+`prepare()` returns the complete JSON-serializable artifact. Core calls `start()` once for a new durable sandbox session and persists its minimal JSON-compatible state. Process restarts call `resume()` with only the current context, that state, and the target deployment's exact artifact.
+
+`onSessionEnd()` is invoked when the durable session reaches a completed, expired, or failed terminal outcome. It receives the exact prepared artifact, persisted provider state, and a `reason` of `"completed"`, `"expired"`, or `"failed"`. Implement idempotent permanent cleanup from those values rather than depending on a live handle. eve retries the cleanup step and logs an exhausted failure without replacing the session's terminal outcome. A session that never opened a sandbox and a child that borrows its parent's sandbox do not call the hook.
+
+Provider handles implement `onSandboxStop()`, `onRuntimeShutdown()`, and `onSandboxDelete()`. These handle-level methods cover authored stop or delete calls, process shutdown, and failed initialization; `onSessionEnd()` is the single provider hook for durable terminal session cleanup.
 
 Open options belong to `start()` and are not serialized or passed to `resume()`. A provider must put any immutable option-derived data needed for reconnection in its session state. With the current immutable-state contract, `resume()` reconnects existing native state and fails if it is gone rather than recreating callback side effects. A custom provider may define start-only callback fields, but built-in providers initialize the sandbox in `defineSandbox()` after `open()`.
 
@@ -231,7 +239,7 @@ Preparation discovers authored files through `ctx.files`; core keeps project lay
 
 ## Lifecycle
 
-Session-owned sandboxes persist across turns and deployments while their provider state remains available. `sandbox.stop()` stops compute without deleting persisted state; a later access resumes that state directly. `sandbox.delete()` clears provider state, so the next `ctx.getSandbox()` reruns the selector and starts a fresh sandbox from the current environment.
+Session-owned sandboxes persist across turns and deployments while their provider state remains available. `sandbox.stop()` stops compute without deleting persisted state; a later access resumes that state directly. `sandbox.delete()` clears provider state, so the next `ctx.getSandbox()` reruns the selector and starts a fresh sandbox from the current environment. When the durable session reaches a terminal outcome, eve calls the provider's `onSessionEnd()` hook to release any remaining session-owned resources.
 
 Changing sandbox source, preparation code, Dockerfile content, environment options, workspace resources, or skills produces a new environment generation. Existing durable sessions retain their recorded sandbox state; new sessions use the current generation.
 

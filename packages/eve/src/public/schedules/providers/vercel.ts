@@ -1,9 +1,11 @@
 import type {
   Schedule as VercelSchedule,
   SchedulesClient,
+  UpdateScheduleParams,
 } from "#compiled/@vercel/schedules/index.js";
 
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
+import { isVercelSchedulesDevEnvironment } from "#internal/schedules/dev-environment.js";
 import type {
   ScheduleExpression,
   SchedulePage,
@@ -34,7 +36,7 @@ export interface VercelScheduleProviderOptions {
 export function vercelScheduleProvider(
   options: VercelScheduleProviderOptions = {},
 ): ScheduleProvider {
-  if (isEveDevEnvironment()) return DEVELOPMENT_PROVIDER;
+  if (isEveDevEnvironment() && !isVercelSchedulesDevEnvironment()) return DEVELOPMENT_PROVIDER;
 
   const client = (signal: AbortSignal) => createClient(options, signal);
 
@@ -42,7 +44,7 @@ export function vercelScheduleProvider(
     kind: "vercel",
     async create(context, input) {
       const schedules = await client(context.abortSignal);
-      let schedule: VercelSchedule = await schedules.create({
+      const schedule: VercelSchedule = await schedules.create({
         expression: toVercelExpression(input.expression),
         jitter: input.expression.type === "cron" ? input.expression.jitter : undefined,
         name: input.name,
@@ -51,16 +53,6 @@ export function vercelScheduleProvider(
         target: { topic: deriveEveScheduleQueueTopic(context.target.key) },
         timezone: input.expression.timezone,
       });
-      if (input.state === "inactive") {
-        try {
-          schedule = await schedules.disable({ name: input.name, namespace: context.namespace });
-        } catch (error) {
-          throw new Error(
-            `Schedule ${JSON.stringify(input.name)} was created active, but disabling it failed; it may remain active.`,
-            { cause: error },
-          );
-        }
-      }
       return fromVercelSchedule(schedule);
     },
     async list(context, input): Promise<SchedulePage> {
@@ -80,6 +72,19 @@ export function vercelScheduleProvider(
         context.namespace,
       );
       return response === null ? null : fromVercelSchedule(response);
+    },
+    async update(context, name, patch) {
+      const expression = patch.expression;
+      const params: UpdateScheduleParams = { name, namespace: context.namespace };
+      if (expression !== undefined) {
+        params.expression = toVercelExpression(expression);
+        params.timezone = expression.timezone ?? "UTC";
+        params.jitter = expression.type === "cron" ? (expression.jitter ?? null) : null;
+      }
+      if (patch.payload !== undefined)
+        params.payload = createDispatchPayload(context, patch.payload);
+      const schedule = await (await client(context.abortSignal)).update(params);
+      return fromVercelSchedule(schedule);
     },
     async enable(context, name) {
       return fromVercelSchedule(
@@ -185,6 +190,7 @@ function isNotFoundError(error: unknown): boolean {
 }
 
 function assertSupportedVercelEnvironment(): void {
+  if (isVercelSchedulesDevEnvironment()) return;
   if (!process.env.VERCEL?.trim()) {
     throw new Error("vercelScheduleProvider() requires a Vercel production deployment or eve dev.");
   }

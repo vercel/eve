@@ -151,7 +151,7 @@ chatSdkChannel({
 });
 ```
 
-Typing indicators post automatically where the adapter supports them: `Working…` on `turn.started`, and tool status on `actions.requested`.
+Typing indicators post automatically where the adapter supports them: `Working…` on `turn.started`, and on `actions.requested`, each call's [label](/docs/tools#label-tool-activity) or a readable form of its name. They leave out the model's own `eve__task_wait` and `eve__task_cancel` calls.
 
 ### Optional capabilities degrade gracefully
 

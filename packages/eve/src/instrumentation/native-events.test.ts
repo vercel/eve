@@ -259,7 +259,6 @@ describe("createInstrumentationHandleEvent", () => {
           nodeId: "workers",
           subagentName: "worker",
         },
-        { callId: "skill-1", input: { name: "research" }, kind: "load-skill" },
         {
           callId: "remote-1",
           description: "Call a remote agent.",
@@ -388,7 +387,7 @@ describe("createInstrumentationHandleEvent", () => {
       );
     });
 
-    expect(events.slice(0, 5)).toEqual([
+    expect(events.slice(0, 4)).toEqual([
       {
         callId: "delegate-1",
         frameworkTool: false,
@@ -398,17 +397,6 @@ describe("createInstrumentationHandleEvent", () => {
         kind: "subagent-call",
         toolName: "delegate",
         isWorkflowTool: true,
-        scope,
-        type: "tool.call.started",
-      },
-      {
-        callId: "skill-1",
-        frameworkTool: false,
-        startedAtMs: 1_000,
-        idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "skill-1"),
-        input: { name: "research" },
-        kind: "load-skill",
-        toolName: "load_skill",
         scope,
         type: "tool.call.started",
       },
@@ -489,7 +477,7 @@ describe("createInstrumentationHandleEvent", () => {
       type: "tool.call.completed",
       usage: undefined,
     });
-    expect(events).toHaveLength(8);
+    expect(events).toHaveLength(7);
     expect(events.every(Object.isFrozen)).toBe(true);
   });
 

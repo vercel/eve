@@ -18,6 +18,7 @@ import type {
   SessionTurn,
 } from "#channel/types.js";
 import { ContextKey } from "#context/key.js";
+import { STUB_CONTEXT_KEY, type StubScope } from "#tool-stubs/types.js";
 import {
   SESSION_INBOX_CONTEXT_KEY,
   type SessionInboxAddress,
@@ -30,7 +31,7 @@ import type { HandleEventFn } from "#harness/types.js";
 import type { PersistedDynamicToolMetadata } from "#context/dynamic-tool-metadata.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
-import type { SandboxAccess } from "#sandbox/state.js";
+import type { SandboxAccess, SandboxSessionEndReason } from "#sandbox/state.js";
 import type { HistoryViewProjector } from "#shared/history-view.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
@@ -79,6 +80,7 @@ export interface Session {
 // ---------------------------------------------------------------------------
 
 export const AuthKey = new ContextKey<SessionAuthContext | null>("eve.auth");
+export const ToolStubsKey = new ContextKey<StubScope>(STUB_CONTEXT_KEY);
 export const InitiatorAuthKey = new ContextKey<SessionAuthContext | null>("eve.initiatorAuth");
 export const SessionIdKey = new ContextKey<string>("eve.sessionId");
 export const ConversationIdKey = new ContextKey<string>("eve.conversationId");
@@ -112,7 +114,6 @@ export const ChannelDeliveryKey = new ContextKey<ChannelDeliveryMetadata>("eve.c
 export const TurnDeliveryIdsKey = new ContextKey<readonly string[]>("eve.turnDeliveryIds");
 /** Last framework announcements recorded in the retained session history. */
 export interface HistoryState {
-  readonly availableSkills?: string;
   /** Last announced value per keyed announcement (see `#harness/announcements.js`). */
   readonly announcements?: Readonly<Record<string, string>>;
 }
@@ -169,6 +170,9 @@ export const LegacyRemoteAgentCallerKey = new ContextKey<LegacyRemoteAgentCaller
 
 export const SessionKey = new ContextKey<Session>("eve.session");
 export const SandboxKey = new ContextKey<SandboxAccess>("eve.sandbox");
+export const SandboxTerminalCleanupKey = new ContextKey<
+  (reason: SandboxSessionEndReason) => Promise<void>
+>("eve.internal.sandboxTerminalCleanup");
 export const HandleEventKey = new ContextKey<HandleEventFn>("eve.internal.handleEvent");
 
 // ---------------------------------------------------------------------------
@@ -326,8 +330,10 @@ export const DynamicSubagentAgentConfigKey = new ContextKey<DynamicSubagentAgent
  */
 export interface DurableDynamicSkillMetadata {
   readonly name: string;
+  /** Listed in the catalog instead of the dynamic skill announcement. */
+  readonly deferred?: true;
   readonly description: string;
-  /** `SKILL.md` content as authored; `load_skill` strips any frontmatter. */
+  /** `SKILL.md` content as authored; loading strips any frontmatter. */
   readonly markdown: string;
   /**
    * Content hash of the package files. Present only for packages with
@@ -340,8 +346,8 @@ export type DynamicSkillManifest = Readonly<Record<string, readonly DurableDynam
 
 /**
  * Durable map from resolver slug to the qualified skills it last produced.
- * Used to diff on re-resolution, serve `load_skill`, and rebuild the
- * model-visible announcement across turns without a sandbox.
+ * Used to diff on re-resolution, load skills, and rebuild the model-visible
+ * announcement across turns without a sandbox.
  */
 export const DynamicSkillManifestKey = new ContextKey<DynamicSkillManifest>(
   "eve.dynamicSkillManifest",

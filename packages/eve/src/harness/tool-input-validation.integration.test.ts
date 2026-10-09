@@ -3,6 +3,7 @@ import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
 import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import type { HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
 
 // The harness runs outside a workflow body here, where run attributes cannot
@@ -23,6 +24,29 @@ const usage = {
   },
 };
 
+type StreamPart =
+  Awaited<ReturnType<MockLanguageModelV4["doStream"]>>["stream"] extends ReadableStream<infer Part>
+    ? Part
+    : never;
+
+/** Streams one scripted response per model call, in order. */
+function scriptedStreams(responses: readonly (readonly StreamPart[])[]) {
+  const queue = [...responses];
+  return async () => {
+    const parts = queue.shift();
+    if (parts === undefined) throw new Error("No scripted response left.");
+    return { stream: convertArrayToReadableStream([...parts]) };
+  };
+}
+
+function toolCall(toolCallId: string, toolName: string, input: string): StreamPart {
+  return { input, toolCallId, toolName, type: "tool-call" };
+}
+
+function finish(unified: "length" | "stop" | "tool-calls"): StreamPart {
+  return { finishReason: { raw: undefined, unified }, type: "finish", usage };
+}
+
 function findToolResult(messages: readonly ModelMessage[], toolCallId: string): unknown {
   for (const message of messages) {
     if (message.role !== "tool" || !Array.isArray(message.content)) continue;
@@ -35,7 +59,7 @@ function findToolResult(messages: readonly ModelMessage[], toolCallId: string): 
 }
 
 describe("framework tool input validation (real AI SDK)", () => {
-  it("rejects invalid final_output input instead of settling the turn", async () => {
+  it("rejects invalid eve__reply input instead of settling the turn", async () => {
     const invalidCallId = "final-invalid";
     const validCallId = "final-valid";
     const outputSchema = {
@@ -45,34 +69,16 @@ describe("framework tool input validation (real AI SDK)", () => {
       type: "object",
     } as const;
     const model = new MockLanguageModelV4({
-      doGenerate: [
-        {
-          content: [
-            {
-              input: JSON.stringify({ answer: 42 }),
-              toolCallId: invalidCallId,
-              toolName: "final_output",
-              type: "tool-call",
-            },
-          ],
-          finishReason: { raw: undefined, unified: "tool-calls" },
-          usage,
-          warnings: [],
-        },
-        {
-          content: [
-            {
-              input: JSON.stringify({ answer: "done" }),
-              toolCallId: validCallId,
-              toolName: "final_output",
-              type: "tool-call",
-            },
-          ],
-          finishReason: { raw: undefined, unified: "tool-calls" },
-          usage,
-          warnings: [],
-        },
-      ],
+      doStream: scriptedStreams([
+        [
+          toolCall(invalidCallId, REPLY_TOOL_NAME, JSON.stringify({ answer: 42 })),
+          finish("tool-calls"),
+        ],
+        [
+          toolCall(validCallId, REPLY_TOOL_NAME, JSON.stringify({ answer: "done" })),
+          finish("tool-calls"),
+        ],
+      ]),
       modelId: "final-output-validation-model",
       provider: "eve-integration-mock",
     });
@@ -99,7 +105,7 @@ describe("framework tool input validation (real AI SDK)", () => {
     expect(typeof invalidStep.next).toBe("function");
     expect(findToolResult(invalidStep.session.history, invalidCallId)).toMatchObject({
       output: expect.objectContaining({ type: "error-text" }),
-      toolName: "final_output",
+      toolName: REPLY_TOOL_NAME,
     });
 
     if (typeof invalidStep.next !== "function") {
@@ -107,8 +113,8 @@ describe("framework tool input validation (real AI SDK)", () => {
     }
     const validStep = await invalidStep.next(invalidStep.session);
 
-    expect(model.doGenerateCalls).toHaveLength(2);
-    expect(findToolResult(model.doGenerateCalls[1]?.prompt ?? [], invalidCallId)).toBeDefined();
+    expect(model.doStreamCalls).toHaveLength(2);
+    expect(findToolResult(model.doStreamCalls[1]?.prompt ?? [], invalidCallId)).toBeDefined();
     expect(validStep.next).toBeNull();
     expect(validStep.settledTurn).toEqual({ output: { answer: "done" } });
   });
@@ -122,32 +128,19 @@ describe("framework tool input validation (real AI SDK)", () => {
   ])("answers complete tool calls cut short at the output limit $name", async ({ truncated }) => {
     const skippedCallId = "read-skipped";
     const model = new MockLanguageModelV4({
-      doGenerate: [
-        {
-          content: [
-            {
-              input: JSON.stringify({ path: "notes/alice.md" }),
-              toolCallId: skippedCallId,
-              toolName: "read_note",
-              type: "tool-call",
-            },
-            ...truncated.map((call) => ({
-              ...call,
-              toolName: "read_note",
-              type: "tool-call" as const,
-            })),
-          ],
-          finishReason: { raw: undefined, unified: "length" },
-          usage,
-          warnings: [],
-        },
-        {
-          content: [{ text: "I will read Alice's note again.", type: "text" }],
-          finishReason: { raw: undefined, unified: "stop" },
-          usage,
-          warnings: [],
-        },
-      ],
+      doStream: scriptedStreams([
+        [
+          toolCall(skippedCallId, "read_note", JSON.stringify({ path: "notes/alice.md" })),
+          ...truncated.map((call) => toolCall(call.toolCallId, "read_note", call.input)),
+          finish("length"),
+        ],
+        [
+          { id: "reply", type: "text-start" },
+          { delta: "I will read Alice's note again.", id: "reply", type: "text-delta" },
+          { id: "reply", type: "text-end" },
+          finish("stop"),
+        ],
+      ]),
       modelId: "output-limit-model",
       provider: "eve-integration-mock",
     });
@@ -189,8 +182,8 @@ describe("framework tool input validation (real AI SDK)", () => {
     const nextStep = await cutShortStep.next(cutShortStep.session);
 
     expect(execute).not.toHaveBeenCalled();
-    expect(model.doGenerateCalls).toHaveLength(2);
-    const retryPrompt = model.doGenerateCalls[1]?.prompt ?? [];
+    expect(model.doStreamCalls).toHaveLength(2);
+    const retryPrompt = model.doStreamCalls[1]?.prompt ?? [];
     expect(findToolResult(retryPrompt, skippedCallId)).toMatchObject({
       output: { type: "error-text", value: expect.stringContaining("finish reason: length") },
     });

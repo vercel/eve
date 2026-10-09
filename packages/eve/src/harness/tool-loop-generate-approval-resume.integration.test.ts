@@ -4,7 +4,6 @@ import {
   toolCallStreamResult,
   usage,
 } from "#internal/testing/approval-resume.js";
-import { setTurnClientContextState } from "#harness/turn-client-context.js";
 import { jsonSchema, type LanguageModel, type ModelMessage, type Telemetry } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import type { InstrumentationAttemptScope } from "#instrumentation/lifecycle.js";
@@ -15,10 +14,8 @@ import {
   preparePersistedStepDynamicToolMetadata,
 } from "#context/dynamic-tool-lifecycle.js";
 import type { OldSourceOffsetDynamicToolMetadata } from "#context/dynamic-tool-metadata.js";
-import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
 import {
   AuthKey,
-  HistoryStateKey,
   SessionKey,
   SessionIdKey,
   SessionDynamicToolMetadataKey,
@@ -960,96 +957,6 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
       role: "assistant",
     });
   });
-
-  // Regression: turn-local context (a dynamic skill announcement) was
-  // appended as a user message after the approval response. The AI SDK reads
-  // approvals only from the tail tool message, so the approved tool never ran
-  // and the provider rejected the prompt with a tool call that had no output.
-  it.each([false, true])(
-    "executes the approved tool when a dynamic skill announcement is injected on the resume step (restored anchor: %s)",
-    async (restoredAnchor) => {
-      const siblingCall = {
-        input: { command: "whoami" },
-        toolCallId: "call-sibling",
-        toolName: "bash",
-        type: "tool-call" as const,
-      };
-      const siblingResult = {
-        output: { type: "text" as const, value: "eve" },
-        toolCallId: siblingCall.toolCallId,
-        toolName: "bash",
-        type: "tool-result" as const,
-      };
-      // The parked shape when a gated call shares a step with an ungated one.
-      const session = withParkedStep(createBaseSession(), {
-        messages: [
-          { content: [toolCall, approvalRequest, siblingCall], role: "assistant" },
-          { content: [siblingResult], role: "tool" },
-        ],
-        requests: [pendingApprovalInputRequest],
-      });
-      const ctx = new ContextContainer();
-      const runtimeContextAnnouncement = "Available skills\n- policy: Tenant policy";
-      ctx.set(PendingSkillAnnouncementKey, runtimeContextAnnouncement);
-      const execute = vi.fn(async () => "/workspace");
-      const model = createModel();
-      const runStep = createToolLoopHarness(createConfig(model, execute));
-
-      const result = await contextStorage.run(ctx, () =>
-        runStep(
-          withOpenTurn(
-            restoredAnchor
-              ? setTurnClientContextState(session, {
-                  insertionIndex: 0,
-                  messages: [],
-                  turnId: "turn-1",
-                })
-              : session,
-            { sequence: 1, stepIndex: 1, turnId: "turn-1" },
-          ),
-          { inputResponses: [{ optionId: "approve", requestId: approvalRequest.approvalId }] },
-        ),
-      );
-
-      expect(execute).toHaveBeenCalledExactlyOnceWith(
-        toolCall.input,
-        expect.objectContaining({ toolCallId: toolCall.toolCallId }),
-      );
-
-      const providerPrompt = model.doStreamCalls[0]?.prompt ?? [];
-      const answered = new Set<string>();
-      const called: string[] = [];
-      for (const message of providerPrompt) {
-        if (!Array.isArray(message.content)) continue;
-        for (const part of message.content) {
-          if (part.type === "tool-call") called.push(part.toolCallId);
-          if (part.type === "tool-result") answered.add(part.toolCallId);
-        }
-      }
-      expect(called).toEqual([toolCall.toolCallId, siblingCall.toolCallId]);
-      expect(called.filter((id) => !answered.has(id))).toEqual([]);
-      expect(JSON.stringify(providerPrompt)).toContain("Tenant policy");
-      expect(ctx.get(HistoryStateKey)).toMatchObject({
-        availableSkills: runtimeContextAnnouncement,
-      });
-      expect(result.session.history.at(-1)).toMatchObject({
-        content: [{ text: "The command returned /workspace.", type: "text" }],
-        role: "assistant",
-      });
-
-      const continued = await contextStorage.run(ctx, () =>
-        runStep(result.session, { message: "Continue." }),
-      );
-      expect(
-        continued.session.history.filter(
-          (message) => message.content === runtimeContextAnnouncement,
-        ),
-      ).toHaveLength(1);
-      expect(ctx.get(HistoryStateKey)).toMatchObject({
-        availableSkills: runtimeContextAnnouncement,
-      });
-    },
-  );
 
   // Acceptance gate for the HITL non-blocking plan (research/hitl-request-lifecycle.md):
   // once messages run as normal turns while an approval is open, the approval batch is

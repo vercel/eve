@@ -1,3 +1,4 @@
+import { sessionAuthFromResult } from "#channel/auth/result.js";
 import { parseJsonObject } from "#shared/json.js";
 import { z } from "#compiled/zod/index.js";
 import {
@@ -381,9 +382,14 @@ async function authenticateMcpRequest(
   if (auth instanceof Response) {
     return oauth === undefined ? auth : addResourceChallenge(auth, request, oauth);
   }
-  const principals = await resolveMcpRequestPrincipals(request, auth, input.trustedForwarders);
+  const sessionAuth = sessionAuthFromResult(auth);
+  const principals = await resolveMcpRequestPrincipals(
+    request,
+    sessionAuth,
+    input.trustedForwarders,
+  );
   if (principals instanceof Response) return principals;
-  return await handleMcpRequest(request, args, auth, principals, publish);
+  return await handleMcpRequest(request, args, sessionAuth, principals, publish);
 }
 
 interface McpPublishOptions {

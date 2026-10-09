@@ -2,6 +2,7 @@ import type { ModelAccessChange, ModelConnectionSelection } from "#shared/model-
 import { runModelLogin } from "#setup/flows/model-login.js";
 import { LOGIN_CONNECTION_OPTIONS } from "#setup/flows/model-login-options.js";
 import { HumanActionRequiredError } from "#setup/human-action.js";
+import { runLoginFlow } from "#setup/flows/login.js";
 import { runDeployFlow } from "#setup/flows/deploy.js";
 import {
   runInstallVercelCliFlow,
@@ -70,6 +71,7 @@ export interface TuiSetupFlows {
   runInstallVercelCliFlow: typeof runInstallVercelCliFlow;
   runRegistryFlow: typeof runRegistryFlow;
   runDeployFlow: typeof runDeployFlow;
+  runLoginFlow?: typeof runLoginFlow;
 }
 
 /** Setup owns flow-close behavior; the command adapter receives only the transcript outcome. */
@@ -282,22 +284,31 @@ async function executeSetupCommand(
         };
       }
       case "add": {
-        const flow = await flows.runRegistryFlow({
-          appRoot,
-          installRoot: input.agentRoot,
-          prompter,
-          signal,
-          initialAddress: input.initialRegistryAddress,
-          onScreen: input.onOnboardingScreen,
-          onItemStart: registryItemProgress(renderer),
-          runItem: runRegistryItem,
-        });
+        const runAdd = (overrides: { initialAddress?: string; skipInstall?: boolean }) =>
+          flows.runRegistryFlow({
+            appRoot,
+            installRoot: input.agentRoot,
+            prompter,
+            signal,
+            onScreen: input.onOnboardingScreen,
+            onItemStart: registryItemProgress(renderer),
+            runItem: runRegistryItem,
+            ...overrides,
+          });
+        const flow = await runAdd({ initialAddress: input.initialRegistryAddress });
         if (flow.kind === "cancelled" || flow.result.outcomes.length === 0) {
           return cancelledSetupResult();
         }
-        const outcome = registryResult(flow.result, warnings);
-        if (flow.result.cancelled === true) outcome.partial = true;
-        if (flow.result.deployed === "production") outcome.effect = { kind: "deployed" };
+        const result = await recoverVercelLoginSetup(flow.result, {
+          appRoot,
+          prompter,
+          signal,
+          runLoginFlow: flows.runLoginFlow ?? runLoginFlow,
+          resumeSetup: (address) => runAdd({ initialAddress: address, skipInstall: true }),
+        });
+        const outcome = registryResult(result, warnings);
+        if (result.cancelled === true) outcome.partial = true;
+        if (result.deployed === "production") outcome.effect = { kind: "deployed" };
         return outcome;
       }
       case "deploy": {
@@ -420,6 +431,65 @@ function withRegistryResults(
     failed: true,
     preserveFlowDiagnostics: false,
   };
+}
+
+/**
+ * Offers `vercel login` when an installed item's setup stopped on a logged-out
+ * Vercel CLI, then resumes only that item's setup. `/login` connects eve's
+ * model access and does not log in the CLI that registry setup drives, so
+ * without this the user is left retrying an add that can never succeed.
+ */
+async function recoverVercelLoginSetup(
+  result: RegistrySessionResult,
+  input: {
+    appRoot: string;
+    prompter: Prompter;
+    signal: AbortSignal;
+    runLoginFlow: typeof runLoginFlow;
+    resumeSetup: (address: string) => ReturnType<typeof runRegistryFlow>;
+  },
+): Promise<RegistrySessionResult> {
+  const blocked = result.outcomes.filter(
+    (outcome) => outcome.kind === "incomplete" && outcome.prerequisite?.code === "vercel-login",
+  );
+  if (blocked.length === 0) return result;
+
+  let choice: "login" | "later";
+  try {
+    choice = await input.prompter.select({
+      message: "Setup needs the Vercel CLI, which isn't logged in. Log in now?",
+      options: [
+        {
+          value: "login",
+          label: "Log in to Vercel",
+          description: "Runs `vercel login` in your browser, then finishes setup",
+        },
+        { value: "later", label: "Not now" },
+      ],
+      initialValue: "login",
+    });
+  } catch {
+    choice = "later";
+  }
+  if (choice === "later") return result;
+
+  const login = await input.runLoginFlow({
+    appRoot: input.appRoot,
+    prompter: input.prompter,
+    signal: input.signal,
+  });
+  if (login.kind !== "logged-in" && login.kind !== "already") return result;
+
+  const outcomes = [...result.outcomes];
+  let deployed = result.deployed;
+  for (const outcome of blocked) {
+    if (outcome.kind !== "incomplete") continue;
+    const resumed = await input.resumeSetup(outcome.address);
+    if (resumed.kind !== "done" || resumed.result.outcomes.length !== 1) continue;
+    outcomes[outcomes.indexOf(outcome)] = resumed.result.outcomes[0]!;
+    deployed ??= resumed.result.deployed;
+  }
+  return { ...result, outcomes, ...(deployed !== undefined && { deployed }) };
 }
 
 /**

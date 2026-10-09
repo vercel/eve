@@ -4,6 +4,7 @@ import { mountIdSchema } from "#shared/extension-mount.js";
 import type { Node } from "#shared/node.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import type { AgentSourceOwner, CompiledModuleBinding } from "#compiler/source-graph.js";
+import type { AgentToolExposure } from "#shared/agent-definition.js";
 
 export interface CompiledDynamicSubagentDefinition extends Readonly<ModuleSourceRef> {
   readonly build?: {
@@ -29,7 +30,7 @@ export type CompiledRemoteAgentNode = Readonly<
       parentNodeId: string;
       path: string;
       rootPath: string;
-      tool?: boolean;
+      tool?: AgentToolExposure;
       // Absent when the definition's `url` is a function the runtime resolves.
       url?: string;
     }
@@ -104,7 +105,7 @@ export const compiledRemoteAgentNodeSchema: z.ZodType<CompiledRemoteAgentNode> =
     parentNodeId: z.string(),
     path: z.string(),
     rootPath: z.string(),
-    tool: z.boolean().optional(),
+    tool: z.union([z.boolean(), z.literal("deferred")]).optional(),
     sourceId: z.string(),
     sourceKind: z.literal("module"),
     url: z.string().optional(),

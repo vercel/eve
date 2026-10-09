@@ -86,6 +86,13 @@ export function connectionProtocols(connection: ConnectionIdentity): ConnectionP
  */
 export const INTEGRATIONS: readonly IntegrationEntry[] = [
   {
+    slug: "eve",
+    name: "Web Chat",
+    kind: "channel",
+    tagline: "Embed a first-party web chat UI backed by your agent.",
+    surfaces: { scaffoldable: true, registry: true, gallery: true },
+  },
+  {
     slug: "slack",
     name: "Slack",
     kind: "channel",
@@ -142,13 +149,6 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     tagline:
       "Delegate Linear issues and comments through Agent Sessions, with guided Connect setup.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
-  },
-  {
-    slug: "eve",
-    name: "Web Chat",
-    kind: "channel",
-    tagline: "Embed a first-party web chat UI backed by your agent.",
-    surfaces: { scaffoldable: true, registry: true, gallery: true },
   },
   {
     slug: "buzz",

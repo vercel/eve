@@ -1,6 +1,7 @@
 import { bindTurnCallerContext } from "#subagents/parent-notification.js";
 import type { HandleEventFn } from "#harness/types.js";
 import { bindDynamicConnections } from "#execution/dynamic-connections.js";
+import { recoverDynamicConnectionRehydration } from "#execution/dynamic-connection-recovery.js";
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
@@ -526,13 +527,24 @@ async function runSessionStepBody(
                 ? { ...enrichedSession, outputSchema: resolved.outputSchema }
                 : enrichedSession;
             const connectionState = turnPosition(currentProjection(ctx));
-            await dynamicConnections.rehydrate(
-              connectionState,
-              runtimeIdentity,
-              isBetweenTurns(currentProjection(ctx))
-                ? undefined
-                : { sequence: connectionState.sequence, turnId: activeTurnId(connectionState) },
-            );
+            try {
+              await dynamicConnections.rehydrate(
+                connectionState,
+                runtimeIdentity,
+                isBetweenTurns(currentProjection(ctx))
+                  ? undefined
+                  : { sequence: connectionState.sequence, turnId: activeTurnId(connectionState) },
+              );
+            } catch (error) {
+              const recovered = await recoverDynamicConnectionRehydration({
+                emit: handleEvent,
+                error,
+                projection: currentProjection(ctx),
+                session: schemaSession,
+              });
+              if (recovered !== undefined) return recovered;
+              throw error;
+            }
             // A sign-in completes before the turn it resumes, in the first call only.
             const completions =
               firstCall && completedAuths !== undefined

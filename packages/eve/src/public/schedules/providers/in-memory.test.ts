@@ -21,11 +21,12 @@ describe("inMemoryScheduleProvider", () => {
     const deliver = vi.fn(async (delivery: unknown) => {
       deliveries.push(delivery);
     });
-    await provider.create(context("create", { key: "app", deliver }), {
+    const created = await provider.create(context("create", { key: "app", deliver }), {
       name: "daily",
       expression: { type: "cron", cron: "0 9 * * *" },
       payload: { request: "do work" },
     });
+    expect(created.state).toBe("active");
     await provider.invoke(context("invoke-1"), "daily");
     await provider.invoke(context("invoke-2"), "daily");
     expect(deliveries).toHaveLength(2);

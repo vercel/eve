@@ -30,6 +30,7 @@ export async function resolveToolDefinition(
     const resolved: ResolvedToolDefinition = {
       availableInSubagents: definition.availableInSubagents,
       behavior: definition.behavior,
+      deferred: definition.deferred,
       description: definition.description,
       inputSchema: toInputSchema(definition.inputSchema),
       logicalPath: definition.logicalPath,
@@ -84,6 +85,7 @@ export async function resolveToolDefinition(
     const resolved: ResolvedToolDefinition = {
       availableInSubagents: definition.availableInSubagents,
       behavior: definition.behavior,
+      deferred: definition.deferred,
       description: definition.description,
       execute,
       executeInput,

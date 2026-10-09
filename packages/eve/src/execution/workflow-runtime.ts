@@ -1,3 +1,4 @@
+import { validateToolStubTargets } from "#tool-stubs/validate-targets.js";
 import { context, trace } from "#compiled/@opentelemetry/api/index.js";
 import {
   EntityConflictError,
@@ -124,6 +125,9 @@ export function createWorkflowRuntime(config: {
         compiledArtifactsSource: config.compiledArtifactsSource,
         nodeId: config.nodeId,
       });
+      if (input.toolStubs !== undefined && input.toolStubs.rootSessionId === undefined) {
+        validateToolStubTargets(input.toolStubs.rules, bundle.graph);
+      }
       const ctx = buildRunContext({
         bundle,
         dynamicSubagentAgentConfig: config.dynamicSubagentAgentConfig,

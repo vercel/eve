@@ -28,7 +28,7 @@ describe("just-bash sandbox deletion", () => {
     } satisfies BashSandbox;
     const handle = createJustBashHandle(sandbox);
 
-    await handle.onSessionDelete();
+    await handle.onSandboxDelete();
 
     expect(dispose).toHaveBeenCalledTimes(1);
     await expect(access(rootPath)).rejects.toMatchObject({ code: "ENOENT" });

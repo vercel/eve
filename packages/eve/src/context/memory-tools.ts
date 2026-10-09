@@ -2,7 +2,6 @@ import type { MemoryDefinition, MemoryToolSet, MemoryToolsContext } from "#publi
 import { resolveApprovalPolicy } from "#approval/definition.js";
 import { loadContext } from "#context/container.js";
 import { TurnMemoryLocksKey } from "#context/keys.js";
-import { TOOL_SLUG_PATTERN } from "#discover/grammar.js";
 import { defineDynamic } from "#dynamic/definition.js";
 import { markDynamicCallbackRebind } from "#internal/dynamic-tool-rebind.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
@@ -33,11 +32,6 @@ export function createMemoryToolDynamicDefinition(definition: MemoryDefinition, 
           return Object.fromEntries(
             Object.entries(result).map(([key, tool]) => {
               const name = `${slot}__${key}`;
-              if (!TOOL_SLUG_PATTERN.test(name)) {
-                throw new Error(
-                  `Memory provider tool name "${name}" must start with an ASCII letter, contain only letters, digits, underscores, or dashes, and be at most 64 characters.`,
-                );
-              }
               if (!isBrandedToolEntry(tool)) {
                 throw new Error(
                   `Memory provider tool "${name}" must be created with defineTool().`,

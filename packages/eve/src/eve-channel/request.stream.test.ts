@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Session } from "#channel/session.js";
 import { createSessionStreamResponse } from "#eve-channel/request.js";
+import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import {
   EVE_STREAM_CONTROL_VERSION,
   EVE_STREAM_CONTROL_VERSION_QUERY,
@@ -10,16 +11,35 @@ import {
 
 const encoder = new TextEncoder();
 
-function stubSession(events: ReadableStream<unknown>): Session {
+function stubSession(events: ReadableStream<unknown>, tailIndex = -1): Session {
   return {
     id: "session_1",
     async getEventStream() {
       return events;
     },
     async getStreamTailIndex() {
-      return -1;
+      return tailIndex;
     },
   } as Session;
+}
+
+/** A durable byte source that never reaches EOF, like a parked run's stream. */
+function openByteSource(lines: number): {
+  readonly source: ReadableStream<Uint8Array>;
+  readonly cancelled: () => boolean;
+} {
+  let cancelled = false;
+  const source = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (let i = 0; i < lines; i += 1) {
+        controller.enqueue(encoder.encode(`${JSON.stringify({ sequence: i })}\n`));
+      }
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+  return { cancelled: () => cancelled, source };
 }
 
 function leasedRequest(): Request {
@@ -122,5 +142,52 @@ describe("createSessionStreamResponse", () => {
     expect(settled).toBe(false);
     await reader.cancel();
     await pending;
+  });
+
+  it("cancels the durable source once a tail-indexed read reaches the tail", async () => {
+    const { cancelled, source } = openByteSource(3);
+    const url = "https://eve.test/eve/v1/session/session_1/stream?includeTailIndex=1";
+
+    const response = await createSessionStreamResponse(
+      new Request(url),
+      stubSession(
+        parseNdjsonStream(() => source),
+        1,
+      ),
+    );
+
+    await expect(response.text()).resolves.toBe('\n{"sequence":0}\n{"sequence":1}\n');
+    await vi.waitFor(() => expect(cancelled()).toBe(true));
+  });
+
+  it("cancels the durable source when the client aborts", async () => {
+    const { cancelled, source } = openByteSource(1);
+    const abort = new AbortController();
+
+    const response = await createSessionStreamResponse(
+      new Request("https://eve.test/eve/v1/session/session_1/stream", { signal: abort.signal }),
+      stubSession(parseNdjsonStream(() => source)),
+    );
+    const reader = response.body!.getReader();
+    await reader.read();
+    await reader.read();
+    abort.abort();
+
+    await vi.waitFor(() => expect(cancelled()).toBe(true));
+  });
+
+  it("cancels the durable source when the response body is cancelled", async () => {
+    const { cancelled, source } = openByteSource(1);
+
+    const response = await createSessionStreamResponse(
+      new Request("https://eve.test/eve/v1/session/session_1/stream"),
+      stubSession(parseNdjsonStream(() => source)),
+    );
+    const reader = response.body!.getReader();
+    await reader.read();
+    await reader.read();
+    await reader.cancel();
+
+    await vi.waitFor(() => expect(cancelled()).toBe(true));
   });
 });

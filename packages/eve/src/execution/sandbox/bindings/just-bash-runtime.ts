@@ -207,11 +207,11 @@ export function createJustBashHandle(sandbox: BashSandbox): SandboxProviderHandl
   const session = buildSandboxSession(createFileBackedInternalSandboxSession({ sandbox }));
   return {
     sandbox: session,
-    async onSessionDelete() {
+    async onSandboxDelete() {
       await sandbox.dispose();
       await rm(sandbox.rootPath, { force: true, recursive: true });
     },
-    async onSessionStop() {
+    async onSandboxStop() {
       await sandbox.dispose();
     },
     // The interpreter lives in this process, so stopping it is all the

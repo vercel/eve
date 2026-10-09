@@ -1,12 +1,21 @@
 # Contributing to eve
 
-Thanks for your interest in contributing! This guide covers everything you need to get the repo running locally and land a change.
+Thanks for your interest in contributing to eve! We greatly appreciate bug
+reports, feature proposals, and prompts or implementation plans shared through
+issues.
+
+If you are an external contributor, start with an
+[issue](https://github.com/vercel/eve/issues/new/choose) rather than a pull
+request. See [Proposing a change](#proposing-a-change) for what to include.
+
+The rest of this guide covers local development and the team's implementation
+and pull request workflow.
 
 ## Signed commits
 
 This repository requires verified commit signatures on protected branches.
 
-Before contributing, configure Git to sign your commits with a GitHub-verified
+Before committing code, configure Git to sign your commits with a GitHub-verified
 GPG, SSH, or S/MIME key. Unsigned commits will be rejected by repository rules
 and need to be rewritten as signed commits before they can be merged.
 
@@ -79,6 +88,19 @@ shared project's Preview env must provide those same model-provider
 credentials.
 
 Do not commit fixture trees under `packages/eve/test/fixtures/` — scenario app content is defined inline as `ScenarioAppDescriptor` objects under `packages/eve/src/internal/testing/scenario-apps/` (CI enforces this).
+
+### Testing packaged builds
+
+`pkg.eve.dev` serves `main` and same-repository PR builds. It does not serve fork
+PRs or direct branch deployments. A PR package is available after its Vercel –
+eve-pkg deployment succeeds.
+
+```bash
+pnpm dlx https://pkg.eve.dev/pr/<pull-request-id>/eve.tgz dev
+```
+
+`pnpm dlx` may reuse a cached package for the same PR URL. To test a newer
+commit, use its full-SHA URL: `https://pkg.eve.dev/<full-sha>/eve.tgz`.
 
 ## Linting and formatting
 
@@ -168,18 +190,31 @@ User-facing docs live in [`docs/`](./docs) and are published with the `eve` npm 
 
 ## Proposing a change
 
-If you are an external contributor and have not been invited to implement a
-change, open an issue instead of a pull request. Search the existing issues,
-discussions, and pull requests first so you do not duplicate active work. Use
-the relevant issue template to describe the problem, use case, or bug
-reproduction. You may also include a suggested implementation prompt that a
-maintainer or coding agent could use after the proposal is accepted.
+External contributions should come through issues rather than unsolicited
+pull requests. Search the existing issues, discussions, and pull requests
+first so you do not duplicate active work, then use the
+[relevant issue template](https://github.com/vercel/eve/issues/new/choose).
 
-For changes to public APIs, agent behavior, compiler/runtime internals,
-dependencies, generated artifacts, fixture contracts, or any non-trivial
-implementation detail, wait for maintainer agreement before investing in an
-implementation. The goal is to agree that the problem is real and that the
-proposed direction fits eve before review shifts to code.
+We use our own coding agents to implement accepted proposals. This lets us
+control which models and skills the agents use and how changes are validated.
+We welcome prompts as issues. Your investigation, prompt, or implementation
+plan helps us understand the problem and gives our agents a concrete starting
+point.
+You do not need to write the code or open a pull request to contribute.
+
+Describe the problem, use case, or bug reproduction. If you have a change in
+mind, include a prompt or short implementation plan that the team can review
+and run with its own agents. Useful details include:
+
+- Explain the desired behavior and give a concrete user story or reproduction.
+- Identify the relevant code or docs and outline the changes you recommend.
+- Note constraints, trade-offs, and any public API or dependency changes.
+- Describe how to validate the result, including relevant tests and docs updates.
+
+Start with a short prompt or plan focused on the outcome. Once a maintainer
+agrees on the direction, they may ask for more detail. Prompts and plans are
+optional: you can report a bug or request a feature without knowing how to
+implement it. Share what you know, even if your proposal is incomplete.
 
 To make a proposal easier to evaluate:
 
@@ -191,9 +226,9 @@ To make a proposal easier to evaluate:
   package should keep runtime dependencies minimal.
 - Do not propose public behavior based only on a hypothetical use case. Include
   a concrete user story or, for bugs, a reproduction.
-- Do not claim an issue silently. Wait for a maintainer to invite an
-  implementation, and check the thread first in case someone else is already
-  working on it.
+- Check the issue thread before developing a prompt or plan in case someone
+  else is already working on it. Coordinate with maintainers rather than
+  assuming an issue is assigned to you.
 
 ## Submitting a pull request
 

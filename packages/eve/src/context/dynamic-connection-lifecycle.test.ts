@@ -2,8 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
 import { dispatchDynamicConnectionEvent } from "#context/dynamic-connection-lifecycle.js";
-import { AuthKey, SessionIdKey } from "#context/keys.js";
+import {
+  dispatchDynamicSubagentEvent,
+  getDynamicSubagentSelection,
+} from "#context/dynamic-subagent-lifecycle.js";
+import { AuthKey, SessionIdKey, StaticModelReferenceKey } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
+import { defineAgent } from "#public/definitions/agent.js";
 import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
 import { defineOpenAPIConnection } from "#public/definitions/connections/openapi.js";
 import { createSessionStartedEvent, createTurnStartedEvent } from "#protocol/message.js";
@@ -13,6 +18,8 @@ import type {
   ResolvedDynamicConnectionResolver,
 } from "#runtime/types.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
+import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import type { ResolvedDynamicSubagentResolver } from "#runtime/subagents/registry.js";
 
 describe("dynamic connection lifecycle", () => {
   it("resolves a mixed connection map with bare map-key names", async () => {
@@ -303,6 +310,154 @@ describe("dynamic connection lifecycle", () => {
     );
   });
 
+  it("fails when a dynamic connection would own an existing tool's name", async () => {
+    const { ctx, registry } = createContext();
+    ctx.set(BundleKey, agentBundle({ tools: ["billing__refund"] }));
+    const resolver = createResolver({
+      handler: () => ({
+        billing: defineMcpClientConnection({
+          description: "Billing.",
+          url: "https://mcp.example.com/billing",
+        }),
+      }),
+    });
+
+    await expect(
+      dispatchDynamicConnectionEvent({
+        ctx,
+        event: createSessionStartedEvent(),
+        resolvers: [resolver],
+      }),
+    ).rejects.toThrow(
+      'Tool or subagent "billing__refund" starts with "billing__", which belongs to connection "billing". Rename it, or the dynamic connection that "connections/accounts.ts" returned.',
+    );
+    expect(registry.getConnectionNames()).toEqual([]);
+  });
+
+  it("rejects a turn's dynamic connection named after a dynamic subagent the session selected", async () => {
+    const { ctx, registry } = createContext();
+    ctx.set(StaticModelReferenceKey, { id: "openai/gpt-root" });
+    const billing: ResolvedDynamicSubagentResolver = {
+      eventNames: ["session.started"],
+      events: {
+        "session.started": () =>
+          defineAgent({
+            description: "Resolve billing disputes.",
+            model: "openai/gpt-5.5",
+            modelContextWindowTokens: 200_000,
+          }),
+      },
+      kind: "subagent",
+      logicalPath: "subagents/billing/agent.ts",
+      name: "billing",
+      nodeId: "subagents/billing",
+      sourceId: "subagents/billing/agent.ts",
+      sourceKind: "module",
+    };
+    ctx.set(BundleKey, agentBundle({ dynamicSubagents: [billing] }));
+    await dispatchDynamicSubagentEvent({
+      ctx,
+      event: createSessionStartedEvent(),
+      messages: [],
+      resolvers: [billing],
+    });
+    expect(getDynamicSubagentSelection(ctx, billing.nodeId)).toBeDefined();
+    const resolver = createResolver({
+      eventNames: ["turn.started"],
+      events: {
+        "turn.started": () =>
+          defineMcpClientConnection({
+            description: "Billing.",
+            url: "https://mcp.example.com/billing",
+          }),
+      },
+      slug: "billing",
+    });
+
+    await expect(
+      dispatchDynamicConnectionEvent({
+        ctx,
+        event: createTurnStartedEvent({ sequence: 1, turnId: "turn_1" }),
+        resolvers: [resolver],
+      }),
+    ).rejects.toThrow(
+      'Tool or subagent "billing" has the same name as connection "billing". Rename it, or the dynamic connection that "connections/billing.ts" returned.',
+    );
+    expect(registry.getConnectionNames()).toEqual([]);
+  });
+
+  it("fails when a dynamic connection is named eve, which would own eve's namespace", async () => {
+    const { ctx, registry } = createContext();
+    const resolver = createResolver({
+      handler: () => ({
+        eve: defineMcpClientConnection({
+          description: "Runs jobs.",
+          url: "https://mcp.example.com/jobs",
+        }),
+      }),
+    });
+
+    await expect(
+      dispatchDynamicConnectionEvent({
+        ctx,
+        event: createSessionStartedEvent(),
+        resolvers: [resolver],
+      }),
+    ).rejects.toThrow(
+      'Dynamic connection resolver "connections/accounts.ts" returned the reserved connection name "eve". eve reserves the "eve" namespace for its built-in tools; rename the connection.',
+    );
+    expect(registry.getConnectionNames()).toEqual([]);
+  });
+
+  it("registers dynamic connections outside eve's namespace, including the catalog tools' former names", async () => {
+    const { ctx, registry } = createContext();
+    const names = ["search", "execute", "steve", "eve-tools"];
+    const resolver = createResolver({
+      handler: () =>
+        Object.fromEntries(
+          names.map((name) => [
+            name,
+            defineMcpClientConnection({
+              description: name,
+              url: `https://mcp.example.com/${name}`,
+            }),
+          ]),
+        ),
+    });
+
+    await dispatchDynamicConnectionEvent({
+      ctx,
+      event: createSessionStartedEvent(),
+      resolvers: [resolver],
+    });
+
+    expect(registry.getConnectionNames().toSorted()).toEqual(names.toSorted());
+  });
+
+  it("fails when a dynamic connection nests under another connection's name", async () => {
+    const { ctx, registry } = createContext([createStaticConnection("cloud")]);
+    const resolver = createResolver({
+      extensionNamespace: "cloud",
+      handler: () => ({
+        production: defineMcpClientConnection({
+          description: "Production account.",
+          url: "https://mcp.example.com/production",
+        }),
+      }),
+    });
+
+    await expect(
+      dispatchDynamicConnectionEvent({
+        ctx,
+        event: createSessionStartedEvent(),
+        resolvers: [resolver],
+      }),
+    ).rejects.toThrow(
+      'Connection "cloud__production" starts with "cloud__", which belongs to connection "cloud". Rename the dynamic connection "cloud__production".',
+    );
+    expect(registry.getConnectionNames()).toEqual(["cloud"]);
+  });
+
   it("fails closed when a handler returns an unbranded connection", async () => {
     const logs = captureLogRecords();
     const { ctx, registry } = createContext();
@@ -355,6 +510,20 @@ describe("dynamic connection lifecycle", () => {
     expect(registry.getConnectionNames()).toEqual(["cloud__production"]);
   });
 });
+
+/** The compiled bundle fields connection ownership reads: authored tools and dynamic subagents. */
+function agentBundle(input: {
+  readonly dynamicSubagents?: readonly ResolvedDynamicSubagentResolver[];
+  readonly tools?: readonly string[];
+}) {
+  return {
+    subagentRegistry: {
+      dynamicResolvers: input.dynamicSubagents ?? [],
+      subagentsByName: new Map(),
+    },
+    toolRegistry: { toolsByName: new Map((input.tools ?? []).map((name) => [name, {}])) },
+  } as never;
+}
 
 function createContext(staticConnections: readonly ResolvedConnectionDefinition[] = []) {
   const ctx = new ContextContainer();

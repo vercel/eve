@@ -91,6 +91,9 @@ const CHECKPOINT_UPGRADES: Readonly<
   },
   // Lifecycle moved from emission/batch registries to the projection and TurnState.
   11: upgradeIdleLifecycle,
+  // Version 13 prevents older deployments from ignoring stubs and running real tools.
+  // Existing checkpoints need no data changes.
+  12: (checkpoint) => checkpoint,
 };
 
 /**

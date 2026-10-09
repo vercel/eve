@@ -7,6 +7,7 @@ import type {
 import type { ScheduleDefinition, ScheduleRunHandler } from "#public/definitions/schedule.js";
 import type { SkillDefinition, SkillFileContent } from "#public/definitions/skill.js";
 import {
+  expectAgentToolExposure,
   expectBoolean,
   expectFunction,
   expectObjectRecord,
@@ -118,7 +119,7 @@ export function normalizeAgentDefinition(
   }
 
   if (record.tool !== undefined) {
-    definition.tool = expectBoolean(record.tool, message);
+    definition.tool = expectAgentToolExposure(record.tool, message);
   }
 
   if (record.limits !== undefined) {
@@ -425,11 +426,18 @@ export function normalizeInstructionsDefinition(
  */
 export function normalizeSkillDefinition(value: unknown, message: string): SkillDefinition {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["description", "files", "license", "markdown", "metadata"], message);
+  expectOnlyKnownKeys(
+    record,
+    ["deferred", "description", "files", "license", "markdown", "metadata"],
+    message,
+  );
   const definition: Mutable<SkillDefinition> = {
     description: expectString(record.description, message),
     markdown: expectString(record.markdown, message),
   };
+  if (record.deferred !== undefined) {
+    definition.deferred = expectBoolean(record.deferred, message);
+  }
   const license = record.license;
   const metadata = getOptionalStringRecordProperty(record, "metadata", message);
 

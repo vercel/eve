@@ -143,7 +143,7 @@ describe("session owner starts", () => {
       startSessionOwnerStep({
         activationToken: "owner-1:handoff",
         anchorRunId: "anchor-1",
-        checkpoint: {} as never,
+        checkpoint: { serializedContext: {} } as never,
         delivery: { kind: "deliver", payloads: [] },
         targetDeploymentId: "latest",
       }),

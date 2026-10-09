@@ -33,65 +33,84 @@ afterEach(() => {
 });
 
 describe("vercelScheduleProvider", () => {
-  it("creates a queue-target schedule with an eve dispatch envelope using ambient OIDC", async () => {
+  it.each(["production", "local"] as const)(
+    "creates a queue-target schedule with an eve dispatch envelope in %s",
+    async (environment) => {
+      const local = environment === "local";
+      vi.stubEnv("VERCEL", local ? undefined : "1");
+      vi.stubEnv("VERCEL_ENV", local ? "development" : "production");
+      vi.stubEnv("EVE_DEV", local ? "1" : undefined);
+      vi.stubEnv("NODE_ENV", local ? "development" : "test");
+      vi.stubEnv("VERCEL_DEPLOYMENT_ID", undefined);
+      vi.stubEnv("VERCEL_OIDC_TOKEN", oidcToken);
+      vi.stubEnv("VERCEL_SCHEDULE_DEV_API_VERSION", local ? "1" : undefined);
+      vi.stubEnv("VERCEL_SCHEDULE_BASE_URL", local ? "http://127.0.0.1:4784" : undefined);
+      vi.stubEnv("VERCEL_SCHEDULE_TOKEN", local ? "local-token" : undefined);
+      const fetchImpl = vi.fn<typeof fetch>(async () => Response.json(schedule()));
+      const provider = vercelScheduleProvider({ fetch: fetchImpl });
+
+      const record = await provider.create(context, {
+        expression: {
+          type: "cron",
+          cron: "0 12 * * *",
+          timezone: "America/New_York",
+          jitter: 5,
+        },
+        payload: "Review PRs",
+        name: "review-prs-daily",
+      });
+
+      expect(provider.kind).toBe("vercel");
+      expect(record).toMatchObject({ name: "review-prs-daily", scheduleId: "sch_1" });
+      const [url, init] = fetchImpl.mock.calls[0]!;
+      expect(String(url)).toBe(
+        `${local ? "http://127.0.0.1:4784" : "https://vercel-schedules.com"}/v1/schedules`,
+      );
+      expect(JSON.parse(String(init?.body))).toMatchObject({
+        name: "review-prs-daily",
+        namespace: "eve-namespace",
+        payload: {
+          eve: { application: "dynamic-schedules", collection: "collection", version: 1 },
+          payload: "Review PRs",
+        },
+        target: { type: "queue", topic: expect.stringMatching(/^__eve_schedule_/u) },
+      });
+      expect(init?.headers).toBeInstanceOf(Headers);
+      expect(init?.signal).toBe(context.abortSignal);
+      expect(new Headers(init?.headers).get("Authorization")).toBe(
+        `Bearer ${local ? "local-token" : oidcToken}`,
+      );
+    },
+  );
+
+  it("patches only supplied configuration, wraps replacement payloads, and clears omitted timing options", async () => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_ENV", "production");
     vi.stubEnv("VERCEL_OIDC_TOKEN", oidcToken);
     const fetchImpl = vi.fn<typeof fetch>(async () => Response.json(schedule()));
-    const provider = vercelScheduleProvider({
-      fetch: fetchImpl,
-      baseUrl: "https://vercel-schedules.com",
+    const provider = vercelScheduleProvider({ fetch: fetchImpl });
+    await provider.update(context, "review-prs-daily", { payload: { task: "Updated" } });
+    await provider.update(context, "review-prs-daily", {
+      expression: { type: "cron", cron: "0 9 * * *" },
     });
-
-    const record = await provider.create(context, {
-      expression: {
-        type: "cron",
-        cron: "0 12 * * *",
-        timezone: "America/New_York",
-        jitter: 5,
-      },
-      payload: "Review PRs",
-      name: "review-prs-daily",
-    });
-
-    expect(provider.kind).toBe("vercel");
-    expect(record).toMatchObject({ name: "review-prs-daily", scheduleId: "sch_1" });
-    const [url, init] = fetchImpl.mock.calls[0]!;
-    expect(String(url)).toBe("https://vercel-schedules.com/v1/schedules");
-    expect(JSON.parse(String(init?.body))).toMatchObject({
-      name: "review-prs-daily",
-      namespace: "eve-namespace",
+    const [url, payloadRequest] = fetchImpl.mock.calls[0]!;
+    expect(String(url)).toBe(
+      "https://vercel-schedules.com/v1/schedules/review-prs-daily?namespace=eve-namespace",
+    );
+    expect(payloadRequest?.method).toBe("PATCH");
+    expect(JSON.parse(String(payloadRequest?.body))).toEqual({
       payload: {
         eve: { application: "dynamic-schedules", collection: "collection", version: 1 },
-        payload: "Review PRs",
+        payload: { task: "Updated" },
       },
-      target: { type: "queue", topic: expect.stringMatching(/^__eve_schedule_/u) },
     });
-    expect(init?.headers).toBeInstanceOf(Headers);
-    expect(init?.signal).toBe(context.abortSignal);
-    expect(new Headers(init?.headers).get("Authorization")).toBe(`Bearer ${oidcToken}`);
+    expect(JSON.parse(String(fetchImpl.mock.calls[1]![1]?.body))).toEqual({
+      expression: { type: "cron", cron: "0 9 * * *" },
+      timezone: "UTC",
+      jitter: null,
+    });
   });
 
-  it("reports when creating an inactive schedule leaves it active after disable fails", async () => {
-    vi.stubEnv("VERCEL", "1");
-    vi.stubEnv("VERCEL_ENV", "production");
-    vi.stubEnv("VERCEL_OIDC_TOKEN", oidcToken);
-    const fetchImpl = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(Response.json(schedule()))
-      .mockResolvedValueOnce(new Response("disable failed", { status: 500 }));
-    const provider = vercelScheduleProvider({ fetch: fetchImpl });
-
-    await expect(
-      provider.create(context, {
-        expression: { type: "cron", cron: "0 12 * * *", timezone: "UTC" },
-        payload: "Review PRs",
-        name: "review-prs-daily",
-        state: "inactive",
-      }),
-    ).rejects.toThrow("was created active, but disabling it failed; it may remain active");
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
-  });
   it("omits a blank first-page cursor", async () => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_ENV", "production");
@@ -109,6 +128,9 @@ describe("vercelScheduleProvider", () => {
   it("rejects preview deployments before calling the API", async () => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_ENV", "preview");
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_preview");
+    vi.stubEnv("VERCEL_SCHEDULE_DEV_API_VERSION", "1");
     const fetchImpl = vi.fn<typeof fetch>();
     const provider = vercelScheduleProvider({ fetch: fetchImpl });
 
@@ -116,8 +138,24 @@ describe("vercelScheduleProvider", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("uses the shared in-memory provider under eve dev", async () => {
+  it("rejects missing local authentication without falling back", async () => {
     vi.stubEnv("EVE_DEV", "1");
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", undefined);
+    vi.stubEnv("VERCEL_SCHEDULE_DEV_API_VERSION", "1");
+    vi.stubEnv("VERCEL_SCHEDULE_BASE_URL", "http://127.0.0.1:4784");
+    vi.stubEnv("VERCEL_SCHEDULE_TOKEN", undefined);
+    const fetchImpl = vi.fn<typeof fetch>();
+    const provider = vercelScheduleProvider({ fetch: fetchImpl });
+
+    await expect(provider.list(context, {})).rejects.toThrow("VERCEL_SCHEDULE_TOKEN");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("uses the shared in-memory provider under standalone eve dev", async () => {
+    vi.stubEnv("EVE_DEV", "1");
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("VERCEL_SCHEDULE_DEV_API_VERSION", undefined);
     const provider = vercelScheduleProvider();
     expect(provider.kind).toBe("in-memory");
 

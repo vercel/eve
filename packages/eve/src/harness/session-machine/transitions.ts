@@ -1,4 +1,4 @@
-import type { ModelMessage, UserContent } from "ai";
+import type { ModelMessage, ToolCallPart, UserContent } from "ai";
 
 import type {
   SubagentAuthorizationEventHookPayload,
@@ -370,27 +370,44 @@ function isComplete(step: SuspendedStep): boolean {
   return [...stepCallIds(step)].every((callId) => answered.has(callId));
 }
 
-/** Places a result right after the message that made its call. */
+/**
+ * Places a result right after the message that made its call, under the call's name: a call
+ * made through `eve__tool` or `eve__skill` keeps that name in history, whatever entry it ran.
+ */
 export function withResult(
   messages: readonly ModelMessage[],
-  part: ToolResultPart,
+  result: ToolResultPart,
 ): ModelMessage[] {
   const next = [...messages];
-  const asking = next.findIndex(
-    (message) =>
-      message.role === "assistant" &&
-      Array.isArray(message.content) &&
-      message.content.some(
-        (content) => content.type === "tool-call" && content.toolCallId === part.toolCallId,
-      ),
-  );
-  const following = next[asking + 1];
-  if (asking >= 0 && following?.role === "tool") {
-    next[asking + 1] = { ...following, content: [...following.content, part] };
+  const asking = findCall(next, result.toolCallId);
+  if (asking === undefined) {
+    next.push({ content: [result], role: "tool" });
+    return next;
+  }
+  const part = { ...result, toolName: asking.call.toolName };
+  const following = next[asking.index + 1];
+  if (following?.role === "tool") {
+    next[asking.index + 1] = { ...following, content: [...following.content, part] };
   } else {
-    next.splice(asking >= 0 ? asking + 1 : next.length, 0, { content: [part], role: "tool" });
+    next.splice(asking.index + 1, 0, { content: [part], role: "tool" });
   }
   return next;
+}
+
+/** The call with this id, and the index of the message that made it. */
+function findCall(
+  messages: readonly ModelMessage[],
+  callId: string,
+): { readonly call: ToolCallPart; readonly index: number } | undefined {
+  for (const [index, message] of messages.entries()) {
+    if (message.role !== "assistant" || typeof message.content === "string") continue;
+    const call = message.content.find(
+      (content): content is ToolCallPart =>
+        content.type === "tool-call" && content.toolCallId === callId,
+    );
+    if (call !== undefined) return { call, index };
+  }
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------

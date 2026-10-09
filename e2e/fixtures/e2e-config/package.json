@@ -5,6 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./cache-checks": "./src/cache-checks.ts",
+    "./catalog-tools": "./src/catalog-tools.ts",
     "./instrumentation": "./src/instrumentation.ts",
     "./instrumentation-otel": "./src/instrumentation-otel.ts",
     "./mock-script": "./src/mock-script.ts"

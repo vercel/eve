@@ -25,7 +25,7 @@ export type RuntimeEvent =
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage }
   /** A steering message that answered no pending request arrived during the wait. */
   | { readonly kind: "steering" }
-  /** A `task_wait` call's timeout passed. */
+  /** An `eve__task_wait` call's timeout passed. */
   | { readonly kind: "timeout"; readonly callId: string }
   /** A delivery or sign-in callback was admitted; a held request may be answered. */
   | { readonly kind: "input" }
@@ -231,7 +231,7 @@ export class ActiveTurn {
   }
 
   private cancelsThisTurn(payload: SessionInboxPayload): boolean {
-    if (payload.kind === "reset") return true;
+    if (payload.kind === "reset" || payload.kind === "session-failure") return true;
     if (payload.kind !== "cancel") return false;
     return payload.turnId === undefined || payload.turnId === this.expectedTurnId;
   }

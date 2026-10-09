@@ -305,7 +305,7 @@ export class SessionExecution {
 
   /**
    * The model tried to end the turn while its tasks work. The turn parks as
-   * `task_wait` would, until one of them settles or the turn is steered.
+   * `eve__task_wait` would, until one of them settles or the turn is steered.
    */
   private async waitForHeldTurn(turn: ActiveTurn): Promise<"cancelled" | "woke"> {
     let interrupted = false;
@@ -444,7 +444,7 @@ export class SessionExecution {
     }
   }
 
-  /** Answers every `task_wait` that can return now; returns the ones still waiting. */
+  /** Answers every `eve__task_wait` that can return now; returns the ones still waiting. */
   private async resolveTaskWaits(
     waits: readonly TaskWait[],
     interrupted: boolean,
@@ -469,11 +469,11 @@ export class SessionExecution {
   }
 
   /**
-   * `task_cancel` is answered at once, and so is each `task_wait` that can
+   * `eve__task_cancel` is answered at once, and so is each `eve__task_wait` that can
    * return now: a timeout of 0, a result already waiting, or nothing working.
-   * Any other `task_wait` parks the open turn, reported once as
+   * Any other `eve__task_wait` parks the open turn, reported once as
    * `turn.waiting`, and the turn resolves it alongside the step's other
-   * deferred calls.
+   * workflow tool calls.
    */
   private async answerTaskToolCalls(
     calls: readonly TaskToolCall[],
@@ -482,7 +482,7 @@ export class SessionExecution {
     const waits: TaskWait[] = [];
     const startedAtMs = calls.length === 0 ? 0 : await startTaskToolCallsStep();
     for (const call of calls) {
-      if (call.kind === "task_wait") waits.push(startTaskWait(call, startedAtMs));
+      if (call.kind === TASK_WAIT_TOOL_NAME) waits.push(startTaskWait(call, startedAtMs));
       else {
         let result: RuntimeActionResult;
         try {
@@ -522,7 +522,7 @@ export class SessionExecution {
     await this.input.cursor.advance((state) =>
       traceTaskToolCallStep(state, {
         callId: wait.callId,
-        toolName: "task_wait",
+        toolName: TASK_WAIT_TOOL_NAME,
         startedAtMs: wait.startedAtMs,
         completedAtMs: Date.now(),
         input: wait.input,
@@ -549,7 +549,7 @@ export class SessionExecution {
 }
 
 /**
- * One `task_wait` call the turn is parked on. Its timeout is a durable sleep
+ * One `eve__task_wait` call the turn is parked on. Its timeout is a durable sleep
  * the turn races against the inbox; nothing polls.
  */
 interface TaskWait {
@@ -562,7 +562,7 @@ interface TaskWait {
 }
 
 function startTaskWait(
-  call: Extract<TaskToolCall, { readonly kind: "task_wait" }>,
+  call: Extract<TaskToolCall, { readonly kind: typeof TASK_WAIT_TOOL_NAME }>,
   startedAtMs: number,
 ): TaskWait {
   const { callId, timeoutMs } = call;

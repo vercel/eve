@@ -18,11 +18,6 @@ export const runtimeToolCallActionRequestSchema = z
     callId: z.string(),
     input: jsonObjectSchema,
     kind: z.literal("tool-call"),
-    /**
-     * Set on a nested action: a call a tool made on the model's behalf. Names
-     * the call id of the tool call that made it.
-     */
-    parentCallId: z.string().optional(),
     toolName: z.string(),
   })
   .strict();
@@ -128,7 +123,7 @@ export type WorkflowToolRunEntry = Exclude<
 >;
 
 /**
- * How a deferred call enters its tool's workflow: through the entry point of
+ * How a workflow tool call enters its tool's workflow: through the entry point of
  * a new run, or, for a call with `taskId` to a `serve` tool, through the
  * `receive()` of the running task that id names.
  */
@@ -170,13 +165,15 @@ export const runtimeWorkflowTaskRequestSchema = z
 type RuntimeLoadSkillActionRequest = z.infer<typeof runtimeLoadSkillActionRequestSchema>;
 
 /**
- * Zod schema for one Eve-owned `load-skill` action request.
+ * Zod schema for one Eve-owned `load-skill` action request: the model's
+ * `eve__skill` call, named for the skill it loads.
  */
 const runtimeLoadSkillActionRequestSchema = z
   .object({
     callId: z.string(),
     input: jsonObjectSchema,
     kind: z.literal("load-skill"),
+    name: z.string(),
   })
   .strict();
 
@@ -302,18 +299,16 @@ export type RuntimeSubagentResult = RuntimeSubagentChildResult | RuntimeSubagent
 type RuntimeLoadSkillActionResult = z.infer<typeof runtimeLoadSkillActionResultSchema>;
 
 /**
- * Zod schema for one runtime-owned load-skill action result.
- *
- * The result still reports whether a skill became active during the turn; the
- * action name reflects how the model requests those instructions.
+ * Zod schema for one runtime-owned load-skill action result, named for the
+ * skill its `load-skill` request loads.
  */
 const runtimeLoadSkillActionResultSchema = z
   .object({
     callId: z.string(),
     isError: z.boolean().optional(),
     kind: z.literal("load-skill-result"),
+    name: z.string(),
     output: jsonValueSchema,
-    name: z.string().optional(),
   })
   .strict();
 

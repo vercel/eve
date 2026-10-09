@@ -109,8 +109,10 @@ export function webChatDriver(): ClientDriver {
             async () => {
               await look();
               // The page lists requests in the order the session asked them, which is the
-              // order a typed reply answers them in.
-              const texts = (await page.locator("p").allInnerTexts()).map((text) => text.trim());
+              // order a typed reply answers them in. A question's prompt is its legend.
+              const texts = (await page.locator("p, legend").allInnerTexts()).map((text) =>
+                text.trim(),
+              );
               const shown = prompts
                 .filter((prompt) => texts.includes(prompt))
                 .sort((a, b) => texts.lastIndexOf(a) - texts.lastIndexOf(b));
@@ -123,12 +125,14 @@ export function webChatDriver(): ClientDriver {
             describe,
           ),
         async press(option) {
-          const button = option.handle as Locator;
-          // A press on a button that's disabled, or that a re-render removed
-          // mid-press, lands nowhere, as it would for a person.
-          const pressable =
-            (await button.count()) > 0 && (await button.isEnabled().catch(() => false));
-          if (pressable) await button.click().catch(() => {});
+          for (const control of option.handle as readonly Locator[]) {
+            // A press on a control that's disabled, or that a re-render removed
+            // mid-press, lands nowhere, as it would for a person.
+            const pressable =
+              (await control.count()) > 0 && (await control.isEnabled().catch(() => false));
+            if (!pressable) return;
+            await control.click().catch(() => {});
+          }
         },
         async replies() {
           await look();
@@ -175,25 +179,38 @@ async function promptOptions(page: Page, prompt: string): Promise<RenderedOption
   );
 }
 
-/** An open-ended `ask_question` card: the prompt above a text field and no options while it's open. */
+/** An open-ended `ask_question` card: the prompt titles a text field and no options while it's open. */
 async function openEndedQuestion(page: Page, prompt: string): Promise<[] | undefined> {
-  const label = page.locator("p").getByText(prompt, { exact: true }).last();
-  if ((await label.count()) === 0) return undefined;
-  const card = label.locator("xpath=..");
-  const field = card.getByRole("textbox", { name: "Answer" });
+  const group = questionGroup(page, prompt);
+  const field = group.getByRole("textbox", { name: "Answer" });
   if ((await field.count()) === 0 || !(await field.isEditable().catch(() => false))) {
     return undefined;
   }
   // A question with options also takes free text. Its card can mount after `questionOptions`
   // looked, so check for options only once the field is known to be there.
-  return (await card.getByRole("radio").count()) === 0 ? [] : undefined;
+  return (await group.getByRole("radio").count()) === 0 ? [] : undefined;
 }
 
-/** An `ask_question` card: one radio per option while the question is open. */
+/** An `ask_question` card: one radio per option, chosen and then sent with Answer. */
 async function questionOptions(page: Page, prompt: string): Promise<RenderedOption[] | undefined> {
-  const group = page.getByRole("radiogroup", { exact: true, name: prompt }).last();
-  if ((await group.count()) === 0) return undefined;
-  return await readButtons(group.getByRole("radio"));
+  const group = questionGroup(page, prompt);
+  const radios = await group.getByRole("radio").all();
+  if (radios.length === 0) return undefined;
+  const answer = page
+    .locator("form")
+    .filter({ has: group })
+    .getByRole("button", { name: "Answer" });
+  const options: RenderedOption[] = [];
+  for (const radio of radios) {
+    if (!(await radio.isEnabled())) return undefined;
+    const label = await firstLine(radio.locator("xpath=ancestor::label[1]"));
+    options.push({ handle: [radio, answer], label });
+  }
+  return options;
+}
+
+function questionGroup(page: Page, prompt: string): Locator {
+  return page.getByRole("group", { exact: true, name: prompt }).last();
 }
 
 /** A tool approval: the prompt above one button per choice until it's answered. */
@@ -210,10 +227,14 @@ async function readButtons(buttons: Locator): Promise<RenderedOption[] | undefin
   const options: RenderedOption[] = [];
   for (const button of all) {
     if (!(await button.isEnabled())) return undefined;
-    const label = (await button.innerText()).split("\n")[0]!.trim();
-    options.push({ handle: button, label });
+    options.push({ handle: [button], label: await firstLine(button) });
   }
   return options;
+}
+
+async function firstLine(element: Locator): Promise<string> {
+  const lines = (await element.innerText()).split("\n").map((line) => line.trim());
+  return lines.find((line) => line.length > 0) ?? "";
 }
 
 /**

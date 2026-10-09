@@ -3,6 +3,7 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import {
   AuthKey,
+  ToolStubsKey,
   CapabilitiesKey,
   ChannelInstrumentationKey,
   ChannelDeliveryKey,
@@ -72,6 +73,7 @@ export function buildRunContext(input: {
     run.schedule?.occurrenceId ?? contextStorage.getStore()?.get(OccurrenceIdKey);
   if (occurrenceId !== undefined) ctx.set(OccurrenceIdKey, occurrenceId);
   ctx.set(AuthKey, auth);
+  if (run.toolStubs !== undefined) ctx.set(ToolStubsKey, run.toolStubs);
   if (run.initiatorAuth !== undefined || run.input.message !== undefined) {
     ctx.set(InitiatorAuthKey, run.initiatorAuth ?? auth);
   }

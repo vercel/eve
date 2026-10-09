@@ -20,22 +20,18 @@ describe("mergeProviderSafetyIdentifier", () => {
       openai: { safetyIdentifier: "authored", store: false },
     };
 
-    expect(
-      mergeProviderSafetyIdentifier({ id: "openai/gpt-5.6-sol" }, providerOptions, auth),
-    ).toEqual(providerOptions);
+    expect(mergeProviderSafetyIdentifier("openai", providerOptions, auth)).toEqual(providerOptions);
   });
 
   it("treats an authored OpenAI null as explicit", () => {
     const providerOptions = { openai: { safetyIdentifier: null } };
 
-    expect(
-      mergeProviderSafetyIdentifier({ id: "openai/gpt-5.6-sol" }, providerOptions, auth),
-    ).toEqual(providerOptions);
+    expect(mergeProviderSafetyIdentifier("openai", providerOptions, auth)).toEqual(providerOptions);
   });
 
   it("sets the OpenAI safety identifier while preserving other options", () => {
     const result = mergeProviderSafetyIdentifier(
-      { id: "openai/gpt-5.6-sol" },
+      "openai",
       {
         gateway: { caching: "auto" },
         openai: { store: false },
@@ -61,14 +57,14 @@ describe("mergeProviderSafetyIdentifier", () => {
       },
     };
 
-    expect(
-      mergeProviderSafetyIdentifier({ id: "anthropic/claude-opus-5" }, providerOptions, auth),
-    ).toEqual(providerOptions);
+    expect(mergeProviderSafetyIdentifier("anthropic", providerOptions, auth)).toEqual(
+      providerOptions,
+    );
   });
 
   it("sets the Anthropic user ID while preserving other options", () => {
     const result = mergeProviderSafetyIdentifier(
-      { id: "anthropic/claude-opus-5" },
+      "anthropic",
       {
         gateway: { caching: "auto" },
         anthropic: { thinking: { type: "adaptive" } },
@@ -89,16 +85,12 @@ describe("mergeProviderSafetyIdentifier", () => {
   it("does not add a safety identifier for another provider", () => {
     const providerOptions = { google: { structuredOutputs: true } };
 
-    expect(
-      mergeProviderSafetyIdentifier({ id: "google/gemini-3.1-pro" }, providerOptions, auth),
-    ).toBe(providerOptions);
+    expect(mergeProviderSafetyIdentifier("google", providerOptions, auth)).toBe(providerOptions);
   });
 
   it("does not add a safety identifier without an active caller", () => {
     const providerOptions = { anthropic: { thinking: { type: "adaptive" } } };
 
-    expect(
-      mergeProviderSafetyIdentifier({ id: "anthropic/claude-opus-5" }, providerOptions, null),
-    ).toBe(providerOptions);
+    expect(mergeProviderSafetyIdentifier("anthropic", providerOptions, null)).toBe(providerOptions);
   });
 });

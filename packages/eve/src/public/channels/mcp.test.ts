@@ -703,7 +703,9 @@ describe("mcpChannel tools", () => {
     // Unpadded base64url of 12,288 bytes is exactly the 16 KiB cap; JSON whitespace pads it.
     const sized = (bytes: number) => encode(json + " ".repeat(bytes - Buffer.byteLength(json)));
     const trusted = {
-      trustedForwarders: (forwarder: SessionAuthContext) => forwarder === principal,
+      trustedForwarders: (forwarder: SessionAuthContext) =>
+        forwarder.authenticator === principal.authenticator &&
+        forwarder.principalId === principal.principalId,
     };
     const forwardedAlice = {
       ...alice,
@@ -720,7 +722,11 @@ describe("mcpChannel tools", () => {
         describe: async () => ({ name: "compiled-agent", skills: [], tools: [note] }),
         invokeTool: overrides.invokeTool,
       });
-      const route = mcpChannel({ auth: () => principal, tools: true, ...options }).routes[1]!;
+      const route = mcpChannel({
+        auth: () => ({ ...principal, allowToolStubs: true }),
+        tools: true,
+        ...options,
+      }).routes[1]!;
       if (route.transport === "websocket") throw new Error("expected HTTP route");
       const params = { arguments: tool === "agent_start" ? { message: "hi" } : {}, name: tool };
       const body = { id: 1, jsonrpc: "2.0", method: "tools/call", params };
@@ -783,7 +789,7 @@ describe("mcpChannel tools", () => {
       throw new Error("stop after createSession");
     });
     await post(trusted, valid, "agent_start", { createSession: createSession as never });
-    expect(createSession.mock.calls[0]![0]).toMatchObject({ auth: principal });
+    expect((createSession.mock.calls[0]![0] as { auth: unknown }).auth).toEqual(principal);
   });
 
   it("advertises tool sessions and honours a key only from clients that declare them", async () => {

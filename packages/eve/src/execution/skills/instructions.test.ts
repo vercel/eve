@@ -32,9 +32,6 @@ describe("formatAvailableSkillsSection", () => {
     expect(result).not.toBeNull();
     expect(result).toContain("Available skills");
     expect(result).toContain(
-      "If the user names a skill or the request clearly matches one of the descriptions below, call load_skill before proceeding.",
-    );
-    expect(result).toContain(
       "If multiple skills match, activate the minimal set that covers the task.",
     );
     expect(result).toContain("Skill files live under `$HOME/.agents/skills/<skill>/`");

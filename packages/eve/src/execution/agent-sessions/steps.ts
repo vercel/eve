@@ -35,6 +35,7 @@ import {
 } from "#execution/agent-sessions/remote.js";
 import { buildSubagentRunInput } from "#subagents/tool.js";
 import { resolveConversationId } from "#shared/conversation-identity.js";
+import { stubToolPath } from "#tool-stubs/target.js";
 
 const log = createLogger("execution.agent-sessions");
 
@@ -256,8 +257,18 @@ async function startLocalSession(
     dynamicSubagentAgentConfig: target.dynamicSubagentAgentConfig,
     nodeId: action.nodeId,
   });
+  let childToolStubs = context.toolStubs;
+  if (childToolStubs !== undefined) {
+    childToolStubs = {
+      ...childToolStubs,
+      agentPath: stubToolPath(childToolStubs, action.name),
+    };
+  }
   await contextStorage.run(new ContextContainer({ localDevRequest: context.localDevRequest }), () =>
-    childRuntime.createSession(runInput),
+    childRuntime.createSession({
+      ...runInput,
+      toolStubs: childToolStubs,
+    }),
   );
   const owner = await waitForCommandHookOwner(sessionInboxHookToken(childContinuationToken));
   return { kind: "local", name: action.name, nodeId: action.nodeId, sessionId: owner.runId };
