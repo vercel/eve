@@ -58,3 +58,8 @@ function samePrincipal(
   if (left.type === "app" || right.type === "app") return left.type === right.type;
   return left.id === right.id && left.issuer === right.issuer;
 }
+
+/** The key a sign-in callback names its attempt by. */
+export function signInAttemptKey(challenge: AuthorizationChallenge): string {
+  return challenge.attemptId ?? challenge.candidateId ?? challenge.name;
+}

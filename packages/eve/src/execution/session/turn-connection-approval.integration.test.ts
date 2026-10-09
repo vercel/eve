@@ -17,7 +17,10 @@ import {
   markApprovalCandidateAuthorizationRequired,
 } from "#harness/hitl/candidates.js";
 import { CallbackBaseUrlKey } from "#harness/authorization.js";
-import { setPendingAuthorization } from "#harness/hitl/session-state.js";
+
+import { withSignIns } from "#harness/hitl/sign-ins.js";
+import { readHitlState, writeHitlState } from "#harness/hitl/session-state.js";
+
 import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import { defineInteractiveAuthorization } from "#shared/connection-types.js";
 import { suspendedSteps } from "#harness/session-machine/view.js";
@@ -630,17 +633,15 @@ describe("turn connection approval restoration", () => {
         challenge: { url: "https://example.com/sign-in" },
       },
     ];
-    fixture.updateSession((session) => ({
-      ...session,
-      state: setPendingAuthorization(
-        markApprovalCandidateAuthorizationRequired({
-          state: session.state,
-          candidateId: candidate.candidateId,
-          authorizationChallenges: challenges,
-        }),
-        { challenges },
-      ),
-    }));
+    fixture.updateSession((session) => {
+      const state = markApprovalCandidateAuthorizationRequired({
+        state: session.state,
+        candidateId: candidate.candidateId,
+        authorizationChallenges: challenges,
+      });
+      const signIns = withSignIns(readHitlState(state).signIns, challenges);
+      return { ...session, state: writeHitlState({ state }, { signIns }).state };
+    });
     clearDurableDynamicCallbacks(sessionId);
     const start = fixture.events.length;
     await fixture.step({

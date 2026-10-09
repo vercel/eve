@@ -13,8 +13,11 @@ import {
   registerWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
 
+import { readHitlState } from "#harness/hitl/session-state.js";
+import { withRelays } from "#internal/testing/session-machine.js";
+
 import { toolOutput } from "#tools/model-output.js";
-import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/hitl/session-state.js";
+
 import { setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
 import { isRuntimeWorkflowToolAction } from "#shared/action-types.js";
@@ -296,19 +299,8 @@ describe("runtime results", () => {
       address: { runId: "run-1", hookToken: "eve:workflow-tool-run:op-1" },
     });
     const answerToken = "eve:workflow-tool-run-answer:run-1:0";
-    const session = upsertProxyInputRequests({
-      entries: [
-        [
-          "other-request",
-          {
-            childContinuationToken: CHILD_CONTINUATION_TOKEN,
-            event: REQUEST_EVENT,
-            kind: "question",
-          },
-        ],
-      ],
-      forChildContinuationToken: CHILD_CONTINUATION_TOKEN,
-      session: upsertProxyInputRequests({
+    const session = withRelays(
+      withRelays(withRun, {
         entries: [
           [
             answerToken,
@@ -323,9 +315,21 @@ describe("runtime results", () => {
           ],
         ],
         forChildContinuationToken: answerToken,
-        session: withRun,
       }),
-    });
+      {
+        entries: [
+          [
+            "other-request",
+            {
+              childContinuationToken: CHILD_CONTINUATION_TOKEN,
+              event: REQUEST_EVENT,
+              kind: "question",
+            },
+          ],
+        ],
+        forChildContinuationToken: CHILD_CONTINUATION_TOKEN,
+      },
+    );
 
     const finished = forgetFinishedRuns(
       session,
@@ -335,7 +339,7 @@ describe("runtime results", () => {
 
     expect(getBlockingWorkflowToolRuns(finished.session.state)).toEqual([]);
     expect(finished.requestIds).toEqual([answerToken]);
-    expect([...getProxyInputRequests(finished.session.state).keys()]).toContain("other-request");
+    expect([...readHitlState(finished.session.state).relays.keys()]).toContain("other-request");
   });
 
   it("projects a workflow tool's result through its toModelOutput", async () => {
