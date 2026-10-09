@@ -28,10 +28,8 @@ export default defineEval({
     ).expectOk();
     expectResolved(stale, request, "withdrawn");
     expectNotRun(stale, "change-a");
-    stale.event("delivery.consumed", {
-      count: 1,
-      data: { parts: [{ kind: "text", text: "approve" }] },
-    });
+    // The answer reaches the model as a note about an earlier prompt, never as Alice's text.
+    stale.event("delivery.consumed", { count: 1, data: { parts: [] } });
     stale.event("content.completed", { data: { phase: "reply", value: REPLY.staleAnswer } });
     stale.event("turn.settled", { count: 1, data: { outcome: "completed" } });
   },

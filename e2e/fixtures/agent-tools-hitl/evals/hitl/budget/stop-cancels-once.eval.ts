@@ -11,7 +11,8 @@ export default defineEval({
     const { request, session } = await budgetQuestion(t);
 
     const stopped = await session.respond(answers("stop", request), asAlice);
-    expectResolved(stopped, request, "accepted");
+    // Stop declines to go on.
+    expectResolved(stopped, request, "declined");
     stopped.event("interaction.settled", { count: 1 });
     stopped.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
     stopped.notEvent("model.started");

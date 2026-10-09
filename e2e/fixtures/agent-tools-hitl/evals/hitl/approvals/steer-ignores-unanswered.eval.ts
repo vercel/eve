@@ -50,12 +50,10 @@ export default defineEval({
       count: 1,
       data: { parts: [{ kind: "text", text: SAY.hello }] },
     });
-    // The answers settle first. A runs before the model's next run; Alice's
-    // message is consumed into the same turn before the run after that.
+    // The answers settle first and A runs; the model reads A's result, then Alice's message.
     steered.eventOrder([
       { type: "interaction.settled" },
       { type: "call.settled", data: { callId: a.action.callId, outcome: "completed" } },
-      { type: "delivery.consumed", data: { parts: [{ kind: "text", text: SAY.hello }] } },
       { type: "model.started" },
       { type: "content.completed", data: { phase: "reply", value: REPLY.hello } },
       { data: { outcome: "completed" }, type: "turn.settled" },

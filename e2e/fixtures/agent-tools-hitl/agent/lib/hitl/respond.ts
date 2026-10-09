@@ -33,8 +33,10 @@ const STALE_ANSWER_PREFIX =
   "The user submitted the following response to an earlier interactive prompt.";
 const SIGN_IN_DROPPED = "was cancelled because the user sent a new message instead";
 
+/** Each attempt at a scripted call gets a new id, as a provider's would: `<id>.<attempt>`. */
+let attempts = 0;
 const call = (id: string, name: string, input: object = {}): MockModelToolCall => ({
-  id,
+  id: `${id}.${++attempts}`,
   input,
   name,
 });
@@ -45,14 +47,16 @@ const call = (id: string, name: string, input: object = {}): MockModelToolCall =
  * durable replay follows the same script.
  */
 export function respond(request: MockModelRequest): MockModelResponse {
-  const result = (id: string) => request.toolResults.find((entry) => entry.id === id);
+  // A call is known by its script id; the attempt suffix only keeps call ids unique.
+  const result = (id: string) =>
+    request.toolResults.find((entry) => entry.id.slice(0, entry.id.lastIndexOf(".")) === id);
   const outcome = (id: string): string => {
     const found = result(id);
     if (found === undefined) return "missing";
     return found.isError ? "not run" : `done ${JSON.stringify(found.output)}`;
   };
   const run = (calls: MockModelToolCall[], answer: () => string): MockModelResponse => {
-    const missing = calls.filter((tool) => result(tool.id!) === undefined);
+    const missing = calls.filter((tool) => result(scriptId(tool.id!)) === undefined);
     return missing.length > 0 ? { toolCalls: missing } : { text: answer() };
   };
   const allText = request.messages.map((message) => message.text).join("\n");
@@ -117,6 +121,10 @@ export function respond(request: MockModelRequest): MockModelResponse {
     if (script !== undefined) return reply(script());
   }
   throw new Error(`No hitl script for: ${JSON.stringify(request.userMessages)}`);
+}
+
+function scriptId(id: string): string {
+  return id.slice(0, id.lastIndexOf("."));
 }
 
 function reply(response: MockModelResponse): MockModelResponse {

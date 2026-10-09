@@ -27,7 +27,7 @@ export default defineEval({
       count: 1,
       data: {
         interactionId: request.requestId,
-        outcome: "accepted",
+        outcome: "declined",
         response: { optionId: "stop" },
       },
     });

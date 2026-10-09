@@ -16,7 +16,8 @@ export default defineEval({
     const cancelled = await follow(t, session, startIndex);
     cancelled.event("interaction.settled", {
       count: 1,
-      data: { interactionId: authorization.attemptId, outcome: "declined" },
+      // The cancel interrupts the sign-in; nobody declined it.
+      data: { interactionId: authorization.attemptId, outcome: "interrupted" },
     });
     cancelled.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
     cancelled.notEvent("model.started");

@@ -56,7 +56,7 @@ export default defineEval({
         type: "interaction.settled",
         data: { interactionId: authorization.attemptId, outcome: "accepted" },
       },
-      { type: "response.settled", data: { outcome: "applied" } },
+      // The responder's answer applies once their sign-in completes.
       {
         type: "interaction.settled",
         data: { interactionId: request.requestId, outcome: "accepted" },

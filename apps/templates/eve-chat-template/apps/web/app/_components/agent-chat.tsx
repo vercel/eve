@@ -170,13 +170,17 @@ function namespaceStreamEvent(
     return event;
   }
 
-  return {
-    ...event,
-    ...(dataTurnId === undefined ? {} : { data: { ...event.data, turnId: prefixed(dataTurnId) } }),
-    ...(scopeTurnId === undefined
-      ? {}
-      : { scope: { ...event.scope, turnId: prefixed(scopeTurnId) } }),
-  } as SessionStreamEvent;
+  const withData = (
+    dataTurnId === undefined
+      ? event
+      : { ...event, data: { ...event.data, turnId: prefixed(dataTurnId) } }
+  ) as SessionStreamEvent;
+  return scopeTurnId === undefined
+    ? withData
+    : ({
+        ...withData,
+        scope: { ...withData.scope, turnId: prefixed(scopeTurnId) },
+      } as SessionStreamEvent);
 }
 
 function isSnapshotForCurrentSession(
@@ -1200,14 +1204,20 @@ function createAuthorizationDeclinedEvents(
 ): readonly SessionStreamEvent[] {
   // Skipping abandons the session: the chat's next message starts a new one. These records
   // close the sign-in and the turn in the chat's own history; the server never sees them.
-  const scope = authorization.turnId === undefined ? undefined : { turnId: authorization.turnId };
+  const data = {
+    interactionId: authorization.key,
+    outcome: "declined",
+    reason: "skipped",
+  } as const;
   const events: SessionStreamEvent[] = [
-    {
-      data: { interactionId: authorization.key, outcome: "declined", reason: "skipped" },
-      meta: createLocalEventMeta(),
-      type: "interaction.settled",
-      ...(scope === undefined ? {} : { scope }),
-    },
+    authorization.turnId === undefined
+      ? { data, meta: createLocalEventMeta(), type: "interaction.settled" }
+      : {
+          data,
+          meta: createLocalEventMeta(),
+          scope: { turnId: authorization.turnId },
+          type: "interaction.settled",
+        },
   ];
   if (authorization.turnId !== undefined) {
     events.push({

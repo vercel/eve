@@ -1,11 +1,10 @@
 import type { InteractionOutcome } from "eve/client";
-import {
-  toolCallsOf,
-  type EveEvalAssertions,
-  type EveEvalContext,
-  type EveEvalSession,
-  type EveEvalTurn,
-  type InputRequest,
+import type {
+  EveEvalAssertions,
+  EveEvalContext,
+  EveEvalSession,
+  EveEvalTurn,
+  InputRequest,
 } from "eve/evals";
 
 import { SAY } from "../../agent/lib/hitl/respond.ts";
@@ -156,11 +155,6 @@ export function expectResolved(
 
 /** `toolName`'s call never ran: it settled rejected, and no call of it completed. */
 export function expectNotRun(on: EveEvalAssertions, toolName: string) {
-  on.eventsSatisfy(`${toolName} settles rejected and never completes`, (events) => {
-    const calls = toolCallsOf(events).filter((call) => call.name === toolName);
-    return (
-      calls.some((call) => call.status === "rejected") &&
-      !calls.some((call) => call.status === "completed")
-    );
-  });
+  on.calledTool(toolName, { status: "rejected" });
+  on.calledTool(toolName, { count: 0, status: "completed" });
 }
