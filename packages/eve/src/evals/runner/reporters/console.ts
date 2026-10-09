@@ -11,6 +11,10 @@ import {
   formatAssertionFailureDetailLines,
   formatAssertionFailureHeadline,
 } from "#evals/runner/reporters/assertion-diagnostics.js";
+import {
+  exportedAssertionName,
+  groupAssertionScores,
+} from "#evals/runner/reporters/assertion-scores.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 
 /**
@@ -80,6 +84,17 @@ class ConsoleReporter implements EvalReporter {
       for (const detailLine of formatAssertionFailureDetailLines(assertion)) {
         this.#log(`    ${this.#colors.red(detailLine)}`);
       }
+    }
+
+    // Reporters keep one score per exported name, the lowest. Warn only when
+    // that merge drops information: repeated names whose scores differ.
+    for (const [name, group] of groupAssertionScores(assertions, exportedAssertionName)) {
+      if (group.assertions.every((assertion) => assertion.score === group.score)) continue;
+      this.#log(
+        `  ${this.#colors.yellow(
+          `⚠ ${name} recorded ${group.assertions.length} times with different scores; reporters keep only the lowest. Add .label() to tell them apart.`,
+        )}`,
+      );
     }
 
     if (error) {
@@ -188,15 +203,18 @@ class ConsoleReporter implements EvalReporter {
   ): { name: string; avg: number; count: number }[] {
     const totals = new Map<string, { sum: number; count: number }>();
 
+    // One value per name per eval, the group minimum, matching what the
+    // export reporters record; `count` is the number of evals.
     for (const result of results) {
-      for (const assertion of result.assertions) {
-        if (assertion.severity !== "soft" || assertion.score === undefined) continue;
-        const entry = totals.get(assertion.name);
+      const softs = result.assertions.filter((assertion) => assertion.severity === "soft");
+      for (const [name, group] of groupAssertionScores(softs, (assertion) => assertion.name)) {
+        if (group.score === undefined) continue;
+        const entry = totals.get(name);
         if (entry) {
-          entry.sum += assertion.score;
+          entry.sum += group.score;
           entry.count += 1;
         } else {
-          totals.set(assertion.name, { sum: assertion.score, count: 1 });
+          totals.set(name, { sum: group.score, count: 1 });
         }
       }
     }

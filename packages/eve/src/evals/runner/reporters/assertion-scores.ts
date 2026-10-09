@@ -1,5 +1,15 @@
 import type { AssertionResult } from "#evals/types.js";
 
+/**
+ * The name an assertion is exported under. Gates carry a `gate:` prefix so
+ * they never share a column with a soft assertion of the same name, and so
+ * experiments diff gate regressions the same way they diff soft scores.
+ * Sinks with stricter label rules normalize this name themselves.
+ */
+export function exportedAssertionName(assertion: AssertionResult): string {
+  return assertion.severity === "gate" ? `gate:${assertion.name}` : assertion.name;
+}
+
 /** Assertions reported under one name, scored together. */
 export interface AssertionScoreGroup {
   /** Lowest completed score in the group; absent when every member errored. */

@@ -56,6 +56,65 @@ describe("Console", () => {
     expect(lines).toContain('    answer: {"type":"boolean","probability":0}');
   });
 
+  it("warns when repeated assertion names merge different scores", () => {
+    const lines: string[] = [];
+    const reporter = Console({ color: false, log: (line) => lines.push(line) });
+
+    reporter.onEvalComplete({
+      assertions: [
+        { name: "judge.boolean", passed: true, errored: false, score: 0.9, severity: "soft" },
+        { name: "judge.boolean", passed: true, errored: false, score: 0.4, severity: "soft" },
+        { name: "judge.boolean", passed: true, errored: false, score: 1, severity: "gate" },
+        { name: "succeeded", passed: true, errored: false, score: 1, severity: "gate" },
+        { name: "succeeded", passed: true, errored: false, score: 1, severity: "gate" },
+      ],
+      completedAt: "2026-01-01T00:00:01.000Z",
+      id: "quality",
+      result: {
+        derived: createEmptyDerivedFacts(),
+        events: [],
+        finalMessage: "ok",
+        output: "ok",
+        status: "completed",
+        traceContexts: [],
+      },
+      startedAt: "2026-01-01T00:00:00.000Z",
+      verdict: "passed",
+    });
+
+    expect(lines).toEqual([
+      "✓  quality  gates 3/3  judge.boolean: 90%  judge.boolean: 40%",
+      "  ⚠ judge.boolean recorded 2 times with different scores; reporters keep only the lowest. Add .label() to tell them apart.",
+    ]);
+  });
+
+  it("aggregates repeated soft scores as one value per eval in the run summary", () => {
+    const lines: string[] = [];
+    const reporter = Console({ color: false, log: (line) => lines.push(line) });
+    const result: EveEvalResult = {
+      assertions: [
+        { name: "judge.boolean", passed: true, errored: false, score: 0.9, severity: "soft" },
+        { name: "judge.boolean", passed: true, errored: false, score: 0.4, severity: "soft" },
+      ],
+      completedAt: "2026-01-01T00:00:01.000Z",
+      id: "quality",
+      result: {
+        derived: createEmptyDerivedFacts(),
+        events: [],
+        finalMessage: "ok",
+        output: "ok",
+        status: "completed",
+        traceContexts: [],
+      },
+      startedAt: "2026-01-01T00:00:00.000Z",
+      verdict: "passed",
+    };
+
+    reporter.onRunComplete(summary(result));
+
+    expect(lines).toContain("  judge.boolean: 40% (1 evals)");
+  });
+
   it("does not print diagnostics for passing assertions", () => {
     const lines: string[] = [];
     const reporter = Console({ color: false, log: (line) => lines.push(line) });
