@@ -52,11 +52,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * disposable build workspace. Materializing after Nitro finishes keeps those
  * links relative so the published function remains self-contained.
  */
-export async function materializeVercelWorkflowFunctionOutput(outputDir: string): Promise<void> {
+export async function materializeVercelWorkflowFunctionOutput(
+  outputDir: string,
+  hub = false,
+): Promise<void> {
   const functionsDir = join(outputDir, "functions");
   const rootServerFunctionPath = await realpath(join(functionsDir, "__server.func"));
   const flowFunctionPath = join(functionsDir, `${EVE_WORKFLOW_FLOW_ROUTE_PATH.slice(1)}.func`);
   const flowFunctionConfig = await readFile(join(flowFunctionPath, ".vc-config.json"));
+  if (hub) {
+    const serverConfigPath = join(rootServerFunctionPath, ".vc-config.json");
+    const serverConfig = JSON.parse(await readFile(serverConfigPath, "utf8"));
+    const flowConfig = JSON.parse(flowFunctionConfig.toString());
+    for (const key of ["maxDuration", "memory"]) {
+      if (flowConfig[key] === undefined) delete serverConfig[key];
+      else serverConfig[key] = flowConfig[key];
+    }
+    await writeFile(serverConfigPath, JSON.stringify(serverConfig));
+  }
   const stagingPath = `${flowFunctionPath}.eve-staging`;
 
   await rm(stagingPath, {

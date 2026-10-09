@@ -1,3 +1,4 @@
+import { resolveConfiguredWorkflowWorld } from "#internal/workflow/world-target.js";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
@@ -48,7 +49,8 @@ export async function computeDevelopmentHostFingerprint(
       enabled: agentNodes.some((node) =>
         node.tools.some((tool) => tool.workflowProgram !== undefined),
       ),
-      world: manifest.config.experimental?.workflow?.world ?? "local",
+      world:
+        resolveConfiguredWorkflowWorld(manifest.config.experimental?.workflow?.world) ?? "local",
     },
   };
 
