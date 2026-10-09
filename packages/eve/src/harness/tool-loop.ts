@@ -29,6 +29,7 @@ import type {
 import type { InstrumentationAttempt, InstrumentationStepScope } from "#instrumentation/runtime.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createHistoryViewPreparer } from "#shared/history-view.js";
+import { eventsOf } from "#harness/publication.js";
 import { clearMemorySessionState } from "#shared/memory-state.js";
 
 const environment = process.env.NODE_ENV ?? "unknown";
@@ -101,12 +102,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         handleEvent: config.handleEvent,
         turnId: activeTurnId(turnPosition(live.read())),
       }) ?? config.handleEvent;
-    const publish: Publish = async (event, messages) => {
-      generation.beforeEvent(event);
+    const publish: Publish = async (publication, messages) => {
+      const events = eventsOf(publication);
+      for (const event of events) generation.beforeEvent(event);
       // The publish sink folds what it publishes; without a sink, the step does, so lifecycle
       // never depends on whether a caller listens.
-      if (emit !== undefined) await emit(event, messages);
-      if (emit === undefined || ctx === undefined) live.record(event);
+      if (emit !== undefined) await emit(publication, messages);
+      if (emit === undefined || ctx === undefined) for (const event of events) live.record(event);
     };
     const step = createStep({
       config,

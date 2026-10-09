@@ -1,3 +1,4 @@
+import { eachEvent } from "#internal/testing/session-machine.js";
 import { simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
@@ -50,9 +51,9 @@ describe("content-filter reporting (real AI SDK)", () => {
       const step = createToolLoopHarness({
         resolveModel: async () => model,
         tools: new Map(),
-        handleEvent: async (event) => {
+        handleEvent: eachEvent(async (event) => {
           events.push(event);
-        },
+        }),
       });
       const result = await step(session(), { message: "Help Alice prepare Bob's inventory list." });
       expect(calls).toBe(1);

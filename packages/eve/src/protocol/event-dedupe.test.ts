@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { stampTestEvent } from "#internal/testing/events.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
-import { stampMessageStreamEvent, type MessageStreamEvent } from "#protocol/message.js";
+import { stampTestEvent } from "#internal/testing/events.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 
 function sessionStarted(index: number) {
   return stampTestEvent({ type: "session.started", data: {} }, index);
@@ -17,12 +17,8 @@ describe("createEventDeduper", () => {
     // byte-identical payload are not.
     expect(deduper.admit(replayed)).toBe(true);
     expect(deduper.admit(replayed)).toBe(false);
-    expect(deduper.admit(stampMessageStreamEvent({ type: "session.started", data: {} }))).toBe(
-      true,
-    );
-    expect(deduper.admit(stampMessageStreamEvent({ type: "session.started", data: {} }))).toBe(
-      true,
-    );
+    expect(deduper.admit(sessionStarted(1))).toBe(true);
+    expect(deduper.admit(sessionStarted(2))).toBe(true);
     expect(deduper.size).toBe(3);
   });
 

@@ -47,6 +47,7 @@ import type {
 import { pausedOrParked, resolveSessionStepResult } from "#execution/session/turn-step-result.js";
 import { withSessionStateDelta } from "#execution/session/state-delta.js";
 import { openSessionEventPublisher } from "#execution/publish-session-events.js";
+import { eventsOf } from "#harness/publication.js";
 import { createTurnEventHandler } from "#execution/session/turn-event-handler.js";
 import {
   CallbackBaseUrlKey,
@@ -290,9 +291,11 @@ async function runSessionStepBody(
       participants,
       publisher,
     });
-    const handleEvent: HandleEventFn = async (event, messages) => {
-      if (event.type === "compaction.completed") compacted = true;
-      await emitTurnEvent(event, messages);
+    const handleEvent: HandleEventFn = async (publication, messages) => {
+      if (eventsOf(publication).some((event) => event.type === "compaction.completed")) {
+        compacted = true;
+      }
+      await emitTurnEvent(publication, messages);
     };
     const previousAdapterState =
       delivery !== undefined && !startedBetweenTurns

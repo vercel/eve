@@ -3,7 +3,7 @@ import { getTurnUsageState } from "#harness/turn-tag-state.js";
 import { jsonSchema, type LanguageModel, streamText, ToolLoopAgent } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { withParkedStep } from "#internal/testing/session-machine.js";
+import { withParkedStep, eachEvent } from "#internal/testing/session-machine.js";
 import { validateHarnessModelMessages } from "#harness/messages.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession, StepFn, StepNext, ToolLoopHarnessConfig } from "#harness/types.js";
@@ -606,7 +606,7 @@ describe("final request envelope compaction", () => {
         resolveModel: vi
           .fn()
           .mockResolvedValue({ provider: "test", modelId: "test-model" } as LanguageModel),
-        handleEvent: async (event) => {
+        handleEvent: eachEvent(async (event) => {
           events.push(event.type);
           if (event.type === "step.started")
             ctx.set(SessionDynamicToolMetadataKey, [
@@ -619,7 +619,7 @@ describe("final request envelope compaction", () => {
                 callbacks: { execute: { closure: {} } },
               },
             ]);
-        },
+        }),
       }),
     );
     await contextStorage.run(ctx, () =>

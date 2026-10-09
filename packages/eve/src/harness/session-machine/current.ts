@@ -27,6 +27,14 @@ export function enterSessionProjection(
   liveProjections.set(ctx, { projection: storedProjection(state) });
 }
 
+/**
+ * Enters an empty projection whose next line is at `position`, for a step that publishes without
+ * the session's state, as the terminal event does.
+ */
+export function enterSessionProjectionAt(ctx: ContextReader, position: number): void {
+  liveProjections.set(ctx, { projection: { ...storedProjection(undefined), position } });
+}
+
 /** Enters the stored projection unless this step already did. */
 export function ensureSessionProjection(
   ctx: ContextReader,
@@ -50,6 +58,23 @@ export function projectionFor(
   state: SessionStateMap | undefined,
 ): SessionProjection {
   return liveProjections.get(ctx)?.projection ?? storedProjection(state);
+}
+
+/** The position of the next line the step writes. */
+export function nextLinePosition(ctx: ContextReader): number {
+  return currentProjection(ctx).position ?? 0;
+}
+
+/** Records that the step wrote one line: the events it carries fold in, and the position advances. */
+export function recordPublishedLine(
+  ctx: ContextReader,
+  events: readonly (MessageStreamEvent | UnstampedMessageStreamEvent)[],
+): void {
+  for (const event of events) recordPublishedEvent(ctx, event);
+  const live = liveProjections.get(ctx);
+  if (live === undefined)
+    throw new Error("Session publication requires an initialized projection.");
+  live.projection = { ...live.projection, position: (live.projection.position ?? 0) + 1 };
 }
 
 export function recordPublishedEvent(

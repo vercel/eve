@@ -10,6 +10,7 @@ import {
   workflowTool,
 } from "#internal/testing/catalog-fixtures.js";
 import {
+  eachEvent,
   foldingHandler,
   parkedSteps,
   positionOf,
@@ -191,9 +192,9 @@ describe("generation steering with the real AI SDK", () => {
       steeringSignal: steering.signal,
       tools: new Map(),
       resolveModel: async () => model,
-      handleEvent: async (event) => {
+      handleEvent: eachEvent(async (event) => {
         events.push(event);
-      },
+      }),
     })(session(), { message: "Original request" });
     expect(result.steered).toBe(true);
     expect(doStream).not.toHaveBeenCalled();
@@ -241,10 +242,10 @@ describe("generation steering with the real AI SDK", () => {
         resolveModel: async () => model,
         tools: new Map(),
         steeringSignal: signal,
-        handleEvent: async (event) => {
+        handleEvent: eachEvent(async (event) => {
           events.push(event);
           if (event.type === "reasoning.appended") reasoning.resolve();
-        },
+        }),
       });
     const running = createStep(steering.signal)(session(), { message: "Who won in 2026?" });
     await reasoning.promise;
@@ -303,9 +304,9 @@ describe("generation steering with the real AI SDK", () => {
         resolveModel: async () => model,
         tools: new Map(),
         steeringSignal: signal,
-        handleEvent: async (event) => {
+        handleEvent: eachEvent(async (event) => {
           events.push(event);
-        },
+        }),
       });
     const running = createStep(steering.signal)(session(), {
       message: "Alice is preparing the 2026 report.",
@@ -543,10 +544,10 @@ describe("generation steering with the real AI SDK", () => {
       steeringSignal: steering.signal,
       tools: new Map(),
       resolveModel: async () => model,
-      handleEvent: async (event) => {
+      handleEvent: eachEvent(async (event) => {
         events.push(event);
         if (event.type === "message.appended") steering.abort();
-      },
+      }),
     })(session(), { message: "Start" });
     expect(result.steered).toBeUndefined();
     expect(providerSignal?.aborted).toBe(false);
@@ -595,9 +596,9 @@ describe("generation steering with the real AI SDK", () => {
         steeringSignal: steering.signal,
         tools: toolMap(entry),
         resolveModel: async () => model,
-        handleEvent: async (event) => {
+        handleEvent: eachEvent(async (event) => {
           if (event.type === "actions.requested") steering.abort();
-        },
+        }),
       })(session(), { message: "Alice asks for the work to start" });
 
       expect(result.steered).toBe(true);

@@ -8,11 +8,10 @@ import type { StreamReconnectPolicy } from "#client/types.js";
 import type { AgentStartedStreamEvent, MessageStreamEvent } from "#protocol/message.js";
 
 /**
- * A followed session can stay silent while a person answers its question, and the dev server can
- * restart underneath it, so only an abort or a non-retryable failure ends a subscription.
+ * The dev server can restart underneath a followed session, so only an abort, the stream's end,
+ * or a non-retryable failure ends a subscription.
  */
 const agentStreamReconnectPolicy = {
-  streamIdleReconnectPolicy: { maxAttempts: Infinity },
   streamOpenReconnectPolicy: { maxAttempts: Infinity },
 } as const satisfies StreamReconnectPolicy;
 
@@ -80,15 +79,14 @@ export class AgentStreamFollower {
     this.#options.onFollowing(sessionId);
     const { cursors } = this.#options;
     void (async () => {
-      let cursor = cursors.get(sessionId) ?? 0;
       try {
-        for await (const event of this.#options.session.agent(started).stream({
+        for await (const { cursor, event } of this.#options.session.agent(started).follow({
           signal: controller.signal,
-          startIndex: cursor,
+          startIndex: cursors.get(sessionId) ?? 0,
           streamReconnectPolicy: agentStreamReconnectPolicy,
         })) {
           if (controller.signal.aborted) return;
-          cursors.set(sessionId, ++cursor);
+          cursors.set(sessionId, cursor);
           this.#options.onEvent(sessionId, event);
           this.reconcile();
         }

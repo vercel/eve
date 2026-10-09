@@ -9,7 +9,7 @@ import {
 import { ClientAgentSession } from "#client/agent-session.js";
 import { ClientError } from "#client/client-error.js";
 import { MessageResponse } from "#client/message-response.js";
-import { followStreamIterable, sleep } from "#client/open-stream.js";
+import { followStreamIterable, sleep, type FollowedEvent } from "#client/open-stream.js";
 import {
   cancelClientSession,
   clearClientSession,
@@ -102,20 +102,19 @@ export class ClientSession {
   async snapshot(options?: { readonly signal?: AbortSignal }): Promise<SessionSnapshot> {
     options?.signal?.throwIfAborted();
     const events: MessageStreamEvent[] = [];
+    let streamIndex = 0;
 
-    for await (const event of this.#readStream({
+    for await (const { cursor, event } of this.#readStream({
       follow: false,
       signal: options?.signal,
       startIndex: 0,
     })) {
       events.push(event);
+      streamIndex = cursor;
     }
 
     options?.signal?.throwIfAborted();
-    return {
-      events,
-      session: { sessionId: this.#state.sessionId, streamIndex: events.length },
-    };
+    return { events, session: { sessionId: this.#state.sessionId, streamIndex } };
   }
 
   /** Sends a message to this exact session ID. */
@@ -204,11 +203,6 @@ export class ClientSession {
 
   /** Opens this session's durable event stream from its stored cursor. */
   stream(options?: StreamOptions): AsyncIterable<MessageStreamEvent> {
-    if (options?.follow === false && (options.startIndex ?? this.#state.streamIndex) < 0) {
-      throw new Error(
-        "stream({ follow: false }) requires a nonnegative startIndex; a tail-relative cursor cannot be bounded.",
-      );
-    }
     return this.#streamAndAdvance(options);
   }
 
@@ -223,7 +217,7 @@ export class ClientSession {
   }
 
   [followSession](options: FollowSessionOptions): AsyncIterable<MessageStreamEvent> {
-    return this.#streamAndAdvance({ ...options, keepAlive: true });
+    return this.#streamAndAdvance(options);
   }
 
   #messageResponse<TOutput>(
@@ -248,20 +242,23 @@ export class ClientSession {
     deliveryId?: string,
     source?: AsyncIterable<MessageStreamEvent>,
   ): AsyncGenerator<MessageStreamEvent> {
-    let eventCount = 0;
+    // A caller's own source advances the cursor as it reads; only this read's own lines move it.
+    let cursor = initialStreamIndex;
     let started = deliveryId === undefined;
     let reachedBoundary = false;
     const segment = new TurnSegment({ followCallbacks: true });
+    const events: AsyncIterable<{ readonly event: MessageStreamEvent; readonly cursor?: number }> =
+      source === undefined
+        ? this.#readStream({
+            headers: input.headers,
+            signal: input.signal,
+            startIndex: initialStreamIndex,
+            streamReconnectPolicy: input.streamReconnectPolicy,
+          })
+        : withoutCursor(source);
     try {
-      for await (const event of source ??
-        this.#readStream({
-          headers: input.headers,
-          keepAlive: true,
-          signal: input.signal,
-          startIndex: initialStreamIndex,
-          streamReconnectPolicy: input.streamReconnectPolicy,
-        })) {
-        eventCount += 1;
+      for await (const { event, cursor: next } of events) {
+        if (next !== undefined) cursor = next;
         if (deliveryId !== undefined) {
           const matches = event.meta?.deliveryIds?.includes(deliveryId) === true;
           const terminal = event.type === "session.failed" || event.type === "session.completed";
@@ -287,19 +284,15 @@ export class ClientSession {
         );
       }
     } finally {
-      this.#advanceStreamIndex(initialStreamIndex + eventCount);
+      if (source === undefined) this.#advanceStreamIndex(cursor);
     }
   }
 
-  async *#streamAndAdvance(
-    options?: FollowSessionOptions & { readonly keepAlive?: boolean },
-  ): AsyncGenerator<MessageStreamEvent> {
+  async *#streamAndAdvance(options?: FollowSessionOptions): AsyncGenerator<MessageStreamEvent> {
     const startIndex = options?.startIndex ?? this.#state.streamIndex;
-    let eventCount = 0;
-    for await (const event of this.#readStream({
+    for await (const { cursor, event } of this.#readStream({
       follow: options?.follow,
       headers: options?.headers,
-      keepAlive: options?.keepAlive,
       onCaughtUp: options?.onCaughtUp,
       resolveHeaders: options?.resolveHeaders,
       resolveReconnectPolicy: options?.resolveReconnectPolicy,
@@ -307,8 +300,7 @@ export class ClientSession {
       startIndex,
       streamReconnectPolicy: options?.streamReconnectPolicy,
     })) {
-      eventCount += 1;
-      if (startIndex >= 0) this.#advanceStreamIndex(startIndex + eventCount);
+      this.#advanceStreamIndex(cursor);
       yield event;
     }
   }
@@ -325,17 +317,15 @@ export class ClientSession {
     readonly resolveReconnectPolicy?: () => StreamOptions["streamReconnectPolicy"];
     readonly follow?: boolean;
     readonly headers?: Readonly<Record<string, string>>;
-    readonly keepAlive?: boolean;
     readonly signal?: AbortSignal;
     readonly startIndex: number;
     readonly streamReconnectPolicy?: StreamOptions["streamReconnectPolicy"];
     readonly resolveHeaders?: () => Readonly<Record<string, string>> | undefined;
-  }): AsyncIterable<MessageStreamEvent> {
+  }): AsyncIterable<FollowedEvent> {
     return followStreamIterable({
       onCaughtUp: input.onCaughtUp,
       follow: input.follow,
       host: this.#context.host,
-      keepAlive: input.keepAlive,
       resolveHeaders: () => this.#context.resolveHeaders(input.resolveHeaders?.() ?? input.headers),
       path: createEveSessionStreamRoutePath(this.#state.sessionId),
       redirect: this.#context.redirect,
@@ -353,6 +343,12 @@ export function followClientSession(
   options: FollowSessionOptions,
 ): AsyncIterable<MessageStreamEvent> {
   return session[followSession](options);
+}
+
+async function* withoutCursor(
+  source: AsyncIterable<MessageStreamEvent>,
+): AsyncGenerator<{ readonly event: MessageStreamEvent }> {
+  for await (const event of source) yield { event };
 }
 
 async function postSessionSend(

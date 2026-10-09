@@ -1,10 +1,7 @@
 import type { MessageStreamEvent } from "#protocol/message.js";
-import {
-  EVE_STREAM_CONTROL_VERSION,
-  EVE_STREAM_CONTROL_VERSION_QUERY,
-  EVE_STREAM_TAIL_INDEX_HEADER,
-} from "#protocol/message.js";
-import type { MessageStreamVersion } from "#protocol/message-version.js";
+import { EVE_STREAM_TAIL_INDEX_HEADER } from "#protocol/message.js";
+import { createLegacyEventReader } from "#protocol/legacy-lines.js";
+import type { StoredLine } from "#protocol/session-events/envelope.js";
 import { ClientError } from "#client/client-error.js";
 import { isStreamDisconnectError, readNdjsonStream } from "#client/ndjson.js";
 import { readMessageStreamVersion } from "#client/stream-version.js";
@@ -23,25 +20,27 @@ interface RetryPolicy {
 }
 
 interface ResolvedStreamReconnectPolicy {
+  /** False when the caller owns cursor recovery: one connection, then stop. */
+  readonly reconnect: boolean;
   readonly retryableErrorStatuses: ReadonlySet<number>;
-  readonly streamIdleReconnectPolicy: RetryPolicy;
   readonly streamOpenReconnectPolicy: RetryPolicy;
 }
 
-const DEFAULT_STREAM_READ_IDLE_TIMEOUT_MS = 15_000;
+/** A read times out only to detect a dead connection: the route sends a heartbeat every 10s. */
+const DEFAULT_STREAM_READ_IDLE_TIMEOUT_MS = 30_000;
+
+/** Backoff between reconnects after a transport failure. Following readers retry forever. */
+const RECONNECT_BACKOFF = { baseDelayMs: 250, maxDelayMs: 5_000 } as const;
 
 const DEFAULT_STREAM_RECONNECT_POLICY: ResolvedStreamReconnectPolicy = {
+  reconnect: true,
   retryableErrorStatuses: new Set([404, 409, 425, 500, 502, 503, 504]),
-  streamIdleReconnectPolicy: { baseDelayMs: 250, maxAttempts: 5, maxDelayMs: 4_000 },
   streamOpenReconnectPolicy: { baseDelayMs: 250, maxAttempts: 12, maxDelayMs: 5_000 },
 };
 
 const NO_STREAM_RECONNECT_POLICY: ResolvedStreamReconnectPolicy = {
   ...DEFAULT_STREAM_RECONNECT_POLICY,
-  streamIdleReconnectPolicy: {
-    ...DEFAULT_STREAM_RECONNECT_POLICY.streamIdleReconnectPolicy,
-    maxAttempts: 0,
-  },
+  reconnect: false,
   streamOpenReconnectPolicy: {
     ...DEFAULT_STREAM_RECONNECT_POLICY.streamOpenReconnectPolicy,
     maxAttempts: 1,
@@ -57,7 +56,6 @@ function resolveRetryPolicy(
 
 function resolveStreamReconnectPolicy(
   policy: StreamReconnectPolicy | undefined,
-  keepAlive = false,
 ): ResolvedStreamReconnectPolicy {
   if (policy && "reconnect" in policy && policy.reconnect === false) {
     return NO_STREAM_RECONNECT_POLICY;
@@ -65,15 +63,10 @@ function resolveStreamReconnectPolicy(
 
   const configured = policy as StreamReconnectPolicyOptions | undefined;
   return {
+    reconnect: true,
     retryableErrorStatuses: configured?.retryableErrorStatuses
       ? new Set(configured.retryableErrorStatuses)
       : DEFAULT_STREAM_RECONNECT_POLICY.retryableErrorStatuses,
-    streamIdleReconnectPolicy: resolveRetryPolicy(configured?.streamIdleReconnectPolicy, {
-      ...DEFAULT_STREAM_RECONNECT_POLICY.streamIdleReconnectPolicy,
-      maxAttempts: keepAlive
-        ? Infinity
-        : DEFAULT_STREAM_RECONNECT_POLICY.streamIdleReconnectPolicy.maxAttempts,
-    }),
     streamOpenReconnectPolicy: resolveRetryPolicy(
       configured?.streamOpenReconnectPolicy,
       DEFAULT_STREAM_RECONNECT_POLICY.streamOpenReconnectPolicy,
@@ -88,8 +81,6 @@ interface FollowStreamInput {
   /** Called once after consuming the durable tail captured when the connection opens. */
   readonly onCaughtUp?: () => void;
   readonly host: string;
-  /** Keep following empty streams unless the caller configures an idle retry limit. */
-  readonly keepAlive?: boolean;
   readonly resolveReconnectPolicy?: () => StreamReconnectPolicy | undefined;
   readonly streamReconnectPolicy?: StreamReconnectPolicy;
   /** @internal Test override for reconnecting an open stream that stops producing bytes. */
@@ -99,6 +90,7 @@ interface FollowStreamInput {
   /** eve stream route path, such as a session stream or a parent-origin subagent stream. */
   readonly path: string;
   readonly signal?: AbortSignal;
+  /** The position of the first line to read. Negative values count back from the tail. */
   readonly startIndex: number;
   /** Follow the live stream after the durable tail (default). `false` bounds the read at the tail. */
   readonly follow?: boolean;
@@ -109,107 +101,114 @@ interface OpenStreamInput extends FollowStreamInput {
   readonly requestTailIndex?: boolean;
 }
 
-/**
- * Follows one durable event stream route from an absolute cursor,
- * transparently reconnecting whenever the transport ends.
- *
- * Transport endings reconnect from the advanced cursor. Progress resets the
- * idle budget; repeated empty streams eventually stop the follow. Callers own
- * boundary handling. Negative tail-relative cursors use one connection because
- * they cannot be advanced safely.
- *
- * With `follow: false`, the first connection fixes the bound: the iterator
- * yields events until the cursor passes that tail, reconnecting as needed,
- * then returns instead of following.
- */
-export async function* followStreamIterable(
-  input: FollowStreamInput,
-): AsyncGenerator<MessageStreamEvent> {
-  if (input.follow === false && input.startIndex < 0) {
-    throw new Error(
-      "stream({ follow: false }) requires a nonnegative startIndex; a tail-relative cursor cannot be bounded.",
-    );
-  }
+/** One stored line and its position. A line this version can't read has `line: undefined`. */
+export interface FollowedLine {
+  readonly line: StoredLine | undefined;
+  readonly position: number;
+}
 
+/**
+ * Follows one durable stream route from a position, reconnecting as the transport ends.
+ *
+ * A reader counts positions from its cursor, one per stored line, and jumps forward at each
+ * position marker. `stream.ended` stops the follow; a lease end reconnects at once; anything
+ * else is a transport failure, retried with capped backoff. Readers that follow retry forever,
+ * and decide to stop from what they read. A tail-relative cursor becomes a position on the first
+ * connection, from the tail the server reports.
+ *
+ * With `follow: false`, the first connection fixes the bound: the iterator yields lines until
+ * the cursor passes that tail, reconnecting as needed, then returns instead of following.
+ */
+export async function* followStreamLines(input: FollowStreamInput): AsyncGenerator<FollowedLine> {
   const resolvePolicy = () =>
     resolveStreamReconnectPolicy(
       input.resolveReconnectPolicy === undefined
         ? input.streamReconnectPolicy
         : input.resolveReconnectPolicy(),
-      input.keepAlive,
     );
-  let retryPolicy = resolvePolicy();
-  let idleRetryPolicy = retryPolicy.streamIdleReconnectPolicy;
+  const bounded = input.follow === false || input.onCaughtUp !== undefined;
   let startIndex = input.startIndex;
-  let reconnectDelayMs = idleRetryPolicy.baseDelayMs;
-  let idleReconnects = 0;
-  let initialConnection = true;
+  let reconnectDelayMs: number = RECONNECT_BACKOFF.baseDelayMs;
+  let failures = 0;
   let tailIndex: number | undefined;
   let caughtUp = false;
 
+  const passedTail = () => tailIndex !== undefined && startIndex > tailIndex;
+  const noteProgress = () => {
+    if (!caughtUp && passedTail()) {
+      caughtUp = true;
+      input.onCaughtUp?.();
+    }
+    return input.follow === false && passedTail();
+  };
+
   while (true) {
-    retryPolicy = resolvePolicy();
-    idleRetryPolicy = retryPolicy.streamIdleReconnectPolicy;
+    const retryPolicy = resolvePolicy();
     let connection: OpenedStream;
     try {
       connection = await openStreamBody({
         ...input,
         retryPolicy,
         startIndex,
-        requestTailIndex:
-          (input.follow === false || input.onCaughtUp !== undefined) && tailIndex === undefined,
+        requestTailIndex: (bounded || startIndex < 0) && tailIndex === undefined,
       });
     } catch (error) {
-      if (input.signal?.aborted) {
-        return;
-      }
+      if (input.signal?.aborted) return;
       throw error;
     }
 
-    if ((input.follow === false || input.onCaughtUp !== undefined) && tailIndex === undefined) {
+    if ((bounded || startIndex < 0) && tailIndex === undefined) {
       tailIndex = connection.tailIndex;
       if (tailIndex === undefined) {
         connection.close();
         throw new Error(
-          `stream({ follow: false }) requires the server to report the ${EVE_STREAM_TAIL_INDEX_HEADER} header. ` +
+          `This read requires the server to report the ${EVE_STREAM_TAIL_INDEX_HEADER} header. ` +
             "The agent may be running an older eve version.",
         );
       }
+      if (startIndex < 0) startIndex = Math.max(0, tailIndex + 1 + startIndex);
     }
-
-    if (!caughtUp && tailIndex !== undefined && startIndex > tailIndex) {
-      caughtUp = true;
-      input.onCaughtUp?.();
-    }
-    if (input.follow === false && tailIndex !== undefined && startIndex > tailIndex) {
+    if (noteProgress()) {
       connection.close();
       return;
     }
 
-    let deliveredEvent = false;
+    let streamEnded = false;
     let leaseEnded = false;
     try {
-      for await (const event of readNdjsonStream(connection.body, {
+      for await (const record of readNdjsonStream(connection.body, {
         signal: input.signal,
-        controlVersion: connection.controlVersion,
         idleTimeoutMs: input.streamReadIdleTimeoutMs ?? DEFAULT_STREAM_READ_IDLE_TIMEOUT_MS,
-        onLeaseEnded: () => {
-          leaseEnded = true;
-        },
-        streamVersion: connection.streamVersion,
       })) {
-        startIndex += 1;
-        deliveredEvent = true;
-        reconnectDelayMs = idleRetryPolicy.baseDelayMs;
-        idleReconnects = 0;
-        yield event;
-
-        if (!caughtUp && tailIndex !== undefined && startIndex > tailIndex) {
-          caughtUp = true;
-          input.onCaughtUp?.();
-        }
-        if (input.follow === false && tailIndex !== undefined && startIndex > tailIndex) {
-          return;
+        switch (record.kind) {
+          case "transport":
+            switch (record.record.$eve) {
+              case "position":
+                if (record.record.next > startIndex) startIndex = record.record.next;
+                if (noteProgress()) return;
+                break;
+              case "stream.lease-ended":
+                leaseEnded = true;
+                break;
+              case "stream.ended":
+                streamEnded = true;
+                break;
+              case "heartbeat":
+                break;
+            }
+            continue;
+          case "unknown-transport":
+            continue;
+          case "commit":
+          case "progress":
+          case "invalid": {
+            const position = startIndex;
+            startIndex += 1;
+            failures = 0;
+            reconnectDelayMs = RECONNECT_BACKOFF.baseDelayMs;
+            yield { line: record.kind === "invalid" ? undefined : record.line, position };
+            if (noteProgress()) return;
+          }
         }
       }
     } catch (error) {
@@ -218,29 +217,44 @@ export async function* followStreamIterable(
       connection.close();
     }
 
-    idleRetryPolicy = resolvePolicy().streamIdleReconnectPolicy;
-    if (input.signal?.aborted || input.startIndex < 0 || idleRetryPolicy.maxAttempts === 0) {
-      return;
-    }
+    if (streamEnded || input.signal?.aborted || !resolvePolicy().reconnect) return;
+    if (leaseEnded) continue;
 
-    if (leaseEnded) {
-      continue;
+    // A transport failure. A one-shot read gives up after its budget of consecutive failures.
+    failures += 1;
+    if (input.follow === false && failures >= retryPolicy.streamOpenReconnectPolicy.maxAttempts) {
+      throw new Error("The session stream kept disconnecting before the read reached its tail.");
     }
-
-    if (
-      !deliveredEvent &&
-      !initialConnection &&
-      (idleReconnects += 1) >= idleRetryPolicy.maxAttempts
-    ) {
-      return;
-    }
-
-    initialConnection = false;
     await sleep(reconnectDelayMs, input.signal);
-    if (input.signal?.aborted) {
-      return;
+    if (input.signal?.aborted) return;
+    reconnectDelayMs = Math.min(reconnectDelayMs * 2, RECONNECT_BACKOFF.maxDelayMs);
+  }
+}
+
+/** One v26 event read from a line, with the position to resume from once it's handled. */
+export interface FollowedEvent {
+  readonly event: MessageStreamEvent;
+  /**
+   * The cursor after this event: past its line once the line's last event is handled, at the
+   * line before then, so a resume re-reads the rest of the line.
+   */
+  readonly cursor: number;
+}
+
+/**
+ * Follows a stream route's v26 events: the records each line carries, rebuilt as v26 readers
+ * expect them. Kept while v26 event types ride inside lines.
+ */
+export async function* followStreamIterable(
+  input: FollowStreamInput,
+): AsyncGenerator<FollowedEvent> {
+  const events = createLegacyEventReader();
+  for await (const { line, position } of followStreamLines(input)) {
+    if (line === undefined) continue;
+    const lineEvents = events.read(line, position);
+    for (const [index, event] of lineEvents.entries()) {
+      yield { cursor: index === lineEvents.length - 1 ? position + 1 : position, event };
     }
-    reconnectDelayMs = Math.min(reconnectDelayMs * 2, idleRetryPolicy.maxDelayMs);
   }
 }
 
@@ -248,8 +262,6 @@ export async function* followStreamIterable(
 interface OpenedStream {
   readonly body: ReadableStream<Uint8Array>;
   close(): void;
-  readonly controlVersion: "1" | undefined;
-  readonly streamVersion: MessageStreamVersion;
   readonly tailIndex: number | undefined;
 }
 
@@ -263,21 +275,14 @@ export async function openStreamBody(
   input: OpenStreamInput & { readonly retryPolicy?: ResolvedStreamReconnectPolicy },
 ): Promise<OpenedStream> {
   const retryPolicy =
-    input.retryPolicy ?? resolveStreamReconnectPolicy(input.streamReconnectPolicy, input.keepAlive);
+    input.retryPolicy ?? resolveStreamReconnectPolicy(input.streamReconnectPolicy);
   const openRetryPolicy = retryPolicy.streamOpenReconnectPolicy;
   let lastStatus: number | undefined;
   let lastBody: string | undefined;
   let lastHeaders: Headers | undefined;
   let retryDelayMs = openRetryPolicy.baseDelayMs;
 
-  const controlVersion =
-    input.startIndex >= 0 && retryPolicy.streamIdleReconnectPolicy.maxAttempts > 0
-      ? EVE_STREAM_CONTROL_VERSION
-      : undefined;
   const searchParams: Record<string, string> = {};
-  if (controlVersion !== undefined) {
-    searchParams[EVE_STREAM_CONTROL_VERSION_QUERY] = controlVersion;
-  }
   if (input.startIndex !== 0) {
     searchParams.startIndex = String(input.startIndex);
   }
@@ -324,6 +329,7 @@ export async function openStreamBody(
       if (!response.body) {
         throw new ClientError(response.status, "Response body is null.", response.headers);
       }
+      readMessageStreamVersion(response.headers);
       let closed = false;
       return {
         body: response.body,
@@ -337,8 +343,6 @@ export async function openStreamBody(
           response.body?.cancel().catch(() => {});
           connectionController.abort();
         },
-        controlVersion,
-        streamVersion: readMessageStreamVersion(response.headers),
         tailIndex: parseTailIndexHeader(response.headers),
       };
     }

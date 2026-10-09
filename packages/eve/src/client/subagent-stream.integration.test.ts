@@ -8,8 +8,6 @@ import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operati
 import { stampTestEvent } from "#internal/testing/events.js";
 import {
   EVE_MESSAGE_STREAM_VERSION,
-  EVE_STREAM_CONTROL_VERSION,
-  EVE_STREAM_CONTROL_VERSION_QUERY,
   EVE_STREAM_TAIL_INDEX_HEADER,
   EVE_STREAM_VERSION_HEADER,
   createAgentStartedEvent,
@@ -68,9 +66,6 @@ describe("ClientSession.agent through the parent proxy", () => {
       `${REMOTE_URL}/eve/v1/session/child-1/stream`,
     );
     expect(remoteUrl.searchParams.get("includeTailIndex")).toBe("1");
-    expect(remoteUrl.searchParams.get(EVE_STREAM_CONTROL_VERSION_QUERY)).toBe(
-      EVE_STREAM_CONTROL_VERSION,
-    );
     expect(remoteUrl.searchParams.has("startIndex")).toBe(false);
     expect(remoteRequests[0]!.headers.get("authorization")).toBe("Bearer authored-remote");
     expect(session.state).toEqual({ sessionId: "parent-1", streamIndex: 0 });
@@ -140,6 +135,9 @@ function createParentRoute(
     },
     async reset() {
       return { previousSessionId: "parent-1", status: "reset" };
+    },
+    async getLineStream() {
+      return new ReadableStream();
     },
     async getEventStream() {
       return new ReadableStream<MessageStreamEvent>({

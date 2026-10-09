@@ -46,6 +46,7 @@ import { buildRunContext } from "#execution/runtime-context.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import {
   readSessionEventStream,
+  readSessionRecords,
   readSessionStreamTailIndex,
 } from "#execution/session-event-stream.js";
 import {
@@ -233,6 +234,13 @@ export function createWorkflowRuntime(config: {
       options?: GetEventStreamOptions,
     ): Promise<ReadableStream<MessageStreamEvent>> {
       return readSessionEventStream(sessionId, options?.startIndex);
+    },
+
+    async getLineStream(
+      sessionId: string,
+      options?: GetEventStreamOptions,
+    ): Promise<ReadableStream<unknown>> {
+      return readSessionRecords(sessionId, options?.startIndex);
     },
 
     async getStreamTailIndex(sessionId: string): Promise<number> {

@@ -28,6 +28,7 @@ import {
 } from "#instrumentation/state.js";
 import type { ResolvedInputBatch } from "#harness/input-request-resolution.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
+import { eventsOf } from "#harness/publication.js";
 import type { HandleEventFn } from "#harness/types.js";
 import {
   isRuntimeWorkflowToolAction,
@@ -67,9 +68,20 @@ export function createInstrumentationHandleEvent(
   const publishedActions = new Set<string>();
   const publishedInputs = new Set<string>();
   let activeTurnId = input.turnId;
-  return async (event, messages) => {
+  return async (publication, messages) => {
     const startedAtMs = Date.now();
-    await handleEvent(event, messages);
+    await handleEvent(publication, messages);
+    for (const event of eventsOf(publication)) {
+      activeTurnId = await instrumentEvent(event, activeTurnId, startedAtMs);
+    }
+  };
+
+  async function instrumentEvent(
+    event: UnstampedMessageStreamEvent,
+    turnId: string | undefined,
+    startedAtMs: number,
+  ): Promise<string | undefined> {
+    let activeTurnId = turnId;
     const lifecycleEvent = toLifecycleEvent(event, input, activeTurnId);
     if (event.type === "turn.started") activeTurnId = event.data.turnId;
     if (
@@ -114,7 +126,8 @@ export function createInstrumentationHandleEvent(
     } else if (event.type === "input.requested") {
       await publishInputStarts(event, input, hooks, publishedInputs);
     }
-  };
+    return activeTurnId;
+  }
 }
 
 async function publishInputStarts(

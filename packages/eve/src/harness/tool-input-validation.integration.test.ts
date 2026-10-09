@@ -1,3 +1,4 @@
+import { eachEvent } from "#internal/testing/session-machine.js";
 import { jsonSchema, type LanguageModel, type ModelMessage } from "ai";
 import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
@@ -219,7 +220,7 @@ describe("framework tool input validation (real AI SDK)", () => {
     });
     const events: string[] = [];
     const runStep = createToolLoopHarness({
-      handleEvent: async (event) => {
+      handleEvent: eachEvent(async (event) => {
         if (event.type === "action.result") {
           events.push(
             `action.result:${event.data.result.callId}:${String(event.data.result.isError)}`,
@@ -227,7 +228,7 @@ describe("framework tool input validation (real AI SDK)", () => {
         } else {
           events.push(event.type);
         }
-      },
+      }),
       resolveModel: async (): Promise<LanguageModel> => model,
       tools: new Map([
         [

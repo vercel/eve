@@ -75,6 +75,9 @@ function createCapturingRuntime(captured: CapturedRun[]): Runtime {
     async dispatchSession() {
       throw new Error("dispatchSession should not be called in this scenario");
     },
+    async getLineStream() {
+      return new ReadableStream();
+    },
     async getEventStream() {
       return new ReadableStream<MessageStreamEvent>();
     },

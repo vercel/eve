@@ -1,6 +1,8 @@
 import type { UnstampedMessageStreamEvent, MessageStreamEvent } from "#protocol/message.js";
 import { TurnSegment } from "#client/session-utils.js";
 import { createSessionContract } from "#internal/testing/session-contract.js";
+import { createLegacyEventReader, linesOf } from "#protocol/legacy-lines.js";
+import { isStoredLine } from "#protocol/session-events/envelope.js";
 
 /**
  * Minimal, duck-typed handle to one workflow `Run`'s readable stream.
@@ -52,7 +54,12 @@ export function captureTurnEvents(
   options: CaptureTurnEventsOptions = {},
 ): CapturedTurnStream {
   const reader = run.readable.getReader();
-  const state: StreamState = { buffer: "" };
+  const state: StreamState = {
+    buffer: "",
+    lines: createLegacyEventReader(),
+    pending: [],
+    position: 0,
+  };
   const decoder = options.decoder ?? new TextDecoder();
   let disposed = false;
   // Every stream a test reads is held to the session contract readers rely on.
@@ -169,6 +176,11 @@ interface CaptureTurnEventsOptions {
 
 interface StreamState {
   buffer: string;
+  /** The position of the next stored line. */
+  position: number;
+  /** Events of a line already read that the last call stopped before. */
+  pending: MessageStreamEvent[];
+  readonly lines: ReturnType<typeof createLegacyEventReader>;
 }
 
 async function readUntilMatch(
@@ -180,24 +192,21 @@ async function readUntilMatch(
   const events: MessageStreamEvent[] = [];
 
   while (true) {
-    for (
-      let newlineIndex = state.buffer.indexOf("\n");
-      newlineIndex !== -1;
-      newlineIndex = state.buffer.indexOf("\n")
-    ) {
+    while (state.pending.length > 0) {
+      const event = state.pending.shift() as MessageStreamEvent;
+      events.push(event);
+      if (matches(event)) return events;
+    }
+    const newlineIndex = state.buffer.indexOf("\n");
+    if (newlineIndex !== -1) {
       const line = state.buffer.slice(0, newlineIndex).trim();
       state.buffer = state.buffer.slice(newlineIndex + 1);
-
-      if (line.length === 0) {
-        continue;
-      }
-
-      const event = JSON.parse(line) as MessageStreamEvent;
-      events.push(event);
-
-      if (matches(event)) {
-        return events;
-      }
+      if (line.length === 0) continue;
+      const value: unknown = JSON.parse(line);
+      const position = state.position;
+      state.position += 1;
+      if (isStoredLine(value)) state.pending.push(...state.lines.read(value, position));
+      continue;
     }
 
     const { done, value } = await reader.read();
@@ -210,8 +219,7 @@ async function readUntilMatch(
 
 /**
  * Stamps a constructed event so a fixture satisfies the stamped stream
- * contract without a real emit seam. Ids are sequential and readable; use
- * `stampMessageStreamEvent` when a test asserts on real id format.
+ * contract without a real emit seam. Ids are sequential and readable.
  */
 export function stampTestEvent(event: UnstampedMessageStreamEvent, index = 0): MessageStreamEvent {
   return {
@@ -238,3 +246,16 @@ export const TEST_USAGE = {
   inputTokens: 1200,
   outputTokens: 150,
 };
+
+/**
+ * Encodes events as the stored lines a stream route serves: each event on its own line, so a
+ * fixture's event indexes are its positions. Pass `deliveryIds` to attribute every event.
+ */
+export function encodeTestLine(
+  event: UnstampedMessageStreamEvent,
+  deliveryIds?: readonly string[],
+): string {
+  return linesOf([event], new Date(Date.UTC(2026, 0, 1)).toISOString(), deliveryIds)
+    .map((line) => `${JSON.stringify(line)}\n`)
+    .join("");
+}

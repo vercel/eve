@@ -33,6 +33,7 @@ function createFixedSession(overrides: Partial<Session> = {}): Session {
     clear: vi.fn().mockResolvedValue({ sessionId: "wrun_A", status: "accepted" }),
     reset: vi.fn().mockResolvedValue({ previousSessionId: "wrun_A", status: "reset" }),
     getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
+    getLineStream: vi.fn().mockResolvedValue(new ReadableStream()),
     getStreamTailIndex: vi.fn().mockResolvedValue(-1),
     ...overrides,
   };

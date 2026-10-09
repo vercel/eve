@@ -8,7 +8,7 @@ import { SessionIdKey, StepDynamicToolMetadataKey } from "#context/keys.js";
 import { applyTransition, sessionView } from "#harness/session-machine/commit.js";
 import { cancel } from "#harness/session-machine/transitions.js";
 import { runtimeWait, storedProjection } from "#harness/session-machine/view.js";
-import { withPublished } from "#internal/testing/session-machine.js";
+import { withPublished, eachEvent } from "#internal/testing/session-machine.js";
 import { openInputs } from "#protocol/session-projection.js";
 import { createProjectionRecorder } from "#internal/testing/session-projection-recorder.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -66,7 +66,7 @@ function setup(
   const recorder = createProjectionRecorder();
   const listen: NonNullable<ToolLoopHarnessConfig["handleEvent"]> =
     overrides.handleEvent ??
-    (async (event) => {
+    eachEvent(async (event) => {
       events.push(event);
     });
   const config: ToolLoopHarnessConfig = {
@@ -74,10 +74,10 @@ function setup(
     resolveModel: async () => model,
     tools: new Map(tools.map((tool) => [tool.name, tool])),
     ...overrides,
-    handleEvent: async (event, messages) => {
+    handleEvent: eachEvent(async (event, messages) => {
       recorder.record(event);
       await listen(event, messages);
-    },
+    }),
   };
   const session: HarnessSession = {
     agent: {
@@ -114,10 +114,10 @@ async function cancelTurn(
   const cancelled = await applyTransition(
     session,
     cancel(sessionView(storedProjection(session.state), session.state)),
-    async (event) => {
+    eachEvent(async (event) => {
       published.push(event);
       record(event);
-    },
+    }),
   );
   return withPublished(cancelled, published);
 }
@@ -178,7 +178,7 @@ describe("workflow approval resume (real AI SDK)", () => {
 
   it("keeps approved calls runnable when the resume turn adds user instructions", async () => {
     const fixture = setup([workflow("deploy", always())], {
-      handleEvent: async (event, messages) => {
+      handleEvent: eachEvent(async (event, messages) => {
         const ctx = contextStorage.getStore();
         if (!(ctx instanceof ContextContainer)) throw new Error("Missing test context.");
         if (event.type !== "session.started" && event.type !== "turn.started") return;
@@ -200,7 +200,7 @@ describe("workflow approval resume (real AI SDK)", () => {
             },
           ],
         });
-      },
+      }),
     });
     const initial = await fixture.step(fixture.session, { message: "Deploy Alice's release." });
     const approved = await fixture.step(initial.session, {
