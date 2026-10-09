@@ -11,6 +11,7 @@ import type { StoredLine, Usage } from "#protocol/session-events/envelope.js";
 import type { Fact, Progress } from "#protocol/session-events/facts.js";
 import type {
   CallPreview,
+  CallRow,
   PartPreview,
   SessionPreviews,
   SessionView,
@@ -19,7 +20,7 @@ import type {
 
 /**
  * How much a fold keeps. `complete` keeps everything, for clients and history reads.
- * `operational` keeps the session, everything still open, and what the latest line touched,
+ * `operational` keeps the session, everything still open and its ownership ancestors, and what the latest line touched,
  * for server checkpoints and observers; it drops the rest when the next line arrives.
  */
 export type Retention = "complete" | "operational";
@@ -532,7 +533,77 @@ function dropRunPreviews(view: SessionView, previews: MutablePreviews, runId: st
 
 /** Operational retention: drops what closed before the latest line, keeping what's open. */
 function prune(view: MutableView, keep: FoldOptions["keep"]): void {
-  const retained = (table: TableName, id: string) => keep?.(table, id) === true;
+  // Open descendants need their ownership path even after an ancestor settles. Otherwise a
+  // call outliving its model run loses its turn, and a terminal closer cannot find it.
+  const pinned = new Set<string>();
+  const pin = (table: TableName, id: string): boolean => {
+    const key = `${table}:${id}`;
+    if (pinned.has(key)) return false;
+    pinned.add(key);
+    return true;
+  };
+  const pinTurn = (id: string) => {
+    pin("turns", id);
+  };
+  const pinChange = (id: string) => {
+    if (!pin("changes", id)) return;
+    const row = view.changes[id];
+    if (row?.turnId !== undefined) pinTurn(row.turnId);
+  };
+  const pinRun = (id: string) => {
+    if (!pin("runs", id)) return;
+    const owner = view.runs[id]?.owner;
+    if (owner === undefined) return;
+    if ("turnId" in owner) pinTurn(owner.turnId);
+    else pinChange(owner.changeId);
+  };
+  const pinCall = (id: string) => {
+    // Iterative and cycle-safe: a malformed ownership chain must not recurse forever.
+    let current: string | undefined = id;
+    while (current !== undefined && pin("calls", current)) {
+      const row: CallRow | undefined = view.calls[current];
+      if (row === undefined) return;
+      if (row.taskId !== undefined) pin("tasks", row.taskId);
+      if ("runId" in row.owner) {
+        pinRun(row.owner.runId);
+        return;
+      }
+      current = row.owner.callId;
+    }
+  };
+  const pinInteraction = (id: string) => {
+    if (!pin("interactions", id)) return;
+    const subject = view.interactions[id]?.subject;
+    if (subject === undefined) return;
+    if ("turnId" in subject) pinTurn(subject.turnId);
+    else if ("callId" in subject) pinCall(subject.callId);
+    else if ("taskId" in subject) pin("tasks", subject.taskId);
+  };
+  for (const row of Object.values(view.calls)) {
+    if (row.status !== "settled") pinCall(row.callId);
+  }
+  for (const row of Object.values(view.runs)) {
+    if (row.status !== "settled") pinRun(row.runId);
+  }
+  for (const row of Object.values(view.changes)) {
+    if (row.status !== "settled") pinChange(row.changeId);
+  }
+  for (const row of Object.values(view.tasks)) {
+    if (row.status === "running") pinCall(row.startedBy.callId);
+  }
+  for (const row of Object.values(view.deliveries)) {
+    if (row.status !== "settled" && row.turnId !== undefined) pinTurn(row.turnId);
+  }
+  for (const row of Object.values(view.interactions)) {
+    if (row.status === "open") pinInteraction(row.interactionId);
+  }
+  for (const row of Object.values(view.responses)) {
+    if (row.status === "settled") continue;
+    pinInteraction(row.interactionId);
+    pin("deliveries", row.deliveryId);
+  }
+  const retained = (table: TableName, id: string) =>
+    pinned.has(`${table}:${id}`) || keep?.(table, id) === true;
   const dropWhere = <TRow>(
     table: TableName,
     rows: Record<string, TRow>,

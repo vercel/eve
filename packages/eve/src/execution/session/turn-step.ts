@@ -125,7 +125,7 @@ async function runSessionStepBody(
 
   let durableSession = readDurableSession(input.sessionState);
   // An `execute` run's delegated spend counts in the step that hands the model its result.
-  for (const usage of runtimeResults?.delegatedUsage ?? []) {
+  for (const usage of Object.values(runtimeResults?.delegatedUsage ?? {})) {
     durableSession = countRunUsage(durableSession, usage);
   }
   const ctx = await deserializeContext(input.serializedContext);
@@ -386,7 +386,11 @@ async function runSessionStepBody(
       if (runtimeResults.acceptedAtMsByCallId !== undefined) {
         ctx.set(RuntimeActionSettlementTimesKey, runtimeResults.acceptedAtMsByCallId);
       }
-      resolved = { ...resolved, runtimeActionResults: runtimeResults.results };
+      resolved = {
+        ...resolved,
+        delegatedUsage: runtimeResults.delegatedUsage,
+        runtimeActionResults: runtimeResults.results,
+      };
     }
 
     if (rawDelivery !== undefined) {

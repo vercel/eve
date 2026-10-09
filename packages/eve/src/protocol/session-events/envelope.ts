@@ -192,6 +192,8 @@ export interface ErrorInfo {
   readonly message: string;
   /** An id to quote when asking for support; the server's logs carry the same id. */
   readonly id?: string;
+  /** What to do about it, when eve recognizes the failure: a person-facing remedy. */
+  readonly hint?: string;
 }
 
 /** Tokens and cost one unit of work spent. */

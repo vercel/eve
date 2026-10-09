@@ -29,7 +29,8 @@ import {
 import { type ModelProfile, resolveModelProfile } from "#harness/model-profile.js";
 import { estimateRequestEnvelope } from "#harness/request-envelope.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
-import { discardAttempt, settleModel } from "#harness/session-machine/transitions.js";
+import { discardAttempt } from "#harness/session-machine/transitions.js";
+import { publicViewOf } from "#harness/session-machine/closure.js";
 import { activeTurnId } from "#harness/session-machine/view.js";
 import type { Step } from "#harness/step/context.js";
 import {
@@ -134,7 +135,6 @@ export class ModelCaller {
   private compactionFailure: { readonly error: unknown } | undefined;
   private attemptIndex = 0;
   /** Calls the latest attempt announced that haven't received a result yet, by tool name. */
-  private readonly unsettledActions = new Map<string, string>();
   /** The latest attempt published output, so retrying it gives its run up. */
   private acceptedOutput = false;
   /** The run's start is published, once per run. */
@@ -181,31 +181,11 @@ export class ModelCaller {
    */
   async prepareRetry(): Promise<void> {
     const runId = this.acceptedOutput ? this.step.position().runId : undefined;
-    await this.settleDiscardedActions({ outcome: "abandoned", runId });
     if (runId === undefined) return;
+    await this.step.apply(discardAttempt(this.step.view(), { ending: "retried", runId }));
     this.acceptedOutput = false;
     this.runStarted = false;
     await this.input.newRun();
-  }
-
-  /** Settles the calls a discarded attempt announced, so none stays open. */
-  private async settleDiscardedActions(input: {
-    readonly outcome: "abandoned" | "interrupted";
-    readonly runId?: string;
-  }): Promise<void> {
-    // One call per transition: publishing isn't atomic, so a publish that fails partway leaves
-    // only the calls it didn't reach for the next attempt to settle.
-    for (const [callId, toolName] of this.unsettledActions) {
-      await this.step.apply(
-        discardAttempt(this.step.view(), { calls: [{ callId, toolName }], outcome: input.outcome }),
-      );
-      this.unsettledActions.delete(callId);
-    }
-    if (input.runId !== undefined) {
-      await this.step.apply(
-        discardAttempt(this.step.view(), { calls: [], outcome: "abandoned", runId: input.runId }),
-      );
-    }
   }
 
   /** A failed compaction fails the step, whatever recovery the call attempted. */
@@ -220,7 +200,6 @@ export class ModelCaller {
     this.input.generation.end();
     // The cut response never reaches history, so the calls it announced never run, even once its
     // response ended and only their approvals were being decided.
-    await this.settleDiscardedActions({ outcome: "interrupted" });
     step.ctx?.set(HistoryStateKey, this.request.historyState);
     if (this.interruptedUsage !== undefined) {
       step.session = addTurnUsage(step.session, step.position().turnId, this.interruptedUsage);
@@ -228,9 +207,8 @@ export class ModelCaller {
     const runId = step.position().runId;
     if (runId !== undefined) {
       await step.apply(
-        settleModel(step.view(), {
-          finishReason: "other",
-          outcome: "completed",
+        discardAttempt(step.view(), {
+          ending: "steered",
           runId,
           usage: this.interruptedUsage === undefined ? undefined : usageOf(this.interruptedUsage),
         }),
@@ -305,18 +283,19 @@ export class ModelCaller {
         model: this.input.model,
         promptMessages: withClientContext(prompt),
         publish: step.publish,
+        view: () => publicViewOf(step.view().projection),
         requestEnvelopeTokens: this.requestEnvelopeTokens,
         resolveModel: config.resolveModel,
         runtimeIdentity: config.runtimeIdentity,
         session: step.session,
         telemetry: step.instrumentation?.telemetry(),
       });
+      step.session = compaction.session;
       if (compaction.failure !== undefined) throw compaction.failure.error;
     } catch (error) {
       this.compactionFailure = { error };
       throw error;
     }
-    step.session = compaction.session;
     if (!compaction.compacted) return tools;
     compactPrompt(step, prompt, compaction.messages);
     const { compaction: settings } = step.session;
@@ -457,7 +436,6 @@ export class ModelCaller {
         excludedActionToolNames,
         hidesHeldText: this.input.hidesHeldText && workingTaskIds(step.session).length > 0,
         tools: catalog,
-        unsettledActionToolNames: this.unsettledActions,
       },
     );
     throwIfTurnAborted(step.config.abortSignal);
@@ -471,7 +449,6 @@ export class ModelCaller {
       excludedCallIds: invalidInputToolCallIds,
       telemetry,
     });
-    for (const part of calls.parts) this.unsettledActions.delete(part.toolCallId);
     const notRun = answerSkippedToolCalls(stepResult, catalog, invalidInputToolCallIds);
     await emitStepActions(step.publish, step.position(), stepResult, notRun);
     return withCallResults({

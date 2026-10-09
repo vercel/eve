@@ -1,4 +1,5 @@
-import type { SessionStreamEvent } from "#protocol/session-event.js";
+import { failureOf } from "#client/session-utils.js";
+import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 import type { UserContent } from "ai";
 import { RunExpiredError, WorkflowRunNotFoundError } from "#compiled/@workflow/errors/index.js";
 
@@ -27,7 +28,6 @@ import {
 } from "#protocol/session-projection.js";
 import { type InputRequest, type InputResponse, parseInputResponses } from "#shared/input.js";
 import type { JsonValue } from "#shared/json.js";
-import { parseJsonValue } from "#shared/json.js";
 
 export class WorkflowAgentInvocationExecution {
   readonly #createSession: RouteSessionCreator;
@@ -178,10 +178,10 @@ export class WorkflowAgentInvocationExecution {
 /** The requests one `input.requested` introduced, by the batch-scoped id clients answer. */
 type InputBatch = ReadonlyMap<string, InputRequest>;
 
-type InvocationFailureEvent = Extract<
-  SessionStreamEvent,
-  { type: "session.failed" | "turn.failed" }
->;
+interface InvocationFailure {
+  readonly error: ErrorInfo;
+  readonly terminal: boolean;
+}
 
 /** The session's shared projection, plus what an invocation shows that it doesn't keep. */
 interface InvocationStream {
@@ -195,19 +195,21 @@ interface InvocationStream {
   /** The latest turn's final message. */
   readonly result: JsonValue | undefined;
   /** How the latest turn ended; reset when a turn starts or a park resumes. */
-  readonly settled: "completed" | "cancelled" | InvocationFailureEvent | undefined;
+  readonly settled: "completed" | "cancelled" | InvocationFailure | undefined;
 }
 
 async function readInvocationStream(invocationId: string): Promise<InvocationStream> {
   const batches: InputBatch[] = [];
   let result: JsonValue | undefined;
   let settled: InvocationStream["settled"];
+  const parts = new Map<string, { readonly kind: string; readonly value: JsonValue | undefined }>();
   const events = streamSessionEvents(invocationId, { follow: false });
   const { projection, signIns } = await foldSessionEvents(events, (event, before) => {
     switch (event.type) {
       case "turn.started":
         result = undefined;
         settled = undefined;
+        parts.clear();
         break;
       case "input.requested": {
         // The projection keeps the first request under an id, so a batch claims only new ids.
@@ -218,7 +220,10 @@ async function readInvocationStream(invocationId: string): Promise<InvocationStr
         batches.push(
           new Map(
             introduced.map((request) => [
-              invocationInputRequestId(event.meta.id, request.requestId),
+              invocationInputRequestId(
+                `${event.meta.position.line}.${event.meta.position.index}`,
+                request.requestId,
+              ),
               request,
             ]),
           ),
@@ -229,24 +234,43 @@ async function readInvocationStream(invocationId: string): Promise<InvocationStr
       case "authorization.completed":
         settled = undefined;
         break;
-      case "message.completed":
-        // Only tool-call narration continues the turn; any other finish is the reply.
-        if (event.data.finishReason !== "tool-calls") result = safeJson(event.data.message);
+      case "content.completed":
+        if (event.data.phase === "reply")
+          parts.set(event.data.partId, {
+            kind: event.data.kind,
+            value: event.data.value,
+          });
         break;
-      case "turn.waiting":
-        // Text completed before the turn parked was interim; the reply comes after it resumes.
+      case "turn.resumed":
+      case "turn.paused":
         result = undefined;
+        settled = undefined;
         break;
-      case "turn.completed":
-        settled = "completed";
+      case "turn.settled": {
+        const reply = (event.data.reply ?? []).flatMap((partId) => {
+          const part = parts.get(partId);
+          return part === undefined ? [] : [part];
+        });
+        const structured = reply.find((part) => part.kind === "result");
+        const text = reply.flatMap((part) =>
+          part.kind === "text" && typeof part.value === "string" ? [part.value] : [],
+        );
+        result = structured?.value ?? (text.length === 0 ? undefined : text.join("\n"));
+        const error = failureOf(event);
+        settled =
+          error === undefined
+            ? event.data.outcome === "cancelled"
+              ? "cancelled"
+              : "completed"
+            : { error, terminal: false };
         break;
-      case "turn.cancelled":
-        settled = "cancelled";
+      }
+      case "session.ended": {
+        const error = failureOf(event);
+        if (error !== undefined) settled = { error, terminal: true };
+        else if (settled === undefined) settled = "completed";
         break;
-      case "turn.failed":
-      case "session.failed":
-        settled = event;
-        break;
+      }
     }
   });
   const open = new Set(openInputs(projection).map((input) => input.request.requestId));
@@ -283,7 +307,7 @@ function replaysSettledBatch(
 
 /**
  * Projects the invocation from its session. The session parks after the
- * turn settles, so `turn.completed` or a failure event — not the run
+ * turn settles, so `turn.settled` or a failure — not the run
  * status — is what completes the invocation. An open sign-in or input
  * request outranks how the turn ended.
  */
@@ -296,11 +320,11 @@ function projectInvocation(
   const failure = typeof settled === "object" ? settled : undefined;
   const failed = (): AgentInvocation => ({
     ...base,
-    error: publicInvocationFailure(base.invocationId, failure),
+    error: publicInvocationFailure(base.invocationId, failure?.error),
     status: "failed",
   });
   // A pending batch can outlive its session (timeout, failure); nobody can answer it then.
-  if (runStatus === "failed" || failure?.type === "session.failed") return failed();
+  if (runStatus === "failed" || failure?.terminal === true) return failed();
   if (runStatus === "completed") return { ...base, result, status: "completed" };
   const authorizations = stream.signIns.map(
     ({ authorization, description, name, webhookUrl }): AgentInvocationAuthorizationRequest => ({
@@ -342,96 +366,19 @@ function workingInvocation(
   return { createdAt, expiresAt, invocationId, pollAfterMs: 1_000, status: "working" };
 }
 
-function safeJson(value: unknown): JsonValue {
-  try {
-    return parseJsonValue(value);
-  } catch {
-    return String(value);
-  }
-}
-
 function publicInvocationFailure(
   runId: string,
-  event: InvocationFailureEvent | undefined,
+  error: ErrorInfo | undefined,
 ): Extract<AgentInvocation, { readonly status: "failed" }>["error"] {
   const data: Record<string, string> = { runId };
-  if (event !== undefined) data.eveCode = event.data.code;
-
   const deploymentId = vercelDeploymentId();
   if (deploymentId !== undefined) data.vercelDeploymentId = deploymentId;
-  if (typeof event?.data.details?.errorId === "string") data.errorId = event.data.details.errorId;
-
-  const semantic = event === undefined ? null : semanticFailure(event.data);
-  if (semantic === null) {
-    const fallback = event === undefined ? null : fallbackFailure(event.data);
-    if (fallback === null) return { code: -32603, data, message: "Invocation failed." };
-    if (fallback.name !== undefined) data.name = fallback.name;
-    return { code: -32603, data, message: fallback.message };
+  if (error !== undefined) {
+    data.eveCode = error.code;
+    if (error.id !== undefined) data.errorId = error.id;
+    if (error.hint !== undefined) data.hint = error.hint;
   }
-
-  data.semanticErrorId = semantic.id;
-  data.name = semantic.name;
-  if (semantic.hint !== undefined) data.hint = semantic.hint;
-  return { code: -32603, data, message: semantic.message };
-}
-
-function semanticFailure(event: InvocationFailureEvent["data"]): {
-  readonly hint?: string;
-  readonly id: string;
-  readonly message: string;
-  readonly name: string;
-} | null {
-  const details = event.details;
-  if (
-    typeof details?.semanticErrorId !== "string" ||
-    details.semanticErrorId.trim().length === 0 ||
-    typeof details.name !== "string" ||
-    details.name.trim().length === 0
-  ) {
-    return null;
-  }
-
-  const message =
-    typeof details.message === "string" && details.message.trim().length > 0
-      ? details.message.trim()
-      : event.message.trim();
-  if (message.length === 0) return null;
-
-  const hint =
-    typeof details.hint === "string" && details.hint.trim().length > 0
-      ? details.hint.trim()
-      : undefined;
-  const summary: {
-    hint?: string;
-    id: string;
-    message: string;
-    name: string;
-  } = {
-    id: details.semanticErrorId,
-    message,
-    name: details.name,
-  };
-  if (hint !== undefined) summary.hint = hint;
-  return summary;
-}
-
-function fallbackFailure(event: InvocationFailureEvent["data"]): {
-  readonly message: string;
-  readonly name?: string;
-} | null {
-  const message = event.message.trim();
-  const name = typeof event.details?.name === "string" ? event.details.name.trim() : "";
-  if (message.length === 0 && name.length === 0) return null;
-  const fallback: { message: string; name?: string } = {
-    message: message.length === 0 ? name : truncateForDisplay(message),
-  };
-  if (name.length > 0) fallback.name = name;
-  return fallback;
-}
-
-function truncateForDisplay(value: string, maxChars = 160): string {
-  if (value.length <= maxChars) return value;
-  return `${value.slice(0, maxChars - 1).trimEnd()}…`;
+  return { code: -32603, data, message: error?.message ?? "Invocation failed." };
 }
 
 function vercelDeploymentId(): string | undefined {

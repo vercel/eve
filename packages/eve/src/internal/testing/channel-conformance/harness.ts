@@ -1,4 +1,5 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
+import { endsTurn } from "#client/session-utils.js";
 import { createChannelOperations } from "#channel/channel-operations.js";
 import { type CompiledChannel, isCompiledChannel } from "#channel/compiled-channel.js";
 import { type RouteHandlerArgs, isHttpRouteDefinition } from "#channel/routes.js";
@@ -1076,10 +1077,17 @@ async function waitForRest(sessions: readonly Session[], wait: Wait): Promise<vo
         sessions.map(async (session) => {
           const tail = await session.getStreamTailIndex();
           const reader = (await session.getEventStream({ startIndex: tail })).getReader();
-          const last = await reader.read().finally(() => reader.cancel());
-          const waiting =
-            last.value?.type === "session.waiting" ||
-            (last.value?.type === "turn.waiting" && last.value.data.on === "input");
+          let waiting = false;
+          try {
+            for (;;) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              waiting ||= endsTurn(value);
+              if (value.meta.endOfLine !== false) break;
+            }
+          } finally {
+            await reader.cancel();
+          }
           const steps = await world.steps.list({ resolveData: "none", runId: session.id });
           const idle = steps.data.every((step) => TERMINAL_STEP_STATUSES.has(step.status));
           return { resting: waiting && idle, tail };
@@ -1111,7 +1119,7 @@ async function settles(session: Session, prompt: string): Promise<boolean> {
   const reader = (await session.getEventStream({ startIndex: 0 })).getReader();
   const requestIds = new Set<string>();
   try {
-    for (let index = 0; index <= tail; index += 1) {
+    for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
       if (value.type === "input.requested") {
@@ -1126,6 +1134,7 @@ async function settles(session: Session, prompt: string): Promise<boolean> {
       ) {
         return true;
       }
+      if (value.meta.position.line >= tail && value.meta.endOfLine !== false) break;
     }
   } finally {
     await reader.cancel();
@@ -1152,19 +1161,16 @@ async function holdsFor(
   let seen = false;
   let held = false;
   try {
-    for (let index = 0; index <= tail; index += 1) {
+    for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
       if (asked(value)) {
         seen = true;
         held = false;
-      } else if (
-        seen &&
-        ((value.type === "turn.waiting" && value.data.on === "input") ||
-          value.type === "session.waiting")
-      ) {
+      } else if (seen && endsTurn(value)) {
         held = true;
       }
+      if (value.meta.position.line >= tail && value.meta.endOfLine !== false) break;
     }
   } finally {
     await reader.cancel();

@@ -1,4 +1,6 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
+import { failureOf } from "#client/session-utils.js";
+import { replyTextOf } from "#public/channels/reply.js";
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import {
   deepEquals,
@@ -215,19 +217,17 @@ export function noFailedActions(): RunAssertion {
     name: "noFailedActions",
     evaluate(result) {
       const failed = result.events.filter(
-        (evt): evt is Extract<SessionStreamEvent, { type: "action.result" }> =>
-          evt.type === "action.result" &&
-          (evt.data.status === "failed" || evt.data.result.isError === true),
+        (evt): evt is Extract<SessionStreamEvent, { type: "call.settled" }> =>
+          evt.type === "call.settled" && evt.data.outcome === "failed",
       );
       if (failed.length === 0) return PASS;
       const details = failed.map(formatFailedActionResult);
       return fail(`${failed.length} failed action(s): ${details.join("; ")}`, {
         failedActions: failed.map((evt) => ({
-          callId: evt.data.result.callId,
+          callId: evt.data.callId,
           error: evt.data.error,
-          kind: evt.data.result.kind,
-          output: evt.data.result.output,
-          status: evt.data.status,
+          output: evt.data.output,
+          status: evt.data.outcome,
         })),
       });
     },
@@ -379,9 +379,9 @@ export function outputMatches(schema: StandardSchemaV1): RunAssertion {
 function joinCompletedMessages(events: readonly SessionStreamEvent[]): string {
   const parts: string[] = [];
   for (const evt of events) {
-    if (evt.type === "message.completed") {
-      parts.push(evt.data.message);
-    }
+    if (evt.type !== "content.completed") continue;
+    const text = replyTextOf(evt.data);
+    if (text !== undefined) parts.push(text);
   }
   return parts.join("\n");
 }
@@ -391,44 +391,27 @@ function failureDetail(prefix: string, code: string | undefined): string {
 }
 
 function formatFailedActionResult(
-  event: Extract<SessionStreamEvent, { type: "action.result" }>,
+  event: Extract<SessionStreamEvent, { type: "call.settled" }>,
 ): string {
-  const { result, status } = event.data;
+  const { callId, outcome, output, error } = event.data;
   const parts = [
-    actionResultLabel(result),
-    `callId=${result.callId}`,
-    `status=${status}`,
-    result.isError === true ? "isError=true" : undefined,
-    event.data.error?.message === undefined ? undefined : `error=${event.data.error.message}`,
-    `output=${truncate(formatUnknown(result.output))}`,
+    `callId=${callId}`,
+    `status=${outcome}`,
+    error === undefined ? undefined : `error=${error.message}`,
+    `output=${truncate(formatUnknown(output))}`,
   ];
   return parts.filter((part) => part !== undefined).join(" ");
-}
-
-function actionResultLabel(
-  result: Extract<SessionStreamEvent, { type: "action.result" }>["data"]["result"],
-): string {
-  switch (result.kind) {
-    case "tool-result":
-      return `tool-result:${result.toolName}`;
-    case "subagent-result":
-      return `subagent-result:${result.subagentName}`;
-    case "load-skill-result":
-      return result.name === undefined ? "load-skill-result" : `load-skill-result:${result.name}`;
-  }
 }
 
 function runFailure(result: EveEvalAssertionSubject): AssertionOutcome | undefined {
   if (result.status === "failed") {
     return fail(failureDetail("run failed", result.derived.failureCode));
   }
-  const failedEvent = result.events.find(
-    (event): event is Extract<SessionStreamEvent, { type: "step.failed" | "turn.failed" }> =>
-      event.type === "turn.failed" || event.type === "step.failed",
-  );
-  return failedEvent === undefined
-    ? undefined
-    : fail(`${failedEvent.type} (${failedEvent.data.code}): ${failedEvent.data.message}`);
+  for (const event of result.events) {
+    const error = failureOf(event);
+    if (error !== undefined) return fail(`${event.type} (${error.code}): ${error.message}`);
+  }
+  return undefined;
 }
 
 function truncate(text: string | undefined, max = 200): string {
@@ -493,10 +476,8 @@ function requestedTools(events: readonly SessionStreamEvent[]): readonly ToolReq
   };
 
   for (const event of events) {
-    if (event.type === "actions.requested") {
-      for (const action of event.data.actions) {
-        if (action.kind === "tool-call") append(action.callId, action.toolName);
-      }
+    if (event.type === "call.requested" && event.data.capability.kind === "tool") {
+      append(event.data.callId, event.data.capability.name);
     } else if (event.type === "input.requested") {
       for (const request of event.data.requests) {
         const { action } = request;

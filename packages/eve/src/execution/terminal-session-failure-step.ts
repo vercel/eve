@@ -1,3 +1,4 @@
+import { errorInfoOf } from "#harness/session-machine/transitions.js";
 import { publishTerminalSessionEvent } from "#execution/publish-session-events.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
@@ -45,7 +46,7 @@ export async function emitTerminalSessionFailureStep(input: {
   await publishTerminalSessionEvent({
     ending: {
       cause: input.turnId === undefined ? undefined : { turnId: input.turnId },
-      error: { code, message },
+      error: errorInfoOf({ code, details, message }),
       outcome: "failed",
     },
     errorId: typeof details.errorId === "string" ? details.errorId : undefined,

@@ -43,13 +43,18 @@ export async function settleRuntimeWork(
   const parts = staged.flatMap((message) =>
     message.role === "tool" ? message.content.filter((part) => part.type === "tool-result") : [],
   );
+  const usage = input?.delegatedUsage ?? {};
   await step.apply(
     settle(step.view(), {
-      results: results.map((result, index) => ({ ...result, part: parts[index]! })),
+      results: results.map((result, index) => ({
+        ...result,
+        part: parts[index]!,
+        usage: usage[result.part.toolCallId],
+      })),
     }),
   );
   if (input === undefined) return { input, waited: true };
-  const { runtimeActionResults: _results, ...rest } = input;
+  const { delegatedUsage: _usage, runtimeActionResults: _results, ...rest } = input;
   return { input: rest, waited: true };
 }
 

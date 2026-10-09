@@ -87,7 +87,7 @@ export function failedCall(call: {
   readonly callId: string;
   readonly message: string;
   readonly toolName: string;
-}): Required<SettledCall> {
+}): Required<Pick<SettledCall, "part" | "result">> {
   const { callId, message, toolName } = call;
   return {
     part: {

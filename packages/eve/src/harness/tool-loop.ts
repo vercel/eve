@@ -108,7 +108,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       // The publish sink folds what it publishes; without a sink, the step does, so lifecycle
       // never depends on whether a caller listens.
       if (emit !== undefined) await emit(publication, messages);
-      if (emit === undefined || ctx === undefined) for (const event of events) live.record(event);
+      if (emit === undefined || ctx === undefined) live.record(events);
     };
     const step = createStep({
       config,

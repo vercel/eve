@@ -29,20 +29,26 @@ import type {
 } from "#evals/match.js";
 
 /** Lifecycle outcome of an eval-observed tool action. */
-export type EveEvalActionStatus = "pending" | "completed" | "failed" | "rejected";
+export type EveEvalActionStatus =
+  | "pending"
+  | "completed"
+  | "failed"
+  | "rejected"
+  | "interrupted"
+  | "abandoned";
 
 /**
  * One tool call extracted from the captured stream, pairing the
- * `actions.requested` request with its matching `action.result`.
+ * `call.requested` request with its matching `call.settled`.
  */
 export interface EveEvalToolCall {
   /** Authored tool name (e.g. `"get_weather"`). */
   readonly name: string;
   /** Tool input as requested by the model. */
   readonly input: JsonObject;
-  /** Tool output from the matching `action.result`; `undefined` when the call never resolved. */
+  /** Inline output from `call.settled`; absent when unresolved or only a reference was recorded. */
   readonly output: JsonValue | undefined;
-  /** Whether the request is unresolved, completed, failed, or user-rejected. */
+  /** Pending until settled, then the call's explicit outcome. */
   readonly status: EveEvalActionStatus;
   /** Zero-based index of the turn the call happened in. */
   readonly turnIndex: number;
@@ -51,8 +57,8 @@ export interface EveEvalToolCall {
 }
 
 /**
- * One skill load extracted from the captured stream, pairing the `load-skill`
- * request with its matching `load-skill-result`.
+ * One skill call extracted from the captured stream, pairing its `call.requested`
+ * capability with its matching `call.settled`.
  */
 export interface EveEvalSkillLoad {
   /** The loaded skill's name. */
@@ -106,18 +112,18 @@ export interface EveEvalDerivedFacts {
   readonly messageCount: number;
   readonly reasoningBlockCount: number;
   /**
-   * Distinct ids of the models the steps started with (`step.started`): in first-use order for one
-   * session, and in session order for an eval. Covers only the sessions the eval created or
-   * attached: a delegated subagent runs in its own session, so its models appear only when the eval
-   * attaches that session. Compaction and `auto` routing calls are not included.
+   * Distinct model ids from `model.started`: in first-use order for one session, and in session
+   * order for an eval. Includes compaction summaries. Covers only captured sessions; a delegated
+   * agent's models appear only when the eval captures its session. Provider-internal routing
+   * calls without an eve model lifecycle are not included.
    */
   readonly models: readonly string[];
   /**
-   * Token usage from the latest `session.waiting`, `turn.waiting`, `session.failed`, or
-   * `session.completed`: the
-   * session's own model calls plus what the agents it delegated to spent, so on a turn it is the
-   * session's total so far. For an eval, each captured session counts once, by its latest usage,
-   * except sessions another captured session opened. Absent when a counted session reported none.
+   * Sum of the captured session's `usage.recorded` facts through this turn: its own model calls,
+   * compaction summaries, and delegated spend recorded on calls. A turn reports the session's
+   * total so far, not only that turn's spend. For an eval, each captured session counts once,
+   * except sessions another captured session opened, whose spend is attributed to that parent's
+   * calls. Absent when a counted session reported no usage.
    */
   readonly usage?: TokenUsage;
   readonly failureCode?: string;

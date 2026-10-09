@@ -12,13 +12,8 @@ import type {
   SendTurnPayload,
   StreamOptions,
 } from "#client/types.js";
-import type {
-  RuntimeTraceContext,
-  AgentStartedStreamEvent,
-  TurnFailureStreamEvent,
-} from "#protocol/message.js";
-import { isTurnFailureEvent } from "#protocol/message.js";
-import { summarizeTurnEvents, TurnSegment } from "#client/session-utils.js";
+import type { RuntimeTraceContext, AgentStartedStreamEvent } from "#protocol/message.js";
+import { failureOf, ResponseSegment, summarizeTurnEvents } from "#client/session-utils.js";
 import { extractCompletedResult } from "#client/output-schema.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import { deriveRunFacts } from "#evals/runner/derive-run-facts.js";
@@ -49,15 +44,17 @@ import { assertReportedToolName } from "#evals/reported-tool-name.js";
  * Error thrown by {@link EveEvalTurn.expectOk} when a turn failed.
  */
 export class EveEvalTurnFailedError extends Error {
-  readonly event: (TurnFailureStreamEvent & SessionStreamEvent) | undefined;
+  /** The `turn.settled` or `session.ended` that reported the failure. */
+  readonly event: SessionStreamEvent | undefined;
   readonly turn: EveEvalTurn;
 
   constructor(turn: EveEvalTurn) {
-    const event = turn.events.find(isTurnFailureEvent);
+    const event = turn.events.find((candidate) => failureOf(candidate) !== undefined);
+    const error = event === undefined ? undefined : failureOf(event);
     const detail =
-      event === undefined
+      event === undefined || error === undefined
         ? `turn ended with status "${turn.status}"`
-        : `${event.type}: ${event.data.code} ${event.data.message}`.trim();
+        : `${event.type}: ${error.code} ${error.message}`.trim();
     super(`Eval turn failed: ${detail}`);
     this.name = "EveEvalTurnFailedError";
     this.event = event;
@@ -341,7 +338,10 @@ export class EvalSessionDriver implements EveEvalSession {
     this.#events.push(...input.events);
     this.#pendingInputRequests = input.status === "waiting" ? input.inputRequests : [];
 
-    const derived = deriveRunFacts(input.events, { sessionId: input.sessionId });
+    const derived = deriveRunFacts(input.events, {
+      sessionId: input.sessionId,
+      usageEvents: this.#events,
+    });
     const turn = new EvalTurn({
       collector: this.#collector,
       data: input.data,
@@ -456,14 +456,14 @@ class EvalLiveTurn implements EveEvalLiveTurn {
   ): Promise<EveEvalTurn> {
     try {
       let sawBoundary = false;
-      const segment = new TurnSegment();
+      const segment = new ResponseSegment();
       for await (const event of source) {
         this.#events.push(event);
         const endsSegment = segment.observe(event);
         observe(event);
         this.#resolveWaiters(event);
 
-        if (isTurnFailureEvent(event)) {
+        if (failureOf(event) !== undefined) {
           this.#closeWaiters(
             new Error(
               `Session ${this.sessionId} failed before the expected event (${event.type}).`,

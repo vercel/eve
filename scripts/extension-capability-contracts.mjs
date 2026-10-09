@@ -94,6 +94,8 @@ function updateRequest(args) {
   const retain = args.includes("--retain");
   const dropIndex = args.indexOf("--drop");
   const reason = dropIndex === -1 ? undefined : args[dropIndex + 1];
+  const dropAll = args.includes("--drop-all");
+  if (dropAll && dropIndex === -1) throw new Error('--drop-all requires --drop "reason".');
   if (updateIndex !== -1 && (!capability || capability.startsWith("--"))) {
     throw new Error("--update requires a capability name.");
   }
@@ -111,7 +113,11 @@ function updateRequest(args) {
     : {
         capability,
         decision:
-          dropIndex !== -1 ? { retain: false, reason } : retain ? { retain: true } : undefined,
+          dropIndex !== -1
+            ? { retain: false, reason, dropAll }
+            : retain
+              ? { retain: true }
+              : undefined,
       };
 }
 
@@ -153,7 +159,11 @@ async function main() {
       ...immutableContractHistoryIssues(),
       ...(await reportInventoryIssues(configuration)),
     ];
-    const reportIssues = await checkCapabilityReports(configuration, false);
+    // An explicit drop must be able to classify today's roots even when a retained example
+    // uses the API being removed. The closing check still compiles every supported example.
+    const reportIssues = await checkCapabilityReports(configuration, false, {
+      checkRetainedFixtures: request.decision?.retain !== false,
+    });
     const selectedMismatch = reportIssues.find(
       (issue) => issue.kind === "contract-mismatch" && issue.capability === request.capability,
     );
@@ -197,10 +207,18 @@ async function main() {
     process.stdout.write(
       decision.retain
         ? `[eve:extension-contracts] ${request.capability} is structurally backward compatible; retaining epoch ${bumped.previousVersion} and bumping to ${bumped.version}.\n`
-        : `[eve:extension-contracts] dropping ${request.capability} epoch ${bumped.previousVersion} and bumping to ${bumped.version}.\n`,
+        : `[eve:extension-contracts] dropping ${request.capability} ${decision.dropAll ? "all supported epochs" : `epoch ${bumped.previousVersion}`} and bumping to ${bumped.version}.\n`,
     );
   }
 
+  if (request?.decision?.retain === false) {
+    // Persist the new epoch's report before the strict fixture check. Other capabilities can
+    // need their own drop, and a failed check must not leave this bump without its metadata.
+    const source = await readFile(COMPATIBILITY_SOURCE, "utf8");
+    await checkCapabilityReports(parseCapabilityConfiguration(source), true, {
+      checkRetainedFixtures: false,
+    });
+  }
   const issues = await checkExtensionCapabilityContracts({ update: true });
   return issues;
 }

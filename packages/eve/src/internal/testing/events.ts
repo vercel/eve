@@ -1,6 +1,5 @@
 import type { SessionEvent, SessionStreamEvent } from "#protocol/session-event.js";
-import { TurnSegment } from "#client/session-utils.js";
-import { createSessionContract } from "#internal/testing/session-contract.js";
+import { ResponseSegment, summarizeTurnEvents } from "#client/session-utils.js";
 import { createEventReader, linesOf } from "#protocol/session-lines.js";
 import { isStoredLine } from "#protocol/session-events/envelope.js";
 
@@ -62,30 +61,17 @@ export function captureTurnEvents(
   };
   const decoder = options.decoder ?? new TextDecoder();
   let disposed = false;
-  // Every stream a test reads is held to the session contract readers rely on.
-  const contract = createSessionContract();
-  let index = 0;
-
   const readUntil = async (matches: (event: SessionStreamEvent) => boolean) => {
     if (disposed) {
       throw new Error("CapturedTurnStream: stream already disposed.");
     }
 
-    return await readUntilMatch(reader, state, decoder, (event) => {
-      const [violation] = contract.observe(event);
-      if (violation !== undefined) {
-        throw new Error(
-          `Session stream contract (${violation.rule}) at event ${index}: ${violation.message}`,
-        );
-      }
-      index += 1;
-      return matches(event);
-    });
+    return await readUntilMatch(reader, state, decoder, matches);
   };
 
   return {
     async nextTurn() {
-      const segment = new TurnSegment();
+      const segment = new ResponseSegment();
       return await readUntil((event) => segment.observe(event));
     },
     async nextUntil(matches) {
@@ -110,7 +96,7 @@ export async function readFirstTurnReply(run: WorkflowRunHandle): Promise<string
   const stream = captureTurnEvents(run);
   try {
     const turn = await stream.nextTurn();
-    return filterEventsByType(turn, "message.completed").at(-1)?.data.message ?? null;
+    return summarizeTurnEvents(turn).message ?? null;
   } finally {
     stream.dispose();
     await run.cancel();
@@ -216,15 +202,15 @@ async function readUntilMatch(
 }
 
 /**
- * Stamps a constructed event so a fixture satisfies the stamped stream
- * contract without a real emit seam. Ids are sequential and readable.
+ * Materializes one fixture event with its line position, without a real writer.
  */
 export function stampTestEvent(event: SessionEvent, index = 0): SessionStreamEvent {
   return {
     ...event,
     meta: {
       at: new Date(Date.UTC(2026, 0, 1) + index).toISOString(),
-      id: `evt_test_${String(index).padStart(4, "0")}`,
+      position: { line: index, index: 0 },
+      endOfLine: true,
     },
   };
 }
@@ -245,10 +231,10 @@ export const TEST_USAGE = {
 
 /**
  * Encodes events as the stored lines a stream route serves: each event on its own line, so a
- * fixture's event indexes are its positions. Pass `deliveryIds` to attribute every event.
+ * fixture's event indexes are its positions. Delivery attribution is in the facts themselves.
  */
-export function encodeTestLine(event: SessionEvent, deliveryIds?: readonly string[]): string {
-  return linesOf([event], new Date(Date.UTC(2026, 0, 1)).toISOString(), deliveryIds)
+export function encodeTestLine(event: SessionEvent): string {
+  return linesOf([event], new Date(Date.UTC(2026, 0, 1)).toISOString())
     .map((line) => `${JSON.stringify(line)}\n`)
     .join("");
 }

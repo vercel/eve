@@ -6,10 +6,12 @@ import type { Usage } from "#protocol/session-events/envelope.js";
 import type { InteractionSubject } from "#protocol/session-events/families/interaction.js";
 import type {
   CallRow,
+  ChangeRow,
   ChildRow,
   DeliveryRow,
   InteractionRow,
   PartRow,
+  RunRow,
   SessionView,
   TaskRow,
   TurnRow,
@@ -243,6 +245,96 @@ export function callTurn(view: SessionView, entry: CallRow): string | undefined 
     current = view.calls[current.owner.callId];
   }
   return undefined;
+}
+
+/** The run that made a call, directly or through the calls it was made inside. */
+export function callRun(view: SessionView, entry: CallRow): string | undefined {
+  const seen = new Set<string>();
+  let current: CallRow | undefined = entry;
+  while (current !== undefined && !seen.has(current.callId)) {
+    seen.add(current.callId);
+    if ("runId" in current.owner) return current.owner.runId;
+    current = view.calls[current.owner.callId];
+  }
+  return undefined;
+}
+
+/** The turn a run belongs to: the turn that requested it, or the turn its context change is in. */
+export function runTurn(view: SessionView, entry: RunRow): string | undefined {
+  const { owner } = entry;
+  return "turnId" in owner ? owner.turnId : view.changes[owner.changeId]?.turnId;
+}
+
+/** What an owner leaves open: the entities that still need a terminal fact. */
+export interface OpenWork {
+  readonly calls: readonly CallRow[];
+  readonly runs: readonly RunRow[];
+  readonly changes: readonly ChangeRow[];
+  readonly deliveries: readonly DeliveryRow[];
+}
+
+/**
+ * The work still open under an owner, by ownership:
+ *
+ * - a run: the run and the calls it made, directly or inside other calls;
+ * - a context change: the change, its runs, and their calls;
+ * - a turn: its runs and their calls, the context changes inside it, and the deliveries it
+ *   consumed. A task's calls belong to the task, so they outlive the turn that started it;
+ * - the session: everything.
+ *
+ * The turn and session rows themselves aren't included: their own terminal facts close them.
+ */
+export function openWork(
+  view: SessionView,
+  owner:
+    | { readonly runId: string }
+    | { readonly changeId: string }
+    | { readonly turnId: string }
+    | { readonly session: true },
+): OpenWork {
+  const runs = Object.values(view.runs).filter((row) => {
+    if (row.status === "settled") return false;
+    if ("session" in owner) return true;
+    if ("runId" in owner) return row.runId === owner.runId;
+    if ("changeId" in owner)
+      return "changeId" in row.owner && row.owner.changeId === owner.changeId;
+    return runTurn(view, row) === owner.turnId;
+  });
+  const runIds = new Set(runs.map((row) => row.runId));
+  const calls = Object.values(view.calls).filter((row) => {
+    if (row.status === "settled") return false;
+    if ("session" in owner) return true;
+    if ("turnId" in owner) {
+      const seen = new Set<string>();
+      let ancestor: CallRow | undefined = row;
+      while (ancestor !== undefined && !seen.has(ancestor.callId)) {
+        seen.add(ancestor.callId);
+        if (ancestor.taskId !== undefined) return false;
+        ancestor = "callId" in ancestor.owner ? view.calls[ancestor.owner.callId] : undefined;
+      }
+    }
+    const runId = callRun(view, row);
+    if ("runId" in owner) return runId === owner.runId;
+    if (runId !== undefined && runIds.has(runId)) return true;
+    // A call whose run already settled still belongs to the run's turn or context change.
+    const run = runId === undefined ? undefined : view.runs[runId];
+    if (run === undefined) return false;
+    if ("changeId" in owner)
+      return "changeId" in run.owner && run.owner.changeId === owner.changeId;
+    return runTurn(view, run) === owner.turnId;
+  });
+  const changes = Object.values(view.changes).filter((row) => {
+    if (row.status === "settled") return false;
+    if ("session" in owner) return true;
+    if ("changeId" in owner) return row.changeId === owner.changeId;
+    return "turnId" in owner && row.turnId === owner.turnId;
+  });
+  const deliveries = Object.values(view.deliveries).filter((row) => {
+    if (row.status === "settled") return false;
+    if ("session" in owner) return true;
+    return "turnId" in owner && row.status === "consumed" && row.turnId === owner.turnId;
+  });
+  return { calls, changes, deliveries, runs };
 }
 
 /** The turn an interaction is about, directly or through its call. */
