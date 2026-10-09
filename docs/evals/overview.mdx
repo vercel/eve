@@ -139,7 +139,7 @@ model: mockModel({
 });
 ```
 
-`mockModel()` uses `"Mock response"` when no response is supplied. It handles both generated and streamed responses, derives deterministic response metadata, and estimates token usage. Because the model is part of the agent definition, use it for a dedicated fixture agent; it remains mocked whether that fixture runs locally or as a deployed eval target.
+`mockModel()` uses `"Mock response"` when no response is supplied. It handles both generated and streamed responses, derives deterministic response metadata, and estimates token usage. It compiles with a 1,000,000-token context window, so compaction stays out of the way; set `modelContextWindowTokens` on the agent to exercise compaction with a smaller window. Because the model is part of the agent definition, use it for a dedicated fixture agent; it remains mocked whether that fixture runs locally or as a deployed eval target.
 
 ## The `t` context
 
