@@ -1,7 +1,4 @@
-import type {
-  AuthorizationCompletedStreamEvent,
-  AuthorizationRequiredStreamEvent,
-} from "#protocol/message.js";
+import type { SignInPrompt, SignInSettlement } from "#channel/interaction-prompts.js";
 import type { EveAuthorizationPart } from "#client/message-reducer-types.js";
 
 type MutableAuthorizationPart<T extends EveAuthorizationPart> = {
@@ -9,65 +6,62 @@ type MutableAuthorizationPart<T extends EveAuthorizationPart> = {
 };
 
 export function createAuthorizationRequiredPart(
-  event: AuthorizationRequiredStreamEvent,
+  prompt: SignInPrompt,
+  place: { readonly turnId: string; readonly stepIndex: number },
 ): EveAuthorizationPart {
   const displayName =
-    event.data.authorization?.displayName ?? formatAuthorizationDisplayName(event.data.name);
+    prompt.authorization?.displayName ?? formatAuthorizationDisplayName(prompt.name);
 
   const part: MutableAuthorizationPart<Extract<EveAuthorizationPart, { state: "required" }>> = {
-    authorization: event.data.authorization,
-    description: normalizeAuthorizationDescription(
-      event.data.description,
-      event.data.name,
-      displayName,
-    ),
+    authorization: prompt.authorization,
+    description: normalizeAuthorizationDescription(prompt.description, prompt.name, displayName),
     displayName,
-    name: event.data.name,
+    name: prompt.name,
     state: "required",
-    stepIndex: event.data.stepIndex,
-    turnId: event.data.turnId,
+    stepIndex: place.stepIndex,
+    turnId: place.turnId,
     type: "authorization",
   };
-  if (event.data.attemptId !== undefined) part.attemptId = event.data.attemptId;
-  if (event.data.webhookUrl !== undefined) part.awaitsCallback = true;
+  part.attemptId = prompt.attemptId;
+  if (prompt.webhookUrl !== undefined) part.awaitsCallback = true;
   return part;
 }
 
 export function createAuthorizationCompletedPart(
-  event: AuthorizationCompletedStreamEvent,
+  settled: SignInSettlement,
+  place: { readonly turnId: string; readonly stepIndex: number },
   existing?: EveAuthorizationPart,
 ): EveAuthorizationPart {
   const displayName =
-    event.data.authorization?.displayName ??
+    settled.authorization?.displayName ??
     existing?.displayName ??
-    formatAuthorizationDisplayName(event.data.name);
+    formatAuthorizationDisplayName(settled.name);
 
   const part: MutableAuthorizationPart<Extract<EveAuthorizationPart, { state: "completed" }>> = {
     authorization:
-      existing?.authorization || event.data.authorization
-        ? { ...existing?.authorization, ...event.data.authorization }
+      existing?.authorization || settled.authorization
+        ? { ...existing?.authorization, ...settled.authorization }
         : undefined,
     description:
       existing?.description ??
-      buildCompletedAuthorizationDescription(displayName, event.data.outcome, event.data.reason),
+      buildCompletedAuthorizationDescription(displayName, settled.outcome, settled.reason),
     displayName,
-    name: event.data.name,
-    outcome: event.data.outcome,
+    name: settled.name,
+    outcome: settled.outcome,
     state: "completed",
-    stepIndex: existing?.stepIndex ?? event.data.stepIndex,
-    turnId: existing?.turnId ?? event.data.turnId,
+    stepIndex: existing?.stepIndex ?? place.stepIndex,
+    turnId: existing?.turnId ?? place.turnId,
     type: "authorization",
   };
-  const attemptId = event.data.attemptId ?? existing?.attemptId;
-  if (attemptId !== undefined) part.attemptId = attemptId;
+  part.attemptId = settled.attemptId;
   if (existing?.awaitsCallback) part.awaitsCallback = true;
-  if (event.data.reason !== undefined) part.reason = event.data.reason;
+  if (settled.reason !== undefined) part.reason = settled.reason;
   return part;
 }
 
 function buildCompletedAuthorizationDescription(
   displayName: string,
-  outcome: AuthorizationCompletedStreamEvent["data"]["outcome"],
+  outcome: SignInSettlement["outcome"],
   reason?: string,
 ): string {
   if (outcome === "authorized") {

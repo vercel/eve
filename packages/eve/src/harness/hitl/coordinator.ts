@@ -30,9 +30,10 @@ import {
 } from "#harness/authorization.js";
 import { isApprovalRequest } from "#harness/input-request-class.js";
 import { suspendedSteps } from "#harness/session-machine/view.js";
-import type { HarnessSession, HarnessToolLookup, StepInput } from "#harness/types.js";
+import type { HarnessSession, HarnessToolLookup, HarnessStepInput } from "#harness/types.js";
+import { responseBindingFor } from "#harness/response-bindings.js";
 import { createLogger, logError } from "#internal/logging.js";
-import type { InputRequest } from "#shared/input.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
 
 const UNAUTHENTICATED_APPROVAL_FEEDBACK = "Authentication is required to respond to this approval.";
 const REQUESTER_ONLY_APPROVAL_FEEDBACK =
@@ -46,9 +47,16 @@ const APPROVAL_CANDIDATE_TTL_MS = 10 * 60_000;
 
 const log = createLogger("harness.hitl");
 
+/** A response a check refused before any policy ran: who answered may not answer it. */
+export interface RefusedResponse {
+  readonly responseId: string;
+  readonly reason: string;
+}
+
 interface ApprovalDeliveryResult {
   readonly challenges: readonly AuthorizationChallenge[];
   readonly feedback: readonly string[];
+  readonly refused: readonly RefusedResponse[];
   readonly kind:
     | "continue"
     | "continue-coordination"
@@ -56,7 +64,7 @@ interface ApprovalDeliveryResult {
     | "responses-completed"
     | "park";
   readonly session: HarnessSession;
-  readonly stepInput?: StepInput;
+  readonly stepInput?: HarnessStepInput;
 }
 
 /**
@@ -79,7 +87,7 @@ interface ApprovalDeliveryResult {
 export async function coordinateApprovalDelivery(input: {
   readonly now?: number;
   readonly session: HarnessSession;
-  readonly stepInput?: StepInput;
+  readonly stepInput?: HarnessStepInput;
   readonly tools: HarnessToolLookup;
   readonly prepareTools?: (request: InputRequest) => Promise<HarnessToolLookup>;
 }): Promise<ApprovalDeliveryResult> {
@@ -135,6 +143,12 @@ export async function coordinateApprovalDelivery(input: {
   const requests = new Map(allRequests.map((request) => [request.requestId, request]));
   const challenges: AuthorizationChallenge[] = [];
   const feedback: string[] = [];
+  const refused: RefusedResponse[] = [];
+  const refuse = (response: InputResponse, reason: string) => {
+    feedback.push(reason);
+    const binding = responseBindingFor(stepInput, response);
+    if (binding !== undefined) refused.push({ reason, responseId: binding.responseId });
+  };
   const consumed = new Set<string>();
   let didCommit = false;
   const candidatesAtStart = getApprovalAuditState(session.state).activeCandidates;
@@ -170,14 +184,17 @@ export async function coordinateApprovalDelivery(input: {
         !sameResponder(requester, responder)
       ) {
         consumed.add(response.requestId);
-        feedback.push(REQUESTER_ONLY_APPROVAL_FEEDBACK);
+        refuse(response, REQUESTER_ONLY_APPROVAL_FEEDBACK);
         continue;
       }
       if (responder !== null && decision !== undefined) {
+        // The batch is still open, so a later answer revises this one.
         const settled = settleDirectApprovalResponse({
           actor: responder,
           outcome: decision === "approve" ? "allowed" : "cancelled",
           requestId: response.requestId,
+          responseId: responseBindingFor(stepInput, response)?.responseId,
+          revisionPending: true,
           settledAt: now,
           state: session.state,
         });
@@ -197,12 +214,14 @@ export async function coordinateApprovalDelivery(input: {
         ? attributedResponder
         : buildCallbackContext().session.auth.current;
     if (responder === null) {
-      feedback.push(UNAUTHENTICATED_APPROVAL_FEEDBACK);
+      refuse(response, UNAUTHENTICATED_APPROVAL_FEEDBACK);
       continue;
     }
 
     const created = createApprovalCandidate({
+      candidateId: responseBindingFor(stepInput, response)?.responseId,
       candidateIdPrefix: approvalCandidateIdPrefix(request.requestId, responder, decision),
+      revisionPending: true,
       createdAt: now,
       decision,
       expiresAt: now + APPROVAL_CANDIDATE_TTL_MS,
@@ -222,10 +241,11 @@ export async function coordinateApprovalDelivery(input: {
       didCommit ? "continue-coordination" : "continue",
       [],
       feedback,
+      refused,
     );
   }
   if (didCommit) {
-    return deliveryResult(session, remainingStepInput, "continue", [], feedback);
+    return deliveryResult(session, remainingStepInput, "continue", [], feedback, refused);
   }
 
   // Candidates are persisted in an earlier pass. Run pending candidates and
@@ -395,6 +415,7 @@ async function authorizeCandidate(input: {
 
     const settled = settleAllowedCandidate({
       candidateId: input.candidateId,
+      revisionPending: true,
       settledAt: input.now,
       state: session.state,
     });
@@ -464,7 +485,7 @@ function failCandidate(input: {
 }
 
 function hasResponseForRequest(
-  stepInput: StepInput | undefined,
+  stepInput: HarnessStepInput | undefined,
   requestIds: ReadonlySet<string>,
 ): boolean {
   return (
@@ -475,7 +496,7 @@ function hasResponseForRequest(
   );
 }
 
-function hasMeaningfulInput(stepInput: StepInput | undefined): boolean {
+function hasMeaningfulInput(stepInput: HarnessStepInput | undefined): boolean {
   return (
     stepInput?.message !== undefined ||
     (stepInput?.attributedInputResponses?.length ?? 0) > 0 ||
@@ -485,9 +506,9 @@ function hasMeaningfulInput(stepInput: StepInput | undefined): boolean {
 }
 
 function appendSettledResponses(
-  stepInput: StepInput | undefined,
+  stepInput: HarnessStepInput | undefined,
   settlements: readonly ApprovalSettlementAuditRecord[],
-): StepInput | undefined {
+): HarnessStepInput | undefined {
   if (settlements.length === 0) return stepInput;
   const existingRequestIds = new Set([
     ...(stepInput?.inputResponses ?? []).map((response) => response.requestId),
@@ -511,9 +532,9 @@ function appendSettledResponses(
 }
 
 function removeConsumedResponses(
-  stepInput: StepInput | undefined,
+  stepInput: HarnessStepInput | undefined,
   consumed: ReadonlySet<string>,
-): StepInput | undefined {
+): HarnessStepInput | undefined {
   if (stepInput === undefined) return undefined;
   const attributed = (stepInput.attributedInputResponses ?? []).filter(
     ({ response }) => !consumed.has(response.requestId),
@@ -531,12 +552,13 @@ function removeConsumedResponses(
 
 function deliveryResult(
   session: HarnessSession,
-  stepInput: StepInput | undefined,
+  stepInput: HarnessStepInput | undefined,
   kind: ApprovalDeliveryResult["kind"] = "continue",
   challenges: readonly AuthorizationChallenge[] = [],
   feedback: readonly string[] = [],
+  refused: readonly RefusedResponse[] = [],
 ): ApprovalDeliveryResult {
-  return { challenges, feedback, kind, session, stepInput };
+  return { challenges, feedback, kind, refused, session, stepInput };
 }
 
 function toCandidateDecision(optionId: string | undefined): ApprovalCandidateDecision | undefined {

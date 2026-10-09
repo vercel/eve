@@ -1,24 +1,22 @@
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 
-// How a call's result reads on `call.settled`: a result flagged as an error, or whose output is
-// an error record `{code, message}`, failed; any other completed.
-
-/** A policy's automatic denial: the call never ran. */
-export const TOOL_EXECUTION_DENIED = "TOOL_EXECUTION_DENIED";
+// How a call's result reads on `call.settled`: an explicitly failed runtime result failed.
+// Error-shaped JSON can also be an ordinary successful tool value; its fields aren't a status.
 
 export function callOutcomeOf(result: RuntimeActionResult): {
   readonly outcome: "completed" | "failed";
   readonly error?: ErrorInfo;
 } {
-  const outputError = readOutputError(result.output);
   if (result.isError === true) {
     return {
-      error: outputError ?? { code: "ACTION_RESULT_FAILED", message: formatOutput(result.output) },
+      error: readOutputError(result.output) ?? {
+        code: "ACTION_RESULT_FAILED",
+        message: formatOutput(result.output),
+      },
       outcome: "failed",
     };
   }
-  if (outputError !== undefined) return { error: outputError, outcome: "failed" };
   return { outcome: "completed" };
 }
 

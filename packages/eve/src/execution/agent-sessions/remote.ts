@@ -57,6 +57,8 @@ const UNKNOWN_REMOTE_OUTCOME =
 
 type RemoteAgentSessionCoordinates = {
   readonly sessionId: string;
+  /** The child's protocol, when it speaks an earlier one: its result arrives, nothing else. */
+  readonly earlierProtocol?: number;
 };
 
 export async function startRemoteAgentSession(input: {
@@ -193,7 +195,9 @@ export async function startRemoteAgentSession(input: {
     );
   }
 
-  return { sessionId: parsed.data.sessionId };
+  return receiverVersion === REMOTE_AGENT_PROTOCOL_VERSION
+    ? { sessionId: parsed.data.sessionId }
+    : { earlierProtocol: receiverVersion, sessionId: parsed.data.sessionId };
 }
 
 /** A receiver that speaks another protocol version rejects the create with its own version. */
@@ -466,8 +470,8 @@ export function resolveRemoteAgentForAction(input: {
 /**
  * Resolves authored outbound headers for a server-authored remote child event.
  *
- * `resolverId` is the key persisted on the `agent.started` event (see
- * `AgentStartedStreamEvent`): it identifies the authored credential
+ * `resolverId` is the key the parent's private child binding records: it identifies the
+ * authored credential
  * functions, never their resolved values. Lookup order mirrors how dispatch
  * chose the key — first as a subagent node id (static remote definition),
  * then as a `credentialsStepId` in the step registry (dynamic remote

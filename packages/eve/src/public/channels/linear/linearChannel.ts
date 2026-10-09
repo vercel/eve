@@ -139,14 +139,11 @@ export interface LinearChannelEvents {
   readonly "call.settled"?: LinearEventHandler<"call.settled">;
   readonly "content.completed"?: LinearEventHandler<"content.completed">;
   readonly "content.delta"?: LinearEventHandler<"content.delta">;
-  readonly "input.requested"?: LinearEventHandler<"input.requested">;
-  readonly "input.resolved"?: LinearEventHandler<"input.resolved">;
-  readonly "approval.settled"?: LinearEventHandler<"approval.settled">;
+  readonly "interaction.opened"?: LinearEventHandler<"interaction.opened">;
+  readonly "interaction.settled"?: LinearEventHandler<"interaction.settled">;
   readonly "turn.settled"?: LinearEventHandler<"turn.settled">;
   readonly "session.ended"?: LinearEventHandler<"session.ended">;
   readonly "delivery.settled"?: LinearEventHandler<"delivery.settled">;
-  readonly "authorization.required"?: LinearEventHandler<"authorization.required">;
-  readonly "authorization.completed"?: LinearEventHandler<"authorization.completed">;
 }
 
 /**

@@ -137,11 +137,8 @@ export interface GitHubChannelEvents {
   readonly "call.progress"?: GitHubEventHandler<"call.progress">;
   readonly "call.settled"?: GitHubEventHandler<"call.settled">;
   readonly "call.requested"?: GitHubEventHandler<"call.requested">;
-  readonly "authorization.completed"?: GitHubEventHandler<"authorization.completed">;
-  readonly "authorization.required"?: GitHubEventHandler<"authorization.required">;
-  readonly "input.requested"?: GitHubEventHandler<"input.requested">;
-  readonly "input.resolved"?: GitHubEventHandler<"input.resolved">;
-  readonly "approval.settled"?: GitHubEventHandler<"approval.settled">;
+  readonly "interaction.opened"?: GitHubEventHandler<"interaction.opened">;
+  readonly "interaction.settled"?: GitHubEventHandler<"interaction.settled">;
   readonly "content.delta"?: GitHubEventHandler<"content.delta">;
   readonly "content.completed"?: GitHubEventHandler<"content.completed">;
   readonly "session.ended"?: GitHubEventHandler<"session.ended">;

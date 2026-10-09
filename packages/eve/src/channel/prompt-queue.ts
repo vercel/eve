@@ -1,9 +1,9 @@
-import type { SessionEvent } from "#protocol/session-event.js";
-import { contextStorage } from "#context/container.js";
-import type { ContextReader } from "#context/key.js";
-import { firstOpenInput } from "#harness/open-input-request.js";
-import { currentProjection } from "#harness/session-machine/current.js";
-import { foldSession } from "#protocol/session-projection.js";
+import { firstOpenRequest } from "#channel/interaction-prompts.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
+import type {
+  InteractionOpenedData,
+  InteractionSettledData,
+} from "#protocol/session-events/families/interaction.js";
 import type { InputRequest } from "#shared/input.js";
 
 /**
@@ -19,16 +19,15 @@ export interface PromptQueueState {
 /**
  * Event handlers that call `show` with the request a typed reply answers now,
  * each time that request changes. They read which requests are open from the
- * session's own record of the events it published, so a request that closed
- * never shows, and one the channel failed to show is tried again on the next
- * event. `show` returns `false` when it could not show the request.
+ * tables as of the event's commit, so a request that closed never shows, and
+ * one the channel failed to show is tried again on the next event. `show`
+ * returns `false` when it could not show the request.
  */
 export function promptQueueEvents<TChannel extends { state: PromptQueueState }>(
   show: (channel: TChannel, request: InputRequest) => Promise<boolean | void>,
 ) {
-  async function refresh(channel: TChannel, event: SessionEvent) {
-    // The session records the event only after its handlers run.
-    const first = firstOpenInput(foldSession(publishedProjection(channel), event))?.request;
+  async function refresh(channel: TChannel, view: SessionView) {
+    const first = firstOpenRequest(view);
     if (first === undefined) {
       delete channel.state.shownPromptId;
       return;
@@ -39,34 +38,19 @@ export function promptQueueEvents<TChannel extends { state: PromptQueueState }>(
   }
 
   return {
-    async "input.requested"(
-      data: Extract<SessionEvent, { type: "input.requested" }>["data"],
+    async "interaction.opened"(
+      _data: InteractionOpenedData,
       channel: TChannel,
+      ctx: { readonly view: SessionView },
     ): Promise<void> {
-      await refresh(channel, { data, type: "input.requested" });
+      await refresh(channel, ctx.view);
     },
-    async "input.resolved"(
-      data: Extract<SessionEvent, { type: "input.resolved" }>["data"],
+    async "interaction.settled"(
+      _data: InteractionSettledData,
       channel: TChannel,
+      ctx: { readonly view: SessionView },
     ): Promise<void> {
-      await refresh(channel, { data, type: "input.resolved" });
-    },
-    async "approval.settled"(
-      data: Extract<SessionEvent, { type: "approval.settled" }>["data"],
-      channel: TChannel,
-    ): Promise<void> {
-      await refresh(channel, { data, type: "approval.settled" });
+      await refresh(channel, ctx.view);
     },
   };
-}
-
-/**
- * The session's record as of the last event it published. Throws rather than read an empty
- * record when the step's projection is missing: an empty one would show nothing open, so the
- * next prompt would silently never post.
- */
-function publishedProjection(channel: object) {
-  // A handler's channel context carries the context of the step that publishes the event.
-  const ctx = (channel as { readonly ctx?: ContextReader }).ctx ?? contextStorage.getStore();
-  return currentProjection(ctx);
 }

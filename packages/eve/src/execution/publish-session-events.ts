@@ -1,3 +1,4 @@
+import type { ControlDelivery } from "#harness/types.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapterContext } from "#channel/adapter.js";
 import { type ContextContainer, contextStorage } from "#context/container.js";
@@ -19,6 +20,7 @@ import { hydrateDurableSession } from "#execution/session.js";
 import { dropClosedRecords } from "#harness/session-machine/commit.js";
 import {
   currentProjection,
+  currentView,
   enterSessionProjection,
   enterSessionProjectionAt,
   nextLinePosition,
@@ -43,6 +45,7 @@ import { type SessionProjection } from "#protocol/session-projection.js";
 import type { Cause, ErrorInfo } from "#protocol/session-events/envelope.js";
 import { sessionEndedFacts } from "#harness/session-machine/transitions.js";
 import { createStreamChecker, type StreamChecker } from "#protocol/session-events/checker.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
 const log = createLogger("execution.publish-session-events");
@@ -274,6 +277,8 @@ export interface WrittenEvent {
   readonly position: FactPosition;
   /** It rode as a progress record, which only hooks keyed on its type hear. */
   readonly progress: boolean;
+  /** Immutable table snapshot after this record's whole line, not a later concurrent write. */
+  readonly view: SessionView;
 }
 
 interface StreamWriter extends SessionEventWriter {
@@ -319,6 +324,18 @@ export interface SessionEventPublisher {
   publish(publication: SessionPublication): Promise<void>;
 }
 
+/**
+ * Whether publication checks each line against the event contract before writing it: on under
+ * `eve dev` and with `EVE_CHECK_SESSION_EVENTS=1`, off with `EVE_CHECK_SESSION_EVENTS=0`. A
+ * violation fails the publication instead of writing a line readers can't fold.
+ */
+function checksSessionEvents(): boolean {
+  const configured = process.env.EVE_CHECK_SESSION_EVENTS;
+  if (configured === "1") return true;
+  if (configured === "0") return false;
+  return process.env.EVE_DEV === "1";
+}
+
 export function openSessionEventPublisher(input: {
   readonly ctx: ContextContainer;
   readonly origin: SessionEventOrigin;
@@ -331,8 +348,8 @@ export function openSessionEventPublisher(input: {
   // stream unlocked for the terminal event's fallback write.
   const writer = openSessionEventWriter(input.sessionWritable);
   let checker: StreamChecker | undefined;
-  const emit = async (publication: SessionPublication): Promise<readonly WrittenEvent[]> => {
-    if (process.env.EVE_CHECK_SESSION_EVENTS === "1" && checker === undefined) {
+  const emitOne = async (publication: SessionPublication): Promise<readonly WrittenEvent[]> => {
+    if (checker === undefined && checksSessionEvents()) {
       const { schemaViolation } = await import("#protocol/session-events/schemas.js");
       checker = createStreamChecker({
         seed: currentProjection(ctx).view,
@@ -370,12 +387,25 @@ export function openSessionEventPublisher(input: {
       const lineEvents = eventsOfLine(line, position, at);
       recordPublishedLine(ctx, line, position, lineEvents);
       const progress = "progress" in line;
+      const view = currentView(ctx);
       lineEvents.forEach((event) =>
-        written.push({ event, position: event.meta.position, progress }),
+        written.push({ event, position: event.meta.position, progress, view }),
       );
     }
     await dispatcher.deliver(written);
     return written;
+  };
+  // Local calls execute concurrently. Serialize publication through write, fold and channel
+  // delivery so two calls cannot reserve the same position or overwrite channel state. A
+  // failure rejects its caller but releases this lane for terminal cleanup.
+  let publicationTail: Promise<unknown> = Promise.resolve();
+  const emit = (publication: SessionPublication): Promise<readonly WrittenEvent[]> => {
+    const next = publicationTail.then(() => emitOne(publication));
+    publicationTail = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
   };
   return {
     dispatcher,
@@ -400,10 +430,10 @@ function createSessionEventDispatcher(input: {
     adapterCtx,
     async deliver(written) {
       if (written.length === 0) return;
-      for (const { event, position } of written) {
+      for (const { event, position, view } of written) {
         if (await forwardSessionInput(ctx, event, inputSource)) continue;
         const scope = "scope" in event ? event.scope : undefined;
-        await callAdapterEventHandler(adapter, event, { ...deliveryCtx, position, scope });
+        await callAdapterEventHandler(adapter, event, { ...deliveryCtx, position, scope, view });
       }
       setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
     },
@@ -412,7 +442,7 @@ function createSessionEventDispatcher(input: {
       // Read here rather than when the dispatcher is built: terminal delivery
       // runs no hooks and must not require the bundle.
       const registry = ctx.require(BundleKey).hookRegistry;
-      for (const { event, position, progress } of written) {
+      for (const { event, position, progress, view } of written) {
         await dispatchStreamEventHooks({
           cancelTurn: cancelTurnFor?.(event),
           ctx,
@@ -420,6 +450,7 @@ function createSessionEventDispatcher(input: {
           position,
           progress,
           registry,
+          view,
         });
       }
     },
@@ -456,6 +487,8 @@ export function readSessionProjection(ctx: ContextContainer): SessionProjection 
 export interface SessionEnding {
   readonly outcome: "completed" | "failed";
   readonly cause?: Cause;
+  /** The reset control that ends the session, when it named its delivery. */
+  readonly control?: ControlDelivery;
   readonly error?: ErrorInfo;
 }
 

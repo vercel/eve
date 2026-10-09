@@ -3,7 +3,7 @@ import { failureOf } from "#client/session-utils.js";
 import { stripAnsi } from "#cli/ui/terminal-text.js";
 import type { EveAgentStoreSnapshot } from "#client/eve-agent-store.js";
 import type { EveAgentReducer } from "#client/reducer.js";
-import { isTaskRetryRefusal } from "#protocol/task-tools.js";
+import { isTaskAdmissionRefused } from "#protocol/task-tools.js";
 import {
   failureKey,
   formatFailureDetail,
@@ -77,7 +77,7 @@ export const tuiSessionReducer: EveAgentReducer<TuiSessionData> = {
       }
       case "call.settled": {
         const { callId } = event.data;
-        if (isTaskRetryRefusal(event)) {
+        if (isTaskAdmissionRefused(event)) {
           return { ...data, withdrawnCallIds: [...data.withdrawnCallIds, callId] };
         }
         const complete = event.data.title;

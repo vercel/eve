@@ -12,7 +12,7 @@ import {
 import { finishRun, settle } from "#harness/session-machine/transitions.js";
 import { activeTurnId, runtimeWait } from "#harness/session-machine/view.js";
 import { getTurnClientContextState } from "#harness/turn-client-context.js";
-import type { StepInput } from "#harness/types.js";
+import type { HarnessStepInput } from "#harness/types.js";
 import { readClientContext } from "#internal/client-context.js";
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type { Step } from "./context.js";
@@ -24,8 +24,8 @@ import type { Step } from "./context.js";
  */
 export async function settleRuntimeWork(
   step: Step,
-  input: StepInput | undefined,
-): Promise<{ readonly input: StepInput | undefined; readonly waited: boolean } | undefined> {
+  input: HarnessStepInput | undefined,
+): Promise<{ readonly input: HarnessStepInput | undefined; readonly waited: boolean } | undefined> {
   const runtime = runtimeWait(step.session.state);
   if (runtime === undefined) return { input, waited: false };
   const ready = resolveRuntimeActionResultsForCallIds({
@@ -77,7 +77,7 @@ export interface TurnInput {
  */
 export async function prepareTurnInput(
   step: Step,
-  input: StepInput | undefined,
+  input: HarnessStepInput | undefined,
   options: { readonly consumedMessage: boolean },
 ): Promise<TurnInput> {
   const turnId = activeTurnId(step.position());

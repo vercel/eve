@@ -6,7 +6,7 @@ import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { isNonEmptyString, isObject } from "#shared/guards.js";
 import type { JsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-import type { TaskCancelReason, TaskStartedStreamEvent } from "#protocol/message.js";
+import type { TaskCancelReason } from "#protocol/message.js";
 import { UNREADABLE_TASK_ERROR } from "#execution/tasks/render.js";
 
 // The session's task table: the tasks part of its record of running work
@@ -80,7 +80,7 @@ export type TaskResult = Exclude<TaskOutcome, { readonly status: "cancelled" }> 
 export interface TaskRecord {
   readonly id: string;
   /** Whether the tool is an agent's, as `task.started` reports it. */
-  readonly kind: TaskStartedStreamEvent["data"]["kind"];
+  readonly kind: "agent" | "tool";
   /** The tool whose call started the task. */
   readonly name: string;
   /** A `serve` tool's task: it takes more calls by its id, and is idle between results. */

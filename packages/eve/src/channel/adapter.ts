@@ -6,6 +6,7 @@ import { attachInputText, readInputText } from "#internal/input-text.js";
 import { createLogger } from "#internal/logging.js";
 import type { FactPosition, Scope } from "#protocol/session-events/envelope.js";
 import type { SessionHandle } from "#channel/session.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
 import type { DeliverPayload } from "#channel/types.js";
 import type {
   FetchFileContext,
@@ -59,6 +60,8 @@ export interface ChannelAdapterContext<TState = Record<string, unknown>> {
   readonly position?: FactPosition;
   /** The event's owners: its turn, task, model run, or context change. */
   readonly scope?: Scope;
+  /** The immutable snapshot of the event's line, supplied by its publisher. */
+  readonly view?: SessionView;
 }
 
 /**

@@ -2,13 +2,13 @@ import type { SessionEvent } from "#protocol/session-event.js";
 import type { ContextContainer } from "#context/container.js";
 import {
   ContinuationTokenKey,
-  LegacyRemoteAgentCallerKey,
+  EarlierRemoteCallerKey,
   SessionCallbackKey,
   SessionIdKey,
   SessionInboxKey,
 } from "#context/keys.js";
-import { forwardLegacySessionInput } from "#execution/legacy-remote-agent/protocol.js";
-import { resolvedForParent } from "#harness/proxy-input-requests.js";
+import { openedBatch, relayedInteractionEvent } from "#harness/interaction-relay.js";
+import { currentView } from "#harness/session-machine/current.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 
@@ -19,33 +19,28 @@ export async function forwardSessionInput(
   inputSource?: string,
 ): Promise<boolean> {
   const callback = ctx.get(SessionCallbackKey);
-  if (callback === undefined) return false;
-  const legacyCaller = ctx.get(LegacyRemoteAgentCallerKey);
-  if (legacyCaller !== undefined) return await forwardLegacySessionInput(ctx, legacyCaller, event);
-  if (event.type === "input.resolved") {
-    const relayed = resolvedForParent(event.data);
-    if (relayed === undefined) return false;
-    event = { data: relayed, type: "input.resolved" };
+  // A caller on an earlier protocol can't read this session's requests; the turn fails instead.
+  if (callback === undefined || ctx.get(EarlierRemoteCallerKey) !== undefined) return false;
+  const view = currentView(ctx);
+  const batch =
+    event.type === "interaction.opened" && event.data.request.kind !== "sign-in"
+      ? openedBatch(view, event.data.interactionId)
+      : undefined;
+  const relayed = batch === undefined ? relayedInteractionEvent(view, event) : undefined;
+  if (batch === undefined && relayed === undefined) {
+    // Every other request of a batch rides with its first; the session keeps it off its channel.
+    return event.type === "interaction.opened";
   }
-  if (
-    event.type !== "input.requested" &&
-    event.type !== "authorization.required" &&
-    event.type !== "authorization.completed" &&
-    event.type !== "approval.candidate" &&
-    event.type !== "approval.settled" &&
-    event.type !== "input.resolved"
-  )
-    return false;
 
   const body =
-    event.type === "input.requested"
+    batch !== undefined
       ? {
           callId: callback.callId,
           childContinuationToken:
             ctx.get(ContinuationTokenKey) ?? sessionCommandHookToken(ctx.require(SessionIdKey)),
           childSessionId: ctx.require(SessionIdKey),
           childSessionInbox: ctx.get(SessionInboxKey),
-          event: event.data,
+          event: batch,
           inputSource: inputSource ?? "session",
           kind: "subagent-input-request",
           subagentName: callback.subagentName,
@@ -53,7 +48,7 @@ export async function forwardSessionInput(
       : {
           callId: callback.callId,
           childSessionId: ctx.require(SessionIdKey),
-          event,
+          event: relayed,
           kind: "subagent-authorization-event",
           subagentName: callback.subagentName,
         };

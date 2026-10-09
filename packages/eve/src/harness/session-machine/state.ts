@@ -1,7 +1,7 @@
 import type { ModelMessage } from "ai";
 
 import type { SessionAuthContext } from "#channel/types.js";
-import type { SessionStateMap, StepInput } from "#harness/types.js";
+import type { SessionStateMap, HarnessStepInput } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { InputRequest } from "#shared/input.js";
 
@@ -45,7 +45,7 @@ export interface SuspendedStep {
 
 export interface TurnState {
   /** Input that arrived before it could run: a partial answer, or input behind a policy pass. */
-  readonly queued?: StepInput;
+  readonly queued?: HarnessStepInput;
   readonly suspended: readonly SuspendedStep[];
   /** Approval keys a `once()` approval granted for the rest of the session. */
   readonly grants: readonly string[];

@@ -36,14 +36,13 @@ export interface HookEventMap {
   readonly "usage.recorded": ProtocolEvent<"usage.recorded">;
   readonly "context.started": ProtocolEvent<"context.started">;
   readonly "context.settled": ProtocolEvent<"context.settled">;
-  readonly "agent.started": ProtocolEvent<"agent.started">;
-  readonly "approval.candidate": ProtocolEvent<"approval.candidate">;
-  readonly "approval.settled": ProtocolEvent<"approval.settled">;
-  readonly "authorization.completed": ProtocolEvent<"authorization.completed">;
-  readonly "authorization.required": ProtocolEvent<"authorization.required">;
-  readonly "input.requested": ProtocolEvent<"input.requested">;
-  readonly "input.resolved": ProtocolEvent<"input.resolved">;
-  readonly "task.settled": ProtocolEvent<"task.settled">;
+  readonly "interaction.opened": ProtocolEvent<"interaction.opened">;
+  readonly "interaction.settled": ProtocolEvent<"interaction.settled">;
+  readonly "response.submitted": ProtocolEvent<"response.submitted">;
+  readonly "response.admitted": ProtocolEvent<"response.admitted">;
+  readonly "response.settled": ProtocolEvent<"response.settled">;
+  readonly "child.opened": ProtocolEvent<"child.opened">;
+  readonly "task.ended": ProtocolEvent<"task.ended">;
   readonly "task.started": ProtocolEvent<"task.started">;
 }
 

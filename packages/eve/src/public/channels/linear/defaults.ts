@@ -1,6 +1,7 @@
 import { errorHintOf } from "#public/channels/reply.js";
 import { contentPhase } from "#protocol/session-events/catalog.js";
 import { promptQueueEvents } from "#channel/prompt-queue.js";
+import { signInPromptOf, signInSettlementOf } from "#channel/interaction-prompts.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { formatErrorHint } from "#internal/logging.js";
@@ -80,6 +81,9 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
     );
   }
 
+  // A reply can only answer the elicitation it sees, so they post one at a time.
+  const prompts = promptQueueEvents(showPrompt);
+
   return {
     async "turn.started"(_event, channel, _ctx) {
       channel.state.pendingToolCallMessage = null;
@@ -129,10 +133,10 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       );
     },
 
-    // A reply can only answer the elicitation it sees, so they post one at a time.
-    ...promptQueueEvents(showPrompt),
-
-    async "authorization.required"(event, channel, ctx) {
+    async "interaction.opened"(data, channel, ctx) {
+      await prompts["interaction.opened"](data, channel, ctx);
+      const event = signInPromptOf(data, ctx.scope);
+      if (event === undefined) return;
       const displayName = authorizationDisplayName(event.name, event.authorization?.displayName);
       const url = event.authorization?.url;
       const userId = linearUserId(ctx);
@@ -157,7 +161,10 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       );
     },
 
-    async "authorization.completed"(event, channel, _ctx) {
+    async "interaction.settled"(data, channel, ctx) {
+      await prompts["interaction.settled"](data, channel, ctx);
+      const event = signInSettlementOf(ctx.view, data);
+      if (event === undefined) return;
       const displayName = authorizationDisplayName(event.name, event.authorization?.displayName);
       if (event.outcome === "authorized") {
         await postActivity(

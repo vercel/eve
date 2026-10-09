@@ -1,18 +1,8 @@
-import type { WorkStreamEvent } from "#protocol/message.js";
 import type { FactPosition } from "#protocol/session-events/envelope.js";
 import type { Fact, Progress } from "#protocol/session-events/facts.js";
 
-/**
- * The v27 facts producers write today: the conversation families. Tasks, interactions, responses,
- * and child links still ride as v26 work events.
- */
-export type ConversationFact = Exclude<
-  Fact,
-  { readonly type: `${"task" | "interaction" | "response" | "child"}.${string}` }
->;
-
-/** What a session publishes: v27 conversation facts and progress, and the v26 work events. */
-export type SessionEvent = ConversationFact | Progress | WorkStreamEvent;
+/** What a session publishes: v27 facts and progress records. */
+export type SessionEvent = Fact | Progress;
 
 /** Where and when a reader read one event back. Never on the wire: readers attach it. */
 export interface SessionEventMeta {

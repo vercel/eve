@@ -775,6 +775,52 @@ describe("SessionExecution checkpoints", () => {
     },
   );
 
+  it.each([
+    { attemptIds: [], requestIds: ["request_1"] },
+    { attemptIds: ["attempt_1"], requestIds: [] },
+  ])(
+    "fails a turn that needs a person when its caller speaks an earlier protocol: %o",
+    async (pause) => {
+      const inbox: SessionInbox = {
+        claimedTokens: [],
+        claimSessionHook: vi.fn(),
+        claimSessionHooks: vi.fn(),
+        drain: vi.fn(() => []),
+        hasPending: vi.fn(() => false),
+        whenPending: () => new Promise<void>(() => {}),
+        next: vi.fn(() => new Promise<never>(() => {})),
+        onDelivery: vi.fn(() => () => {}),
+        onInterrupt: vi.fn(() => () => {}),
+        restore: vi.fn(),
+      };
+      const execution = createExecution({
+        capabilities: { requestInput: false },
+        inbox,
+        serializedContext: {
+          "eve.earlierRemoteCaller": 2,
+          "eve.sessionCallback": { callId: "call_1", token: "parent" },
+        },
+        sessionState: state(""),
+      });
+      vi.mocked(turnStep)
+        .mockReset()
+        .mockImplementation(
+          turnStepWork(async (input) => ({
+            action: "paused",
+            ...({ on: "person", ...pause } satisfies TurnPause),
+            serializedContext: input.serializedContext,
+            sessionState: input.sessionState,
+          })),
+        );
+
+      await expect(
+        execution.runTurn({
+          delivery: { kind: "deliver", payloads: [{ message: "Deploy the release." }] },
+        }),
+      ).rejects.toThrow("speaks eve remote agent protocol 2");
+    },
+  );
+
   it("preserves the completed turn when cancellation races its checkpoint", async () => {
     const settled = { output: "Done." };
     const followUp: DeliverHookPayload = {

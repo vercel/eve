@@ -176,21 +176,17 @@ type TeamsEventHandler<T extends SessionEvent["type"]> = (
 
 /** Event handlers supported by `teamsChannel({ events })`. */
 export interface TeamsChannelEvents {
-  readonly "approval.candidate"?: TeamsEventHandler<"approval.candidate">;
-  readonly "approval.settled"?: TeamsEventHandler<"approval.settled">;
-  readonly "input.resolved"?: TeamsEventHandler<"input.resolved">;
+  readonly "interaction.opened"?: TeamsEventHandler<"interaction.opened">;
+  readonly "interaction.settled"?: TeamsEventHandler<"interaction.settled">;
   readonly "turn.started"?: TeamsEventHandler<"turn.started">;
   readonly "call.requested"?: TeamsEventHandler<"call.requested">;
   readonly "call.progress"?: TeamsEventHandler<"call.progress">;
   readonly "call.settled"?: TeamsEventHandler<"call.settled">;
   readonly "content.completed"?: TeamsEventHandler<"content.completed">;
   readonly "content.delta"?: TeamsEventHandler<"content.delta">;
-  readonly "input.requested"?: TeamsEventHandler<"input.requested">;
   readonly "turn.settled"?: TeamsEventHandler<"turn.settled">;
   readonly "session.ended"?: TeamsEventHandler<"session.ended">;
   readonly "delivery.settled"?: TeamsEventHandler<"delivery.settled">;
-  readonly "authorization.required"?: TeamsEventHandler<"authorization.required">;
-  readonly "authorization.completed"?: TeamsEventHandler<"authorization.completed">;
 }
 
 /** Configuration for {@link teamsChannel}. */

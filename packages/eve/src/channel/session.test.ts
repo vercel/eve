@@ -62,7 +62,7 @@ describe("createSession#cancel", () => {
 
     await expect(session.cancel()).resolves.toEqual({ sessionId: "sess_1", status: "accepted" });
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
-      command: { kind: "cancel" },
+      command: { deliveryId: expect.any(String), kind: "cancel" },
       sessionId: "sess_1",
     });
   });
@@ -74,7 +74,7 @@ describe("createSession#cancel", () => {
     await session.cancel({ turnId: "turn_2" });
 
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
-      command: { kind: "cancel", turnId: "turn_2" },
+      command: { deliveryId: expect.any(String), kind: "cancel", turnId: "turn_2" },
       sessionId: "sess_1",
     });
   });
@@ -85,7 +85,7 @@ describe("createSession#cancel", () => {
 
     await expect(session.cancel()).resolves.toEqual({ sessionId: "sess_2", status: "accepted" });
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
-      command: { kind: "cancel" },
+      command: { deliveryId: expect.any(String), kind: "cancel" },
       sessionId: "sess_2",
     });
   });
@@ -172,15 +172,15 @@ describe("fixed session operations", () => {
       sessionId: "sess_1",
     });
     expect(runtime.dispatchSession).toHaveBeenNthCalledWith(3, {
-      command: { kind: "compact" },
+      command: { deliveryId: expect.any(String), kind: "compact" },
       sessionId: "sess_1",
     });
     expect(runtime.dispatchSession).toHaveBeenNthCalledWith(4, {
-      command: { kind: "clear" },
+      command: { deliveryId: expect.any(String), kind: "clear" },
       sessionId: "sess_1",
     });
     expect(runtime.dispatchSession).toHaveBeenNthCalledWith(5, {
-      command: { kind: "reset", reason: "fresh start" },
+      command: { deliveryId: expect.any(String), kind: "reset", reason: "fresh start" },
       sessionId: "sess_1",
     });
   });

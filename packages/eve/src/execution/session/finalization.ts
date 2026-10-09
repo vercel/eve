@@ -1,3 +1,4 @@
+import type { ControlDelivery } from "#harness/types.js";
 import type { TurnCaller } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { closeSessionStreamStep } from "#execution/close-session-stream-step.js";
@@ -20,7 +21,7 @@ import { notifyTurnCallerStep } from "#subagents/parent-notification.js";
 /** The three ways a session ends. `done` already emitted its terminal event inside the turn. */
 export type SessionTerminalOutcome =
   | { readonly kind: "done"; readonly action: TurnOutcome & { readonly kind: "done" } }
-  | { readonly kind: "expired" }
+  | { readonly kind: "expired"; readonly control?: ControlDelivery }
   | { readonly kind: "failed"; readonly error: unknown; readonly turnId?: string };
 
 interface SessionFinalizationContext {
@@ -76,6 +77,7 @@ export async function finalizeSession(
   const latest = stored.latestTurn;
   if (outcome.kind === "expired") {
     await emitTerminalSessionCompletionStep({
+      control: outcome.control,
       projection: stored,
       sessionWritable: context.sessionWritable,
       serializedContext,

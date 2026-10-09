@@ -208,8 +208,7 @@ type ChannelEventHandler<T extends SessionEvent["type"], TCtx> = (
 
 /**
  * Optional handlers keyed by session event type: the session's facts, the progress records a
- * channel streams (`content.delta`, `call.input`, `call.progress`), and the work events not yet
- * moved to facts. Each handler receives the event `data`, the {@link ChannelContext}, and a
+ * channel streams (`content.delta`, `call.input`, `call.progress`). Each handler receives the event `data`, the {@link ChannelContext}, and a
  * {@link ChannelEventContext} `ctx`. Handlers run after the event is written, so they observe it
  * and never shape it.
  */
@@ -236,15 +235,14 @@ export interface ChannelEvents<TCtx = void> {
   readonly "usage.recorded"?: ChannelEventHandler<"usage.recorded", TCtx>;
   readonly "context.started"?: ChannelEventHandler<"context.started", TCtx>;
   readonly "context.settled"?: ChannelEventHandler<"context.settled", TCtx>;
-  readonly "agent.started"?: ChannelEventHandler<"agent.started", TCtx>;
-  readonly "approval.candidate"?: ChannelEventHandler<"approval.candidate", TCtx>;
-  readonly "approval.settled"?: ChannelEventHandler<"approval.settled", TCtx>;
-  readonly "authorization.required"?: ChannelEventHandler<"authorization.required", TCtx>;
-  readonly "authorization.completed"?: ChannelEventHandler<"authorization.completed", TCtx>;
-  readonly "input.requested"?: ChannelEventHandler<"input.requested", TCtx>;
-  readonly "input.resolved"?: ChannelEventHandler<"input.resolved", TCtx>;
+  readonly "interaction.opened"?: ChannelEventHandler<"interaction.opened", TCtx>;
+  readonly "interaction.settled"?: ChannelEventHandler<"interaction.settled", TCtx>;
+  readonly "response.submitted"?: ChannelEventHandler<"response.submitted", TCtx>;
+  readonly "response.admitted"?: ChannelEventHandler<"response.admitted", TCtx>;
+  readonly "response.settled"?: ChannelEventHandler<"response.settled", TCtx>;
+  readonly "child.opened"?: ChannelEventHandler<"child.opened", TCtx>;
   readonly "task.started"?: ChannelEventHandler<"task.started", TCtx>;
-  readonly "task.settled"?: ChannelEventHandler<"task.settled", TCtx>;
+  readonly "task.ended"?: ChannelEventHandler<"task.ended", TCtx>;
 }
 
 /**
@@ -355,15 +353,14 @@ const channelEventTypes: Record<keyof ChannelEvents, null> = {
   "usage.recorded": null,
   "context.started": null,
   "context.settled": null,
-  "agent.started": null,
-  "approval.candidate": null,
-  "approval.settled": null,
-  "authorization.required": null,
-  "authorization.completed": null,
-  "input.requested": null,
-  "input.resolved": null,
+  "interaction.opened": null,
+  "interaction.settled": null,
+  "response.submitted": null,
+  "response.admitted": null,
+  "response.settled": null,
+  "child.opened": null,
   "task.started": null,
-  "task.settled": null,
+  "task.ended": null,
 };
 
 const eventTypes = Object.keys(channelEventTypes) as readonly (keyof ChannelEvents)[];
@@ -395,7 +392,7 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
     if (userHandler) {
       hasEventHandlers = true;
       eventHandlers[eventType] = (data: unknown, adapterCtx: any) => {
-        const { session, position, scope, ...platformContext } = adapterCtx;
+        const { session, position, scope, view, ...platformContext } = adapterCtx;
         const channel = {
           ...platformContext,
           continuation:
@@ -410,7 +407,7 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
           ...buildCallbackContext(),
           position: position ?? { index: 0, line: 0 },
           scope,
-          view: currentView(),
+          view: view ?? currentView(),
         };
         return (
           userHandler as (

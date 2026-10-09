@@ -1,3 +1,6 @@
+import { EARLIER_REMOTE_CALLER_CONTEXT_KEY_NAME } from "#context/key-names.js";
+import { formatEarlierRemoteCallerInputError } from "#protocol/remote-agent-protocol.js";
+import { controlDeliveryOf } from "#execution/session/control-delivery.js";
 import { sleep } from "#compiled/@workflow/core/index.js";
 
 import type { SessionCapabilities, TurnCaller } from "#channel/types.js";
@@ -52,11 +55,18 @@ import {
 
 /** True when a delegating parent (local or remote) receives this session's input requests. */
 export function hasDelegatedCallerContext(serializedContext: Record<string, unknown>): boolean {
+  if (earlierRemoteCaller(serializedContext) !== undefined) return false;
   if (serializedContext["eve.sessionCallback"] !== undefined) return true;
   const channel = serializedContext["eve.channel"];
   return (
     typeof channel === "object" && channel !== null && Reflect.get(channel, "kind") === "subagent"
   );
+}
+
+/** The protocol of a remote caller this session can't relay requests to, when it has one. */
+function earlierRemoteCaller(serializedContext: Record<string, unknown>): number | undefined {
+  const version = serializedContext[EARLIER_REMOTE_CALLER_CONTEXT_KEY_NAME];
+  return typeof version === "number" ? version : undefined;
 }
 
 const NO_INPUT_CAPABILITY_ERROR_MESSAGE =
@@ -235,6 +245,10 @@ export class SessionExecution {
     turn: ActiveTurn,
     paused: TurnPause,
   ): Promise<TurnStepPayload | undefined | "cancelled"> {
+    const earlierCaller = earlierRemoteCaller(this.input.cursor.serializedContext);
+    if (paused.on === "person" && earlierCaller !== undefined) {
+      throw new Error(formatEarlierRemoteCallerInputError(earlierCaller));
+    }
     if (
       paused.on === "person" &&
       paused.requestIds.length > 0 &&
@@ -352,7 +366,10 @@ export class SessionExecution {
     // A child a run opened before the cancel appears before its task settles as cancelled.
     await this.handleBoundaryMessages(turn.takeBoundaryMessages("agent-started"));
     await this.cancelTurnWork();
-    return { cancelled: true, kind: "park" };
+    const by = turn.cancelledBy;
+    return by === undefined
+      ? { cancelled: true, kind: "park" }
+      : { cancelled: true, cancelledBy: controlDeliveryOf(by), kind: "park" };
   }
 }
 

@@ -46,7 +46,13 @@ import {
   type TokenUsageDelta,
 } from "#harness/turn-tag-state.js";
 import { getRequestEnvelopeTokens } from "#harness/request-envelope.js";
-import { contextStarted, idle } from "#harness/session-machine/transitions.js";
+import {
+  contextStarted,
+  controlAdmitted,
+  deliveryApplied,
+  controlDeliveryFor,
+  idle,
+} from "#harness/session-machine/transitions.js";
 import { closeFacts, closureFor, publicViewOf } from "#harness/session-machine/closure.js";
 import { openWork } from "#protocol/session-projection/selectors.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
@@ -67,14 +73,12 @@ const log = createLogger("harness.tool-loop");
 export async function compactHistory(step: Step): Promise<StepResult> {
   const { config } = step;
   const { projection } = step.view();
-  const deliveryId = `control_${String(projection.position ?? 0)}`;
+  const delivery = controlDeliveryFor(step.view(), config.controlDelivery);
+  const { deliveryId } = delivery;
   const changeId = nextChangeId(projection);
   if (step.session.history.length === 0) {
     await step.apply({
-      events: [
-        { data: { deliveryId, source: { control: "compact" } }, type: "delivery.admitted" },
-        { data: { deliveryId, outcome: "applied" }, type: "delivery.settled" },
-      ],
+      events: [controlAdmitted(delivery, "compact"), deliveryApplied(deliveryId)],
       turn: step.view().turn,
     });
     return { next: null, session: step.session };
@@ -83,7 +87,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
   await step.apply(
     {
       events: [
-        { data: { deliveryId, source: { control: "compact" } }, type: "delivery.admitted" },
+        controlAdmitted(delivery, "compact"),
         contextStarted({ cause: { deliveryId }, changeId, kind: "compaction" }),
       ],
       turn: step.view().turn,

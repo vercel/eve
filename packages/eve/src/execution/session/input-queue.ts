@@ -1,8 +1,14 @@
-import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
+import type { DeliverHookPayload, DeliverPayload, SessionAuthContext } from "#channel/types.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 import { ANONYMOUS_PRINCIPAL, principalOf } from "#execution/session/principal.js";
 
 export type SessionControl = "clear" | "compact" | "expired" | "reset";
+
+/** The delivery a control arrived as: its id, and who sent it. */
+export interface ControlOrigin {
+  readonly deliveryId: string;
+  readonly auth?: SessionAuthContext | null;
+}
 
 export interface DeliveryAdmission {
   readonly delivery: DeliverHookPayload;
@@ -17,6 +23,7 @@ interface QueuedControl {
   readonly control: SessionControl;
   readonly kind: "control";
   readonly sequence: number;
+  readonly origin?: ControlOrigin;
 }
 
 interface QueuedAuthorization {
@@ -43,7 +50,7 @@ export interface TurnSelection {
 
 export type SessionInputSelection =
   | TurnSelection
-  | { readonly control: SessionControl; readonly kind: "control" };
+  | { readonly control: SessionControl; readonly kind: "control"; readonly origin?: ControlOrigin };
 
 /**
  * Ordered, admitted session input. Entries are private; callers receive typed
@@ -64,8 +71,14 @@ export class SessionInputQueue {
     return admission;
   }
 
-  enqueueControl(control: SessionControl): void {
-    this.entries.push({ control, kind: "control", sequence: this.nextSequence++ });
+  enqueueControl(control: SessionControl, origin?: ControlOrigin): void {
+    const entry: { -readonly [K in keyof QueuedControl]: QueuedControl[K] } = {
+      control,
+      kind: "control",
+      sequence: this.nextSequence++,
+    };
+    if (origin !== undefined) entry.origin = origin;
+    this.entries.push(entry);
   }
 
   /** Keeps one payload per authorization attempt; a repeated callback for the same attempt is dropped. */
@@ -159,7 +172,10 @@ export class SessionInputQueue {
     this.retain((entry) => entry.kind !== "authorization");
     const first = this.entries.shift() as QueuedDelivery | QueuedControl | undefined;
     if (first === undefined) return undefined;
-    if (first.kind === "control") return { control: first.control, kind: "control" };
+    if (first.kind === "control")
+      return first.origin === undefined
+        ? { control: first.control, kind: "control" }
+        : { control: first.control, kind: "control", origin: first.origin };
 
     const turnEntries = [first, ...this.takeFollowingDeliveriesFrom(first)];
     const sequences = turnEntries.map(({ sequence }) => sequence);
