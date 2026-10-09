@@ -2,7 +2,7 @@
 // no reader re-derives a lifecycle. They read only the tables, so they work in observers, in
 // clients, and through the session handle on the server.
 
-import type { Usage } from "#protocol/session-events/envelope.js";
+import type { ErrorInfo, Usage } from "#protocol/session-events/envelope.js";
 import type { InteractionSubject } from "#protocol/session-events/families/interaction.js";
 import type {
   CallRow,
@@ -62,7 +62,7 @@ export function reply(view: SessionView, turnId: string): readonly PartRow[] {
 export function failure(
   view: SessionView,
   turnId?: string,
-): { readonly code: string; readonly message: string } | undefined {
+): ErrorInfo | undefined {
   const row = turnId === undefined ? undefined : view.turns[turnId];
   if (row?.outcome === "failed")
     return row.error ?? { code: "TURN_FAILED", message: "The turn failed." };
@@ -279,7 +279,7 @@ export interface OpenWork {
  * - a run: the run and the calls it made, directly or inside other calls;
  * - a context change: the change, its runs, and their calls;
  * - a turn: its runs and their calls, the context changes inside it, and the deliveries it
- *   consumed. A task's calls belong to the task, so they outlive the turn that started it;
+ *   consumed. A task's calls belong to the task, so they survive closure of their run or turn;
  * - the session: everything.
  *
  * The turn and session rows themselves aren't included: their own terminal facts close them.
@@ -304,14 +304,12 @@ export function openWork(
   const calls = Object.values(view.calls).filter((row) => {
     if (row.status === "settled") return false;
     if ("session" in owner) return true;
-    if ("turnId" in owner) {
-      const seen = new Set<string>();
-      let ancestor: CallRow | undefined = row;
-      while (ancestor !== undefined && !seen.has(ancestor.callId)) {
-        seen.add(ancestor.callId);
-        if (ancestor.taskId !== undefined) return false;
-        ancestor = "callId" in ancestor.owner ? view.calls[ancestor.owner.callId] : undefined;
-      }
+    const seen = new Set<string>();
+    let ancestor: CallRow | undefined = row;
+    while (ancestor !== undefined && !seen.has(ancestor.callId)) {
+      seen.add(ancestor.callId);
+      if (ancestor.taskId !== undefined) return false;
+      ancestor = "callId" in ancestor.owner ? view.calls[ancestor.owner.callId] : undefined;
     }
     const runId = callRun(view, row);
     if ("runId" in owner) return runId === owner.runId;

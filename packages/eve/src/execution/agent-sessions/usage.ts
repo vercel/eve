@@ -3,7 +3,6 @@ import {
   getTurnUsageState,
   setTurnUsageState,
   toUsage,
-  type TokenUsageDelta,
   type TurnUsageState,
 } from "#harness/turn-tag-state.js";
 import type { SessionStateMap } from "#harness/types.js";
@@ -58,7 +57,8 @@ export function countRunUsage<T extends { readonly state?: SessionStateMap }>(
   );
 }
 
-function usageSince(total: TokenUsage, counted: TokenUsage | undefined): TokenUsageDelta {
+/** The new spend in one cumulative report, shared by limit accounting and the public journal. */
+export function usageSince(total: TokenUsage, counted: TokenUsage | undefined): TokenUsage {
   if (counted === undefined) return total;
   return {
     cacheReadTokens: total.cacheReadTokens - counted.cacheReadTokens,

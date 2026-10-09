@@ -436,6 +436,7 @@ export class ModelCaller {
         excludedActionToolNames,
         hidesHeldText: this.input.hidesHeldText && workingTaskIds(step.session).length > 0,
         tools: catalog,
+        interruptSignal: generation.signal,
       },
     );
     throwIfTurnAborted(step.config.abortSignal);

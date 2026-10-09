@@ -15,6 +15,7 @@ import {
 } from "./catalog.js";
 import type { StoredLine } from "./envelope.js";
 import type { Fact, Progress } from "./facts.js";
+import type { SessionView } from "../session-projection/tables.js";
 
 export interface Violation {
   readonly position: number;
@@ -63,6 +64,10 @@ export function createStreamChecker(
   options: {
     /** Schema validation, from `schemas.ts`, for tests and development. */
     readonly validate?: (record: unknown, kind: "fact" | "progress") => string | undefined;
+    /** Check from a checkpoint's operational view, including retained ownership ancestors.
+     * Forgotten history cannot establish global identity uniqueness; full-stream checks can.
+     */
+    readonly seed?: SessionView;
   } = {},
 ): StreamChecker {
   const entities = new Map<string, Entity>();
@@ -77,6 +82,53 @@ export function createStreamChecker(
   const key = (family: Family, id: string) => `${family}:${id}`;
   const get = (family: Family, id: unknown) =>
     typeof id === "string" ? entities.get(key(family, id)) : undefined;
+
+  const seed = options.seed;
+  if (seed !== undefined) {
+    lastPosition = seed.position - 1;
+    sessionStarted = seed.session.status !== "new";
+    sessionEnded = seed.session.status === "ended";
+    const add = (family: Family, id: string, entity: Omit<Entity, "family">) =>
+      entities.set(key(family, id), { ...entity, family });
+    for (const row of Object.values(seed.deliveries))
+      add("delivery", row.deliveryId, { open: row.status !== "settled" });
+    for (const row of Object.values(seed.turns)) {
+      const open = row.status !== "settled";
+      add("turn", row.turnId, { open });
+      if (open) openTurn = row.turnId;
+    }
+    for (const row of Object.values(seed.changes))
+      add("context", row.changeId, {
+        open: row.status !== "settled",
+        turnId: row.turnId,
+      });
+    for (const row of Object.values(seed.runs))
+      add("model", row.runId, {
+        open: row.status !== "settled",
+        turnId: "turnId" in row.owner ? row.owner.turnId : undefined,
+        changeId: "changeId" in row.owner ? row.owner.changeId : undefined,
+      });
+    for (const row of Object.values(seed.calls))
+      add("call", row.callId, {
+        open: row.status !== "settled",
+        taskId: row.taskId,
+        runId: "runId" in row.owner ? row.owner.runId : undefined,
+        parentCallId: "callId" in row.owner ? row.owner.callId : undefined,
+      });
+    for (const row of Object.values(seed.tasks))
+      add("task", row.taskId, { open: row.status !== "ended" });
+    for (const row of Object.values(seed.interactions))
+      add("interaction", row.interactionId, {
+        open: row.status !== "settled",
+        subject: row.subject,
+      });
+    for (const row of Object.values(seed.responses))
+      add("response", row.responseId, {
+        open: row.status !== "settled",
+        interactionId: row.interactionId,
+      });
+    for (const row of Object.values(seed.parts)) parts.add(row.partId);
+  }
 
   return {
     check(line, position) {
@@ -312,7 +364,7 @@ export function createStreamChecker(
       case "session":
         return entity.family !== "child";
       case "turn":
-        if (entity.family === "model") return entity.turnId === id;
+        if (entity.family === "model") return modelTurn(entity) === id;
         if (entity.family === "call") return entity.taskId === undefined && callTurn(entity) === id;
         if (entity.family === "interaction") return subjectTurn(entity) === id;
         if (entity.family === "context") return entity.turnId === id;
@@ -331,10 +383,23 @@ export function createStreamChecker(
   }
 
   /** The turn a call belongs to, through its run, or its parent call. */
+  function modelTurn(model: Entity): string | undefined {
+    return model.turnId ?? get("context", model.changeId)?.turnId;
+  }
+
   function callTurn(call: Entity): string | undefined {
-    if (call.runId !== undefined) return get("model", call.runId)?.turnId;
-    const parent = get("call", call.parentCallId);
-    return parent === undefined || parent.taskId !== undefined ? undefined : callTurn(parent);
+    const seen = new Set<Entity>();
+    let current: Entity | undefined = call;
+    while (current !== undefined && !seen.has(current)) {
+      seen.add(current);
+      if (current.taskId !== undefined) return undefined;
+      if (current.runId !== undefined) {
+        const model = get("model", current.runId);
+        return model === undefined ? undefined : modelTurn(model);
+      }
+      current = get("call", current.parentCallId);
+    }
+    return undefined;
   }
 
   function subjectTurn(interaction: Entity): string | undefined {

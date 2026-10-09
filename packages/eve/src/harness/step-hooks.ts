@@ -92,8 +92,8 @@ interface StepHooks {
   /**
    * `ToolLoopAgent` `onStepEnd` callback.
    *
-   * Emits `actions.requested`, `action.result`, and `step.completed` events
-   * from the captured step result.
+   * Publishes call and content facts from the captured response, then settles its model run
+   * with the usage it reported.
    */
   readonly onStepEnd: (step: StepResult<ToolSet>) => Promise<void>;
 
