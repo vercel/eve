@@ -172,8 +172,8 @@ export default defineAgent({
 });
 ```
 
-Not every Claude model supports a 1-hour cache. eve rejects `promptCache` on Gateway models; use `providerOptions.gateway.caching`
-instead.
+Not every Claude model supports a 1-hour cache. eve rejects `promptCache` on
+Gateway models; use `providerOptions.gateway.caching` instead.
 
 ## Compaction
 
