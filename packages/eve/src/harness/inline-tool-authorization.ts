@@ -5,8 +5,8 @@ import {
   type AuthorizationSignal,
   isAuthorizationSignal,
   isPendingAuthorizationToolOutput,
-  resolveActiveAuthorizationChallenges,
 } from "#harness/authorization.js";
+import { resolveActiveAuthorizationChallenges } from "#harness/hitl/sign-ins.js";
 import { readToolInterrupt } from "#harness/tool-interrupts.js";
 
 /** Returns whether an inline tool result represents a pending authorization interrupt. */

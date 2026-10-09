@@ -1,15 +1,12 @@
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import type { InputResolvedStreamEvent } from "#protocol/message.js";
 import type { StepCoordinates as PendingInputBatchEvent } from "#harness/session-machine/view.js";
-import type { HarnessSessionBase, SessionStateMap } from "#harness/types.js";
-import { inputOptionSchema, type InputOption, type InputRequestKind } from "#shared/input.js";
+import type { InputOption, InputRequestKind } from "#shared/input.js";
 import {
   isSessionInboxAddress,
   type SessionInboxAddress,
 } from "#execution/session-inbox/address.js";
 import type { RemoteAgentBinding } from "#eve-channel/support.js";
-
-const PROXY_INPUT_REQUESTS_KEY = "eve.runtime.proxyInputRequests";
 
 const PROXY_INPUT_REQUEST_KINDS = {
   question: true,
@@ -83,114 +80,6 @@ export function resolvedForParent(
   return resolutions.length === 0 ? undefined : { ...data, resolutions };
 }
 
-/** `requestId → route` map stored on the parent session. */
-type ProxyInputRequestMap = Readonly<Record<string, ProxyInputRequest>>;
-
-/**
- * Returns the proxy-routing map as a fresh `Map`. Never returns a live
- * reference so accidental mutation cannot corrupt session state.
- */
-export function getProxyInputRequests(
-  state: SessionStateMap | undefined,
-): ReadonlyMap<string, ProxyInputRequest> {
-  return new Map(Object.entries(readMap(state)));
-}
-
-/**
- * Returns true when the session is currently proxying one or more
- * HITL requests on behalf of a descendant subagent.
- */
-export function hasProxyInputRequests(state: SessionStateMap | undefined): boolean {
-  for (const _ of Object.keys(readMap(state))) {
-    return true;
-  }
-  return false;
-}
-
-/**
- * Replaces prior entries for the destination and input source with the provided
- * ones. A child raising a fresh batch overwrites its prior batch so the
- * parent never keeps stale request metadata. Other sources' routes stay
- * independently answerable.
- */
-export function upsertProxyInputRequests<S extends HarnessSessionBase>(input: {
-  readonly inputSource?: string;
-  readonly entries: readonly (readonly [requestId: string, route: ProxyInputRequest])[];
-  readonly forChildContinuationToken: string;
-  readonly session: S;
-}): S {
-  return {
-    ...input.session,
-    state: upsertProxyInputRequestState({
-      entries: input.entries,
-      forChildContinuationToken: input.forChildContinuationToken,
-      inputSource: input.inputSource,
-      state: input.session.state,
-    }),
-  };
-}
-
-/** State-only variant for control-plane steps that already hold a durable projection. */
-export function upsertProxyInputRequestState(input: {
-  readonly inputSource?: string;
-  readonly entries: readonly (readonly [requestId: string, route: ProxyInputRequest])[];
-  readonly forChildContinuationToken: string;
-  readonly state: SessionStateMap | undefined;
-}): SessionStateMap | undefined {
-  const next: Record<string, ProxyInputRequest> = {};
-
-  for (const [requestId, route] of Object.entries(readMap(input.state))) {
-    if (
-      route.childContinuationToken !== input.forChildContinuationToken ||
-      route.inputSource !== input.inputSource
-    ) {
-      next[requestId] = route;
-    }
-  }
-
-  for (const [requestId, route] of input.entries) {
-    next[requestId] = route;
-  }
-
-  const state = { ...input.state };
-  if (Object.keys(next).length === 0) {
-    delete state[PROXY_INPUT_REQUESTS_KEY];
-  } else {
-    state[PROXY_INPUT_REQUESTS_KEY] = next;
-  }
-  return Object.keys(state).length > 0 ? state : undefined;
-}
-
-/** Removes every proxy route the predicate selects. */
-export function clearProxyInputRequestsWhere<T extends { readonly state?: SessionStateMap }>(
-  session: T,
-  select: (route: ProxyInputRequest, requestId: string) => boolean,
-): T {
-  const requestIds = Object.entries(readMap(session.state))
-    .filter(([requestId, route]) => select(route, requestId))
-    .map(([requestId]) => requestId);
-  return retireProxyInputRequests(session, requestIds);
-}
-
-/** Removes only the request IDs whose responses were successfully forwarded. */
-export function retireProxyInputRequests<T extends { readonly state?: SessionStateMap }>(
-  session: T,
-  requestIds: readonly string[],
-): T {
-  const current = readMap(session.state);
-  const next = { ...current };
-  let changed = false;
-
-  for (const requestId of requestIds) {
-    if (Object.hasOwn(next, requestId)) {
-      delete next[requestId];
-      changed = true;
-    }
-  }
-
-  return changed ? writeMap(session, next) : session;
-}
-
 /**
  * Projects a {@link SubagentInputRequestHookPayload} into the
  * `(requestId, route)` tuples the session stores.
@@ -238,42 +127,11 @@ export function toProxyInputRequestEntries(
   });
 }
 
-function readMap(state: SessionStateMap | undefined): ProxyInputRequestMap {
-  const raw = state?.[PROXY_INPUT_REQUESTS_KEY];
-
-  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
-    return {};
-  }
-
-  const result: Record<string, ProxyInputRequest> = {};
-  for (const [key, value] of Object.entries(raw)) {
-    const request = parseProxyInputRequest(value, key);
-    if (request !== undefined) {
-      result[key] = request;
-    }
-  }
-  return result;
-}
-
-function writeMap<T extends { readonly state?: SessionStateMap }>(
-  session: T,
-  entries: Record<string, ProxyInputRequest>,
-): T {
-  const state = { ...session.state };
-
-  if (Object.keys(entries).length === 0) {
-    delete state[PROXY_INPUT_REQUESTS_KEY];
-    return {
-      ...session,
-      state: Object.keys(state).length > 0 ? state : undefined,
-    };
-  }
-
-  state[PROXY_INPUT_REQUESTS_KEY] = entries;
-  return { ...session, state };
-}
-
-function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRequest | undefined {
+/** Reads one stored route, or `undefined` when it is malformed. */
+export function parseProxyInputRequest(
+  value: unknown,
+  requestId: string,
+): ProxyInputRequest | undefined {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return undefined;
   }
@@ -385,9 +243,9 @@ function parseProxyInputReply(value: unknown): ProxyInputReply | undefined {
   }
   const options = Reflect.get(value, "options");
   if (options !== undefined) {
-    const parsed = inputOptionSchema.array().safeParse(options);
-    if (!parsed.success) return undefined;
-    reply.options = parsed.data;
+    // `Array.from` turns holes into `undefined`, which `every` alone would skip.
+    if (!Array.isArray(options) || !Array.from(options).every(isInputOption)) return undefined;
+    reply.options = options;
   }
   return reply;
 }
@@ -405,6 +263,24 @@ function parseProxyInputRequestBatch(value: unknown): ProxyInputRequestBatch | u
     return undefined;
   }
   return { approvalRequestIds: value.approvalRequestIds, requestIds: value.requestIds };
+}
+
+// `inputOptionSchema`, checked by hand: the session-state module imports this one, and the
+// workflow bundle reads session state without pulling in zod.
+const INPUT_OPTION_FIELDS: Readonly<Record<string, (value: unknown) => boolean>> = {
+  description: (value) => value === undefined || typeof value === "string",
+  id: (value) => typeof value === "string",
+  label: (value) => typeof value === "string",
+  style: (value) =>
+    value === undefined || value === "primary" || value === "danger" || value === "default",
+};
+
+function isInputOption(value: unknown): value is InputOption {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  return (
+    Object.keys(value).every((key) => Object.hasOwn(INPUT_OPTION_FIELDS, key)) &&
+    Object.entries(INPUT_OPTION_FIELDS).every(([key, valid]) => valid(Reflect.get(value, key)))
+  );
 }
 
 function isStringArray(value: unknown): value is string[] {

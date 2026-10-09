@@ -13,15 +13,12 @@ import {
   withSessionStateDelta,
   type SessionStateTransition,
 } from "#execution/session/state-delta.js";
-import {
-  getProxyInputRequests,
-  toProxyInputRequestEntries,
-  upsertProxyInputRequests,
-} from "#harness/proxy-input-requests.js";
+import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/hitl/session-state.js";
+import { toProxyInputRequestEntries } from "#harness/hitl/relays.js";
 import { currentProjection } from "#harness/session-machine/current.js";
 import { applyTransition, sessionView } from "#harness/session-machine/commit.js";
 import { relay } from "#harness/session-machine/transitions.js";
-import type { WorkflowAskRoute } from "#harness/proxy-input-requests.js";
+import type { WorkflowAskRoute } from "#harness/hitl/relays.js";
 
 type SubagentEventHookPayload =
   | SubagentAuthorizationEventHookPayload

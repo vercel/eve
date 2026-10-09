@@ -6,8 +6,8 @@ import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.j
 import {
   getProxyInputRequests,
   upsertProxyInputRequestState,
-  type ProxyInputRequest,
-} from "#harness/proxy-input-requests.js";
+} from "#harness/hitl/session-state.js";
+import type { ProxyInputRequest } from "#harness/hitl/relays.js";
 import { filterEventsByType } from "#internal/testing/events.js";
 import { createInputRequestedEvent, type MessageStreamEvent } from "#protocol/message.js";
 import type { InputRequest } from "#shared/input.js";

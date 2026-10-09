@@ -36,9 +36,9 @@ import {
   toToolInputResponseResponder,
 } from "#execution/tools/workflow/answer.js";
 import type { StepCoordinates as PendingInputBatchEvent } from "#harness/session-machine/view.js";
-import type { WorkflowAskRoute } from "#harness/proxy-input-requests.js";
+import type { WorkflowAskRoute } from "#harness/hitl/relays.js";
 import { type InputResolution, type UnstampedMessageStreamEvent } from "#protocol/message.js";
-import { getProxyInputRequests, retireProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { getProxyInputRequests, retireProxyInputRequests } from "#harness/hitl/session-state.js";
 import type { InputResponse } from "#shared/input.js";
 
 export type RoutedDeliverResult =
@@ -56,9 +56,7 @@ export type RoutedDeliverResult =
 
 interface ChildBucket {
   readonly workflowAsk?: WorkflowAskRoute;
-  readonly remote?: NonNullable<
-    import("#harness/proxy-input-requests.js").ProxyInputRequest["remote"]
-  >;
+  readonly remote?: NonNullable<import("#harness/hitl/relays.js").ProxyInputRequest["remote"]>;
   readonly childContinuationToken: string;
   readonly childSessionInbox?: SessionInboxAddress;
   readonly event: PendingInputBatchEvent;

@@ -1,4 +1,4 @@
-import { getPendingAuthorization } from "#harness/authorization.js";
+import { getPendingAuthorization } from "#harness/hitl/session-state.js";
 import { sessionView } from "#harness/session-machine/commit.js";
 import { ownOpenRequestIds } from "#harness/session-machine/transitions.js";
 import { runtimeWait } from "#harness/session-machine/view.js";

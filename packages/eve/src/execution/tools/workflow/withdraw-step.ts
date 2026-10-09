@@ -11,7 +11,8 @@ import {
 import type { WorkflowToolRunControlMessage } from "#execution/tools/workflow/messages.js";
 import { ignoreGoneTarget } from "#execution/tasks/workflow-target.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
-import { getProxyInputRequests, type ProxyInputRequest } from "#harness/proxy-input-requests.js";
+import { getProxyInputRequests } from "#harness/hitl/session-state.js";
+import type { ProxyInputRequest } from "#harness/hitl/relays.js";
 import { sessionView } from "#harness/session-machine/commit.js";
 import { finishRun } from "#harness/session-machine/transitions.js";
 import { storedProjection } from "#harness/session-machine/view.js";

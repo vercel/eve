@@ -1,4 +1,4 @@
-import { toProxyInputRequestEntries } from "#harness/proxy-input-requests.js";
+import { toProxyInputRequestEntries } from "#harness/hitl/relays.js";
 import { describe, expect, it } from "vitest";
 
 import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js";
@@ -14,7 +14,7 @@ import { applyTransition, sessionView } from "#harness/session-machine/commit.js
 import { relay } from "#harness/session-machine/transitions.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import { withOpenTurn } from "#internal/testing/session-machine.js";
-import { hasProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { hasProxyInputRequests, upsertProxyInputRequests } from "#harness/hitl/session-state.js";
 import type { HarnessEmitFn, HarnessSession } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { InputRequest } from "#shared/input.js";

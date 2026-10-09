@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { matchAuthorizationCallbacks } from "#execution/authorization-callback-match.js";
-import type { PendingAuthorizationState } from "#harness/authorization.js";
+import type { PendingAuthorizationState } from "#harness/hitl/session-state.js";
 
 describe("matchAuthorizationCallbacks", () => {
   it.each([undefined, "another-attempt"])("ignores an unmatched attempt %s", (attemptId) => {

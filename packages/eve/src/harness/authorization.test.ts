@@ -4,15 +4,19 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
 import {
   CallbackBaseUrlKey,
-  clearPendingAuthorization,
   consumeAuthorizationResult,
-  getPendingAuthorization,
   getHookUrl,
   PendingAuthorizationResultKey,
-  resolveActiveAuthorizationChallenges,
-  setPendingAuthorization,
-  supersededChallenges,
 } from "#harness/authorization.js";
+import {
+  resolveActiveAuthorizationChallenges,
+  supersededChallenges,
+} from "#harness/hitl/sign-ins.js";
+import {
+  clearPendingAuthorization,
+  getPendingAuthorization,
+  setPendingAuthorization,
+} from "#harness/hitl/session-state.js";
 import type { ConnectionPrincipal } from "#shared/connection-types.js";
 
 afterEach(() => {

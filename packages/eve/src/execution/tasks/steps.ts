@@ -39,7 +39,7 @@ import type {
   WorkflowToolRunOutcomeMessage,
 } from "#execution/tools/workflow/messages.js";
 import { workflowToolRunFailureOutput } from "#execution/tools/workflow/owner-inbox.js";
-import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { getProxyInputRequests } from "#harness/hitl/session-state.js";
 import { sessionView } from "#harness/session-machine/commit.js";
 import { finishRun, settleTask } from "#harness/session-machine/transitions.js";
 import { storedProjection } from "#harness/session-machine/view.js";

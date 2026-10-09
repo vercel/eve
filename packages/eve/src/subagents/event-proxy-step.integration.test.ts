@@ -16,7 +16,7 @@ import { openSessionEventPublisher } from "#execution/publish-session-events.js"
 import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { positionOf, withOpenTurn } from "#internal/testing/session-machine.js";
 import { createSessionLimitContinuationRequest } from "#harness/hitl/budget-request.js";
-import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { getProxyInputRequests } from "#harness/hitl/session-state.js";
 import { createAuthorizationRequiredEvent, type MessageStreamEvent } from "#protocol/message.js";
 import type { HookContext } from "#public/definitions/hook.js";
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";

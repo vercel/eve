@@ -14,7 +14,7 @@ import {
 } from "#harness/workflow-tool-runs.js";
 
 import { toolOutput } from "#tools/model-output.js";
-import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/hitl/session-state.js";
 import { setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
 import { isRuntimeWorkflowToolAction } from "#shared/action-types.js";

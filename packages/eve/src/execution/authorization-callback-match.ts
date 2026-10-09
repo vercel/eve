@@ -1,9 +1,6 @@
 import type { DeliverPayload } from "#channel/types.js";
-import type {
-  AuthorizationChallenge,
-  AuthorizationResult,
-  PendingAuthorizationState,
-} from "#harness/authorization.js";
+import type { AuthorizationChallenge, AuthorizationResult } from "#harness/authorization.js";
+import type { PendingAuthorizationState } from "#harness/hitl/session-state.js";
 import type { AuthorizationCallback } from "#shared/connection-types.js";
 
 export interface MatchedAuthorizationCallback {

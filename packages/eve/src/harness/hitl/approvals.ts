@@ -1,11 +1,8 @@
 import type { ModelMessage } from "ai";
 
 import type { getApprovalAuditState } from "#harness/hitl/candidates.js";
-import {
-  supersededChallenges,
-  withSignIns,
-  type AuthorizationChallenge,
-} from "#harness/authorization.js";
+import type { AuthorizationChallenge } from "#harness/authorization.js";
+import { supersededChallenges, withSignIns } from "./sign-ins.js";
 import { authorizationEventFields } from "#harness/authorization-event-fields.js";
 import { renderPendingApprovalsSnippet } from "#harness/hitl/approval-prompt.js";
 import { isApprovalRequest } from "#harness/input-request-class.js";

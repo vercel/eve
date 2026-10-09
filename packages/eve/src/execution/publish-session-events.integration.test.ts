@@ -3,7 +3,7 @@ import { expect, it } from "vitest";
 import { replaceDurableSessionSnapshot } from "#execution/durable-session-store.js";
 import { applyRunMessagesStep } from "#execution/tools/workflow/apply-run-messages-step.js";
 import { withdrawWorkflowToolRunQuestionStep } from "#execution/tools/workflow/withdraw-step.js";
-import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { upsertProxyInputRequests } from "#harness/hitl/session-state.js";
 import type { HarnessSession } from "#harness/types.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
