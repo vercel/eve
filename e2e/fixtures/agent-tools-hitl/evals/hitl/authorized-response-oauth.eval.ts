@@ -39,7 +39,7 @@ export default defineEval({
     const resumedTurn = t.target.watchTurn(held.sessionId, {
       startIndex: held.session.state.streamIndex,
     });
-    const callback = await fetch(callbackUrl);
+    const callback = await t.target.fetch(`${callbackUrl.pathname}${callbackUrl.search}`);
     if (!callback.ok) {
       throw new Error(
         `Fixture OAuth callback failed (${String(callback.status)}): ${await callback.text()}`,

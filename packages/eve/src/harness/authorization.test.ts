@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
+import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import {
   CallbackBaseUrlKey,
   clearPendingAuthorization,
@@ -20,14 +21,27 @@ afterEach(() => {
 });
 
 describe("authorization callback URLs", () => {
-  it("includes the Vercel automation bypass query when configured", () => {
+  it("keeps the automation bypass secret out of sign-in callback URLs", () => {
     vi.stubEnv("VERCEL_AUTOMATION_BYPASS_SECRET", "secret value");
     const ctx = new ContextContainer();
     ctx.set(CallbackBaseUrlKey, "https://agent.example.com");
     ctx.set(SessionIdKey, "session-1");
 
     expect(contextStorage.run(ctx, () => getHookUrl("linear", "attempt-1"))).toBe(
-      "https://agent.example.com/eve/v1/connections/linear/callback/attempt-1/eve%3Ainbox%3Av1%3Aeve%3Asession%3Asession-1%3Ainbox?x-vercel-protection-bypass=secret+value",
+      "https://agent.example.com/eve/v1/connections/linear/callback/attempt-1/eve%3Ainbox%3Av1%3Aeve%3Asession%3Asession-1%3Ainbox",
+    );
+  });
+
+  it("keeps the automation bypass secret out of production sign-in callback URLs", () => {
+    vi.stubEnv("VERCEL_AUTOMATION_BYPASS_SECRET", "secret value");
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "agent.example.com");
+    const ctx = new ContextContainer();
+    ctx.set(CallbackBaseUrlKey, resolveWorkflowCallbackBaseUrl("https://agent-abc123.vercel.app"));
+    ctx.set(SessionIdKey, "session-1");
+
+    expect(contextStorage.run(ctx, () => getHookUrl("linear", "attempt-1"))).toBe(
+      "https://agent.example.com/eve/v1/connections/linear/callback/attempt-1/eve%3Ainbox%3Av1%3Aeve%3Asession%3Asession-1%3Ainbox",
     );
   });
 });
