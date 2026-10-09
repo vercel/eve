@@ -3,11 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   getProxyInputRequests,
   hasProxyInputRequests,
-  toProxyInputRequestEntries,
   upsertProxyInputRequests,
-} from "#harness/proxy-input-requests.js";
+} from "./session-state.js";
+import { parseProxyInputRequest, toProxyInputRequestEntries } from "./relays.js";
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
-import type { InputRequest, InputRequestKind } from "#shared/input.js";
+import { inputOptionSchema, type InputRequest, type InputRequestKind } from "#shared/input.js";
 import type { HarnessSession } from "#harness/types.js";
 
 const REQUEST_EVENT = { sequence: 0, stepIndex: 0, turnId: "turn_0" };
@@ -334,5 +334,71 @@ describe("getProxyInputRequests type safety", () => {
         { childContinuationToken: "child-a", event: REQUEST_EVENT, kind: "tool-approval" },
       ],
     ]);
+  });
+});
+
+describe("parseProxyInputRequest", () => {
+  it("keeps reply options shaped like input options and drops a route with any other", () => {
+    const parse = (options: unknown) =>
+      parseProxyInputRequest(
+        {
+          childContinuationToken: "child",
+          event: REQUEST_EVENT,
+          kind: "question",
+          reply: { options },
+        },
+        "req-1",
+      );
+    const options = [
+      { id: "a", label: "A" },
+      { description: "Ship it.", id: "b", label: "B", style: "danger" },
+    ];
+    expect(parse(options)?.reply?.options).toEqual(options);
+    for (const malformed of [
+      [{ id: "a" }],
+      [{ id: "a", label: "A", style: "loud" }],
+      [{ id: "a", label: "A", value: 1 }],
+      { id: "a", label: "A" },
+      Array(1),
+    ]) {
+      expect(parse(malformed)).toBeUndefined();
+    }
+  });
+
+  it("accepts exactly the reply options inputOptionSchema accepts", () => {
+    const parse = (options: unknown) =>
+      parseProxyInputRequest(
+        {
+          childContinuationToken: "child",
+          event: REQUEST_EVENT,
+          kind: "question",
+          reply: { options },
+        },
+        "req-1",
+      );
+    const option = { id: "a", label: "A" };
+    for (const options of [
+      [],
+      [option],
+      [{ ...option, description: "d", style: "primary" }],
+      [{ ...option, description: undefined, style: undefined }],
+      [{ ...option, description: 1 }],
+      [{ ...option, style: "loud" }],
+      [{ ...option, value: 1 }],
+      [{ id: "a" }],
+      [{ label: "A" }],
+      [null],
+      ["a"],
+      [[option]],
+      [option, undefined],
+      Array(1),
+      option,
+      "a",
+      null,
+    ]) {
+      expect(parse(options) !== undefined, JSON.stringify(options)).toBe(
+        inputOptionSchema.array().safeParse(options).success,
+      );
+    }
   });
 });

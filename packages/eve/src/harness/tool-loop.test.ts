@@ -53,11 +53,8 @@ import {
   createUserMessage,
   type HarnessModelMessage,
 } from "#harness/messages.js";
-import {
-  getPendingAuthorization,
-  modelFacingAuthorizationOutput,
-  requestAuthorization,
-} from "#harness/authorization.js";
+import { getPendingAuthorization } from "#harness/hitl/session-state.js";
+import { modelFacingAuthorizationOutput, requestAuthorization } from "#harness/authorization.js";
 import { applyTransition, sessionView } from "#harness/session-machine/commit.js";
 import { requireSignIn } from "#harness/hitl/approvals.js";
 import { createAuthorizationRequiredEvent } from "#protocol/message.js";

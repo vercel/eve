@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  retireProxyInputRequests,
-  toProxyInputRequestEntries,
-  upsertProxyInputRequests,
-} from "#harness/proxy-input-requests.js";
+import { retireProxyInputRequests, upsertProxyInputRequests } from "#harness/hitl/session-state.js";
+import { toProxyInputRequestEntries } from "#harness/hitl/relays.js";
 import type { HarnessSession } from "#harness/types.js";
 import { withParkedStep } from "#internal/testing/session-machine.js";
 import type { InputRequest } from "#shared/input.js";

@@ -16,12 +16,8 @@ import { dispatchDynamicToolEvent } from "#context/dynamic-tool-lifecycle.js";
 import { SessionIdKey, StaticModelReferenceKey } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { mockModel } from "#evals/mock-model.js";
-import {
-  CallbackBaseUrlKey,
-  clearPendingAuthorization,
-  getPendingAuthorization,
-  PendingAuthorizationResultKey,
-} from "#harness/authorization.js";
+import { CallbackBaseUrlKey, PendingAuthorizationResultKey } from "#harness/authorization.js";
+import { clearPendingAuthorization, getPendingAuthorization } from "#harness/hitl/session-state.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession, HarnessToolMap, StepInput, StepResult } from "#harness/types.js";
 import {

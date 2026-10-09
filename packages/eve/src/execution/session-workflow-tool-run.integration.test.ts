@@ -11,7 +11,7 @@ import {
   writeTaskTable,
 } from "#execution/tasks/table.js";
 import type { WorkflowToolRunRef } from "#execution/tools/workflow/messages.js";
-import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { getProxyInputRequests } from "#harness/hitl/session-state.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { containsEventSequence, filterEventsByType } from "#internal/testing/events.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
