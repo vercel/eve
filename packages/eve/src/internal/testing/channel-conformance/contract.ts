@@ -6,6 +6,7 @@ import {
   type ChannelCapability,
   type ChannelConversation,
   type ConversationOptions,
+  deployPrompt,
   GATED_TOOL,
   type GatedTool,
   OPEN_GATED_TOOL,
@@ -65,11 +66,14 @@ const OWN_WORDS = "Mostly the billing migration";
 
 const PLAN_REVIEW = `Use ${TWO_QUESTIONS_TOOL} to plan the review.`;
 
-const DEPLOY = `Use ${GATED_TOOL} to ship the release.`;
+// The mock model fills the tool's `release` input from this, and the tool's
+// custom approval prompt reads it back, so rules see the prompt the tool built.
+const RELEASE = 'release "v2.4"';
+const DEPLOY = `Use ${GATED_TOOL} to ship ${RELEASE}.`;
 // Channels word the two approval choices differently; the TUI asks Yes or No.
 const APPROVE_LABELS = ["Approve", "Yes"];
 const CANCEL_LABELS = ["Cancel", "No"];
-const APPROVAL_PROMPT = "Approve Deploy release?";
+const APPROVAL_PROMPT = deployPrompt("v2.4");
 
 async function askToDeploy(conversation: ChannelConversation) {
   await conversation.say(DEPLOY);
@@ -78,8 +82,8 @@ async function askToDeploy(conversation: ChannelConversation) {
 
 const PUBLISH_PROMPT = "Approve Publish notes?";
 
-const DEPLOY_AND_PUBLISH = `Call tools in parallel: ${GATED_TOOL}, ${SECOND_GATED_TOOL}`;
-const ASK_AND_DEPLOY = `Call tools in parallel: ask_question, ${GATED_TOOL}\n${ASK}`;
+const DEPLOY_AND_PUBLISH = `Call tools in parallel: ${GATED_TOOL}, ${SECOND_GATED_TOOL}\nShip ${RELEASE}.`;
+const ASK_AND_DEPLOY = `Call tools in parallel: ask_question, ${GATED_TOOL}\n${ASK}\nShip ${RELEASE}.`;
 
 /** Answers each prompt with its option, in whatever order the client shows them. */
 function answerEach(
@@ -505,7 +509,7 @@ const questionRules = [
 
 const approvalRules = [
   {
-    rule: "a tool approval shows a choice to approve and one to cancel",
+    rule: "a tool approval shows the tool's prompt with a choice to approve and one to cancel",
     source: "docs/tools/human-in-the-loop.md#approvals",
     requires: [],
     async run(conversation) {

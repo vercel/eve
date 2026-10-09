@@ -64,7 +64,7 @@ approval: auto({
 
 A reusable approval grant applies only after every matching request that is already pending has been resolved. If several calls to a `once()`-gated tool have each produced an approval prompt, approving one does not authorize the others; each visible prompt remains an independent decision. After those pending requests are resolved, later calls in the session are allowed automatically.
 
-Use the object form of `approval` to replace the default `Approve tool call: <toolName>` text with a tool-specific summary. The `prompt` callback receives the validated `input`, final `toolName`, and `callId`:
+Use the object form of `approval` to replace the default `Approve <tool label>?` text with a tool-specific summary. The `prompt` callback receives the validated `input`, final `toolName`, and `callId`:
 
 ```ts title="agent/tools/refund_charge.ts"
 import { defineTool } from "eve/tools";
