@@ -3,6 +3,7 @@ import { defineAgent, defineDynamic } from "eve";
 import type { MockModelRequest, MockModelResponse } from "eve/evals";
 
 import { continuationModel } from "./lib/continuation/model.ts";
+import { humanInputModel } from "./lib/hitl/model.ts";
 
 const AUTH_PROBE_DIRECTIVE = /call the auth-probe tool exactly once with marker "([^"]+)"/iu;
 const SCOPED_APPROVAL_DIRECTIVE =
@@ -105,10 +106,16 @@ export default defineAgent({
         model: typeof base.model === "string" ? base.model : "openai/gpt-6.1-sol",
         modelContextWindowTokens: base.modelContextWindowTokens,
       }),
-      "step.started": (_event, ctx) =>
-        ctx.session.auth.initiator?.attributes?.model === "continuation"
-          ? { model: continuationModel(), modelContextWindowTokens: 1_000_000 }
-          : { model: base.model, modelContextWindowTokens: base.modelContextWindowTokens },
+      "step.started": (_event, ctx) => {
+        switch (ctx.session.auth.initiator?.attributes?.model) {
+          case "continuation":
+            return { model: continuationModel(), modelContextWindowTokens: 1_000_000 };
+          case "hitl":
+            return { model: humanInputModel(), modelContextWindowTokens: 1_000_000 };
+          default:
+            return { model: base.model, modelContextWindowTokens: base.modelContextWindowTokens };
+        }
+      },
     },
   }),
 });

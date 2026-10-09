@@ -35,6 +35,14 @@ function respond(request: MockModelRequest): MockModelResponse | string {
       ],
     };
   }
+  // RELAY-<child>: delegate to that mock child once, wait for it, and report its result.
+  const relay = /RELAY-(question-child|budget-child)/u.exec(message)?.[1];
+  if (relay !== undefined) {
+    const result = taskResultOf(request, relay);
+    if (result !== undefined) return `RELAY-RESULT ${result}`;
+    if (hasReceipt(request, relay)) return waitForTasks();
+    return { toolCalls: [{ input: { message: "Handle Alice's release request." }, name: relay }] };
+  }
   if (message.includes("Call the stock-price subagent exactly once")) {
     const quote = taskResultOf(request, "stock-price");
     if (quote !== undefined) return `The stock-price subagent returned: ${quote}`;
