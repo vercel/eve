@@ -77,6 +77,8 @@ function createAlsContext(sandbox?: MockSandbox): ContextContainer {
     turn: { id: "test-turn", sequence: 0 },
   });
   if (sandbox !== undefined) ctx.setVirtualContext(SandboxKey, sandbox.access);
+  // Handlers read the session's tables as of the event they observe.
+  enterSessionProjection(ctx, undefined);
   return ctx;
 }
 

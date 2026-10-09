@@ -98,6 +98,10 @@ export interface DynamicResolveContext {
  * wide so it accepts both tool-returning and skill-returning handlers:
  * the slot directory (tools/ vs skills/) determines the required return,
  * validated at runtime by the respective resolver.
+ *
+ * Each handler receives the session fact behind its key: `session.started` and `turn.started`
+ * get those facts, and `step.started` gets the turn's `model.requested`, whose `scope` names the
+ * turn and its model run.
  */
 export type DynamicEvents<TResult = unknown> = {
   readonly [K in DynamicToolEventName]?: (

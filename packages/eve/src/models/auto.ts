@@ -103,16 +103,13 @@ function selectionLogIdentity(selection: AutoModelSelection): string {
   return typeof model === "string" ? model : `${model.provider}/${model.modelId}`;
 }
 
+/** The turn whose model run a `step.started` handler chooses for: the `model.requested` fact's. */
 function turnId(event: unknown): string {
-  if (
-    !isRecord(event) ||
-    !isRecord(event.data) ||
-    typeof event.data.turnId !== "string" ||
-    !event.data.turnId
-  ) {
+  const scope = isRecord(event) && isRecord(event.scope) ? event.scope : undefined;
+  if (scope === undefined || typeof scope.turnId !== "string" || !scope.turnId) {
     throw new Error("auto requires a step.started event with a turn ID.");
   }
-  return event.data.turnId;
+  return scope.turnId;
 }
 
 function routingState(ctx: DynamicResolveContext): Parameters<typeof decide>[0]["state"] {

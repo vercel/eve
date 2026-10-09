@@ -21,7 +21,7 @@ const log = createLogger("execution.subagent-adapter");
  */
 export const SUBAGENT_ADAPTER: ChannelAdapter = {
   kind: SUBAGENT_ADAPTER_KIND,
-  async "interaction.opened"(data, ctx) {
+  async "interaction.opened"({ data }, ctx) {
     const state = ctx.state;
     if (!isSubagentAdapterState(state) || ctx.view === undefined) return;
     if (data.request.kind === "sign-in") {
@@ -45,11 +45,11 @@ export const SUBAGENT_ADAPTER: ChannelAdapter = {
       parentContinuationToken: state.parentContinuationToken,
     });
   },
-  async "interaction.settled"(data, ctx) {
-    await forwardFact({ data, type: "interaction.settled" }, ctx);
+  async "interaction.settled"(event, ctx) {
+    await forwardFact(event, ctx);
   },
-  async "response.settled"(data, ctx) {
-    await forwardFact({ data, type: "response.settled" }, ctx);
+  async "response.settled"(event, ctx) {
+    await forwardFact(event, ctx);
   },
 };
 

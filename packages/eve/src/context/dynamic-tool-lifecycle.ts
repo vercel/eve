@@ -380,7 +380,7 @@ async function resolveToolsFromEvent(
       if (handler === undefined) return null;
       clearDurableDynamicCallbacks(sessionId, { scope, resolverSlug: resolver.slug });
       try {
-        const rawResult = await handler(event, buildResolveContext(ctx, messages));
+        const rawResult = await handler(event.fact, buildResolveContext(ctx, messages));
         if (rawResult === null || rawResult === undefined) return null;
         const { entries, isSingle } = readDynamicToolResult(resolver, rawResult);
         const named = qualifyDynamicToolNames(resolver, isSingle, entries);

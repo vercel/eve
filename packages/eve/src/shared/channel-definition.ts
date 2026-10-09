@@ -45,7 +45,7 @@ export interface GenericReceiveInput<TReceiveTarget = Record<string, unknown>> {
 
 /**
  * The object passed to {@link defineChannel}. `routes` is required; `state`
- * seeds durable adapter state, `context` builds the per-step `channel` argument
+ * seeds durable adapter state, `context` builds the per-step `ctx.channel`
  * for `events` and `deliver`, `events` handle session lifecycle, `receive`
  * accepts cross-channel handoffs, `fetchFile` stages remote file URLs,
  * `audience` classifies conversation visibility, and `metadata` projects
@@ -79,10 +79,9 @@ export interface GenericChannelDefinition<
    * register late-bound callbacks. eve writes state mutations made inside the
    * returned context back through `adapter.state`.
    *
-   * Return the channel-owned context (thread handles, API clients, etc.). The
-   * framework passes it as the `channel` argument to event handlers (with
-   * {@link ChannelContinuationOps} injected) and passes {@link SessionContext}
-   * as a separate `ctx` argument.
+   * Return the channel-owned context (thread handles, API clients, etc.). An
+   * event handler reads it as `ctx.channel`, with continuation routing added,
+   * beside the session's context.
    */
   context?(state: NonNullable<TState>, session: SessionHandle): TCtx;
 

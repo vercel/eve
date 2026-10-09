@@ -1,4 +1,4 @@
-import type { ChannelEventContext } from "#public/definitions/channel.js";
+import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
@@ -54,9 +54,6 @@ import { defineChannel, POST, type Channel } from "#public/definitions/channel.j
 import { readNonEmptyString } from "#shared/guards.js";
 
 const log = createLogger("github.channel");
-
-type EventData<T extends SessionEvent["type"]> =
-  Extract<SessionEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /**
  * Target accepted by `receive(github, { target })` for proactive sessions.
@@ -120,9 +117,8 @@ export type GitHubInboundResult = {
 export type GitHubInboundResultOrPromise = GitHubInboundResult | Promise<GitHubInboundResult>;
 
 type GitHubEventHandler<T extends SessionEvent["type"]> = (
-  data: EventData<T>,
-  channel: GitHubEventContext,
-  ctx: ChannelEventContext,
+  event: ChannelEventOf<T>,
+  ctx: ChannelEventContext<GitHubEventContext>,
 ) => void | Promise<void>;
 
 /**

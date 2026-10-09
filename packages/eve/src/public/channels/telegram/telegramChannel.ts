@@ -1,11 +1,10 @@
-import type { ChannelEventContext } from "#public/definitions/channel.js";
+import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { TelegramInstrumentationMetadata } from "#public/channels/telegram/index.js";
 import { defaultDeliverResult, type ChannelAdapterContext } from "#channel/adapter.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
-import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -74,9 +73,6 @@ import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
 const log = createLogger("telegram.channel");
 
-type EventData<T extends SessionEvent["type"]> =
-  Extract<SessionEvent, { type: T }> extends { data: infer D } ? D : undefined;
-
 /** Minimal Telegram context (only `telegram`, no `state` or session ops), passed to `onMessage` and `onCallbackQuery` hooks before a session exists. Event handlers receive the richer {@link TelegramEventContext}. */
 export interface TelegramContext {
   readonly telegram: TelegramHandle;
@@ -140,12 +136,15 @@ export type TelegramInboundResult = {
 export type TelegramInboundResultOrPromise = TelegramInboundResult | Promise<TelegramInboundResult>;
 
 type TelegramEventHandler<T extends SessionEvent["type"]> = (
-  data: EventData<T>,
-  channel: TelegramEventContext,
-  ctx: ChannelEventContext,
+  event: ChannelEventOf<T>,
+  ctx: ChannelEventContext<TelegramEventContext>,
 ) => void | Promise<void>;
 
-/** Per-event handlers for `telegramChannel({ events })`. Each entry overrides the built-in default (handlers merge over {@link defaultEvents}). Every handler receives the event's data, the channel context, and the {@link SessionContext}. */
+/**
+ * Per-event handlers for `telegramChannel({ events })`. Each entry overrides the built-in default
+ * (handlers merge over {@link defaultEvents}). Every handler receives the event and a `ctx` whose
+ * `channel` is the Telegram context.
+ */
 export interface TelegramChannelEvents {
   readonly "turn.started"?: TelegramEventHandler<"turn.started">;
   readonly "call.requested"?: TelegramEventHandler<"call.requested">;

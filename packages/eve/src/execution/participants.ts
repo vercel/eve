@@ -5,9 +5,7 @@ import { contextStorage, type ContextContainer } from "#context/container.js";
 import { resolveDynamicConnections } from "#context/dynamic-connection-lifecycle.js";
 import { resolveDynamicInstructions } from "#context/dynamic-instruction-lifecycle.js";
 import { resolveDynamicModel } from "#context/dynamic-model-lifecycle.js";
-import {
-  resolveDynamicSkills,
-} from "#context/dynamic-skill-lifecycle.js";
+import { resolveDynamicSkills } from "#context/dynamic-skill-lifecycle.js";
 import {
   refreshDynamicSessionSubagentsForRuntimeRevision,
   resolveDynamicSubagents,
@@ -36,12 +34,15 @@ import {
   compactionRequestedPoint,
   sessionStartedForResolvers,
   stepStartedForResolvers,
+  modelRequestedFact,
+  sessionStartedFact,
   turnCompletedPoint,
+  turnStartedFact,
   turnStartedForResolvers,
 } from "#harness/session-machine/change-points.js";
-import { currentProjection } from "#harness/session-machine/current.js";
+import { currentProjection, currentView } from "#harness/session-machine/current.js";
 import { turnCoordinates } from "#protocol/session-projection.js";
-import type { StepParticipants } from "#harness/types.js";
+import type { StepCoordinates, StepParticipants } from "#harness/types.js";
 import type { ExecutionInstrumentation } from "#instrumentation/runtime.js";
 import { createLogger } from "#internal/logging.js";
 import type { RuntimeIdentity } from "#protocol/message.js";
@@ -141,15 +142,25 @@ export function bindSessionParticipants(input: {
     return { ...turn, stepIndex: run?.stepIndex ?? turn.stepIndex };
   };
   const previewModelId = () => input.effectiveAgent.turnAgent.model?.id ?? "dynamic";
+  // A restored step's handlers get the facts its turn published, rebuilt from the tables.
+  const restoredTurn = (turn: TurnRef) =>
+    turnStartedForResolvers(turn, turnStartedFact(currentView(ctx), turn.turnId));
+  const restoredRun = (at: StepCoordinates) => {
+    const runId = currentProjection(ctx).turns[at.turnId]?.runId;
+    if (runId === undefined) {
+      throw new Error(`Turn "${at.turnId}" has no model run to restore step ${at.stepIndex} from.`);
+    }
+    return modelRequestedFact(at.turnId, runId);
+  };
 
   return {
     async receive(event, messages) {
       switch (event.type) {
         case "session.started":
-          await resolveScope(sessionStartedForResolvers(event.data.runtime), messages ?? []);
+          await resolveScope(sessionStartedForResolvers(event), messages ?? []);
           return;
         case "turn.started": {
-          const turn = turnStartedForResolvers(coordinates());
+          const turn = turnStartedForResolvers(coordinates(), event);
           // Recall runs first, so the resolvers see what it brought back.
           const recalled =
             memories.length === 0
@@ -166,7 +177,7 @@ export function bindSessionParticipants(input: {
         case "model.requested": {
           const { owner, runId } = event.data;
           const at = coordinates(runId);
-          const step = stepStartedForResolvers({ ...at, modelId: previewModelId() });
+          const step = stepStartedForResolvers({ ...at, modelId: previewModelId() }, event);
           await resolveModel(step, messages ?? []);
           // A compaction's summary run is the model's alone.
           if ("changeId" in owner) return;
@@ -236,20 +247,20 @@ export function bindSessionParticipants(input: {
     },
 
     async selectModel({ at, messages, modelId }) {
-      await resolveModel(stepStartedForResolvers({ ...at, modelId }), messages);
+      await resolveModel(stepStartedForResolvers({ ...at, modelId }, restoredRun(at)), messages);
     },
 
     async restoreStep({ at, messages, modelId, parked }) {
       if (parked) {
         await resolveDynamicConnections({
           ctx,
-          event: turnStartedForResolvers(at),
+          event: restoredTurn(at),
           resolvers: connections,
         });
       }
       await preparePersistedStepDynamicToolMetadata({
         ctx,
-        event: stepStartedForResolvers({ ...at, modelId }),
+        event: stepStartedForResolvers({ ...at, modelId }, restoredRun(at)),
         messages,
         resolvers: tools,
       });
@@ -261,7 +272,7 @@ export function bindSessionParticipants(input: {
         ctx.set(SessionDynamicToolRuntimeRevisionKey, runtimeRevision);
         return;
       }
-      const event = sessionStartedForResolvers(runtime);
+      const event = sessionStartedForResolvers(sessionStartedFact(runtime));
       await Promise.all([
         refreshDynamicSessionSubagentsForRuntimeRevision({
           ctx,
@@ -283,7 +294,7 @@ export function bindSessionParticipants(input: {
       if (turn === undefined) return;
       await rebindMissingCompiledDynamicToolCallbacks({
         ctx,
-        event: turnStartedForResolvers(turn),
+        event: restoredTurn(turn),
         messages,
         resolvers: tools,
       });
@@ -292,13 +303,13 @@ export function bindSessionParticipants(input: {
     async rehydrateConnections({ runtime, turn }) {
       await resolveDynamicConnections({
         ctx,
-        event: sessionStartedForResolvers(runtime),
+        event: sessionStartedForResolvers(sessionStartedFact(runtime)),
         resolvers: connections,
       });
       if (turn === undefined) return;
       await resolveDynamicConnections({
         ctx,
-        event: turnStartedForResolvers(turn),
+        event: restoredTurn(turn),
         resolvers: connections,
       });
     },

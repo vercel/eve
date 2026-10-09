@@ -67,15 +67,16 @@ export function defaultOnCommand(
 
 /** Built-in Discord event handlers for typing, replies, HITL, and terminal errors. */
 export const defaultEvents: DiscordChannelEvents = {
-  async "turn.started"(_event, channel, _ctx) {
+  async "turn.started"(_event, { channel }) {
     await channel.discord.startTyping();
   },
 
-  async "call.requested"(_event, channel, _ctx) {
+  async "call.requested"(_event, { channel }) {
     await channel.discord.startTyping();
   },
 
-  async "interaction.opened"(data, channel, ctx) {
+  async "interaction.opened"({ data }, ctx) {
+    const { channel } = ctx;
     const event = requestBatchOf(ctx.view, data);
     for (const request of event?.requests ?? []) {
       const content = splitDiscordMessageContent(request.prompt)[0] ?? request.prompt;
@@ -95,7 +96,8 @@ export const defaultEvents: DiscordChannelEvents = {
 
   // Covers every way a prompt ends: a press, a modal answer, or a withdrawal.
   // The bot token outlives the interaction token the prompt may have been posted with.
-  async "interaction.settled"(data, channel, ctx) {
+  async "interaction.settled"({ data }, ctx) {
+    const { channel } = ctx;
     if (signInSettlementOf(ctx.view, data)?.outcome === "authorized") {
       await channel.discord.startTyping();
       return;
@@ -126,16 +128,16 @@ export const defaultEvents: DiscordChannelEvents = {
     }
   },
 
-  async "content.completed"(event, channel, _ctx) {
-    const text = replyTextOf(event);
+  async "content.completed"({ data }, { channel }) {
+    const text = replyTextOf(data);
     if (text === undefined) return;
     await channel.discord.post(text);
   },
 
-  async "session.ended"(event, channel, _ctx) {
-    if (event.outcome !== "failed") return;
-    const hint = formatErrorHint(errorHintOf(event.error));
-    const errorId = event.error?.id;
+  async "session.ended"({ data }, { channel }) {
+    if (data.outcome !== "failed") return;
+    const hint = formatErrorHint(errorHintOf(data.error));
+    const errorId = data.error?.id;
     await channel.discord.post(
       [
         `This session could not recover from an error${hint}.`,
@@ -146,10 +148,10 @@ export const defaultEvents: DiscordChannelEvents = {
     );
   },
 
-  async "turn.settled"(event, channel, _ctx) {
-    if (event.outcome !== "failed") return;
-    const hint = formatErrorHint(errorHintOf(event.error));
-    const errorId = event.error?.id;
+  async "turn.settled"({ data }, { channel }) {
+    if (data.outcome !== "failed") return;
+    const hint = formatErrorHint(errorHintOf(data.error));
+    const errorId = data.error?.id;
     await channel.discord.post(
       [
         `I hit an error while handling your request${hint}.`,

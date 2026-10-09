@@ -46,10 +46,10 @@ export function defaultInputRequestedHandler(
   approvalChannel?: SlackApprovalChannelResolver,
 ): (
   data: RequestBatch,
-  channel: SlackEventContext,
-  ctx: Parameters<NonNullable<SlackChannelInternalEvents["interaction.opened"]>>[2],
+  ctx: Parameters<NonNullable<SlackChannelInternalEvents["interaction.opened"]>>[1],
 ) => Promise<void> {
-  return async (data, channel, ctx) => {
+  return async (data, ctx) => {
+    const { channel } = ctx;
     const directMessageRequests: InputRequest[] = [];
     const threadRequests: InputRequest[] = [];
     for (const request of data.requests) {

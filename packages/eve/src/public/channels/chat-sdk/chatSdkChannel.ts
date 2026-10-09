@@ -388,7 +388,7 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
 ): ChatSdkChannelEvents<TAdapters> {
   type EventChannel = Parameters<
     NonNullable<ChatSdkChannelEvents<TAdapters>["interaction.opened"]>
-  >[1];
+  >[1]["channel"];
 
   async function showPrompt(channel: EventChannel, request: InputRequest) {
     if (!channel.thread) return false;
@@ -441,12 +441,12 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
 
   const prompts = promptQueueEvents(showPrompt);
   return {
-    async "turn.started"(_event, channel, _ctx) {
+    async "turn.started"(_event, { channel }) {
       channel.state.pendingToolCallMessage = null;
       clearStream(channel.state);
       await safeStartTyping(channel.thread, "Working...");
     },
-    async "call.requested"(event, channel, _ctx) {
+    async "call.requested"({ data }, { channel }) {
       const buffered = channel.state.pendingToolCallMessage;
       channel.state.pendingToolCallMessage = null;
       if (buffered) {
@@ -454,24 +454,24 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
         return;
       }
       // eve's own task controls stay out of view.
-      if (isTaskControlTool(event.capability.name)) return;
-      const label = event.capability.title ?? displayTitle(event.capability.name);
+      if (isTaskControlTool(data.capability.name)) return;
+      const label = data.capability.title ?? displayTitle(data.capability.name);
       await safeStartTyping(channel.thread, truncate(`${label}...`));
     },
-    async "content.delta"(event, channel, _ctx) {
+    async "content.delta"({ data }, { channel }) {
       if (!channel.thread || !canStream(channel)) return;
       // Only text streams: a part announces its kind with its first delta.
-      const streaming = channel.state.streamPartId === event.partId;
-      if (event.kind === undefined ? !streaming : event.kind !== "text") return;
+      const streaming = channel.state.streamPartId === data.partId;
+      if (data.kind === undefined ? !streaming : data.kind !== "text") return;
       const currentText = streaming ? streamTextByState.get(channel.state) : undefined;
-      const message = (currentText ?? "") + event.delta;
+      const message = (currentText ?? "") + data.delta;
       if (!message) return;
       streamTextByState.set(channel.state, message);
       const anchor = channel.state.anchorMessageId;
       if (!anchor || !streaming) {
         const sent = await channel.thread.post({ markdown: message });
         channel.state.anchorMessageId = sent.id;
-        channel.state.streamPartId = event.partId;
+        channel.state.streamPartId = data.partId;
         channel.state.lastEditAtMs = Date.now();
         return;
       }
@@ -488,24 +488,28 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
     },
     // Some adapters show only text, where a reply can answer only the request
     // it sees, so cards post one at a time.
-    async "interaction.opened"(data, channel, ctx) {
-      await prompts["interaction.opened"](data, channel, ctx);
-      const signIn = signInPromptOf(data, ctx.scope);
+    async "interaction.opened"(event, ctx) {
+      const { data } = event;
+      const { channel } = ctx;
+      await prompts["interaction.opened"](event, ctx);
+      const signIn = signInPromptOf(data, event.scope);
       if (signIn !== undefined) await showChatSdkSignIn(signIn, channel);
     },
     // Covers every way a request ends: a press, a typed answer, or a withdrawal.
-    async "interaction.settled"(data, channel, ctx) {
+    async "interaction.settled"(event, ctx) {
+      const { data } = event;
+      const { channel } = ctx;
       const signIn = signInSettlementOf(ctx.view, data);
       if (signIn !== undefined) await settleChatSdkSignIn(signIn, channel);
       const resolution = requestSettlementOf(ctx.view, data);
       if (resolution !== undefined)
         await clearAnsweredCards({ resolutions: [resolution] }, channel);
-      await prompts["interaction.settled"](data, channel, ctx);
+      await prompts["interaction.settled"](event, ctx);
     },
-    async "content.completed"(event, channel, _ctx) {
-      if (event.kind !== "text") return;
-      const text = typeof event.value === "string" ? event.value : "";
-      if (contentPhase(event.phase) === "narration") {
+    async "content.completed"({ data }, { channel }) {
+      if (data.kind !== "text") return;
+      const text = typeof data.value === "string" ? data.value : "";
+      if (contentPhase(data.phase) === "narration") {
         channel.state.pendingToolCallMessage = text ? (firstNonEmptyLine(text) ?? null) : null;
         // Finalize the streamed anchor so it shows the complete pre-tool-call
         // text rather than the last throttled edit. Pass `false` so nothing new
@@ -525,17 +529,13 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
       }
       await finalizeStreamedMessage(channel, text, true);
     },
-    async "turn.settled"(event, channel, _ctx) {
-      if (event.outcome !== "failed") return;
-      await postFailure(channel.thread, "I hit an error while handling your request", event.error);
+    async "turn.settled"({ data }, { channel }) {
+      if (data.outcome !== "failed") return;
+      await postFailure(channel.thread, "I hit an error while handling your request", data.error);
     },
-    async "session.ended"(event, channel, _ctx) {
-      if (event.outcome !== "failed") return;
-      await postFailure(
-        channel.thread,
-        "This session could not recover from an error",
-        event.error,
-      );
+    async "session.ended"({ data }, { channel }) {
+      if (data.outcome !== "failed") return;
+      await postFailure(channel.thread, "This session could not recover from an error", data.error);
     },
   };
 }
