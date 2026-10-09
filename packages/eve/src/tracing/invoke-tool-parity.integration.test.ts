@@ -4,8 +4,6 @@ import {
   SimpleSpanProcessor,
   type ReadableSpan,
 } from "@opentelemetry/sdk-trace-base";
-import { generateText, stepCountIs } from "ai";
-import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
@@ -20,7 +18,8 @@ import {
 import { invokeTool, type InvokeToolRuntime } from "#execution/invoke-tool.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { buildToolSet } from "#harness/tools.js";
+import { executeToolCall } from "#harness/call-executor.js";
+import { isRunnableTool } from "#harness/tools.js";
 import {
   turnIdempotencyKey,
   type InstrumentationEvent,
@@ -36,8 +35,7 @@ import type { TraceCapturePolicy } from "#shared/trace-policy.js";
 import { defineJsonSchema } from "#tools/schema.js";
 import { installInstrumentationRuntime } from "#tracing/install-instrumentation-runtime.js";
 import { collectOtelPipeline, otel, otelIntegration } from "#tracing/otel-declaration.js";
-import { createActionResultEvent, createActionsRequestedEvent } from "#protocol/message.js";
-import type { JsonValue } from "#shared/json.js";
+import { createActionsRequestedEvent } from "#protocol/message.js";
 
 /**
  * One tool, run by a model in a conversation and by `invokeTool`, must export
@@ -247,51 +245,20 @@ async function runInConversation(toolName: string, modelInput: string): Promise<
               turnId: "turn_0",
             }),
           );
-          const result = await generateText({
-            model: new MockLanguageModelV3({
-              doGenerate: async () => ({
-                content: [{ input: modelInput, toolCallId: callId, toolName, type: "tool-call" }],
-                finishReason: { raw: undefined, unified: "tool-calls" },
-                usage: {
-                  inputTokens: { cacheRead: 0, cacheWrite: 0, noCache: 1, total: 1 },
-                  outputTokens: { reasoning: 0, text: 1, total: 1 },
-                },
-                warnings: [],
-              }),
-            }),
-            prompt: "Use the tool.",
-            stopWhen: stepCountIs(1),
-            telemetry: attempt.telemetry,
-            tools: buildToolSet({
-              describe: (definition) => definition.description,
-              resolve: (call) => {
-                const definition = tools.get(call.toolName);
-                return definition === undefined ? undefined : { call, definition };
-              },
-              tools,
-            }),
-          });
-          const output = result.content.find(
-            (part) => part.type === "tool-result" || part.type === "tool-error",
-          )!;
-          await handleEvent(
-            createActionResultEvent({
-              result: {
-                callId,
-                kind: "tool-result",
-                toolName,
-                output: (output.type === "tool-result"
-                  ? output.output
-                  : {
-                      code: "tool-execution-failed",
-                      message: (output.error as Error).message,
-                    }) as JsonValue,
-                isError: output.type === "tool-error",
-              },
-              sequence: 0,
-              stepIndex: 0,
-              turnId: "turn_0",
-            }),
+          // A conversation's call runs through eve's executor, as a model step runs it.
+          const definition = tools.get(toolName);
+          if (!isRunnableTool(definition)) throw new TypeError(`Missing test tool "${toolName}".`);
+          await executeToolCall(
+            { callId, input: modelInput === "" ? {} : JSON.parse(modelInput), toolName },
+            {
+              abortSignal: undefined,
+              definition,
+              messages: [],
+              position: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+              publish: handleEvent,
+              telemetry: attempt.telemetry,
+            },
+            "evaluate",
           );
           await attempt.complete();
         },
@@ -426,7 +393,7 @@ describe.each<Policy>(["record", "inputs only", "none"])(
         expect(viaInvoke.raw.attributes["error.type"]).toBe(
           policy === "record" ? "Error" : "_OTHER",
         );
-        expect(conversation.raw.attributes["error.type"]).toBe("tool-execution-failed");
+        expect(conversation.raw.attributes["error.type"]).toBe("ACTION_RESULT_FAILED");
       }
 
       // The policy applies the same way on both paths.

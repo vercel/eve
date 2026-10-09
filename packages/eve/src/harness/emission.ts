@@ -14,7 +14,6 @@ import type { AssistantStepFinishReason } from "#protocol/message.js";
 import {
   createActionsRequestedEvent,
   createActionInputAppendedEvent,
-  createActionPartialEvent,
   createActionResultEvent,
   createMessageAppendedEvent,
   createMessageCompletedEvent,
@@ -39,27 +38,18 @@ import {
   createPresentedRuntimeActionRequestFromToolCall,
   type RuntimeActionRequestProjection,
 } from "#harness/action-presentation.js";
-import { projectResultPresentation, projectDeltaPresentation } from "#harness/tool-presentation.js";
+import { projectResultPresentation } from "#harness/tool-presentation.js";
 import { createProviderStreamActionBatch } from "#harness/stream-actions.js";
 import { normalizeModelStreamError } from "#harness/model-call/errors.js";
 import { createOrderedStreamEmitter } from "#harness/ordered-stream-emitter.js";
 import { interruptStreamOnFailure } from "#harness/interruptible-stream.js";
-import { isInlineAuthorizationToolResult } from "#harness/inline-tool-authorization.js";
 import type { TurnPosition } from "#harness/session-machine/view.js";
 import type { HarnessEmitFn, HarnessToolLookup } from "#harness/types.js";
 import { normalizeAssistantStepFinishReason } from "#harness/finish-reason.js";
 
-/**
- * Result of consuming one step's `fullStream`.
- *
- * Inline results avoid duplicate post-step events. Approval-resume
- * authorization results also route back to the park detector.
- */
+/** The calls of one step's `fullStream` whose input was invalid, and their results. */
 interface EmittedStreamContent {
-  readonly emittedActionCallIds: ReadonlySet<string>;
-  readonly handledInlineToolResultCallIds: ReadonlySet<string>;
   readonly invalidInputToolCallIds: ReadonlySet<string>;
-  readonly inlineAuthorizationResults: readonly TypedToolResult<ToolSet>[];
   readonly trailingInlineToolResultParts: readonly InlineToolResultPart[];
 }
 
@@ -136,13 +126,10 @@ async function consumeStreamContent(
   let currentMessage = "";
   let finishReason: AssistantStepFinishReason = "stop";
   let streamError: Error | undefined;
-  const toolCallIdsSeenInStream = new Set<string>();
   const emittedActionCallIds = new Set<string>();
   const emittedActionResultCallIds = new Set<string>();
   const providerToolCallIdsSeen = new Set<string>();
-  const handledInlineToolResultCallIds = new Set<string>();
   const invalidInputToolCallIds = new Set<string>();
-  const inlineAuthorizationResults: TypedToolResult<ToolSet>[] = [];
   const trailingInlineToolResultParts: InlineToolResultPart[] = [];
   const actionInputs = new Map<string, JsonObject>();
   const streamingActionInputs = new Map<string, { toolName: string }>();
@@ -230,7 +217,6 @@ async function consumeStreamContent(
     if (resolved.toolError !== undefined) {
       invalidInputToolCallIds.add(toolCall.toolCallId);
       await emitActionResult(createRuntimeToolResultFromToolError(resolved.toolError));
-      handledInlineToolResultCallIds.add(toolCall.toolCallId);
       trailingInlineToolResultParts.push(
         createToolResultMessagePartFromToolError(resolved.toolError),
       );
@@ -267,24 +253,6 @@ async function consumeStreamContent(
     options?.unsettledActionToolNames?.delete(result.callId);
   };
 
-  const emitActionPartial = async (result: RuntimeToolResultActionResult): Promise<void> => {
-    const deltaPresentation = projectDeltaPresentation(
-      options?.tools.get(result.toolName),
-      result.callId,
-      actionInputs.get(result.callId),
-      result.output,
-    );
-    await emitFn(
-      createActionPartialEvent({
-        presentation: deltaPresentation,
-        result,
-        sequence: state.sequence,
-        stepIndex: state.stepIndex,
-        turnId: state.turnId,
-      }),
-    );
-  };
-
   const emitToolCall = async (toolCall: TypedToolCall<ToolSet>): Promise<void> => {
     if (isInvalidToolCall(toolCall)) {
       invalidInputToolCallIds.add(toolCall.toolCallId);
@@ -310,7 +278,6 @@ async function consumeStreamContent(
           await flushCurrentMessage();
         }
         await emitActionResult(createRuntimeToolResultFromToolError(toolError));
-        handledInlineToolResultCallIds.add(toolCall.toolCallId);
         trailingInlineToolResultParts.push(createToolResultMessagePartFromToolError(toolError));
         return;
       }
@@ -391,7 +358,6 @@ async function consumeStreamContent(
       case "tool-call": {
         const toolCall = part as TypedToolCall<ToolSet>;
         streamingActionInputs.delete(toolCall.toolCallId);
-        toolCallIdsSeenInStream.add(toolCall.toolCallId);
         if (toolCall.providerExecuted === true) {
           await collectProviderToolCall(toolCall);
         } else {
@@ -400,64 +366,26 @@ async function consumeStreamContent(
         }
         break;
       }
+      // eve runs local calls after the stream, so only the provider's own results and errors
+      // arrive here.
       case "tool-result": {
-        const inlineToolResult = part as TypedToolResult<ToolSet>;
-        if (inlineToolResult.preliminary === true) {
-          if (inlineToolResult.providerExecuted !== true) {
-            await emitActionPartial(createRuntimeToolResultFromStepResult(inlineToolResult));
-          }
-          break;
-        }
-        if (inlineToolResult.providerExecuted === true) {
-          await collectProviderToolCall({
-            input: "input" in inlineToolResult ? inlineToolResult.input : undefined,
-            toolCallId: inlineToolResult.toolCallId,
-            toolName: inlineToolResult.toolName,
-          });
-          await providerActionBatch.flush();
-          await emitActionResult(createRuntimeToolResultFromStepResult(inlineToolResult));
-          // Provider results already live in the assistant response. Do not
-          // add a local tool message.
-          break;
-        }
-
-        if (toolCallIdsSeenInStream.has(part.toolCallId)) {
-          if (isInlineAuthorizationToolResult(inlineToolResult)) {
-            break;
-          }
-          if (emittedActionCallIds.has(part.toolCallId)) {
-            await emitActionResult(createRuntimeToolResultFromStepResult(inlineToolResult));
-            handledInlineToolResultCallIds.add(part.toolCallId);
-          }
-          break;
-        }
-
-        // An approved tool can resume with its result but no matching call in
-        // this step. Emit it before the message that consumes it.
+        const providerResult = part as TypedToolResult<ToolSet>;
+        if (providerResult.providerExecuted !== true || providerResult.preliminary === true) break;
+        await collectProviderToolCall({
+          input: "input" in providerResult ? providerResult.input : undefined,
+          toolCallId: providerResult.toolCallId,
+          toolName: providerResult.toolName,
+        });
         await providerActionBatch.flush();
-        await flushCurrentMessage();
-        if (isInlineAuthorizationToolResult(inlineToolResult)) {
-          // Keep authorization output for the park detector instead of
-          // emitting a normal tool result.
-          handledInlineToolResultCallIds.add(part.toolCallId);
-          inlineAuthorizationResults.push(inlineToolResult);
-          break;
-        }
-        await emitActionResult(createRuntimeToolResultFromStepResult(inlineToolResult));
-        handledInlineToolResultCallIds.add(part.toolCallId);
+        await emitActionResult(createRuntimeToolResultFromStepResult(providerResult));
         break;
       }
       case "tool-error": {
         const toolError = part as TypedToolError<ToolSet>;
-        if (toolError.providerExecuted === true) {
-          await collectProviderToolCall(toolError);
-          await providerActionBatch.flush();
-          await emitActionResult(createRuntimeToolResultFromToolError(toolError));
-        } else if (emittedActionCallIds.has(toolError.toolCallId)) {
-          await emitActionResult(createRuntimeToolResultFromToolError(toolError));
-          handledInlineToolResultCallIds.add(toolError.toolCallId);
-          trailingInlineToolResultParts.push(createToolResultMessagePartFromToolError(toolError));
-        }
+        if (toolError.providerExecuted !== true) break;
+        await collectProviderToolCall(toolError);
+        await providerActionBatch.flush();
+        await emitActionResult(createRuntimeToolResultFromToolError(toolError));
         break;
       }
       case "finish-step":
@@ -509,11 +437,5 @@ async function consumeStreamContent(
     );
   }
 
-  return {
-    emittedActionCallIds,
-    handledInlineToolResultCallIds,
-    invalidInputToolCallIds,
-    inlineAuthorizationResults,
-    trailingInlineToolResultParts,
-  };
+  return { invalidInputToolCallIds, trailingInlineToolResultParts };
 }

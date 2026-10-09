@@ -45,7 +45,6 @@ export {
   type ApprovedWork,
   type HumanInputIntake,
 } from "./intake.js";
-export { extractToolApprovalInputRequests } from "#harness/input-extraction.js";
 export { hasRunnableQueue } from "./approvals.js";
 
 /**
