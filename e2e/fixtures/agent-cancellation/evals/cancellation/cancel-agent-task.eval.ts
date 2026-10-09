@@ -10,7 +10,7 @@ export default defineEval({
       [
         "Alice is checking that a paused helper keeps its notes. AGENT-TASK-CANCEL",
         'Ask the sleeper agent with the message "Please wait for cancellation."',
-        "Once it is waiting, stop that sleeper task with task_cancel.",
+        "Once it is waiting, stop that sleeper task with eve__task_cancel.",
         'Then continue the same sleeper task with its taskId and the message "SLEEPER-FOLLOW-UP", and report its reply.',
       ].join("\n"),
     );

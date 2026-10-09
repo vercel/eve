@@ -34,7 +34,7 @@ export function respondAsSurveyParent(request: MockModelRequest): MockModelRespo
         input: () => ({ message: "Please count the tide survey stations for Alice." }),
         name: "survey-worker",
       },
-      { id: "survey-wait", name: "task_wait" },
+      { id: "survey-wait", name: "eve__task_wait" },
     ],
     (finished) => `SURVEY-REPLY ${latestTaskResult(finished, "survey-worker") ?? "no result"}`,
   );

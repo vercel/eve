@@ -64,7 +64,7 @@ export function typescriptInstallCommand(sandbox: Pick<SandboxSession, "resolveP
 
 /**
  * Runs inside the sandbox with `node`. Reads one base64 JSON request from
- * `EVE_CODE_DIAGNOSTICS_REQUEST` (`{ repoRoot, filePath }`), loads only the
+ * `EVE_CODE_DIAGNOSTICS_REQUEST` (`{ patchRoot, filePath }`), loads only the
  * bootstrap-installed compiler, and prints `{ diagnostics }`.
  */
 export const DIAGNOSTICS_WORKER_SOURCE = String.raw`const fs = require("node:fs");
@@ -72,9 +72,9 @@ const path = require("node:path");
 
 const { EVE_CODE_DIAGNOSTICS_REQUEST = "" } = require("node:process").env;
 const request = JSON.parse(Buffer.from(EVE_CODE_DIAGNOSTICS_REQUEST, "base64").toString());
-const repoRoot = fs.realpathSync(request.repoRoot);
-const fileName = fs.realpathSync(path.join(repoRoot, request.filePath));
-if (fileName !== repoRoot && !fileName.startsWith(repoRoot + path.sep)) {
+const patchRoot = fs.realpathSync(request.patchRoot);
+const fileName = fs.realpathSync(path.join(patchRoot, request.filePath));
+if (fileName !== patchRoot && !fileName.startsWith(patchRoot + path.sep)) {
   throw new Error("file escapes repository: " + request.filePath);
 }
 
@@ -104,7 +104,7 @@ const host = {
   directoryExists: ts.sys.directoryExists,
   fileExists: ts.sys.fileExists,
   getCompilationSettings: () => options,
-  getCurrentDirectory: () => repoRoot,
+  getCurrentDirectory: () => patchRoot,
   getDefaultLibFileName: (compilerOptions) => ts.getDefaultLibFilePath(compilerOptions),
   getNewLine: () => ts.sys.newLine,
   getScriptFileNames: () => fileNames,
@@ -139,12 +139,12 @@ process.stdout.write(JSON.stringify({ diagnostics }));
 
 function nearestConfig(start) {
   let current = start;
-  while (current === repoRoot || current.startsWith(repoRoot + path.sep)) {
+  while (current === patchRoot || current.startsWith(patchRoot + path.sep)) {
     for (const name of ["tsconfig.json", "jsconfig.json"]) {
       const candidate = path.join(current, name);
       if (fs.existsSync(candidate)) return candidate;
     }
-    if (current === repoRoot) break;
+    if (current === patchRoot) break;
     current = path.dirname(current);
   }
   return null;

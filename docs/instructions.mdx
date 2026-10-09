@@ -62,11 +62,11 @@ A flat `agent/instructions.md` (or `.ts`) at the agent root and the directory ca
 
 Instructions and [skills](./skills) both feed text into the model's context. The difference is timing:
 
-|                          | Loaded                                             | Use for                                                  |
-| ------------------------ | -------------------------------------------------- | -------------------------------------------------------- |
-| System-role instructions | Outside history on every model call                | Permanent identity and standing rules                    |
-| User-role instructions   | Once at their static or dynamic lifecycle boundary | Application context that belongs in conversation history |
-| `agent/skills/*`         | On demand, when the model calls `load_skill`       | Optional procedures that should not bloat every turn     |
+|                          | Loaded                                                | Use for                                                  |
+| ------------------------ | ----------------------------------------------------- | -------------------------------------------------------- |
+| System-role instructions | Outside history on every model call                   | Permanent identity and standing rules                    |
+| User-role instructions   | Once at their static or dynamic lifecycle boundary    | Application context that belongs in conversation history |
+| `agent/skills/*`         | On demand, when the model loads one with `eve__skill` | Optional procedures that should not bloat every turn     |
 
 Keep instructions short and stable. Long or situational procedures belong in [skills](./skills), where they only enter context when the request calls for them.
 

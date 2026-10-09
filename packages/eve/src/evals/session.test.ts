@@ -1,3 +1,4 @@
+import { captureLogRecords } from "#internal/testing/log-records.js";
 import { readFile } from "node:fs/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -186,3 +187,25 @@ async function* events() {
     },
   ]);
 }
+
+it("warns about unused stubs without failing verification", async () => {
+  const { records } = captureLogRecords();
+  const client = new Client({ host: "https://eve.test" });
+  vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(Response.json({ sessionId: "session_1" }, { status: 202 }))
+    .mockResolvedValueOnce(Response.json({ error: null, matchedRuleIds: ["used"] }));
+  const manager = new EvalSessionManager({ client });
+  await manager.session({
+    stubs: [
+      { id: "used", tool: "dynamic_tool", outcome: { response: true } },
+      { id: "unused", tool: "connection__operation", outcome: { response: true } },
+    ],
+  });
+  await expect(manager.verifyStubs()).resolves.toBeUndefined();
+  expect(records).toContainEqual(
+    expect.objectContaining({
+      level: "warn",
+      message: "Tool stubs did not match any calls: unused.",
+    }),
+  );
+});

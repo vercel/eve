@@ -16,6 +16,7 @@ import type { JsonObject } from "#shared/json.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import type { ForwardedTraceAssertion } from "#shared/forwarded-trace-policy.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
+import type { StubScope } from "#tool-stubs/types.js";
 
 export type { ContextAccessor } from "#context/key.js";
 export type { ChannelInstrumentationProjection } from "#channel/instrumentation.js";
@@ -191,6 +192,7 @@ export type SessionCommand =
       /** Initial workflow title when delivering to a prewarmed session. */
       readonly title?: string;
       readonly kind: "send";
+      readonly schedule?: import("#context/session-schedule.js").SessionSchedule;
       readonly payload: DeliverPayload;
       readonly delivery?: ChannelDeliveryMetadata;
       readonly requestId?: string;
@@ -249,6 +251,7 @@ export interface DispatchSessionInput<TCommand extends SessionCommand = SessionC
  * metadata so both cross the durable hook boundary outside adapter-owned data.
  */
 export interface DeliverHookPayload {
+  readonly schedule?: import("#context/session-schedule.js").SessionSchedule;
   /** Initial workflow title; ignored once session initialization has run. */
   readonly title?: string;
   readonly auth?: SessionAuthContext | null;
@@ -333,7 +336,10 @@ export interface SubagentInputRequestHookPayload {
   readonly subagentName: string;
 }
 
-/** Responder-specific lifecycle event forwarded from a delegated child. */
+/**
+ * Lifecycle event forwarded from a delegated child: responder and sign-in progress, and the
+ * resolution of its requests. The parent relays it unchanged.
+ */
 export type SubagentAuthorizationEvent = Extract<
   UnstampedMessageStreamEvent,
   {
@@ -341,7 +347,8 @@ export type SubagentAuthorizationEvent = Extract<
       | "approval.candidate"
       | "approval.settled"
       | "authorization.required"
-      | "authorization.completed";
+      | "authorization.completed"
+      | "input.resolved";
   }
 >;
 
@@ -424,6 +431,16 @@ export interface SessionCapabilities {
  * subagent tool wrapper).
  */
 export interface RunInput {
+  /**
+   * @internal Set by the server after it authorizes tool stubs.
+   * Local subagents match rules qualified by their full path, such as researcher/list_tasks.
+   * The root session tracks positions per rule; subagent sessions at the same path
+   * share those positions. Unprefixed rules apply only to root tools.
+   * Remote agents do not receive these stubs.
+   */
+  readonly toolStubs?: StubScope;
+  /** Server-supplied provenance inherited by locally delegated scheduled work. */
+  readonly schedule?: import("#context/session-schedule.js").SessionSchedule;
   readonly adapter: ChannelAdapter<any>;
   /**
    * Registered channel name for root sessions started from an authored

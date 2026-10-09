@@ -40,8 +40,8 @@ function handle(nativeId: string) {
       removePath: vi.fn(),
     },
     onRuntimeShutdown: vi.fn(async () => {}),
-    onSessionDelete: vi.fn(async () => {}),
-    onSessionStop: vi.fn(async () => {}),
+    onSandboxDelete: vi.fn(async () => {}),
+    onSandboxStop: vi.fn(async () => {}),
     nativeId,
   };
 }

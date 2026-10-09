@@ -1,4 +1,5 @@
 import type { EveEval, EveEvalResult, EveEvalRunSummary, EveEvalTarget } from "#evals/types.js";
+import { resolveRuntimeTraceLinks } from "#evals/runner/reporters/datadog-runtime-trace-links.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 import {
   composeAssertionScoreMetadata,
@@ -473,8 +474,13 @@ function resolveResultMetadata(
     eveSkipReason: result.skipReason,
     eveToolCalls: result.result.derived.toolCalls.map((call) => call.name),
     eveSubagentCalls: result.result.derived.subagentCalls.map((call) => call.name),
+    eveSkillLoads: result.result.derived.skillLoads.map((load) => load.skill),
     eveParked: result.result.derived.parked,
   });
+  const runtimeTraceLinks = resolveRuntimeTraceLinks(result.result.traceContexts);
+  if (runtimeTraceLinks.length > 0) {
+    metadata.experimentRuntimeTraceLinks = runtimeTraceLinks;
+  }
   if (recordAssertionDetails) {
     const failedAssertions = result.assertions
       .filter((assertion) => !assertion.passed)
@@ -539,5 +545,9 @@ function elapsedMs(startedAt: string, completedAt: string): number | undefined {
   const start = Date.parse(startedAt);
   const completed = Date.parse(completedAt);
   if (!Number.isFinite(start) || !Number.isFinite(completed)) return undefined;
-  return Math.max(0, completed - start);
+
+  // ISO timestamps have millisecond precision, so fast failures can start and
+  // finish in the same millisecond. Datadog Experiment spans require a
+  // positive duration; use the smallest representable duration in these units.
+  return Math.max(1, completed - start);
 }

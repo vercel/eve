@@ -4,25 +4,24 @@ import type { CompactionConfig, HarnessSession, ToolLoopHarnessConfig } from "#h
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { contextStorage } from "#context/container.js";
 import { getEffectiveModelSelection } from "#context/effective-model.js";
-import { resolveProviderHeaders } from "#internal/gateway.js";
+import type { ModelProfile } from "#harness/model-profile.js";
+import { appendPackageUserAgent } from "#internal/user-agent.js";
+
 /**
- * Builds AI Gateway app attribution headers when the model is gateway-routed.
- *
- * Bare model ids and `gateway.*` model instances route through AI Gateway.
- * Direct-provider model instances receive no Gateway-specific headers.
+ * Builds AI Gateway app attribution headers, including eve's User-Agent product token, for a
+ * Gateway-routed model. Direct-provider models receive no Gateway-specific headers.
  */
 export function buildGatewayAttributionHeaders(
-  model: LanguageModel,
+  profile: ModelProfile,
   runtimeIdentity: ToolLoopHarnessConfig["runtimeIdentity"],
 ): Record<string, string> | undefined {
-  const providerHeaders = resolveProviderHeaders(model);
-  if (providerHeaders === undefined) return undefined;
+  if (!profile.gateway) return undefined;
 
   const title = runtimeIdentity?.agentName ?? runtimeIdentity?.agentId;
   const deploymentHost = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
   const referer = deploymentHost ? `https://${deploymentHost}` : undefined;
 
-  const headers: Record<string, string> = { ...providerHeaders };
+  const headers: Record<string, string> = Object.fromEntries(appendPackageUserAgent(new Headers()));
   if (title) headers["x-title"] = title;
   if (referer) headers["http-referer"] = referer;
   return headers;

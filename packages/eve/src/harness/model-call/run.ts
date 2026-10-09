@@ -1,6 +1,7 @@
 import type { LanguageModel, ModelMessage } from "ai";
 
 import { HistoryStateKey } from "#context/keys.js";
+import { buildStepCatalog, type StepCatalog } from "#execution/catalog/step-catalog.js";
 import type { GenerationSteering } from "#harness/generation-steering.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
 import {
@@ -25,14 +26,10 @@ import {
 } from "#harness/step/prompt.js";
 import type { HarnessStepResult } from "#harness/step-hooks.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
-import {
-  type HarnessToolMap,
-  requireSessionModelReference,
-  type StepResult,
-} from "#harness/types.js";
+import { requireSessionModelReference, type StepResult } from "#harness/types.js";
 import type { InstrumentationAttempt } from "#instrumentation/runtime.js";
 import { ModelCaller } from "./call.js";
-import type { EndsTurnTools } from "./tools.js";
+import { type EndsTurnTools, endsTurnTools, frameworkToolNames } from "./tools.js";
 import { reportModelCallFailure } from "./failure.js";
 import { resolveEffectiveRuntimeModel } from "./model.js";
 import { recoverModelCall } from "./recovery.js";
@@ -40,7 +37,8 @@ import { recordModelUsage } from "./usage.js";
 
 /** A model step's response, for the session to act on. */
 export interface ModelResponse {
-  readonly coordinationTools: HarnessToolMap;
+  /** The step's catalog, which decides what each of the response's calls runs. */
+  readonly catalog: StepCatalog;
   /** How many prompt messages the model read, when no client context was spliced in. */
   readonly durableModelPromptMessageCount?: number;
   /** Tools that can end the turn in this step, with their `endsTurn` option. */
@@ -102,9 +100,20 @@ export async function runModelStep(
     prompt = await buildPrompt(step, input.turn);
     projectedMessages = projectPrompt(step, prompt);
   }
-  const { approvedTools, pendingApprovalsNote } = humanInputContext(step);
+  // Dynamic tools and subagents resolved when the step started, so the step's calls resolve once,
+  // against this catalog.
+  const endsTurn = !step.hasDelegatedCaller && step.session.outputSchema === undefined;
+  const catalog = buildStepCatalog({
+    agentTools: step.config.tools,
+    ctx: step.ctx,
+    endsTurn,
+    session: step.session,
+  });
+  step.frameworkToolNames = frameworkToolNames(catalog);
+  const { approvedTools, pendingApprovalsNote } = humanInputContext(step, catalog);
   const caller = new ModelCaller(step, prompt, {
     approvedTools,
+    catalog,
     generation,
     hidesHeldText: input.hidesHeldText,
     model: model.model,
@@ -142,13 +151,13 @@ export async function runModelStep(
   try {
     generation.check();
     stepResult = await input.onResponse({
-      coordinationTools: caller.tools?.coordinationTools ?? step.config.tools,
+      catalog,
       // Usage measures what the model read only when no client context was spliced in.
       durableModelPromptMessageCount:
         prompt.clientContext === undefined || prompt.clientContext.messages.length === 0
           ? caller.modelMessages.length
           : undefined,
-      endsTurnTools: caller.tools?.endsTurnTools ?? new Map(),
+      endsTurnTools: endsTurnTools(catalog, endsTurn),
       promptMessages: caller.request.history,
       requestEnvelopeTokens: caller.requestEnvelopeTokens,
       result,

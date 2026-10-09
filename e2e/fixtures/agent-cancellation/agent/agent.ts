@@ -56,13 +56,13 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
   if (message.includes("call the sleeper subagent")) {
     const hitl = message.includes(HITL_REQUEST);
     // The workflow tool runs as a task: its call returns a receipt, and the
-    // program's result arrives in a <task_result> message after task_wait.
+    // program's result arrives in a <task_result> message after eve__task_wait.
     const taskResult = request.messages.find(
       (entry) => entry.role === "user" && entry.text.startsWith("<task_result"),
     );
     if (taskResult !== undefined) return taskResult.text;
     if (request.toolResults.some((entry) => entry.name === "workflow")) {
-      return { toolCalls: [{ id: "wait-for-sleeper", input: {}, name: "task_wait" }] };
+      return { toolCalls: [{ id: "wait-for-sleeper", input: {}, name: "eve__task_wait" }] };
     }
     return {
       toolCalls: [
@@ -120,11 +120,11 @@ function cancelAndContinueSleeper(request: MockModelRequest): MockModelResponse 
   }
   const taskId = /Started task (\S+)\./u.exec(String(started.output))?.[1];
   if (taskId === undefined) throw new Error("The sleeper call returned no task receipt.");
-  if (calls("task_wait").length === 0) {
-    return { toolCalls: [{ input: { timeoutSeconds: 2 }, name: "task_wait" }] };
+  if (calls("eve__task_wait").length === 0) {
+    return { toolCalls: [{ input: { timeoutSeconds: 2 }, name: "eve__task_wait" }] };
   }
-  if (calls("task_cancel").length === 0) {
-    return { toolCalls: [{ input: { taskId }, name: "task_cancel" }] };
+  if (calls("eve__task_cancel").length === 0) {
+    return { toolCalls: [{ input: { taskId }, name: "eve__task_cancel" }] };
   }
   if (continued === undefined) {
     return { toolCalls: [{ input: { message: SLEEPER_FOLLOW_UP, taskId }, name: "sleeper" }] };
@@ -132,7 +132,7 @@ function cancelAndContinueSleeper(request: MockModelRequest): MockModelResponse 
   const result = [...request.messages]
     .reverse()
     .find((entry) => entry.role === "user" && entry.text.startsWith("<task_result"));
-  return result?.text ?? { toolCalls: [{ input: {}, name: "task_wait" }] };
+  return result?.text ?? { toolCalls: [{ input: {}, name: "eve__task_wait" }] };
 }
 
 const base = e2eAgentConfig({ mock: respond });

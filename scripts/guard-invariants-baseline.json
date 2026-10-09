@@ -44,7 +44,6 @@
     "packages/eve/src/tools/provided/bash.ts",
     "packages/eve/src/tools/provided/glob.ts",
     "packages/eve/src/tools/provided/grep.ts",
-    "packages/eve/src/tools/provided/load-skill.ts",
     "packages/eve/src/tools/provided/read-file.ts",
     "packages/eve/src/tools/provided/web-fetch.ts",
     "packages/eve/src/tools/provided/web-search.ts",

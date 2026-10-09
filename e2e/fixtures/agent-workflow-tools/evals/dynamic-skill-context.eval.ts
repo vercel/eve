@@ -52,7 +52,6 @@ export default (["direct", "waiting"] as const).map((mode) =>
       const started = await send(t.target, threadId, "alice", firstMessage);
       const initial = await t.target.watchTurn(started.sessionId).result();
       initial.expectOk();
-      initial.calledTool("load_skill", { count: 1, status: "completed" });
       const marker = mode === "direct" ? "Alice's hook audit" : "hook-audit:blocking";
       const childOutput = readChildOutput(initial, mode);
       t.check(childOutput.startsWith("WORKFLOW-CHILD:"), equals(true)).label(
@@ -68,7 +67,6 @@ export default (["direct", "waiting"] as const).map((mode) =>
       );
       const audit = await t.target.watchTurn(resumed.sessionId, { startIndex }).result();
       audit.expectOk();
-      audit.calledTool("load_skill", { count: 1, status: "completed" });
       audit.calledTool("read_dynamic_skill_context", { count: 1, status: "completed" });
       const output = audit.toolCalls.find(
         (call) => call.name === "read_dynamic_skill_context",
@@ -89,6 +87,7 @@ export default (["direct", "waiting"] as const).map((mode) =>
           model: { id: "eve-mock/model" },
           session: {
             id: started.sessionId,
+            schedule: null,
             auth: {
               current: expectedAuth(last ? "bob" : "alice"),
               initiator: expectedAuth("alice"),

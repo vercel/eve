@@ -60,7 +60,7 @@ interface PickTeamOptions extends VercelProjectOperationOptions {
 }
 
 export interface LinkProjectOperationOptions extends CreatedProjectFrameworkOptions {
-  /** Configure 100% trace sampling when creating a Vercel project. */
+  /** Configure 100% trace sampling when creating a Vercel project. Defaults to true. */
   traceSampling?: boolean;
 }
 
@@ -128,7 +128,8 @@ export async function assertNewProjectNameAvailable(
  * API error and the user is already authenticated.
  */
 function requireVercelLogin(failure?: VercelCaptureFailure): never {
-  const base = "Provisioning a Vercel project requires you to be logged in to Vercel.";
+  const base =
+    "The Vercel CLI is not logged in to an account with access to this project. Run `vercel login`.";
   const stderr = failure?.stderr.trim();
   const reason = failure
     ? `${base} The Vercel CLI check did not succeed: ${failure.message}${stderr ? ` ${stderr}` : ""}`
@@ -144,57 +145,124 @@ function requireVercelLogin(failure?: VercelCaptureFailure): never {
 const WHOAMI_TIMEOUT_MS = 10_000;
 
 /**
+ * Structured `vercel whoami --format json` output. A missing saved token is
+ * `{ loggedIn: false }`; newer CLIs also report rejected credentials as an
+ * agent error with a `reason`. Logged in, it carries the principal.
+ */
+const WhoamiJsonSchema = z.object({
+  loggedIn: z.boolean().optional(),
+  reason: z.string().optional(),
+  username: z.string().optional(),
+  app: z.object({ id: z.string() }).optional(),
+});
+
+const LOGIN_REQUIRED_REASONS = new Set([
+  "login_required",
+  "not_authorized",
+  "scope_not_accessible",
+]);
+
+/** Reads whoami's JSON, tolerating CLIs that print it after a banner line or not at all. */
+function parseWhoamiJson(stdout: string): z.infer<typeof WhoamiJsonSchema> | undefined {
+  const start = stdout.indexOf("{");
+  const end = stdout.lastIndexOf("}");
+  if (start === -1 || end < start) return undefined;
+  try {
+    const parsed = WhoamiJsonSchema.safeParse(JSON.parse(stdout.slice(start, end + 1)));
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+type WhoamiProbe =
+  | { status: "authenticated"; stdout: string }
+  | {
+      status: Exclude<VercelAuthStatus, "authenticated">;
+      failure: VercelCaptureFailure;
+    };
+
+/**
  * Runs the bounded, read-only `vercel whoami` probe shared by the auth checks.
  * A linked team project is the user's explicit scope choice, so authenticate
  * against that owner instead of whichever account scope the CLI last selected.
  */
-async function probeWhoami(projectRoot: string, options: VercelProjectOperationOptions) {
+async function probeWhoami(
+  projectRoot: string,
+  options: VercelProjectOperationOptions,
+): Promise<WhoamiProbe> {
   const link = await readProjectLink(projectRoot);
-  const args = ["whoami", ...(link?.orgId.startsWith("team_") ? ["--scope", link.orgId] : [])];
-  return captureVercel(args, {
+  const args = [
+    "whoami",
+    "--format",
+    "json",
+    ...(link?.orgId.startsWith("team_") ? ["--scope", link.orgId] : []),
+  ];
+  const result = await captureVercel(args, {
     cwd: projectRoot,
     signal: options.signal,
     timeoutMs: WHOAMI_TIMEOUT_MS,
   });
+  options.signal?.throwIfAborted();
+  if (result.ok) return { status: "authenticated", stdout: result.stdout };
+  return { status: classifyWhoamiFailure(result.failure), failure: result.failure };
 }
 
 /**
- * Whether a failed `whoami` explicitly calls for authentication recovery
- * rather than reporting a transient fault (DNS, network, API error, timeout).
+ * Classifies a failed `whoami`. ENOENT means the binary isn't installed. The
+ * CLI's structured JSON is authoritative for a logged-out session; only when it
+ * gives none (rejected tokens on some CLI versions, CLIs without JSON output)
+ * do we fall back to recognizing the diagnostic text. Anything unrecognized is
+ * a transient fault (DNS, network, API error, timeout), never a login prompt.
+ */
+function classifyWhoamiFailure(
+  failure: VercelCaptureFailure,
+): Exclude<VercelAuthStatus, "authenticated"> {
+  if (failure.errno === "ENOENT") return "cli-missing";
+  const json = parseWhoamiJson(failure.stdout);
+  if (
+    json?.loggedIn === false ||
+    (json?.reason !== undefined && LOGIN_REQUIRED_REASONS.has(json.reason))
+  ) {
+    return "logged-out";
+  }
+  return isLoggedOutDiagnostic(failure) ? "logged-out" : "unavailable";
+}
+
+/**
+ * Text fallback for CLIs that report a rejected or missing login without JSON.
  * Vercel reports an invalid stored token directly, but a linked team can mask
  * that diagnostic with `scope-not-accessible`; both require a fresh login.
  */
-function isLoggedOutFailure(failure: VercelCaptureFailure): boolean {
+function isLoggedOutDiagnostic(failure: VercelCaptureFailure): boolean {
   const text = `${failure.stdout} ${failure.stderr}`.toLowerCase();
   return (
     text.includes("credentials") ||
     text.includes("not authenticated") ||
     text.includes("not authorized") ||
     text.includes("not logged in") ||
-    text.includes("specified token is not valid") ||
+    /token\b.*\bis not valid/u.test(text) ||
     text.includes("scope-not-accessible") ||
     text.includes("do not have access to the specified account")
   );
 }
 
 /**
- * Throws the right outcome for a failed `vercel whoami`. ENOENT means the
- * binary isn't installed (its own action, not a login that would fail
- * identically); the explicit not-authenticated diagnostic is a login action;
- * anything else is a transient fault surfaced as a plain error, so the caller
- * reports "try again" rather than mislabeling it "log in".
+ * Throws the right outcome for a failed `vercel whoami`: a missing CLI and a
+ * logged-out session are each their own action; anything else is a transient
+ * fault surfaced as a plain error, so the caller reports "try again" rather
+ * than mislabeling it "log in".
  */
-function requireVercelAuth(failure: VercelCaptureFailure): never {
-  if (failure.errno === "ENOENT") {
+function requireVercelAuth(probe: Exclude<WhoamiProbe, { status: "authenticated" }>): never {
+  const { failure } = probe;
+  if (probe.status === "cli-missing") {
     throw new HumanActionRequiredError({
       kind: "vercel-cli-missing",
       command: "npm i -g vercel@latest",
       reason: failure.message,
     });
   }
-  if (isLoggedOutFailure(failure)) {
-    requireVercelLogin(failure);
-  }
+  if (probe.status === "logged-out") requireVercelLogin(failure);
   const stderr = failure.stderr.trim();
   throw new Error(
     `Couldn't verify your Vercel login: ${failure.message}${stderr ? ` ${stderr}` : ""}`,
@@ -205,8 +273,7 @@ function requireVercelAuth(failure: VercelCaptureFailure): never {
  * The Vercel auth state, read-only. `cli-missing` (ENOENT) and `unavailable` (a
  * transient network/API fault) are each kept distinct from `logged-out` so a
  * caller never tells the user to log in when the real cause is a missing CLI or
- * an unreachable network. `logged-out` is claimed only from the explicit
- * not-authenticated diagnostic.
+ * an unreachable network.
  */
 export type VercelAuthStatus = "authenticated" | "logged-out" | "cli-missing" | "unavailable";
 
@@ -214,11 +281,7 @@ export async function getVercelAuthStatus(
   projectRoot: string,
   options: VercelProjectOperationOptions = {},
 ): Promise<VercelAuthStatus> {
-  const result = await probeWhoami(projectRoot, options);
-  options.signal?.throwIfAborted();
-  if (result.ok) return "authenticated";
-  if (result.failure.errno === "ENOENT") return "cli-missing";
-  return isLoggedOutFailure(result.failure) ? "logged-out" : "unavailable";
+  return (await probeWhoami(projectRoot, options)).status;
 }
 
 /**
@@ -232,11 +295,8 @@ export async function requireAuth(
   options: VercelProjectOperationOptions = {},
 ): Promise<void> {
   const check = async () => {
-    const result = await probeWhoami(projectRoot, options);
-    options.signal?.throwIfAborted();
-    if (!result.ok) {
-      requireVercelAuth(result.failure);
-    }
+    const probe = await probeWhoami(projectRoot, options);
+    if (probe.status !== "authenticated") requireVercelAuth(probe);
   };
   if (prompter === undefined) {
     await check();
@@ -262,12 +322,10 @@ async function whoamiScope(
   projectRoot: string,
   options: VercelProjectOperationOptions,
 ): Promise<string> {
-  const result = await probeWhoami(projectRoot, options);
-  options.signal?.throwIfAborted();
-  if (!result.ok) {
-    requireVercelAuth(result.failure);
-  }
-  return result.stdout.trim();
+  const probe = await probeWhoami(projectRoot, options);
+  if (probe.status !== "authenticated") requireVercelAuth(probe);
+  const json = parseWhoamiJson(probe.stdout);
+  return json?.username ?? json?.app?.id ?? probe.stdout.trim();
 }
 
 /**
@@ -676,7 +734,7 @@ export async function linkProject(
     if (!linked) return undefined;
     const link = await readProjectLink(projectRoot);
     if (link === undefined) return undefined;
-    if (options.traceSampling === true)
+    if (options.traceSampling !== false)
       await configureTraceSampling(link, prompter, options.signal);
     await ensureCreatedProjectFramework(
       prompter,

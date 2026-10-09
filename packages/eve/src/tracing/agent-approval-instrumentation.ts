@@ -110,7 +110,8 @@ export function createAgentApprovalInstrumentation(input: {
               "agent.step.attempt": state.attemptIndex,
               "agent.step.index": state.stepIndex,
               "agent.turn.id": state.turnId,
-              ...agentSpanNamingAttributes("agent.approval"),
+              "gen_ai.operation.name": "workflow",
+              ...agentSpanNamingAttributes("agent.approval", "workflow"),
               ...agentTraceIdentityAttributes({
                 rootSessionId: state.rootSessionId,
                 traceSessionId: state.traceSessionId,

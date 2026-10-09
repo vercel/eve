@@ -18,6 +18,8 @@ interface UpdateChunk {
   readonly oldLines: readonly string[];
   readonly newLines: readonly string[];
   readonly changeContext?: string;
+  /** Function context from a unified-diff range header; git may have truncated it. */
+  readonly contextHint?: string;
   readonly endOfFile?: boolean;
 }
 
@@ -25,6 +27,11 @@ export interface AppliedPatchFile {
   readonly operation: "add" | "delete" | "move" | "update";
   readonly path: string;
   readonly previousPath?: string;
+}
+
+/** A verified change about to be written, with the content it replaces. */
+export interface PlannedPatchFile extends AppliedPatchFile {
+  readonly previousContent: string | null;
 }
 
 interface PlannedChange extends AppliedPatchFile {
@@ -42,20 +49,20 @@ const MISMATCH_EXPECTED_MAX_LINES = 20;
 const patchLocks = new Map<string, Promise<void>>();
 
 export async function applyPatchToSandbox(input: {
-  readonly beforeCommit?: (files: readonly AppliedPatchFile[]) => Promise<void>;
+  readonly beforeCommit?: (files: readonly PlannedPatchFile[]) => Promise<void>;
   readonly patchText: string;
-  readonly repoRoot: string;
+  readonly patchRoot: string;
   readonly sandbox: SandboxSession;
   /** Serializes patches per eve session; every `ctx.getSandbox()` call returns a new handle. */
   readonly sessionId: string;
 }): Promise<AppliedPatchFile[]> {
-  return withPatchLock(`${input.sessionId}:${input.repoRoot}`, () => applyPatchUnlocked(input));
+  return withPatchLock(`${input.sessionId}:${input.patchRoot}`, () => applyPatchUnlocked(input));
 }
 
 async function applyPatchUnlocked(input: {
-  readonly beforeCommit?: (files: readonly AppliedPatchFile[]) => Promise<void>;
+  readonly beforeCommit?: (files: readonly PlannedPatchFile[]) => Promise<void>;
   readonly patchText: string;
-  readonly repoRoot: string;
+  readonly patchRoot: string;
   readonly sandbox: SandboxSession;
 }): Promise<AppliedPatchFile[]> {
   const hunks = parsePatch(input.patchText);
@@ -64,12 +71,13 @@ async function applyPatchUnlocked(input: {
     throw new Error(`patch rejected: at most ${MAX_PATCH_FILES} file operations are allowed`);
   }
 
-  const changes = await planChanges(input.sandbox, input.repoRoot, hunks);
+  const changes = await planChanges(input.sandbox, input.patchRoot, hunks);
   await input.beforeCommit?.(
-    changes.map(({ operation, path, previousPath }) => {
-      const file: { -readonly [Key in keyof AppliedPatchFile]: AppliedPatchFile[Key] } = {
+    changes.map(({ operation, path, previousPath, oldContent }) => {
+      const file: { -readonly [Key in keyof PlannedPatchFile]: PlannedPatchFile[Key] } = {
         operation,
         path,
+        previousContent: oldContent,
       };
       if (previousPath !== undefined) file.previousPath = previousPath;
       return file;
@@ -78,7 +86,7 @@ async function applyPatchUnlocked(input: {
   const committed: PlannedChange[] = [];
   try {
     for (const change of changes) {
-      await revalidateChange(input.sandbox, input.repoRoot, change);
+      await revalidateChange(input.sandbox, input.patchRoot, change);
       committed.push(change);
       await commitChange(input.sandbox, change);
     }
@@ -210,6 +218,23 @@ function parseAdd(lines: readonly string[], start: number, end: number) {
   return { content: content.join("\n"), next: index };
 }
 
+// Models often write unified-diff range headers (`@@ -118,8 +118,8 @@ fn`).
+// The numbers are not searchable text. The trailing function context can be
+// the only thing that tells identical blocks apart, but git truncates it, so it
+// becomes a prefix hint rather than an exact anchor.
+const UNIFIED_RANGE_HEADER = /^-\d+(?:,\d+)? \+\d+(?:,\d+)? @@\s*(.*)$/u;
+
+function chunkHeader(headerLine: string): Pick<UpdateChunk, "changeContext" | "contextHint"> {
+  const anchor = headerLine.slice(2).trim();
+  if (anchor.length === 0) return { changeContext: undefined };
+  const range = UNIFIED_RANGE_HEADER.exec(anchor);
+  if (!range) return { changeContext: anchor };
+  const hint = range[1]!.trim();
+  return hint.length === 0
+    ? { changeContext: undefined }
+    : { changeContext: undefined, contextHint: hint };
+}
+
 function parseUpdate(lines: readonly string[], start: number, end: number) {
   const chunks: UpdateChunk[] = [];
   let index = start;
@@ -219,7 +244,7 @@ function parseUpdate(lines: readonly string[], start: number, end: number) {
     if (!hasHeader && chunks.length > 0) {
       throw new Error(`invalid update file line: ${lines[index]}`);
     }
-    const changeContext = hasHeader ? headerLine.slice(2).trim() || undefined : undefined;
+    const header = hasHeader ? chunkHeader(headerLine) : { changeContext: undefined };
     const oldLines: string[] = [];
     const newLines: string[] = [];
     let endOfFile = false;
@@ -248,20 +273,20 @@ function parseUpdate(lines: readonly string[], start: number, end: number) {
       }
       index += 1;
     }
-    chunks.push({ oldLines, newLines, changeContext, endOfFile: endOfFile || undefined });
+    chunks.push({ oldLines, newLines, ...header, endOfFile: endOfFile || undefined });
   }
   return { chunks, next: index };
 }
 
 async function planChanges(
   sandbox: SandboxSession,
-  repoRoot: string,
+  patchRoot: string,
   hunks: readonly PatchHunk[],
 ): Promise<PlannedChange[]> {
-  const resolvedRoot = await realPath(sandbox, repoRoot);
-  if (resolvedRoot !== repoRoot) {
+  const resolvedRoot = await realPath(sandbox, patchRoot);
+  if (resolvedRoot !== patchRoot) {
     throw new Error(
-      `apply_patch verification failed: repository root resolves outside itself: ${repoRoot}`,
+      `apply_patch verification failed: patch root resolves outside itself: ${patchRoot}`,
     );
   }
   const claimed = new Set<string>();
@@ -269,7 +294,7 @@ async function planChanges(
   const errors: string[] = [];
   for (const hunk of hunks) {
     try {
-      changes.push(await planHunk(sandbox, repoRoot, claimed, hunk));
+      changes.push(await planHunk(sandbox, patchRoot, claimed, hunk));
     } catch (error) {
       errors.push(error instanceof Error ? error.message : String(error));
     }
@@ -282,12 +307,12 @@ async function planChanges(
 
 async function planHunk(
   sandbox: SandboxSession,
-  repoRoot: string,
+  patchRoot: string,
   claimed: Set<string>,
   hunk: PatchHunk,
 ): Promise<PlannedChange> {
-  const source = resolvePatchPath(repoRoot, hunk.path);
-  await assertRealPath(sandbox, repoRoot, source.absolutePath);
+  const source = resolvePatchPath(patchRoot, hunk.path);
+  await assertRealPath(sandbox, patchRoot, source.absolutePath);
   claimPath(claimed, source.absolutePath);
 
   if (hunk.type === "add") {
@@ -322,9 +347,9 @@ async function planHunk(
     };
   }
 
-  const target = hunk.movePath === undefined ? source : resolvePatchPath(repoRoot, hunk.movePath);
+  const target = hunk.movePath === undefined ? source : resolvePatchPath(patchRoot, hunk.movePath);
   if (target.absolutePath !== source.absolutePath) {
-    await assertRealPath(sandbox, repoRoot, target.absolutePath);
+    await assertRealPath(sandbox, patchRoot, target.absolutePath);
     claimPath(claimed, target.absolutePath);
     if ((await sandbox.readTextFile({ path: target.absolutePath })) !== null) {
       throw new Error(
@@ -379,10 +404,10 @@ async function commitChange(sandbox: SandboxSession, change: PlannedChange): Pro
 
 async function revalidateChange(
   sandbox: SandboxSession,
-  repoRoot: string,
+  patchRoot: string,
   change: PlannedChange,
 ): Promise<void> {
-  await assertRealPath(sandbox, repoRoot, change.absolutePath);
+  await assertRealPath(sandbox, patchRoot, change.absolutePath);
   if (change.operation === "add") {
     if ((await sandbox.readTextFile({ path: change.absolutePath })) !== null) {
       throw new Error(`apply_patch stale write: add target now exists: ${change.path}`);
@@ -390,7 +415,7 @@ async function revalidateChange(
     return;
   }
   if (change.operation === "move" && change.previousAbsolutePath !== undefined) {
-    await assertRealPath(sandbox, repoRoot, change.previousAbsolutePath);
+    await assertRealPath(sandbox, patchRoot, change.previousAbsolutePath);
     const [source, target] = await Promise.all([
       sandbox.readTextFile({ path: change.previousAbsolutePath }),
       sandbox.readTextFile({ path: change.absolutePath }),
@@ -474,11 +499,11 @@ async function rollbackChanges(
 
 async function assertRealPath(
   sandbox: SandboxSession,
-  repoRoot: string,
+  patchRoot: string,
   absolutePath: string,
 ): Promise<void> {
   const resolved = await realPath(sandbox, absolutePath);
-  if (resolved !== absolutePath || !resolved.startsWith(`${repoRoot}/`)) {
+  if (resolved !== absolutePath || !resolved.startsWith(`${patchRoot}/`)) {
     throw new Error(
       `apply_patch verification failed: path crosses a symlink or repository boundary: ${absolutePath}`,
     );
@@ -552,7 +577,7 @@ async function restoreMode(
   if (result.exitCode !== 0) throw new Error(`failed to restore file mode for ${path}`);
 }
 
-function resolvePatchPath(repoRoot: string, candidate: string) {
+function resolvePatchPath(patchRoot: string, candidate: string) {
   const normalized = candidate.replaceAll("\\", "/").trim();
   if (
     normalized.length === 0 ||
@@ -562,7 +587,7 @@ function resolvePatchPath(repoRoot: string, candidate: string) {
   ) {
     throw new Error(`invalid patch path: ${candidate}`);
   }
-  return { absolutePath: posix.join(repoRoot, normalized), path: normalized };
+  return { absolutePath: posix.join(patchRoot, normalized), path: normalized };
 }
 
 function claimPath(claimed: Set<string>, path: string): void {
@@ -591,6 +616,15 @@ function computeReplacements(
         throw new Error(formatMissingContextError(path, chunk.changeContext, lines, lineIndex));
       }
       lineIndex = context + 1;
+    }
+    if (chunk.contextHint !== undefined) {
+      const hinted = seekPrefix(lines, chunk.contextHint, lineIndex);
+      if (hinted !== -1) {
+        lineIndex = hinted + 1;
+      } else if (occurrences(lines, chunk, lineIndex) !== 1) {
+        // Without the hint, only an unambiguous hunk is safe to apply.
+        throw new Error(formatMissingContextError(path, chunk.contextHint, lines, lineIndex));
+      }
     }
     if (chunk.oldLines.length === 0) {
       replacements.push([lines.length, 0, chunk.newLines]);
@@ -732,6 +766,42 @@ function seek(
     for (let offset = start; offset <= lines.length - pattern.length; offset += 1) {
       if (matches(lines, pattern, offset, compare)) return offset;
     }
+  }
+  return -1;
+}
+
+function occurrences(lines: readonly string[], chunk: UpdateChunk, start: number): number {
+  const found = seekAll(lines, chunk.oldLines, start, chunk.endOfFile);
+  if (found.length > 0 || chunk.oldLines.at(-1) !== "") return found.length;
+  return seekAll(lines, chunk.oldLines.slice(0, -1), start, chunk.endOfFile).length;
+}
+
+// Offsets of every match at the strictest comparison that matches at all, so
+// ambiguity is judged the same way seek() would pick a location.
+function seekAll(
+  lines: readonly string[],
+  pattern: readonly string[],
+  start: number,
+  endOfFile = false,
+): number[] {
+  if (pattern.length === 0) return [];
+  for (const compare of [exact, trimEnd, trim, normalized]) {
+    const tail = lines.length - pattern.length;
+    // seek() prefers the end-of-file position, which makes that match unambiguous.
+    if (endOfFile && tail >= start && matches(lines, pattern, tail, compare)) return [tail];
+    const found: number[] = [];
+    for (let offset = start; offset <= tail; offset += 1) {
+      if (matches(lines, pattern, offset, compare)) found.push(offset);
+    }
+    if (found.length > 0) return found;
+  }
+  return [];
+}
+
+function seekPrefix(lines: readonly string[], hint: string, start: number): number {
+  const wanted = normalizeTypography(hint.trim());
+  for (let index = start; index < lines.length; index += 1) {
+    if (normalizeTypography(lines[index]!.trim()).startsWith(wanted)) return index;
   }
   return -1;
 }

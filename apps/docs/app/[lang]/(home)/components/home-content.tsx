@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
+import { JsonLd } from "@/components/geistdocs/json-ld";
 import { canonicalAlternates, canonicalRoutes } from "@/lib/geistdocs/canonical";
 import { pageTitleMetadata, siteTitle } from "@/lib/geistdocs/metadata-title";
 import { staticOgImage } from "@/lib/geistdocs/og";
+import { webSiteStructuredData } from "@/lib/geistdocs/structured-data";
 import { ArchitectureDiagram } from "./architecture";
 import { CTA } from "./cta";
 import { FeatureGrid } from "./feature-grid";
@@ -21,6 +23,7 @@ export const homeMetadata: Metadata = {
     description: tagline,
     images: [staticOgImage],
     type: "website",
+    url: canonicalRoutes.home,
   },
   twitter: {
     ...titleMetadata.twitter,
@@ -32,6 +35,7 @@ export const homeMetadata: Metadata = {
 
 export const HomeContent = () => (
   <div className="mx-auto w-full max-w-[1080px] pb-8">
+    <JsonLd data={webSiteStructuredData(tagline)} />
     <section className="relative isolate flex min-h-[80vh] flex-col items-center justify-center gap-y-5 px-4 pt-24 pb-12 text-center sm:px-12 sm:pb-16 sm:pt-42">
       <HeroAudience tagline={tagline} />
     </section>

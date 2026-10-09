@@ -4,7 +4,7 @@ import { resolveInputOutcome } from "#harness/input-request-resolution.js";
 import { firstOpenInput } from "#harness/open-input-request.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import type { StepCoordinates as PendingInputBatchEvent } from "#harness/session-machine/view.js";
-import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { getProxyInputRequests, resolvedByChild } from "#harness/proxy-input-requests.js";
 import type { WorkflowAskRoute, ProxyInputRequest } from "#harness/proxy-input-requests.js";
 import type { SessionStateMap } from "#harness/types.js";
 import type { InputResolution } from "#protocol/message.js";
@@ -73,9 +73,10 @@ const CONSUMED_MESSAGE_KEYS: ReadonlySet<string> = new Set(["context", "message"
 /**
  * Splits a deliver payload into parent-local and proxied-child buckets.
  *
- * With `resolveMessage`, a plain-text message is also resolved against pending
- * `ctx.ask()` questions: when exactly one question is pending, a matching option or
- * permitted free text answers it and consumes the message along with its
+ * With `resolveMessage`, a plain-text message is also resolved against the
+ * first open request when a child asked it, whether a `ctx.ask()` question, a
+ * tool approval, or a session-limit prompt: a matching option or permitted free
+ * text answers that one request, and the message is consumed along with its
  * `context`. Otherwise the message stays with the parent.
  */
 export function routeDeliverPayload(input: {
@@ -87,7 +88,7 @@ export function routeDeliverPayload(input: {
   const entries = getProxyInputRequests(input.state);
   const routable = (requestId: string, route: ProxyInputRequest | undefined) =>
     route !== undefined && input.allowRoute?.(requestId, route) !== false;
-  const message = resolveMessageAgainstQuestions({
+  const message = resolveMessageAgainstFirstRequest({
     enabled: input.resolveMessage === true,
     entries,
     payload: input.payload,
@@ -163,7 +164,11 @@ export function routeDeliverPayload(input: {
       routes,
     }): RoutedChildDelivery => {
       const responseIds = new Set(parentRequestIds);
-      const retireRequestIds = new Set(responseIds);
+      const decided = (requestId: string) => {
+        const kind = entries.get(requestId)?.kind;
+        return kind === undefined || !resolvedByChild(kind);
+      };
+      const retireRequestIds = new Set([...responseIds].filter(decided));
 
       // A fully-answered approval batch retires its sibling requests
       // too, so a late free-form answer cannot route through a stale
@@ -173,7 +178,9 @@ export function routeDeliverPayload(input: {
           route.batch !== undefined &&
           batchResolves({ batch: route.batch, childContinuationToken, entries, responseIds })
         ) {
-          for (const requestId of route.batch.requestIds) retireRequestIds.add(requestId);
+          for (const requestId of route.batch.requestIds) {
+            if (decided(requestId)) retireRequestIds.add(requestId);
+          }
         }
       }
 
@@ -244,7 +251,7 @@ function toInputResolution(
   return response === undefined ? resolution : { ...resolution, response };
 }
 
-function resolveMessageAgainstQuestions(input: {
+function resolveMessageAgainstFirstRequest(input: {
   readonly enabled: boolean;
   readonly entries: ReadonlyMap<string, ProxyInputRequest>;
   readonly payload: DeliverPayload;
@@ -269,13 +276,10 @@ function resolveMessageAgainstQuestions(input: {
   const requestId =
     firstOpenInput(storedProjection(input.state), answered)?.request.requestId ??
     [...input.entries.keys()].find((id) => !answered(id));
-  const route = requestId === undefined ? undefined : input.entries.get(requestId);
-  if (requestId === undefined || route?.kind !== "question") return none;
-  // Task and subagent questions carry no `ctx.ask()` metadata, so plain text
-  // cannot resolve them.
-  const question = route.workflowAsk?.question ?? route.question;
-  const answer =
-    question === undefined ? undefined : resolveTextToResponse(text, { requestId, ...question });
+  const reply = requestId === undefined ? undefined : input.entries.get(requestId)?.reply;
+  // A request recorded without reply metadata cannot be matched at all.
+  if (requestId === undefined || reply === undefined) return none;
+  const answer = resolveTextToResponse(text, { requestId, ...reply });
   return answer === undefined ? none : { consumed: true, responses: [answer] };
 }
 

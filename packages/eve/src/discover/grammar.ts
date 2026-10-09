@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import type { InstructionsDefinition } from "#public/definitions/instructions.js";
 import { lowerInstructionsMarkdown } from "#internal/helpers/markdown.js";
+import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
 import {
   createDiscoverErrorDiagnostic,
   createDiscoverWarningDiagnostic,
@@ -120,6 +121,22 @@ export const DISCOVER_EXTENSION_NAME_INVALID = "discover/extension-name-invalid"
  * want a snake_case identifier should name the file in snake_case.
  */
 export const TOOL_SLUG_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
+
+/** {@link TOOL_SLUG_PATTERN} in words, for errors about a name that breaks it. */
+export const TOOL_SLUG_RULE =
+  "Expected ASCII letters, digits, underscores, and dashes only, starting with a letter, up to 64 characters.";
+
+/**
+ * Skill name charset: {@link TOOL_SLUG_PATTERN}, except that a name may start
+ * with a digit, so a skill such as `3d-modeling` from the Agent Skills
+ * standard ports over as-is. A skill is loaded by name, never called as a
+ * tool, so tool-name limits on the first character don't apply.
+ */
+export const SKILL_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
+
+/** {@link SKILL_NAME_PATTERN} in words, for errors about a name that breaks it. */
+export const SKILL_NAME_RULE =
+  "Expected ASCII letters, digits, underscores, and dashes only, starting with a letter or digit, up to 64 characters.";
 
 /**
  * Connection filename charset. Connections use the same lowercase
@@ -430,9 +447,7 @@ export function createToolNameDiagnostic(
 
   return createDiscoverErrorDiagnostic({
     code: DISCOVER_TOOL_NAME_INVALID,
-    message:
-      `Tool filename "${slotName}" is not a legal tool name. ` +
-      `Expected ASCII letters, digits, underscores, and dashes only, starting with a letter, up to 64 characters.`,
+    message: `Tool filename "${slotName}" is not a legal tool name. ${TOOL_SLUG_RULE}`,
     sourcePath,
   });
 }
@@ -519,6 +534,14 @@ export function createExtensionNameDiagnostic(
   slotName: string,
   sourcePath: string,
 ): DiscoverDiagnostic | null {
+  const reservation = eveNamespaceReservation(slotName);
+  if (reservation !== undefined) {
+    return createDiscoverErrorDiagnostic({
+      code: DISCOVER_EXTENSION_NAME_INVALID,
+      message: `Extension mount "${slotName}" uses the reserved name "${slotName}". Rename it; ${reservation}.`,
+      sourcePath,
+    });
+  }
   if (EXTENSION_SLUG_PATTERN.test(slotName)) {
     return null;
   }

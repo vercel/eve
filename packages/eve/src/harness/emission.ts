@@ -25,6 +25,7 @@ import type { JsonObject } from "#shared/json.js";
 import {
   createRuntimeToolResultFromStepResult,
   createRuntimeToolResultFromToolError,
+  toActionResult,
   createToolResultMessagePartFromToolError,
 } from "#harness/action-result-helpers.js";
 import {
@@ -44,9 +45,8 @@ import { normalizeModelStreamError } from "#harness/model-call/errors.js";
 import { createOrderedStreamEmitter } from "#harness/ordered-stream-emitter.js";
 import { interruptStreamOnFailure } from "#harness/interruptible-stream.js";
 import { isInlineAuthorizationToolResult } from "#harness/inline-tool-authorization.js";
-import { emitNestedToolActions } from "#harness/nested-actions.js";
 import type { TurnPosition } from "#harness/session-machine/view.js";
-import type { HarnessEmitFn, HarnessToolMap } from "#harness/types.js";
+import type { HarnessEmitFn, HarnessToolLookup } from "#harness/types.js";
 import { normalizeAssistantStepFinishReason } from "#harness/finish-reason.js";
 
 /**
@@ -71,7 +71,7 @@ interface StreamActionEmissionOptions {
    * as the reply.
    */
   readonly hidesHeldText?: boolean;
-  readonly tools: HarnessToolMap;
+  readonly tools: HarnessToolLookup;
   readonly unsettledActionToolNames?: Map<string, string>;
 }
 
@@ -246,7 +246,6 @@ async function consumeStreamContent(
       return;
     }
     emittedActionResultCallIds.add(result.callId);
-    await emitNestedToolActions(emitFn, state, result.callId);
     const resultPresentation =
       result.isError === true
         ? undefined
@@ -259,7 +258,7 @@ async function consumeStreamContent(
     await emitFn(
       createActionResultEvent({
         presentation: resultPresentation,
-        result,
+        result: toActionResult(result, actionInputs.get(result.callId)),
         sequence: state.sequence,
         stepIndex: state.stepIndex,
         turnId: state.turnId,

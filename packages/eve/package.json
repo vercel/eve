@@ -1,6 +1,6 @@
 {
   "name": "eve",
-  "version": "0.73.0",
+  "version": "0.75.1",
   "private": false,
   "description": "Filesystem-first framework for durable backend AI agents that run anywhere.",
   "keywords": [
@@ -181,11 +181,6 @@
       "types": "./dist/src/public/tools/web-search.d.ts",
       "import": "./dist/src/public/tools/web-search.js",
       "default": "./dist/src/public/tools/web-search.js"
-    },
-    "./tools/load_skill": {
-      "types": "./dist/src/public/tools/load-skill.d.ts",
-      "import": "./dist/src/public/tools/load-skill.js",
-      "default": "./dist/src/public/tools/load-skill.js"
     },
     "./tools/glob": {
       "types": "./dist/src/public/tools/glob.d.ts",
@@ -442,6 +437,24 @@
       "import": "./dist/src/public/server/index.js",
       "default": "./dist/src/public/server/index.js"
     },
+    "./experimental/schedules/testing": {
+      "eve-source": "./src/public/experimental/schedules/testing.ts",
+      "types": "./dist/src/public/experimental/schedules/testing.d.ts",
+      "import": "./dist/src/public/experimental/schedules/testing.js",
+      "default": "./dist/src/public/experimental/schedules/testing.js"
+    },
+    "./experimental/schedules": {
+      "eve-source": "./src/public/experimental/schedules/index.ts",
+      "types": "./dist/src/public/experimental/schedules/index.d.ts",
+      "import": "./dist/src/public/experimental/schedules/index.js",
+      "default": "./dist/src/public/experimental/schedules/index.js"
+    },
+    "./experimental/schedules/vercel": {
+      "eve-source": "./src/public/experimental/schedules/vercel.ts",
+      "types": "./dist/src/public/experimental/schedules/vercel.d.ts",
+      "import": "./dist/src/public/experimental/schedules/vercel.js",
+      "default": "./dist/src/public/experimental/schedules/vercel.js"
+    },
     "./channels": {
       "types": "./dist/src/public/channels/index.d.ts",
       "import": "./dist/src/public/channels/index.js",
@@ -597,14 +610,16 @@
     "@vercel/detect-agent": "1.2.3",
     "@vercel/oidc": "3.8.0",
     "@vercel/otel": "catalog:",
+    "@vercel/queue": "0.5.1",
     "@vercel/sandbox": "catalog:",
+    "@vercel/schedules": "0.0.0-alpha.11",
     "@vercel/sdk": "1.28.8",
-    "@workflow/core": "5.1.0",
-    "@workflow/errors": "5.0.2",
+    "@workflow/core": "5.2.0",
+    "@workflow/errors": "5.0.3",
     "@workflow/serde": "5.0.0",
-    "@workflow/world": "5.0.2",
-    "@workflow/world-local": "5.0.2",
-    "@workflow/world-vercel": "5.1.0",
+    "@workflow/world": "5.0.3",
+    "@workflow/world-local": "5.1.0",
+    "@workflow/world-vercel": "5.2.0",
     "ai": "catalog:",
     "chat": "4.41.0",
     "chokidar": "5.0.0",

@@ -16,6 +16,7 @@ import { approvingSteps } from "#harness/hitl/approvals.js";
 import { sessionView } from "#harness/session-machine/commit.js";
 import { resolveTypedApproval } from "#harness/hitl/delivery.js";
 import { storedProjection } from "#harness/session-machine/view.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 import { parkedSteps, withParkedStep, withPublished } from "#internal/testing/session-machine.js";
 import { createApprovalSettledEvent } from "#protocol/message.js";
 import type { HarnessSession } from "#harness/types.js";
@@ -59,7 +60,11 @@ function parkedSession(requester?: SessionAuthContext): HarnessSession {
 }
 
 describe("coordinateApprovalDelivery", () => {
-  function authorize(session: HarnessSession, response: ApprovalResponsePolicy) {
+  function authorize(
+    session: HarnessSession,
+    response: ApprovalResponsePolicy,
+    prepareTools?: () => Promise<Map<string, HarnessToolDefinition>>,
+  ) {
     const ctx = new ContextContainer();
     ctx.set(SessionKey, {
       auth: { current: responder, initiator: responder },
@@ -76,6 +81,7 @@ describe("coordinateApprovalDelivery", () => {
     return contextStorage.run(ctx, () =>
       coordinateApprovalDelivery({
         now: 101,
+        prepareTools,
         session,
         tools: new Map([["gate", tool]]),
       }),
@@ -224,6 +230,31 @@ describe("coordinateApprovalDelivery", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("fails the candidate but keeps the request parked when its step's tools can't be restored", async () => {
+    const logs = captureLogRecords();
+    const ingested = await ingest();
+    const response = vi.fn<ApprovalResponsePolicy>(() => ({ status: "allowed" }));
+
+    const result = await authorize(ingested.session, response, async () => {
+      throw new Error("The notes directory is unreachable.");
+    });
+
+    expect(response).not.toHaveBeenCalled();
+    expect(getApprovalAuditState(result.session.state).candidateHistory).toEqual([
+      expect.objectContaining({
+        reason: "Approval authorization is temporarily unavailable. Please try again.",
+        status: "failed",
+      }),
+    ]);
+    // A restore failure may be transient, so the request waits for another response.
+    expect(parkedSteps(result.session)[0]?.requests.map((entry) => entry.requestId)).toEqual([
+      request.requestId,
+    ]);
+    expect(logs.records.map((record) => record.message)).toContain(
+      "approval tools could not be restored",
+    );
   });
 
   it("does not complete a duplicate while its candidate is active", async () => {

@@ -25,6 +25,7 @@ import {
   defineWorkflowTool,
 } from "#tools/workflow-definition.js";
 import { reportCallerWorkflow } from "#internal/testing/workflow-tool-fixtures.js";
+import { STUB_CONTEXT_KEY, type ToolStub } from "#tool-stubs/types.js";
 
 // Scripted model: calls each tool the first message names, in the order it
 // names them, once each, then replies. "in parallel" calls them all in one step.
@@ -129,6 +130,7 @@ async function withChainRun(
   options: {
     readonly firstApproval?: Approval;
     readonly message?: string;
+    readonly stubs?: readonly ToolStub[];
     readonly model?: MockLanguageModelV4;
     readonly modules?: NonNullable<Parameters<typeof createTestRuntime>[0]>["modules"];
   } = {},
@@ -183,6 +185,9 @@ async function withChainRun(
         serializedContext: {
           ...buildSerializedContext({ auth: ALICE, channelKind: "http", continuationToken }),
           "eve.capabilities": { requestInput: true },
+          ...(options.stubs === undefined
+            ? {}
+            : { [STUB_CONTEXT_KEY]: { token: `${name}-stubs`, rules: options.stubs } }),
         },
       },
     ]);
@@ -240,28 +245,44 @@ function turnBoundaries(stage: Stage) {
 }
 
 describe("approval caller", () => {
-  it("runs only the call another person approves as that person", async () => {
-    const { secondRequesters, seen, stages } = await withChainRun(
-      "approval-caller",
-      async (run) => {
-        await run.approve(BOB);
-        await run.approve(ALICE);
-      },
-    );
+  it.each([false, true])(
+    "runs only the call another person approves as that person (unmatched stub: %s)",
+    async (withStub) => {
+      const { secondRequesters, seen, stages } = await withChainRun(
+        `approval-caller-${withStub}`,
+        async (run) => {
+          await run.approve(BOB);
+          await run.approve(ALICE);
+        },
+        {
+          stubs: withStub
+            ? [
+                {
+                  id: "other-deployment",
+                  tool: "deploy_change",
+                  match: { environment: { const: "other" } },
+                  outcome: { response: { ran: "stubbed" } },
+                },
+              ]
+            : undefined,
+        },
+      );
 
-    // Bob's approval resumes Alice's turn; it does not start his own.
-    expect(stages.map(turnBoundaries)).toEqual([
-      ["turn.started turn_0"],
-      [],
-      ["turn.completed turn_0"],
-    ]);
-    expect(seen).toEqual([
-      { tool: "deploy_change", caller: "bob" },
-      { tool: "read_notes", caller: "alice" },
-      { tool: "publish_change", caller: "alice" },
-    ]);
-    expect(secondRequesters).toEqual(["alice"]);
-  }, 60_000);
+      // Bob's approval resumes Alice's turn; it does not start his own.
+      expect(stages.map(turnBoundaries)).toEqual([
+        ["turn.started turn_0"],
+        [],
+        ["turn.completed turn_0"],
+      ]);
+      expect(seen).toEqual([
+        { tool: "deploy_change", caller: "bob" },
+        { tool: "read_notes", caller: "alice" },
+        { tool: "publish_change", caller: "alice" },
+      ]);
+      expect(secondRequesters).toEqual(["alice"]);
+    },
+    60_000,
+  );
 
   it("lets the requester steer the turn after someone else approves a call", async () => {
     const { seen, stages } = await withChainRun("approval-caller-steer", async (run) => {

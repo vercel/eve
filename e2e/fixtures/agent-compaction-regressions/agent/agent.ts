@@ -16,10 +16,16 @@ import { assistantHasReport } from "../report-evidence";
 import { HANDOFF_REFERENCE, REVIEW_REFERENCE } from "../release-reports";
 
 const TEST_CONTEXT_WINDOW_TOKENS = 32_000;
-// The compiled fixture's instructions, task system block, and 11 advertised
-// tools occupy ~2,163 tokens, including `read_file`'s image guidance. Reserve
-// them in addition to the summarizer's history budget.
-const TEST_REQUEST_ENVELOPE_TOKENS = 2_163;
+// eve estimates this fixture's request envelope (instructions, task system
+// block, and 10 advertised tools; with nothing deferred and no skills or
+// connections, the agent has no catalog tools) at 2,273
+// tokens. This allowance sits 230.25 tokens below that estimate, the offset the
+// cases have always run with, so the threshold leaves them a ~670-token history
+// budget. When eve's fixed instructions or tools change, re-measure: log what
+// `estimateRequestEnvelope` (packages/eve/src/harness/request-envelope.ts)
+// returns while `EVE_E2E_MODEL=mock pnpm exec eve eval --strict
+// content-output-file-stub` runs in this fixture, subtract 230.25, and round up.
+const TEST_REQUEST_ENVELOPE_TOKENS = 2_043;
 // Fit the capped file-output exchange, while forcing the larger review and
 // handoff reports into the assistant checkpoint consumed by the script.
 const TEST_HISTORY_BUDGET_TOKENS = 900;

@@ -3,6 +3,7 @@ import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { ConversationIdKey } from "#context/keys.js";
+import { resolveModelProfile } from "#harness/model-profile.js";
 import { buildStepHooks } from "#harness/step-hooks.js";
 import type { HarnessSession } from "#harness/types.js";
 
@@ -24,8 +25,7 @@ describe("buildStepHooks", () => {
   it("starts the step from onStepStart, not prepareStep", async () => {
     const startStep = vi.fn(async () => {});
     const hooks = buildStepHooks({
-      cachePath: { kind: "none" },
-      marker: undefined,
+      profile: resolveModelProfile("openai/gpt-5"),
       session: createSession(),
       startStep,
     });
@@ -65,11 +65,8 @@ describe("buildStepHooks", () => {
     };
     const context = new ContextContainer();
     context.set(ConversationIdKey, "forwarded-conversation");
-    const prepare = (
-      model: LanguageModel,
-      cachePath: Parameters<typeof buildStepHooks>[0]["cachePath"],
-    ) =>
-      buildStepHooks({ marker: undefined, cachePath, session }).prepareStep({
+    const prepare = (model: LanguageModel) =>
+      buildStepHooks({ profile: resolveModelProfile(model), session }).prepareStep({
         messages: [],
         model,
         instructions: undefined,
@@ -84,9 +81,7 @@ describe("buildStepHooks", () => {
       });
 
     await contextStorage.run(context, async () => {
-      expect(
-        (await prepare("anthropic/claude-sonnet-4-5", { kind: "gateway-auto" }))?.providerOptions,
-      ).toEqual({
+      expect((await prepare("anthropic/claude-sonnet-4-5"))?.providerOptions).toEqual({
         gateway: { caching: "auto", order: ["bedrock"], sessionId: "forwarded-conversation" },
         openai: { store: false },
       });
@@ -97,7 +92,6 @@ describe("buildStepHooks", () => {
               modelId: "anthropic/claude-sonnet-4-5",
               provider: "gateway.language-model",
             }),
-            { kind: "gateway-auto" },
           )
         )?.providerOptions,
       ).toEqual({
@@ -111,7 +105,6 @@ describe("buildStepHooks", () => {
               modelId: "claude-sonnet-4-5",
               provider: "anthropic.messages",
             }),
-            { kind: "none" },
           )
         )?.providerOptions,
       ).toEqual({
@@ -123,8 +116,7 @@ describe("buildStepHooks", () => {
 
   it("preserves an authored Gateway session ID", async () => {
     const hooks = buildStepHooks({
-      cachePath: { kind: "none" },
-      marker: undefined,
+      profile: resolveModelProfile("anthropic/claude-sonnet-4-5"),
       session: {
         ...createSession(),
         agent: {
@@ -150,6 +142,8 @@ describe("buildStepHooks", () => {
       stepNumber: 0,
       steps: [],
     });
-    expect(prepared?.providerOptions).toEqual({ gateway: { sessionId: "authored-session" } });
+    expect(prepared?.providerOptions).toEqual({
+      gateway: { caching: "auto", sessionId: "authored-session" },
+    });
   });
 });

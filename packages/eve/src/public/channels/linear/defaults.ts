@@ -10,6 +10,7 @@ import {
 } from "#public/channels/linear/hitl.js";
 import type { LinearAgentSessionEvent, LinearUser } from "#public/channels/linear/inbound.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
+import { actionLabel, visibleActions } from "#shared/action-label.js";
 import type { InputRequest } from "#shared/input.js";
 import type {
   LinearChannelEvents,
@@ -110,14 +111,15 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
         return;
       }
 
-      if (event.actions.length === 0) return;
-      if (event.actions.length > 1) {
+      const actions = visibleActions(event.actions);
+      if (actions.length === 0) return;
+      if (actions.length > 1) {
         await postActivity(
           channel,
           options,
           {
             action: "Running",
-            parameter: event.actions.map(actionLabel).join(", "),
+            parameter: actions.map((action) => actionLabel(action, event.presentation)).join(", "),
             type: "action",
           },
           {
@@ -127,12 +129,12 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
         return;
       }
 
-      for (const action of event.actions) {
+      for (const action of actions) {
         await postActivity(
           channel,
           options,
           {
-            action: actionLabel(action),
+            action: actionLabel(action, event.presentation),
             parameter: actionParameter(action),
             type: "action",
           },
@@ -309,10 +311,6 @@ function firstNonEmptyLine(text: string): string | undefined {
     if (trimmed.length > 0) return trimmed;
   }
   return undefined;
-}
-
-function actionLabel(action: { readonly kind: string; readonly toolName?: string }): string {
-  return action.kind === "tool-call" && action.toolName ? action.toolName : action.kind;
 }
 
 function actionParameter(action: {

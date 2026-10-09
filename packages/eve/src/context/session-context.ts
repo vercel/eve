@@ -6,7 +6,8 @@ import type {
 } from "#shared/sandbox-session.js";
 import type { SessionAuth, SessionParent, SessionTurn } from "#context/keys.js";
 
-export type { SessionAuth, SessionParent, SessionTurn };
+import type { SessionSchedule } from "#context/session-schedule.js";
+export type { SessionAuth, SessionParent, SessionTurn, SessionSchedule };
 
 /**
  * Shared runtime context available to all authored callbacks that run
@@ -25,6 +26,8 @@ export interface SessionContext {
     readonly auth: SessionAuth;
     readonly turn: SessionTurn;
     readonly parent?: SessionParent;
+    /** Present only for scheduled work; not an application-supplied auth attribute. */
+    readonly schedule?: SessionSchedule;
   };
 
   /**

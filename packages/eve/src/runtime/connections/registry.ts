@@ -1,4 +1,5 @@
 import type { Approval } from "#approval/definition.js";
+import { assertNotConnectionOwned } from "#connections/ownership.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { McpConnectionClient } from "#runtime/connections/mcp-client.js";
 import { OpenApiConnectionClient } from "#runtime/connections/openapi-client.js";
@@ -74,6 +75,7 @@ export class ConnectionRegistryImpl implements ConnectionRegistry {
         connections.set(definition.connectionName, definition);
       }
     }
+    for (const name of dynamicNames.keys()) assertNoNestedConnection(name, connections.keys());
     return [...connections.values()];
   }
 
@@ -130,5 +132,21 @@ export class ConnectionRegistryImpl implements ConnectionRegistry {
     const closePromises = [...this.#clients.values()].map((client) => client.close());
     await Promise.allSettled(closePromises);
     this.#clients.clear();
+  }
+}
+
+/** A dynamic connection may neither own nor be owned by another connection's name. */
+function assertNoNestedConnection(dynamicName: string, connectionNames: Iterable<string>): void {
+  for (const other of connectionNames) {
+    if (other === dynamicName) continue;
+    // Only the shorter of two names can own the other.
+    const [name, owner] =
+      other.length < dynamicName.length ? [dynamicName, other] : [other, dynamicName];
+    assertNotConnectionOwned({
+      connectionNames: [owner],
+      name,
+      remedy: `Rename the dynamic connection "${dynamicName}".`,
+      subject: "Connection",
+    });
   }
 }

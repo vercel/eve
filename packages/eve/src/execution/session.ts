@@ -155,7 +155,7 @@ export function refreshSessionFromTurnAgent(input: {
 }
 
 function createSessionSystemPrompt(turnAgent: RuntimeTurnAgent): string {
-  const skillSection = formatAvailableSkillsSection(turnAgent.availableSkills ?? []);
+  const skillSection = formatAvailableSkillsSection(turnAgent.listedSkills ?? []);
   const blocks =
     skillSection === null ? turnAgent.instructions : [...turnAgent.instructions, skillSection];
   return blocks.join("\n\n");

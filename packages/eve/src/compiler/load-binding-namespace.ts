@@ -32,6 +32,11 @@ function ancestorMountEntries(mounts: ReadonlyMap<string, ExtensionCompileMount>
 
 /** Loads one node's selected bindings with dependency ordering and per-phase caching. */
 export function createCompiledBindingNamespaceLoader(input: {
+  /**
+   * Selected app root; application modules stamp Workflow ids relative to it. Required so
+   * no caller silently falls back to the package root, which differs in workspace members.
+   */
+  readonly appRoot: string | undefined;
   readonly bindings?: Readonly<Record<string, AgentModuleBinding>>;
   readonly mounts?: ReadonlyMap<string, ExtensionCompileMount>;
   readonly evaluationId?: string;
@@ -66,6 +71,7 @@ export function createCompiledBindingNamespaceLoader(input: {
         await load(mountSourceId, nextLineage);
       }
       return await loadCompiledBindingNamespace({
+        appRoot: input.appRoot,
         binding,
         loadDependency: (dependencySourceId) => load(dependencySourceId, nextLineage),
         registries: input.registries,
@@ -81,6 +87,7 @@ export function createCompiledBindingNamespaceLoader(input: {
 }
 
 async function loadCompiledBindingNamespace(input: {
+  readonly appRoot: string | undefined;
   readonly binding: AgentModuleBinding;
   readonly loadDependency: CompiledBindingNamespaceLoader;
   readonly mounts?: ReadonlyMap<string, ExtensionCompileMount>;
@@ -105,6 +112,7 @@ async function loadCompiledBindingNamespace(input: {
               input.mounts === undefined ? undefined : ancestorMountEntries(input.mounts, mountId),
           };
     return await loadAuthoredModuleNamespace(input.binding.backing.sourcePath, {
+      appRoot: input.binding.owner.kind === "application" ? input.appRoot : undefined,
       externalDependencies: input.binding.backing.externalDependencies,
       extension,
     });

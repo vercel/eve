@@ -263,3 +263,8 @@ export async function reportCallerWorkflow(_input: unknown, ctx: WorkflowToolCon
   "use workflow";
   return { caller: ctx.session.auth.current?.principalId ?? null };
 }
+
+export async function failingServeWorkflow(): Promise<never> {
+  "use workflow";
+  throw new Error("Live serve workflow must not execute.");
+}

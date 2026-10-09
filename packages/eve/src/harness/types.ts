@@ -252,6 +252,24 @@ export type StepFn = (session: HarnessSession, input?: StepInput) => Promise<Ste
  */
 export type HarnessToolMap = ReadonlyMap<string, HarnessToolDefinition>;
 
+/** Looks up the definition a call runs by its entry name. */
+export type HarnessToolLookup = Pick<HarnessToolMap, "get">;
+
+/** The parts of a model tool call that name what it runs. */
+export interface ToolCallLike {
+  readonly input: unknown;
+  readonly toolName: string;
+}
+
+/** A model tool call as the call to its entry, with the entry it runs. */
+export interface ResolvedCall<T extends ToolCallLike> {
+  readonly call: T;
+  readonly definition: HarnessToolDefinition;
+}
+
+/** Resolves a model tool call to the entry it runs, if it reaches one. */
+export type CallResolver = <T extends ToolCallLike>(toolCall: T) => ResolvedCall<T> | undefined;
+
 /**
  * Callback that writes one event to the event stream.
  *

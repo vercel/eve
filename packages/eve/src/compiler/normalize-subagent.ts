@@ -1,4 +1,5 @@
 import {
+  expectAgentToolExposure,
   expectBoolean,
   expectFunction,
   expectObjectRecord,
@@ -8,6 +9,7 @@ import {
 import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import { isDynamicSentinel, type DynamicToolEventName } from "#dynamic/definition.js";
 import type { LocalSubagentSourceRef } from "#discover/manifest.js";
+import type { AgentToolExposure } from "#shared/agent-definition.js";
 
 const ALLOWED_DYNAMIC_SUBAGENT_EVENTS = new Set<DynamicToolEventName>([
   "session.started",
@@ -28,7 +30,7 @@ export type NormalizedSubagentConfig =
       readonly description: string;
       readonly kind: "remote";
       readonly path: string;
-      readonly tool?: boolean;
+      readonly tool?: AgentToolExposure;
       readonly url?: string;
     };
 
@@ -75,7 +77,7 @@ export function normalizeSubagentConfig(value: unknown, message: string): Normal
       description: expectString(record.description, message),
       kind: "remote",
       path: record.path === undefined ? EVE_SESSION_ROUTE_PATH : expectString(record.path, message),
-      tool: record.tool === undefined ? undefined : expectBoolean(record.tool, message),
+      tool: record.tool === undefined ? undefined : expectAgentToolExposure(record.tool, message),
       url: typeof record.url === "function" ? undefined : expectString(record.url, message),
     };
   }

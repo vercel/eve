@@ -161,6 +161,7 @@ describe("EveAcpAdapter", () => {
               workflowId: "publish-workflow",
             },
           ],
+          presentation: { "call-1": { label: "Check the weather in SF" } },
           sequence: 3,
           stepIndex: 0,
           turnId: "t1",
@@ -169,6 +170,7 @@ describe("EveAcpAdapter", () => {
       {
         type: "action.result",
         data: {
+          presentation: { "call-1": { label: "Sunny in SF" } },
           result: {
             callId: "call-1",
             kind: "tool-result",
@@ -206,7 +208,12 @@ describe("EveAcpAdapter", () => {
     expect(notifications.slice(0, 2).map(({ params }) => (params as any).update.messageId)).toEqual(
       ["t1:message:0", "t1:thought:0"],
     );
-    expect((notifications[3]!.params as any).update.title).toBe("publish");
+    // A call reads as its label, or a readable form of its name, and a result can retitle it.
+    expect(notifications.slice(2).map(({ params }) => (params as any).update.title)).toEqual([
+      "Check the weather in SF",
+      "Publish",
+      "Sunny in SF",
+    ]);
     expect(JSON.stringify(notifications)).not.toContain("secret");
   });
 

@@ -104,7 +104,7 @@ async function hydrateCompiledModuleMapFromManifest(
   ];
   for (const node of nodeManifests) {
     nodes[node.nodeId] = {
-      modules: await hydrateCompiledNodeScope(node.manifest, (sourcePath) =>
+      modules: await hydrateCompiledNodeScope(node.manifest, authoredAppRoot, (sourcePath) =>
         resolve(authoredAppRoot, relative(manifest.appRoot, sourcePath)),
       ),
     };
@@ -114,6 +114,7 @@ async function hydrateCompiledModuleMapFromManifest(
 
 async function hydrateCompiledNodeScope(
   manifest: CompiledAgentNodeManifest | CompiledAgentResources,
+  appRoot: string,
   resolveSourcePath: (sourcePath: string) => string,
 ): Promise<CompiledModuleMap["nodes"][string]["modules"]> {
   const modules: CompiledModuleMap["nodes"][string]["modules"] = {};
@@ -130,6 +131,7 @@ async function hydrateCompiledNodeScope(
           )
         : memoizeModuleNamespaceFactories(
             await loadAuthoredModuleNamespace(resolveSourcePath(binding.backing.sourcePath), {
+              appRoot: binding.owner.kind === "application" ? appRoot : undefined,
               externalDependencies: binding.backing.externalDependencies,
               extension: (() => {
                 const mountId = resolveExtensionBindingMountId(binding);

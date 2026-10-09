@@ -150,7 +150,7 @@ export function createJustBashSandboxProvider(
   };
   // Each handle runs its own interpreter in this process; stopping it keeps the root's files.
   return withToolSessionSandboxes(implementation, {
-    releaseHandle: (handle) => handle.onSessionStop(),
+    releaseHandle: (handle) => handle.onSandboxStop(),
   });
 }
 

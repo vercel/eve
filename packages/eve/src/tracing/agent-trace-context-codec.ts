@@ -8,6 +8,7 @@ import type {
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import { readInstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { boundedTraceError } from "#tracing/bounded-error.js";
+import { CONTENT_ATTRIBUTE_LIMIT } from "#tracing/agent-otel-content.js";
 import { boundedPrincipalId } from "#tracing/telemetry-budget.js";
 import { isInstrumentationPrincipalType } from "#instrumentation/lifecycle.js";
 
@@ -112,7 +113,9 @@ function deserializeTurn(value: unknown): AgentTurnTraceState | undefined {
     context: value.context,
     currentPrincipal: deserializePrincipalSummary(value.currentPrincipal),
     initiatorPrincipal: deserializePrincipalSummary(value.initiatorPrincipal),
+    inputMessagesAttribute: deserializeContentAttribute(value.inputMessagesAttribute),
     modelUsage: deserializeModelUsage(value.modelUsage),
+    outputMessagesAttribute: deserializeContentAttribute(value.outputMessagesAttribute),
     parentLineage: deserializeParentLineage(value.parentLineage),
     rootSessionId: typeof value.rootSessionId === "string" ? value.rootSessionId : "",
     traceSessionId: decodeTraceSessionId(value),
@@ -177,7 +180,6 @@ function deserializeAction(value: unknown): AgentActionTraceState | undefined {
     kind: value.kind,
     name: value.name,
     parent: value.parent,
-    parentCallId: typeof value.parentCallId === "string" ? value.parentCallId : undefined,
     rootSessionId: value.rootSessionId,
     traceSessionId: decodeTraceSessionId(value),
     sessionId: value.sessionId,
@@ -210,6 +212,10 @@ function deserializeAction(value: unknown): AgentActionTraceState | undefined {
         )
       : undefined,
   };
+}
+
+function deserializeContentAttribute(value: unknown): string | undefined {
+  return typeof value === "string" && value.length <= CONTENT_ATTRIBUTE_LIMIT ? value : undefined;
 }
 
 function deserializeModelUsage(

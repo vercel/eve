@@ -1,3 +1,4 @@
+import { observeToolOutput } from "#tool-stubs/execute.js";
 import type { ModelMessage } from "ai";
 
 import type {
@@ -6,7 +7,9 @@ import type {
   RuntimeWorkflowTaskRequest,
   WorkflowToolCallEntry,
 } from "#shared/action-types.js";
+import { SKILL_ENTRY_NAME, SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { markRuntimeWorkflowToolAction } from "#shared/action-types.js";
+import { skillTarget } from "#shared/action-request-name.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
 import {
@@ -17,7 +20,7 @@ import { normalizeToolModelOutput } from "#harness/tool-model-output.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { commitCallEntry, isTaskTool } from "#execution/tasks/model-step.js";
 import { startsTasks } from "#execution/tasks/tool-entry-point.js";
-import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
+import type { HarnessSession, HarnessToolLookup } from "#harness/types.js";
 type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
 type ToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
 
@@ -60,14 +63,15 @@ export function forgetFinishedRuns(
 /** Each runtime result as the model reads it, beside the result the stream reports. */
 export async function runtimeResultCalls(
   results: readonly RuntimeActionResult[],
-  tools: HarnessToolMap | undefined,
+  tools: HarnessToolLookup | undefined,
 ): Promise<{ readonly part: ToolResultPart; readonly result: RuntimeActionResult }[]> {
   const settled: { part: ToolResultPart; result: RuntimeActionResult }[] = [];
   for (const result of results) {
     switch (result.kind) {
+      // A skill load is always an `eve__skill` call in history.
       case "load-skill-result":
         settled.push({
-          part: toolResult(result, "load_skill", toToolResultOutput(result)),
+          part: toolResult(result, SKILL_TOOL_NAME, toToolResultOutput(result)),
           result,
         });
         continue;
@@ -102,14 +106,14 @@ function toolResult(
 }
 
 /**
- * Turns a step's deferred calls into workflow runs, committing a task record
- * for each call that starts a task. Task tool calls stay in the response
- * alone: the session reads them from there.
+ * Turns a step's workflow tool calls into workflow runs, committing a task
+ * record for each call that starts a task. Task tool calls stay in the
+ * response alone: the session reads them from there.
  */
-export function collectDeferredCalls(input: {
+export function collectWorkflowCalls(input: {
   readonly session: HarnessSession;
   readonly toolCalls: readonly CoordinationToolCall[];
-  readonly tools: HarnessToolMap;
+  readonly tools: HarnessToolLookup;
   readonly turnId: string;
 }): {
   readonly session: HarnessSession;
@@ -155,19 +159,16 @@ export interface CoordinationToolCall {
  */
 export function createRuntimeActionRequestFromToolCall(input: {
   readonly toolCall: CoordinationToolCall;
-  readonly tools: HarnessToolMap;
+  readonly tools: HarnessToolLookup;
 }): RuntimeActionRequest {
   const definition = input.tools.get(input.toolCall.toolName);
   const toolInput = resolveToolCallInputObject(input.toolCall.input, {
     callId: input.toolCall.toolCallId,
     toolName: input.toolCall.toolName,
   });
-  if (definition?.frameworkAction === "load-skill") {
-    return {
-      callId: input.toolCall.toolCallId,
-      input: toolInput,
-      kind: "load-skill",
-    };
+  const skill = input.toolCall.toolName === SKILL_ENTRY_NAME ? skillTarget(toolInput) : undefined;
+  if (skill !== undefined) {
+    return { callId: input.toolCall.toolCallId, input: toolInput, kind: "load-skill", name: skill };
   }
   const handling = definition?.behavior?.handling;
   if (
@@ -197,18 +198,18 @@ export function createRuntimeActionRequestFromToolCall(input: {
 }
 
 /**
- * Projects one deferred harness tool call into a workflow run request. The
- * input is the tool's own, without anything eve added to its model input.
+ * Projects one workflow tool call into a workflow run request. The input is
+ * the tool's own, without anything eve added to its model input.
  */
 export function createCoordinationRequestFromToolCall(input: {
   readonly entry: WorkflowToolCallEntry;
   readonly input: JsonObject;
   readonly toolCall: CoordinationToolCall;
-  readonly tools: HarnessToolMap;
+  readonly tools: HarnessToolLookup;
 }): RuntimeWorkflowTaskRequest {
   const definition = input.tools.get(input.toolCall.toolName);
   if (definition?.workflowId === undefined) {
-    throw new Error(`Deferred tool "${input.toolCall.toolName}" has no workflow.`);
+    throw new Error(`Workflow tool "${input.toolCall.toolName}" has no workflow.`);
   }
   return {
     callId: input.toolCall.toolCallId,
@@ -273,11 +274,13 @@ async function projectToolResultOutput(
   ) {
     return toToolResultOutput(result);
   }
-  return normalizeToolModelOutput({
-    output: await definition.toModelOutput(result.output),
-    toolCallId: result.callId,
-    toolName: result.toolName,
-  });
+  return await observeToolOutput(result.toolName, [{ callId: result.callId }], async () =>
+    normalizeToolModelOutput({
+      output: await definition.toModelOutput!(result.output),
+      toolCallId: result.callId,
+      toolName: result.toolName,
+    }),
+  );
 }
 
 function toToolResultOutput(result: RuntimeActionResult): ToolResultPart["output"] {

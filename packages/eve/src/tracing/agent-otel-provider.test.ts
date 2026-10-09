@@ -1485,6 +1485,8 @@ describe("createAgentOtelInstrumentation", () => {
     expect(step.attributes).toMatchObject({
       "agent.framework.name": "eve",
       "agent.model.id": "claude-test",
+      "gen_ai.operation.name": "workflow",
+      "operation.name": "workflow",
       "agent.usage.cache_read_tokens": 4,
       "agent.usage.cache_write_tokens": 2,
       "agent.usage.input_tokens": 10,
@@ -2066,7 +2068,7 @@ describe("createAgentOtelInstrumentation", () => {
         idempotencyKey: uncorrelatedToolKey,
         input: {},
         scope,
-        toolName: "final_output",
+        toolName: "eve__reply",
         type: "tool.call",
       },
       () => Promise.resolve("done"),
@@ -2080,7 +2082,7 @@ describe("createAgentOtelInstrumentation", () => {
 
     const spans = runtime.exporter.getFinishedSpans();
     const tool = byName(spans, "execute_tool weather")[0]!;
-    const uncorrelatedTool = byName(spans, "execute_tool final_output")[0]!;
+    const uncorrelatedTool = byName(spans, "execute_tool eve__reply")[0]!;
     expect(tool.parentSpanContext?.spanId).toBe(
       byName(spans, "agent.step")[0]!.spanContext().spanId,
     );
@@ -2266,7 +2268,8 @@ describe("createAgentOtelInstrumentation", () => {
       "agent.approval.request": expect.stringContaining("Approve weather?"),
       "agent.approval.request_id": "approval-1",
       "agent.approval.response": expect.stringContaining("approve"),
-      "operation.name": "agent.approval",
+      "gen_ai.operation.name": "workflow",
+      "operation.name": "workflow",
       "resource.name": "agent.approval",
       "gen_ai.conversation.id": "session-1",
       "agent.step.index": 0,
@@ -2751,6 +2754,12 @@ describe("createAgentOtelInstrumentation", () => {
     const spans = runtime.exporter.getFinishedSpans();
     const model = byName(spans, "chat claude-test")[0]!;
     const tool = byName(spans, "execute_tool weather")[0]!;
+    const turn = byName(spans, "invoke_agent weather")[0]!;
+    expect(turn.attributes).toMatchObject({
+      "gen_ai.input.messages":
+        '[{"parts":[{"content":"real user text","type":"text"}],"role":"user"}]',
+      "gen_ai.output.messages": expect.stringContaining("Checking the weather."),
+    });
     expect(model.attributes["ai.response.finish_reason"]).toBe("tool-calls");
     expect(model.attributes["ai.response.reasoning"]).toBe("thinking about weather");
     expect(model.attributes["ai.response.text"]).toBe("Checking the weather.");
@@ -2813,6 +2822,12 @@ describe("createAgentOtelInstrumentation", () => {
       "gen_ai.tool.definitions",
     );
     expect(byName(spans, "chat claude-test")[0]?.attributes).not.toHaveProperty(
+      "gen_ai.output.messages",
+    );
+    expect(byName(spans, "invoke_agent weather")[0]?.attributes).not.toHaveProperty(
+      "gen_ai.input.messages",
+    );
+    expect(byName(spans, "invoke_agent weather")[0]?.attributes).not.toHaveProperty(
       "gen_ai.output.messages",
     );
     expect(byName(spans, "execute_tool weather")[0]?.attributes).not.toHaveProperty(

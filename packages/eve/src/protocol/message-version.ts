@@ -7,6 +7,7 @@ import {
   type ReasoningAppendedStreamEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
+import type { RuntimeActionRequest } from "#shared/action-types.js";
 
 interface MessageAppendedStreamEventV24 {
   data: {
@@ -83,6 +84,13 @@ export function normalizeMessageStreamEvent<Version extends MessageStreamVersion
   event: MessageStreamEventForVersion<Version>,
 ): MessageStreamEvent;
 export function normalizeMessageStreamEvent(
+  version: MessageStreamVersion,
+  event: SupportedMessageStreamEvent,
+): MessageStreamEvent {
+  return nameSkillLoads(normalizeAppendEvent(version, event));
+}
+
+function normalizeAppendEvent(
   version: MessageStreamVersion,
   event: SupportedMessageStreamEvent,
 ): MessageStreamEvent {
@@ -188,6 +196,38 @@ function normalizeLegacyMessageStreamEvent(
   }
 
   return event;
+}
+
+type LoadSkillActionRequest = Extract<RuntimeActionRequest, { readonly kind: "load-skill" }>;
+
+/**
+ * Names the skill each `load-skill` request loads. eve 0.75 and earlier
+ * recorded it only in the `load_skill` call's `{ skill }` input, and their
+ * sessions still replay through the current stream version.
+ */
+function nameSkillLoads(event: MessageStreamEvent): MessageStreamEvent {
+  if (event.type !== "actions.requested" || !event.data.actions.some(isUnnamedSkillLoad)) {
+    return event;
+  }
+  return {
+    ...event,
+    data: {
+      ...event.data,
+      actions: event.data.actions.map((action) =>
+        isUnnamedSkillLoad(action) ? { ...action, name: releasedSkillName(action) } : action,
+      ),
+    },
+  };
+}
+
+function isUnnamedSkillLoad(action: RuntimeActionRequest): action is LoadSkillActionRequest {
+  return action.kind === "load-skill" && typeof Reflect.get(action, "name") !== "string";
+}
+
+function releasedSkillName(action: LoadSkillActionRequest): string {
+  const skill = action.input.skill;
+  // `load_skill` required `skill`, so only a malformed record lacks it.
+  return typeof skill === "string" ? skill : "load_skill";
 }
 
 function validateDeltaMessageStreamEvent(

@@ -91,8 +91,8 @@ function createSessionSandboxHarness() {
   function createHandle(sessionId: string, value = mockSandbox({ id: sessionId })) {
     return {
       sandbox: value.session,
-      async onSessionDelete() {},
-      async onSessionStop() {},
+      async onSandboxDelete() {},
+      async onSandboxStop() {},
       async onRuntimeShutdown() {},
     };
   }

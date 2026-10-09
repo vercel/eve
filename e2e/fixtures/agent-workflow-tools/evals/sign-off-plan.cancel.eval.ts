@@ -23,7 +23,7 @@ export default defineEval({
 
     const reworked = await parked.session.send(ALICE_REWORK, { turnPolicy: "steer" });
     reworked.expectOk();
-    reworked.calledTool("task_cancel", {
+    reworked.calledTool("eve__task_cancel", {
       count: 1,
       output: /^Stopped sign_off_plan-\w{6}'s current work;/u,
     });

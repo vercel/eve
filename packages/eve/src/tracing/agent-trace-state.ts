@@ -33,7 +33,11 @@ export interface AgentTurnTraceState {
   readonly currentPrincipal?: InstrumentationPrincipalSummary;
   readonly initiatorPrincipal?: InstrumentationPrincipalSummary;
   readonly parentLineage?: InstrumentationParentLineage;
+  /** First model input projected onto the turn-level invoke_agent span. */
+  readonly inputMessagesAttribute?: string;
   readonly modelUsage?: { readonly inputTokens?: number; readonly outputTokens?: number };
+  /** Latest model output projected onto the turn-level invoke_agent span. */
+  readonly outputMessagesAttribute?: string;
   readonly rootSessionId: string;
   readonly sequence: number;
   readonly startTimeMs: number;
@@ -61,7 +65,6 @@ export interface AgentActionTraceState {
   readonly kind: InstrumentationToolCallKind;
   readonly name: string;
   readonly parent: InstrumentationTraceContext;
-  readonly parentCallId?: string;
   readonly rootSessionId: string;
   readonly sessionId: string;
   readonly spanId: string;

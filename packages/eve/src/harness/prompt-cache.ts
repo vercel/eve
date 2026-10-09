@@ -1,16 +1,7 @@
-import type { LanguageModel, ModelMessage, SystemModelMessage, ToolSet } from "ai";
-import { isGatewayModel } from "#internal/gateway.js";
+import type { ModelMessage, SystemModelMessage, ToolSet } from "ai";
 
 /**
- * The caching strategy to apply for one harness step.
- */
-export type PromptCachePath =
-  | { readonly kind: "gateway-auto" }
-  | { readonly kind: "anthropic-direct" }
-  | { readonly kind: "none" };
-
-/**
- * Cache marker injected on the Anthropic-direct path.
+ * Cache marker for models that take Anthropic prompt-cache breakpoints.
  *
  * The marker carries two provider namespaces because Anthropic models are
  * reachable through providers that read different provider-options keys:
@@ -22,22 +13,10 @@ export type PromptCachePath =
  *   Converse provider, which does not understand `anthropic.cacheControl`.
  *
  * A provider ignores namespaces it does not own, so carrying both is safe on
- * every Anthropic-direct request regardless of which provider serves it.
+ * every request regardless of which provider serves it. Every breakpoint shares
+ * this frozen instance.
  */
-export interface AnthropicCacheMarker {
-  readonly anthropic: {
-    readonly cacheControl: { readonly type: "ephemeral" };
-  };
-  readonly bedrock: {
-    readonly cachePoint: { readonly type: "default" };
-  };
-}
-
-/**
- * Shared frozen marker. All direct-Anthropic breakpoints in the harness share
- * this instance to avoid allocating per-message.
- */
-const ANTHROPIC_CACHE_MARKER: AnthropicCacheMarker = Object.freeze({
+const ANTHROPIC_CACHE_MARKER = Object.freeze({
   anthropic: Object.freeze({
     cacheControl: Object.freeze({ type: "ephemeral" as const }),
   }),
@@ -45,41 +24,6 @@ const ANTHROPIC_CACHE_MARKER: AnthropicCacheMarker = Object.freeze({
     cachePoint: Object.freeze({ type: "default" as const }),
   }),
 });
-
-/**
- * Detects which prompt caching path applies to a resolved model.
- *
- * Runs once per harness step right after `resolveModel()`.
- */
-export function detectPromptCachePath(model: LanguageModel): PromptCachePath {
-  if (typeof model === "string" || isGatewayModel(model)) {
-    return { kind: "gateway-auto" };
-  }
-
-  const providerName = typeof model.provider === "string" ? model.provider.toLowerCase() : "";
-  if (providerName.includes("anthropic")) {
-    return { kind: "anthropic-direct" };
-  }
-
-  // The standard `@ai-sdk/amazon-bedrock` Converse provider reports its
-  // provider as `amazon-bedrock` and carries the Anthropic identity in the
-  // model id (e.g. `anthropic.claude-3-5-sonnet-20241022-v2:0`), so it must be
-  // matched on the model id rather than the provider name.
-  const modelId = typeof model.modelId === "string" ? model.modelId.toLowerCase() : "";
-  if (providerName.includes("bedrock") && modelId.includes("anthropic")) {
-    return { kind: "anthropic-direct" };
-  }
-
-  return { kind: "none" };
-}
-
-/**
- * Returns the shared Anthropic cache marker used on the `anthropic-direct`
- * path. Exposed for unit tests and for the harness wiring layer.
- */
-export function getAnthropicCacheMarker(): AnthropicCacheMarker {
-  return ANTHROPIC_CACHE_MARKER;
-}
 
 /**
  * Returns a new `providerOptions` object with
@@ -112,17 +56,14 @@ export function mergeGatewayAutoCaching(
 
 /**
  * Returns a new ToolSet where the last tool entry carries the Anthropic
- * cache marker on `providerOptions`. Used on the `anthropic-direct` path
+ * cache marker on `providerOptions`. Used for Anthropic-cache models
  * to place a stable breakpoint at the end of the tools block, caching the
  * full tool definitions across every turn.
  *
  * No-op when `tools` has no entries. Preserves existing `providerOptions`
  * on tools (merges the cache marker in via spread).
  */
-export function applyLastToolCacheBreakpoint(
-  tools: ToolSet,
-  marker: AnthropicCacheMarker,
-): ToolSet {
+export function applyLastToolCacheBreakpoint(tools: ToolSet): ToolSet {
   const entries = Object.entries(tools);
   if (entries.length === 0) {
     return tools;
@@ -140,7 +81,7 @@ export function applyLastToolCacheBreakpoint(
         ...tool,
         providerOptions: {
           ...existingProviderOptions,
-          ...marker,
+          ...ANTHROPIC_CACHE_MARKER,
         },
       };
     } else {
@@ -162,7 +103,6 @@ export function applyLastToolCacheBreakpoint(
  */
 export function applySystemCacheBreakpoint(
   instructions: readonly SystemModelMessage[],
-  marker: AnthropicCacheMarker,
 ): SystemModelMessage[] {
   if (instructions.length === 0) return [...instructions];
 
@@ -172,7 +112,7 @@ export function applySystemCacheBreakpoint(
     ...last,
     providerOptions: {
       ...last.providerOptions,
-      ...marker,
+      ...ANTHROPIC_CACHE_MARKER,
     },
   };
   return result;
@@ -200,10 +140,7 @@ export function applySystemCacheBreakpoint(
  * appends more content blocks than Anthropic's backward boundary scan
  * covers.
  */
-export function applyConversationCacheControl(
-  messages: readonly ModelMessage[],
-  marker: AnthropicCacheMarker,
-): ModelMessage[] {
+export function applyConversationCacheControl(messages: readonly ModelMessage[]): ModelMessage[] {
   if (messages.length === 0) {
     return [...messages];
   }
@@ -219,7 +156,7 @@ export function applyConversationCacheControl(
       ...message,
       providerOptions: {
         ...message.providerOptions,
-        ...marker,
+        ...ANTHROPIC_CACHE_MARKER,
       },
     };
   };
