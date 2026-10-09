@@ -21,6 +21,8 @@ import {
   createSessionWaitingEvent,
   createAgentStartedEvent,
   createInputRequestedEvent,
+  createInputResolvedEvent,
+  createStepStartedEvent,
   createTaskSettledEvent,
   createTaskStartedEvent,
   createTurnCompletedEvent,
@@ -2479,6 +2481,62 @@ describe("EveAgentStore cancellation", () => {
     const store = createStore({ reducer: defaultMessageReducer() });
 
     await expect(store.cancel()).resolves.toEqual({ status: "no_active_turn" });
+  });
+
+  it("cancels a turn resumed by an approval answer", async () => {
+    const events = stampTestEvents([
+      createTurnStartedEvent({ sequence: 0, turnId: "turn_1" }),
+      colorApprovalRequested("color-a"),
+      createTurnWaitingEvent({ on: "input", sequence: 1, turnId: "turn_1", usage: TEST_USAGE }),
+      createInputResolvedEvent({
+        resolutions: [
+          {
+            kind: "tool-approval",
+            outcome: "approved",
+            requestId: "color-a",
+            response: { optionId: "approve", requestId: "color-a" },
+          },
+        ],
+        sequence: 2,
+        stepIndex: 1,
+        turnId: "turn_1",
+      }),
+      createStepStartedEvent({ modelId: "mock", sequence: 3, stepIndex: 1, turnId: "turn_1" }),
+      createTurnCancelledEvent({ sequence: 4, turnId: "turn_1" }),
+      createSessionWaitingEvent(TEST_USAGE),
+    ] as UnstampedMessageStreamEvent[]);
+    const parked = events.slice(0, 3);
+    const resumed = events.slice(3);
+    const live = controlledStreamResponse();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      if (init?.method !== "POST") return live.response;
+      return String(url).endsWith("/cancel") ? acceptedCancellationResponse() : startedResponse();
+    });
+    const cancelRequests = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url) === "/eve/v1/session/session_1/cancel");
+    const store = createStore({
+      initialEvents: parked,
+      initialSession: { sessionId: "session_1", streamIndex: parked.length },
+      reducer: defaultMessageReducer(),
+    });
+
+    const answering = store.send({
+      inputResponses: [{ optionId: "approve", requestId: "color-a" }],
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    live.emit(resumed[0]!);
+    live.emit(resumed[1]!);
+    await vi.waitFor(() => expect(store.snapshot.status).toBe("streaming"));
+
+    const cancellation = store.cancel();
+    await vi.waitFor(() => expect(cancelRequests()).toHaveLength(1));
+
+    live.emit(resumed[2]!);
+    live.emit(resumed[3]!);
+    live.close();
+    await expect(cancellation).resolves.toEqual({ sessionId: "session_1", status: "accepted" });
+    await answering;
+    expect(store.snapshot.status).toBe("ready");
   });
 
   it("resolves a queued cancellation when reset wins before dispatch", async () => {
