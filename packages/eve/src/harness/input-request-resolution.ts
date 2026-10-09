@@ -54,9 +54,13 @@ export function resolveApprovalOutcome(response: InputResponse | undefined): {
 
   // ACP uses "deny" while harness-owned approval prompts use "cancel".
   if (response.optionId === "cancel" || response.optionId === "deny") {
+    const note = response.text?.trim();
     return {
       approved: false,
-      reason: TOOL_EXECUTION_DENIED_MESSAGE,
+      // The responder may be an approver other than the user, so the note is quoted, not merged.
+      reason: note
+        ? `${TOOL_EXECUTION_DENIED_MESSAGE} The person who denied it wrote: ${JSON.stringify(note)}`
+        : TOOL_EXECUTION_DENIED_MESSAGE,
       status: "denied",
     };
   }
