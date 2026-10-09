@@ -176,6 +176,9 @@ export async function maybeCompact(input: {
   const projectedPromptMessages = validateHarnessModelMessages(
     input.historyProjector?.({ messages: promptMessages, state: session.state }) ?? promptMessages,
   );
+  // The estimate already includes the session's last reported count, and the heuristics measure
+  // the compacted history the same way (estimate plus that correction), so the provider's count
+  // rescales the threshold once, in the units it is measured in.
   const compaction =
     input.contextOverflow === undefined
       ? session.compaction
