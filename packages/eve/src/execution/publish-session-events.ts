@@ -1,9 +1,24 @@
 import type { ControlDelivery } from "#harness/types.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";
-import { callAdapterEventHandler, type ChannelAdapterContext } from "#channel/adapter.js";
+import {
+  callAdapterEventHandler,
+  type ChannelAdapter,
+  type ChannelAdapterContext,
+} from "#channel/adapter.js";
+import { factHandlerOf, type FactHandlerContext } from "#channel/fact-handlers.js";
+import { createLegacyEventTranslator, type LegacyContext } from "#execution/legacy-events.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 import { type ContextContainer, contextStorage } from "#context/container.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
-import { AuthKey, InitiatorAuthKey, ParentSessionKey, SessionKey } from "#context/keys.js";
+import {
+  AuthKey,
+  ContinuationTokenKey,
+  InitiatorAuthKey,
+  ParentSessionKey,
+  SessionIdKey,
+  SessionKey,
+  TurnDeliveryIdsKey,
+} from "#context/keys.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { setChannelContext } from "#execution/channel-context.js";
@@ -275,10 +290,12 @@ export interface SessionEventWriter {
 export interface WrittenEvent {
   readonly event: SessionStreamEvent;
   readonly position: FactPosition;
-  /** It rode as a progress record, which only hooks keyed on its type hear. */
+  /** It rode as a progress record. */
   readonly progress: boolean;
   /** Immutable table snapshot after this record's whole line, not a later concurrent write. */
   readonly view: SessionView;
+  /** The v26 events it stands for, which authored hooks and channels observe. */
+  readonly legacy: readonly MessageStreamEvent[];
 }
 
 interface StreamWriter extends SessionEventWriter {
@@ -297,7 +314,7 @@ export interface SessionEventDispatcher {
    */
   runHooks(
     written: readonly WrittenEvent[],
-    cancelTurnFor?: (event: SessionStreamEvent) => (() => void) | undefined,
+    cancelTurnFor?: (event: MessageStreamEvent) => (() => void) | undefined,
   ): Promise<void>;
 }
 
@@ -348,6 +365,7 @@ export function openSessionEventPublisher(input: {
   // stream unlocked for the terminal event's fallback write.
   const writer = openSessionEventWriter(input.sessionWritable);
   let checker: StreamChecker | undefined;
+  const translator = createLegacyEventTranslator();
   const emitOne = async (publication: SessionPublication): Promise<readonly WrittenEvent[]> => {
     if (checker === undefined && checksSessionEvents()) {
       const { schemaViolation } = await import("#protocol/session-events/schemas.js");
@@ -385,11 +403,23 @@ export function openSessionEventPublisher(input: {
         throw error;
       });
       const lineEvents = eventsOfLine(line, position, at);
+      const before = currentProjection(ctx);
       recordPublishedLine(ctx, line, position, lineEvents);
+      const after = currentProjection(ctx);
       const progress = "progress" in line;
       const view = currentView(ctx);
-      lineEvents.forEach((event) =>
-        written.push({ event, position: event.meta.position, progress, view }),
+      const legacy = translator.translate(
+        { after, at: "at" in line ? line.at : at, before, events: lineEvents, position },
+        legacyContextOf(ctx),
+      );
+      lineEvents.forEach((event, index) =>
+        written.push({
+          event,
+          legacy: legacy[index] ?? [],
+          position: event.meta.position,
+          progress,
+          view,
+        }),
       );
     }
     await dispatcher.deliver(written);
@@ -430,10 +460,13 @@ function createSessionEventDispatcher(input: {
     adapterCtx,
     async deliver(written) {
       if (written.length === 0) return;
-      for (const { event, position, view } of written) {
+      for (const { event, legacy, position, view } of written) {
         if (await forwardSessionInput(ctx, event, inputSource)) continue;
         const scope = "scope" in event ? event.scope : undefined;
-        await callAdapterEventHandler(adapter, event, { ...deliveryCtx, position, scope, view });
+        await callFactHandler(adapter, event, { ...deliveryCtx, position, scope, view });
+        for (const observed of legacy) {
+          await callAdapterEventHandler(adapter, observed, deliveryCtx);
+        }
       }
       setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
     },
@@ -442,16 +475,15 @@ function createSessionEventDispatcher(input: {
       // Read here rather than when the dispatcher is built: terminal delivery
       // runs no hooks and must not require the bundle.
       const registry = ctx.require(BundleKey).hookRegistry;
-      for (const { event, position, progress, view } of written) {
-        await dispatchStreamEventHooks({
-          cancelTurn: cancelTurnFor?.(event),
-          ctx,
-          event,
-          position,
-          progress,
-          registry,
-          view,
-        });
+      for (const { legacy } of written) {
+        for (const event of legacy) {
+          await dispatchStreamEventHooks({
+            cancelTurn: cancelTurnFor?.(event),
+            ctx,
+            event,
+            registry,
+          });
+        }
       }
     },
   };
@@ -594,5 +626,34 @@ async function writeUnroutedSessionEvent(
     await writer.close();
   } finally {
     writer.release();
+  }
+}
+
+/** What the v26 events of a step's lines name: the session, its channel address, and its turn. */
+function legacyContextOf(ctx: ContextContainer): LegacyContext {
+  const sessionId = ctx.get(SessionIdKey) ?? "";
+  const continuationToken = ctx.get(ContinuationTokenKey) ?? sessionId;
+  const deliveryIds = ctx.get(TurnDeliveryIdsKey);
+  return deliveryIds === undefined
+    ? { continuationToken, sessionId }
+    : { continuationToken, deliveryIds, sessionId };
+}
+
+/** Runs a framework adapter's handler for one fact; see `channel/fact-handlers.ts`. */
+async function callFactHandler(
+  adapter: ChannelAdapter,
+  event: SessionStreamEvent,
+  ctx: FactHandlerContext,
+): Promise<void> {
+  const handler = factHandlerOf(adapter, event.type);
+  if (handler === undefined) return;
+  try {
+    await handler("data" in event ? event.data : undefined, ctx);
+  } catch (error) {
+    log.error("adapter fact handler threw — event swallowed", {
+      adapterKind: adapter.kind,
+      error,
+      eventType: event.type,
+    });
   }
 }

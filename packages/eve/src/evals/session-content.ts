@@ -1,5 +1,5 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
-import { replyTextOf } from "#public/channels/reply.js";
+import { replyTextOf } from "#evals/reply-text.js";
 import { extname } from "node:path";
 
 /** Formats the user and assistant messages observed in one eval session. */

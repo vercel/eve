@@ -1,10 +1,7 @@
-import { errorHintOf } from "#public/channels/reply.js";
-import { contentPhase } from "#protocol/session-events/catalog.js";
 import { promptQueueEvents } from "#channel/prompt-queue.js";
-import { signInPromptOf, signInSettlementOf } from "#channel/interaction-prompts.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
-import { formatErrorHint } from "#internal/logging.js";
+import { extractErrorId, formatErrorHint } from "#internal/logging.js";
 import { createLinearAgentActivity, type LinearApiOptions } from "#public/channels/linear/api.js";
 import type { LinearChannelCredentials } from "#public/channels/linear/auth.js";
 import {
@@ -13,8 +10,7 @@ import {
 } from "#public/channels/linear/hitl.js";
 import type { LinearAgentSessionEvent, LinearUser } from "#public/channels/linear/inbound.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import { isTaskControlTool } from "#protocol/task-tools.js";
-import { displayTitle } from "#shared/display-name.js";
+import { actionLabel, visibleActions } from "#shared/action-label.js";
 import type { InputRequest } from "#shared/input.js";
 import type {
   LinearChannelEvents,
@@ -81,9 +77,6 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
     );
   }
 
-  // A reply can only answer the elicitation it sees, so they post one at a time.
-  const prompts = promptQueueEvents(showPrompt);
-
   return {
     async "turn.started"(_event, channel, _ctx) {
       channel.state.pendingToolCallMessage = null;
@@ -100,7 +93,7 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       );
     },
 
-    async "call.requested"(event, channel, _ctx) {
+    async "actions.requested"(event, channel, _ctx) {
       const buffered = channel.state.pendingToolCallMessage;
       channel.state.pendingToolCallMessage = null;
       if (buffered) {
@@ -117,26 +110,45 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
         );
         return;
       }
-      // eve's own task controls stay out of view.
-      if (isTaskControlTool(event.capability.name)) return;
-      await postActivity(
-        channel,
-        options,
-        {
-          action: event.capability.title ?? displayTitle(event.capability.name),
-          parameter: actionParameter({ input: event.input }),
-          type: "action",
-        },
-        {
-          ephemeral: true,
-        },
-      );
+
+      const actions = visibleActions(event.actions);
+      if (actions.length === 0) return;
+      if (actions.length > 1) {
+        await postActivity(
+          channel,
+          options,
+          {
+            action: "Running",
+            parameter: actions.map((action) => actionLabel(action, event.presentation)).join(", "),
+            type: "action",
+          },
+          {
+            ephemeral: true,
+          },
+        );
+        return;
+      }
+
+      for (const action of actions) {
+        await postActivity(
+          channel,
+          options,
+          {
+            action: actionLabel(action, event.presentation),
+            parameter: actionParameter(action),
+            type: "action",
+          },
+          {
+            ephemeral: true,
+          },
+        );
+      }
     },
 
-    async "interaction.opened"(data, channel, ctx) {
-      await prompts["interaction.opened"](data, channel, ctx);
-      const event = signInPromptOf(data, ctx.scope);
-      if (event === undefined) return;
+    // A reply can only answer the elicitation it sees, so they post one at a time.
+    ...promptQueueEvents(showPrompt),
+
+    async "authorization.required"(event, channel, ctx) {
       const displayName = authorizationDisplayName(event.name, event.authorization?.displayName);
       const url = event.authorization?.url;
       const userId = linearUserId(ctx);
@@ -161,10 +173,7 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       );
     },
 
-    async "interaction.settled"(data, channel, ctx) {
-      await prompts["interaction.settled"](data, channel, ctx);
-      const event = signInSettlementOf(ctx.view, data);
-      if (event === undefined) return;
+    async "authorization.completed"(event, channel, _ctx) {
       const displayName = authorizationDisplayName(event.name, event.authorization?.displayName);
       if (event.outcome === "authorized") {
         await postActivity(
@@ -186,27 +195,24 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       });
     },
 
-    async "content.completed"(event, channel, _ctx) {
-      if (event.kind !== "text" || typeof event.value !== "string") return;
-      // Narration before calls posts as a thought with the next call.
-      if (contentPhase(event.phase) === "narration") {
-        channel.state.pendingToolCallMessage = event.value
-          ? (firstNonEmptyLine(event.value) ?? null)
+    async "message.completed"(event, channel, _ctx) {
+      if (event.finishReason === "tool-calls") {
+        channel.state.pendingToolCallMessage = event.message
+          ? (firstNonEmptyLine(event.message) ?? null)
           : null;
         return;
       }
       channel.state.pendingToolCallMessage = null;
-      if (!event.value) return;
+      if (!event.message) return;
       await postActivity(channel, options, {
-        body: event.value,
+        body: event.message,
         type: "response",
       });
     },
 
-    async "session.ended"(event, channel, _ctx) {
-      if (event.outcome !== "failed") return;
-      const hint = formatErrorHint(errorHintOf(event.error));
-      const errorId = event.error?.id;
+    async "session.failed"(event, channel) {
+      const hint = formatErrorHint(event);
+      const errorId = extractErrorId(event.details);
       await postActivity(channel, options, {
         body: [
           `This session could not recover from an error${hint}.`,
@@ -218,10 +224,9 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       });
     },
 
-    async "turn.settled"(event, channel, _ctx) {
-      if (event.outcome !== "failed") return;
-      const hint = formatErrorHint(errorHintOf(event.error));
-      const errorId = event.error?.id;
+    async "turn.failed"(event, channel, _ctx) {
+      const hint = formatErrorHint(event);
+      const errorId = extractErrorId(event.details);
       await postActivity(channel, options, {
         body: [
           `I hit an error while handling your request${hint}.`,

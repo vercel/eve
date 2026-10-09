@@ -1,13 +1,7 @@
-import { errorHintOf, replyTextOf } from "#public/channels/reply.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { resolvedPromptLabel } from "#channel/resolved-prompt.js";
-import {
-  requestBatchOf,
-  requestSettlementOf,
-  signInSettlementOf,
-} from "#channel/interaction-prompts.js";
-import { createLogger, formatErrorHint } from "#internal/logging.js";
+import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
 import {
   DISCORD_MESSAGE_CONTENT_MAX_LENGTH,
   splitDiscordMessageContent,
@@ -71,13 +65,18 @@ export const defaultEvents: DiscordChannelEvents = {
     await channel.discord.startTyping();
   },
 
-  async "call.requested"(_event, channel, _ctx) {
+  async "authorization.completed"(event, channel, _ctx) {
+    if (event.outcome === "authorized") {
+      await channel.discord.startTyping();
+    }
+  },
+
+  async "actions.requested"(_event, channel, _ctx) {
     await channel.discord.startTyping();
   },
 
-  async "interaction.opened"(data, channel, ctx) {
-    const event = requestBatchOf(ctx.view, data);
-    for (const request of event?.requests ?? []) {
+  async "input.requested"(event, channel, _ctx) {
+    for (const request of event.requests) {
       const content = splitDiscordMessageContent(request.prompt)[0] ?? request.prompt;
       const components = renderInputRequestComponents(request);
       const posted = await channel.discord.post({ components, content });
@@ -95,13 +94,8 @@ export const defaultEvents: DiscordChannelEvents = {
 
   // Covers every way a prompt ends: a press, a modal answer, or a withdrawal.
   // The bot token outlives the interaction token the prompt may have been posted with.
-  async "interaction.settled"(data, channel, ctx) {
-    if (signInSettlementOf(ctx.view, data)?.outcome === "authorized") {
-      await channel.discord.startTyping();
-      return;
-    }
-    const settled = requestSettlementOf(ctx.view, data);
-    for (const resolution of settled === undefined ? [] : [settled]) {
+  async "input.resolved"(event, channel, _ctx) {
+    for (const resolution of event.resolutions) {
       const prompt = channel.state.hitlPrompts?.[resolution.requestId];
       if (prompt === undefined) continue;
       const { [resolution.requestId]: _, ...rest } = channel.state.hitlPrompts ?? {};
@@ -126,16 +120,14 @@ export const defaultEvents: DiscordChannelEvents = {
     }
   },
 
-  async "content.completed"(event, channel, _ctx) {
-    const text = replyTextOf(event);
-    if (text === undefined) return;
-    await channel.discord.post(text);
+  async "message.completed"(event, channel, _ctx) {
+    if (event.finishReason === "tool-calls" || !event.message) return;
+    await channel.discord.post(event.message);
   },
 
-  async "session.ended"(event, channel, _ctx) {
-    if (event.outcome !== "failed") return;
-    const hint = formatErrorHint(errorHintOf(event.error));
-    const errorId = event.error?.id;
+  async "session.failed"(event, channel) {
+    const hint = formatErrorHint(event);
+    const errorId = extractErrorId(event.details);
     await channel.discord.post(
       [
         `This session could not recover from an error${hint}.`,
@@ -146,10 +138,9 @@ export const defaultEvents: DiscordChannelEvents = {
     );
   },
 
-  async "turn.settled"(event, channel, _ctx) {
-    if (event.outcome !== "failed") return;
-    const hint = formatErrorHint(errorHintOf(event.error));
-    const errorId = event.error?.id;
+  async "turn.failed"(event, channel, _ctx) {
+    const hint = formatErrorHint(event);
+    const errorId = extractErrorId(event.details);
     await channel.discord.post(
       [
         `I hit an error while handling your request${hint}.`,

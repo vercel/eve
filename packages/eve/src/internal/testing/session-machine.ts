@@ -21,7 +21,12 @@ import {
   type SuspendedStep,
   type TurnPosition,
 } from "#harness/session-machine/view.js";
-import type { HarnessEmitFn, HarnessSession, SessionStateMap, StepInput } from "#harness/types.js";
+import type {
+  HarnessEmitFn,
+  HarnessSession,
+  SessionStateMap,
+  HarnessStepInput,
+} from "#harness/types.js";
 import { initialSessionProjection } from "#protocol/session-projection.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { InputRequest } from "#shared/input.js";
@@ -166,7 +171,7 @@ export function positionState(position: {
 /** The session holding `input` until it can run. */
 export function withQueuedInput<T extends Pick<HarnessSession, "state">>(
   session: T,
-  input: StepInput,
+  input: HarnessStepInput,
 ): T {
   return writeTurnState(session, { ...readTurnState(session.state), queued: input });
 }

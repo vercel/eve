@@ -1,10 +1,10 @@
-import type { StepInput } from "#harness/types.js";
+import type { HarnessStepInput } from "#harness/types.js";
 import type { InputResponse } from "#shared/input.js";
 import type { ResponseSubmittedData } from "#protocol/session-events/families/response.js";
 
 /** The immutable delivery/response identity of an answer after input coalescing. */
 export function responseBindingFor(
-  input: StepInput | undefined,
+  input: HarnessStepInput | undefined,
   response: InputResponse,
 ): ResponseSubmittedData | undefined {
   return input?.responseBindings?.findLast(
@@ -26,7 +26,7 @@ function sameOption(a: string | undefined, b: string | undefined): boolean {
  * identity through coalescing and policy passes like a press does.
  */
 export function withTypedBindings(
-  input: StepInput,
+  input: HarnessStepInput,
   responses: readonly InputResponse[],
 ): readonly ResponseSubmittedData[] | undefined {
   const deliveryId = input.deliveries?.at(-1)?.deliveryId;

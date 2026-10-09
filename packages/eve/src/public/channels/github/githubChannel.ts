@@ -1,10 +1,10 @@
-import type { ChannelEventContext } from "#public/definitions/channel.js";
-import type { SessionEvent } from "#protocol/session-event.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
 import { createLogger } from "#internal/logging.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   buildGitHubBinding,
   type GitHubHandle,
@@ -55,8 +55,8 @@ import { readNonEmptyString } from "#shared/guards.js";
 
 const log = createLogger("github.channel");
 
-type EventData<T extends SessionEvent["type"]> =
-  Extract<SessionEvent, { type: T }> extends { data: infer D } ? D : undefined;
+type EventData<T extends UnstampedMessageStreamEvent["type"]> =
+  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /**
  * Target accepted by `receive(github, { target })` for proactive sessions.
@@ -119,10 +119,15 @@ export type GitHubInboundResult = {
  */
 export type GitHubInboundResultOrPromise = GitHubInboundResult | Promise<GitHubInboundResult>;
 
-type GitHubEventHandler<T extends SessionEvent["type"]> = (
+type GitHubEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
   data: EventData<T>,
   channel: GitHubEventContext,
-  ctx: ChannelEventContext,
+  ctx: SessionContext,
+) => void | Promise<void>;
+
+type GitHubSessionFailedHandler = (
+  data: EventData<"session.failed">,
+  channel: GitHubEventContext,
 ) => void | Promise<void>;
 
 /**
@@ -134,16 +139,22 @@ type GitHubEventHandler<T extends SessionEvent["type"]> = (
  * here replaces the built-in for that key rather than running alongside it.
  */
 export interface GitHubChannelEvents {
-  readonly "call.progress"?: GitHubEventHandler<"call.progress">;
-  readonly "call.settled"?: GitHubEventHandler<"call.settled">;
-  readonly "call.requested"?: GitHubEventHandler<"call.requested">;
-  readonly "interaction.opened"?: GitHubEventHandler<"interaction.opened">;
-  readonly "interaction.settled"?: GitHubEventHandler<"interaction.settled">;
-  readonly "content.delta"?: GitHubEventHandler<"content.delta">;
-  readonly "content.completed"?: GitHubEventHandler<"content.completed">;
-  readonly "session.ended"?: GitHubEventHandler<"session.ended">;
-  readonly "delivery.settled"?: GitHubEventHandler<"delivery.settled">;
-  readonly "turn.settled"?: GitHubEventHandler<"turn.settled">;
+  readonly "action.partial"?: GitHubEventHandler<"action.partial">;
+  readonly "action.result"?: GitHubEventHandler<"action.result">;
+  readonly "actions.requested"?: GitHubEventHandler<"actions.requested">;
+  readonly "authorization.completed"?: GitHubEventHandler<"authorization.completed">;
+  readonly "authorization.required"?: GitHubEventHandler<"authorization.required">;
+  readonly "input.requested"?: GitHubEventHandler<"input.requested">;
+  readonly "input.resolved"?: GitHubEventHandler<"input.resolved">;
+  readonly "approval.settled"?: GitHubEventHandler<"approval.settled">;
+  readonly "message.appended"?: GitHubEventHandler<"message.appended">;
+  readonly "message.completed"?: GitHubEventHandler<"message.completed">;
+  readonly "session.completed"?: GitHubEventHandler<"session.completed">;
+  readonly "session.failed"?: GitHubSessionFailedHandler;
+  readonly "session.waiting"?: GitHubEventHandler<"session.waiting">;
+  readonly "turn.completed"?: GitHubEventHandler<"turn.completed">;
+  readonly "turn.cancelled"?: GitHubEventHandler<"turn.cancelled">;
+  readonly "turn.failed"?: GitHubEventHandler<"turn.failed">;
   readonly "turn.started"?: GitHubEventHandler<"turn.started">;
 }
 

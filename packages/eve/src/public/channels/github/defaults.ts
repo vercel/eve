@@ -1,4 +1,3 @@
-import { errorHintOf, replyTextOf } from "#public/channels/reply.js";
 import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 type NetworkPolicySandboxSession = SandboxSession & {
@@ -8,7 +7,7 @@ import { promptQueueEvents } from "#channel/prompt-queue.js";
 import { renderTextInputRequest } from "#channel/resolve-text.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
-import { createLogger, formatErrorHint, logError } from "#internal/logging.js";
+import { createLogger, extractErrorId, formatErrorHint, logError } from "#internal/logging.js";
 import type { GitHubApiOptions } from "#public/channels/github/api.js";
 import type {
   GitHubBotNameResolver,
@@ -114,19 +113,17 @@ export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): Gi
       await checkoutRepositoryForTurn(channel, ctx, options);
     },
 
-    async "content.completed"(event, channel, _ctx) {
-      const text = replyTextOf(event);
-      if (text === undefined) return;
-      await postCommentChunks(channel, text);
+    async "message.completed"(event, channel, _ctx) {
+      if (event.finishReason === "tool-calls" || !event.message) return;
+      await postCommentChunks(channel, event.message);
     },
 
     // A comment can only answer the prompt it sees, so prompts post one at a time.
     ...promptQueueEvents(showPrompt),
 
-    async "session.ended"(event, channel, _ctx) {
-      if (event.outcome !== "failed") return;
-      const hint = formatErrorHint(errorHintOf(event.error));
-      const errorId = event.error?.id;
+    async "session.failed"(event, channel) {
+      const hint = formatErrorHint(event);
+      const errorId = extractErrorId(event.details);
       const message = [
         `This session could not recover from an error${hint}.`,
         "",
@@ -136,10 +133,9 @@ export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): Gi
       await postFailure(channel, message);
     },
 
-    async "turn.settled"(event, channel, _ctx) {
-      if (event.outcome !== "failed") return;
-      const hint = formatErrorHint(errorHintOf(event.error));
-      const errorId = event.error?.id;
+    async "turn.failed"(event, channel, _ctx) {
+      const hint = formatErrorHint(event);
+      const errorId = extractErrorId(event.details);
       const message = [
         `I hit an error while handling your request${hint}.`,
         "",

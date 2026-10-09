@@ -1,8 +1,7 @@
-import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { ChannelResolveSession } from "#channel/channel-operations.js";
 import type { Session } from "#channel/session.js";
 import { createLogger } from "#internal/logging.js";
-import { foldSessionEvents } from "#protocol/session-projection.js";
+import type { AuthorizationRequiredStreamEvent, MessageStreamEvent } from "#protocol/message.js";
 import {
   TELEGRAM_AUTHORIZATION_CALLBACK_PREFIX,
   renderTelegramAuthorizationPrompt,
@@ -47,10 +46,7 @@ export async function dispatchTelegramAuthorizationCallback(input: {
 
     await input.telegram.telegram.postEphemeral(
       input.query.from.id,
-      renderTelegramAuthorizationPrompt({
-        authorization: authorization.signIn,
-        name: authorization.name,
-      }),
+      renderTelegramAuthorizationPrompt(authorization),
       { callbackQueryId: input.query.id },
     );
     await input.telegram.telegram.answerCallbackQuery({
@@ -74,13 +70,23 @@ async function inactiveAuthorization(
 }
 
 /** The latest sign-in still open. An approval responder's sign-in has its own prompt. */
-async function findOpenAuthorization(session: Session) {
-  const { signIns } = await foldSessionEvents(eventsToTail(session));
-  return signIns.findLast((prompt) => prompt.responseId === undefined);
+async function findOpenAuthorization(
+  session: Session,
+): Promise<AuthorizationRequiredStreamEvent["data"] | undefined> {
+  const open = new Map<string, AuthorizationRequiredStreamEvent["data"]>();
+  for await (const event of eventsToTail(session)) {
+    if (event.type === "authorization.required" && event.data.candidateId === undefined) {
+      open.delete(event.data.attemptId ?? event.data.name);
+      open.set(event.data.attemptId ?? event.data.name, event.data);
+    } else if (event.type === "authorization.completed") {
+      open.delete(event.data.attemptId ?? event.data.name);
+    }
+  }
+  return [...open.values()].at(-1);
 }
 
 /** The session's events up to its tail when the read starts. Its stream follows the session. */
-async function* eventsToTail(session: Session): AsyncGenerator<SessionStreamEvent> {
+async function* eventsToTail(session: Session): AsyncGenerator<MessageStreamEvent> {
   const tailIndex = await session.getStreamTailIndex();
   if (tailIndex < 0) return;
   let index = 0;

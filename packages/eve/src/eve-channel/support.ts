@@ -1,3 +1,4 @@
+import { sessionInternals, type Session } from "#channel/session.js";
 import type { UserContent } from "ai";
 
 import type { SessionAuthContext } from "#channel/types.js";
@@ -41,21 +42,10 @@ interface RemoteAgentStreamCoordinates {
 /** Finds the remote child the parent session recorded for one proxy route, from its private binding. */
 export async function findRemoteAgentBinding(
   input: RemoteAgentStreamCoordinates & {
-    readonly parent: {
-      getChildBinding?(childSessionId: string): Promise<
-        | {
-            readonly callId: string;
-            readonly name: string;
-            readonly resolverId?: string;
-            readonly streamPath: string;
-            readonly url: string;
-          }
-        | undefined
-      >;
-    };
+    readonly parent: Session;
   },
 ): Promise<RemoteAgentBinding | undefined> {
-  const recorded = await input.parent.getChildBinding?.(input.childSessionId);
+  const recorded = await sessionInternals(input.parent)?.childBinding(input.childSessionId);
   // The stream path embeds the parent session id, so matching it binds the parent.
   if (
     recorded === undefined ||

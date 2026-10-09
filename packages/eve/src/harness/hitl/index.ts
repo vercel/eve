@@ -12,7 +12,7 @@ import type { Step } from "#harness/step/context.js";
 import type {
   HarnessSessionBase,
   HarnessToolLookup,
-  StepInput,
+  HarnessStepInput,
   StepResult,
 } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
@@ -201,7 +201,7 @@ export function retireCancelledCandidates<T extends HarnessSessionBase>(session:
  */
 export function takeDeferredMessage<T extends HarnessSessionBase>(
   session: T,
-): { readonly message?: StepInput["message"]; readonly session: T } {
+): { readonly message?: HarnessStepInput["message"]; readonly session: T } {
   const { queued, ...turn } = readTurnState(session.state);
   if (queued?.message === undefined) return { session };
   const { message, ...rest } = queued;

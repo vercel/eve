@@ -7,7 +7,7 @@ import type {
   SessionCapabilities,
   TurnPolicy,
 } from "#channel/types.js";
-import type { Session } from "#channel/session.js";
+import { sessionInternals, type Session, type SessionInternals } from "#channel/session.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
 import { isMissingWorkflowRunError } from "#internal/workflow/is-inactive-workflow-run-error.js";
@@ -297,22 +297,23 @@ export async function createSessionStreamResponse(
     // An unknown or unreachable session would otherwise answer 200 and then fail mid-body, so
     // the tail must resolve before any bytes are committed. A position cursor opens the stream
     // alongside it to save a round trip; a tail-relative cursor needs the tail to become one.
+    const internals = requireSessionInternals(session);
     const early =
       startIndex === undefined || startIndex >= 0
-        ? session.getLineStream({ startIndex: startIndex ?? 0 })
+        ? internals.lines({ startIndex: startIndex ?? 0 })
         : undefined;
     // Handled below; this keeps an early rejection from being reported as unhandled.
     early?.catch(() => {});
     let tailIndex: number;
     try {
-      tailIndex = await session.getStreamTailIndex();
+      tailIndex = await internals.tailLine();
     } catch (error) {
       void early?.then((lines) => lines.cancel()).catch(() => {});
       throw error;
     }
     const from =
       early === undefined ? Math.max(0, tailIndex + 1 + (startIndex ?? 0)) : (startIndex ?? 0);
-    const lines = await (early ?? session.getLineStream({ startIndex: from }));
+    const lines = await (early ?? internals.lines({ startIndex: from }));
     const headers = new Headers({
       "cache-control": "no-store, no-transform",
       "content-type": EVE_MESSAGE_STREAM_CONTENT_TYPE,
@@ -685,4 +686,12 @@ function serializeLines(
     .catch(() => {})
     .finally(clearTimers);
   return transform.readable;
+}
+
+/** The stream route reads stored lines, which only a framework-created handle exposes. */
+function requireSessionInternals(session: Session): SessionInternals {
+  const internals = sessionInternals(session);
+  if (internals === undefined)
+    throw new Error("The session handle does not expose its stored lines.");
+  return internals;
 }

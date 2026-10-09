@@ -27,7 +27,7 @@ import { prepareTurnInput, settleRuntimeWork } from "#harness/step/intake.js";
 import type {
   HarnessSession,
   StepFn,
-  StepInput,
+  HarnessStepInput,
   StepResult,
   ToolLoopHarnessConfig,
 } from "#harness/types.js";
@@ -52,7 +52,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
   async function runStep(
     initialSession: Readonly<Parameters<StepFn>[0]>,
-    input?: StepInput,
+    input?: HarnessStepInput,
   ): Promise<StepResult> {
     const executeStep = async (scope?: InstrumentationStepScope<HarnessSession>) => {
       const current = scope?.session ?? initialSession;
@@ -82,7 +82,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     initialSession: HarnessSession,
     generation: GenerationSteering,
     live: StepProjection,
-    input: StepInput | undefined,
+    input: HarnessStepInput | undefined,
     instrumentation: InstrumentationStepScope<HarnessSession> | undefined,
   ): Promise<StepResult> {
     const prepareHistory = createHistoryViewPreparer({
@@ -186,7 +186,7 @@ async function clearContext(step: Step): Promise<StepResult> {
 }
 
 /** Whether the input carries user-facing turn input. */
-function hasStepInput(input: StepInput | undefined): boolean {
+function hasStepInput(input: HarnessStepInput | undefined): boolean {
   if (input === undefined) return false;
   return input.message !== undefined || (input.inputResponses?.length ?? 0) > 0;
 }

@@ -1,15 +1,12 @@
-import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { getAdapterKind } from "#channel/adapter.js";
-import type { FactPosition } from "#protocol/session-events/envelope.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 import type { HookContext } from "#public/definitions/hook.js";
-import type { SessionView } from "#protocol/session-projection/tables.js";
 import type { RuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import type { ContextContainer } from "./container.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { ContinuationTokenKey } from "./keys.js";
-import { currentView } from "#harness/session-machine/current.js";
 
 const log = createLogger("hooks");
 
@@ -21,29 +18,18 @@ const log = createLogger("hooks");
 export async function dispatchStreamEventHooks(input: {
   readonly ctx: ContextContainer;
   readonly registry: RuntimeHookRegistry;
-  readonly event: SessionStreamEvent;
-  /** Where the event sits on the stream. */
-  readonly position: FactPosition;
-  /** It rode as progress: only handlers keyed on its type hear it, never `*`. */
-  readonly progress: boolean;
-  /** Snapshot of the written line, even if another publication already advanced the context. */
-  readonly view?: SessionView;
+  readonly event: MessageStreamEvent;
   /** Stops the running turn for `ctx.cancel()`; `undefined` when this event cannot stop one. */
   readonly cancelTurn: (() => void) | undefined;
 }): Promise<void> {
   const typed = input.registry.streamEventsByType.get(input.event.type) ?? [];
-  const wildcard = input.progress ? [] : input.registry.streamEventsWildcard;
+  const wildcard = input.registry.streamEventsWildcard;
 
   if (typed.length === 0 && wildcard.length === 0) {
     return;
   }
 
-  const { meta: _meta, ...event } = input.event;
-  const baseCtx = {
-    ...buildHookContext(input.ctx),
-    position: input.position,
-    view: input.view ?? currentView(input.ctx),
-  };
+  const baseCtx = buildHookContext(input.ctx);
   let dispatching = true;
   for (const entry of [...typed, ...wildcard]) {
     const hookCtx: HookContext = {
@@ -59,21 +45,21 @@ export async function dispatchStreamEventHooks(input: {
             : "ctx.cancel() ignored: the event's hooks already returned",
           {
             hook: entry.slug,
+            eventId: input.event.meta.id,
             eventType: input.event.type,
-            position: input.position,
             sessionId: baseCtx.session.id,
           },
         );
       },
     };
     try {
-      await entry.handler(event, hookCtx);
+      await entry.handler(input.event, hookCtx);
     } catch (error) {
       logError(log, "stream event hook failed", error, {
         hook: entry.slug,
         subscription: entry.eventType,
+        eventId: input.event.meta.id,
         eventType: input.event.type,
-        position: input.position,
         sessionId: baseCtx.session.id,
       });
     }
@@ -83,9 +69,7 @@ export async function dispatchStreamEventHooks(input: {
 }
 
 /** Builds the {@link HookContext} fields shared by every handler of one event. */
-function buildHookContext(
-  ctx: ContextContainer,
-): Omit<HookContext, "cancel" | "position" | "view"> {
+function buildHookContext(ctx: ContextContainer): Omit<HookContext, "cancel"> {
   const bundle = ctx.require(BundleKey);
   const channelAdapter = ctx.get(ChannelKey);
   const continuationToken = ctx.get(ContinuationTokenKey);

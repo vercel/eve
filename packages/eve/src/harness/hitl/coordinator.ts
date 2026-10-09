@@ -30,7 +30,7 @@ import {
 } from "#harness/authorization.js";
 import { isApprovalRequest } from "#harness/input-request-class.js";
 import { suspendedSteps } from "#harness/session-machine/view.js";
-import type { HarnessSession, HarnessToolLookup, StepInput } from "#harness/types.js";
+import type { HarnessSession, HarnessToolLookup, HarnessStepInput } from "#harness/types.js";
 import { responseBindingFor } from "#harness/response-bindings.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
@@ -64,7 +64,7 @@ interface ApprovalDeliveryResult {
     | "responses-completed"
     | "park";
   readonly session: HarnessSession;
-  readonly stepInput?: StepInput;
+  readonly stepInput?: HarnessStepInput;
 }
 
 /**
@@ -87,7 +87,7 @@ interface ApprovalDeliveryResult {
 export async function coordinateApprovalDelivery(input: {
   readonly now?: number;
   readonly session: HarnessSession;
-  readonly stepInput?: StepInput;
+  readonly stepInput?: HarnessStepInput;
   readonly tools: HarnessToolLookup;
   readonly prepareTools?: (request: InputRequest) => Promise<HarnessToolLookup>;
 }): Promise<ApprovalDeliveryResult> {
@@ -485,7 +485,7 @@ function failCandidate(input: {
 }
 
 function hasResponseForRequest(
-  stepInput: StepInput | undefined,
+  stepInput: HarnessStepInput | undefined,
   requestIds: ReadonlySet<string>,
 ): boolean {
   return (
@@ -496,7 +496,7 @@ function hasResponseForRequest(
   );
 }
 
-function hasMeaningfulInput(stepInput: StepInput | undefined): boolean {
+function hasMeaningfulInput(stepInput: HarnessStepInput | undefined): boolean {
   return (
     stepInput?.message !== undefined ||
     (stepInput?.attributedInputResponses?.length ?? 0) > 0 ||
@@ -506,9 +506,9 @@ function hasMeaningfulInput(stepInput: StepInput | undefined): boolean {
 }
 
 function appendSettledResponses(
-  stepInput: StepInput | undefined,
+  stepInput: HarnessStepInput | undefined,
   settlements: readonly ApprovalSettlementAuditRecord[],
-): StepInput | undefined {
+): HarnessStepInput | undefined {
   if (settlements.length === 0) return stepInput;
   const existingRequestIds = new Set([
     ...(stepInput?.inputResponses ?? []).map((response) => response.requestId),
@@ -532,9 +532,9 @@ function appendSettledResponses(
 }
 
 function removeConsumedResponses(
-  stepInput: StepInput | undefined,
+  stepInput: HarnessStepInput | undefined,
   consumed: ReadonlySet<string>,
-): StepInput | undefined {
+): HarnessStepInput | undefined {
   if (stepInput === undefined) return undefined;
   const attributed = (stepInput.attributedInputResponses ?? []).filter(
     ({ response }) => !consumed.has(response.requestId),
@@ -552,7 +552,7 @@ function removeConsumedResponses(
 
 function deliveryResult(
   session: HarnessSession,
-  stepInput: StepInput | undefined,
+  stepInput: HarnessStepInput | undefined,
   kind: ApprovalDeliveryResult["kind"] = "continue",
   challenges: readonly AuthorizationChallenge[] = [],
   feedback: readonly string[] = [],

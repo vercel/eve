@@ -1,12 +1,10 @@
-import type { SessionEvent } from "#protocol/session-event.js";
 import type { ContextAccessor } from "#context/key.js";
 import type { StepInput } from "#harness/types.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { attachInputText, readInputText } from "#internal/input-text.js";
 import { createLogger } from "#internal/logging.js";
-import type { FactPosition, Scope } from "#protocol/session-events/envelope.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { SessionHandle } from "#channel/session.js";
-import type { SessionView } from "#protocol/session-projection/tables.js";
 import type { DeliverPayload } from "#channel/types.js";
 import type {
   FetchFileContext,
@@ -55,13 +53,6 @@ export interface ChannelAdapterContext<TState = Record<string, unknown>> {
 
   /** @internal Independent source of a relayed child input batch. */
   readonly inputSource?: string;
-
-  /** Where the event a handler observes sits on the stream: its line, and its index there. */
-  readonly position?: FactPosition;
-  /** The event's owners: its turn, task, model run, or context change. */
-  readonly scope?: Scope;
-  /** The immutable snapshot of the event's line, supplied by its publisher. */
-  readonly view?: SessionView;
 }
 
 /**
@@ -79,15 +70,15 @@ type StateOf<TCtx> = TCtx extends ChannelAdapterContext<infer S> ? S : Record<st
  * Extracts the `data` field type from a stream event by its `type` discriminant.
  * Events that carry no `data` field (e.g. `session.completed`) resolve to `undefined`.
  */
-type EventData<T extends SessionEvent["type"]> =
-  Extract<SessionEvent, { type: T }> extends { data: infer D } ? D : undefined;
+type EventData<T extends UnstampedMessageStreamEvent["type"]> =
+  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /**
  * A single outbound event handler. Receives the event's `data` (not the full
  * envelope) and the adapter context. Void return — side effects only.
  */
 type EventHandler<
-  T extends SessionEvent["type"],
+  T extends UnstampedMessageStreamEvent["type"],
   TCtx extends ChannelAdapterContext<any> = ChannelAdapterContext,
 > = (data: EventData<T>, ctx: TCtx) => void | Promise<void>;
 
@@ -98,7 +89,7 @@ type EventHandler<
  */
 export type ChannelEventHandlers<TCtx extends ChannelAdapterContext<any> = ChannelAdapterContext> =
   {
-    [K in SessionEvent["type"]]?: EventHandler<K, TCtx>;
+    [K in UnstampedMessageStreamEvent["type"]]?: EventHandler<K, TCtx>;
   };
 
 // ---------------------------------------------------------------------------
@@ -262,26 +253,41 @@ export function getAdapterKind(adapter: ChannelAdapter): string {
  * Throwing handlers are logged and swallowed so a downstream delivery
  * failure does not corrupt the event stream write path.
  */
-/**
- * Runs the channel adapter's handler for one written event. Handlers observe; they never shape
- * what is written, because the write already happened.
- */
 export async function callAdapterEventHandler(
   adapter: ChannelAdapter,
-  event: SessionEvent,
+  event: UnstampedMessageStreamEvent,
   ctx: ChannelAdapterContext,
-): Promise<void> {
+): Promise<UnstampedMessageStreamEvent> {
+  const eventForHandler = withWaitingContinuationToken(event, ctx);
   const handler = adapter[event.type] as
     | ((data: unknown, ctx: ChannelAdapterContext) => void | Promise<void>)
     | undefined;
-  if (handler === undefined) return;
-  try {
-    await handler("data" in event ? event.data : undefined, ctx);
-  } catch (error) {
-    log.error("adapter event handler threw — event swallowed", {
-      adapterKind: getAdapterKind(adapter),
-      eventType: event.type,
-      error,
-    });
+
+  if (handler !== undefined) {
+    try {
+      await handler("data" in eventForHandler ? eventForHandler.data : undefined, ctx);
+    } catch (error) {
+      log.error("adapter event handler threw — event swallowed", {
+        adapterKind: getAdapterKind(adapter),
+        eventType: event.type,
+        error,
+      });
+    }
   }
+
+  return withWaitingContinuationToken(eventForHandler, ctx);
+}
+
+function withWaitingContinuationToken(
+  event: UnstampedMessageStreamEvent,
+  ctx: ChannelAdapterContext,
+): UnstampedMessageStreamEvent {
+  if (event.type !== "session.waiting") return event;
+  return {
+    ...event,
+    data: {
+      ...event.data,
+      continuationToken: ctx.session.continuation?.token ?? ctx.session.id,
+    },
+  };
 }

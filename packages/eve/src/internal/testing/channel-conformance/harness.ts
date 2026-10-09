@@ -1,5 +1,3 @@
-import type { SessionStreamEvent } from "#protocol/session-event.js";
-import { endsTurn } from "#client/session-utils.js";
 import { createChannelOperations } from "#channel/channel-operations.js";
 import { type CompiledChannel, isCompiledChannel } from "#channel/compiled-channel.js";
 import { type RouteHandlerArgs, isHttpRouteDefinition } from "#channel/routes.js";
@@ -23,6 +21,7 @@ import {
   askRetroDayWorkflow,
 } from "#internal/testing/channel-conformance/question-workflows.js";
 import { getWorld } from "#internal/workflow/runtime.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 import {
   type ConnectionAuthorizationChallenge,
   ConnectionAuthorizationRequiredError,
@@ -1077,17 +1076,10 @@ async function waitForRest(sessions: readonly Session[], wait: Wait): Promise<vo
         sessions.map(async (session) => {
           const tail = await session.getStreamTailIndex();
           const reader = (await session.getEventStream({ startIndex: tail })).getReader();
-          let waiting = false;
-          try {
-            for (;;) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              waiting ||= endsTurn(value);
-              if (value.meta.endOfLine !== false) break;
-            }
-          } finally {
-            await reader.cancel();
-          }
+          const last = await reader.read().finally(() => reader.cancel());
+          const waiting =
+            last.value?.type === "session.waiting" ||
+            (last.value?.type === "turn.waiting" && last.value.data.on === "input");
           const steps = await world.steps.list({ resolveData: "none", runId: session.id });
           const idle = steps.data.every((step) => TERMINAL_STEP_STATUSES.has(step.status));
           return { resting: waiting && idle, tail };
@@ -1108,10 +1100,9 @@ async function waitForRest(sessions: readonly Session[], wait: Wait): Promise<vo
 }
 
 /** Whether an event asks the person `prompt`. */
-const asks = (prompt: string) => (event: SessionStreamEvent) =>
-  event.type === "interaction.opened" &&
-  event.data.request.kind !== "sign-in" &&
-  event.data.request.prompt === prompt;
+const asks = (prompt: string) => (event: MessageStreamEvent) =>
+  event.type === "input.requested" &&
+  event.data.requests.some((request) => request.prompt === prompt);
 
 /** Whether `session` settled the request that asked `prompt`, answered or withdrawn. */
 async function settles(session: Session, prompt: string): Promise<boolean> {
@@ -1120,15 +1111,21 @@ async function settles(session: Session, prompt: string): Promise<boolean> {
   const reader = (await session.getEventStream({ startIndex: 0 })).getReader();
   const requestIds = new Set<string>();
   try {
-    for (;;) {
+    for (let index = 0; index <= tail; index += 1) {
       const { done, value } = await reader.read();
       if (done) break;
-      if (value.type === "interaction.opened" && value.data.request.prompt === prompt) {
-        requestIds.add(value.data.interactionId);
-      } else if (value.type === "interaction.settled" && requestIds.has(value.data.interactionId)) {
+      if (value.type === "input.requested") {
+        for (const request of value.data.requests) {
+          if (request.prompt === prompt) requestIds.add(request.requestId);
+        }
+      } else if (value.type === "approval.settled" && requestIds.has(value.data.requestId)) {
+        return true;
+      } else if (
+        value.type === "input.resolved" &&
+        value.data.resolutions.some((resolution) => requestIds.has(resolution.requestId))
+      ) {
         return true;
       }
-      if (value.meta.position.line >= tail && value.meta.endOfLine !== false) break;
     }
   } finally {
     await reader.cancel();
@@ -1137,8 +1134,7 @@ async function settles(session: Session, prompt: string): Promise<boolean> {
 }
 
 /** Whether an event asks the person to sign in. */
-const isSignIn = (event: SessionStreamEvent) =>
-  event.type === "interaction.opened" && event.data.request.kind === "sign-in";
+const isSignIn = (event: MessageStreamEvent) => event.type === "authorization.required";
 
 /**
  * Whether the session held for the person after it last emitted an event
@@ -1148,7 +1144,7 @@ const isSignIn = (event: SessionStreamEvent) =>
  */
 async function holdsFor(
   session: Session,
-  asked: (event: SessionStreamEvent) => boolean,
+  asked: (event: MessageStreamEvent) => boolean,
 ): Promise<boolean> {
   const tail = await session.getStreamTailIndex();
   if (tail < 0) return false;
@@ -1156,16 +1152,19 @@ async function holdsFor(
   let seen = false;
   let held = false;
   try {
-    for (;;) {
+    for (let index = 0; index <= tail; index += 1) {
       const { done, value } = await reader.read();
       if (done) break;
       if (asked(value)) {
         seen = true;
         held = false;
-      } else if (seen && endsTurn(value)) {
+      } else if (
+        seen &&
+        ((value.type === "turn.waiting" && value.data.on === "input") ||
+          value.type === "session.waiting")
+      ) {
         held = true;
       }
-      if (value.meta.position.line >= tail && value.meta.endOfLine !== false) break;
     }
   } finally {
     await reader.cancel();

@@ -1,10 +1,9 @@
-import type { SignInPrompt } from "#channel/interaction-prompts.js";
-import type { AuthorizationOutcome } from "#protocol/message.js";
+import type { AuthorizationOutcome, AuthorizationRequiredStreamEvent } from "#protocol/message.js";
 
 export const TELEGRAM_AUTHORIZATION_CALLBACK_PREFIX = "eve_auth:";
 
 export function renderTelegramAuthorizationPrompt(
-  authorization: Pick<SignInPrompt, "authorization" | "name">,
+  authorization: Pick<AuthorizationRequiredStreamEvent["data"], "authorization" | "name">,
 ): { readonly reply_markup?: Readonly<Record<string, unknown>>; readonly text: string } {
   const displayName = formatTelegramAuthorizationDisplayName(
     authorization.name,

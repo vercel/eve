@@ -1,5 +1,7 @@
 import type { RemoteChildBinding } from "#execution/child-binding.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
+import { legacyEventStream, legacyTailIndex } from "#execution/legacy-event-stream.js";
 import type { ContextAccessor } from "#context/key.js";
 import {
   createChannelDeliveryMetadata,
@@ -52,19 +54,47 @@ export interface Session {
     options: SessionRespondOptions,
   ): Promise<SessionSendCommandResult>;
   /** Requests cancellation of this exact session's active turn. */
-  cancel(options?: { turnId?: string } & SessionControlOptions): Promise<CancelTurnResult>;
+  cancel(options?: { turnId?: string }): Promise<CancelTurnResult>;
   /** Queues compaction on this exact session ID. */
-  compact(options?: SessionControlOptions): Promise<CompactSessionResult>;
+  compact(): Promise<CompactSessionResult>;
   /** Queues a context clear on this exact session ID. */
-  clear(options?: SessionControlOptions): Promise<ClearSessionResult>;
+  clear(): Promise<ClearSessionResult>;
   /** Terminally retires this exact session ID. */
-  reset(options?: { reason?: string } & SessionControlOptions): Promise<ResetSessionResult>;
-  getEventStream(options?: { startIndex?: number }): Promise<ReadableStream<SessionStreamEvent>>;
-  /** The session's stored lines from `startIndex`: one parsed record per line. */
-  getLineStream(options?: { startIndex?: number }): Promise<ReadableStream<unknown>>;
-  /** Where a remote child of this session runs; read only by the parent's stream proxy. */
-  getChildBinding?(childSessionId: string): Promise<RemoteChildBinding | undefined>;
+  reset(options?: { reason?: string }): Promise<ResetSessionResult>;
+  getEventStream(options?: { startIndex?: number }): Promise<ReadableStream<MessageStreamEvent>>;
   getStreamTailIndex(): Promise<number>;
+}
+
+/**
+ * What the framework reads of a session beyond its authored handle: its stored lines and the
+ * facts they hold, positions in lines, controls that name their sender, and where a remote child
+ * runs. The handle's own stream serves the v26 events authored code reads.
+ */
+export interface SessionInternals {
+  /** The session's facts and progress records from line `startIndex`, as stored. */
+  facts(options?: { startIndex?: number }): Promise<ReadableStream<SessionStreamEvent>>;
+  /** The session's stored lines from `startIndex`: one parsed record per line. */
+  lines(options?: { startIndex?: number }): Promise<ReadableStream<unknown>>;
+  /** The position of the session's last stored line, or `-1` before the first. */
+  tailLine(): Promise<number>;
+  /** A control as a delivery that names its sender. */
+  control(
+    command:
+      | { readonly kind: "cancel"; readonly turnId?: string }
+      | { readonly kind: "compact" }
+      | { readonly kind: "clear" }
+      | { readonly kind: "reset"; readonly reason?: string },
+    options?: SessionControlOptions,
+  ): Promise<unknown>;
+  /** Where a remote child of this session runs; read only by the parent's stream proxy. */
+  childBinding(childSessionId: string): Promise<RemoteChildBinding | undefined>;
+}
+
+const sessionInternalsByHandle = new WeakMap<Session, SessionInternals>();
+
+/** The framework's view of a session handle this module created; `undefined` for others. */
+export function sessionInternals(session: Session): SessionInternals | undefined {
+  return sessionInternalsByHandle.get(session);
 }
 
 interface SessionDeliveryOptions {
@@ -106,6 +136,35 @@ export function createSession(
   id: string,
   runtime: Runtime,
   metadata: Partial<ChannelDeliverySource> & { readonly turnPolicy?: TurnPolicy } = {},
+): Session {
+  const session = createSessionHandle(id, runtime, metadata);
+  sessionInternalsByHandle.set(session, {
+    async childBinding(childSessionId) {
+      return await runtime.readChildBinding?.(id, childSessionId);
+    },
+    async control(command, options) {
+      return await runtime.dispatchSession({
+        command: controlCommand(command, options),
+        sessionId: id,
+      });
+    },
+    async facts(options) {
+      return await runtime.getEventStream(id, options);
+    },
+    async lines(options) {
+      return await runtime.getLineStream(id, options);
+    },
+    async tailLine() {
+      return await runtime.getStreamTailIndex(id);
+    },
+  });
+  return session;
+}
+
+function createSessionHandle(
+  id: string,
+  runtime: Runtime,
+  metadata: Partial<ChannelDeliverySource> & { readonly turnPolicy?: TurnPolicy },
 ): Session {
   return {
     id,
@@ -159,43 +218,36 @@ export function createSession(
         sessionId: id,
       });
     },
-    async cancel(options) {
+    async cancel(options?: { turnId?: string }) {
       const command: { kind: "cancel"; turnId?: string } = { kind: "cancel" };
       if (options?.turnId !== undefined) command.turnId = options.turnId;
+      return await runtime.dispatchSession({ command: controlCommand(command), sessionId: id });
+    },
+    async compact() {
       return await runtime.dispatchSession({
-        command: controlCommand(command, options),
+        command: controlCommand({ kind: "compact" }),
         sessionId: id,
       });
     },
-    async compact(options) {
+    async clear() {
       return await runtime.dispatchSession({
-        command: controlCommand({ kind: "compact" }, options),
-        sessionId: id,
-      });
-    },
-    async clear(options) {
-      return await runtime.dispatchSession({
-        command: controlCommand({ kind: "clear" }, options),
+        command: controlCommand({ kind: "clear" }),
         sessionId: id,
       });
     },
     async reset(options) {
       return await runtime.dispatchSession({
-        command: controlCommand({ kind: "reset", reason: options?.reason }, options),
+        command: controlCommand({ kind: "reset", reason: options?.reason }),
         sessionId: id,
       });
     },
+    // The handle reads the v26 events the stored facts stand for, counted in events, as authored
+    // code always has; see `execution/legacy-events.ts`.
     async getEventStream(options?: { startIndex?: number }) {
-      return runtime.getEventStream(id, options);
-    },
-    async getLineStream(options?: { startIndex?: number }) {
-      return runtime.getLineStream(id, options);
+      return legacyEventStream(runtime, id, options?.startIndex);
     },
     async getStreamTailIndex() {
-      return runtime.getStreamTailIndex(id);
-    },
-    async getChildBinding(childSessionId: string) {
-      return await runtime.readChildBinding?.(id, childSessionId);
+      return await legacyTailIndex(runtime, id);
     },
   };
 }

@@ -1,4 +1,3 @@
-import { replyTextOf } from "#public/channels/reply.js";
 import type { DeliverPayload } from "#channel/types.js";
 import { createLogger, logError } from "#internal/logging.js";
 import {
@@ -30,7 +29,7 @@ const REFUSED_PAYLOAD_ERRORS = new Set([
   "msg_too_long",
 ]);
 
-type ContentCompletedHandler = NonNullable<SlackChannelInternalEvents["content.completed"]>;
+type MessageCompletedHandler = NonNullable<SlackChannelInternalEvents["message.completed"]>;
 
 /**
  * A completed reply for {@link postCompletedSlackReply}: Markdown alone, or
@@ -170,20 +169,20 @@ function refusedPayloadError(error: unknown): string | undefined {
  * next delivery that its reply was not seen. eve never sends the reply from
  * here: the chain owns the content, including any change a renderer made
  * before `next`, and {@link postCompletedSlackReply} owns the fallbacks.
- * Narration, other content, and empty replies pass through.
+ * Steps that end in tool calls and empty replies pass through.
  */
 export function withFinalReplyDelivery(
-  render: ContentCompletedHandler | undefined,
-): ContentCompletedHandler {
+  render: MessageCompletedHandler | undefined,
+): MessageCompletedHandler {
   return async (event, channel, ctx) => {
-    if (replyTextOf(event) === undefined) {
+    if (event.finishReason === "tool-calls" || !event.message) {
       await render?.(event, channel, ctx);
       return;
     }
     try {
       await render?.(event, channel, ctx);
     } catch (error) {
-      await reportUndeliveredReply(channel, ctx.session.turn.id, error);
+      await reportUndeliveredReply(channel, event.turnId, error);
     }
   };
 }

@@ -1,6 +1,6 @@
 import type { DeliverHookPayload, DeliverPayload, SessionAuthContext } from "#channel/types.js";
 import type { ConsumedDelivery } from "#harness/session-machine/transitions.js";
-import type { StepInput } from "#harness/types.js";
+import type { HarnessStepInput } from "#harness/types.js";
 import { userPartsOf } from "#harness/user-parts.js";
 import { readClientContext } from "#internal/client-context.js";
 import type { SessionEvent } from "#protocol/session-event.js";
@@ -29,7 +29,7 @@ export function admitDeliveries(input: {
   /** The payloads left once sign-in callbacks were matched out, with what `deliver` made of each. */
   readonly payloads: readonly {
     readonly payload: DeliverPayload;
-    readonly input: StepInput | undefined;
+    readonly input: HarnessStepInput | undefined;
   }[];
   /** The position of the line the admission takes, for ids a delivery arrived without. */
   readonly position: number;

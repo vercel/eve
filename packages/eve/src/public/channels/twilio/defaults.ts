@@ -1,10 +1,8 @@
-import { errorHintOf, replyTextOf } from "#public/channels/reply.js";
 import { promptQueueEvents } from "#channel/prompt-queue.js";
-import { signInPromptOf, signInSettlementOf } from "#channel/interaction-prompts.js";
 import { renderTextInputRequest } from "#channel/resolve-text.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
-import { formatErrorHint } from "#internal/logging.js";
+import { extractErrorId, formatErrorHint } from "#internal/logging.js";
 import type {
   TwilioTextMessage,
   TwilioVoiceCall,
@@ -75,25 +73,19 @@ export function defaultOnVoiceTranscription(
   };
 }
 
-// SMS has no buttons, so a reply can only answer the request it sees.
-const prompts = promptQueueEvents((channel: TwilioEventContext, request: InputRequest) =>
-  showPrompt(channel, request),
-);
-
 /** Built-in Twilio event handlers for text delivery, sign-ins, and terminal errors. */
 export const defaultEvents: TwilioChannelEvents = {
-  async "content.completed"(event, channel, _ctx) {
-    const text = replyTextOf(event);
-    if (text === undefined) return;
-    await channel.twilio.sendMessage(text);
+  async "message.completed"(event, channel, _ctx) {
+    if (event.finishReason === "tool-calls" || !event.message) return;
+    await channel.twilio.sendMessage(event.message);
   },
 
+  // SMS has no buttons, so a reply can only answer the request it sees.
+  ...promptQueueEvents(showPrompt),
+
   // An SMS thread is one person's, so the link and code can go in the message.
-  async "interaction.opened"(data, channel, ctx) {
-    await prompts["interaction.opened"](data, channel, ctx);
-    const event = signInPromptOf(data, ctx.scope);
-    if (event === undefined) return;
-    if (event.responseId !== undefined) return;
+  async "authorization.required"(event, channel, _ctx) {
+    if (event.candidateId !== undefined) return;
     const challenge = event.authorization;
     await channel.twilio.sendMessage(
       [
@@ -107,11 +99,8 @@ export const defaultEvents: TwilioChannelEvents = {
     );
   },
 
-  async "interaction.settled"(data, channel, ctx) {
-    await prompts["interaction.settled"](data, channel, ctx);
-    const event = signInSettlementOf(ctx.view, data);
-    if (event === undefined) return;
-    if (event.responseId !== undefined) return;
+  async "authorization.completed"(event, channel, _ctx) {
+    if (event.candidateId !== undefined) return;
     await channel.twilio.sendMessage(
       renderAuthorizationOutcome({
         displayName: event.authorization?.displayName ?? displayProperName(event.name),
@@ -121,10 +110,9 @@ export const defaultEvents: TwilioChannelEvents = {
     );
   },
 
-  async "turn.settled"(event, channel, _ctx) {
-    if (event.outcome !== "failed") return;
-    const hint = formatErrorHint(errorHintOf(event.error));
-    const errorId = event.error?.id;
+  async "turn.failed"(event, channel, _ctx) {
+    const hint = formatErrorHint(event);
+    const errorId = extractErrorId(event.details);
     await channel.twilio.sendMessage(
       [
         `I hit an error while handling your request${hint}.`,
@@ -135,10 +123,9 @@ export const defaultEvents: TwilioChannelEvents = {
     );
   },
 
-  async "session.ended"(event, channel, _ctx) {
-    if (event.outcome !== "failed") return;
-    const hint = formatErrorHint(errorHintOf(event.error));
-    const errorId = event.error?.id;
+  async "session.failed"(event, channel) {
+    const hint = formatErrorHint(event);
+    const errorId = extractErrorId(event.details);
     await channel.twilio.sendMessage(
       [
         `This session could not recover from an error${hint}.`,

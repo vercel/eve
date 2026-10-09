@@ -57,7 +57,6 @@ export {
   type WebSocketRouteHooks,
   type WebSocketUpgradeRequest,
   type WebSocketUpgradeResult,
-  type ChannelEventContext,
   isDisabledRouteSentinel,
 } from "#public/definitions/channel.js";
 export {

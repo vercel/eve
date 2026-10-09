@@ -1,5 +1,3 @@
-import type { ChannelEventContext } from "#public/definitions/channel.js";
-import type { SessionEvent } from "#protocol/session-event.js";
 import { parseSlackWebhookBody } from "#compiled/@chat-adapter/slack/webhook.js";
 
 import type { UserContent } from "ai";
@@ -20,6 +18,7 @@ import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 import { maxBytesOf } from "#internal/attachments/limited-read.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { attachInputText } from "#internal/input-text.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type {
   InputRequest,
   InputResponse,
@@ -44,9 +43,9 @@ import {
   collectInboundFileParts,
   createSlackFetchFile,
 } from "#public/channels/slack/attachments.js";
+import { defaultInputRequestedHandler } from "#public/channels/slack/approval-cards.js";
 import {
   defaultEvents,
-  defaultInteractionOpenedHandler,
   defaultOnMessage,
   defaultReceived,
 } from "#public/channels/slack/defaults.js";
@@ -116,8 +115,8 @@ export type {
 const log = createLogger("slack.channel");
 const PRIVATE_SLACK_RUN_TITLE = "Private message";
 
-type EventData<T extends SessionEvent["type"]> =
-  Extract<SessionEvent, { type: T }> extends { data: infer D } ? D : undefined;
+type EventData<T extends UnstampedMessageStreamEvent["type"]> =
+  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /**
  * Base Slack context for inbound webhook handlers. These hooks run before the
@@ -158,10 +157,10 @@ export type {
 } from "#public/channels/slack/api.js";
 export type { SlackWebhookVerifier } from "#public/channels/slack/verify.js";
 
-type SlackEventHandler<T extends SessionEvent["type"]> = (
+type SlackEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
   data: EventData<T>,
   channel: SlackEventContext,
-  ctx: ChannelEventContext,
+  ctx: SessionContext,
 ) => void | Promise<void>;
 
 /**
@@ -191,6 +190,11 @@ export interface SlackAuthorizationEventContext {
    */
   readonly state: SlackChannelState;
 }
+
+type SlackSessionFailedHandler = (
+  data: EventData<"session.failed">,
+  channel: SlackEventContext,
+) => void | Promise<void>;
 
 /**
  * JSON-serializable per-session state, stored verbatim across workflow
@@ -603,7 +607,9 @@ export type SlackInboundResultOrPromise = SlackMentionResultOrPromise;
  * status, which authored renderers, limited to private delivery, can't post.
  */
 export type SlackChannelInternalEvents = {
-  readonly [T in SlackRenderedEvent]?: SlackEventHandler<T>;
+  readonly [T in Exclude<SlackRenderedEvent, "session.failed">]?: SlackEventHandler<T>;
+} & {
+  readonly "session.failed"?: SlackSessionFailedHandler;
 };
 
 export type SlackApprovalChannel = "direct-message" | "thread";
@@ -833,7 +839,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   const rendering = composeSlackRenderers(config.renderers ?? [], {
     events: {
       ...defaultEvents,
-      "interaction.opened": defaultInteractionOpenedHandler(config.approvalChannel),
+      "input.requested": defaultInputRequestedHandler(config.approvalChannel),
     },
     received: defaultReceived,
     taskCard: renderDefaultSlackTaskCard,
@@ -842,7 +848,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   const events = withTaskCards(
     {
       ...rendering.events,
-      "content.completed": withFinalReplyDelivery(rendering.events["content.completed"]),
+      "message.completed": withFinalReplyDelivery(rendering.events["message.completed"]),
       async "turn.started"(data, channel, ctx) {
         const triggeringUserId = slackUserIdFromAuthContext(ctx.session.auth.current);
         if (triggeringUserId !== undefined) {

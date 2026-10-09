@@ -1,7 +1,7 @@
-import type { SessionEvent } from "#protocol/session-event.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
+import { recordLegacyEvent } from "#internal/testing/legacy-events.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
 import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
@@ -10,6 +10,7 @@ import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { SandboxKey, SessionKey } from "#context/keys.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { mockSandbox, type MockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { defaultGitHubAuth } from "#public/channels/github/defaults.js";
 import { githubChannel } from "#public/channels/github/githubChannel.js";
 import { type GitHubChannelState } from "#public/channels/github/state.js";
@@ -84,18 +85,22 @@ const stubAlsContext = createAlsContext();
 
 function callEvent(
   adapter: ChannelAdapter,
-  event: SessionEvent,
+  event: UnstampedMessageStreamEvent,
   ctx: any,
   sandbox?: MockSandbox,
-): Promise<void> {
+): Promise<UnstampedMessageStreamEvent> {
+  if (ctx?.ctx !== undefined) recordLegacyEvent(ctx.ctx, event);
   return contextStorage.run(
     sandbox === undefined ? stubAlsContext : createAlsContext(sandbox),
     () => callAdapterEventHandler(adapter, event, ctx),
   );
 }
 
-function makeEvent<T extends SessionEvent["type"]>(type: T, data: unknown): SessionEvent {
-  return { data, type } as SessionEvent;
+function makeEvent<T extends UnstampedMessageStreamEvent["type"]>(
+  type: T,
+  data: unknown,
+): UnstampedMessageStreamEvent {
+  return { data, type } as UnstampedMessageStreamEvent;
 }
 
 function signedRequest(event: string, payload: Record<string, unknown>): Request {
@@ -892,6 +897,132 @@ describe("githubChannel", () => {
     expect(issue.send).not.toHaveBeenCalled();
     expect(pullRequest.send).not.toHaveBeenCalled();
     for (const ciEvent of ciEvents) expect(ciEvent.send).not.toHaveBeenCalled();
+  });
+
+  it("renders the mention instruction from a lazy botName resolver", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 79 })));
+    const adapter = withState(
+      getAdapter(
+        githubChannel({
+          api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
+          botName: () => Promise.resolve("testbot"),
+          credentials: { installationToken: "ghs_test", webhookSecret: SECRET },
+        }),
+      ),
+      {
+        conversationKind: "issue",
+        installationId: 55,
+        issueNumber: 5,
+        owner: "vercel",
+        repo: "eve",
+        repositoryId: 123,
+      },
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await callEvent(
+      adapter,
+      makeEvent("input.requested", {
+        requests: [
+          {
+            action: { callId: "call_1", input: {}, kind: "tool-call", toolName: "deploy" },
+            options: [
+              { id: "approve", label: "Yes" },
+              { id: "deny", label: "No" },
+            ],
+            prompt: "Approve this change?",
+            requestId: "call_1",
+          },
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String((fetchMock.mock.calls[0]![1] as RequestInit).body))).toEqual({
+      body: "Approve this change?\n\n1. Yes\n2. No\n\nAnswer by mentioning me in a reply, e.g. `@testbot Yes`.",
+    });
+  });
+
+  it("omits the mention instruction when no bot name is configured", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 78 })));
+    const adapter = withState(
+      getAdapter(
+        githubChannel({
+          api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
+          credentials: { installationToken: "ghs_test", webhookSecret: SECRET },
+        }),
+      ),
+      {
+        conversationKind: "issue",
+        installationId: 55,
+        issueNumber: 5,
+        owner: "vercel",
+        repo: "eve",
+        repositoryId: 123,
+      },
+    );
+
+    await callEvent(
+      adapter,
+      makeEvent("input.requested", {
+        requests: [
+          {
+            action: { callId: "call_1", input: {}, kind: "tool-call", toolName: "deploy" },
+            options: [
+              { id: "approve", label: "Yes" },
+              { id: "deny", label: "No" },
+            ],
+            prompt: "Approve this change?",
+            requestId: "call_1",
+          },
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      buildAdapterContext(adapter, stubAccessor()),
+    );
+
+    expect(JSON.parse(String((fetchMock.mock.calls[0]![1] as RequestInit).body))).toEqual({
+      body: "Approve this change?\n\n1. Yes\n2. No",
+    });
+  });
+
+  it("does not post an empty input request comment", async () => {
+    const fetchMock = vi.fn();
+    const adapter = withState(
+      getAdapter(
+        githubChannel({
+          api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
+          credentials: { installationToken: "ghs_test", webhookSecret: SECRET },
+        }),
+      ),
+      {
+        conversationKind: "issue",
+        installationId: 55,
+        issueNumber: 5,
+        owner: "vercel",
+        repo: "eve",
+        repositoryId: 123,
+      },
+    );
+
+    await callEvent(
+      adapter,
+      makeEvent("input.requested", {
+        requests: [],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      buildAdapterContext(adapter, stubAccessor()),
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("turn.started adds an eyes reaction to the triggering comment", async () => {

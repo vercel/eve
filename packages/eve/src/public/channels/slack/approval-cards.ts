@@ -3,11 +3,6 @@
  * and question controls, and retiring an approval's messages once it resolves.
  */
 
-import type {
-  RefusedAnswer,
-  RequestBatch,
-  RequestSettlement,
-} from "#channel/interaction-prompts.js";
 import { createLogger, logError } from "#internal/logging.js";
 import {
   slackUserIdForPrincipal,
@@ -44,11 +39,7 @@ const log = createLogger("slack.defaults");
  */
 export function defaultInputRequestedHandler(
   approvalChannel?: SlackApprovalChannelResolver,
-): (
-  data: RequestBatch,
-  channel: SlackEventContext,
-  ctx: Parameters<NonNullable<SlackChannelInternalEvents["interaction.opened"]>>[2],
-) => Promise<void> {
+): NonNullable<SlackChannelInternalEvents["input.requested"]> {
   return async (data, channel, ctx) => {
     const directMessageRequests: InputRequest[] = [];
     const threadRequests: InputRequest[] = [];
@@ -282,46 +273,53 @@ function blockContainsRequestAction(block: unknown, requestId: string): boolean 
   );
 }
 
-/**
- * A responder an approval's policy or check refused hears why privately. A pending answer gets
- * no notice: an ephemeral cannot be removed once the approval settles, and the card itself
- * reports the outcome moments later.
- */
-export async function notifyRefusedResponder(
-  refused: RefusedAnswer,
-  channel: SlackEventContext,
-): Promise<void> {
-  const userId = slackUserIdForPrincipal(channel.state, refused.responder?.id);
-  if (userId === undefined) return;
-  await channel.thread.postEphemeral(
-    userId,
-    refused.reason ?? "We couldn’t verify your response. Please try again.",
-  );
-}
+/** Default handlers for the approval lifecycle events. */
+export const approvalEvents: Pick<
+  SlackChannelInternalEvents,
+  "approval.candidate" | "approval.settled" | "input.resolved"
+> = {
+  // A pending candidate gets no notice: an ephemeral cannot be removed once the
+  // approval settles, and the card itself reports the outcome moments later.
+  async "approval.candidate"(event, channel, _ctx) {
+    if (event.outcome !== "rejected" && event.outcome !== "failed") return;
+    const userId = slackUserIdForPrincipal(channel.state, event.responderPrincipalId);
+    if (userId === undefined) return;
+    await channel.thread.postEphemeral(
+      userId,
+      event.reason ?? "We couldn’t verify your response. Please try again.",
+    );
+  },
 
-/**
- * Retires an approval's card: with the person whose press decided it, or as no longer needed
- * when it ended any other way (the user replied instead, or it was withdrawn).
- */
-export async function settleApproval(
-  resolution: RequestSettlement,
-  channel: SlackEventContext,
-): Promise<void> {
-  if (resolution.kind !== "tool-approval") return;
-  const decided = resolution.outcome === "approved" || resolution.outcome === "denied";
-  if (!decided) {
-    await settleApprovalCard(channel, resolution.requestId, {
-      announcement: "This approval is no longer needed.",
-      label: "No longer needed",
+  async "approval.settled"(event, channel, _ctx) {
+    const approved = event.outcome === "approved";
+    const userId = slackUserIdForPrincipal(channel.state, event.responderPrincipalId);
+    const by = userId === undefined ? "" : ` by <@${userId}>`;
+    await settleApprovalCard(channel, event.requestId, {
+      announcement: `${approved ? "Approved" : "Cancelled"}${by}.`,
+      label: approved ? "Approve" : "Cancel",
+      userId,
     });
-    return;
-  }
-  const approved = resolution.outcome === "approved";
-  const userId = slackUserIdForPrincipal(channel.state, resolution.responder?.id);
-  const by = userId === undefined ? "" : ` by <@${userId}>`;
-  await settleApprovalCard(channel, resolution.requestId, {
-    announcement: `${approved ? "Approved" : "Cancelled"}${by}.`,
-    label: approved ? "Approve" : "Cancel",
-    userId,
-  });
-}
+  },
+
+  // `approval.settled` runs first in the same step and retires clicked cards
+  // with the responder. Approvals that end any other way (the user replied
+  // instead, or the request was withdrawn) are retired here.
+  async "input.resolved"(event, channel, _ctx) {
+    for (const resolution of event.resolutions) {
+      if (resolution.kind !== "tool-approval") continue;
+      const label =
+        resolution.outcome === "approved"
+          ? "Approve"
+          : resolution.outcome === "denied"
+            ? "Cancel"
+            : "No longer needed";
+      await settleApprovalCard(channel, resolution.requestId, {
+        announcement:
+          label === "No longer needed"
+            ? "This approval is no longer needed."
+            : `${label === "Approve" ? "Approved" : "Cancelled"}.`,
+        label,
+      });
+    }
+  },
+};

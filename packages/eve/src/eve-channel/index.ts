@@ -4,7 +4,7 @@ import { getRun } from "#internal/workflow/runtime.js";
 import { handleExpiredLegacyAuthorization } from "#execution/legacy-session/authorization.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import type { SessionAuthContext, SessionParent, SessionTraceContext } from "#channel/types.js";
-import type { Session } from "#channel/session.js";
+import { sessionInternals, type Session, type SessionInternals } from "#channel/session.js";
 import { resolveForwardedPrincipal } from "#channel/forwarded-principal.js";
 import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
 import { handleSessionCallbackRequest } from "#subagents/callback-route.js";
@@ -481,10 +481,10 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (body instanceof Response) return body;
         let result: Awaited<ReturnType<Session["cancel"]>>;
         try {
-          result = await attachSession(sessionId).cancel({
+          result = (await controlSession(attachSession(sessionId), {
             auth: sessionAuthFromResult(authResult),
-            turnId: body.turnId,
-          });
+            command: { kind: "cancel", turnId: body.turnId },
+          })) as Awaited<ReturnType<Session["cancel"]>>;
         } catch (error) {
           const errorId = logError(log, "cancel-turn request failed", error, { sessionId });
           return Response.json(
@@ -516,9 +516,10 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (body instanceof Response) return body;
         let result: Awaited<ReturnType<Session["compact"]>>;
         try {
-          result = await attachSession(sessionId).compact({
+          result = (await controlSession(attachSession(sessionId), {
             auth: sessionAuthFromResult(authResult),
-          });
+            command: { kind: "compact" },
+          })) as Awaited<ReturnType<Session["compact"]>>;
         } catch (error) {
           const errorId = logError(log, "session-compaction request failed", error, { sessionId });
           return Response.json(
@@ -550,9 +551,10 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (body instanceof Response) return body;
         let result: Awaited<ReturnType<Session["clear"]>>;
         try {
-          result = await attachSession(sessionId).clear({
+          result = (await controlSession(attachSession(sessionId), {
             auth: sessionAuthFromResult(authResult),
-          });
+            command: { kind: "clear" },
+          })) as Awaited<ReturnType<Session["clear"]>>;
         } catch (error) {
           const errorId = logError(log, "session-clear request failed", error, { sessionId });
           return Response.json(
@@ -584,10 +586,10 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (body instanceof Response) return body;
         let result: Awaited<ReturnType<Session["reset"]>>;
         try {
-          result = await attachSession(sessionId).reset({
+          result = (await controlSession(attachSession(sessionId), {
             auth: sessionAuthFromResult(authResult),
-            reason: body.reason,
-          });
+            command: { kind: "reset", reason: body.reason },
+          })) as Awaited<ReturnType<Session["reset"]>>;
         } catch (error) {
           const errorId = logError(log, "session-reset request failed", error, { sessionId });
           return Response.json(
@@ -745,4 +747,30 @@ export function eveChannel(input: EveChannelInput): EveChannel {
     ],
     events: input.events,
   });
+}
+
+/**
+ * A control from the HTTP routes, as a delivery that names the caller. A handle this module
+ * didn't create sends it without the sender.
+ */
+async function controlSession(
+  session: Session,
+  input: {
+    readonly auth: SessionAuthContext | null;
+    readonly command: Parameters<SessionInternals["control"]>[0];
+  },
+): Promise<unknown> {
+  const internals = sessionInternals(session);
+  if (internals !== undefined) return await internals.control(input.command, { auth: input.auth });
+  const { command } = input;
+  switch (command.kind) {
+    case "cancel":
+      return await session.cancel(command.turnId === undefined ? {} : { turnId: command.turnId });
+    case "compact":
+      return await session.compact();
+    case "clear":
+      return await session.clear();
+    case "reset":
+      return await session.reset(command.reason === undefined ? {} : { reason: command.reason });
+  }
 }

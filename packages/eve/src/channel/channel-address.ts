@@ -21,7 +21,6 @@ import type {
   TurnPolicy,
 } from "#channel/types.js";
 import { controlCommand, DEFAULT_TURN_POLICY } from "#channel/types.js";
-import type { SessionControlOptions } from "#channel/types.js";
 import { isReservedSessionCommandToken } from "#execution/session-inbox/address.js";
 
 interface BaseChannelAddressDeliveryOptions {
@@ -52,12 +51,10 @@ interface ChannelAddress<TState = undefined> {
     inputResponses: SendPayload["inputResponses"],
     options: ChannelAddressDeliveryOptions<TState>,
   ): Promise<Session>;
-  cancel(options?: { readonly turnId?: string } & SessionControlOptions): Promise<CancelTurnResult>;
-  compact(options?: SessionControlOptions): Promise<CompactSessionResult>;
-  clear(options?: SessionControlOptions): Promise<ClearSessionResult>;
-  reset(
-    options?: { readonly reason?: string } & SessionControlOptions,
-  ): Promise<ResetSessionResult>;
+  cancel(options?: { readonly turnId?: string }): Promise<CancelTurnResult>;
+  compact(): Promise<CompactSessionResult>;
+  clear(): Promise<ClearSessionResult>;
+  reset(options?: { readonly reason?: string }): Promise<ResetSessionResult>;
   resolveSession(): Promise<Session | undefined>;
 }
 
@@ -169,25 +166,25 @@ export function createChannelAddress<TState = undefined>(input: {
     },
     async cancel(options) {
       return await input.runtime.dispatchContinuation({
-        command: controlCommand({ kind: "cancel", turnId: options?.turnId }, options),
+        command: controlCommand({ kind: "cancel", turnId: options?.turnId }),
         continuationToken: namespacedToken,
       });
     },
-    async compact(options) {
+    async compact() {
       return await input.runtime.dispatchContinuation({
-        command: controlCommand({ kind: "compact" }, options),
+        command: controlCommand({ kind: "compact" }),
         continuationToken: namespacedToken,
       });
     },
-    async clear(options) {
+    async clear() {
       return await input.runtime.dispatchContinuation({
-        command: controlCommand({ kind: "clear" }, options),
+        command: controlCommand({ kind: "clear" }),
         continuationToken: namespacedToken,
       });
     },
     async reset(options) {
       return await input.runtime.dispatchContinuation({
-        command: controlCommand({ kind: "reset", reason: options?.reason }, options),
+        command: controlCommand({ kind: "reset", reason: options?.reason }),
         continuationToken: namespacedToken,
       });
     },

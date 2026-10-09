@@ -1,6 +1,6 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { failureOf } from "#client/session-utils.js";
-import { replyTextOf } from "#public/channels/reply.js";
+import { replyTextOf } from "#evals/reply-text.js";
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import {
   deepEquals,

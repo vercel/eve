@@ -28,9 +28,6 @@ function makeSession(): Session {
     async cancel() {
       return { status: "no_active_turn" };
     },
-    async getLineStream() {
-      return new ReadableStream();
-    },
     async getEventStream() {
       return new ReadableStream();
     },

@@ -1,4 +1,5 @@
-import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js";
+import type { ChannelAdapter } from "#channel/adapter.js";
+import { registerFactHandlers, type FactHandlerContext } from "#channel/fact-handlers.js";
 import type {
   SubagentAuthorizationEvent,
   SubagentAuthorizationEventHookPayload,
@@ -19,11 +20,12 @@ const log = createLogger("execution.subagent-adapter");
  * route answers back down, and the changes only the child decides: its sign-ins, how it settled
  * an approval or ended a request early, and an answer it refused.
  */
-export const SUBAGENT_ADAPTER: ChannelAdapter = {
-  kind: SUBAGENT_ADAPTER_KIND,
+export const SUBAGENT_ADAPTER: ChannelAdapter = { kind: SUBAGENT_ADAPTER_KIND };
+
+registerFactHandlers(SUBAGENT_ADAPTER_KIND, {
   async "interaction.opened"(data, ctx) {
     const state = ctx.state;
-    if (!isSubagentAdapterState(state) || ctx.view === undefined) return;
+    if (!isSubagentAdapterState(state)) return;
     if (data.request.kind === "sign-in") {
       await forwardRelayed({ data, type: "interaction.opened" }, ctx);
       return;
@@ -51,24 +53,23 @@ export const SUBAGENT_ADAPTER: ChannelAdapter = {
   async "response.settled"(data, ctx) {
     await forwardFact({ data, type: "response.settled" }, ctx);
   },
-};
+});
 
-async function forwardFact(event: SessionEvent, ctx: ChannelAdapterContext): Promise<void> {
-  if (ctx.view === undefined) return;
+async function forwardFact(event: SessionEvent, ctx: FactHandlerContext): Promise<void> {
   const relayed = relayedInteractionEvent(ctx.view, event);
   if (relayed !== undefined) await forwardRelayed(relayed, ctx);
 }
 
 async function forwardRelayed(
   event: SubagentAuthorizationEvent,
-  ctx: ChannelAdapterContext,
+  ctx: FactHandlerContext,
 ): Promise<void> {
   await forwardSubagentAuthorizationEvent(event, ctx);
 }
 
 async function forwardSubagentAuthorizationEvent(
   event: SubagentAuthorizationEvent,
-  ctx: ChannelAdapterContext,
+  ctx: FactHandlerContext,
 ): Promise<void> {
   const state = ctx.state;
 
