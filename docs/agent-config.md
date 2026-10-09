@@ -71,8 +71,9 @@ For direct OpenAI and `chatgpt()` model calls, eve sets
 `providerOptions.openai.promptCacheKey` to a SHA-256 hash of the session ID,
 which helps OpenAI route a session's calls to the cache that holds its prompt
 prefix. Each subagent session gets its own key. An authored
-`openai.promptCacheKey` takes precedence. Gateway-routed calls do not receive
-the option.
+`openai.promptCacheKey` takes precedence. `chatgpt()` calls also send the key
+in the `session-id` header, which the Codex backend uses for cache routing.
+Gateway-routed calls do not receive the option.
 
 ### Choose the model dynamically
 
