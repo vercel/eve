@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { PassThrough } from "node:stream";
 
 import { describe, expect, it, vi } from "vitest";
@@ -5,7 +6,6 @@ import { describe, expect, it, vi } from "vitest";
 import { ACP_MAX_LINE_BYTES } from "#acp/line-limit.js";
 import { runAcpServerOnStreams } from "#acp/server.js";
 import type { SendTurnInput } from "#client/types.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
 
 function streams() {
   const input = new PassThrough();
@@ -74,4 +74,4 @@ describe("runAcpServerOnStreams", () => {
   });
 });
 
-async function* emptyEvents(): AsyncIterable<HandleMessageStreamEvent> {}
+async function* emptyEvents(): AsyncIterable<SessionStreamEvent> {}

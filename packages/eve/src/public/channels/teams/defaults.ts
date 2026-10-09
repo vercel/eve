@@ -1,7 +1,8 @@
+import { errorHintOf, replyTextOf } from "#public/channels/reply.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { resolvedPromptAnswer } from "#channel/resolved-prompt.js";
-import { extractErrorId, formatErrorHint } from "#internal/logging.js";
+import { formatErrorHint } from "#internal/logging.js";
 import type { ConnectionAuthorizationOutcome } from "#protocol/message.js";
 import { splitTeamsMessageText, type TeamsMention } from "#public/channels/teams/api.js";
 import {
@@ -65,7 +66,7 @@ export const defaultEvents: TeamsChannelEvents = {
     await channel.thread.startTyping();
   },
 
-  async "actions.requested"(_event, channel, _ctx) {
+  async "call.requested"(_event, channel, _ctx) {
     await channel.thread.startTyping();
   },
 
@@ -130,16 +131,18 @@ export const defaultEvents: TeamsChannelEvents = {
     }
   },
 
-  async "message.completed"(event, channel, _ctx) {
-    if (event.finishReason === "tool-calls" || !event.message) return;
-    for (const chunk of splitTeamsMessageText(event.message)) {
+  async "content.completed"(event, channel, _ctx) {
+    const text = replyTextOf(event);
+    if (text === undefined) return;
+    for (const chunk of splitTeamsMessageText(text)) {
       await channel.thread.post(chunk);
     }
   },
 
-  async "session.failed"(event, channel) {
-    const hint = formatErrorHint(event);
-    const errorId = extractErrorId(event.details);
+  async "session.ended"(event, channel, _ctx) {
+    if (event.outcome !== "failed") return;
+    const hint = formatErrorHint(errorHintOf(event.error));
+    const errorId = event.error?.id;
     await channel.thread.post(
       [
         `This session could not recover from an error${hint}.`,
@@ -150,9 +153,10 @@ export const defaultEvents: TeamsChannelEvents = {
     );
   },
 
-  async "turn.failed"(event, channel, _ctx) {
-    const hint = formatErrorHint(event);
-    const errorId = extractErrorId(event.details);
+  async "turn.settled"(event, channel, _ctx) {
+    if (event.outcome !== "failed") return;
+    const hint = formatErrorHint(errorHintOf(event.error));
+    const errorId = event.error?.id;
     await channel.thread.post(
       [
         `I hit an error while handling your request${hint}.`,

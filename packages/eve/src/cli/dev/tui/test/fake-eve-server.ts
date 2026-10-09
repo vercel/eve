@@ -1,3 +1,4 @@
+import type { SessionEvent, SessionStreamEvent } from "#protocol/session-event.js";
 import {
   createMessageCompletedEvent,
   createMessageReceivedEvent,
@@ -6,8 +7,6 @@ import {
   createTurnStartedEvent,
   EVE_MESSAGE_STREAM_VERSION,
   EVE_STREAM_VERSION_HEADER,
-  type MessageStreamEvent,
-  type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 
 /** What the fake server reports a session spent, like a real one does on `session.waiting`. */
@@ -28,10 +27,10 @@ export interface FakeEveRequest {
 /** Events a fake agent streams after it accepts one delivery. */
 export type FakeEveTurn = (
   request: FakeEveRequest & { readonly deliveryId: string; readonly turnId: string },
-) => readonly UnstampedMessageStreamEvent[];
+) => readonly SessionEvent[];
 
 interface FakeSession {
-  readonly log: MessageStreamEvent[];
+  readonly log: SessionStreamEvent[];
   readonly streams: Set<ReadableStreamDefaultController<Uint8Array>>;
 }
 
@@ -71,7 +70,7 @@ export class FakeEveServer {
 
   /** Appends events to a session's durable stream; the current session by default. */
   emit(
-    events: readonly UnstampedMessageStreamEvent[],
+    events: readonly SessionEvent[],
     deliveryId?: string,
     sessionId = this.#currentSessionId,
   ): void {
@@ -84,7 +83,7 @@ export class FakeEveServer {
       const stamped = {
         ...event,
         meta: deliveryId === undefined ? { at, id } : { at, id, deliveryIds: [deliveryId] },
-      } as MessageStreamEvent;
+      } as SessionStreamEvent;
       session.log.push(stamped);
       const line = encoder.encode(`${JSON.stringify(stamped)}\n`);
       for (const stream of session.streams) stream.enqueue(line);
@@ -184,7 +183,7 @@ export function reply(text: string): FakeEveTurn {
   return ({ body, turnId }) => [
     ...(typeof body?.message === "string"
       ? [createMessageReceivedEvent({ message: body.message, sequence: 0, turnId })]
-      : ([] as UnstampedMessageStreamEvent[])),
+      : ([] as SessionEvent[])),
     createTurnStartedEvent({ sequence: 1, turnId }),
     createMessageCompletedEvent({
       finishReason: "stop",

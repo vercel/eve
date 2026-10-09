@@ -1,4 +1,4 @@
-import type { MessageStreamEvent, InputRequest } from "eve/client";
+import type { SessionStreamEvent, InputRequest } from "eve/client";
 
 import { theme } from "./theme.ts";
 
@@ -22,7 +22,7 @@ const state: PrintState = {
  * - Secondary scaffolding (turn/tool/session lifecycle) is dim gray.
  * - Failures (`step.failed`, `turn.failed`, `session.failed`) are red.
  */
-export function printStreamEvent(event: MessageStreamEvent): void {
+export function printStreamEvent(event: SessionStreamEvent): void {
   switch (event.type) {
     case "session.started":
       process.stdout.write(

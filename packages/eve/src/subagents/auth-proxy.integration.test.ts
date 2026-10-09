@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { describe, expect, it, vi, type Mock } from "vitest";
 
 import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js";
@@ -11,7 +12,6 @@ import { emitProxiedSubagentEvent } from "#subagents/event-proxy-step.js";
 import { projectToDurableSession } from "#execution/session.js";
 import { positionOf, withOpenTurn } from "#internal/testing/session-machine.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import type { StreamEventHook } from "#public/definitions/hook.js";
 import { deserializeRuntimeAdapter } from "#runtime/channels/registry.js";
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
@@ -51,7 +51,7 @@ const turnAgent = {
 
 function buildBundle(
   adapter: ChannelAdapter,
-  hook: StreamEventHook<MessageStreamEvent>,
+  hook: StreamEventHook<SessionStreamEvent>,
 ): CompiledBundle {
   return {
     adapterRegistry: {
@@ -92,9 +92,9 @@ function buildBundle(
 function buildContext(input: { readonly adapter: ChannelAdapter; readonly sessionId: string }): {
   readonly bundle: ReturnType<typeof buildBundle>;
   readonly ctx: ContextContainer;
-  readonly hook: Mock<StreamEventHook<MessageStreamEvent>>;
+  readonly hook: Mock<StreamEventHook<SessionStreamEvent>>;
 } {
-  const hook = vi.fn<StreamEventHook<MessageStreamEvent>>();
+  const hook = vi.fn<StreamEventHook<SessionStreamEvent>>();
   const bundle = buildBundle(input.adapter, hook);
   const ctx = new ContextContainer();
   ctx.set(AuthKey, null);
@@ -154,8 +154,8 @@ function createCapturingWritable(chunks: Uint8Array[]): WritableStream<Uint8Arra
   });
 }
 
-function decodeEvent(chunk: Uint8Array): MessageStreamEvent {
-  return JSON.parse(new TextDecoder().decode(chunk).trim()) as MessageStreamEvent;
+function decodeEvent(chunk: Uint8Array): SessionStreamEvent {
+  return JSON.parse(new TextDecoder().decode(chunk).trim()) as SessionStreamEvent;
 }
 
 describe("subagent authorization proxy", () => {

@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import type { Message as ExternalMessage, Thread as ExternalThread } from "chat";
 
@@ -10,7 +11,6 @@ import { enterSessionProjection, recordPublishedEvent } from "#harness/session-m
 import { SessionKey } from "#context/keys.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 import {
   chatSdkChannel,
@@ -84,25 +84,18 @@ const stubAlsContext = (() => {
   return ctx;
 })();
 
-function callEvent(
-  adapter: ChannelAdapter,
-  event: UnstampedMessageStreamEvent,
-  ctx: any,
-): Promise<void> {
+function callEvent(adapter: ChannelAdapter, event: SessionEvent, ctx: any): Promise<void> {
   return contextStorage.run(stubAlsContext, () => callAdapterEventHandler(adapter, event, ctx));
 }
 
 /** Delivers `event` as a session publishes it: the handler runs, then the session records it. */
-async function publishEvent(adapter: ChannelAdapter, event: UnstampedMessageStreamEvent, ctx: any) {
+async function publishEvent(adapter: ChannelAdapter, event: SessionEvent, ctx: any) {
   await callEvent(adapter, event, ctx);
   recordPublishedEvent(ctx.ctx, event);
 }
 
-function makeEvent<T extends UnstampedMessageStreamEvent["type"]>(
-  type: T,
-  data: unknown,
-): UnstampedMessageStreamEvent {
-  return { type, data } as UnstampedMessageStreamEvent;
+function makeEvent<T extends SessionEvent["type"]>(type: T, data: unknown): SessionEvent {
+  return { type, data } as SessionEvent;
 }
 
 async function firePost(

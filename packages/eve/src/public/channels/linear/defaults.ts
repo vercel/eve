@@ -1,7 +1,9 @@
+import { errorHintOf } from "#public/channels/reply.js";
+import { contentPhase } from "#protocol/session-events/catalog.js";
 import { promptQueueEvents } from "#channel/prompt-queue.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
-import { extractErrorId, formatErrorHint } from "#internal/logging.js";
+import { formatErrorHint } from "#internal/logging.js";
 import { createLinearAgentActivity, type LinearApiOptions } from "#public/channels/linear/api.js";
 import type { LinearChannelCredentials } from "#public/channels/linear/auth.js";
 import {
@@ -10,7 +12,8 @@ import {
 } from "#public/channels/linear/hitl.js";
 import type { LinearAgentSessionEvent, LinearUser } from "#public/channels/linear/inbound.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import { actionLabel, visibleActions } from "#shared/action-label.js";
+import { isTaskControlTool } from "#protocol/task-tools.js";
+import { displayTitle } from "#shared/display-name.js";
 import type { InputRequest } from "#shared/input.js";
 import type {
   LinearChannelEvents,
@@ -93,7 +96,7 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       );
     },
 
-    async "actions.requested"(event, channel, _ctx) {
+    async "call.requested"(event, channel, _ctx) {
       const buffered = channel.state.pendingToolCallMessage;
       channel.state.pendingToolCallMessage = null;
       if (buffered) {
@@ -110,39 +113,20 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
         );
         return;
       }
-
-      const actions = visibleActions(event.actions);
-      if (actions.length === 0) return;
-      if (actions.length > 1) {
-        await postActivity(
-          channel,
-          options,
-          {
-            action: "Running",
-            parameter: actions.map((action) => actionLabel(action, event.presentation)).join(", "),
-            type: "action",
-          },
-          {
-            ephemeral: true,
-          },
-        );
-        return;
-      }
-
-      for (const action of actions) {
-        await postActivity(
-          channel,
-          options,
-          {
-            action: actionLabel(action, event.presentation),
-            parameter: actionParameter(action),
-            type: "action",
-          },
-          {
-            ephemeral: true,
-          },
-        );
-      }
+      // eve's own task controls stay out of view.
+      if (isTaskControlTool(event.capability.name)) return;
+      await postActivity(
+        channel,
+        options,
+        {
+          action: event.capability.title ?? displayTitle(event.capability.name),
+          parameter: actionParameter({ input: event.input }),
+          type: "action",
+        },
+        {
+          ephemeral: true,
+        },
+      );
     },
 
     // A reply can only answer the elicitation it sees, so they post one at a time.
@@ -195,24 +179,27 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       });
     },
 
-    async "message.completed"(event, channel, _ctx) {
-      if (event.finishReason === "tool-calls") {
-        channel.state.pendingToolCallMessage = event.message
-          ? (firstNonEmptyLine(event.message) ?? null)
+    async "content.completed"(event, channel, _ctx) {
+      if (event.kind !== "text" || typeof event.value !== "string") return;
+      // Narration before calls posts as a thought with the next call.
+      if (contentPhase(event.phase) === "narration") {
+        channel.state.pendingToolCallMessage = event.value
+          ? (firstNonEmptyLine(event.value) ?? null)
           : null;
         return;
       }
       channel.state.pendingToolCallMessage = null;
-      if (!event.message) return;
+      if (!event.value) return;
       await postActivity(channel, options, {
-        body: event.message,
+        body: event.value,
         type: "response",
       });
     },
 
-    async "session.failed"(event, channel) {
-      const hint = formatErrorHint(event);
-      const errorId = extractErrorId(event.details);
+    async "session.ended"(event, channel, _ctx) {
+      if (event.outcome !== "failed") return;
+      const hint = formatErrorHint(errorHintOf(event.error));
+      const errorId = event.error?.id;
       await postActivity(channel, options, {
         body: [
           `This session could not recover from an error${hint}.`,
@@ -224,9 +211,10 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       });
     },
 
-    async "turn.failed"(event, channel, _ctx) {
-      const hint = formatErrorHint(event);
-      const errorId = extractErrorId(event.details);
+    async "turn.settled"(event, channel, _ctx) {
+      if (event.outcome !== "failed") return;
+      const hint = formatErrorHint(errorHintOf(event.error));
+      const errorId = event.error?.id;
       await postActivity(channel, options, {
         body: [
           `I hit an error while handling your request${hint}.`,

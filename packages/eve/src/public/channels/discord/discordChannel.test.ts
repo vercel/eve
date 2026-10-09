@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { generateKeyPairSync, sign, type KeyObject } from "node:crypto";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -9,7 +10,6 @@ import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   DISCORD_HITL_FREEFORM_TEXT_INPUT_ID,
   renderInputRequestComponents,
@@ -46,11 +46,7 @@ const stubAlsContext = (() => {
   return ctx;
 })();
 
-function callEvent(
-  adapter: ChannelAdapter,
-  event: UnstampedMessageStreamEvent,
-  ctx: any,
-): Promise<void> {
+function callEvent(adapter: ChannelAdapter, event: SessionEvent, ctx: any): Promise<void> {
   return contextStorage.run(stubAlsContext, () => callAdapterEventHandler(adapter, event, ctx));
 }
 
@@ -92,11 +88,8 @@ function captureAccessor(initialContinuationToken: string): {
   };
 }
 
-function makeEvent<T extends UnstampedMessageStreamEvent["type"]>(
-  type: T,
-  data: unknown,
-): UnstampedMessageStreamEvent {
-  return { type, data } as UnstampedMessageStreamEvent;
+function makeEvent<T extends SessionEvent["type"]>(type: T, data: unknown): SessionEvent {
+  return { type, data } as SessionEvent;
 }
 
 function testKeys(): { privateKey: KeyObject; publicKeyHex: string } {

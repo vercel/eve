@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
@@ -9,7 +10,6 @@ import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { SandboxKey, SessionKey } from "#context/keys.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { mockSandbox, type MockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { defaultGitHubAuth } from "#public/channels/github/defaults.js";
 import { githubChannel } from "#public/channels/github/githubChannel.js";
 import { type GitHubChannelState } from "#public/channels/github/state.js";
@@ -84,7 +84,7 @@ const stubAlsContext = createAlsContext();
 
 function callEvent(
   adapter: ChannelAdapter,
-  event: UnstampedMessageStreamEvent,
+  event: SessionEvent,
   ctx: any,
   sandbox?: MockSandbox,
 ): Promise<void> {
@@ -94,11 +94,8 @@ function callEvent(
   );
 }
 
-function makeEvent<T extends UnstampedMessageStreamEvent["type"]>(
-  type: T,
-  data: unknown,
-): UnstampedMessageStreamEvent {
-  return { data, type } as UnstampedMessageStreamEvent;
+function makeEvent<T extends SessionEvent["type"]>(type: T, data: unknown): SessionEvent {
+  return { data, type } as SessionEvent;
 }
 
 function signedRequest(event: string, payload: Record<string, unknown>): Request {

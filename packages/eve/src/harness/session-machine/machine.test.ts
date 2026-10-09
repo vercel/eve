@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import type { ModelMessage } from "ai";
 import { describe, expect, it } from "vitest";
 import { eachEvent } from "#internal/testing/session-machine.js";
@@ -5,10 +6,7 @@ import { eachEvent } from "#internal/testing/session-machine.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { HarnessSession, StepInput } from "#harness/types.js";
 import { createSessionContract } from "#internal/testing/session-contract.js";
-import {
-  createActionsRequestedEvent,
-  type UnstampedMessageStreamEvent,
-} from "#protocol/message.js";
+import { createActionsRequestedEvent } from "#protocol/message.js";
 import {
   callStatus,
   foldSession,
@@ -56,8 +54,8 @@ function createMachine() {
   };
   let projection: SessionProjection = initialSessionProjection();
   const contract = createSessionContract();
-  const events: UnstampedMessageStreamEvent[] = [];
-  const publish = async (event: UnstampedMessageStreamEvent) => {
+  const events: SessionEvent[] = [];
+  const publish = async (event: SessionEvent) => {
     events.push(event);
     expect(contract.observe(event)).toEqual([]);
     projection = foldSession(projection, event);
@@ -79,7 +77,7 @@ function createMachine() {
       return transition;
     },
     /** What the model step streams as it runs: its calls. */
-    async stream(event: UnstampedMessageStreamEvent) {
+    async stream(event: SessionEvent) {
       await publish(event);
     },
     eventsSince(count: number) {
@@ -504,7 +502,7 @@ describe("checkpoint", () => {
         type: "task.settled",
       },
     ].reduce(
-      (state, event) => foldSession(state, event as UnstampedMessageStreamEvent),
+      (state, event) => foldSession(state, event as SessionEvent),
       initialSessionProjection(),
     );
     expect(callStatus(projection, "call_1")).toBe("completed");

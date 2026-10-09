@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { eachEvent } from "#internal/testing/session-machine.js";
 import { simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
@@ -5,7 +6,6 @@ import { describe, expect, it } from "vitest";
 
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const usage = {
@@ -47,7 +47,7 @@ describe("content-filter reporting (real AI SDK)", () => {
           return { stream: simulateReadableStream({ chunks }) };
         },
       });
-      const events: UnstampedMessageStreamEvent[] = [];
+      const events: SessionEvent[] = [];
       const step = createToolLoopHarness({
         resolveModel: async () => model,
         tools: new Map(),

@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { createHmac } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createChannelOperations } from "#channel/channel-operations.js";
@@ -19,7 +20,6 @@ import {
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import type { ToolContext } from "#tools/definition.js";
 import type {
   AuthorizationDefinition,
@@ -555,7 +555,7 @@ async function createWeatherAuthRuntime(
   };
 }
 
-function authorizationAttemptId(events: readonly MessageStreamEvent[]): string {
+function authorizationAttemptId(events: readonly SessionStreamEvent[]): string {
   const required = filterEventsByType(events, "authorization.required")[0];
   const webhookUrl = required?.data.webhookUrl;
   if (webhookUrl === undefined) throw new Error("Missing authorization callback URL.");

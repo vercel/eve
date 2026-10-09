@@ -1,8 +1,8 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { z as z3 } from "zod/v3";
 
 import { z } from "#compiled/zod/index.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { defineAgent, defineDynamic } from "#public/definitions/agent.js";
 import { defineRemoteAgent } from "#public/definitions/remote-agent.js";
 import { none } from "#public/channels/auth.js";
@@ -118,7 +118,7 @@ describe("definition helper exact inputs", () => {
   });
 
   it("keeps the public hook event map aligned with runtime stream events", () => {
-    expectTypeOf<keyof HookEventMap>().toEqualTypeOf<UnstampedMessageStreamEvent["type"]>();
+    expectTypeOf<keyof HookEventMap>().toEqualTypeOf<SessionEvent["type"]>();
   });
 });
 

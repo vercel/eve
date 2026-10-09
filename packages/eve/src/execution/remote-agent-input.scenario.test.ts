@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -5,7 +6,6 @@ import { Client } from "#client/client.js";
 import type { ClientSession } from "#client/session.js";
 import { filterEventsByType } from "#internal/testing/events.js";
 import { type ScenarioAppDescriptor, useScenarioApp } from "#internal/testing/scenario-app.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import { TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 
 const scenarioApp = useScenarioApp();
@@ -284,10 +284,10 @@ it(
 
 async function waitFor(
   session: ClientSession,
-  ready: (events: readonly HandleMessageStreamEvent[]) => boolean,
+  ready: (events: readonly SessionStreamEvent[]) => boolean,
 ) {
   const deadline = Date.now() + 30_000;
-  let events: readonly HandleMessageStreamEvent[] = [];
+  let events: readonly SessionStreamEvent[] = [];
   while (Date.now() < deadline) {
     ({ events } = await session.snapshot());
     if (ready(events)) return events;

@@ -1,9 +1,9 @@
-import type { MessageStreamEvent } from "#protocol/message.js";
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { InputResponse } from "#shared/input.js";
 
 /**
  * Client-side reducer event emitted before eve confirms a submitted user
- * message with a `message.received` stream event.
+ * message with a `delivery.consumed` fact.
  */
 export interface ClientMessageSubmittedEvent {
   readonly data: {
@@ -18,7 +18,7 @@ export interface ClientMessageSubmittedEvent {
 
 /**
  * Client-side reducer event emitted when a submitted user message fails before
- * eve confirms it with a `message.received` stream event.
+ * eve confirms it with a `delivery.consumed` fact.
  */
 export interface ClientMessageFailedEvent {
   readonly data: {
@@ -59,7 +59,7 @@ export type EveAgentReducerEvent =
   | ClientInputRespondedEvent
   | ClientMessageFailedEvent
   | ClientMessageSubmittedEvent
-  | MessageStreamEvent;
+  | SessionStreamEvent;
 
 /**
  * Projects eve stream events into accumulated consumer data.

@@ -1,13 +1,13 @@
+import type { ChannelEventContext } from "#public/definitions/channel.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
 import type { TeamsInstrumentationMetadata } from "#public/channels/teams/index.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
-import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
 import { createLogger, logError } from "#internal/logging.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   buildTeamsTurnMessage,
   collectTeamsFileParts,
@@ -66,8 +66,8 @@ import type { InputOption } from "#shared/input.js";
 
 const log = createLogger("teams.channel");
 
-type EventData<T extends UnstampedMessageStreamEvent["type"]> =
-  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
+type EventData<T extends SessionEvent["type"]> =
+  Extract<SessionEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /** Pre-dispatch Teams context passed to invoke hooks. */
 export interface TeamsContext {
@@ -168,15 +168,10 @@ export type TeamsInvokeResult = Record<string, unknown> | Response | null | unde
 /** Sync or async {@link TeamsInvokeResult}. */
 export type TeamsInvokeResultOrPromise = TeamsInvokeResult | Promise<TeamsInvokeResult>;
 
-type TeamsEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
+type TeamsEventHandler<T extends SessionEvent["type"]> = (
   data: EventData<T>,
   channel: TeamsEventContext,
-  ctx: SessionContext,
-) => void | Promise<void>;
-
-type TeamsSessionFailedHandler = (
-  data: EventData<"session.failed">,
-  channel: TeamsEventContext,
+  ctx: ChannelEventContext,
 ) => void | Promise<void>;
 
 /** Event handlers supported by `teamsChannel({ events })`. */
@@ -185,18 +180,15 @@ export interface TeamsChannelEvents {
   readonly "approval.settled"?: TeamsEventHandler<"approval.settled">;
   readonly "input.resolved"?: TeamsEventHandler<"input.resolved">;
   readonly "turn.started"?: TeamsEventHandler<"turn.started">;
-  readonly "actions.requested"?: TeamsEventHandler<"actions.requested">;
-  readonly "action.partial"?: TeamsEventHandler<"action.partial">;
-  readonly "action.result"?: TeamsEventHandler<"action.result">;
-  readonly "message.completed"?: TeamsEventHandler<"message.completed">;
-  readonly "message.appended"?: TeamsEventHandler<"message.appended">;
+  readonly "call.requested"?: TeamsEventHandler<"call.requested">;
+  readonly "call.progress"?: TeamsEventHandler<"call.progress">;
+  readonly "call.settled"?: TeamsEventHandler<"call.settled">;
+  readonly "content.completed"?: TeamsEventHandler<"content.completed">;
+  readonly "content.delta"?: TeamsEventHandler<"content.delta">;
   readonly "input.requested"?: TeamsEventHandler<"input.requested">;
-  readonly "turn.failed"?: TeamsEventHandler<"turn.failed">;
-  readonly "turn.completed"?: TeamsEventHandler<"turn.completed">;
-  readonly "turn.cancelled"?: TeamsEventHandler<"turn.cancelled">;
-  readonly "session.failed"?: TeamsSessionFailedHandler;
-  readonly "session.completed"?: TeamsEventHandler<"session.completed">;
-  readonly "session.waiting"?: TeamsEventHandler<"session.waiting">;
+  readonly "turn.settled"?: TeamsEventHandler<"turn.settled">;
+  readonly "session.ended"?: TeamsEventHandler<"session.ended">;
+  readonly "delivery.settled"?: TeamsEventHandler<"delivery.settled">;
   readonly "authorization.required"?: TeamsEventHandler<"authorization.required">;
   readonly "authorization.completed"?: TeamsEventHandler<"authorization.completed">;
 }

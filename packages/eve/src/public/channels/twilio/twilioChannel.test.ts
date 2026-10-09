@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
@@ -8,7 +9,6 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { enterSessionProjection, recordPublishedEvent } from "#harness/session-machine/current.js";
 import { SessionKey } from "#context/keys.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { TwilioTextMessage } from "#public/channels/twilio/inbound.js";
 import { twilioChannel, type TwilioContext } from "#public/channels/twilio/twilioChannel.js";
 import { signTwilioRequest } from "#public/channels/twilio/verify.js";
@@ -49,25 +49,18 @@ const stubAlsContext = (() => {
   return ctx;
 })();
 
-function callEvent(
-  adapter: ChannelAdapter,
-  event: UnstampedMessageStreamEvent,
-  ctx: any,
-): Promise<void> {
+function callEvent(adapter: ChannelAdapter, event: SessionEvent, ctx: any): Promise<void> {
   return contextStorage.run(stubAlsContext, () => callAdapterEventHandler(adapter, event, ctx));
 }
 
 /** Delivers `event` as a session publishes it: the handler runs, then the session records it. */
-async function publishEvent(adapter: ChannelAdapter, event: UnstampedMessageStreamEvent, ctx: any) {
+async function publishEvent(adapter: ChannelAdapter, event: SessionEvent, ctx: any) {
   await callEvent(adapter, event, ctx);
   recordPublishedEvent(ctx.ctx, event);
 }
 
-function makeEvent<T extends UnstampedMessageStreamEvent["type"]>(
-  type: T,
-  data: unknown,
-): UnstampedMessageStreamEvent {
-  return { type, data } as UnstampedMessageStreamEvent;
+function makeEvent<T extends SessionEvent["type"]>(type: T, data: unknown): SessionEvent {
+  return { type, data } as SessionEvent;
 }
 
 function signedFormRequest(path: string, params: URLSearchParams): Request {

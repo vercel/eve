@@ -1,5 +1,5 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import {
   deepEquals,
   eventMatches,
@@ -17,7 +17,7 @@ import type { AssertionOutcome, RunAssertion } from "#evals/assertions/collector
 /** Minimal captured scope consumed by deterministic eval assertions. */
 export interface EveEvalAssertionSubject {
   readonly derived: import("#evals/types.js").EveEvalDerivedFacts;
-  readonly events: readonly MessageStreamEvent[];
+  readonly events: readonly SessionStreamEvent[];
   readonly output: unknown;
   readonly status: "completed" | "failed" | "waiting";
 }
@@ -215,7 +215,7 @@ export function noFailedActions(): RunAssertion {
     name: "noFailedActions",
     evaluate(result) {
       const failed = result.events.filter(
-        (evt): evt is Extract<MessageStreamEvent, { type: "action.result" }> =>
+        (evt): evt is Extract<SessionStreamEvent, { type: "action.result" }> =>
           evt.type === "action.result" &&
           (evt.data.status === "failed" || evt.data.result.isError === true),
       );
@@ -275,7 +275,7 @@ export function calledSubagent(
  */
 export function eventsSatisfy(
   label: string,
-  predicate: (events: readonly MessageStreamEvent[]) => boolean,
+  predicate: (events: readonly SessionStreamEvent[]) => boolean,
 ): RunAssertion {
   return {
     name: `eventsSatisfy(${label})`,
@@ -376,7 +376,7 @@ export function outputMatches(schema: StandardSchemaV1): RunAssertion {
   };
 }
 
-function joinCompletedMessages(events: readonly MessageStreamEvent[]): string {
+function joinCompletedMessages(events: readonly SessionStreamEvent[]): string {
   const parts: string[] = [];
   for (const evt of events) {
     if (evt.type === "message.completed") {
@@ -391,7 +391,7 @@ function failureDetail(prefix: string, code: string | undefined): string {
 }
 
 function formatFailedActionResult(
-  event: Extract<MessageStreamEvent, { type: "action.result" }>,
+  event: Extract<SessionStreamEvent, { type: "action.result" }>,
 ): string {
   const { result, status } = event.data;
   const parts = [
@@ -406,7 +406,7 @@ function formatFailedActionResult(
 }
 
 function actionResultLabel(
-  result: Extract<MessageStreamEvent, { type: "action.result" }>["data"]["result"],
+  result: Extract<SessionStreamEvent, { type: "action.result" }>["data"]["result"],
 ): string {
   switch (result.kind) {
     case "tool-result":
@@ -423,7 +423,7 @@ function runFailure(result: EveEvalAssertionSubject): AssertionOutcome | undefin
     return fail(failureDetail("run failed", result.derived.failureCode));
   }
   const failedEvent = result.events.find(
-    (event): event is Extract<MessageStreamEvent, { type: "step.failed" | "turn.failed" }> =>
+    (event): event is Extract<SessionStreamEvent, { type: "step.failed" | "turn.failed" }> =>
       event.type === "turn.failed" || event.type === "step.failed",
   );
   return failedEvent === undefined
@@ -483,7 +483,7 @@ interface ToolRequestEntry {
   readonly name: string;
 }
 
-function requestedTools(events: readonly MessageStreamEvent[]): readonly ToolRequestEntry[] {
+function requestedTools(events: readonly SessionStreamEvent[]): readonly ToolRequestEntry[] {
   const entries: ToolRequestEntry[] = [];
   const seenCallIds = new Set<string>();
   const append = (callId: string, name: string): void => {

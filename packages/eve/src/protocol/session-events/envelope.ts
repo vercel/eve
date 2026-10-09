@@ -190,6 +190,8 @@ export interface Principal {
 export interface ErrorInfo {
   readonly code: string;
   readonly message: string;
+  /** An id to quote when asking for support; the server's logs carry the same id. */
+  readonly id?: string;
 }
 
 /** Tokens and cost one unit of work spent. */

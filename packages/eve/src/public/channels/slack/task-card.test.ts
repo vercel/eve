@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
@@ -13,7 +14,6 @@ import {
   createTaskSettledEvent,
   createTaskStartedEvent,
   createTurnCompletedEvent,
-  type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
 import { defineSlackRenderer, type SlackRenderer } from "#public/channels/slack/renderers.js";
@@ -78,7 +78,7 @@ function slackThread(
     turn: { id: TURN_ID, sequence: 0 },
   });
   if (input.schedule === true) session.set(ScheduleIdKey, "nightly-report");
-  const emit = async (...events: UnstampedMessageStreamEvent[]) => {
+  const emit = async (...events: SessionEvent[]) => {
     for (const event of events) {
       await contextStorage.run(session, () => callAdapterEventHandler(adapter, event, adapterCtx));
     }
@@ -90,7 +90,7 @@ function slackThread(
 }
 
 /** A root turn that starts a deploy tool task and a researcher agent task. */
-const TWO_TASKS_STARTED: readonly UnstampedMessageStreamEvent[] = [
+const TWO_TASKS_STARTED: readonly SessionEvent[] = [
   createActionsRequestedEvent({
     actions: [
       {
@@ -130,7 +130,7 @@ const TWO_TASKS_STARTED: readonly UnstampedMessageStreamEvent[] = [
   }),
 ];
 
-const BOTH_TASKS_SETTLED: readonly UnstampedMessageStreamEvent[] = [
+const BOTH_TASKS_SETTLED: readonly SessionEvent[] = [
   createTaskSettledEvent({
     callId: DEPLOY_CALL,
     kind: "tool",

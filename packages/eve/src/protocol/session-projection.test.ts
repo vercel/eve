@@ -1,6 +1,6 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { describe, expect, it } from "vitest";
 
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   callStatus,
   foldSession,
@@ -10,13 +10,13 @@ import {
 } from "#protocol/session-projection.js";
 
 const at = { sequence: 0, stepIndex: 0, turnId: "turn_0" };
-const fold = (events: readonly UnstampedMessageStreamEvent[]) =>
+const fold = (events: readonly SessionEvent[]) =>
   events.reduce(foldSession, initialSessionProjection());
-const turnStarted: UnstampedMessageStreamEvent = {
+const turnStarted: SessionEvent = {
   type: "turn.started",
   data: { sequence: 0, turnId: "turn_0" },
 };
-const toolCall = (callId: string, toolName = "deploy"): UnstampedMessageStreamEvent => ({
+const toolCall = (callId: string, toolName = "deploy"): SessionEvent => ({
   type: "actions.requested",
   data: { ...at, actions: [{ callId, input: {}, kind: "tool-call", toolName }] },
 });
@@ -48,7 +48,7 @@ describe("foldSession", () => {
           },
           status: "completed",
         },
-      } as UnstampedMessageStreamEvent,
+      } as SessionEvent,
       { type: "turn.completed", data: { sequence: 0, turnId: "turn_0" } },
     ]);
     expect(callStatus(projection, "call_1")).toBe("running");
@@ -83,7 +83,7 @@ describe("foldSession", () => {
           },
           status: "failed",
         },
-      } as UnstampedMessageStreamEvent,
+      } as SessionEvent,
     ]);
     expect(callStatus(projection, "call_1")).toBe("rejected");
   });

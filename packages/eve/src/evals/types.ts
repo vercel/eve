@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { Experimental_DecisionModel as DecisionModel } from "ai";
 
@@ -6,7 +7,6 @@ import type { ClientAgentSession } from "#client/agent-session.js";
 import type {
   RuntimeIdentity,
   RuntimeTraceContext,
-  MessageStreamEvent,
   AgentStartedStreamEvent,
 } from "#protocol/message.js";
 import type {
@@ -128,7 +128,7 @@ export interface EveEvalDerivedFacts {
  */
 export interface EveEvalSessionResult {
   readonly derived: EveEvalDerivedFacts;
-  readonly events: readonly MessageStreamEvent[];
+  readonly events: readonly SessionStreamEvent[];
   readonly primary: boolean;
   readonly sessionId?: string;
   readonly state: ClientSessionState | undefined;
@@ -161,7 +161,7 @@ export interface EveEvalTaskResult {
    */
   readonly status: "completed" | "failed" | "waiting";
   /** The captured stream events from the run. */
-  readonly events: readonly MessageStreamEvent[];
+  readonly events: readonly SessionStreamEvent[];
   /** Lines written through `t.log` while the eval ran. */
   readonly logs?: readonly string[];
   /** Facts extracted from the stream (tool calls, message counts, etc.). */
@@ -270,18 +270,18 @@ export interface EveEvalAssertions {
   maxToolCalls(max: number): AssertionHandle;
   calledSubagent(name: string, options?: EveEvalSubagentCallMatchOptions): AssertionHandle;
   noFailedActions(): AssertionHandle;
-  event<TType extends MessageStreamEvent["type"]>(
+  event<TType extends SessionStreamEvent["type"]>(
     type: TType,
     options?: Omit<Extract<EveEvalEventMatch, { type: TType }>, "type">,
   ): AssertionHandle;
-  notEvent<TType extends MessageStreamEvent["type"]>(
+  notEvent<TType extends SessionStreamEvent["type"]>(
     type: TType,
     options?: Omit<Extract<EveEvalEventMatch, { type: TType }>, "type" | "count">,
   ): AssertionHandle;
   eventOrder(matchers: readonly EveEvalEventMatch[]): AssertionHandle;
   eventsSatisfy(
     label: string,
-    predicate: (events: readonly MessageStreamEvent[]) => boolean,
+    predicate: (events: readonly SessionStreamEvent[]) => boolean,
   ): AssertionHandle;
 }
 
@@ -293,11 +293,11 @@ export interface EveEvalOutputAssertions {
 
 /** Typed stream event returned by {@link EveEvalLiveTurn.waitForEvent}. */
 export type EveEvalStreamEvent<
-  TType extends MessageStreamEvent["type"] = MessageStreamEvent["type"],
-> = Extract<MessageStreamEvent, { type: TType }>;
+  TType extends SessionStreamEvent["type"] = SessionStreamEvent["type"],
+> = Extract<SessionStreamEvent, { type: TType }>;
 
 /** Matcher options for waiting until one live turn emits a specific event. */
-export type EveEvalWaitForEventOptions<TType extends MessageStreamEvent["type"]> = Omit<
+export type EveEvalWaitForEventOptions<TType extends SessionStreamEvent["type"]> = Omit<
   Extract<EveEvalEventMatch, { type: TType }>,
   "count" | "type"
 >;
@@ -310,7 +310,7 @@ export type EveEvalWaitForEventOptions<TType extends MessageStreamEvent["type"]>
  */
 export interface EveEvalLiveTurn {
   /** Events observed on this turn so far. */
-  readonly events: readonly MessageStreamEvent[];
+  readonly events: readonly SessionStreamEvent[];
   /** Session driver that started or owns this turn. */
   readonly session: EveEvalSession;
   /** Durable session id available as soon as the turn is accepted or attached. */
@@ -320,7 +320,7 @@ export interface EveEvalLiveTurn {
   /** Wait for the turn boundary and return the recorded immutable result. */
   result(): Promise<EveEvalTurn>;
   /** Wait until the live stream emits one typed event matching `options`. */
-  waitForEvent<TType extends MessageStreamEvent["type"]>(
+  waitForEvent<TType extends SessionStreamEvent["type"]>(
     type: TType,
     options?: EveEvalWaitForEventOptions<TType>,
   ): Promise<EveEvalStreamEvent<TType>>;
@@ -329,7 +329,7 @@ export interface EveEvalLiveTurn {
 /** Operations and state belonging to one accepted session. */
 interface EveEvalSessionDriver {
   /** All events observed on this session so far. */
-  readonly events: readonly MessageStreamEvent[];
+  readonly events: readonly SessionStreamEvent[];
   /**
    * User and assistant messages observed on this session in turn order. Pass
    * this to a judge's `on` option to grade the complete conversation.
@@ -389,7 +389,7 @@ export interface EveEvalSession
  */
 export interface EveEvalTurn extends EveEvalAssertions, EveEvalOutputAssertions {
   readonly data: unknown;
-  readonly events: readonly MessageStreamEvent[];
+  readonly events: readonly SessionStreamEvent[];
   readonly inputRequests: readonly InputRequest[];
   readonly message: string | undefined;
   /** Session that owns this turn; use it for follow-up messages. */

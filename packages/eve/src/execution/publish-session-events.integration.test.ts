@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { expect, it } from "vitest";
 
 import { replaceDurableSessionSnapshot } from "#execution/durable-session-store.js";
@@ -7,7 +8,7 @@ import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { HarnessSession } from "#harness/types.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
-import { createInputRequestedEvent, type MessageStreamEvent } from "#protocol/message.js";
+import { createInputRequestedEvent } from "#protocol/message.js";
 import { withPublished } from "#internal/testing/session-machine.js";
 import { defineHook } from "#public/definitions/hook.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -21,7 +22,7 @@ const serializedContext = {
 };
 
 async function createPublishingRuntime() {
-  const hooked: { event: MessageStreamEvent; sessionId: string }[] = [];
+  const hooked: { event: SessionStreamEvent; sessionId: string }[] = [];
   const runtime = await createTestRuntime({
     agent: { name: "publish-session-events" },
     modules: [
@@ -42,10 +43,10 @@ async function createPublishingRuntime() {
       },
     ],
   });
-  const streamed: MessageStreamEvent[] = [];
+  const streamed: SessionStreamEvent[] = [];
   const sessionWritable = new WritableStream<Uint8Array>({
     write(chunk) {
-      streamed.push(JSON.parse(new TextDecoder().decode(chunk)) as MessageStreamEvent);
+      streamed.push(JSON.parse(new TextDecoder().decode(chunk)) as SessionStreamEvent);
     },
   });
   return { hooked, runtime, sessionWritable, streamed };

@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 
@@ -12,7 +13,6 @@ import type {
   StreamOptions,
 } from "#client/types.js";
 import type {
-  MessageStreamEvent,
   RuntimeTraceContext,
   AgentStartedStreamEvent,
   TurnFailureStreamEvent,
@@ -49,7 +49,7 @@ import { assertReportedToolName } from "#evals/reported-tool-name.js";
  * Error thrown by {@link EveEvalTurn.expectOk} when a turn failed.
  */
 export class EveEvalTurnFailedError extends Error {
-  readonly event: (TurnFailureStreamEvent & MessageStreamEvent) | undefined;
+  readonly event: (TurnFailureStreamEvent & SessionStreamEvent) | undefined;
   readonly turn: EveEvalTurn;
 
   constructor(turn: EveEvalTurn) {
@@ -80,7 +80,7 @@ export class EvalSessionDriver implements EveEvalSession {
   #lastInput = "";
   readonly #signal: AbortSignal | undefined;
   readonly #collector: AssertionCollector;
-  readonly #events: MessageStreamEvent[] = [];
+  readonly #events: SessionStreamEvent[] = [];
   readonly #primary: boolean;
   readonly #onSessionStart: ((event: EvalSessionStartedEvent) => void) | undefined;
   readonly #traceContexts: RuntimeTraceContext[] = [];
@@ -116,7 +116,7 @@ export class EvalSessionDriver implements EveEvalSession {
     );
   }
 
-  get events(): readonly MessageStreamEvent[] {
+  get events(): readonly SessionStreamEvent[] {
     return this.#events;
   }
 
@@ -253,7 +253,7 @@ export class EvalSessionDriver implements EveEvalSession {
 
   /** @internal */
   consume(
-    events: AsyncIterable<MessageStreamEvent>,
+    events: AsyncIterable<SessionStreamEvent>,
     message?: SendTurnInput["message"],
   ): EveEvalLiveTurn {
     const sessionId = this.sessionId;
@@ -310,7 +310,7 @@ export class EvalSessionDriver implements EveEvalSession {
     };
   }
 
-  #observeEvent(sessionId: string, event: MessageStreamEvent): void {
+  #observeEvent(sessionId: string, event: SessionStreamEvent): void {
     if (event.type !== "session.started" && event.type !== "turn.started") return;
     const traceContext = event.data.trace;
     if (traceContext === undefined) return;
@@ -332,7 +332,7 @@ export class EvalSessionDriver implements EveEvalSession {
 
   #recordTurn(input: {
     readonly data: unknown;
-    readonly events: readonly MessageStreamEvent[];
+    readonly events: readonly SessionStreamEvent[];
     readonly inputRequests: readonly InputRequest[];
     readonly message: string | undefined;
     readonly sessionId: string;
@@ -359,7 +359,7 @@ export class EvalSessionDriver implements EveEvalSession {
     return turn;
   }
 
-  #recordObservedTurn(sessionId: string, events: readonly MessageStreamEvent[]): EveEvalTurn {
+  #recordObservedTurn(sessionId: string, events: readonly SessionStreamEvent[]): EveEvalTurn {
     const summary = summarizeTurnEvents(events);
     return this.#recordTurn({
       data: extractCompletedResult(events),
@@ -389,23 +389,23 @@ export class EvalSessionDriver implements EveEvalSession {
 }
 
 interface LiveEventWaiter {
-  readonly matches: (event: MessageStreamEvent) => boolean;
+  readonly matches: (event: SessionStreamEvent) => boolean;
   readonly reject: (error: Error) => void;
-  readonly resolve: (event: MessageStreamEvent) => void;
+  readonly resolve: (event: SessionStreamEvent) => void;
 }
 
 class EvalLiveTurn implements EveEvalLiveTurn {
   readonly session: EveEvalSession;
   readonly sessionId: string;
   readonly #completion: Promise<EveEvalTurn>;
-  readonly #events: MessageStreamEvent[] = [];
+  readonly #events: SessionStreamEvent[] = [];
   readonly #waiters = new Set<LiveEventWaiter>();
   #waitError: Error | undefined;
 
   constructor(input: {
-    readonly events: AsyncIterable<MessageStreamEvent>;
-    readonly observe: (event: MessageStreamEvent) => void;
-    readonly record: (events: readonly MessageStreamEvent[]) => EveEvalTurn;
+    readonly events: AsyncIterable<SessionStreamEvent>;
+    readonly observe: (event: SessionStreamEvent) => void;
+    readonly record: (events: readonly SessionStreamEvent[]) => EveEvalTurn;
     readonly session: EveEvalSession;
     readonly sessionId: string;
   }) {
@@ -415,7 +415,7 @@ class EvalLiveTurn implements EveEvalLiveTurn {
     void this.#completion.catch(() => {});
   }
 
-  get events(): readonly MessageStreamEvent[] {
+  get events(): readonly SessionStreamEvent[] {
     return this.#events;
   }
 
@@ -427,11 +427,11 @@ class EvalLiveTurn implements EveEvalLiveTurn {
     return await this.#completion;
   }
 
-  async waitForEvent<TType extends MessageStreamEvent["type"]>(
+  async waitForEvent<TType extends SessionStreamEvent["type"]>(
     type: TType,
     options?: EveEvalWaitForEventOptions<TType>,
   ): Promise<EveEvalStreamEvent<TType>> {
-    const matches = (event: MessageStreamEvent): boolean =>
+    const matches = (event: SessionStreamEvent): boolean =>
       event.type === type &&
       (options?.data === undefined ||
         matchesValue(options.data, "data" in event ? event.data : undefined));
@@ -450,9 +450,9 @@ class EvalLiveTurn implements EveEvalLiveTurn {
   }
 
   async #consume(
-    source: AsyncIterable<MessageStreamEvent>,
-    observe: (event: MessageStreamEvent) => void,
-    record: (events: readonly MessageStreamEvent[]) => EveEvalTurn,
+    source: AsyncIterable<SessionStreamEvent>,
+    observe: (event: SessionStreamEvent) => void,
+    record: (events: readonly SessionStreamEvent[]) => EveEvalTurn,
   ): Promise<EveEvalTurn> {
     try {
       let sawBoundary = false;
@@ -492,7 +492,7 @@ class EvalLiveTurn implements EveEvalLiveTurn {
     }
   }
 
-  #resolveWaiters(event: MessageStreamEvent): void {
+  #resolveWaiters(event: SessionStreamEvent): void {
     for (const waiter of this.#waiters) {
       if (!waiter.matches(event)) continue;
       this.#waiters.delete(waiter);
@@ -514,7 +514,7 @@ interface EvalTurn extends EveEvalAssertions, EveEvalOutputAssertions {}
 
 class EvalTurn implements EveEvalTurn {
   readonly data: unknown;
-  readonly events: readonly MessageStreamEvent[];
+  readonly events: readonly SessionStreamEvent[];
   readonly inputRequests: readonly InputRequest[];
   readonly message: string | undefined;
   readonly session: EveEvalSession;
@@ -528,7 +528,7 @@ class EvalTurn implements EveEvalTurn {
     readonly collector: AssertionCollector;
     readonly data: unknown;
     readonly derived: EveEvalDerivedFacts;
-    readonly events: readonly MessageStreamEvent[];
+    readonly events: readonly SessionStreamEvent[];
     readonly inputRequests: readonly InputRequest[];
     readonly message: string | undefined;
     readonly session: EveEvalSession;

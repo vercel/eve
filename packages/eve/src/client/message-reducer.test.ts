@@ -1,3 +1,4 @@
+import type { SessionEvent, SessionStreamEvent } from "#protocol/session-event.js";
 import { describe, expect, it } from "vitest";
 
 import { defaultMessageReducer } from "#client/message-reducer.js";
@@ -23,16 +24,14 @@ import {
   createTurnCancelledEvent,
   createTurnCompletedEvent,
   createTurnFailedEvent,
-  type MessageStreamEvent,
   type TaskSettledStreamEvent,
-  type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import { createTaskStartedEvent } from "#protocol/message.js";
 
 function reduceServerEvents(
   reducer: ReturnType<typeof defaultMessageReducer>,
   data: ReturnType<ReturnType<typeof defaultMessageReducer>["initial"]>,
-  events: readonly UnstampedMessageStreamEvent[],
+  events: readonly SessionEvent[],
 ) {
   let next = data;
   for (const event of stampTestEvents(events)) {
@@ -1862,7 +1861,7 @@ describe("defaultMessageReducer", () => {
     ) =>
       createTaskSettledEvent({ callId: "call_1", taskId: "task_1", turnId: "turn_1", ...outcome });
 
-    function reduceResearchTask(events: readonly UnstampedMessageStreamEvent[]) {
+    function reduceResearchTask(events: readonly SessionEvent[]) {
       const reducer = defaultMessageReducer();
       const [message] = reduceServerEvents(reducer, reducer.initial(), events).messages;
       return { status: message?.metadata?.status, toolPart: message?.parts[1] };
@@ -1957,7 +1956,7 @@ describe("defaultMessageReducer", () => {
     const event = {
       ...createMessageReceivedEvent({ message: "legacy", sequence: 2, turnId: "turn_1" }),
       meta: { at: "2026-07-27T18:04:11.912Z" },
-    } as MessageStreamEvent;
+    } as SessionStreamEvent;
 
     const data = reducer.reduce(reducer.initial(), event);
     expect(data.messages[0]?.id).toBe("turn_1:2:user");

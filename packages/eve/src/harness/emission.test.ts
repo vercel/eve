@@ -1,4 +1,4 @@
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import { eventsOf } from "#harness/publication.js";
 import { eachEvent } from "#internal/testing/session-machine.js";
 import { jsonSchema, type TextStreamPart, type ToolSet } from "ai";
@@ -207,7 +207,7 @@ describe("emitStreamContent action requests", () => {
   });
 
   it("emits tool labels for provider-executed calls", async () => {
-    const emitted: UnstampedMessageStreamEvent[] = [];
+    const emitted: SessionEvent[] = [];
     const emit: HarnessEmitFn = eachEvent(async (event) => {
       emitted.push(event);
     });
@@ -247,7 +247,7 @@ describe("emitStreamContent action requests", () => {
   });
 
   it("emits a provider action batch before any provider result arrives", async () => {
-    const events: UnstampedMessageStreamEvent[] = [];
+    const events: SessionEvent[] = [];
     const emit: HarnessEmitFn = eachEvent(async (event) => {
       events.push(event);
     });

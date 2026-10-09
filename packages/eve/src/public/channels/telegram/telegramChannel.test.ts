@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
@@ -7,7 +8,6 @@ import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   defaultTelegramAuth,
   telegramChannel,
@@ -47,19 +47,12 @@ const stubAlsContext = (() => {
   return ctx;
 })();
 
-function callEvent(
-  adapter: ChannelAdapter,
-  event: UnstampedMessageStreamEvent,
-  ctx: any,
-): Promise<void> {
+function callEvent(adapter: ChannelAdapter, event: SessionEvent, ctx: any): Promise<void> {
   return contextStorage.run(stubAlsContext, () => callAdapterEventHandler(adapter, event, ctx));
 }
 
-function makeEvent<T extends UnstampedMessageStreamEvent["type"]>(
-  type: T,
-  data: unknown,
-): UnstampedMessageStreamEvent {
-  return { type, data } as UnstampedMessageStreamEvent;
+function makeEvent<T extends SessionEvent["type"]>(type: T, data: unknown): SessionEvent {
+  return { type, data } as SessionEvent;
 }
 
 function signedRequest(body: string): Request {

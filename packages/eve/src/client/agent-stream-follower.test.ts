@@ -1,5 +1,6 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Client, type MessageStreamEvent } from "#client/index.js";
+import { Client, type SessionStreamEvent } from "#client/index.js";
 import { AgentStreamFollower } from "#client/agent-stream-follower.js";
 import {
   conversationReducer,
@@ -18,7 +19,6 @@ import {
   createTurnStartedEvent,
   EVE_MESSAGE_STREAM_VERSION,
   EVE_STREAM_VERSION_HEADER,
-  type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 
 afterEach(() => {
@@ -26,10 +26,10 @@ afterEach(() => {
 });
 
 let stamped = 0;
-const stamp = (event: UnstampedMessageStreamEvent) => stampTestEvent(event, stamped++);
+const stamp = (event: SessionEvent) => stampTestEvent(event, stamped++);
 
 /** One reply turn, as a researcher session produces it for a call's message. */
-function reply(turnId: string, message: string): MessageStreamEvent[] {
+function reply(turnId: string, message: string): SessionStreamEvent[] {
   return [
     createTurnStartedEvent({ sequence: 0, turnId }),
     createMessageReceivedEvent({ message: `Question for ${turnId}`, sequence: 0, turnId }),
@@ -45,11 +45,11 @@ function reply(turnId: string, message: string): MessageStreamEvent[] {
 }
 
 /** Serves the child's stream from each request's cursor, holding it open until aborted. */
-function serveChild(events: MessageStreamEvent[]) {
+function serveChild(events: SessionStreamEvent[]) {
   const requests: { path: string; cursor: number; signal?: AbortSignal }[] = [];
   const openStreams = new Set<ReadableStreamDefaultController<Uint8Array>>();
   let delivered = 0;
-  const encode = (event: MessageStreamEvent) =>
+  const encode = (event: SessionStreamEvent) =>
     new TextEncoder().encode(`${JSON.stringify(event)}\n`);
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = new URL(String(input));
@@ -106,7 +106,7 @@ function setup() {
       return state;
     },
     /** Admits a root event the way the conversation client does. */
-    root(event: UnstampedMessageStreamEvent) {
+    root(event: SessionEvent) {
       const accepted = stamp(event);
       apply(accepted);
       follower.acceptParentEvent(accepted);

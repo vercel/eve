@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
@@ -8,7 +9,6 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { SessionKey } from "#context/keys.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { defaultLinearAuth } from "#public/channels/linear/defaults.js";
 import { linearChannel, type LinearChannelState } from "#public/channels/linear/linearChannel.js";
 import { signLinearWebhookBody } from "#public/channels/linear/verify.js";
@@ -51,19 +51,12 @@ const stubAlsContext = (() => {
   return ctx;
 })();
 
-function callEvent(
-  adapter: ChannelAdapter,
-  event: UnstampedMessageStreamEvent,
-  ctx: any,
-): Promise<void> {
+function callEvent(adapter: ChannelAdapter, event: SessionEvent, ctx: any): Promise<void> {
   return contextStorage.run(stubAlsContext, () => callAdapterEventHandler(adapter, event, ctx));
 }
 
-function makeEvent<T extends UnstampedMessageStreamEvent["type"]>(
-  type: T,
-  data: unknown,
-): UnstampedMessageStreamEvent {
-  return { data, type } as UnstampedMessageStreamEvent;
+function makeEvent<T extends SessionEvent["type"]>(type: T, data: unknown): SessionEvent {
+  return { data, type } as SessionEvent;
 }
 
 function jsonResponse(body: unknown, init?: ResponseInit): Response {

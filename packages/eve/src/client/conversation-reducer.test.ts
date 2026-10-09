@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { describe, expect, it } from "vitest";
 import {
   conversationReducer,
@@ -15,13 +16,12 @@ import {
   createTurnCompletedEvent,
   createTurnStartedEvent,
   createTurnWaitingEvent,
-  type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 
 let stamped = 0;
 
 function reduce(
-  events: readonly (UnstampedMessageStreamEvent | ConversationEvent)[],
+  events: readonly (SessionEvent | ConversationEvent)[],
   state: ConversationState = conversationReducer.initial(),
 ): ConversationState {
   let current = state;
@@ -30,7 +30,7 @@ function reduce(
       current,
       event.type.startsWith("client.")
         ? (event as ConversationEvent)
-        : stampTestEvent(event as UnstampedMessageStreamEvent, stamped++),
+        : stampTestEvent(event as SessionEvent, stamped++),
     );
   }
   return current;

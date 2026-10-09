@@ -1,5 +1,5 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { followClientSession, type ClientSession } from "#client/session.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import type { StreamOptions } from "#client/types.js";
 
 export interface SessionEventStreamOptions {
@@ -7,7 +7,7 @@ export interface SessionEventStreamOptions {
   readonly catchUp?: boolean;
   readonly headers?: Readonly<Record<string, string>>;
   readonly streamReconnectPolicy?: StreamOptions["streamReconnectPolicy"];
-  readonly onEvent: (event: MessageStreamEvent) => void;
+  readonly onEvent: (event: SessionStreamEvent) => void;
   readonly onError: (error: unknown) => void;
 }
 
@@ -38,7 +38,7 @@ export class SessionEventStream {
           if (this.#controller.signal.aborted) return;
           options.onEvent(event);
           for (const reader of this.#readers) reader.push(event);
-          if (event.type === "session.completed" || event.type === "session.failed") break;
+          if (event.type === "session.ended") break;
         }
         this.#caughtUp.resolve();
         this.#finish();
@@ -81,8 +81,8 @@ export class SessionEventStream {
   }
 }
 
-export class SessionEventReader implements AsyncIterable<MessageStreamEvent>, Disposable {
-  #events: MessageStreamEvent[] = [];
+export class SessionEventReader implements AsyncIterable<SessionStreamEvent>, Disposable {
+  #events: SessionStreamEvent[] = [];
   #wake = Promise.withResolvers<void>();
   #ended = false;
   #error: unknown;
@@ -98,7 +98,7 @@ export class SessionEventReader implements AsyncIterable<MessageStreamEvent>, Di
     if (signal?.aborted) abort();
   }
 
-  push(event: MessageStreamEvent): void {
+  push(event: SessionStreamEvent): void {
     if (this.#ended) return;
     this.#events.push(event);
     this.#wake.resolve();
@@ -121,7 +121,7 @@ export class SessionEventReader implements AsyncIterable<MessageStreamEvent>, Di
     this.#events = [];
   }
 
-  async *[Symbol.asyncIterator](): AsyncGenerator<MessageStreamEvent> {
+  async *[Symbol.asyncIterator](): AsyncGenerator<SessionStreamEvent> {
     for (;;) {
       while (this.#events.length > 0) yield this.#events.shift()!;
       if (this.#ended) {

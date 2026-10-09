@@ -1,7 +1,7 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { UserContent } from "ai";
 import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 
-import type { MessageStreamEvent } from "#protocol/message.js";
 import type { CancelTurnResult } from "#protocol/cancel-turn.js";
 import type { ClearStatus } from "#protocol/clear-session.js";
 import type { CompactStatus } from "#protocol/compact-session.js";
@@ -289,15 +289,15 @@ export interface MessageResult<TOutput = unknown> {
   readonly data: TOutput | undefined;
 
   /**
-   * The final completed assistant message text, or `undefined` if no terminal
-   * `message.completed` event was observed.
+   * The reply's text: the text parts the turn's `turn.settled` lists as its reply, or `undefined`
+   * when the response ended without one.
    */
   readonly message: string | undefined;
 
   /**
    * All events received during this turn.
    */
-  readonly events: MessageStreamEvent[];
+  readonly events: SessionStreamEvent[];
 
   /**
    * HITL input requests emitted in this response and still open at its boundary.
@@ -312,12 +312,11 @@ export interface MessageResult<TOutput = unknown> {
   readonly sessionId: string;
 
   /**
-   * How the turn ended.
+   * How the response ended.
    *
-   * - `"completed"`: the session finished (`session.completed`).
-   * - `"waiting"`: the session is parked for the next user message
-   *   (`session.waiting`).
-   * - `"failed"`: the session ended in a terminal failure (`session.failed`).
+   * - `"completed"`: its turn settled (`turn.settled`).
+   * - `"waiting"`: its turn waits on a person (`delivery.settled` with `"awaiting-input"`).
+   * - `"failed"`: its turn or the session failed.
    */
   readonly status: "completed" | "failed" | "waiting";
 }
@@ -338,7 +337,7 @@ export interface ClientSessionState {
  */
 export interface SessionSnapshot {
   /** Events from the start of the session through the durable tail observed when the read opened. */
-  readonly events: readonly MessageStreamEvent[];
+  readonly events: readonly SessionStreamEvent[];
 
   /** Session cursor advanced exactly past {@link events}. */
   readonly session: ClientSessionState;

@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { describe, expect, it } from "vitest";
 import {
   conversationReducer,
@@ -21,15 +22,14 @@ import {
   createTaskStartedEvent,
   createTurnCompletedEvent,
   createTurnStartedEvent,
-  type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 
 let stamped = 0;
-const stamp = (event: UnstampedMessageStreamEvent) => stampTestEvent(event, stamped++);
+const stamp = (event: SessionEvent) => stampTestEvent(event, stamped++);
 
 function reduce(
   state: ConversationState,
-  events: readonly (UnstampedMessageStreamEvent | ConversationEvent)[],
+  events: readonly (SessionEvent | ConversationEvent)[],
 ): ConversationState {
   let current = state;
   for (const event of events) {
@@ -37,14 +37,14 @@ function reduce(
       current,
       event.type.startsWith("client.")
         ? (event as ConversationEvent)
-        : stamp(event as UnstampedMessageStreamEvent),
+        : stamp(event as SessionEvent),
     );
   }
   return current;
 }
 
 /** Child events as the root's follower observes them. */
-function observe(state: ConversationState, events: readonly UnstampedMessageStreamEvent[]) {
+function observe(state: ConversationState, events: readonly SessionEvent[]) {
   return reduce(
     state,
     events.map((event) => ({

@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { jsonSchema } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
@@ -20,7 +21,6 @@ import {
   textStreamResult,
   toolCallsStreamResult,
 } from "#internal/testing/approval-resume.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { always } from "#tools/approval/policies.js";
 import {
   clearDurableDynamicCallbacks,
@@ -46,7 +46,7 @@ function setup(
   tools: readonly HarnessToolDefinition[],
   overrides: Partial<ToolLoopHarnessConfig> = {},
 ) {
-  const events: UnstampedMessageStreamEvent[] = [];
+  const events: SessionEvent[] = [];
   const model = new MockLanguageModelV4({
     doStream: vi
       .fn()
@@ -108,9 +108,9 @@ function requests(session: HarnessSession) {
 /** `session.cancel()`, through the machine's transition. */
 async function cancelTurn(
   session: HarnessSession,
-  record: (event: UnstampedMessageStreamEvent) => void,
+  record: (event: SessionEvent) => void,
 ): Promise<HarnessSession> {
-  const published: UnstampedMessageStreamEvent[] = [];
+  const published: SessionEvent[] = [];
   const cancelled = await applyTransition(
     session,
     cancel(sessionView(storedProjection(session.state), session.state)),

@@ -1,9 +1,9 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { promptQueueEvents, type PromptQueueState } from "#channel/prompt-queue.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { enterSessionProjection, recordPublishedEvent } from "#harness/session-machine/current.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { InputRequest } from "#shared/input.js";
 
 const AT = { sequence: 0, stepIndex: 0, turnId: "turn_0" };
@@ -18,11 +18,11 @@ function question(requestId: string): InputRequest {
   };
 }
 
-function requested(...requests: InputRequest[]): UnstampedMessageStreamEvent {
+function requested(...requests: InputRequest[]): SessionEvent {
   return { data: { requests, ...AT }, type: "input.requested" };
 }
 
-function resolved(requestId: string): UnstampedMessageStreamEvent {
+function resolved(requestId: string): SessionEvent {
   return {
     data: { resolutions: [{ kind: "question", outcome: "answered", requestId }], ...AT },
     type: "input.resolved",
@@ -32,7 +32,7 @@ function resolved(requestId: string): UnstampedMessageStreamEvent {
 /** Publishes `events` as a session does: each handler runs, then the session records it. */
 async function publish(
   show: (channel: unknown, request: InputRequest) => Promise<boolean | void>,
-  events: readonly UnstampedMessageStreamEvent[],
+  events: readonly SessionEvent[],
 ) {
   const handlers = promptQueueEvents(show) as Record<
     string,

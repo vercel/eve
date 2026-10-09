@@ -1,6 +1,6 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import type { TaskCardView } from "#channel/task-card.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
 import type { SlackMessage } from "#public/channels/slack/inbound.js";
 import type {
@@ -10,39 +10,34 @@ import type {
   SlackEventContext,
 } from "#public/channels/slack/slackChannel.js";
 
-type EventData<T extends UnstampedMessageStreamEvent["type"]> =
-  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
+type EventData<T extends SessionEvent["type"]> =
+  Extract<SessionEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /** The session events a Slack renderer can handle, in no particular order. */
 const SLACK_RENDERED_EVENTS = [
-  "action.partial",
-  "action.result",
-  "actions.requested",
   "approval.candidate",
   "approval.settled",
   "authorization.completed",
   "authorization.required",
+  "call.progress",
+  "call.requested",
+  "call.settled",
+  "content.completed",
+  "content.delta",
+  "delivery.settled",
   "input.requested",
   "input.resolved",
-  "message.appended",
-  "message.completed",
-  "reasoning.appended",
-  "reasoning.completed",
-  "session.completed",
-  "session.failed",
-  "session.waiting",
-  "step.started",
+  "model.started",
+  "session.ended",
   "task.settled",
   "task.started",
-  "turn.cancelled",
-  "turn.completed",
-  "turn.failed",
+  "turn.paused",
+  "turn.settled",
   "turn.started",
-  "turn.waiting",
 ] as const;
 
 export type SlackRenderedEvent = (typeof SLACK_RENDERED_EVENTS)[number];
-type SlackSessionEvent = Exclude<SlackRenderedEvent, "authorization.required" | "session.failed">;
+type SlackSessionEvent = Exclude<SlackRenderedEvent, "authorization.required">;
 
 /**
  * Runs the rest of the chain, ending with eve's default. Pass changed data to
@@ -63,7 +58,7 @@ export type SlackRenderHandler<T extends SlackSessionEvent> = (
  * Session event handlers of one {@link SlackRenderer}. `authorization.required`
  * receives the private delivery surface, because the challenge is a
  * credential; its `next` reaches eve's default, which posts the public,
- * link-free status. `session.failed` has no session context.
+ * link-free status.
  */
 export type SlackRendererEvents = {
   readonly [T in SlackSessionEvent]?: SlackRenderHandler<T>;
@@ -73,11 +68,6 @@ export type SlackRendererEvents = {
     channel: SlackAuthorizationEventContext,
     ctx: SessionContext,
     next: SlackRenderNext<"authorization.required">,
-  ) => void | Promise<void>;
-  readonly "session.failed"?: (
-    data: EventData<"session.failed">,
-    channel: SlackEventContext,
-    next: SlackRenderNext<"session.failed">,
   ) => void | Promise<void>;
 };
 
@@ -158,23 +148,14 @@ function composeEvents(
       return handler === undefined ? [] : [handler];
     });
     if (handlers.length === 0 && fallback === undefined) continue;
-    events[type] =
-      type === "session.failed"
-        ? (data, channel) =>
-            runChain(
-              handlers,
-              data,
-              (handler, value, next) => handler(value, channel, next),
-              (value) => fallback?.(value, channel),
-            )
-        : (data, channel, ctx) =>
-            runChain(
-              handlers,
-              data,
-              (handler, value, next) =>
-                handler(value, userChannel(type, channel as SlackEventContext), ctx, next),
-              (value) => fallback?.(value, channel, ctx),
-            );
+    events[type] = (data, channel, ctx) =>
+      runChain(
+        handlers,
+        data,
+        (handler, value, next) =>
+          handler(value, userChannel(type, channel as SlackEventContext), ctx, next),
+        (value) => fallback?.(value, channel, ctx),
+      );
   }
   return events as SlackChannelInternalEvents;
 }

@@ -1,9 +1,8 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { extname } from "node:path";
 
-import type { MessageStreamEvent } from "#protocol/message.js";
-
 /** Formats the user and assistant messages observed in one eval session. */
-export function formatEvalTranscript(events: readonly MessageStreamEvent[]): string {
+export function formatEvalTranscript(events: readonly SessionStreamEvent[]): string {
   const messages: string[] = [];
   for (const event of events) {
     if (event.type === "message.received") {

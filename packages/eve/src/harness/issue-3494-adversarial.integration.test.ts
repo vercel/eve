@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { eachEvent } from "#internal/testing/session-machine.js";
 import { jsonSchema, simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
@@ -18,7 +19,6 @@ import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { always } from "#tools/approval/policies.js";
 import { createAuthorizationRequiredEvent } from "#protocol/message.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
@@ -44,7 +44,7 @@ function fixture(
   outputSchema?: HarnessSession["outputSchema"],
 ) {
   const script: Reply[] = [];
-  const events: UnstampedMessageStreamEvent[] = [];
+  const events: SessionEvent[] = [];
   const executions: string[] = [];
   const steps: unknown[] = [];
   const prompts: unknown[] = [];
@@ -214,7 +214,7 @@ function fixture(
     get session() {
       return session;
     },
-    record(event: UnstampedMessageStreamEvent) {
+    record(event: SessionEvent) {
       events.push(event);
       recorder.record(event);
     },

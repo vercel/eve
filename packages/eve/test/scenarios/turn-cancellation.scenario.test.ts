@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { Client } from "../../src/client/client.js";
-import { type MessageStreamEvent, isCurrentTurnBoundaryEvent } from "../../src/protocol/message.js";
+import { type SessionStreamEvent, isCurrentTurnBoundaryEvent } from "../../src/protocol/message.js";
 import { createEveSessionCancelRoutePath } from "../../src/protocol/routes.js";
 import {
   type ScenarioAppDescriptor,
@@ -333,11 +333,11 @@ describe("turn cancellation descendant cascade", () => {
   );
 });
 
-type AgentStartedEvent = Extract<MessageStreamEvent, { type: "agent.started" }>;
+type AgentStartedEvent = Extract<SessionStreamEvent, { type: "agent.started" }>;
 
 async function readAgentStarts(input: {
   readonly count: number;
-  readonly iterator: AsyncIterator<MessageStreamEvent>;
+  readonly iterator: AsyncIterator<SessionStreamEvent>;
   readonly label: string;
 }): Promise<readonly AgentStartedEvent[]> {
   return await withinEventDeadline(
@@ -354,7 +354,7 @@ async function readAgentStarts(input: {
   );
 }
 
-function isWaitForCancelToolCall(event: MessageStreamEvent): boolean {
+function isWaitForCancelToolCall(event: SessionStreamEvent): boolean {
   return (
     event.type === "actions.requested" &&
     event.data.actions.some(
@@ -364,10 +364,10 @@ function isWaitForCancelToolCall(event: MessageStreamEvent): boolean {
 }
 
 async function readUntil(input: {
-  readonly iterator: AsyncIterator<MessageStreamEvent>;
+  readonly iterator: AsyncIterator<SessionStreamEvent>;
   readonly label: string;
-  readonly matches: (event: MessageStreamEvent) => boolean;
-}): Promise<{ readonly event: MessageStreamEvent }> {
+  readonly matches: (event: SessionStreamEvent) => boolean;
+}): Promise<{ readonly event: SessionStreamEvent }> {
   return await withinEventDeadline(
     (async () => {
       while (true) {
@@ -381,10 +381,10 @@ async function readUntil(input: {
 }
 
 async function readThroughBoundary(input: {
-  readonly iterator: AsyncIterator<MessageStreamEvent>;
+  readonly iterator: AsyncIterator<SessionStreamEvent>;
   readonly label: string;
-}): Promise<readonly MessageStreamEvent[]> {
-  const events: MessageStreamEvent[] = [];
+}): Promise<readonly SessionStreamEvent[]> {
+  const events: SessionStreamEvent[] = [];
   await withinEventDeadline(
     (async () => {
       while (true) {
@@ -405,7 +405,7 @@ async function readThroughBoundary(input: {
   return events;
 }
 
-function expectCancellationBoundary(events: readonly MessageStreamEvent[]): void {
+function expectCancellationBoundary(events: readonly SessionStreamEvent[]): void {
   const types = events.map((event) => event.type);
   expect(types).toContain("turn.cancelled");
   expect(types.at(-1)).toBe("session.waiting");

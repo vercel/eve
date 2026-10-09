@@ -1,7 +1,7 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import { getRun } from "#internal/workflow/runtime.js";
-import { createLegacyEventReader } from "#protocol/legacy-lines.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
+import { createEventReader } from "#protocol/session-lines.js";
 import { isStoredLine, type StoredLine } from "#protocol/session-events/envelope.js";
 
 /** Options for {@link streamSessionEvents}. */
@@ -45,10 +45,10 @@ export function readSessionRecords(
 export function readSessionEventStream(
   sessionId: string,
   startIndex?: number,
-): ReadableStream<MessageStreamEvent> {
+): ReadableStream<SessionStreamEvent> {
   const lines = streamSessionLines(sessionId, { startIndex });
-  const reader = createLegacyEventReader();
-  return new ReadableStream<MessageStreamEvent>({
+  const reader = createEventReader();
+  return new ReadableStream<SessionStreamEvent>({
     async pull(controller) {
       while (true) {
         const next = await lines.next();
@@ -128,8 +128,8 @@ export async function* streamSessionLines(
 export async function* streamSessionEvents(
   sessionId: string,
   options: SessionEventStreamOptions = {},
-): AsyncGenerator<MessageStreamEvent, void, undefined> {
-  const reader = createLegacyEventReader();
+): AsyncGenerator<SessionStreamEvent, void, undefined> {
+  const reader = createEventReader();
   for await (const { line, position } of streamSessionLines(sessionId, options)) {
     if (line !== undefined) yield* reader.read(line, position);
   }

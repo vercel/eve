@@ -1,22 +1,18 @@
 import type { EveMessage, EveMessageData, EveMessagePart } from "#client/message-reducer-types.js";
-import type { MessageReceivedPart } from "#protocol/message.js";
+import type { UserPart } from "#protocol/session-events/envelope.js";
 
-export function projectReceivedParts(
-  parts: readonly MessageReceivedPart[] | undefined,
-  message: string,
-): readonly EveMessagePart[] {
-  return (
-    parts?.map((part) =>
-      part.type === "text"
-        ? { state: "done", text: part.text, type: "text" }
-        : {
-            filename: part.filename,
-            mediaType: part.mediaType,
-            size: part.size,
-            type: "file",
-            url: part.url,
-          },
-    ) ?? [{ state: "done", text: message, type: "text" }]
+/** A person's parts as UI message parts: text, and files by their metadata. */
+export function projectReceivedParts(parts: readonly UserPart[]): readonly EveMessagePart[] {
+  return parts.map((part) =>
+    part.kind === "text"
+      ? { state: "done", text: part.text, type: "text" }
+      : {
+          filename: part.filename,
+          mediaType: part.mediaType,
+          size: part.size,
+          type: "file",
+          url: part.url,
+        },
   );
 }
 

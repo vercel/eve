@@ -1,7 +1,8 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TEST_USAGE, stampTestEvent } from "#internal/testing/events.js";
-import { createSessionWaitingEvent, type MessageStreamEvent } from "#protocol/message.js";
+import { createSessionWaitingEvent } from "#protocol/message.js";
 import { sessions } from "#public/server/index.js";
 
 const getRunMock = vi.fn();
@@ -17,7 +18,7 @@ const encoder = new TextEncoder();
  * `open: true`, reads never reach EOF, like a live session.
  */
 function mockSessionStream(
-  stored: readonly MessageStreamEvent[],
+  stored: readonly SessionStreamEvent[],
   options: { open?: boolean } = {},
 ) {
   const startIndexes: Array<number | undefined> = [];
@@ -49,8 +50,8 @@ const storedEvents = (count: number) =>
     stampTestEvent(createSessionWaitingEvent(TEST_USAGE), index),
   );
 
-async function collect(iterable: AsyncIterable<MessageStreamEvent>) {
-  const events: MessageStreamEvent[] = [];
+async function collect(iterable: AsyncIterable<SessionStreamEvent>) {
+  const events: SessionStreamEvent[] = [];
   for await (const event of iterable) events.push(event);
   return events;
 }
@@ -97,7 +98,7 @@ describe("sessions.attach().stream()", () => {
     const stored = storedEvents(2);
     const stream = mockSessionStream(stored, { open: true });
     const abort = new AbortController();
-    const events: MessageStreamEvent[] = [];
+    const events: SessionStreamEvent[] = [];
 
     for await (const event of sessions.attach("wrun_1").stream({ signal: abort.signal })) {
       events.push(event);

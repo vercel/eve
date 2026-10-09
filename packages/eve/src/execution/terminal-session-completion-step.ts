@@ -1,7 +1,7 @@
 type HarnessTurnRef = { readonly id: string; readonly sequence: number };
 import { publishTerminalSessionEvent } from "#execution/publish-session-events.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-import { sessionCompleted } from "#harness/session-machine/transitions.js";
+import type { SessionProjection } from "#protocol/session-projection.js";
 
 /** Emits a terminal `session.completed` outside a turn. */
 export async function emitTerminalSessionCompletionStep(input: {
@@ -10,10 +10,10 @@ export async function emitTerminalSessionCompletionStep(input: {
   /** The session's last turn, reported to channel handlers as `ctx.session.turn`. */
   readonly turn?: HarnessTurnRef;
   readonly usage: TokenUsage | undefined;
-  /** The position of the line the event takes. */
-  readonly position?: number;
+  /** The session's last checkpointed projection. */
+  readonly projection?: SessionProjection;
 }): Promise<void> {
   "use step";
 
-  await publishTerminalSessionEvent({ ...input, event: sessionCompleted(input.usage) });
+  await publishTerminalSessionEvent({ ...input, ending: { outcome: "completed" } });
 }

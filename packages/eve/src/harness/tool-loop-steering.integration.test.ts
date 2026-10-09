@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { jsonSchema } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
@@ -23,7 +24,6 @@ import {
 } from "#harness/messages.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { always } from "#tools/approval/policies.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
@@ -109,7 +109,7 @@ describe("generation steering with the real AI SDK", () => {
     async (boundary) => {
       const logs = captureLogRecords();
       const steering = new AbortController();
-      const events: UnstampedMessageStreamEvent[] = [];
+      const events: SessionEvent[] = [];
       const model = new MockLanguageModelV3({
         doStream: async () => {
           if (boundary === "step.failed") throw new Error("Model unavailable");
@@ -187,7 +187,7 @@ describe("generation steering with the real AI SDK", () => {
     steering.abort();
     const doStream = vi.fn<MockLanguageModelV3["doStream"]>();
     const model = new MockLanguageModelV3({ doStream });
-    const events: UnstampedMessageStreamEvent[] = [];
+    const events: SessionEvent[] = [];
     const result = await createToolLoopHarness({
       steeringSignal: steering.signal,
       tools: new Map(),
@@ -207,7 +207,7 @@ describe("generation steering with the real AI SDK", () => {
   it("interrupts before provider search, drops late output, and resumes the same turn", async () => {
     const steering = new AbortController();
     const reasoning = Promise.withResolvers<void>();
-    const events: UnstampedMessageStreamEvent[] = [];
+    const events: SessionEvent[] = [];
     let firstStream: ReadableStreamDefaultController<Part>;
     let providerSignal: AbortSignal | undefined;
     const doStream = vi
@@ -284,7 +284,7 @@ describe("generation steering with the real AI SDK", () => {
   it("ends the superseded step with a terminal step event before the next step starts", async () => {
     const steering = new AbortController();
     const pending = Promise.withResolvers<void>();
-    const events: UnstampedMessageStreamEvent[] = [];
+    const events: SessionEvent[] = [];
     const doStream = vi
       .fn<MockLanguageModelV3["doStream"]>()
       .mockImplementationOnce(async () => {
@@ -332,7 +332,7 @@ describe("generation steering with the real AI SDK", () => {
   it("settles a call steering cut while its approval was decided, after the response ended", async () => {
     const steering = new AbortController();
     const execute = vi.fn(async () => "saved");
-    const events: UnstampedMessageStreamEvent[] = [];
+    const events: SessionEvent[] = [];
     const model = new MockLanguageModelV3({
       doStream: async () => ({
         stream: new ReadableStream<Part>({
@@ -526,7 +526,7 @@ describe("generation steering with the real AI SDK", () => {
 
   it("does not interrupt after assistant text has been published", async () => {
     const steering = new AbortController();
-    const events: UnstampedMessageStreamEvent[] = [];
+    const events: SessionEvent[] = [];
     let providerSignal: AbortSignal | undefined;
     const model = new MockLanguageModelV3({
       doStream: async (options) => {

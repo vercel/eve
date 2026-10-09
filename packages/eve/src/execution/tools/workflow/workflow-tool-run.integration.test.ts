@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { hydrateStepArguments } from "#compiled/@workflow/core/serialization.js";
 import { getWorld, start } from "#internal/workflow/runtime.js";
@@ -23,7 +24,7 @@ import {
   stepReferenceWorkflow,
   workflowContextMisuseWorkflow,
 } from "#internal/testing/workflow-tool-fixtures.js";
-import type { InputRequestedStreamEvent, MessageStreamEvent } from "#protocol/message.js";
+import type { InputRequestedStreamEvent } from "#protocol/message.js";
 import {
   buildWorkflowToolSerializedContext,
   createWorkflowToolRuntime,
@@ -414,12 +415,12 @@ describe("workflow tools", () => {
           kind: "send",
           payload: { inputResponses: [{ optionId: "approve", requestId }] },
         });
-      const requestIds = (events: readonly MessageStreamEvent[]) =>
+      const requestIds = (events: readonly SessionStreamEvent[]) =>
         filterEventsByType(events, "input.requested").flatMap((event) =>
           event.data.requests.map((request) => request.requestId),
         );
       try {
-        const asked: MessageStreamEvent[] = [];
+        const asked: SessionStreamEvent[] = [];
         await stream.nextUntil((event) => {
           asked.push(event);
           return event.type === "turn.waiting" && requestIds(asked).length === 2;
@@ -483,7 +484,7 @@ describe("workflow tools", () => {
         const requestId = requested[0]!.data.requests[0]!.requestId;
 
         const outputs: string[] = [];
-        const resumedEvents: MessageStreamEvent[] = [];
+        const resumedEvents: SessionStreamEvent[] = [];
         // A replayed parked boundary may arrive before the deadline result.
         for (let attempt = 0; attempt < 5 && outputs.length === 0; attempt += 1) {
           const resumed = await stream.nextTurn();

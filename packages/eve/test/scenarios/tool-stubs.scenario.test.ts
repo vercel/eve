@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { Client } from "../../src/client/client.js";
-import type { MessageStreamEvent } from "../../src/protocol/message.js";
+import type { SessionStreamEvent } from "../../src/protocol/message.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { startEveDev } from "./dev-server-harness.js";
 
@@ -156,7 +156,7 @@ export default eveChannel({
   }
 }, 360_000);
 
-function results(events: readonly MessageStreamEvent[]): unknown[] {
+function results(events: readonly SessionStreamEvent[]): unknown[] {
   return events.flatMap((event) =>
     event.type === "action.result" &&
     event.data.result.kind === "tool-result" &&

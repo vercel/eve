@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { validateToolStubTargets } from "#tool-stubs/validate-targets.js";
 import { context, trace } from "#compiled/@opentelemetry/api/index.js";
 import {
@@ -37,7 +38,6 @@ import {
   type WorkflowFunction,
   type WorkflowMetadata,
 } from "#internal/workflow/runtime.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
@@ -203,7 +203,7 @@ export function createWorkflowRuntime(config: {
         throw error;
       }
 
-      let events: ReadableStream<MessageStreamEvent> | undefined;
+      let events: ReadableStream<SessionStreamEvent> | undefined;
       const getEvents = () => {
         events ??= readSessionEventStream(run.runId);
         return events;
@@ -232,7 +232,7 @@ export function createWorkflowRuntime(config: {
     async getEventStream(
       sessionId: string,
       options?: GetEventStreamOptions,
-    ): Promise<ReadableStream<MessageStreamEvent>> {
+    ): Promise<ReadableStream<SessionStreamEvent>> {
       return readSessionEventStream(sessionId, options?.startIndex);
     },
 

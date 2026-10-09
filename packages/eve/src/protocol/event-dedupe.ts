@@ -1,4 +1,4 @@
-import type { MessageStreamEvent } from "#protocol/message.js";
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 
 /** Remembers which session-stream events have already been consumed. */
 type EventDeduper = {
@@ -6,13 +6,13 @@ type EventDeduper = {
    * Records `event` and returns true when it is new — false when its id was
    * already admitted, so the caller should drop it.
    */
-  admit(event: MessageStreamEvent): boolean;
+  admit(event: SessionStreamEvent): boolean;
   /** Number of ids currently remembered. */
   readonly size: number;
 };
 
 /**
- * Creates an {@link EventDeduper} keyed on the durable `meta.id`.
+ * Creates an {@link EventDeduper} keyed on each event's position.
  *
  * Catches a reconnect that overlaps handled events, a rewind to an earlier
  * `startIndex`, and a saved log merged with the prefix a live stream replays.
@@ -29,11 +29,11 @@ export function createEventDeduper(): EventDeduper {
 
   return {
     admit(event) {
-      // Absent on the wire for events persisted before stream version 20,
-      // despite being required by `MessageStreamEventMeta`. Admit them:
-      // there is nothing to deduplicate on.
-      const id: string | undefined = event.meta?.id;
-      if (id === undefined) return true;
+      // A record's position is its identity: its line, and its index in the line. A reader
+      // without one has nothing to deduplicate on.
+      const position = event.meta?.position;
+      if (position === undefined) return true;
+      const id = `${String(position.line)}.${String(position.index)}`;
       if (seen.has(id)) return false;
       seen.add(id);
       return true;

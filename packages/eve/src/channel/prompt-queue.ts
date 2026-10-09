@@ -1,9 +1,9 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { contextStorage } from "#context/container.js";
 import type { ContextReader } from "#context/key.js";
 import { firstOpenInput } from "#harness/open-input-request.js";
 import { currentProjection } from "#harness/session-machine/current.js";
 import { foldSession } from "#protocol/session-projection.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { InputRequest } from "#shared/input.js";
 
 /**
@@ -26,7 +26,7 @@ export interface PromptQueueState {
 export function promptQueueEvents<TChannel extends { state: PromptQueueState }>(
   show: (channel: TChannel, request: InputRequest) => Promise<boolean | void>,
 ) {
-  async function refresh(channel: TChannel, event: UnstampedMessageStreamEvent) {
+  async function refresh(channel: TChannel, event: SessionEvent) {
     // The session records the event only after its handlers run.
     const first = firstOpenInput(foldSession(publishedProjection(channel), event))?.request;
     if (first === undefined) {
@@ -40,19 +40,19 @@ export function promptQueueEvents<TChannel extends { state: PromptQueueState }>(
 
   return {
     async "input.requested"(
-      data: Extract<UnstampedMessageStreamEvent, { type: "input.requested" }>["data"],
+      data: Extract<SessionEvent, { type: "input.requested" }>["data"],
       channel: TChannel,
     ): Promise<void> {
       await refresh(channel, { data, type: "input.requested" });
     },
     async "input.resolved"(
-      data: Extract<UnstampedMessageStreamEvent, { type: "input.resolved" }>["data"],
+      data: Extract<SessionEvent, { type: "input.resolved" }>["data"],
       channel: TChannel,
     ): Promise<void> {
       await refresh(channel, { data, type: "input.resolved" });
     },
     async "approval.settled"(
-      data: Extract<UnstampedMessageStreamEvent, { type: "approval.settled" }>["data"],
+      data: Extract<SessionEvent, { type: "approval.settled" }>["data"],
       channel: TChannel,
     ): Promise<void> {
       await refresh(channel, { data, type: "approval.settled" });

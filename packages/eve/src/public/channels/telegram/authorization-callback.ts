@@ -1,7 +1,7 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { ChannelResolveSession } from "#channel/channel-operations.js";
 import type { Session } from "#channel/session.js";
 import { createLogger } from "#internal/logging.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import { foldSessionEvents } from "#protocol/session-projection.js";
 import {
   TELEGRAM_AUTHORIZATION_CALLBACK_PREFIX,
@@ -77,7 +77,7 @@ async function findOpenAuthorization(session: Session) {
 }
 
 /** The session's events up to its tail when the read starts. Its stream follows the session. */
-async function* eventsToTail(session: Session): AsyncGenerator<MessageStreamEvent> {
+async function* eventsToTail(session: Session): AsyncGenerator<SessionStreamEvent> {
   const tailIndex = await session.getStreamTailIndex();
   if (tailIndex < 0) return;
   let index = 0;

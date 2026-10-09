@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { createChannelOperations } from "#channel/channel-operations.js";
 import { type CompiledChannel, isCompiledChannel } from "#channel/compiled-channel.js";
 import { type RouteHandlerArgs, isHttpRouteDefinition } from "#channel/routes.js";
@@ -21,7 +22,6 @@ import {
   askRetroDayWorkflow,
 } from "#internal/testing/channel-conformance/question-workflows.js";
 import { getWorld } from "#internal/workflow/runtime.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import {
   type ConnectionAuthorizationChallenge,
   ConnectionAuthorizationRequiredError,
@@ -1100,7 +1100,7 @@ async function waitForRest(sessions: readonly Session[], wait: Wait): Promise<vo
 }
 
 /** Whether an event asks the person `prompt`. */
-const asks = (prompt: string) => (event: MessageStreamEvent) =>
+const asks = (prompt: string) => (event: SessionStreamEvent) =>
   event.type === "input.requested" &&
   event.data.requests.some((request) => request.prompt === prompt);
 
@@ -1134,7 +1134,7 @@ async function settles(session: Session, prompt: string): Promise<boolean> {
 }
 
 /** Whether an event asks the person to sign in. */
-const isSignIn = (event: MessageStreamEvent) => event.type === "authorization.required";
+const isSignIn = (event: SessionStreamEvent) => event.type === "authorization.required";
 
 /**
  * Whether the session held for the person after it last emitted an event
@@ -1144,7 +1144,7 @@ const isSignIn = (event: MessageStreamEvent) => event.type === "authorization.re
  */
 async function holdsFor(
   session: Session,
-  asked: (event: MessageStreamEvent) => boolean,
+  asked: (event: SessionStreamEvent) => boolean,
 ): Promise<boolean> {
   const tail = await session.getStreamTailIndex();
   if (tail < 0) return false;

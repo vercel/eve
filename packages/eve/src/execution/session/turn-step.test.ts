@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { jsonSchema, type ModelMessage } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
@@ -60,7 +61,6 @@ import {
   createStepStartedEvent,
   createTurnCompletedEvent,
   createTurnStartedEvent,
-  type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import { setLogRecordSubscriber, type LogRecord } from "#internal/logging.js";
 import type { HookContext } from "#public/definitions/hook.js";
@@ -1265,7 +1265,7 @@ describe("turnStep", () => {
       );
       const start = queued === undefined ? parked : withQueuedInput(parked, queued);
       const controller = new AbortController();
-      const events: UnstampedMessageStreamEvent[] = [];
+      const events: SessionEvent[] = [];
       const execute = vi.fn(async () => {
         // The tool has started its side effect when the turn is cancelled.
         if (cutTool && execute.mock.calls.length === 1) {
@@ -1355,7 +1355,7 @@ describe("turnStep", () => {
       return { cancelled, cancelledEvents, execute, next, nextEvents: [...events], session };
     }
 
-    const resolutions = (events: readonly UnstampedMessageStreamEvent[]) =>
+    const resolutions = (events: readonly SessionEvent[]) =>
       events.filter((event) => event.type === "input.resolved");
 
     it("keeps a denial the cancelled step published", async () => {
@@ -1495,7 +1495,7 @@ describe("turnStep", () => {
     installSessionStoreMocks([createStubSession()]);
 
     const continueStep: StepFn = async (session) => ({ next: null, session });
-    let publish: ((event: UnstampedMessageStreamEvent) => Promise<void>) | undefined;
+    let publish: ((event: SessionEvent) => Promise<void>) | undefined;
     // The step asks, as a step does, by publishing the request.
     const execute = vi.fn(async (session: HarnessSession): Promise<StepResult> => {
       await publish?.(
@@ -2378,7 +2378,7 @@ describe("turnStep", () => {
           seen.push("typed");
           ctx.cancel();
         },
-        "*": (event: UnstampedMessageStreamEvent) => {
+        "*": (event: SessionEvent) => {
           seen.push(`wildcard:${event.type}`);
         },
       });

@@ -21,7 +21,7 @@ import type {
   InputOption,
   InputRequest,
   InputResponse,
-  MessageStreamEvent,
+  SessionStreamEvent,
 } from "#client/index.js";
 import { renderApplicationInfo } from "#cli/commands/info.js";
 import type { EveCliSetupStepEvent, EveCliSetupTerminalEvent } from "#cli/telemetry/index.js";
@@ -1545,7 +1545,7 @@ export class EveTUIRunner {
   }
 
   /** Records session activity that the diagnostics log keeps regardless of display. */
-  #recordDiagnostics(event: MessageStreamEvent): void {
+  #recordDiagnostics(event: SessionStreamEvent): void {
     const diagnostics = this.#diagnostics;
     if (diagnostics === undefined) return;
     switch (event.type) {

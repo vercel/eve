@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { describe, expect, it } from "vitest";
 import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
@@ -16,7 +17,6 @@ import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { workflowEntry } from "#execution/session/entry.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { createEveSessionCancelRoutePath } from "#protocol/routes.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { createChannelAddress } from "#channel/channel-address.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import { createSession } from "#channel/session.js";
@@ -259,7 +259,7 @@ async function expectNoStepRetries(runId: string): Promise<void> {
   expect([...completions.entries()].filter(([, count]) => count > 1)).toEqual([]);
 }
 
-function expectNoFailureEvents(events: readonly UnstampedMessageStreamEvent[]): void {
+function expectNoFailureEvents(events: readonly SessionEvent[]): void {
   const types = events.map((event) => event.type);
   for (const failureType of FAILURE_EVENT_TYPES) {
     expect(types).not.toContain(failureType);

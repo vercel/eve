@@ -1,20 +1,16 @@
+import type { SessionEvent, SessionStreamEvent } from "#protocol/session-event.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { MessageResponse } from "#client/message-response.js";
 import { TEST_USAGE, stampTestEvents } from "#internal/testing/events.js";
-import {
-  createSessionWaitingEvent,
-  createTurnStartedEvent,
-  type MessageStreamEvent,
-  type UnstampedMessageStreamEvent,
-} from "#protocol/message.js";
+import { createSessionWaitingEvent, createTurnStartedEvent } from "#protocol/message.js";
 
 function createDeferred<T>() {
   return Promise.withResolvers<T>();
 }
 
-async function consume(response: MessageResponse): Promise<MessageStreamEvent[]> {
-  const events: MessageStreamEvent[] = [];
+async function consume(response: MessageResponse): Promise<SessionStreamEvent[]> {
+  const events: SessionStreamEvent[] = [];
   for await (const event of response) events.push(event);
   return events;
 }
@@ -30,7 +26,7 @@ describe("MessageResponse cancellation", () => {
     const [turnStarted, boundary] = stampTestEvents([
       createTurnStartedEvent({ sequence: 0, turnId: "turn_1" }),
       createSessionWaitingEvent(TEST_USAGE),
-    ] as UnstampedMessageStreamEvent[]);
+    ] as SessionEvent[]);
     const cancelTurn = vi.fn(async () => acceptedCancellation());
     const response = new MessageResponse({
       cancelTurn,
@@ -63,7 +59,7 @@ describe("MessageResponse cancellation", () => {
     const [turnStarted, boundary] = stampTestEvents([
       createTurnStartedEvent({ sequence: 0, turnId: "turn_1" }),
       createSessionWaitingEvent(TEST_USAGE),
-    ] as UnstampedMessageStreamEvent[]);
+    ] as SessionEvent[]);
     const cancelTurn = vi
       .fn<(turnId: string) => Promise<ReturnType<typeof acceptedCancellation>>>()
       .mockRejectedValueOnce(new Error("Cancel unavailable"))
@@ -90,9 +86,7 @@ describe("MessageResponse cancellation", () => {
   });
 
   it("drops a queued cancellation when the response settles without starting a turn", async () => {
-    const [boundary] = stampTestEvents([
-      createSessionWaitingEvent(TEST_USAGE),
-    ] as UnstampedMessageStreamEvent[]);
+    const [boundary] = stampTestEvents([createSessionWaitingEvent(TEST_USAGE)] as SessionEvent[]);
     const cancelTurn = vi.fn(async () => acceptedCancellation());
     const response = new MessageResponse({
       cancelTurn,

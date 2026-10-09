@@ -1,7 +1,7 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { expect, it, vi } from "vitest";
 
 import type { Session } from "#channel/session.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import { dispatchTelegramAuthorizationCallback } from "#public/channels/telegram/authorization-callback.js";
 import { initialTelegramState } from "#public/channels/telegram/state.js";
 import type { TelegramHandle } from "#public/channels/telegram/telegramChannel.js";
@@ -20,9 +20,9 @@ async function tapAuthorize(events: readonly unknown[]) {
   const session: Pick<Session, "getEventStream" | "getStreamTailIndex"> = {
     async getEventStream() {
       // The stream stays open past its tail, as a live session's does.
-      return new ReadableStream<MessageStreamEvent>({
+      return new ReadableStream<SessionStreamEvent>({
         start(controller) {
-          for (const event of events) controller.enqueue(event as MessageStreamEvent);
+          for (const event of events) controller.enqueue(event as SessionStreamEvent);
         },
       });
     },
