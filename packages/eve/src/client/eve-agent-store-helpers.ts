@@ -40,12 +40,23 @@ export function settledStatus(
   return conversation.activeTurnId === undefined ? "ready" : "streaming";
 }
 
+/**
+ * Whether the session's last line ends a response. A boundary commits with what it settles, such
+ * as a pause with the deliveries it answers for now, so any fact of the last line counts.
+ */
 export function isSettledSessionTail(
   events: readonly SessionStreamEvent[],
   conversation: ConversationState,
 ): boolean {
   const tail = events.at(-1);
-  return tail !== undefined && isResponseBoundary(tail, conversation);
+  if (tail === undefined) return false;
+  const line = tail.meta.position.line;
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]!;
+    if (event.meta.position.line !== line) return false;
+    if (isResponseBoundary(event, conversation)) return true;
+  }
+  return false;
 }
 
 /** A server ignores answers to requests it already settled, so the store never sends them. */

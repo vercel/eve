@@ -1,3 +1,4 @@
+import { SESSION_LIMIT_CONTINUATION_TOOL_NAME } from "#protocol/budget-request.js";
 import type {
   ActionResultError,
   AuthorizationOutcome,
@@ -49,6 +50,8 @@ export interface SessionInput {
   readonly status: "open" | "responded" | "settled";
   readonly response?: InputResponse;
   readonly outcome?: string;
+  /** Answers submitted to the request that haven't settled yet. */
+  readonly pendingResponseIds?: readonly string[];
 }
 
 /** One call that started or reached a task, settled by its `task.settled`. */
@@ -498,7 +501,9 @@ export function foldSession<S extends SessionProjection>(
       const input: Mutable<SessionInput> = {
         request: inputRequestOf(interactionId, request, kind, {
           callId,
-          toolName: state.calls[callId]?.name ?? kind,
+          toolName:
+            state.calls[callId]?.name ??
+            (kind === "session-limit" ? SESSION_LIMIT_CONTINUATION_TOOL_NAME : kind),
         }),
         status: "open",
         ...at,
@@ -514,6 +519,34 @@ export function foldSession<S extends SessionProjection>(
         );
       }
       return next;
+    }
+    case "response.submitted": {
+      const { interactionId, responseId } = typed.data;
+      const current = state.inputs[interactionId];
+      if (current === undefined || current.status === "settled") return state;
+      const pendingResponseIds = [...(current.pendingResponseIds ?? []), responseId];
+      return {
+        ...state,
+        inputs: { ...state.inputs, [interactionId]: { ...current, pendingResponseIds } },
+      };
+    }
+    // An answer the server refused, or that never applied, leaves its request answerable again.
+    case "response.settled": {
+      const { outcome, responseId } = typed.data;
+      const entry = Object.entries(state.inputs).find(([, input]) =>
+        input.pendingResponseIds?.includes(responseId),
+      );
+      if (entry === undefined) return state;
+      const [interactionId, current] = entry;
+      const remaining = current.pendingResponseIds?.filter((id) => id !== responseId) ?? [];
+      const { pendingResponseIds: _pending, response: _response, ...rest } = current;
+      const reopened: Mutable<SessionInput> =
+        outcome !== "applied" && current.status === "responded" && remaining.length === 0
+          ? { ...rest, status: "open" }
+          : { ...current };
+      if (remaining.length > 0) reopened.pendingResponseIds = remaining;
+      else delete reopened.pendingResponseIds;
+      return { ...state, inputs: { ...state.inputs, [interactionId]: reopened } };
     }
     case "interaction.settled": {
       const { interactionId, outcome, reason, response } = typed.data;

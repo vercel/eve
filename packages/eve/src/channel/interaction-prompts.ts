@@ -2,6 +2,7 @@
 // requests a commit opened, a sign-in prompt, how a request or sign-in settled, and a responder an
 // approval refused. Built-in channels render these; authored handlers can read the facts directly.
 
+import { SESSION_LIMIT_CONTINUATION_TOOL_NAME } from "#protocol/budget-request.js";
 import type { AuthorizationOutcome, InputResolution } from "#protocol/message.js";
 import type { Principal, Scope } from "#protocol/session-events/envelope.js";
 import type {
@@ -14,8 +15,6 @@ import { interactionOwner } from "#protocol/session-projection/selectors.js";
 import type { InteractionRow, SessionView } from "#protocol/session-projection/tables.js";
 import type { InputOption, InputRequest, InputResponse } from "#shared/input.js";
 import { isJsonObjectValue, type JsonObject } from "#shared/json.js";
-
-const BUDGET_TOOL_NAME = "session_limit_continuation";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
@@ -38,7 +37,9 @@ export function inputRequestOf(view: SessionView, row: InteractionRow): InputReq
       callId: call?.callId ?? row.interactionId,
       input,
       kind: "tool-call",
-      toolName: call?.capability.name ?? (kind === "session-limit" ? BUDGET_TOOL_NAME : kind),
+      toolName:
+        call?.capability.name ??
+        (kind === "session-limit" ? SESSION_LIMIT_CONTINUATION_TOOL_NAME : kind),
     },
     kind,
     prompt: request.prompt,

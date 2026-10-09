@@ -164,6 +164,31 @@ export function deferInput(view: SessionView, input: HarnessStepInput): Transiti
   return { events: [], turn: withQueued(view.turn, input) };
 }
 
+/** `input` without the answers whose responses already settled. */
+function withoutSettledAnswers(
+  input: HarnessStepInput | undefined,
+  isSettled: (responseId: string) => boolean,
+): HarnessStepInput | undefined {
+  if (input === undefined) return undefined;
+  const settledResponse = (response: InputResponse) => {
+    const binding = responseBindingFor(input, response);
+    return binding !== undefined && isSettled(binding.responseId);
+  };
+  const result: { -readonly [K in keyof HarnessStepInput]: HarnessStepInput[K] } = { ...input };
+  const bindings = input.responseBindings?.filter((binding) => !isSettled(binding.responseId));
+  const responses = input.inputResponses?.filter((response) => !settledResponse(response));
+  const attributed = input.attributedInputResponses?.filter(
+    ({ response }) => !settledResponse(response),
+  );
+  if (bindings === undefined || bindings.length === 0) delete result.responseBindings;
+  else result.responseBindings = bindings;
+  if (responses === undefined || responses.length === 0) delete result.inputResponses;
+  else result.inputResponses = responses;
+  if (attributed === undefined || attributed.length === 0) delete result.attributedInputResponses;
+  else result.attributedInputResponses = attributed;
+  return result;
+}
+
 function withQueued(turn: TurnState, queued: HarnessStepInput | undefined): TurnState {
   if (queued === undefined || isEmptyInput(queued)) return turn;
   return {
@@ -267,8 +292,10 @@ export function answer(
       turn,
       ...answered,
     }) satisfies Answered;
+  // An answer that already settled, as one a response policy refused, never waits to be
+  // submitted again.
   const queue = (queued: HarnessStepInput | undefined) => {
-    turn = withQueued(turn, queued);
+    turn = withQueued(turn, withoutSettledAnswers(queued, responses.isSettled));
   };
   // Answers without a policy to pass are admitted as they arrive: they stand, revisable, until
   // their batch has every answer.
@@ -503,6 +530,8 @@ interface ResponseLedger {
   submit(bindings: readonly ResponseSubmittedData[]): void;
   /** Whether this commit or an earlier one recorded the answer. */
   known(responseId: string): boolean;
+  /** Whether the answer settled, in this commit or an earlier one. */
+  isSettled(responseId: string): boolean;
   admit(responseId: string): void;
   settle(responseId: string, outcome: ResponseOutcome, reason?: string): void;
   /** Settles every other open answer to an interaction that `decidedBy` settles. */
@@ -568,6 +597,7 @@ function responseLedger(
     },
     facts: () => facts,
     known: (responseId) => status.has(responseId),
+    isSettled: (responseId) => status.get(responseId) === "settled",
     submit,
     latest(interactionId) {
       return openFor(interactionId).at(-1);
@@ -764,7 +794,21 @@ export function requireSignIn(
   const opening = input.challenges.filter(
     (challenge) => tables.interactions[signInInteractionId(challenge)] === undefined,
   );
+  const stopped = new Set([...(input.callIdsByName?.values() ?? [])].flat());
   const events: SessionEvent[] = [
+    // A call a sign-in stopped leaves its step: it settles here, and the model calls it again,
+    // under a new call, once the sign-in completes.
+    ...[...stopped].flatMap((callId): SessionEvent[] => {
+      const call = tables.calls[callId];
+      if (call === undefined || call.status === "settled") return [];
+      return [
+        {
+          data: { callId, outcome: "interrupted", reason: "authorization-required" },
+          scope: { turnId },
+          type: "call.settled",
+        },
+      ];
+    }),
     // A newer attempt replaces the one it supersedes.
     ...supersededChallenges(view.signIns, input.challenges).flatMap((superseded) => {
       const interactionId = signInInteractionId(superseded);
@@ -801,7 +845,6 @@ export function requireSignIn(
         ? input.queued
         : coalesceTurnInputs(view.turn.queued, input.queued);
   const signIns = withSignIns(view.signIns, input.challenges);
-  const stopped = new Set([...(input.callIdsByName?.values() ?? [])].flat());
   const suspended = view.turn.suspended.map((step) =>
     [...stepCallIds(step)].some((callId) => stopped.has(callId))
       ? { ...step, messages: withoutCalls(step.messages, stopped) }

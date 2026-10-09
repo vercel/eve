@@ -148,6 +148,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       // An answer joins the turn it resumes; between turns, it has nothing to join.
       await step.apply(join(step.view(), { deliveries: input.deliveries }));
     }
+    // Input that opened no turn and found none open, such as a stale answer eve dropped,
+    // settled above and leaves nothing to run.
+    if (!intake.opensTurn && step.view().projection.activeTurnId === undefined) {
+      return { next: null, session: step.session };
+    }
     await admitApprovedWork(step, intake.approved);
 
     return runModelStep(step, {

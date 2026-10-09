@@ -116,6 +116,21 @@ function openDeliveriesOf(projection: SessionProjection, turnId: string): readon
     .map((delivery) => delivery.deliveryId);
 }
 
+/**
+ * Deliveries that carried answers the turn hasn't acted on yet, such as one answer of several a
+ * paused step waits on: admitted, never consumed, and still open.
+ */
+function answeringDeliveriesOf(projection: SessionProjection): readonly string[] {
+  const deliveries = projection.view?.deliveries ?? {};
+  return [
+    ...new Set(
+      Object.values(projection.view?.responses ?? {})
+        .filter((response) => deliveries[response.deliveryId]?.status === "admitted")
+        .map((response) => response.deliveryId),
+    ),
+  ];
+}
+
 // ---------------------------------------------------------------------------
 // Turns
 // ---------------------------------------------------------------------------
@@ -327,7 +342,11 @@ export function hold(
     { data: { awaiting, turnId }, scope: { turnId }, type: "turn.paused" },
   ];
   if (input.on === "input") {
-    for (const deliveryId of openDeliveriesOf(projection, turnId)) {
+    const answered = [
+      ...openDeliveriesOf(projection, turnId),
+      ...answeringDeliveriesOf(projection),
+    ];
+    for (const deliveryId of new Set(answered)) {
       events.push({
         data: { deliveryId, outcome: "awaiting-input", turnId },
         type: "delivery.settled",

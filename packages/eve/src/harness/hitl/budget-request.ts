@@ -7,12 +7,12 @@
  * identical session state always produces an identical prompt — no model call
  * is involved.
  */
+import { SESSION_LIMIT_CONTINUATION_TOOL_NAME } from "#protocol/budget-request.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 import type { SessionUsageLimitViolation } from "#harness/turn-tag-state.js";
 
 /** Synthetic action tool name carried by session-limit continuation requests. */
-const SESSION_LIMIT_CONTINUATION_TOOL_NAME = "session_limit_continuation";
 
 /** Option id that grants a fresh token budget window. */
 const SESSION_LIMIT_CONTINUE_OPTION_ID = "continue";
