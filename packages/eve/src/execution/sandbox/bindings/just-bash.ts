@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { type Dirent } from "node:fs";
 import { mkdir, readdir, rename, rm, stat } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 import {
   copyDirectoryAtomically,
@@ -43,11 +43,7 @@ const JUST_BASH_CACHE_DIRECTORY_NAME = "just-bash";
 export const JUST_BASH_PROVIDER_NAME = "just-bash";
 
 type JustBashPreparedArtifact = { readonly templateRootPath: string };
-type JustBashSessionState = {
-  readonly generation: string;
-  readonly rootPath: string;
-  readonly version: 2;
-};
+type JustBashSessionState = { readonly rootPath: string; readonly version: 2 };
 
 export function createJustBashSandboxProvider(
   authoredOptions: JustBashSandboxCreateOptions | undefined = undefined,
@@ -121,12 +117,13 @@ export function createJustBashSandboxProvider(
       }
       return { templateRootPath };
     },
-    async resume(context, artifactValue, stateValue) {
-      const artifact = requirePreparedJustBashArtifact(artifactValue);
+    // The session root keeps its files across template changes, like a named
+    // Vercel sandbox, so resume reopens it rather than matching the artifact.
+    async resume(context, _artifactValue, stateValue) {
       const state = requireJustBashSessionState(stateValue);
-      const generation = createSandboxProviderIdentity({ artifact, version: 1 });
-      const expectedRootPath = sessionRootPath(context, artifact);
-      if (state.generation !== generation || state.rootPath !== expectedRootPath) {
+      if (
+        state.rootPath !== resolveSessionRootPath(context.storagePath, basename(state.rootPath))
+      ) {
         throw new Error("just-bash session state is incompatible with this environment.");
       }
       if (!(await pathExists(state.rootPath))) {
@@ -140,11 +137,7 @@ export function createJustBashSandboxProvider(
       await ensureSessionRoot(artifact, rootPath);
       return {
         handle: await openHandle(context, rootPath, options),
-        state: {
-          generation: createSandboxProviderIdentity({ artifact, version: 1 }),
-          rootPath,
-          version: 2,
-        },
+        state: { rootPath, version: 2 },
       };
     },
   };
@@ -258,12 +251,11 @@ function requireJustBashSessionState(state: SandboxPreparedArtifact): JustBashSe
   if (
     !isSandboxPreparedArtifactRecord(state) ||
     state.version !== 2 ||
-    typeof state.generation !== "string" ||
     typeof state.rootPath !== "string"
   ) {
     throw new Error("Invalid just-bash session state.");
   }
-  return { generation: state.generation, rootPath: state.rootPath, version: 2 };
+  return { rootPath: state.rootPath, version: 2 };
 }
 
 function resolveTemplateRootPath(storagePath: string, key: string): string {
