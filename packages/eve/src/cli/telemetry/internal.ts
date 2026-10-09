@@ -8,7 +8,7 @@ import {
   writeEveTelemetryInternalTeam,
 } from "#cli/telemetry/preference.js";
 import { readVercelCliFileConnection } from "#internal/model-auth/vercel-cli.js";
-import { isObject } from "#shared/guards.js";
+import { vercelApiJson } from "#internal/model-auth/vercel.js";
 
 const INTERNAL_EMAIL_DOMAIN = "vercel.com";
 const REQUEST_TIMEOUT_MS = 1_000;
@@ -40,18 +40,19 @@ export async function resolveEveTelemetryInternal(): Promise<boolean | undefined
     ) {
       return saved.internal;
     }
-    const response = await fetch(
-      `https://api.vercel.com/v2/teams/${encodeURIComponent(connection.teamId)}`,
-      {
-        headers: { authorization: `Bearer ${connection.token}` },
-        redirect: "error",
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      },
-    );
     let internal: boolean | undefined;
-    if (response.ok) {
-      const team: unknown = await response.json();
-      internal = isObject(team) && team.emailDomain === INTERNAL_EMAIL_DOMAIN;
+    try {
+      const team = await vercelApiJson(
+        `https://api.vercel.com/v2/teams/${encodeURIComponent(connection.teamId)}`,
+        {
+          headers: { authorization: `Bearer ${connection.token}` },
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        },
+      );
+      // vercelApiJson returns, rather than throws, error responses with a string `error`.
+      if (team.error === undefined) internal = team.emailDomain === INTERNAL_EMAIL_DOMAIN;
+    } catch {
+      // A failed lookup stays unknown and is saved so it is retried only after a day.
     }
     await writeEveTelemetryInternalTeam({ teamHash, internal, checkedAt: Date.now() }).catch(
       () => {},

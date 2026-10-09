@@ -162,10 +162,24 @@ describe("resolveEveTelemetryInternal", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("stays unknown without a file-stored CLI login or when the network fails", async () => {
+  it("saves a network failure like an error response", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
-    await expect(resolveEveTelemetryInternal()).resolves.toBeUndefined();
 
+    await expect(resolveEveTelemetryInternal()).resolves.toBeUndefined();
+    expect(writeEveTelemetryInternalTeam).toHaveBeenCalledWith({
+      teamHash: "salt:team_selected",
+      internal: undefined,
+      checkedAt: NOW,
+    });
+  });
+
+  it("stays unknown for an error response with a string error", async () => {
+    stubTeam({ error: "forbidden" }, 403);
+
+    await expect(resolveEveTelemetryInternal()).resolves.toBeUndefined();
+  });
+
+  it("stays unknown without a file-stored CLI login", async () => {
     vi.mocked(readVercelCliFileConnection).mockResolvedValue(undefined);
     await expect(resolveEveTelemetryInternal()).resolves.toBeUndefined();
 
