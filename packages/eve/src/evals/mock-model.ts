@@ -49,6 +49,9 @@ export interface MockModelToolResult {
   readonly isError: boolean;
 }
 
+/** How many call ids this process derived, so each derived id is new. */
+let derivedCallIds = 0;
+
 /** Normalized input supplied to a {@link MockModelResponder}. */
 export interface MockModelRequest {
   /** Every prompt message in order, with text content extracted. */
@@ -71,7 +74,10 @@ export interface MockModelToolCall {
   readonly name: string;
   /** JSON-serializable tool input. Defaults to an empty object. */
   readonly input?: unknown;
-  /** Stable call id. eve derives one when omitted. */
+  /**
+   * The call's id. eve derives a new one when omitted. A session's call ids never repeat, so a
+   * responder that calls a tool again, as after a sign-in, passes a new id.
+   */
   readonly id?: string;
 }
 
@@ -284,9 +290,11 @@ function createGenerateResult(
   for (const [index, toolCall] of toolCalls.entries()) {
     content.push({
       input: JSON.stringify(toolCall.input ?? {}),
+      // Call ids name calls for the whole session, so a derived one never repeats: a model asked
+      // again after a sign-in dropped its call sees the same prompt and makes a new call.
       toolCallId:
         toolCall.id ??
-        `mock-tool-call-${countUserMessages(options)}-${countToolResults(options)}-${index + 1}`,
+        `mock-tool-call-${countUserMessages(options)}-${countToolResults(options)}-${index + 1}-${++derivedCallIds}`,
       toolName: toolCall.name,
       type: "tool-call",
     });

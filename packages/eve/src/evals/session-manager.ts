@@ -1,5 +1,6 @@
 import { createLogger } from "#internal/logging.js";
 import type { ClientSession } from "#client/session.js";
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { CreateSessionOptions, SendTurnInput, SendTurnOptions } from "#client/types.js";
 import type { Client } from "#client/client.js";
 import { AssertionCollector } from "#evals/assertions/collector.js";
@@ -120,9 +121,10 @@ export class EvalSessionManager {
     return await cleanupEvalSessions(this.#sessions, signal);
   }
 
-  #register(session: ClientSession): EvalSessionDriver {
+  #register(session: ClientSession, history?: readonly SessionStreamEvent[]): EvalSessionDriver {
     const driver = new EvalSessionDriver({
       collector: this.#collector,
+      history,
       onSessionStart: this.#onSessionStart,
       onTurn: (completed) => {
         this.#lastTurnSession = completed;
@@ -139,8 +141,15 @@ export class EvalSessionManager {
     sessionId: string,
     options?: { readonly startIndex?: number },
   ): EvalSessionDriver {
+    const startIndex = options?.startIndex ?? 0;
+    // What this eval already read of the session names the calls a later read settles.
+    const history = this.#sessions
+      .filter((driver) => driver.sessionId === sessionId)
+      .flatMap((driver) => driver.events)
+      .filter((event) => event.meta.position.line < startIndex);
     return this.#register(
-      this.#client.sessions.attach(sessionId, { streamIndex: options?.startIndex ?? 0 }),
+      this.#client.sessions.attach(sessionId, { streamIndex: startIndex }),
+      history,
     );
   }
 }

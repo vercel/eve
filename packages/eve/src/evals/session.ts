@@ -79,6 +79,8 @@ export class EvalSessionDriver implements EveEvalSession {
   readonly #signal: AbortSignal | undefined;
   readonly #collector: AssertionCollector;
   readonly #events: SessionStreamEvent[] = [];
+  /** Earlier events that name calls and tasks this driver's turns settle; never reported. */
+  readonly #history: readonly SessionStreamEvent[];
   readonly #primary: boolean;
   readonly #onSessionStart: ((event: EvalSessionStartedEvent) => void) | undefined;
   readonly #traceContexts: RuntimeTraceContext[] = [];
@@ -94,7 +96,10 @@ export class EvalSessionDriver implements EveEvalSession {
     readonly session: ClientSession;
     readonly onTurn: (session: EvalSessionDriver) => void;
     readonly signal?: AbortSignal;
+    /** What this eval already read of the session before this driver attached. */
+    readonly history?: readonly SessionStreamEvent[];
   }) {
+    this.#history = input.history ?? [];
     this.#collector = input.collector;
     this.#onSessionStart = input.onSessionStart;
     this.#primary = input.primary;
@@ -341,7 +346,7 @@ export class EvalSessionDriver implements EveEvalSession {
 
     const derived = deriveRunFacts(input.events, {
       sessionId: input.sessionId,
-      usageEvents: this.#events,
+      usageEvents: this.#history.length === 0 ? this.#events : [...this.#history, ...this.#events],
     });
     const turn = new EvalTurn({
       collector: this.#collector,

@@ -2,7 +2,7 @@ import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { ChildOpenedData } from "#protocol/session-events/families/child.js";
 import { foldSession, initialSessionProjection } from "#protocol/session-projection.js";
 import type { TaskStartedData } from "#protocol/session-events/families/task.js";
-import type { CallOutcome } from "#protocol/session-events/families/call.js";
+import type { CallOutcome, CallRequestedData } from "#protocol/session-events/families/call.js";
 import type { InputRequest } from "#shared/input.js";
 import { isJsonObjectValue, type JsonObject, type JsonValue } from "#shared/json.js";
 import { addTokenUsage, type TokenUsage } from "#shared/token-usage.js";
@@ -66,6 +66,13 @@ export function deriveRunFacts(
     (options?.usageEvents ?? [])
       .filter((event) => event.type === "task.started")
       .map((event) => [event.data.taskId, event.data]),
+  );
+  // A call a turn settles may have been requested in an earlier segment, as an approved call
+  // is. `call.settled` names its call only by id, so the request names it.
+  const earlierRequests = new Map<string, CallRequestedData>(
+    (options?.usageEvents ?? []).flatMap((event) =>
+      event.type === "call.requested" ? [[event.data.callId, event.data] as const] : [],
+    ),
   );
   const agentCallIds = new Set<string>();
   const outputs = new Map<string, JsonValue | undefined>();
@@ -142,6 +149,21 @@ export function deriveRunFacts(
               ? undefined
               : outputs.get(outputOf.callId);
         outputs.set(callId, output);
+        const earlier = earlierRequests.get(callId);
+        if (earlier !== undefined && !toolCallsByCallId.has(callId) && !skillLoads.has(callId)) {
+          if (earlier.capability.kind === "tool") {
+            const input = isJsonObjectValue(earlier.input) ? earlier.input : {};
+            ensureToolCall(callId, earlier.capability.name, input);
+          } else if (earlier.capability.kind === "skill") {
+            skillLoads.set(callId, {
+              output: undefined,
+              sessionId,
+              skill: earlier.capability.name,
+              status: "pending",
+              turnIndex: Math.max(turnIndex, 0),
+            });
+          }
+        }
         if (agentCallIds.has(callId))
           settledTaskCalls.set(callId, {
             output,
