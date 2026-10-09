@@ -5,9 +5,8 @@ import type { AddressInfo } from "node:net";
 import { createEmulator, type Emulator } from "emulate";
 import {
   Client,
-  type ActionResultStreamEvent,
-  type AuthorizationCompletedStreamEvent,
-  type AuthorizationRequiredStreamEvent,
+  type InteractionOpened,
+  type InteractionSettled,
   type SessionStreamEvent,
 } from "eve/client";
 
@@ -47,8 +46,8 @@ import { theme } from "./lib/theme.ts";
  *   2. `authorization.completed` carries
  *      `outcome: "authorized"`.
  *   3. After the resume, the marker token surfaces in the stream:
- *      either in the MCP tool's `action.result`, or echoed verbatim in
- *      the assistant's `message.completed`. The marker is random per
+ *      either in the MCP tool's `call.settled`, or echoed verbatim in
+ *      the assistant's reply `content.completed`. The marker is random per
  *      run and only ever produced by the bearer-gated MCP stub, so its
  *      presence proves the OAuth token reached MCP.
  *   4. A different user on the same anchored thread cannot reuse the
@@ -146,17 +145,22 @@ runEnvironment("tui-connection-auth-user", async ({ cleanup, target: resolveTarg
   const session = client.sessions.attach(sessionId);
   const stream = session.stream();
 
-  let requiredEvent: AuthorizationRequiredStreamEvent | undefined;
-  let completedEvent: AuthorizationCompletedStreamEvent | undefined;
+  let requiredEvent: InteractionOpened | undefined;
+  let completedEvent: InteractionSettled | undefined;
   let toolResultMatched = false;
   let markerEchoedInMessage = false;
+  const markerCalls = new Set<string>();
 
   for await (const event of stream as AsyncIterable<SessionStreamEvent>) {
-    if (event.type === "authorization.required" && event.data.name === "stub-mcp-user") {
+    if (
+      event.type === "interaction.opened" &&
+      event.data.request.kind === "sign-in" &&
+      event.data.request.signIn?.name === "stub-mcp-user"
+    ) {
       requiredEvent = event;
-      const challengeUrl = event.data.authorization?.url;
+      const challengeUrl = event.data.request.signIn.url;
       if (challengeUrl === undefined) {
-        throw new Error("authorization.required missing challenge.url");
+        throw new Error("The sign-in interaction is missing its challenge URL.");
       }
       const parsed = new URL(challengeUrl);
       const form = new URLSearchParams({
@@ -189,81 +193,80 @@ runEnvironment("tui-connection-auth-user", async ({ cleanup, target: resolveTarg
       })();
     }
 
-    if (event.type === "authorization.completed" && event.data.name === "stub-mcp-user") {
+    if (
+      event.type === "interaction.settled" &&
+      event.data.interactionId === requiredEvent?.data.interactionId
+    ) {
       completedEvent = event;
     }
 
-    if (event.type === "action.result") {
-      const ar = event as ActionResultStreamEvent;
-      const result = ar.data.result;
-      // Match on the marker as well as the stable tool-name suffix. The marker
-      // is random per run and only the bearer-gated MCP stub can emit it.
-      if (
-        result.kind === "tool-result" &&
-        result.toolName.includes("echo_marker") &&
-        ar.data.status !== "failed"
-      ) {
-        const output = result.output;
-        const serialized = typeof output === "string" ? output : JSON.stringify(output ?? "");
-        if (serialized.includes(MARKER_TOKEN)) {
-          toolResultMatched = true;
-        }
+    if (event.type === "call.requested" && event.data.capability.name.includes("echo_marker")) {
+      markerCalls.add(event.data.callId);
+    }
+    // Match on the marker as well as the stable tool-name suffix. The marker
+    // is random per run and only the bearer-gated MCP stub can emit it.
+    if (
+      event.type === "call.settled" &&
+      markerCalls.has(event.data.callId) &&
+      event.data.outcome === "completed"
+    ) {
+      const output = event.data.output;
+      const serialized = typeof output === "string" ? output : JSON.stringify(output ?? "");
+      if (serialized.includes(MARKER_TOKEN)) {
+        toolResultMatched = true;
       }
     }
 
     // Fallback proof: the prompt instructs the model to echo the tool's
-    // returned text verbatim, so the final assistant message carries the
-    // marker even if the result event is unavailable.
+    // returned text verbatim, so the reply carries the marker even if the
+    // result event is unavailable.
     if (
-      event.type === "message.completed" &&
-      typeof event.data.message === "string" &&
-      event.data.message.includes(MARKER_TOKEN)
+      event.type === "content.completed" &&
+      event.data.phase === "reply" &&
+      typeof event.data.value === "string" &&
+      event.data.value.includes(MARKER_TOKEN)
     ) {
       markerEchoedInMessage = true;
     }
 
     if (
-      (event.type === "session.waiting" && completedEvent !== undefined) ||
-      event.type === "session.completed" ||
-      event.type === "session.failed"
+      (event.type === "turn.settled" && completedEvent !== undefined) ||
+      event.type === "session.ended"
     ) {
       break;
     }
   }
 
   if (requiredEvent === undefined) {
-    throw new Error("Did not see authorization.required for stub-mcp-user.");
+    throw new Error("Did not see a sign-in interaction for stub-mcp-user.");
   }
-  if (requiredEvent.data.webhookUrl === undefined || requiredEvent.data.webhookUrl.length === 0) {
-    throw new Error("authorization.required.webhookUrl was empty.");
+  const callbackUrl = requiredEvent.data.request.signIn?.callbackUrl;
+  if (callbackUrl === undefined || callbackUrl.length === 0) {
+    throw new Error("The sign-in's callbackUrl was empty.");
   }
-  console.log(
-    theme.muted(
-      `[oauth-user] _required event observed, webhookUrl ${requiredEvent.data.webhookUrl}`,
-    ),
-  );
+  console.log(theme.muted(`[oauth-user] sign-in observed, callbackUrl ${callbackUrl}`));
 
   if (completedEvent === undefined) {
-    throw new Error("Did not see authorization.completed for stub-mcp-user.");
+    throw new Error("Did not see the sign-in settle for stub-mcp-user.");
   }
-  if (completedEvent.data.outcome !== "authorized") {
+  if (completedEvent.data.outcome !== "accepted") {
     throw new Error(
       `Expected outcome=authorized, got ${completedEvent.data.outcome} (reason=${completedEvent.data.reason ?? "n/a"}).`,
     );
   }
-  console.log(theme.muted("[oauth-user] _completed event observed with outcome=authorized"));
+  console.log(theme.muted("[oauth-user] sign-in settled with outcome=accepted"));
 
   if (!toolResultMatched && !markerEchoedInMessage) {
     throw new Error(
-      `Did not see marker ${MARKER_TOKEN} in any successful ${EXPECTED_TOOL_NAME} action.result ` +
-        "or assistant message.completed. The OAuth-issued bearer token did not reach MCP, " +
+      `Did not see marker ${MARKER_TOKEN} in any successful ${EXPECTED_TOOL_NAME} call.settled ` +
+        "or the assistant's reply. The OAuth-issued bearer token did not reach MCP, " +
         "or the model didn't call the tool.",
     );
   }
   console.log(
     theme.muted(
       `[oauth-user] bearer token threaded through to MCP (marker via ${
-        toolResultMatched ? "action.result" : "message.completed"
+        toolResultMatched ? "call.settled" : "the reply"
       })`,
     ),
   );
@@ -297,29 +300,39 @@ runEnvironment("tui-connection-auth-user", async ({ cleanup, target: resolveTarg
   const followupTimer = setTimeout(() => followupAbort.abort(), 60_000);
 
   try {
+    const followupCalls = new Set<string>();
     for await (const event of session.stream({ signal: followupAbort.signal })) {
-      if (event.type === "authorization.required" && event.data.name === "stub-mcp-user") {
+      if (
+        event.type === "interaction.opened" &&
+        event.data.request.kind === "sign-in" &&
+        event.data.request.signIn?.name === "stub-mcp-user"
+      ) {
         followupAuthRequired = true;
       }
 
+      if (event.type === "call.requested" && event.data.capability.name.includes("echo_marker")) {
+        followupCalls.add(event.data.callId);
+      }
       if (
-        event.type === "action.result" &&
-        event.data.status === "completed" &&
-        event.data.result.kind === "tool-result" &&
-        event.data.result.toolName.includes("echo_marker")
+        event.type === "call.settled" &&
+        event.data.outcome === "completed" &&
+        followupCalls.has(event.data.callId)
       ) {
         followupToolCompleted = true;
       }
 
-      if (event.type === "session.failed") {
-        throw new Error(`Follow-up session failed: ${event.data.code} ${event.data.message}`);
+      if (event.type === "session.ended" && event.data.outcome === "failed") {
+        throw new Error(
+          `Follow-up session failed: ${event.data.error?.code} ${event.data.error?.message}`,
+        );
       }
 
-      // The fresh sign-in holds the second principal's turn (`on: "input"`).
+      // The fresh sign-in pauses the second principal's turn on the person.
       if (
-        event.type === "session.waiting" ||
-        event.type === "session.completed" ||
-        (event.type === "turn.waiting" && event.data.on === "input")
+        event.type === "turn.settled" ||
+        event.type === "session.ended" ||
+        (event.type === "turn.paused" &&
+          event.data.awaiting.some((entry) => "interactionId" in entry))
       ) {
         followupBoundary = event.type;
         break;
