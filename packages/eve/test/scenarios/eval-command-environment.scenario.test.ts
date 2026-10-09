@@ -519,7 +519,14 @@ function makeEvalResult(id: string) {
     id,
     assertions: [
       failed
-        ? { name: "check", score: 0, severity: "gate" as const, passed: false, message: "nope" }
+        ? {
+            name: "check",
+            score: 0,
+            severity: "gate" as const,
+            threshold: 1,
+            passed: false,
+            message: "nope",
+          }
         : { name: "check", score: 1, severity: "gate" as const, passed: true },
     ],
     result: {
