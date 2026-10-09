@@ -9112,6 +9112,64 @@ describe("createToolLoopHarness", () => {
       });
     });
 
+    it("declared Anthropic cache: marks an opaque Bedrock profile with the authored TTL", async () => {
+      setupStopResult();
+      const config: ToolLoopHarnessConfig = {
+        resolveModel: vi.fn().mockResolvedValue({
+          provider: "amazon-bedrock",
+          modelId: "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc",
+          specificationVersion: "v3",
+        } as unknown as LanguageModel),
+        tools: new Map([
+          [
+            "add",
+            {
+              description: "Adds numbers",
+              execute: vi.fn(),
+              inputSchema: jsonSchema({ type: "object" }),
+              name: "add",
+            },
+          ],
+        ]),
+      };
+      const runStep = createToolLoopHarness(config);
+      const session = createTestSession();
+      await runStep(
+        {
+          ...session,
+          agent: {
+            ...session.agent,
+            modelReference: {
+              id: "bedrock-profile",
+              promptCache: { anthropic: { ttl: "1h" } },
+            },
+          },
+        },
+        { message: "c" },
+      );
+
+      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
+      const prepareStep = getPrepareStep<
+        Array<{ role: string; content: string; providerOptions?: unknown }>,
+        { messages?: Array<{ providerOptions?: unknown }> }
+      >(agentCall?.prepareStep);
+      const result = await prepareStep({
+        messages: [{ role: "user", content: "c" }],
+        stepNumber: 0,
+        steps: [],
+        model: agentCall?.model,
+        context: undefined,
+      });
+      const hourMarker = {
+        anthropic: { cacheControl: { type: "ephemeral", ttl: "1h" } },
+        bedrock: { cachePoint: { type: "default", ttl: "1h" } },
+      };
+
+      expect(result.messages?.[0]?.providerOptions).toEqual(hourMarker);
+      const tools = agentCall?.tools as Record<string, { providerOptions?: unknown }>;
+      expect(Object.values(tools).at(-1)?.providerOptions).toEqual(hourMarker);
+    });
+
     it("none path: direct OpenAI instance gets only a prompt cache key", async () => {
       setupStopResult();
       const config: ToolLoopHarnessConfig = {

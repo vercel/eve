@@ -11,8 +11,10 @@ import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import {
   isDynamicModelDefinition,
-  type PublicAgentStaticModelDefinition,
+  type AgentPromptCacheDefinition,
   type AgentToolExposure,
+  type ModelRouting,
+  type PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
 import type { DynamicToolEventName } from "#dynamic/definition.js";
 import type { CompiledAgentDefinition, CompiledRuntimeModelReference } from "#compiler/manifest.js";
@@ -66,6 +68,7 @@ export async function compileAgentConfig(
           modelCatalog: context.modelCatalog,
           purpose: "the primary compaction trigger model",
           contextWindowTokens: definition.modelContextWindowTokens,
+          promptCache: definition.modelOptions?.promptCache,
           providerOptions: definition.modelOptions?.providerOptions,
           source: configModule,
           sourcePath: configModulePath,
@@ -198,17 +201,20 @@ async function normalizeAuthoredModelReference(input: {
   readonly modelCatalog: ManifestCompileContext["modelCatalog"];
   readonly purpose: string;
   readonly contextWindowTokens?: number;
+  readonly promptCache?: AgentPromptCacheDefinition;
   readonly providerOptions?: Record<string, JsonObject>;
   readonly source?: ModuleSourceRef;
   readonly sourcePath?: string;
   readonly value: PublicAgentStaticModelDefinition;
 }): Promise<CompiledRuntimeModelReference> {
   if (typeof input.value === "string") {
+    const routing = classifyModelRouting(input.value, input.providerOptions);
+    rejectGatewayPromptCache(input, routing);
     return await withCompiledRuntimeModelLimits(
       {
         id: formatLanguageModelGatewayId(input.value),
         providerOptions: parseProviderOptionsRecord(input.providerOptions),
-        routing: classifyModelRouting(input.value, input.providerOptions),
+        routing,
       },
       input,
     );
@@ -247,7 +253,9 @@ async function normalizeAuthoredModelReference(input: {
     );
   }
 
-  const sourceBackedModel = {
+  const routing = classifyModelRouting(languageModel, input.providerOptions);
+  rejectGatewayPromptCache(input, routing);
+  const sourceBackedModel: CompiledRuntimeModelReference = {
     id: formatLanguageModelGatewayId(languageModel),
     source: {
       exportName: source.exportName,
@@ -256,8 +264,9 @@ async function normalizeAuthoredModelReference(input: {
       sourceId: source.sourceId,
     },
     providerOptions: parseProviderOptionsRecord(input.providerOptions),
-    routing: classifyModelRouting(languageModel, input.providerOptions),
+    routing,
   };
+  if (input.promptCache !== undefined) sourceBackedModel.promptCache = input.promptCache;
 
   if (input.contextWindowTokens === undefined) {
     // Codex models have no Gateway catalog entry, so use eve's known context limit.
@@ -288,6 +297,20 @@ async function normalizeAuthoredModelReference(input: {
   }
 
   return await withCompiledRuntimeModelLimits(sourceBackedModel, input);
+}
+
+function rejectGatewayPromptCache(
+  input: {
+    readonly promptCache?: AgentPromptCacheDefinition;
+    readonly sourcePath?: string;
+    readonly value: PublicAgentStaticModelDefinition;
+  },
+  routing: ModelRouting,
+): void {
+  if (input.promptCache === undefined || routing.kind !== "gateway") return;
+  throw new Error(
+    `${input.sourcePath ?? "agent.ts"}: modelOptions.promptCache applies only to models eve calls directly, but "${formatLanguageModelGatewayId(input.value)}" routes through AI Gateway, which manages its own prompt caching. Remove promptCache, or configure Gateway caching with providerOptions.gateway.caching.`,
+  );
 }
 
 function formatAgentConfigModulePath(

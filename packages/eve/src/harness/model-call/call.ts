@@ -48,7 +48,7 @@ import { estimateTokens } from "#harness/token-estimate.js";
 import { buildToolApproval } from "#harness/tools.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { addTurnUsage, type TokenUsageDelta } from "#harness/turn-tag-state.js";
-import type { StepResult } from "#harness/types.js";
+import { requireSessionModelReference, type StepResult } from "#harness/types.js";
 import type { InstrumentationAttempt } from "#instrumentation/runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { maybeCompact } from "#harness/compaction/step.js";
@@ -128,7 +128,10 @@ export class ModelCaller {
     this.prompt = prompt;
     this.input = input;
 
-    this.profile = resolveModelProfile(input.model);
+    this.profile = resolveModelProfile(
+      input.model,
+      requireSessionModelReference(step.session).promptCache,
+    );
     this.attributionHeaders = buildGatewayAttributionHeaders(
       this.profile,
       step.config.runtimeIdentity,

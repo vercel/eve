@@ -164,7 +164,9 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
   const prepareStep: PrepareStepFunction<ToolSet> = async ({ messages }) => {
     const { profile } = input;
     const stepResult: NonNullable<Awaited<ReturnType<PrepareStepFunction<ToolSet>>>> = {
-      messages: profile.anthropicCache ? applyConversationCacheControl(messages) : messages,
+      messages: profile.anthropicCache
+        ? applyConversationCacheControl(messages, profile.anthropicCache)
+        : messages,
     };
 
     const modelReference = requireSessionModelReference(session);

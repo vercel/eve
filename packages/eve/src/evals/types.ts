@@ -413,7 +413,8 @@ export interface EveEvalTurn extends EveEvalAssertions, EveEvalOutputAssertions 
 export interface EveEvalJudgeConfig {
   /** Decision model ID or instance. Defaults to the model used by `eve/ai` decide. */
   readonly model?: DecisionModel;
-  readonly modelOptions?: AgentModelOptionsDefinition;
+  /** Judge calls carry provider options only; eve places no prompt-cache breakpoints on them. */
+  readonly modelOptions?: Pick<AgentModelOptionsDefinition, "providerOptions">;
 }
 
 /** JSON content accepted as decision state, instructions, or rubric descriptions. */

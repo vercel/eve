@@ -704,6 +704,62 @@ describe("compileAgentManifest source graph", () => {
     });
   });
 
+  it("carries a direct model's prompt cache options to the resolved agent", async () => {
+    const bedrockProfile = {
+      doGenerate: async () => ({}),
+      doStream: async () => ({}),
+      modelId: "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc",
+      provider: "amazon-bedrock",
+      specificationVersion: "v3",
+    } as never;
+    const sourceRegistry = registry([
+      {
+        logicalPath: "agent.ts",
+        loadNamespace: async () => ({
+          default: defineAgent({
+            model: bedrockProfile,
+            modelContextWindowTokens: 200_000,
+            modelOptions: { promptCache: { anthropic: { ttl: "1h" } } },
+          }),
+        }),
+      },
+    ]);
+    const compiled = await compileAgentManifest(manifest(), {
+      sourceRegistries: [sourceRegistry],
+    });
+    const moduleMap = await createProgrammaticCompiledModuleMap(compiled, [
+      frameworkAgentSourceRegistry,
+      sourceRegistry,
+    ]);
+
+    const resolved = await resolveAgent({
+      manifest: compiledAgentManifestSchema.parse(compiled),
+      moduleMap,
+    });
+
+    expect(resolved.config?.model?.promptCache).toEqual({ anthropic: { ttl: "1h" } });
+  });
+
+  it("rejects prompt cache options on an AI Gateway model", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "agent.ts",
+        loadNamespace: async () => ({
+          default: defineAgent({
+            model: "anthropic/claude-opus-5",
+            modelOptions: { promptCache: { anthropic: { ttl: "1h" } } },
+          }),
+        }),
+      },
+    ]);
+
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow(
+      'modelOptions.promptCache applies only to models eve calls directly, but "anthropic/claude-opus-5" routes through AI Gateway',
+    );
+  });
+
   it("classifies extension mount initialization as runtime-only", async () => {
     const discovered = manifest();
     const extensionManifest = createAgentSourceManifest({

@@ -1,0 +1,23 @@
+{
+  "kind": "eve-extension-capability-contract",
+  "capability": "subagent",
+  "epoch": 35,
+  "sha256": "80344ccec496d2e20d5d0a8e02852eecac6863a20fec493b1f2c9d1e7bbb9773",
+  "exports": [
+    "AgentCompactionDefinition",
+    "AgentDefinition",
+    "AgentModelDefinition",
+    "AgentStaticModelDefinition",
+    "DefinedAgent",
+    "DynamicLocalSubagentDefinition",
+    "DynamicSubagentDefinition",
+    "RemoteAgentDefinition",
+    "RemoteAgentDefinitionInput",
+    "WorkspaceAgentDefinition",
+    "WorkspaceAgentTransport",
+    "defineAgent",
+    "defineDynamic",
+    "defineRemoteAgent",
+    "defineWorkspaceAgent"
+  ]
+}

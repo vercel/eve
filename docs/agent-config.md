@@ -152,6 +152,43 @@ the agent-level setting for that selection. Omitting it inherits the agent setti
 
 Run `eve set model --reasoning high` to update this field from the command line.
 
+## Prompt caching
+
+eve turns on prompt caching for AI Gateway models with
+`providerOptions.gateway.caching: "auto"`; set it to `false` to opt out. For
+Anthropic models it calls directly, eve places Anthropic cache breakpoints at
+the end of the tools, the system prompt, and the conversation. It recognizes
+these models from the provider (`anthropic`, `vertex.anthropic`) or from a
+Bedrock model id that names Anthropic (`anthropic.claude-…`).
+
+Use `modelOptions.promptCache` to declare breakpoints for an Anthropic model
+eve can't recognize, such as a Bedrock application inference profile, or to
+change how long cache entries live:
+
+```ts title="agent/agent.ts"
+import { bedrock } from "@ai-sdk/amazon-bedrock";
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: bedrock(process.env.BEDROCK_INFERENCE_PROFILE_ARN!),
+  modelContextWindowTokens: 200_000,
+  modelOptions: {
+    promptCache: { anthropic: { ttl: "1h" } },
+  },
+});
+```
+
+`ttl` is `"5m"` (the default) or `"1h"`, and applies to every breakpoint in
+the request. Anthropic bills a 1-hour cache write at 2x the base input price,
+compared with 1.25x for a 5-minute write, so `"1h"` pays off when turns are
+often more than five minutes apart. Use `promptCache: { anthropic: {} }` to
+turn breakpoints on with the default lifetime.
+
+`promptCache` applies only to models eve calls directly. eve rejects it on an
+AI Gateway model, at build time for a static model and when a dynamic resolver
+returns the selection. A dynamic selection can return its own `promptCache` in
+`modelOptions`.
+
 ## Compaction
 
 Compaction summarizes older turns as you approach the context window. It's on by default, so you only tune when it kicks in. eve adds the estimated fixed checkpoint-prompt envelope to the trigger count, so compaction starts sooner than the conversation-only estimate. Lower `thresholdPercent` to compact sooner:
@@ -369,7 +406,7 @@ it falls back to the World's default retention period.
 | Field          | Type                                  | Default          | Description                                                                                                                                                                                                                                                                                                                          |
 | -------------- | ------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `reasoning`    | `AgentReasoningDefinition`            | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                                                                                                                                                        |
-| `modelOptions` | `AgentModelOptionsDefinition`         | none             | Provider option overrides forwarded to the model call.                                                                                                                                                                                                                                                                               |
+| `modelOptions` | `AgentModelOptionsDefinition`         | none             | Provider option overrides forwarded to the model call, and [`promptCache`](#prompt-caching) settings.                                                                                                                                                                                                                                |
 | `limits`       | `AgentLimitsDefinition`               | field-specific   | Framework-owned runtime limits. Sessions complete after 30 days by default; usage-limit defaults and inheritance are described above. Set a limit to `false` to disable it.                                                                                                                                                          |
 | `experimental` | `AgentExperimentalDefinition`         | unset            | Unstable opt-ins. `workflow.world` selects the Workflow world package on the root agent; `workflow.modelCallsPerStep` batches sequential model calls into a wider replay unit; `workflow.retention` controls how long the durable runtime keeps run data.                                                                            |
 | `build`        | `{ externalDependencies?: string[] }` | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.                                                                                                                             |

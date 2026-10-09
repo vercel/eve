@@ -294,6 +294,7 @@ function createResolvedAgentConfig(
             contextWindowTokens: model.contextWindowTokens,
             id: model.id,
             maxOutputTokens: model.maxOutputTokens,
+            promptCache: model.promptCache,
             providerOptions: model.providerOptions,
             source: {
               exportName: model.source.exportName,

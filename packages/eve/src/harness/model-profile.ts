@@ -1,5 +1,10 @@
 import type { LanguageModel } from "ai";
 
+import type {
+  AgentPromptCacheDefinition,
+  AnthropicPromptCacheTtl,
+} from "#shared/agent-definition.js";
+
 /**
  * What eve assumes about the model serving one call. Every decision that shapes a request for
  * its provider reads this record, so a step and its compaction agree about the model.
@@ -16,8 +21,8 @@ export interface ModelProfile {
    * `anthropicCache`.
    */
   readonly provider: string;
-  /** Takes Anthropic prompt-cache breakpoints. */
-  readonly anthropicCache: boolean;
+  /** Takes Anthropic prompt-cache breakpoints, which live for `ttl`. */
+  readonly anthropicCache: { readonly ttl: AnthropicPromptCacheTtl } | undefined;
   /** Chat Completions APIs can't carry files in tool results, so they move to user messages. */
   readonly filesOutsideToolResults: boolean;
   /**
@@ -27,25 +32,34 @@ export interface ModelProfile {
   readonly googleSearchDropsTools: boolean;
 }
 
-export function resolveModelProfile(model: LanguageModel): ModelProfile {
+/**
+ * `promptCache` is the model's authored `modelOptions.promptCache`. It names the cache protocol
+ * of a model whose provider and id don't, such as a Bedrock application inference profile.
+ */
+export function resolveModelProfile(
+  model: LanguageModel,
+  promptCache?: AgentPromptCacheDefinition,
+): ModelProfile {
   const provider = typeof model === "string" ? "gateway" : lowerCaseOrEmpty(model.provider);
   const modelId = typeof model === "string" ? model : lowerCaseOrEmpty(model.modelId);
   const topLevelProvider = provider.split(".")[0]!;
   if (topLevelProvider === "gateway") {
     return {
-      anthropicCache: false,
+      anthropicCache: undefined,
       filesOutsideToolResults: false,
       gateway: true,
       googleSearchDropsTools: PRE_GEMINI_3_MODEL.test(modelId),
       provider: modelId.split("/")[0]!,
     };
   }
+  // The Bedrock Converse provider reports `amazon-bedrock` and carries the Anthropic identity in
+  // the model id (`anthropic.claude-…`).
+  const anthropic =
+    promptCache?.anthropic !== undefined ||
+    provider.includes("anthropic") ||
+    (provider.includes("bedrock") && modelId.includes("anthropic"));
   return {
-    // The Bedrock Converse provider reports `amazon-bedrock` and carries the Anthropic identity
-    // in the model id (`anthropic.claude-…`).
-    anthropicCache:
-      provider.includes("anthropic") ||
-      (provider.includes("bedrock") && modelId.includes("anthropic")),
+    anthropicCache: anthropic ? { ttl: promptCache?.anthropic?.ttl ?? "5m" } : undefined,
     filesOutsideToolResults: provider.endsWith(".chat"),
     gateway: false,
     googleSearchDropsTools: PRE_GEMINI_3_MODEL.test(modelId),

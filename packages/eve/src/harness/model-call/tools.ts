@@ -44,7 +44,7 @@ export async function prepareModelTools(
   }
 
   const effectiveTools = profile.anthropicCache
-    ? applyLastToolCacheBreakpoint(modelTools)
+    ? applyLastToolCacheBreakpoint(modelTools, profile.anthropicCache)
     : modelTools;
   for (const [name, tool] of Object.entries(effectiveTools)) {
     // Whatever produced this tool, the AI SDK must only receive its own

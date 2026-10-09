@@ -13,7 +13,35 @@ import {
  */
 export interface AgentModelOptionsDefinition {
   readonly providerOptions?: Record<string, JsonObject>;
+  /** Prompt-cache breakpoints eve places for this model. */
+  readonly promptCache?: AgentPromptCacheDefinition;
 }
+
+/**
+ * Prompt-cache breakpoints eve places for a model it calls directly. AI Gateway models cache
+ * through `providerOptions.gateway.caching` instead and reject this option.
+ */
+export interface AgentPromptCacheDefinition {
+  /**
+   * Places Anthropic cache breakpoints on every call. eve already does this for Anthropic models
+   * it recognizes by provider or model id; set it for one it can't, such as a Bedrock application
+   * inference profile, or to change the cache lifetime.
+   */
+  readonly anthropic?: AgentAnthropicPromptCacheDefinition;
+}
+
+export interface AgentAnthropicPromptCacheDefinition {
+  /**
+   * How long each breakpoint's cache entry lives: `"5m"` (the default) or `"1h"`. A 1-hour write
+   * costs more than a 5-minute one, so `"1h"` pays off when turns are often more than five
+   * minutes apart.
+   */
+  readonly ttl?: AnthropicPromptCacheTtl;
+}
+
+export type AnthropicPromptCacheTtl = "5m" | "1h";
+
+export const ANTHROPIC_PROMPT_CACHE_TTLS: readonly AnthropicPromptCacheTtl[] = ["5m", "1h"];
 
 /**
  * Provider-agnostic reasoning effort forwarded to the AI SDK model call.
@@ -48,6 +76,7 @@ export type InternalAgentModelDefinition = {
   maxOutputTokens?: number;
   source?: ModuleSourceRef;
   providerOptions?: Record<string, JsonObject>;
+  promptCache?: AgentPromptCacheDefinition;
 };
 
 /**

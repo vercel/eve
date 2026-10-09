@@ -89,10 +89,10 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   dynamicTool: {
-    current: 78,
+    current: 79,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 31, 32, 33, 52, 54,
-      60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 72, 73, 75, 76, 77, 78,
+      60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 72, 73, 75, 76, 77, 78, 79,
     ],
     dropped: {
       21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -171,10 +171,10 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   subagent: {
-    current: 34,
+    current: 35,
     supported: [
       3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33,
-      34,
+      34, 35,
     ],
     dropped: {
       1: "Persistent subagent sessions are now the default and the experimental opt-in was removed",

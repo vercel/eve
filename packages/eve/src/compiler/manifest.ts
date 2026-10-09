@@ -25,6 +25,7 @@ import type { NamedSkillDefinition } from "#shared/skill-definition.js";
 import { WEB_SEARCH_FALLBACK_PROVIDERS, WEB_SEARCH_PROVIDERS } from "#shared/web-search.js";
 import {
   AGENT_WORKFLOW_RETENTION_VALUES,
+  ANTHROPIC_PROMPT_CACHE_TTLS,
   type InternalAgentDefinition,
   type InternalAgentModelDefinition,
   type InternalAgentCompactionDefinition,
@@ -577,6 +578,15 @@ const compiledRuntimeModelReferenceSchema: z.ZodType<CompiledRuntimeModelReferen
     id: z.string(),
     maxOutputTokens: z.number().int().positive().optional(),
     source: moduleSourceRefSchema.optional(),
+    promptCache: z
+      .object({
+        anthropic: z
+          .object({ ttl: z.literal(ANTHROPIC_PROMPT_CACHE_TTLS).optional() })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
     providerOptions: z.record(z.string(), jsonObjectSchema).optional(),
     routing: modelRoutingSchema,
   })
@@ -1356,6 +1366,9 @@ function cloneCompiledRuntimeModelReference(
   }
   if (model.providerOptions !== undefined) {
     clone.providerOptions = { ...model.providerOptions };
+  }
+  if (model.promptCache !== undefined) {
+    clone.promptCache = structuredClone(model.promptCache);
   }
   if (model.source !== undefined) {
     clone.source = { ...model.source };

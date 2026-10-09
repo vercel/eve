@@ -101,7 +101,7 @@ describe("mergeProviderSafetyIdentifier", () => {
 
 describe("resolveCallProviderOptions", () => {
   const openai: ModelProfile = {
-    anthropicCache: false,
+    anthropicCache: undefined,
     filesOutsideToolResults: false,
     gateway: false,
     googleSearchDropsTools: false,
