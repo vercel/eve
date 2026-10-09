@@ -1,22 +1,20 @@
 import { createLogger } from "#internal/logging.js";
 import {
   EmptyModelResponseError,
+  extractModelCallErrorDetails,
   extractUnsupportedProviderToolTypes,
+  isContextOverflowError,
   isNoOutputGeneratedError,
+  readContextOverflowTokens,
 } from "#harness/model-call/errors.js";
+import type { ModelCallOptions } from "./call.js";
 import type { HarnessStepResult } from "#harness/step-hooks.js";
 import { resolveAssistantStepText } from "#harness/messages.js";
 import { resolveFrameworkToolFromUpstreamType } from "#harness/provider-tools.js";
 
 const log = createLogger("harness.tool-loop");
 /** How a recovery reissues the call. */
-type RecoveryCall = (options: {
-  readonly disabledProviderTools?: ReadonlySet<string>;
-  readonly extraSystemNote?: string;
-  readonly retryReason?: "empty-response";
-  readonly suppressStepStartedEmission?: boolean;
-  readonly trailingUserNote?: string;
-}) => Promise<HarnessStepResult>;
+type RecoveryCall = (options: ModelCallOptions) => Promise<HarnessStepResult>;
 
 /**
  * Recovers a failed model call, each recovery at most once and within the current step, so the
@@ -25,7 +23,10 @@ type RecoveryCall = (options: {
  * 1. AI Gateway rejected a provider-specific tool a fallback provider can't serve ("tool type 'X'
  *    is not supported"): the call is reissued without it, and a system note tells the model which
  *    capability went away. Only known provider tools are dropped, never an authored one.
- * 2. The response was empty (see {@link EmptyModelResponseError}), including the first
+ * 2. The provider rejected the request as longer than the context window, including the first
+ *    recovery's: the call is reissued after compacting against a threshold calibrated by the
+ *    provider's token counts. A second overflow fails the step.
+ * 3. The response was empty (see {@link EmptyModelResponseError}), including an earlier
  *    recovery's: the call is reissued with {@link EMPTY_RESPONSE_NUDGE}, repeating what the first
  *    recovery removed.
  *
@@ -40,7 +41,7 @@ export async function recoverModelCall(input: {
 }): Promise<{ readonly result: HarnessStepResult } | { readonly error: unknown }> {
   let { error } = input;
   const diagnostics = { sessionId: input.sessionId, turnId: input.turnId };
-  let options: Parameters<RecoveryCall>[0] = {};
+  let options: ModelCallOptions = {};
 
   const unsupportedTypes = extractUnsupportedProviderToolTypes(error);
   const disabled = [
@@ -60,6 +61,29 @@ export async function recoverModelCall(input: {
     };
     try {
       return { result: await input.call({ ...options, suppressStepStartedEmission: true }) };
+    } catch (retryError) {
+      error = retryError;
+    }
+  }
+
+  if (isContextOverflowError(error)) {
+    // The raw error carries the whole rejected request; log only its compact details.
+    log.warn("model context window exceeded; compacting and reissuing the model call once", {
+      ...diagnostics,
+      details: extractModelCallErrorDetails(error),
+    });
+    try {
+      // Only this reissue compacts on overflow: its compaction rewrote the step's prompt, so a
+      // later recovery reads the compacted prompt and must not compact it again.
+      return {
+        result: await input.call({
+          ...options,
+          contextOverflow: readContextOverflowTokens(error),
+          retryReason: "context-overflow",
+          suppressStepStartedEmission: true,
+          trailingUserNote: CONTEXT_OVERFLOW_NOTE,
+        }),
+      };
     } catch (retryError) {
       error = retryError;
     }
@@ -139,3 +163,11 @@ export function rethrowNoOutputAsEmptyResponse(error: unknown): never {
  */
 const EMPTY_RESPONSE_NUDGE =
   "Your previous reply was empty and was not delivered. Continue the current user request. Reuse completed results when they satisfy the request. If existing results are stale or insufficient, use the appropriate read tools to get fresh results. Do not repeat writes or other side effects that already completed. Do not mention this notice.";
+
+/**
+ * Wire-only note the context-overflow reissue appends. Compaction may have shortened this turn's
+ * tool results or folded them into the summary, so the model must not take a missing result as
+ * work that never ran.
+ */
+const CONTEXT_OVERFLOW_NOTE =
+  "Earlier context was compacted to fit the model's context window, so some tool results may be shortened or summarized. Continue the current user request. Reuse completed results when they satisfy the request. Do not repeat writes or other side effects that already completed. Do not mention this notice.";

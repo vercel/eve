@@ -1,8 +1,9 @@
 import { isObject } from "#shared/guards.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import { toError, walkCauseChain } from "#shared/errors.js";
-import { summarizeKnownError } from "#harness/semantic-errors/index.js";
+import { matchesContextOverflow, summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { isTurnCancellation } from "#harness/turn-cancellation.js";
+import type { ContextOverflowTokens } from "#harness/compaction/engine.js";
 
 const RESPONSE_BODY_SNIPPET_LIMIT = 1_000;
 const API_ERROR_SUMMARY_LIMIT = 800;
@@ -271,6 +272,60 @@ export function isNoOutputGeneratedError(error: unknown): boolean {
     }
   }
   return false;
+}
+
+/**
+ * True when the provider rejected the request as longer than the model's context window. The
+ * classification is unchanged (a rejected 4xx stays terminal); `recoverModelCall` reads this to
+ * compact and reissue the call once first. Checked directly rather than through the catalog's
+ * first-matching rule, so an earlier rule can't hide it.
+ */
+export function isContextOverflowError(error: unknown): boolean {
+  for (const candidate of walkCauseChain(error)) {
+    // The AI SDK's own classification (vercel/ai#22461); once it ships, this replaces the prose.
+    if (readStringField(candidate, "failureReason") === "context-length-exceeded") return true;
+  }
+  return matchesContextOverflow(error);
+}
+
+/**
+ * Token counts a context-overflow rejection states in its message, e.g. Anthropic's "prompt is
+ * too long: 215000 tokens > 200000 maximum" or OpenAI's "maximum context length is 128000 tokens.
+ * However, your messages resulted in 130000 tokens". Counts the provider leaves out stay unset.
+ */
+export function readContextOverflowTokens(error: unknown): ContextOverflowTokens {
+  for (const candidate of walkCauseChain(error)) {
+    const message = readErrorMessage(candidate);
+    const anthropic = /prompt is too long: (\d+) tokens > (\d+) maximum/i.exec(message);
+    if (anthropic) return overflowCounts(anthropic[1], undefined, anthropic[2]);
+    const withOutput = /exceed context limit: (\d+) \+ (\d+) > (\d+)/i.exec(message);
+    if (withOutput) return overflowCounts(withOutput[1], withOutput[2], withOutput[3]);
+    const openai = /maximum context length is (\d+) tokens/i.exec(message);
+    if (openai) {
+      const split = /\((\d+) in the messages, (\d+) in the completion\)/i.exec(message);
+      if (split) return overflowCounts(split[1], split[2], openai[1]);
+      const requested = /(?:resulted in|requested) (\d+) tokens/i.exec(message);
+      return overflowCounts(requested?.[1], undefined, openai[1]);
+    }
+    const gemini =
+      /input token count(?: \((\d+)\))? exceeds the maximum number of tokens allowed \(?(\d+)/i.exec(
+        message,
+      );
+    if (gemini) return overflowCounts(gemini[1], undefined, gemini[2]);
+  }
+  return {};
+}
+
+function overflowCounts(
+  input: string | undefined,
+  reservedOutput: string | undefined,
+  limit: string | undefined,
+): ContextOverflowTokens {
+  const tokens: { inputTokens?: number; limitTokens?: number; reservedOutputTokens?: number } = {};
+  if (input !== undefined) tokens.inputTokens = Number(input);
+  if (reservedOutput !== undefined) tokens.reservedOutputTokens = Number(reservedOutput);
+  if (limit !== undefined) tokens.limitTokens = Number(limit);
+  return tokens;
 }
 
 /**

@@ -77,6 +77,79 @@ export function shouldCompact(
   );
 }
 
+/** What a provider's context-overflow rejection reported, when its message carries counts. */
+export interface ContextOverflowTokens {
+  /** Input tokens the rejected request measured. */
+  readonly inputTokens?: number;
+  /** Output tokens the request reserved, when the provider counted them toward the limit. */
+  readonly reservedOutputTokens?: number;
+  /** The provider's context limit. */
+  readonly limitTokens?: number;
+}
+
+/**
+ * Without a provider count the rejection only proves the request was at least as large as eve
+ * believed, so the overflow compaction assumes this much more.
+ */
+const UNCOUNTED_OVERFLOW_HEADROOM = 1.25;
+
+/**
+ * eve's input-token count corrected by the session's last provider-reported count: the newer
+ * messages are scaled by how far eve's estimate undercounted the ones the provider measured.
+ * `undefined` without a reported count to calibrate from.
+ */
+export function extrapolateInputTokenCount(
+  messages: readonly ModelMessage[],
+  config: CompactionConfig,
+  requestEnvelopeTokens = 0,
+  previousEnvelopeTokens = 0,
+): number | undefined {
+  const prior = config.lastKnownInputTokens;
+  const priorCount = config.lastKnownPromptMessageCount;
+  if (
+    prior === undefined ||
+    priorCount === undefined ||
+    !Number.isInteger(priorCount) ||
+    priorCount < 0 ||
+    priorCount > messages.length
+  ) {
+    return undefined;
+  }
+  const priorEstimate = estimateTokens(messages.slice(0, priorCount)) + previousEnvelopeTokens;
+  const undercount = Math.max(1, prior / Math.max(1, priorEstimate));
+  const newer =
+    estimateTokens(messages.slice(priorCount)) +
+    Math.max(0, requestEnvelopeTokens - previousEnvelopeTokens);
+  return prior + Math.ceil(newer * undercount);
+}
+
+/**
+ * The compaction threshold, in eve's estimated tokens, that fits a request the provider rejected
+ * as too long. `estimatedTokens` is what eve counted for that request's input. The provider's
+ * count is the truth, so the threshold shrinks by how far eve undercounted, and to the provider's
+ * limit (less any reserved output) when that is below the configured one.
+ *
+ * Without a reported count, the request is assumed to be {@link UNCOUNTED_OVERFLOW_HEADROOM}
+ * over the largest size it is known to have reached: eve's estimate, that estimate extrapolated
+ * from the session's last reported count, or the model's context window. Without a known window
+ * either, the request is assumed to have been right at the provider's limit.
+ */
+export function overflowCompactionThreshold(
+  config: CompactionConfig,
+  estimatedTokens: number,
+  overflow: ContextOverflowTokens,
+  known: { readonly contextWindowTokens?: number; readonly extrapolatedTokens?: number } = {},
+): number {
+  const thresholdPercent = config.thresholdPercent ?? 0.9;
+  const lowerBound = Math.max(estimatedTokens, known.extrapolatedTokens ?? 0, 1);
+  const limit = overflow.limitTokens ?? known.contextWindowTokens ?? lowerBound;
+  const inputLimit = Math.max(1, limit - (overflow.reservedOutputTokens ?? 0));
+  const actualTokens =
+    overflow.inputTokens ?? Math.max(lowerBound, inputLimit) * UNCOUNTED_OVERFLOW_HEADROOM;
+  const target = Math.min(config.threshold, inputLimit * thresholdPercent);
+  return Math.max(1, Math.floor((target * estimatedTokens) / Math.max(actualTokens, 1)));
+}
+
 /** Summarizes one compaction prompt with the compaction model, returning the summary text. */
 export type CompactionSummarizer = (prompt: {
   readonly messages: ModelMessage[];

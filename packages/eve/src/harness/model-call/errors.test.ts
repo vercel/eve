@@ -6,7 +6,9 @@ import {
   EmptyModelResponseError,
   extractModelCallErrorDetails,
   extractUnsupportedProviderToolTypes,
+  isContextOverflowError,
   isNoOutputGeneratedError,
+  readContextOverflowTokens,
   normalizeModelStreamError,
   extractUpstreamRejectionMessage,
 } from "#harness/model-call/errors.js";
@@ -301,6 +303,156 @@ describe("classifyModelCallError", () => {
     expect(classifyModelCallError(new Error("mystery"))).toBe("recoverable");
     expect(classifyModelCallError("weird string throw")).toBe("recoverable");
     expect(classifyModelCallError(null)).toBe("recoverable");
+  });
+});
+
+describe("isContextOverflowError", () => {
+  const anthropicMessage = "prompt is too long: 215000 tokens > 200000 maximum";
+  // The shape AI Gateway returned for an over-long Anthropic prompt: the upstream
+  // APICallError is relayed with `type: "AI_APICallError"`, which the client maps to
+  // GatewayInternalServerError.
+  const gatewayOverflowError = () =>
+    gatewayModelCallError({
+      gatewayName: "GatewayInternalServerError",
+      gatewayType: "internal_server_error",
+      statusCode: 400,
+      upstreamMessage: anthropicMessage,
+      upstreamType: "AI_APICallError",
+    });
+
+  it.each([
+    {
+      title: "Anthropic prompt-too-long",
+      error: directApiCallError({
+        data: { error: { message: anthropicMessage, type: "invalid_request_error" } },
+        message: anthropicMessage,
+        statusCode: 400,
+      }),
+    },
+    {
+      title: "OpenAI Chat Completions maximum context length",
+      error: directApiCallError({
+        message:
+          "This model's maximum context length is 128000 tokens. However, your messages resulted in 130000 tokens.",
+        statusCode: 400,
+      }),
+    },
+    {
+      title: "OpenAI Responses context window",
+      error: directApiCallError({
+        message:
+          "Your input exceeds the context window of this model. Please adjust your input and try again.",
+        statusCode: 400,
+      }),
+    },
+    {
+      title: "AI SDK failureReason",
+      error: Object.assign(directApiCallError({ message: "Request too large.", statusCode: 400 }), {
+        failureReason: "context-length-exceeded",
+      }),
+    },
+    {
+      title: "Anthropic input plus max_tokens",
+      error: directApiCallError({
+        message:
+          "input length and `max_tokens` exceed context limit: 198000 + 8192 > 200000, decrease input length or `max_tokens` and try again",
+        statusCode: 400,
+      }),
+    },
+    {
+      title: "Bedrock Converse",
+      error: directApiCallError({
+        message: "Input is too long for requested model.",
+        statusCode: 400,
+      }),
+    },
+    {
+      title: "Gemini input token count",
+      error: directApiCallError({
+        message: "The input token count exceeds the maximum number of tokens allowed 1048576.",
+        statusCode: 400,
+      }),
+    },
+    {
+      title: "AI Gateway relaying Anthropic",
+      error: gatewayOverflowError(),
+    },
+    {
+      title: "OpenAI stream error code",
+      error: Object.assign(new Error("Your input exceeds the context window of this model."), {
+        code: "context_length_exceeded",
+        name: "AI_StreamProviderError",
+      }),
+    },
+    {
+      title: "custom LanguageModel failureReason",
+      error: Object.assign(new Error("Request exceeds the proxy limit."), {
+        failureReason: "context-length-exceeded",
+      }),
+    },
+  ])("recognizes $title", ({ error }) => {
+    expect(isContextOverflowError(error)).toBe(true);
+  });
+
+  it("keeps the rejection's existing classification", () => {
+    expect(classifyModelCallError(gatewayOverflowError())).toBe("terminal");
+  });
+
+  it("does not match the prose outside a provider rejection", () => {
+    const toolFailure = new Error(
+      "The search index rejected the query: maximum context length is 512 tokens.",
+    );
+    expect(isContextOverflowError(toolFailure)).toBe(false);
+  });
+
+  it("does not match an unrelated 400, which stays terminal", () => {
+    const outputLimit = directApiCallError({
+      message: "max_tokens: 64000 > 32000, which is the maximum allowed number of output tokens",
+      statusCode: 400,
+    });
+    expect(isContextOverflowError(outputLimit)).toBe(false);
+    expect(classifyModelCallError(outputLimit)).toBe("terminal");
+  });
+});
+
+describe("readContextOverflowTokens", () => {
+  it.each([
+    {
+      message: "prompt is too long: 215000 tokens > 200000 maximum",
+      expected: { inputTokens: 215_000, limitTokens: 200_000 },
+    },
+    {
+      message:
+        "input length and `max_tokens` exceed context limit: 198000 + 8192 > 200000, decrease input length or `max_tokens` and try again",
+      expected: { inputTokens: 198_000, limitTokens: 200_000, reservedOutputTokens: 8_192 },
+    },
+    {
+      message:
+        "This model's maximum context length is 128000 tokens. However, your messages resulted in 130000 tokens.",
+      expected: { inputTokens: 130_000, limitTokens: 128_000 },
+    },
+    {
+      message:
+        "This model's maximum context length is 128000 tokens. However, you requested 130000 tokens (120000 in the messages, 10000 in the completion).",
+      expected: { inputTokens: 120_000, limitTokens: 128_000, reservedOutputTokens: 10_000 },
+    },
+    {
+      message:
+        "The input token count (1200000) exceeds the maximum number of tokens allowed (1048576).",
+      expected: { inputTokens: 1_200_000, limitTokens: 1_048_576 },
+    },
+    {
+      message: "The input token count exceeds the maximum number of tokens allowed 1048576.",
+      expected: { limitTokens: 1_048_576 },
+    },
+    {
+      message: "Your input exceeds the context window of this model.",
+      expected: {},
+    },
+  ])("reads $message", ({ message, expected }) => {
+    expect(readContextOverflowTokens(directApiCallError({ message, statusCode: 400 }))).toEqual(
+      expected,
+    );
   });
 });
 

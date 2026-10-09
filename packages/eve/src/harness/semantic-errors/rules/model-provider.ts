@@ -1,4 +1,32 @@
-import { anyOf, messageMatches, nameIs, type SemanticErrorRule } from "../rule.js";
+import {
+  allOf,
+  anyOf,
+  codeIs,
+  messageMatches,
+  nameIs,
+  type SemanticErrorRule,
+  statusCodeIs,
+} from "../rule.js";
+
+/**
+ * A provider's rejection of a request longer than the model's context window. Anthropic says
+ * "prompt is too long" or "exceed context limit"; Bedrock says "Input is too long"; OpenAI says
+ * "maximum context length" (Chat Completions) or "exceeds the context window" (Responses); Gemini
+ * says "input token count ... exceeds the maximum". AI Gateway relays the upstream message. The
+ * prose only counts on a 400/413 rejection, so another error that quotes it isn't misread.
+ * OpenAI stream errors carry `code: "context_length_exceeded"` instead.
+ *
+ * Message prose is a stopgap until the AI SDK classifies this itself (vercel/ai#22461).
+ */
+export const isContextOverflowLink = anyOf(
+  codeIs("context_length_exceeded"),
+  allOf(
+    statusCodeIs(400, 413),
+    messageMatches(
+      /prompt is too long|exceed context limit|input is too long|maximum context length|exceeds the context window|input token count.*exceeds the maximum/i,
+    ),
+  ),
+);
 
 /**
  * Discriminators verified against the vendored `@ai-sdk/provider` /
@@ -10,6 +38,14 @@ import { anyOf, messageMatches, nameIs, type SemanticErrorRule } from "../rule.j
  * rethrow under the unprefixed class name.
  */
 export const MODEL_PROVIDER_RULES: readonly SemanticErrorRule[] = [
+  {
+    id: "model-context-overflow",
+    name: "Model context window exceeded",
+    tags: ["model-provider"],
+    when: isContextOverflowLink,
+    message: "The request exceeds the model's context window.",
+    hint: "eve compacts and retries once on this error. If it persists, lower `compaction.thresholdPercent` in `agent.ts` so compaction runs sooner, or start a new session.",
+  },
   {
     id: "model-provider-api-key-missing",
     name: "Model provider API key missing",

@@ -2,7 +2,13 @@ import type { ModelMessage } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
 import { COMPACTION_PROMPT_ENVELOPE } from "#harness/compaction/prompt.js";
-import { compactMessages, getInputTokenCount, shouldCompact } from "#harness/compaction/engine.js";
+import {
+  compactMessages,
+  extrapolateInputTokenCount,
+  getInputTokenCount,
+  overflowCompactionThreshold,
+  shouldCompact,
+} from "#harness/compaction/engine.js";
 import { createFrameworkUserMessage } from "#harness/messages.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import type { CompactionConfig } from "#harness/types.js";
@@ -445,6 +451,81 @@ function summarizeWith(summary: string) {
     async (_prompt: { readonly messages: ModelMessage[]; readonly system: string }) => summary,
   );
 }
+
+describe("overflowCompactionThreshold", () => {
+  const window: CompactionConfig = {
+    recentWindowSize: 10,
+    threshold: 90_000,
+    thresholdPercent: 0.9,
+  };
+
+  it.each([
+    // eve counted 60k of a 120k request: half the threshold fits.
+    {
+      estimated: 60_000,
+      overflow: { inputTokens: 120_000, limitTokens: 100_000 },
+      expected: 45_000,
+    },
+    // The provider's limit is below the configured window, so the target shrinks to it too.
+    {
+      estimated: 40_000,
+      overflow: { inputTokens: 80_000, limitTokens: 50_000 },
+      expected: 22_500,
+    },
+    // Reserved output takes part of the limit; the input alone is what eve estimated.
+    {
+      estimated: 45_000,
+      overflow: { inputTokens: 90_000, limitTokens: 100_000, reservedOutputTokens: 20_000 },
+      expected: 36_000,
+    },
+    // Without counts, the request was at least the context window, plus headroom.
+    {
+      estimated: 60_000,
+      overflow: {},
+      known: { contextWindowTokens: 100_000 },
+      expected: 43_200,
+    },
+    // The session's last reported count shows the request was larger than the window.
+    {
+      estimated: 60_000,
+      overflow: {},
+      known: { contextWindowTokens: 100_000, extrapolatedTokens: 150_000 },
+      expected: 28_800,
+    },
+    // With no window either, the request sat at the provider's limit.
+    { estimated: 60_000, overflow: {}, expected: 43_200 },
+  ])(
+    "calibrates $estimated against $overflow and $known",
+    ({ estimated, overflow, known, expected }) => {
+      expect(overflowCompactionThreshold(window, estimated, overflow, known)).toBe(expected);
+    },
+  );
+});
+
+describe("extrapolateInputTokenCount", () => {
+  const prior: ModelMessage[] = [{ content: "x".repeat(4_000), role: "user" }];
+  const newer: ModelMessage[] = [{ content: "y".repeat(4_000), role: "user" }];
+
+  it("scales newer messages by how far the estimate undercounted the measured ones", () => {
+    const priorEstimate = estimateTokens(prior);
+    const config: CompactionConfig = {
+      lastKnownInputTokens: priorEstimate * 3,
+      lastKnownPromptMessageCount: 1,
+      recentWindowSize: 10,
+      threshold: 90_000,
+    };
+
+    expect(extrapolateInputTokenCount([...prior, ...newer], config)).toBeCloseTo(
+      priorEstimate * 3 + estimateTokens(newer) * 3,
+      -1,
+    );
+  });
+
+  it("has nothing to calibrate from without a reported count", () => {
+    const config: CompactionConfig = { recentWindowSize: 10, threshold: 90_000 };
+    expect(extrapolateInputTokenCount([...prior, ...newer], config)).toBeUndefined();
+  });
+});
 
 describe("compactMessages: tool-result cap heuristic", () => {
   it.each([false, true])(

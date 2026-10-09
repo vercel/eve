@@ -107,6 +107,11 @@ export function codeIs(...codes: readonly string[]): LinkPredicate {
   return (link) => link.code !== undefined && codes.includes(link.code);
 }
 
+/** Matches when the link's HTTP status equals any of the given statuses. */
+export function statusCodeIs(...statusCodes: readonly number[]): LinkPredicate {
+  return (link) => link.statusCode !== undefined && statusCodes.includes(link.statusCode);
+}
+
 /** Matches when the link's gateway body `type` equals any of the given types. */
 export function typeIs(...types: readonly string[]): LinkPredicate {
   return (link) => link.type !== undefined && types.includes(link.type);
