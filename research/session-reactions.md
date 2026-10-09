@@ -15,6 +15,7 @@ This doc proposes one primitive, the **reaction**, underneath eve's dynamic capa
 - **Reactions are sync or async.** Authors write sync reactions, which finish before the next commit. Async reactions, such as a model run, are a direction for eve's own loop, and aren't needed to ship this ([Sync and async reactions](#sync-and-async-reactions)).
 - **Today's surfaces become sugar.** `defineDynamic`, memory providers, and hook event maps all desugar to `defineHook`, the public reaction ([Today's concepts as reactions](#todays-concepts-as-reactions)).
 - **Hooks gain what has no home today:** several kinds of capability behind one condition, intents such as "compact now", agent-wide policies, and dynamic extension mounts ([Advanced examples](#advanced-examples)).
+- **It's approachable now.** The session machine, state deltas, and fewer durable steps have landed on `main`, and the v27 stack makes stopping, waiting, and calls one path each ([Why this is approachable now](#why-this-is-approachable-now)).
 - **It's cheap.** 20 unchanged reactions cost about 7 µs per commit ([Performance](#performance)).
 
 The plan is unchanged. The pipeline lands on `main` behind today's API, the conversation slice moves it onto v27 commits, and the API is the last PR of the break ([Plan](#plan)).
@@ -107,6 +108,36 @@ On Workflow, the layers stay as they are today:
 Two pieces are still open. A retried step must fold the stream lines written after its checkpoint before deciding anything, or it re-decides facts that are already public. And a cancel has to reach a running step as a signal, as steering does today through `steeringSignal`.
 
 </details>
+
+## Why this is approachable now
+
+Most of what reactions need has landed on `main` in the last few weeks, or is in review as the first tier of the v27 stack. The proposal mostly connects pieces that already exist.
+
+**Already on `main`:**
+
+| Change                                                                 | What reactions get from it                                                                                                                                                                                                                                                                                            |
+| ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The session machine (#4177, 2026-10-06)                                | The machine half already exists. Transitions in `harness/session-machine/` are functions of a `SessionView` that return a `Transition` ("Nothing else changes session state"), and lifecycle is derived from published events into a stored projection. Reactions add the other half: slots folded into the same view |
+| State deltas from steps (#3988)                                        | Steps return a structural diff instead of the whole session, and a mid-session step output dropped to about 700 bytes. Slot changes ride the same delta, so they don't grow replay                                                                                                                                    |
+| History kept out of steps that don't use it (#4128)                    | The session cursor separates history from context and session state, and the types prove which steps read history. Slots live in session state, so evaluating reactions doesn't pull history into a step                                                                                                              |
+| Fewer durable steps (#4188) and the compaction handoff (#4239)         | Step count and event-log growth are already managed budgets. Reactions add no steps: they run inside the steps that commit                                                                                                                                                                                            |
+| Compaction summaries as model calls (#4550, on #4546's model profiles) | One model-call path, so a summary run reads the model slot like any other model call                                                                                                                                                                                                                                  |
+| Long work as tasks (#3840, #3850)                                      | `task.started` and `task.settled` are facts, and tasks are the hosts async reactions would need for work that outlives a step                                                                                                                                                                                         |
+| Hooks that cancel turns (#3718)                                        | Hooks already steer the loop, so returning `cancel(…)` instead of calling `ctx.cancel()` is a small step                                                                                                                                                                                                              |
+| `transcriptReducer` in `eve/client` (#4482)                            | Clients already fold the stream into state, the pattern this doc applies inside the session                                                                                                                                                                                                                           |
+
+**In review, as Tier 0 of the v27 stack.** Each PR is open and stacked on the one before:
+
+- **#4532, one projection for internal readers:** every internal reader uses the session projection, the view reactions select from.
+- **#4541, one participant pipeline:** step 1 of the [Plan](#plan). Every participant runs in one fixed order, and its tests pin today's timing.
+- **#4543, one stop path:** every run stops the same way. That's where a returned `cancel(…)` lands, and where an async reaction's abort would go.
+- **#4545, one suspension:** a turn pauses on one record with one waiter, so waiting is one thing to select.
+- **#4549, one executor:** every local call runs through one executor, the shape of the call reaction in [Sync and async reactions](#sync-and-async-reactions).
+- **#4588, one running-work record:** tasks and the workflow runs a turn waits on live in one `eve.work` record.
+
+Tier 1 (#4564, #4567, #4574, #4591) commits each transition as one v27 line, with the machine as the only writer of facts, and hands authored channels and dynamic resolvers v27 facts. Hooks, channels, and dynamic resolvers already change shape in that break, so authors migrate once ([Compatibility](#compatibility)).
+
+**What's left is the reaction layer itself:** slots and the runner, the authoring API and its codemod, and rebuilding durable callbacks from recorded selections. None of it needs new Workflow machinery.
 
 ## The primitive
 
