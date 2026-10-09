@@ -112,12 +112,13 @@ export function toActionResult(
   result: RuntimeToolResultActionResult,
   input: unknown,
 ): RuntimeActionResult {
-  if (result.toolName !== SKILL_ENTRY_NAME) return result;
+  const skill = result.toolName === SKILL_ENTRY_NAME ? skillTarget(input) : undefined;
+  if (skill === undefined) return result;
   return {
     callId: result.callId,
     isError: result.isError,
     kind: "load-skill-result",
-    name: skillTarget(input),
+    name: skill,
     output: result.output,
   };
 }

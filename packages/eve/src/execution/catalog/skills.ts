@@ -62,16 +62,16 @@ function skillName(input: unknown): string {
   return skill === undefined ? "" : ` ${skill}`;
 }
 
-/** The entry every `eve__skill` call resolves to, with its skill as `{ skill }`. */
+/** The entry every `eve__skill` call resolves to, with the call's own `{ name }` input. */
 export function createSkillLoader(
   skills: ReadonlyMap<string, CatalogSkill>,
 ): HarnessToolDefinition {
   return {
     description: "Loads a skill's instructions.",
-    execute: (input: { readonly skill: string }) => {
-      const skill = skills.get(input.skill);
+    execute: (input: { readonly name: string }) => {
+      const skill = skills.get(input.name);
       // `eve__skill` validation resolves every skill before the call runs.
-      if (skill === undefined) throw new Error(`No skill named "${input.skill}".`);
+      if (skill === undefined) throw new Error(`No skill named "${input.name}".`);
       return skill.markdown;
     },
     frameworkTool: true,
@@ -107,7 +107,7 @@ export function unknownSkillMessage(
 
 const SKILL_INPUT_SCHEMA = toInputSchema({
   type: "object",
-  properties: { skill: { type: "string" } },
-  required: ["skill"],
+  properties: { name: { type: "string" } },
+  required: ["name"],
   additionalProperties: false,
 });

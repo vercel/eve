@@ -298,7 +298,7 @@ describe("buildStepCatalog", () => {
     it("resolves an eve__skill call to the skill loader, which returns the skill's markdown", async () => {
       const resolved = catalog.resolve({ input: { name: "pdf-forms" }, toolName: SKILL_TOOL_NAME });
 
-      expect(resolved?.call).toEqual({ input: { skill: "pdf-forms" }, toolName: "eve:load-skill" });
+      expect(resolved?.call).toEqual({ input: { name: "pdf-forms" }, toolName: "eve:load-skill" });
       const label = resolved?.definition.label;
       expect(label?.start?.(resolved?.call.input)).toBe("Load skill pdf-forms");
       expect(label?.complete?.(resolved?.call.input, "# PDF forms")).toBe("Loaded skill pdf-forms");

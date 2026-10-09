@@ -414,7 +414,7 @@ function actionResultLabel(
     case "subagent-result":
       return `subagent-result:${result.subagentName}`;
     case "load-skill-result":
-      return result.name === undefined ? "load-skill-result" : `load-skill-result:${result.name}`;
+      return `load-skill-result:${result.name}`;
   }
 }
 

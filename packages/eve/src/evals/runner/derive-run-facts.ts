@@ -3,7 +3,6 @@ import type {
   MessageStreamEvent,
   TaskSettledStreamEvent,
 } from "#protocol/message.js";
-import { requestedSkill } from "#shared/action-request-name.js";
 import type { InputRequest } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
@@ -112,7 +111,7 @@ export function deriveRunFacts(
             skillLoads.set(action.callId, {
               output: undefined,
               sessionId,
-              skill: requestedSkill(action),
+              skill: action.name,
               status: "pending",
               turnIndex: Math.max(turnIndex, 0),
             });

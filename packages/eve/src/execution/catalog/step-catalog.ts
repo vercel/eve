@@ -193,7 +193,7 @@ export function buildStepCatalog(input: {
       if (toolCall.toolName === SKILL_TOOL_NAME && catalogTools.skills) {
         const name = targetName(toolCall.input);
         if (name === undefined || !skills.has(name)) return undefined;
-        const call = { ...toolCall, input: { skill: name }, toolName: SKILL_ENTRY_NAME };
+        const call = { ...toolCall, input: { name }, toolName: SKILL_ENTRY_NAME };
         return { call, definition: skillLoader };
       }
       const definition = advertised.get(toolCall.toolName);

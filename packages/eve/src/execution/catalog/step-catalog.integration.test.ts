@@ -603,7 +603,11 @@ describe("step catalog in the harness (real AI SDK)", () => {
       driver.events.flatMap((event) =>
         event.type === "actions.requested"
           ? event.data.actions.map((action) =>
-              "toolName" in action ? action.toolName : "name" in action ? action.name : action.kind,
+              action.kind === "load-skill"
+                ? `skill:${action.name}`
+                : "toolName" in action
+                  ? action.toolName
+                  : action.name,
             )
           : [],
       ),
@@ -620,11 +624,30 @@ describe("step catalog in the harness (real AI SDK)", () => {
       "private__list_items",
       "products__get_status",
       SEARCH_TOOL_NAME,
-      "load-skill",
-      "load-skill",
-      "load-skill",
-      "load-skill",
+      "skill:release_notes",
+      "skill:pdf-forms",
+      "skill:ops__playbook",
+      "skill:house-rules",
     ]);
+    // A skill load's result is named for the same skill, and its input is the model's own.
+    const skillActions = driver.events.flatMap((event) =>
+      event.type === "actions.requested"
+        ? event.data.actions.filter((action) => action.kind === "load-skill")
+        : [],
+    );
+    expect(skillActions.map(({ input, name }) => ({ input, name }))).toEqual(
+      ["release_notes", "pdf-forms", "ops__playbook", "house-rules"].map((name) => ({
+        input: { name },
+        name,
+      })),
+    );
+    expect(
+      driver.events.flatMap((event) =>
+        event.type === "action.result" && event.data.result.kind === "load-skill-result"
+          ? [event.data.result.name]
+          : [],
+      ),
+    ).toEqual(["release_notes", "pdf-forms", "ops__playbook", "house-rules"]);
   });
 
   it("names the entry, not eve__tool, when a deferred entry returns a result that isn't JSON", async () => {

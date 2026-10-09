@@ -1,4 +1,3 @@
-import { SKILL_ENTRY_NAME } from "#protocol/catalog-tools.js";
 import type { RuntimeActionRequest } from "#shared/action-types.js";
 import { isObject } from "#shared/guards.js";
 
@@ -6,7 +5,7 @@ import { isObject } from "#shared/guards.js";
 export function actionRequestName(action: RuntimeActionRequest): string {
   switch (action.kind) {
     case "load-skill":
-      return requestedSkill(action);
+      return action.name;
     case "subagent-call":
       return action.subagentName;
     case "remote-agent-call":
@@ -17,14 +16,7 @@ export function actionRequestName(action: RuntimeActionRequest): string {
   }
 }
 
-/** The skill a `load-skill` request loads, or the loader itself when its input names none. */
-export function requestedSkill(
-  action: Extract<RuntimeActionRequest, { readonly kind: "load-skill" }>,
-): string {
-  return skillTarget(action.input) ?? SKILL_ENTRY_NAME;
-}
-
-/** The skill a skill loader's input names, if it names one. */
+/** The skill an `eve__skill` input names, if it names one. */
 export function skillTarget(input: unknown): string | undefined {
-  return isObject(input) && typeof input.skill === "string" ? input.skill : undefined;
+  return isObject(input) && typeof input.name === "string" ? input.name : undefined;
 }

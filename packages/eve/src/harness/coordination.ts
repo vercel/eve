@@ -9,6 +9,7 @@ import type {
 } from "#shared/action-types.js";
 import { SKILL_ENTRY_NAME, SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { markRuntimeWorkflowToolAction } from "#shared/action-types.js";
+import { skillTarget } from "#shared/action-request-name.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
 import {
@@ -165,8 +166,9 @@ export function createRuntimeActionRequestFromToolCall(input: {
     callId: input.toolCall.toolCallId,
     toolName: input.toolCall.toolName,
   });
-  if (input.toolCall.toolName === SKILL_ENTRY_NAME) {
-    return { callId: input.toolCall.toolCallId, input: toolInput, kind: "load-skill" };
+  const skill = input.toolCall.toolName === SKILL_ENTRY_NAME ? skillTarget(toolInput) : undefined;
+  if (skill !== undefined) {
+    return { callId: input.toolCall.toolCallId, input: toolInput, kind: "load-skill", name: skill };
   }
   const handling = definition?.behavior?.handling;
   if (
