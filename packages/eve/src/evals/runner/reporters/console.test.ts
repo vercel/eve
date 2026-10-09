@@ -83,8 +83,35 @@ describe("Console", () => {
 
     expect(lines).toEqual([
       "✓  quality  gates 2/2  judge.boolean: 90%  judge.boolean: 40%",
-      "  ⚠ judge.boolean recorded 2 times; Braintrust and Datadog keep only the lowest score. Add .label() to tell them apart.",
+      "  ⚠ judge.boolean recorded 2 times; reporters aggregate scores by name. Add .label() to tell them apart.",
     ]);
+  });
+
+  it("aggregates repeated soft scores as one value per eval in the run summary", () => {
+    const lines: string[] = [];
+    const reporter = Console({ color: false, log: (line) => lines.push(line) });
+    const result: EveEvalResult = {
+      assertions: [
+        { name: "judge.boolean", passed: true, errored: false, score: 0.9, severity: "soft" },
+        { name: "judge.boolean", passed: true, errored: false, score: 0.4, severity: "soft" },
+      ],
+      completedAt: "2026-01-01T00:00:01.000Z",
+      id: "quality",
+      result: {
+        derived: createEmptyDerivedFacts(),
+        events: [],
+        finalMessage: "ok",
+        output: "ok",
+        status: "completed",
+        traceContexts: [],
+      },
+      startedAt: "2026-01-01T00:00:00.000Z",
+      verdict: "passed",
+    };
+
+    reporter.onRunComplete(summary(result));
+
+    expect(lines).toContain("  judge.boolean: 40% (1 evals)");
   });
 
   it("does not print diagnostics for passing assertions", () => {

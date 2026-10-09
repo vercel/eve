@@ -84,15 +84,13 @@ class ConsoleReporter implements EvalReporter {
       }
     }
 
-    // Braintrust and Datadog report one score per name, so repeated names
-    // collapse to their lowest member. Surface that where the author is looking.
-    const groups = groupAssertionScores(assertions, exportedAssertionName);
-    for (const group of groups.values()) {
+    // Every reporter aggregates scores by exported name, so repeated names
+    // collapse to one value. Surface that where the author is looking.
+    for (const [name, group] of groupAssertionScores(assertions, exportedAssertionName)) {
       if (group.assertions.length < 2) continue;
-      const name = group.assertions[0]!.name;
       this.#log(
         `  ${this.#colors.yellow(
-          `⚠ ${name} recorded ${group.assertions.length} times; Braintrust and Datadog keep only the lowest score. Add .label() to tell them apart.`,
+          `⚠ ${name} recorded ${group.assertions.length} times; reporters aggregate scores by name. Add .label() to tell them apart.`,
         )}`,
       );
     }
@@ -203,15 +201,17 @@ class ConsoleReporter implements EvalReporter {
   ): { name: string; avg: number; count: number }[] {
     const totals = new Map<string, { sum: number; count: number }>();
 
+    // One value per name per eval, the group minimum, matching what the
+    // export reporters record; `count` is the number of evals.
     for (const result of results) {
-      for (const assertion of result.assertions) {
-        if (assertion.severity !== "soft") continue;
-        const entry = totals.get(assertion.name);
+      const softs = result.assertions.filter((assertion) => assertion.severity === "soft");
+      for (const [name, group] of groupAssertionScores(softs, (assertion) => assertion.name)) {
+        const entry = totals.get(name);
         if (entry) {
-          entry.sum += assertion.score;
+          entry.sum += group.score;
           entry.count += 1;
         } else {
-          totals.set(assertion.name, { sum: assertion.score, count: 1 });
+          totals.set(name, { sum: group.score, count: 1 });
         }
       }
     }
