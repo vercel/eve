@@ -1,9 +1,9 @@
 import type { SessionEvent } from "#protocol/session-event.js";
-import type { ErrorInfo, JsonValue, Scope } from "#protocol/session-events/envelope.js";
+import type { Cause, ErrorInfo, JsonValue, Scope } from "#protocol/session-events/envelope.js";
 import type { FactOf } from "#protocol/session-events/facts.js";
 import type { Capability, CallOwner, ClearedBy } from "#protocol/session-events/families/call.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#shared/action-types.js";
-import { callOutcomeOf, TOOL_EXECUTION_DENIED } from "#harness/call-outcome.js";
+import { callOutcomeOf } from "#harness/call-outcome.js";
 
 // The facts for one call, built where the call streams and runs: what the model asked for, that
 // it started, and how it settled. Calls never reach the wire any other way.
@@ -60,11 +60,17 @@ export function callStarted(
 /** A call settled from its runtime result: failed if the result says so, otherwise completed. */
 export function callSettledFrom(
   result: RuntimeActionResult,
-  options: { readonly scope?: Scope; readonly title?: string; readonly rejected?: boolean } = {},
+  options: {
+    readonly scope?: Scope;
+    readonly title?: string;
+    readonly rejected?: boolean;
+    readonly cause?: Cause;
+  } = {},
 ): FactOf<"call.settled"> {
   const { error, outcome } = callOutcomeOf(result);
-  // A policy's denial never ran the call: it's a rejection, not a failure.
-  const rejected = options.rejected === true || error?.code === TOOL_EXECUTION_DENIED;
+  // Rejection is an explicit adjudication, never inferred from an output's error code.
+  // Fresh policy denials and failures inside a tool remain failed unless the caller says otherwise.
+  const rejected = options.rejected === true;
   const data: {
     -readonly [K in keyof FactOf<"call.settled">["data"]]: FactOf<"call.settled">["data"][K];
   } = {
@@ -73,7 +79,8 @@ export function callSettledFrom(
   };
   if (result.output !== undefined) data.output = toJsonValue(result.output);
   if (error !== undefined) data.error = error;
-  if (rejected) data.cause = { policy: "approval" };
+  if (options.cause !== undefined) data.cause = options.cause;
+  else if (rejected) data.cause = { policy: "approval" };
   if (options.title !== undefined) data.title = options.title;
   return options.scope === undefined
     ? { data, type: "call.settled" }

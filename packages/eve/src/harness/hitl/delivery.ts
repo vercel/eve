@@ -142,6 +142,7 @@ export function withoutResponses(input: ResolvedStepInput | undefined): StepInpu
   const {
     attributedInputResponses: _attributed,
     inputResponses: _responses,
+    responseBindings: _bindings,
     messageConsumed: _consumed,
     ...rest
   } = input;
@@ -163,8 +164,15 @@ export function withoutTurnInput(input: ResolvedStepInput | undefined): Resolved
   const result: {
     inputResponses?: StepInput["inputResponses"];
     outputSchema?: StepInput["outputSchema"];
+    attributedInputResponses?: StepInput["attributedInputResponses"];
+    responseBindings?: StepInput["responseBindings"];
+    deliveries?: StepInput["deliveries"];
   } = {};
   if ((input?.inputResponses?.length ?? 0) > 0) result.inputResponses = input!.inputResponses;
+  if ((input?.attributedInputResponses?.length ?? 0) > 0)
+    result.attributedInputResponses = input!.attributedInputResponses;
+  if ((input?.responseBindings?.length ?? 0) > 0) result.responseBindings = input!.responseBindings;
+  if ((input?.deliveries?.length ?? 0) > 0) result.deliveries = input!.deliveries;
   if (input?.outputSchema !== undefined) result.outputSchema = input.outputSchema;
   return result;
 }
@@ -177,7 +185,16 @@ export function compactInput(input: ResolvedStepInput | undefined): ResolvedStep
     message?: StepInput["message"];
     messageConsumed?: boolean;
     outputSchema?: StepInput["outputSchema"];
+    attributedInputResponses?: StepInput["attributedInputResponses"];
+    responseBindings?: StepInput["responseBindings"];
+    deliveries?: StepInput["deliveries"];
+    messageAuth?: StepInput["messageAuth"];
   } = {};
+  if ((input.attributedInputResponses?.length ?? 0) > 0)
+    result.attributedInputResponses = input.attributedInputResponses;
+  if ((input.responseBindings?.length ?? 0) > 0) result.responseBindings = input.responseBindings;
+  if ((input.deliveries?.length ?? 0) > 0) result.deliveries = input.deliveries;
+  if (input.messageAuth !== undefined) result.messageAuth = input.messageAuth;
   if ((input.context?.length ?? 0) > 0) result.context = input.context;
   if ((input.inputResponses?.length ?? 0) > 0) result.inputResponses = input.inputResponses;
   if (input.message !== undefined) result.message = input.message;

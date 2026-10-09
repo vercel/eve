@@ -34,7 +34,7 @@ const HOOK_CANCELLABLE_EVENTS = {
   "model.started": true,
   "session.ended": false,
   "session.started": true,
-  "task.settled": false,
+  "task.ended": false,
   "task.started": false,
   "turn.paused": false,
   "turn.resumed": true,

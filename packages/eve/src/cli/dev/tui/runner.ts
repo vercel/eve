@@ -12,7 +12,7 @@ import { isAbortError } from "#client/eve-agent-store-helpers.js";
 import { failureOf } from "#client/session-utils.js";
 import { isTerminalToolCallPart } from "./terminal-tool-part.js";
 import { userText } from "./transcript-parts.js";
-import { isTaskRetryRefusal } from "#protocol/task-tools.js";
+import { isTaskAdmissionRefused } from "#protocol/task-tools.js";
 import type { SendTurnPayload } from "#client/types.js";
 import type { ModelAccessChange } from "#shared/model-connection.js";
 import type {
@@ -1561,13 +1561,13 @@ export class EveTUIRunner {
           .flatMap((message) => message.parts)
           .find((part) => part.type === "dynamic-tool" && part.toolCallId === event.data.callId);
         const name = call?.type === "dynamic-tool" ? call.toolName : event.data.callId;
-        if (isTaskRetryRefusal(event)) {
+        if (isTaskAdmissionRefused(event)) {
           diagnostics.append({
             source: "tool",
             summary: `${name} was refused for the model to retry`,
             detail: event.data.error?.message ?? "Refused.",
           });
-        } else if (event.data.outcome === "failed" && event.scope?.taskId === undefined) {
+        } else if (event.data.outcome === "failed") {
           diagnostics.append({
             source: "tool",
             summary: `${name} failed`,
@@ -1576,12 +1576,12 @@ export class EveTUIRunner {
         }
         break;
       }
-      // A task call's receipt never fails; its task's outcome does.
-      case "task.settled":
-        if (event.data.status === "failed") {
+      // A reusable body's failure can arrive after it already replied to every call.
+      case "task.ended":
+        if (event.data.outcome === "failed") {
           diagnostics.append({
             source: "tool",
-            summary: `${this.#store.snapshot.conversation.tasks[event.data.taskId]?.name ?? "A task"} failed`,
+            summary: `${this.#store.snapshot.conversation.tasks[event.data.taskId]?.name ?? "A task"} ended with an error`,
             detail: event.data.error?.message ?? "Task failed.",
           });
         }

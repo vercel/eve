@@ -43,7 +43,12 @@ import type {
 import { workflowToolRunFailureOutput } from "#execution/tools/workflow/owner-inbox.js";
 import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { sessionView } from "#harness/session-machine/commit.js";
-import { delegatedUsageFact, finishRun, settleTask } from "#harness/session-machine/transitions.js";
+import {
+  delegatedUsageFact,
+  endTask,
+  finishRun,
+  settleTask,
+} from "#harness/session-machine/transitions.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import { stopRuns, waitedCallRuns, type RunStopTarget } from "#execution/stop-runs.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
@@ -87,6 +92,7 @@ async function applyTaskRunMessage(
       break;
     }
     case "reply": {
+      if (findTask(table, taskId)?.run?.runId !== message.from.runId) break;
       ({ session, table, spend } = countTaskRunUsage(session, table, taskId, message));
       const outcome: TaskOutcome = { output: message.output, status: "completed" };
       const record = findTask(table, taskId);
@@ -99,11 +105,22 @@ async function applyTaskRunMessage(
       ({ session, table, spend } = countTaskRunUsage(session, table, taskId, message));
       break;
     case "outcome": {
+      if (findTask(table, taskId)?.run?.runId !== message.from.runId) break;
       ({ session, table, spend } = countTaskRunUsage(session, table, taskId, message));
       const outcome = toOutcome(message);
       const record = findTask(table, taskId);
       const settled = settleRemainingTaskCalls(table, taskId, outcome);
       events.push(...taskSettledEvents(session, record, settled.settled, outcome));
+      // The run's final spend lands while its task is still open, before `task.ended`.
+      if (spend !== undefined) events.push(spendFact(events, message.from.callId, spend, taskId));
+      spend = undefined;
+      events.push(
+        ...endTask(viewOf(session), {
+          taskId,
+          outcome,
+          closedCallIds: settled.settled.map((call) => call.callId),
+        }).events,
+      );
       table = finishTaskRun(settled.table, taskId, message.from.runId);
       // Nobody can answer what a finished run relayed, so channels stop offering it.
       withdrawn = finishRun(viewOf(session), {
@@ -113,29 +130,38 @@ async function applyTaskRunMessage(
       break;
     }
   }
-  if (spend !== undefined) {
-    const settled = events.filter((event) => event.type === "call.settled");
-    // One reply may settle several calls with the same result. Its spend belongs once to the
-    // latest served call (the message's source), never once per recipient.
-    const call = settled.find((event) => event.data.callId === message.from.callId) ?? settled[0];
-    const turnId = call?.scope?.turnId;
-    if (call !== undefined && turnId !== undefined) {
-      events.push(delegatedUsageFact(call.data.callId, spend, { turnId }));
-    } else {
-      // A serve body can keep spending after it replied or while cancellation unwinds. No
-      // open call owns that late spend, and an immutable settlement cannot be amended.
-      events.push({
-        type: "usage.recorded",
-        data: { kind: "delegated-late", usage: spend },
-        scope: { taskId },
-      });
-    }
-  }
+  if (spend !== undefined) events.push(spendFact(events, message.from.callId, spend, taskId));
   const relayed = await relaySessionEvents(
     { ...input, sessionState: saveTable(input.sessionState, session, table) },
     withdrawn,
   );
   return await publishSessionEvents({ ...input, ...relayed }, events);
+}
+
+/**
+ * Delegated spend, owned by the call this commit settles. One reply may settle several calls
+ * with the same result; its spend belongs once to the latest served call (the message's
+ * source), never once per recipient. A serve body can keep spending after it replied or while
+ * cancellation unwinds: no open call owns that, and an immutable settlement can't be amended,
+ * so it is the task's own `delegated-late` usage.
+ */
+function spendFact(
+  events: readonly SessionEvent[],
+  sourceCallId: string | undefined,
+  spend: TokenUsage,
+  taskId: string,
+): SessionEvent {
+  const settled = events.filter((event) => event.type === "call.settled");
+  const call = settled.find((event) => event.data.callId === sourceCallId) ?? settled[0];
+  const turnId = call?.scope?.turnId;
+  if (call !== undefined && turnId !== undefined) {
+    return delegatedUsageFact(call.data.callId, spend, { turnId });
+  }
+  return {
+    type: "usage.recorded",
+    data: { kind: "delegated-late", usage: spend },
+    scope: { taskId },
+  };
 }
 
 /**
@@ -209,7 +235,17 @@ async function cancelTasks(
     (next, { runId, taskId }) => finishTaskRun(next, taskId, runId),
     readTaskTable(current.state),
   );
-  return { ...published, sessionState: saveTable(published.sessionState, current, finished) };
+  const ended = forgotten.flatMap(
+    ({ taskId }) =>
+      endTask(viewOf(current), {
+        taskId,
+        outcome: { status: "cancelled", reason: input.reason },
+      }).events,
+  );
+  return await publishSessionEvents(
+    { ...input, ...published, sessionState: saveTable(published.sessionState, current, finished) },
+    ended,
+  );
 }
 
 /** The `task.settled` events for a task's settled calls; calls only settle on a known task. */

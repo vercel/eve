@@ -1,5 +1,6 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
-import type { AgentStartedStreamEvent, TaskSettledStreamEvent } from "#protocol/message.js";
+import type { AgentStartedStreamEvent } from "#protocol/message.js";
+import type { TaskStartedData } from "#protocol/session-events/families/task.js";
 import type { CallOutcome } from "#protocol/session-events/families/call.js";
 import type { InputRequest } from "#shared/input.js";
 import { isJsonObjectValue, type JsonObject, type JsonValue } from "#shared/json.js";
@@ -22,7 +23,7 @@ interface MutableToolCall {
 
 type MutableSkillLoad = { -readonly [K in keyof EveEvalSkillLoad]: EveEvalSkillLoad[K] };
 
-/** One call to an agent task, as `task.started` reports it until the work migration. */
+/** One call served by an agent task, explicitly linked by `call.started`. */
 interface AgentCall {
   readonly callId: string;
   readonly name: string;
@@ -30,10 +31,15 @@ interface AgentCall {
   readonly turnIndex: number;
 }
 
+interface AgentCallSettlement {
+  readonly status: Exclude<EveEvalSubagentCall["status"], "working">;
+  readonly output?: JsonValue;
+}
+
 export interface DeriveRunFactsOptions {
   /** Session id stamped onto every derived tool call, skill load, and subagent call. */
   readonly sessionId?: string;
-  /** Session events through this turn: usage remains the session's total so far. */
+  /** Session events through this turn: cumulative usage and reusable task/child metadata. */
   readonly usageEvents?: readonly SessionStreamEvent[];
 }
 
@@ -51,8 +57,19 @@ export function deriveRunFacts(
   const toolCallsByCallId = new Map<string, MutableToolCall>();
   const skillLoads = new Map<string, MutableSkillLoad>();
   const agentCalls: AgentCall[] = [];
-  const settledTaskCalls = new Map<string, TaskSettledStreamEvent["data"]>();
-  const agentSessions: AgentStartedStreamEvent["data"][] = [];
+  const settledTaskCalls = new Map<string, AgentCallSettlement>();
+  // Per-turn captures can call a reusable task started in an earlier turn. Reuse only its
+  // identity/child metadata from the captured session, not its old call counts or outcomes.
+  const tasks = new Map<string, TaskStartedData>(
+    (options?.usageEvents ?? [])
+      .filter((event) => event.type === "task.started")
+      .map((event) => [event.data.taskId, event.data]),
+  );
+  const agentCallIds = new Set<string>();
+  const outputs = new Map<string, JsonValue | undefined>();
+  const agentSessions: AgentStartedStreamEvent["data"][] = (options?.usageEvents ?? [])
+    .filter((event) => event.type === "agent.started")
+    .map((event) => event.data);
   const inputRequests: InputRequest[] = [];
   const turnIndexes = new Map<string, number>();
   let turnIndex = -1;
@@ -110,7 +127,25 @@ export function deriveRunFacts(
         break;
       }
       case "call.settled": {
-        const { callId, outcome, output } = event.data;
+        const { callId, outcome, outputOf } = event.data;
+        if (outputs.has(callId)) break;
+        const output =
+          event.data.output !== undefined
+            ? event.data.output
+            : outputOf === undefined
+              ? undefined
+              : outputs.get(outputOf.callId);
+        outputs.set(callId, output);
+        if (agentCallIds.has(callId))
+          settledTaskCalls.set(callId, {
+            output,
+            status:
+              outcome === "completed"
+                ? "completed"
+                : outcome === "interrupted"
+                  ? "cancelled"
+                  : "failed",
+          });
         const call = toolCallsByCallId.get(callId);
         if (call !== undefined && call.status === "pending") {
           call.output = output;
@@ -124,14 +159,20 @@ export function deriveRunFacts(
         break;
       }
       case "task.started": {
-        const { callId, kind, name, taskId } = event.data;
-        if (kind === "agent")
-          agentCalls.push({ callId, name, taskId, turnIndex: Math.max(turnIndex, 0) });
+        if (!tasks.has(event.data.taskId)) tasks.set(event.data.taskId, event.data);
         break;
       }
-      case "task.settled": {
-        if (!settledTaskCalls.has(event.data.callId))
-          settledTaskCalls.set(event.data.callId, event.data);
+      case "call.started": {
+        const { callId, taskId } = event.data;
+        if (taskId === undefined || agentCallIds.has(callId)) break;
+        const task = tasks.get(taskId);
+        if (task?.kind !== "agent") break;
+        agentCallIds.add(callId);
+        const index =
+          event.scope?.turnId === undefined
+            ? turnIndex
+            : (turnIndexes.get(event.scope.turnId) ?? turnIndex);
+        agentCalls.push({ callId, name: task.name, taskId, turnIndex: Math.max(index, 0) });
         break;
       }
       case "agent.started": {
@@ -204,7 +245,7 @@ function deriveSubagentCalls(input: {
   readonly agentCalls: readonly AgentCall[];
   readonly agentSessions: readonly AgentStartedStreamEvent["data"][];
   readonly sessionId: string | undefined;
-  readonly settledTaskCalls: ReadonlyMap<string, TaskSettledStreamEvent["data"]>;
+  readonly settledTaskCalls: ReadonlyMap<string, AgentCallSettlement>;
 }): EveEvalSubagentCall[] {
   const agentSessionsByTaskId = new Map<string, AgentStartedStreamEvent["data"]>();
   for (const session of input.agentSessions) {

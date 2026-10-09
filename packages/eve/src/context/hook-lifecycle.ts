@@ -3,6 +3,7 @@ import { createLogger, logError } from "#internal/logging.js";
 import { getAdapterKind } from "#channel/adapter.js";
 import type { FactPosition } from "#protocol/session-events/envelope.js";
 import type { HookContext } from "#public/definitions/hook.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
 import type { RuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import type { ContextContainer } from "./container.js";
@@ -25,6 +26,8 @@ export async function dispatchStreamEventHooks(input: {
   readonly position: FactPosition;
   /** It rode as progress: only handlers keyed on its type hear it, never `*`. */
   readonly progress: boolean;
+  /** Snapshot of the written line, even if another publication already advanced the context. */
+  readonly view?: SessionView;
   /** Stops the running turn for `ctx.cancel()`; `undefined` when this event cannot stop one. */
   readonly cancelTurn: (() => void) | undefined;
 }): Promise<void> {
@@ -39,7 +42,7 @@ export async function dispatchStreamEventHooks(input: {
   const baseCtx = {
     ...buildHookContext(input.ctx),
     position: input.position,
-    view: currentView(input.ctx),
+    view: input.view ?? currentView(input.ctx),
   };
   let dispatching = true;
   for (const entry of [...typed, ...wildcard]) {

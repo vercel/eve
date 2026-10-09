@@ -43,7 +43,7 @@ export interface HookEventMap {
   readonly "authorization.required": ProtocolEvent<"authorization.required">;
   readonly "input.requested": ProtocolEvent<"input.requested">;
   readonly "input.resolved": ProtocolEvent<"input.resolved">;
-  readonly "task.settled": ProtocolEvent<"task.settled">;
+  readonly "task.ended": ProtocolEvent<"task.ended">;
   readonly "task.started": ProtocolEvent<"task.started">;
 }
 

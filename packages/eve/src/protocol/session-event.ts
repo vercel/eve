@@ -8,7 +8,7 @@ import type { Fact, Progress } from "#protocol/session-events/facts.js";
  */
 export type ConversationFact = Exclude<
   Fact,
-  { readonly type: `${"task" | "interaction" | "response" | "child"}.${string}` }
+  { readonly type: `${"interaction" | "response" | "child"}.${string}` }
 >;
 
 /** What a session publishes: v27 conversation facts and progress, and the v26 work events. */

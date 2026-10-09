@@ -297,10 +297,6 @@ function reduceContent(
 
     case "call.settled": {
       const { callId } = event.data;
-      // A task's call settles through its task; its own result was the start receipt.
-      if (before.calls[callId]?.taskId !== undefined && event.scope?.taskId === undefined) {
-        return data;
-      }
       // A retried model-call attempt's calls may never have run; the replacement re-requests them.
       if (event.data.outcome === "abandoned") {
         return removeToolPart(data, callId);
@@ -324,9 +320,15 @@ function reduceContent(
         toolName: existing?.toolName ?? call?.name ?? "unknown",
         type: "dynamic-tool" as const,
       };
+      const output =
+        event.data.output !== undefined
+          ? event.data.output
+          : event.data.outputOf === undefined
+            ? undefined
+            : findToolPart(data, event.data.outputOf.callId)?.output;
       const outcome =
         event.data.outcome === "completed"
-          ? { errorText: undefined, output: event.data.output }
+          ? { errorText: undefined, output }
           : {
               errorText: event.data.error?.message ?? stringifyUnknown(event.data.output),
               output: undefined,
@@ -376,15 +378,6 @@ function reduceContent(
       return next;
     }
 
-    // A task's outcome is its call's: the call's `action.result` was only the start receipt.
-    case "task.settled": {
-      const existing = findToolPart(data, event.data.callId);
-      if (existing === undefined) return data;
-      const { error, output, status } = event.data;
-      const outcome = status === "completed" ? { output } : { errorText: error?.message };
-      return replaceToolPart(data, { ...existing, ...outcome } as EveDynamicToolPart);
-    }
-
     case "authorization.required":
       return updateAssistantMessage(data, event.data.turnId, (message) =>
         upsertPart(
@@ -432,9 +425,6 @@ function toolCallIds(data: EveMessageData, event: EveAgentReducerEvent): readonl
       return [event.data.callId];
     case "input.requested":
       return event.data.requests.map((request) => request.action.callId);
-    case "task.started":
-    case "task.settled":
-      return [event.data.callId];
     case "input.resolved":
       return event.data.resolutions.flatMap((resolution) => byRequest(resolution.requestId));
     case "approval.settled":

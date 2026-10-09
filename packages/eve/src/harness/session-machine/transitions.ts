@@ -14,13 +14,10 @@ import {
   createAuthorizationRequiredEvent,
   createInputRequestedEvent,
   createInputResolvedEvent,
-  createTaskSettledEvent,
-  createTaskStartedEvent,
   type InputResolution,
   type RuntimeIdentity,
   type RuntimeTraceContext,
   type TaskCancelReason,
-  type TaskStartedStreamEvent,
 } from "#protocol/message.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { Cause, ErrorInfo, Usage, UserPart } from "#protocol/session-events/envelope.js";
@@ -430,7 +427,7 @@ export function sessionEndedFacts(
   },
 ): SessionEvent[] {
   const facts: SessionEvent[] = [];
-  let closed: OpenWork = { calls: [], changes: [], deliveries: [], runs: [] };
+  let closed: OpenWork = { calls: [], changes: [], deliveries: [], runs: [], tasks: [] };
   const tables = publicViewOf(projection);
   // The shared tables, not an execution pointer, decide which turns are still open. This
   // also works for degraded terminal publication from a checkpoint without live turn state.
@@ -447,6 +444,7 @@ export function sessionEndedFacts(
         changes: [...closed.changes, ...turn.closed.changes],
         deliveries: [...closed.deliveries, ...turn.closed.deliveries],
         runs: [...closed.runs, ...turn.closed.runs],
+        tasks: [...closed.tasks, ...turn.closed.tasks],
       };
     }
   }
@@ -516,7 +514,11 @@ export function settle(view: SessionView, input: { readonly results: readonly Se
       { ...step, messages: withResult(step.messages, part) },
       new Set([part.toolCallId]),
     );
-    if (result !== undefined) {
+    const recorded =
+      result === undefined ? undefined : publicViewOf(view.projection).calls[result.callId];
+    if (result !== undefined && recorded?.taskId === undefined && recorded?.status !== "settled") {
+      // A task's start receipt is model history only. Its public call stays open until the
+      // task replies; the reply path publishes its actual settlement and delegated spend.
       const scope = { turnId: step.event.turnId };
       events.push(callSettledFrom(result, { scope }));
       // A child's usage counts once, in the commit that settles its call.
@@ -659,9 +661,41 @@ function findCall(
 // Tasks
 // ---------------------------------------------------------------------------
 
-/** A call started or reached a task. */
-export function startTask(view: SessionView, task: TaskStartedStreamEvent["data"]): Transition {
-  return unchanged(view, [createTaskStartedEvent(task)]);
+/** Private dispatch metadata for a call that starts or reaches a task. */
+export interface TaskCallStart {
+  readonly callId: string;
+  readonly taskId: string;
+  readonly turnId: string;
+  readonly kind: "agent" | "tool";
+  readonly name: string;
+}
+
+/** A task starts once; every call it serves starts against that task. */
+export function startTask(
+  view: SessionView,
+  task: TaskCallStart,
+  introducedTasks?: Set<string>,
+): Transition {
+  const scope = { taskId: task.taskId, turnId: task.turnId };
+  const events: SessionEvent[] = [];
+  const introduced =
+    introducedTasks?.has(task.taskId) ??
+    publicViewOf(view.projection).tasks[task.taskId] !== undefined;
+  if (!introduced) {
+    introducedTasks?.add(task.taskId);
+    events.push({
+      type: "task.started",
+      scope,
+      data: {
+        taskId: task.taskId,
+        kind: task.kind,
+        name: task.name,
+        startedBy: { callId: task.callId },
+      },
+    });
+  }
+  events.push({ type: "call.started", scope, data: { callId: task.callId, taskId: task.taskId } });
+  return unchanged(view, events);
 }
 
 export type TaskCallOutcome =
@@ -675,7 +709,7 @@ export function settleTask(
   input: {
     readonly task: {
       readonly id: string;
-      readonly kind?: TaskStartedStreamEvent["data"]["kind"];
+      readonly kind?: TaskCallStart["kind"];
       readonly name?: string;
     };
     readonly calls: readonly { readonly callId: string; readonly turnId: string }[];
@@ -683,7 +717,7 @@ export function settleTask(
   },
 ): Transition {
   const { outcome, task } = input;
-  const settled = input.calls.map((call): SessionEvent => {
+  const settled = input.calls.map((call, index): SessionEvent => {
     const data: {
       -readonly [K in keyof FactOf<"call.settled">["data"]]: FactOf<"call.settled">["data"][K];
     } = {
@@ -695,40 +729,42 @@ export function settleTask(
             ? "failed"
             : "interrupted",
     };
-    if (outcome.status === "completed" && outcome.output !== undefined)
-      data.output = outcome.output;
+    if (outcome.status === "completed" && outcome.output !== undefined) {
+      const first = input.calls[0];
+      if (index === 0 || first === undefined) data.output = outcome.output;
+      else data.outputOf = { callId: first.callId };
+    }
     if (outcome.status === "failed") data.error = { code: "TASK_FAILED", message: outcome.error };
     if (outcome.status === "cancelled") data.reason = outcome.reason ?? "task-cancelled";
     return { data, scope: { taskId: task.id, turnId: call.turnId }, type: "call.settled" };
   });
-  return unchanged(view, [
-    ...input.calls.map((call) => {
-      const base = {
-        callId: call.callId,
-        kind: task.kind,
-        name: task.name,
-        taskId: task.id,
-        turnId: call.turnId,
-      };
-      switch (outcome.status) {
-        case "completed":
-          return createTaskSettledEvent({ ...base, output: outcome.output, status: "completed" });
-        case "failed":
-          return createTaskSettledEvent({
-            ...base,
-            error: { message: outcome.error },
-            status: "failed",
-          });
-        case "cancelled":
-          return createTaskSettledEvent(
-            outcome.reason === undefined
-              ? { ...base, status: "cancelled" }
-              : { ...base, cancel: { reason: outcome.reason }, status: "cancelled" },
-          );
-      }
-    }),
-    ...settled,
-  ]);
+  return unchanged(view, settled);
+}
+
+/** A task's body ended. Replying only settles calls; it never ends a resumable task. */
+export function endTask(
+  view: SessionView,
+  input: {
+    readonly taskId: string;
+    readonly outcome: TaskCallOutcome;
+    /** Calls whose actual outcomes precede this task terminal in the same commit. */
+    readonly closedCallIds?: readonly string[];
+  },
+): Transition {
+  const tables = publicViewOf(view.projection);
+  const row = tables.tasks[input.taskId];
+  if (row === undefined || row.status === "ended") return unchanged(view, []);
+  const { outcome } = input;
+  const open = openWork(tables, { taskId: input.taskId });
+  const closed = new Set(input.closedCallIds);
+  const remaining = { ...open, calls: open.calls.filter((call) => !closed.has(call.callId)) };
+  const closure = closureFor({
+    task: outcome.status,
+    error:
+      outcome.status === "failed" ? { code: "TASK_FAILED", message: outcome.error } : undefined,
+    reason: outcome.status === "cancelled" ? outcome.reason : undefined,
+  });
+  return unchanged(view, closeFacts(tables, remaining, closure).work);
 }
 
 /**

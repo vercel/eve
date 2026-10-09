@@ -73,12 +73,11 @@ export interface EveEvalSkillLoad {
 }
 
 /**
- * One call to an agent task extracted from the captured stream: its
- * `task.started`, joined with its `task.settled` and the task's
- * `agent.started`.
+ * One call served by an agent task: its `call.started {taskId}`, joined with
+ * `call.settled`, the task's single `task.started`, and its child-session link.
  */
 export interface EveEvalSubagentCall {
-  /** The agent tool call's id, as on its task events. */
+  /** The agent tool call's id. */
   readonly callId?: string;
   /** The agent's session id, shared by every call to one task; absent if it never opened. */
   readonly childSessionId?: string;
@@ -86,9 +85,9 @@ export interface EveEvalSubagentCall {
   readonly name: string;
   /** Remote agent URL for remote delegations (`agent.started` remote metadata). */
   readonly remoteUrl?: string;
-  /** Output from the call's `task.settled`; `undefined` until the call completes. */
+  /** Output from `call.settled`, resolving shared replies; absent until it completes. */
   readonly output?: JsonValue;
-  /** The call's task status: `working` until its `task.settled` arrives. */
+  /** `working` until this call settles; interruptions present as `cancelled`. */
   readonly status: "working" | "completed" | "failed" | "cancelled";
   /** Zero-based index of the turn the delegation happened in. */
   readonly turnIndex: number;

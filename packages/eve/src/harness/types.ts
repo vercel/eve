@@ -11,6 +11,7 @@ import type { InputResponse } from "#shared/input.js";
 import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
+import type { ResponseSubmittedData } from "#protocol/session-events/families/response.js";
 import type { InternalToolDefinition } from "#tools/definition.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -150,6 +151,10 @@ export interface AttributedInputResponse {
 }
 
 export interface StepInput {
+  /** Stable public response/delivery identities carried across policy and sign-in passes.
+   * Routing and auth remain private; lifecycle status belongs only to the public fold.
+   */
+  readonly responseBindings?: readonly ResponseSubmittedData[];
   /** Internal responder-bound input produced at the delivery boundary. */
   readonly attributedInputResponses?: readonly AttributedInputResponse[];
   readonly inputResponses?: readonly InputResponse[];

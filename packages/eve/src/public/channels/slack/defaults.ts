@@ -213,15 +213,6 @@ export const defaultEvents: SlackChannelInternalEvents = {
     if (working.length > 0) await showStatus(channel, waitingOnTasks(working));
   },
 
-  // The turn's next model run reads the results, so `model.started` can say so.
-  async "task.settled"(event, channel, _ctx) {
-    if (event.cancel !== undefined) return;
-    const pending = channel.state.pendingTaskResults;
-    const names = pending?.turnId === event.turnId ? pending.names : [];
-    const name = event.kind === "agent" && event.name !== undefined ? event.name : null;
-    channel.state.pendingTaskResults = { names: [...names, name], turnId: event.turnId };
-  },
-
   // A model run means nothing to someone reading the thread, so the status
   // keeps naming the work, such as the call that just finished, and is written
   // again so Slack doesn't time it out. Only task results the run is about to
@@ -295,7 +286,16 @@ export const defaultEvents: SlackChannelInternalEvents = {
     await showStatus(channel, label);
   },
 
-  async "call.settled"(event, channel, _ctx) {
+  async "call.settled"(event, channel, ctx) {
+    // Task replies settle their calls, not their reusable task. The next model run reads them.
+    const { taskId, turnId } = ctx.scope ?? {};
+    if (taskId !== undefined && turnId !== undefined && event.outcome !== "interrupted") {
+      const task = ctx.view.tasks[taskId];
+      const pending = channel.state.pendingTaskResults;
+      const names = pending?.turnId === turnId ? pending.names : [];
+      const name = task?.kind === "agent" ? task.name : null;
+      channel.state.pendingTaskResults = { names: [...names, name], turnId };
+    }
     if (event.title) await showStatus(channel, event.title);
   },
 

@@ -244,7 +244,7 @@ export interface ChannelEvents<TCtx = void> {
   readonly "input.requested"?: ChannelEventHandler<"input.requested", TCtx>;
   readonly "input.resolved"?: ChannelEventHandler<"input.resolved", TCtx>;
   readonly "task.started"?: ChannelEventHandler<"task.started", TCtx>;
-  readonly "task.settled"?: ChannelEventHandler<"task.settled", TCtx>;
+  readonly "task.ended"?: ChannelEventHandler<"task.ended", TCtx>;
 }
 
 /**
@@ -363,7 +363,7 @@ const channelEventTypes: Record<keyof ChannelEvents, null> = {
   "input.requested": null,
   "input.resolved": null,
   "task.started": null,
-  "task.settled": null,
+  "task.ended": null,
 };
 
 const eventTypes = Object.keys(channelEventTypes) as readonly (keyof ChannelEvents)[];
@@ -395,7 +395,7 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
     if (userHandler) {
       hasEventHandlers = true;
       eventHandlers[eventType] = (data: unknown, adapterCtx: any) => {
-        const { session, position, scope, ...platformContext } = adapterCtx;
+        const { session, position, scope, view, ...platformContext } = adapterCtx;
         const channel = {
           ...platformContext,
           continuation:
@@ -410,7 +410,7 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
           ...buildCallbackContext(),
           position: position ?? { index: 0, line: 0 },
           scope,
-          view: currentView(),
+          view: view ?? currentView(),
         };
         return (
           userHandler as (
