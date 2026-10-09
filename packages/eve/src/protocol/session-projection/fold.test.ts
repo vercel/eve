@@ -19,11 +19,10 @@ function turnLines(index: number, options: { readonly opensSession?: boolean } =
   const deliveryId = `d_${index}`;
   const scope = { runId, turnId };
   const commit = (...facts: unknown[]): StoredLine => ({ at, facts });
+  const opening: unknown[] =
+    options.opensSession === true ? [{ data: {}, type: "session.started" }] : [];
   return [
-    commit(...(options.opensSession === true ? [{ data: {}, type: "session.started" }] : []), {
-      data: { deliveryId },
-      type: "delivery.admitted",
-    }),
+    commit(...opening, { data: { deliveryId }, type: "delivery.admitted" }),
     commit(
       {
         data: { cause: { deliveryId }, follows: index === 0 ? null : `turn_${index - 1}`, turnId },
