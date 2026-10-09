@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  resolveRuntimeTraceLinks,
-  resolveRuntimeTraceTrack,
-} from "#evals/runner/reporters/datadog-runtime-trace-links.js";
+import { resolveRuntimeTraceLinks } from "#evals/runner/reporters/datadog-runtime-trace-links.js";
 import type { EveEvalTraceContext } from "#evals/types.js";
 
 function traceContext(overrides: Partial<EveEvalTraceContext> = {}): EveEvalTraceContext {
@@ -17,67 +14,22 @@ function traceContext(overrides: Partial<EveEvalTraceContext> = {}): EveEvalTrac
   };
 }
 
-describe("resolveRuntimeTraceTrack", () => {
-  it.each([
-    [undefined, "llmobs"],
-    ["", "llmobs"],
-    ["auto", "llmobs"],
-    ["llmobs", "llmobs"],
-    ["experiments", "experiments"],
-    ["invalid", "llmobs"],
-  ] as const)("maps %s to %s", (configuredTrack, expected) => {
-    expect(resolveRuntimeTraceTrack(configuredTrack)).toBe(expected);
-  });
-});
-
 describe("resolveRuntimeTraceLinks", () => {
-  it("deduplicates converted contexts and lets a primary context win", () => {
-    expect(
-      resolveRuntimeTraceLinks(
-        [
-          traceContext({ sessionId: "secondary", primary: false }),
-          traceContext({ sessionId: "primary", primary: true }),
-          traceContext({
-            traceId: "fedcba9876543210fedcba9876543210",
-            spanId: "fedcba9876543210",
-            sessionId: "other",
-            primary: false,
-          }),
-        ],
-        "llmobs",
-      ),
-    ).toEqual([
-      {
-        relation: "experiment_runtime",
-        traceId: "c6a8d65cb7d45f2cbbcd2b8e57bdd074",
-        spanId: "81985529216486895",
-        sessionId: "primary",
-        primary: true,
-        track: "llmobs",
-      },
-      {
-        relation: "experiment_runtime",
-        traceId: "d8464e48436c5124a7b8b5b463a20f61",
-        spanId: "18364758544493064720",
-        sessionId: "other",
-        primary: false,
-        track: "llmobs",
-      },
-    ]);
-  });
-
   it("stores the Datadog-indexed IDs for a real W3C runtime context", () => {
     expect(
-      resolveRuntimeTraceLinks(
-        [
-          traceContext({
-            traceId: "010280a6f337b4e3117b3db95c1ad3fe",
-            spanId: "140edab97d7fb4ef",
-            sessionId: "wrun_01M3533VV7F1M7FF5J8NQ3W7G8",
-          }),
-        ],
-        "llmobs",
-      ),
+      resolveRuntimeTraceLinks([
+        traceContext({
+          traceId: "010280a6f337b4e3117b3db95c1ad3fe",
+          spanId: "140edab97d7fb4ef",
+          sessionId: "wrun_01M3533VV7F1M7FF5J8NQ3W7G8",
+        }),
+        traceContext({
+          traceId: "fedcba9876543210fedcba9876543210",
+          spanId: "fedcba9876543210",
+          sessionId: "secondary",
+          primary: false,
+        }),
+      ]),
     ).toEqual([
       {
         relation: "experiment_runtime",
@@ -85,28 +37,25 @@ describe("resolveRuntimeTraceLinks", () => {
         spanId: "1445333020641834223",
         sessionId: "wrun_01M3533VV7F1M7FF5J8NQ3W7G8",
         primary: true,
-        track: "llmobs",
+      },
+      {
+        relation: "experiment_runtime",
+        traceId: "d8464e48436c5124a7b8b5b463a20f61",
+        spanId: "18364758544493064720",
+        sessionId: "secondary",
+        primary: false,
       },
     ]);
   });
 
   it("omits unsampled, malformed, and zero runtime contexts", () => {
     expect(
-      resolveRuntimeTraceLinks(
-        [
-          traceContext({ traceFlags: 0 }),
-          traceContext({ traceId: "invalid", spanId: "invalid" }),
-          traceContext({ traceId: "0".repeat(32) }),
-          traceContext({ spanId: "0".repeat(16) }),
-        ],
-        "llmobs",
-      ),
+      resolveRuntimeTraceLinks([
+        traceContext({ traceFlags: 0 }),
+        traceContext({ traceId: "invalid", spanId: "invalid" }),
+        traceContext({ traceId: "0".repeat(32) }),
+        traceContext({ spanId: "0".repeat(16) }),
+      ]),
     ).toEqual([]);
-  });
-
-  it("records an explicit experiments track", () => {
-    expect(resolveRuntimeTraceLinks([traceContext()], "experiments")).toEqual([
-      expect.objectContaining({ track: "experiments" }),
-    ]);
   });
 });

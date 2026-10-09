@@ -1,8 +1,5 @@
 import type { EveEval, EveEvalResult, EveEvalRunSummary, EveEvalTarget } from "#evals/types.js";
-import {
-  resolveRuntimeTraceLinks,
-  resolveRuntimeTraceTrack,
-} from "#evals/runner/reporters/datadog-runtime-trace-links.js";
+import { resolveRuntimeTraceLinks } from "#evals/runner/reporters/datadog-runtime-trace-links.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 import {
   composeAssertionScoreMetadata,
@@ -480,10 +477,7 @@ function resolveResultMetadata(
     eveSkillLoads: result.result.derived.skillLoads.map((load) => load.skill),
     eveParked: result.result.derived.parked,
   });
-  const runtimeTraceLinks = resolveRuntimeTraceLinks(
-    result.result.traceContexts,
-    resolveRuntimeTraceTrack(process.env.DD_LLMOBS_SPAN_TRACK),
-  );
+  const runtimeTraceLinks = resolveRuntimeTraceLinks(result.result.traceContexts);
   if (runtimeTraceLinks.length > 0) {
     metadata.experimentRuntimeTraceLinks = runtimeTraceLinks;
   }

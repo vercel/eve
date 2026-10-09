@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createEmptyDerivedFacts } from "#evals/runner/derive-run-facts.js";
 import { Datadog, type DatadogReporterConfig } from "#evals/reporters/index.js";
@@ -12,9 +12,13 @@ const RECORDING_DISABLED = {
   recordErrors: false,
 } satisfies DatadogReporterConfig;
 
-afterEach(() => {
-  vi.unstubAllEnvs();
-});
+const SAMPLED_TRACE_CONTEXT = {
+  traceId: "0123456789abcdef0123456789abcdef",
+  spanId: "0123456789abcdef",
+  traceFlags: 1,
+  sessionId: "session-123",
+  primary: true,
+};
 
 function makeTarget(kind: "local" | "remote" = "local"): EveEvalTarget {
   return {
@@ -308,22 +312,13 @@ describe("Datadog", () => {
   it.each(["failed", "waiting"] as const)(
     "records runtime trace links for %s evals",
     async (status) => {
-      vi.stubEnv("DD_LLMOBS_SPAN_TRACK", "experiments");
       const { config, experiment } = makeConfig(RECORDING_DISABLED);
       const reporter = Datadog(config);
       const result = makeEvalResult({
         result: {
           ...makeEvalResult().result,
           status,
-          traceContexts: [
-            {
-              traceId: "0123456789abcdef0123456789abcdef",
-              spanId: "0123456789abcdef",
-              traceFlags: 1,
-              sessionId: "session-123",
-              primary: true,
-            },
-          ],
+          traceContexts: [SAMPLED_TRACE_CONTEXT],
         },
       });
 
@@ -337,7 +332,6 @@ describe("Datadog", () => {
               expect.objectContaining({
                 relation: "experiment_runtime",
                 primary: true,
-                track: "experiments",
               }),
             ],
           }),
@@ -491,21 +485,12 @@ describe("Datadog", () => {
   });
 
   it("records inputs, outputs, expected outputs, and runtime links in a shared dataset by default", async () => {
-    vi.stubEnv("DD_LLMOBS_SPAN_TRACK", "llmobs");
     const { client, config, datasets, experiment, lines } = makeConfig({ experimentName: "run-1" });
     const reporter = Datadog(config);
     const result = makeEvalResult({
       result: {
         ...makeEvalResult().result,
-        traceContexts: [
-          {
-            traceId: "0123456789abcdef0123456789abcdef",
-            spanId: "0123456789abcdef",
-            traceFlags: 1,
-            sessionId: "session-123",
-            primary: true,
-          },
-        ],
+        traceContexts: [SAMPLED_TRACE_CONTEXT],
       },
     });
 
@@ -550,7 +535,6 @@ describe("Datadog", () => {
             expect.objectContaining({
               traceId: "c6a8d65cb7d45f2cbbcd2b8e57bdd074",
               spanId: "81985529216486895",
-              track: "llmobs",
             }),
           ],
         }),
