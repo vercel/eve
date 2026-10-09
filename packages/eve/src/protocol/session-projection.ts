@@ -11,6 +11,7 @@ import type {
   SignInChallenge,
 } from "#protocol/session-events/families/interaction.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
+import { interactionOwner, openInteractions } from "#protocol/session-projection/selectors.js";
 import type { InputOption, InputRequest, InputResponse } from "#shared/input.js";
 import type { JsonValue } from "#shared/json.js";
 
@@ -692,6 +693,63 @@ export function turnCoordinates(state: SessionProjection): {
     return { sequence: turn.sequence, stepIndex: turn.stepIndex ?? 0, turnId: turn.turnId };
   }
   return { sequence: state.nextSequence, stepIndex: 0, turnId: `turn_${state.nextSequence}` };
+}
+
+/** A request the session still waits on, as the shared tables show it. */
+export interface OpenRequest {
+  readonly request: InputRequest;
+  /** The call a relayed request serves. */
+  readonly callId?: string;
+  /** The task whose run asks, when a task asks. */
+  readonly taskId?: string;
+  /** The turn the request holds, when a turn owns it. */
+  readonly turnId?: string;
+}
+
+/** Where a turn's events go: its sequence and its latest step, from the private turn record. */
+export function turnCoordinatesOf(
+  state: SessionProjection,
+  turnId: string,
+): { readonly sequence: number; readonly stepIndex: number; readonly turnId: string } {
+  const turn = state.turns[turnId];
+  return {
+    sequence: turn?.sequence ?? turnSequence(turnId) ?? state.nextSequence,
+    stepIndex: turn?.stepIndex ?? 0,
+    turnId,
+  };
+}
+
+/**
+ * The approvals, questions, and budget prompts the session still waits on, oldest first, read
+ * from the shared tables: the server's one source for whether a request is open. A question, or
+ * a request with an origin, is relayed: it serves a call or a task. An approval without an
+ * origin is this session's own, about its own call.
+ */
+export function openRequests(view: SessionView | undefined): readonly OpenRequest[] {
+  if (view === undefined) return [];
+  return openInteractions(view).flatMap((row) => {
+    const kind = inputKindOf(row.request);
+    if (kind === undefined) return [];
+    const { subject } = row;
+    const callId = "callId" in subject ? subject.callId : row.interactionId;
+    const open: Mutable<OpenRequest> = {
+      request: inputRequestOf(row.interactionId, row.request, kind, {
+        callId,
+        toolName: view.calls[callId]?.capability.name ?? kind,
+      }),
+    };
+    const { taskId, turnId } = interactionOwner(view, row);
+    if (taskId !== undefined) open.taskId = taskId;
+    if (turnId !== undefined) open.turnId = turnId;
+    if ((row.origin !== undefined || kind === "question") && "callId" in subject)
+      open.callId = subject.callId;
+    return [open];
+  });
+}
+
+/** Whether the shared tables show the session waiting on a sign-in. */
+export function waitsOnSignIn(view: SessionView | undefined): boolean {
+  return view !== undefined && openInteractions(view, { kind: "sign-in" }).length > 0;
 }
 
 /** Inputs awaiting an answer, including requests introduced in earlier turns. */
