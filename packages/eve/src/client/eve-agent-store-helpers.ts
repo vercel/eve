@@ -41,23 +41,32 @@ export function settledStatus(
 }
 
 /**
- * Whether the session's last line ends a response. A boundary commits with what it settles, such
- * as a pause with the deliveries it answers for now, so any fact of the last line counts.
+ * Whether the session's stream, as read so far, rests at a response boundary: its latest turn
+ * fact ended the turn or paused it on a person, and no delivery admitted since still waits to
+ * settle. A boundary commits with what it settles, and later lines can record work that doesn't
+ * move the turn, such as a control's settlement, so the tail's last event alone can't tell.
  */
 export function isSettledSessionTail(
   events: readonly SessionStreamEvent[],
   conversation: ConversationState,
 ): boolean {
-  const tail = events.at(-1);
-  if (tail === undefined) return false;
-  const line = tail.meta.position.line;
+  const settled = new Set<string>();
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]!;
-    if (event.meta.position.line !== line) return false;
-    if (isResponseBoundary(event, conversation)) return true;
+    if (event.type === "delivery.settled") settled.add(event.data.deliveryId);
+    if (event.type === "delivery.admitted" && !settled.has(event.data.deliveryId)) return false;
+    if (TURN_LIFECYCLE.has(event.type)) return isResponseBoundary(event, conversation);
   }
   return false;
 }
+
+const TURN_LIFECYCLE: ReadonlySet<string> = new Set([
+  "turn.started",
+  "turn.resumed",
+  "turn.paused",
+  "turn.settled",
+  "session.ended",
+]);
 
 /** A server ignores answers to requests it already settled, so the store never sends them. */
 export function assertAnswerable(input: SendTurnPayload, conversation: ConversationState): void {

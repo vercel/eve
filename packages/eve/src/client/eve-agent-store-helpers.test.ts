@@ -22,11 +22,18 @@ describe("isSettledSessionTail", () => {
     expect(isSettledSessionTail([paused, answeredForNow], initialConversationState())).toBe(true);
   });
 
-  it("doesn't count a boundary from an earlier line", () => {
+  it("rests at a boundary that later lines don't move, until a delivery waits again", () => {
     const later: SessionStreamEvent = {
       ...answeredForNow,
       meta: { at, position: { index: 0, line: 8 } },
     };
-    expect(isSettledSessionTail([paused, later], initialConversationState())).toBe(false);
+    expect(isSettledSessionTail([paused, later], initialConversationState())).toBe(true);
+
+    const waiting: SessionStreamEvent = {
+      data: { deliveryId: "d_2" },
+      meta: { at, position: { index: 0, line: 9 } },
+      type: "delivery.admitted",
+    };
+    expect(isSettledSessionTail([paused, later, waiting], initialConversationState())).toBe(false);
   });
 });
