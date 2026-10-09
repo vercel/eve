@@ -14,7 +14,7 @@ This doc proposes one primitive, the **reaction**, underneath eve's dynamic capa
 - **A reaction is that idea as code.** `select` reads what it depends on, and `resolve` returns what it contributes. `resolve` is called right after the commit that changes its selection, and nothing else triggers it ([The primitive](#the-primitive)).
 - **Reactions are sync or async.** Authors write sync reactions, which finish before the next commit. Async reactions, such as a model run, are a direction for eve's own loop, and aren't needed to ship this ([Sync and async reactions](#sync-and-async-reactions)).
 - **Today's surfaces become sugar.** `defineDynamic`, memory providers, and hook event maps all desugar to `defineHook`, the public reaction ([Today's concepts as reactions](#todays-concepts-as-reactions)).
-- **Hooks gain what has no home today:** several kinds of capability behind one condition, intents such as "compact now", agent-wide policies, one instance per row, and dynamic extension mounts ([Advanced examples](#advanced-examples)).
+- **Hooks gain what has no home today:** several kinds of capability behind one condition, intents such as "compact now", agent-wide policies, and dynamic extension mounts ([Advanced examples](#advanced-examples)).
 - **It's cheap.** 20 unchanged reactions cost about 7 µs per commit ([Performance](#performance)).
 
 The plan is unchanged. The pipeline lands on `main` behind today's API, the conversation slice moves it onto v27 commits, and the API is the last PR of the break ([Plan](#plan)).
@@ -80,7 +80,7 @@ Everything in the loop has the same shape: notice something in the view, do some
 |            | Sync                                                   | Async                                                      |
 | ---------- | ------------------------------------------------------ | ---------------------------------------------------------- |
 | Written by | Authors and eve                                        | eve only                                                   |
-| Instances  | One per hook, or one per key with `each`               | One per key: a requested model run, a cleared call         |
+| Instances  | One                                                    | One per key: a requested model run, a cleared call         |
 | Runs       | To completion before the next commit                   | Across commits, concurrently                               |
 | Output     | Its slot                                               | An outcome in its slot, which the machine turns into facts |
 | Withdrawal | The slot is replaced                                   | The work is aborted when its key leaves the selection      |
@@ -123,7 +123,6 @@ That's the whole primitive, and `defineHook` is its public form.
 
 - **`select` declares the inputs.** It's synchronous and deterministic, and returns JSON. Omitting it means `resolve` runs once. Development mode evaluates it twice to catch clock reads.
 - **`resolve` gets the selection, not the view,** so it can't depend on state it didn't select. Its context adds services: `abortSignal`, the reaction's previous slot as `ctx.previous` (for cursors and counters), and the facts of the commit that called it as `ctx.facts`.
-- **`each` replaces `select` for one instance per key.** It returns a map from keys to selections, and `resolve` runs per key whose selection changed, with `ctx.key` ([One instance per row](#one-instance-per-row)).
 - **IDs come from file paths,** like every other eve name.
 
 ### Why `select` is separate
@@ -607,44 +606,6 @@ export default defineHook({
 
 Returning the whole set each time is fine, because the machine reconciles each intent by its key.
 
-### One instance per row
-
-Today, a status card per task needs event handlers and separate state for the card IDs. Hooks run at least once, so a retried step posts a second card:
-
-```ts
-// agent/hooks/task-cards.ts
-const cards = defineState("ops.task-cards", () => ({}) as Record<string, string>);
-
-export default defineHook({
-  events: {
-    "task.started": async (event) => {
-      const cardId = await postCard(event.data.name, "running");
-      cards.update((all) => ({ ...all, [event.data.taskId]: cardId }));
-    },
-    "task.settled": async (event) => {
-      const cardId = cards.get()[event.data.taskId];
-      if (cardId) await updateCard(cardId, event.data.status);
-    },
-  },
-});
-```
-
-A single `select` would see every task at once, so the author would diff against the previous selection by hand, and one failing card would withdraw every other task's card ID. `each` selects one value per key instead, and runs `resolve` once per key whose value changed:
-
-```ts
-// agent/hooks/task-cards.ts
-export default defineHook({
-  each: (view) => Object.fromEntries(view.tasks.map((t) => [t.id, t.status])),
-  resolve: async (status, ctx) => {
-    if (!ctx.previous) return data({ cardId: await postCard(ctx.key, status) });
-    await updateCard(ctx.previous.cardId, status);
-    return data({ cardId: ctx.previous.cardId });
-  },
-});
-```
-
-Each key has its own slot, its own `ctx.previous`, and its own failures. A restore doesn't post again, because the card ID is in the slot. The runner needs keyed instances for async reactions anyway, so `each` adds little to the runtime.
-
 ### A dynamic extension mount
 
 A mount file exports what the extension returns, so `defineDynamic` applies to it like any other file:
@@ -697,7 +658,7 @@ The runner costs microseconds after each commit, against seconds of model latenc
 - **Tool changes mid-turn miss the prompt cache.** eve's Anthropic cache breakpoint sits at the end of the tools block (`harness/prompt-cache.ts`). Equal re-runs change nothing, and presenting rare changes differently would keep them cheap ([Open questions](#open-questions)).
 - **A slow `resolve` delays the next commit,** not just the next model call. If it matters, readers could wait for a slot's run in flight instead of every commit waiting for all reactions.
 - **Redeploys** re-run every reaction in every active session after its next commit, so external calls still happen. A code fingerprint per reaction would re-run only what changed.
-- **Storage** is one slot per reaction (one per key with `each`), plus older slots while calls that started under them are open. Selections are stored whole only for entries with code, under a cap (4 KiB in the prototype). Slots ride the checkpoint and never reach the stream.
+- **Storage** is one slot per reaction, plus older slots while calls that started under them are open. Selections are stored whole only for entries with code, under a cap (4 KiB in the prototype). Slots ride the checkpoint and never reach the stream.
 
 Not measured: Workflow step overhead, checkpoint serialization, real resolver I/O, and the cost of keeping views immutable in eve's fold.
 
@@ -709,7 +670,7 @@ Every dynamic resolver and memory provider changes shape. The change aims to shi
 - **Not every resolver converts mechanically.** About half of the roughly 210 files that use `defineDynamic` read `ctx` in a handler, by a rough grep. The codemod moves simple reads into the selection (`auth.current` at session start becomes `auth.initiator`) and leaves a TODO for the dozen or so that read `ctx.messages`. It can't know what data outside eve a resolver depends on.
 - **Dynamic fields become dynamic files:** `defineAgent({ model: defineDynamic(…) })` becomes a dynamic `agent.ts` that returns `defineAgent({ model })`.
 - **Memory providers:** `recall` and `tools` become `{ select, resolve }`, with recall selecting the latest turn start to keep today's timing. `compaction.completed` recall goes away, and `capture` receives only messages it hasn't seen.
-- **Hooks and channels:** event maps stay, with v27's names, and `select`, `resolve`, and `each` are additive. `ctx.cancel()` becomes a returned `cancel(…)`. Hooks gain the conversation through the view. If the channel change is adopted, handlers move to `(fact, ctx)`.
+- **Hooks and channels:** event maps stay, with v27's names, and `select` and `resolve` are additive. `ctx.cancel()` becomes a returned `cancel(…)`. Hooks gain the conversation through the view. If the channel change is adopted, handlers move to `(fact, ctx)`.
 - **One ordering change is already made in the pipeline PR:** memory now runs after hooks, so a hook that cancels the turn from `turn.started` also stops recall for that turn.
 - **The old shape fails the build** with an error that points at the codemod, not an alias.
 - **Running sessions don't cross the break,** so slots can change shape there. If the API ships later, results recorded under today's keys count as stale and re-run, as after a redeploy.
@@ -760,7 +721,6 @@ There are three steps in the overall plan ([`session-event-lifecycle.md`](./sess
 **Beyond the plan, not scheduled.** Each lands as a minor after the break, with its own doc and e2e tests:
 
 - hooks returning more than effects and `cancel(…)`: data, capabilities, mixed results, and other intents, including `requireApproval`;
-- `each`, for one instance per row;
 - dynamic extension mounts;
 - timers, context edits, and request parameters;
 - the channel signature, which would belong in the conversation slice if accepted;
@@ -787,5 +747,5 @@ There are three steps in the overall plan ([`session-event-lifecycle.md`](./sess
 
 10. **The channel signature.** Should channels move to `(fact, ctx)` in v27, when their event names break anyway, or in a minor after it?
 11. **Intents.** Which come first after `cancel`, with what caps per delivery, and is `cause: {reaction}` enough attribution? Each new kind also needs the fact that satisfies it.
-12. **Hooks as the public reaction.** In what order do hooks gain data, capabilities, mixed results, other intents, and `each`? Once hooks can return an entry kind, it's public contract. Do capabilities a hook declares need the same e2e coverage as their own folders, and what does a key leaving `each` mean for effects it already made?
+12. **Hooks as the public reaction.** In what order do hooks gain data, capabilities, mixed results, and other intents? Once hooks can return an entry kind, it's public contract. Do capabilities a hook declares need the same e2e coverage as their own folders?
 13. **Async reactions.** Does eve's loop move onto them, and when? On Workflow they need a retried step to catch up from the stream, and a cancel to reach a running step.
