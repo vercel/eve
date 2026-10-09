@@ -28,6 +28,7 @@ import {
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger, logError } from "#internal/logging.js";
 import {
+  cancelRun,
   getHookByToken,
   getRun,
   getWorld,
@@ -77,6 +78,7 @@ import {
 } from "#execution/stable-workflow-names.js";
 const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
 const COMMAND_HOOK_READY_TIMEOUT_MS = 30_000;
+const FORCED_RESET_CANCEL_REASON = "Session reset timed out waiting for command inbox release";
 
 const STABLE_ID_BASE = EVE_PACKAGE_INFO.name;
 
@@ -325,11 +327,26 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
     const addressedToken =
       typeof token === "string" ? token : sessionCommandHookToken(token.sessionId);
     const tokens = new Set([sessionCommandHookToken(hook.sessionId), addressedToken]);
-    await Promise.all(
+    const released = await Promise.all(
       [...tokens].map((logicalToken) =>
         waitForHookRelease(sessionInboxHookToken(logicalToken), hook.runId),
       ),
     );
+    if (released.includes(false)) {
+      log.warn("session reset did not release its command inbox; cancelling the workflow run", {
+        runId: hook.runId,
+        sessionId: hook.sessionId,
+      });
+      try {
+        // A run that cannot replay cannot consume reset or finalize cooperatively.
+        // Direct cancellation is the only out-of-band way to release its inbox.
+        await cancelRun(await getWorld(), hook.runId, {
+          cancelReason: FORCED_RESET_CANCEL_REASON,
+        });
+      } catch (error) {
+        if (!isInactiveCommandTarget(error)) throw error;
+      }
+    }
   }
 
   return activeCommandResult(command, hook.sessionId);
@@ -408,20 +425,18 @@ export async function waitForCommandHookOwner(token: string): Promise<WorkflowHo
   }
 }
 
-async function waitForHookRelease(token: string, ownerRunId: string): Promise<void> {
+async function waitForHookRelease(token: string, ownerRunId: string): Promise<boolean> {
   const deadline = Date.now() + COMMAND_HOOK_READY_TIMEOUT_MS;
   while (true) {
     try {
       const owner = normalizeWorkflowHook(await getHookByToken(token));
-      if (owner.runId !== ownerRunId) return;
+      if (owner.runId !== ownerRunId) return true;
     } catch (error) {
-      if (HookNotFoundError.is(error)) return;
+      if (HookNotFoundError.is(error)) return true;
       throw error;
     }
 
-    if (Date.now() >= deadline) {
-      throw new Error(`Timed out waiting for session "${ownerRunId}" to release inbox "${token}".`);
-    }
+    if (Date.now() >= deadline) return false;
     await new Promise<void>((resolve) => setTimeout(resolve, 20));
   }
 }

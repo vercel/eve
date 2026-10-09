@@ -444,6 +444,33 @@ describe("createWorkflowRuntime command dispatch", () => {
     );
     expect(getHookByTokenMock).toHaveBeenCalledWith(sessionInboxHookToken("eve:token"));
   });
+
+  it("force-cancels a session whose reset cannot release the stable command inbox", async () => {
+    vi.useFakeTimers();
+    try {
+      resumeHookMock.mockResolvedValue(currentSessionHook("eve:token", "session-1"));
+      getHookByTokenMock.mockImplementation(async (token: string) =>
+        currentSessionHook(token, "session-1"),
+      );
+
+      const reset = buildRuntime().dispatchContinuation({
+        command: { kind: "reset", reason: "User requested /new" },
+        continuationToken: "eve:token",
+      });
+      const result = expect(reset).resolves.toEqual({
+        previousSessionId: "session-1",
+        status: "reset",
+      });
+      await vi.advanceTimersByTimeAsync(30_020);
+
+      await result;
+      expect(cancelRunMock).toHaveBeenCalledWith(world, "session-1", {
+        cancelReason: "Session reset timed out waiting for command inbox release",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 function currentSessionHook(token: string, runId = "target-session") {
