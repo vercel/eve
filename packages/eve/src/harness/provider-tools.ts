@@ -10,7 +10,7 @@ import {
   WEB_SEARCH_TOOL_NAME,
 } from "#harness/provider-tool-schemas.js";
 import type { JsonObject } from "#shared/json.js";
-import type { WebSearchProvider } from "#shared/web-search.js";
+import type { WebSearchSelection } from "#shared/web-search.js";
 
 /**
  * The provider backend resolved for one web search tool invocation.
@@ -71,15 +71,20 @@ export function resolveWebSearchOutputSchema(
 }
 
 /**
- * Determines the web search backend for a model: the configured search provider (Exa by
- * default) on AI Gateway, the provider's native search for direct OpenAI, Anthropic, and Google
- * models, and none (`null`) for any other direct model.
+ * Determines the web search backend for a model: the selected search provider on AI Gateway
+ * (Exa by default), or its fallback when the provider can't serve the model; the provider's
+ * native search for direct OpenAI, Anthropic, and Google models; and none (`null`) otherwise.
  */
 export function resolveWebSearchBackend(
   profile: ModelProfile,
-  gatewayProvider: WebSearchProvider = "exa",
+  selection: WebSearchSelection = { provider: "exa" },
 ): WebSearchBackend | null {
-  if (profile.gateway) return gatewayProvider;
+  if (profile.gateway) {
+    // OpenAI's hosted search serves only OpenAI models.
+    return selection.provider === "openai" && profile.provider !== "openai"
+      ? (selection.fallback ?? null)
+      : selection.provider;
+  }
   return NATIVE_WEB_SEARCH_PROVIDERS.has(profile.provider)
     ? (profile.provider as WebSearchBackend)
     : null;

@@ -14,10 +14,13 @@ import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { isApprovedToolCall, markApprovalRecheck } from "#harness/approval-recheck.js";
 import { toModelSchema } from "#tools/schema.js";
 import { normalizeToolJsonOutput } from "#harness/tool-model-output.js";
+import { createLogger } from "#internal/logging.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { executeWithToolStub } from "#tool-stubs/execute.js";
 import { iterateAsApprover, runAsApprover } from "#harness/hitl/approved-call-callers.js";
+
+const log = createLogger("harness.tools");
 
 /**
  * Builds an AI SDK `ToolSet` from unified harness tool definitions, described
@@ -186,8 +189,14 @@ export async function buildToolSetWithProviderTools(input: {
       definition.execute === undefined &&
       !disabled?.has(definition.name)
     ) {
-      const backend = resolveWebSearchBackend(input.profile, handling.provider);
+      const backend = resolveWebSearchBackend(input.profile, handling);
       if (backend === null) {
+        log.debug("model has no web search backend; leaving the tool out", {
+          gateway: input.profile.gateway,
+          modelProvider: input.profile.provider,
+          searchProvider: handling.provider,
+          tool: definition.name,
+        });
         delete tools[definition.name];
       } else {
         tools[definition.name] = await resolveWebSearchProviderTool(backend);

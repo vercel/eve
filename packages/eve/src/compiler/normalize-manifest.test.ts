@@ -38,7 +38,7 @@ import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { defineTool, disableTool } from "#tools/definition.js";
 import { defineMemory } from "#public/memory/index.js";
 import { defineDynamic } from "#dynamic/definition.js";
-import { webSearch } from "#tools/provided/web-search.js";
+import { webSearch, type WebSearchToolInput } from "#tools/provided/web-search.js";
 import { agent as agentTool } from "#tools/framework/agent.js";
 
 function manifest() {
@@ -320,13 +320,17 @@ describe("compileAgentManifest source graph", () => {
     });
   });
 
-  it.each(["parallel", "browserbase"] as const)(
-    "preserves %s search through serialization and runtime preparation",
-    async (provider) => {
+  it.each<WebSearchToolInput>([
+    { provider: "parallel" },
+    { provider: "browserbase" },
+    { fallback: "exa", provider: "openai" },
+  ])(
+    "preserves the %o search selection through serialization and runtime preparation",
+    async (selection) => {
       const sourceRegistry = registry([
         {
           logicalPath: "tools/web_search.ts",
-          loadNamespace: async () => ({ default: webSearch({ provider }) }),
+          loadNamespace: async () => ({ default: webSearch(selection) }),
         },
       ]);
       const compiled = await compileAgentManifest(manifest(), {
@@ -345,7 +349,7 @@ describe("compileAgentManifest source graph", () => {
       expect(serialized.tools.find((tool) => tool.name === "web_search")).toMatchObject({
         behavior: {
           availability: [],
-          handling: { kind: "provider-tool", provider },
+          handling: { kind: "provider-tool", ...selection },
         },
         hasExecute: false,
       });
@@ -357,7 +361,7 @@ describe("compileAgentManifest source graph", () => {
       });
       expect(graph.root.turnAgent.tools.find((tool) => tool.name === "web_search")).toMatchObject({
         behavior: {
-          handling: { kind: "provider-tool", provider },
+          handling: { kind: "provider-tool", ...selection },
         },
       });
     },
