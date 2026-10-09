@@ -105,6 +105,31 @@ t.score("reply-brevity", brevity).atLeast(0.5); // marks the eval `scored`, fata
 
 The rule never rewrites the measurement. A `0.82` gated at `0.9` is reported as `score: 0.82`, `threshold: 0.9`, `passed: false`. An evaluator that throws or returns a non-finite number records an errored outcome with the error message and no score, and fails the eval.
 
+Read the plain score back by `key` from `result.assertions`, which every [reporter](./reporters#custom-reporters) receives in `onEvalComplete`:
+
+```ts
+onEvalComplete(result) {
+  for (const { key, score, threshold, passed } of result.assertions) {
+    if (key === undefined) continue;
+    store.write({ evalId: result.id, key, score, threshold, passed });
+  }
+}
+```
+
+The same entries land in the [run artifacts](./running#artifacts) under `.eve/evals/`, in `summary.json` and one line per eval in `results.jsonl`:
+
+```json
+{
+  "name": "reply-brevity",
+  "key": "reply-brevity",
+  "score": 0.84,
+  "severity": "soft",
+  "errored": false
+}
+```
+
+`threshold` and `passed` appear only once a rule is chained, so a consumer can tell a measurement from a decision without reading the eval source.
+
 ## The matcher mini-language
 
 `t.calledTool` and `t.calledSubagent` take matcher objects. Tools accept `{ input, output, status, count }`; subagents accept `{ callId, childSessionId, remoteUrl, output, status, count }`. Calls match `status: "completed"` by default. Tool lifecycle checks also accept `"pending"`, `"failed"`, and `"rejected"`. Subagent checks accept `"working"`, `"completed"`, `"failed"`, and `"cancelled"`. A numeric `count` requires an exact number of calls matching every supplied constraint. Use a predicate for ranges or other custom count requirements; it receives the observed number of matching calls.
