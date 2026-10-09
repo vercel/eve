@@ -125,15 +125,10 @@ export function createAgentToolInstrumentation(input: {
       name: event.toolName,
       toolAttributes: { "agent.tool.is_framework": event.frameworkTool === true },
       parent: {
-        spanId: input.idGenerator.deriveSpanId(
-          event.parentCallId === undefined
-            ? attemptIdempotencyKey(event.scope)
-            : `action:${actionIdempotencyKey(event.scope.sessionId, event.scope.turnId, event.parentCallId)}`,
-        ),
+        spanId: input.idGenerator.deriveSpanId(attemptIdempotencyKey(event.scope)),
         traceFlags: traceContext.traceFlags,
         traceId: traceContext.traceId,
       },
-      parentCallId: event.parentCallId,
       rootSessionId: event.scope.rootSessionId ?? event.scope.sessionId,
       traceSessionId: traceSessionIdOf(event.scope),
       sessionId: event.scope.sessionId,
@@ -204,9 +199,6 @@ export function createAgentToolInstrumentation(input: {
           attributes: {
             "agent.action.kind": state.kind,
             "agent.action.name": state.name,
-            ...(state.parentCallId === undefined
-              ? undefined
-              : { "agent.action.parent_call_id": state.parentCallId }),
             "gen_ai.operation.name": "execute_tool",
             "gen_ai.tool.call.id": state.callId,
             "gen_ai.tool.name": state.name,

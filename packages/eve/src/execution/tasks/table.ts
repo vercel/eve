@@ -17,7 +17,7 @@ const TASK_TABLE_VERSION = 1;
 /** At most this many tasks work at once in one session: a backstop normal use shouldn't reach. */
 export const MAX_WORKING_TASKS = 32;
 
-/** Finished records kept so `task_cancel` can still answer `already_finished`. */
+/** Finished records kept so `eve__task_cancel` can still answer `already_finished`. */
 const MAX_FINISHED_RECORDS = 100;
 
 /** Idle resumable tasks the `[Tasks]` note lists: the most recently used ones. */
@@ -189,7 +189,7 @@ export function taskWaitResult(
 }
 
 /**
- * What `task_cancel` answers, or `undefined` for a task that doesn't exist.
+ * What `eve__task_cancel` answers, or `undefined` for a task that doesn't exist.
  * `cancelled` means the caller cancels the working task.
  */
 export function taskCancelResult(table: TaskTable, taskId: string): TaskCancelResult | undefined {

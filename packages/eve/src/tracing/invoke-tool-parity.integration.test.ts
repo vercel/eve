@@ -262,7 +262,14 @@ async function runInConversation(toolName: string, modelInput: string): Promise<
             prompt: "Use the tool.",
             stopWhen: stepCountIs(1),
             telemetry: attempt.telemetry,
-            tools: buildToolSet({ tools }),
+            tools: buildToolSet({
+              describe: (definition) => definition.description,
+              resolve: (call) => {
+                const definition = tools.get(call.toolName);
+                return definition === undefined ? undefined : { call, definition };
+              },
+              tools,
+            }),
           });
           const output = result.content.find(
             (part) => part.type === "tool-result" || part.type === "tool-error",

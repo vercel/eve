@@ -25,12 +25,10 @@ function hasToolPath(graph: ResolvedAgentGraphBundle, path: readonly string[]): 
     if (index === path.length - 1) {
       if (tool !== undefined) return tool.behavior?.handling?.kind !== "provider-tool";
       return (
-        // The reserved connection resolver only supplies the two framework wrappers.
         node.agent.dynamicToolResolvers.some(
           (resolver) =>
-            resolver.slug !== "connection_tools" &&
-            (resolver.extensionNamespace === undefined ||
-              name.startsWith(`${resolver.extensionNamespace}__`)),
+            resolver.extensionNamespace === undefined ||
+            name.startsWith(`${resolver.extensionNamespace}__`),
         ) ||
         node.subagentRegistry.dynamicResolvers.some((resolver) => resolver.name === name) ||
         (name.includes("__") &&

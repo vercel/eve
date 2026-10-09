@@ -16,11 +16,11 @@ Scoped assertions take no explicit value and gate by default. Assertions on `t` 
 | `t.messageIncludes(token)`                            | Joined assistant text contains `token` (string or RegExp)                     |
 | `turn.outputEquals(value)` / `.outputMatches(schema)` | Deep equality or Standard Schema validation of turn/session structured output |
 | `t.calledTool(name, opts?)`                           | A matching tool call completed (`input`, `output`, `status`, `count`)         |
-| `t.loadedSkill(skill, opts?)`                         | Sugar for `t.calledTool("load_skill", { input: { skill }, ...opts })`         |
+| `t.loadedSkill(skill, opts?)`                         | A load of `skill` completed (`output`, `status`, `count`)                     |
 | `t.notCalledTool(name)`                               | No request for `name` in any lifecycle state                                  |
 | `t.toolOrder([...names])`                             | Tool requests appear in order                                                 |
-| `t.usedNoTools()`                                     | No tool calls at all                                                          |
-| `t.maxToolCalls(n)`                                   | At most `n` tool calls                                                        |
+| `t.usedNoTools()`                                     | No tool calls at all; skill loads don't count                                 |
+| `t.maxToolCalls(n)`                                   | At most `n` tool calls; skill loads don't count                               |
 | `t.noFailedActions()`                                 | No tool, subagent, or skill action reported a failure                         |
 | `t.calledSubagent(name, opts?)`                       | A subagent delegation happened (identity, remote, output, status, count)      |
 | `t.event(type, opts?)` / `t.notEvent(type, opts?)`    | Typed event presence, data, and count matching                                |
@@ -47,6 +47,8 @@ attached.messageIncludes("Sunny");
 ```
 
 `t.calledTool` and `t.usedNoTools` are mutually exclusive; assert one or the other, never both in the same run.
+
+A call through [`eve__tool`](../concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) is reported under the name and input of the entry it reaches, such as `linear__list_issues`, so assert on that entry; `eve__search` calls count as tool calls in `t.usedNoTools()` and `t.maxToolCalls(n)`, and skill loads don't. The tool-name assertions and `turn.requireToolCall` throw for `eve__tool` and `eve__skill`, whose calls are reported as their entries and as skill loads, and for a retired name such as `load_skill` unless the root agent declares a tool by that name or has a dynamic tool resolver, and say what to assert instead.
 
 ## Value assertions with `t.check`
 

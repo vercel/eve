@@ -459,7 +459,7 @@ export interface TaskSettledStreamEvent {
 }
 
 /**
- * Why the session cancelled a task call: the model called `task_cancel`,
+ * Why the session cancelled a task call: the model called `eve__task_cancel`,
  * someone cancelled the turn (or, between turns, the tasks still working), or
  * the turn ended while the task still worked.
  */

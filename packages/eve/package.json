@@ -1,6 +1,6 @@
 {
   "name": "eve",
-  "version": "0.75.0",
+  "version": "0.75.1",
   "private": false,
   "description": "Filesystem-first framework for durable backend AI agents that run anywhere.",
   "keywords": [
@@ -181,11 +181,6 @@
       "types": "./dist/src/public/tools/web-search.d.ts",
       "import": "./dist/src/public/tools/web-search.js",
       "default": "./dist/src/public/tools/web-search.js"
-    },
-    "./tools/load_skill": {
-      "types": "./dist/src/public/tools/load-skill.d.ts",
-      "import": "./dist/src/public/tools/load-skill.js",
-      "default": "./dist/src/public/tools/load-skill.js"
     },
     "./tools/glob": {
       "types": "./dist/src/public/tools/glob.d.ts",

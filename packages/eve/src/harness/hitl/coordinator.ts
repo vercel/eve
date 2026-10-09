@@ -14,6 +14,7 @@ import {
   getApprovalAuditState,
   markApprovalCandidateAuthorizationRequired,
   settleAllowedCandidate,
+  settleUnavailableCandidate,
   sameResponder,
   settleDirectApprovalResponse,
   type ActiveApprovalCandidate,
@@ -29,14 +30,21 @@ import {
 } from "#harness/authorization.js";
 import { isApprovalRequest } from "#harness/input-request-class.js";
 import { suspendedSteps } from "#harness/session-machine/view.js";
-import type { HarnessSession, HarnessToolMap, StepInput } from "#harness/types.js";
+import type { HarnessSession, HarnessToolLookup, StepInput } from "#harness/types.js";
+import { createLogger, logError } from "#internal/logging.js";
 import type { InputRequest } from "#shared/input.js";
 
 const UNAUTHENTICATED_APPROVAL_FEEDBACK = "Authentication is required to respond to this approval.";
 const REQUESTER_ONLY_APPROVAL_FEEDBACK =
   "Only the person who requested this action can respond to this approval.";
+const UNAVAILABLE_TOOL_APPROVAL_REASON =
+  "The tool this approval was for is no longer available, so the call won't run.";
+const TEMPORARILY_UNAVAILABLE_APPROVAL_REASON =
+  "Approval authorization is temporarily unavailable. Please try again.";
 const APPROVAL_AUTHORIZER_TIMEOUT_MS = 10_000;
 const APPROVAL_CANDIDATE_TTL_MS = 10 * 60_000;
+
+const log = createLogger("harness.hitl");
 
 interface ApprovalDeliveryResult {
   readonly challenges: readonly AuthorizationChallenge[];
@@ -72,8 +80,8 @@ export async function coordinateApprovalDelivery(input: {
   readonly now?: number;
   readonly session: HarnessSession;
   readonly stepInput?: StepInput;
-  readonly tools: HarnessToolMap;
-  readonly prepareTools?: (request: InputRequest) => Promise<HarnessToolMap>;
+  readonly tools: HarnessToolLookup;
+  readonly prepareTools?: (request: InputRequest) => Promise<HarnessToolLookup>;
 }): Promise<ApprovalDeliveryResult> {
   const now = input.now ?? Date.now();
   const expiredCandidates = getApprovalAuditState(input.session.state).activeCandidates.filter(
@@ -252,8 +260,8 @@ export async function coordinateApprovalDelivery(input: {
       now,
       request,
       responder: candidate.responder,
+      restoreTools: async () => (await input.prepareTools?.(request)) ?? input.tools,
       session,
-      tools: (await input.prepareTools?.(request)) ?? input.tools,
     });
     session = processed.session;
     didCommit ||= processed.didCommit;
@@ -292,8 +300,9 @@ async function authorizeCandidate(input: {
   readonly now: number;
   readonly request: InputRequest;
   readonly responder: ActiveApprovalCandidate["responder"];
+  /** The entries of the step that asked, restored by running its resolvers. */
+  readonly restoreTools: () => Promise<HarnessToolLookup>;
   readonly session: HarnessSession;
-  readonly tools: HarnessToolMap;
 }): Promise<{
   readonly challenges: readonly AuthorizationChallenge[];
   readonly didCommit: boolean;
@@ -308,15 +317,36 @@ async function authorizeCandidate(input: {
     return { challenges: [], didCommit: false, session };
   }
 
-  const approval = input.tools.get(input.request.action.toolName)?.approval;
+  let tools: HarnessToolLookup;
+  try {
+    tools = await input.restoreTools();
+  } catch (error) {
+    // A resolver or its infrastructure failed: the entry may still exist, so the request waits.
+    logError(log, "approval tools could not be restored", error, {
+      requestId: input.request.requestId,
+    });
+    return failCandidate({ ...input, reason: TEMPORARILY_UNAVAILABLE_APPROVAL_REASON, session });
+  }
+  const definition = tools.get(input.request.action.toolName);
+  // Gone from the restored catalog: no response can approve the call, and it can't run.
+  if (definition === undefined) {
+    const settled = settleUnavailableCandidate({
+      candidateId: input.candidateId,
+      reason: UNAVAILABLE_TOOL_APPROVAL_REASON,
+      settledAt: input.now,
+      state: session.state,
+    });
+    return {
+      challenges: [],
+      didCommit: settled.changed,
+      session: { ...session, state: settled.state },
+    };
+  }
+  const { approval } = definition;
   const responsePolicy =
     approval !== undefined && typeof approval !== "function" ? approval.response : undefined;
   if (responsePolicy === undefined) {
-    return failCandidate({
-      ...input,
-      reason: "Approval authorization is temporarily unavailable. Please try again.",
-      session,
-    });
+    return failCandidate({ ...input, reason: TEMPORARILY_UNAVAILABLE_APPROVAL_REASON, session });
   }
 
   try {
@@ -471,6 +501,7 @@ function appendSettledResponses(
     ...stepInput,
     inputResponses: [
       ...(stepInput?.inputResponses ?? []),
+      // An unavailable request answers as cancel, so nothing runs; `answer` reports it unavailable.
       ...missingSettlements.map((settlement) => ({
         optionId: settlement.outcome === "allowed" ? "approve" : "cancel",
         requestId: settlement.requestId,

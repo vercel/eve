@@ -9,6 +9,8 @@ import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import type {
   ScheduleClient,
   ScheduleClientCreate,
+  ScheduleClientUpdate,
+  SchedulePatch,
   DynamicSchedulesDefinition,
   ScheduleEnvelope,
   SchedulePageResult,
@@ -42,14 +44,30 @@ export interface PreparedScheduleCreate<TPrepared = unknown> {
   readonly envelope: ScheduleEnvelope<TPrepared>;
 }
 
-/** Internal capabilities used by generated create approval; authored clients expose only create. */
+export interface PreparedScheduleUpdate<TPrepared = unknown> {
+  readonly name: string;
+  readonly namespace: string;
+  readonly expression?: import("#public/schedules/subscription.js").ScheduleTiming;
+  readonly envelope?: ScheduleEnvelope<TPrepared>;
+}
+
+export type PreparedScheduleWrite = PreparedScheduleCreate | PreparedScheduleUpdate;
+
+/** Internal preparation capabilities used by generated write approval. */
 export interface ScheduleCollectionClient<TInput, TPrepared> extends ScheduleClient<TInput> {
-  prepareCreate(
-    input: ScheduleClientCreate<TInput>,
-  ): Promise<PreparedScheduleCreate<TInput | TPrepared>>;
+  prepareCreate(input: ScheduleClientCreate<unknown>): Promise<PreparedScheduleCreate<TPrepared>>;
   create(
     input: ScheduleClientCreate<TInput>,
     approved?: PreparedScheduleCreate,
+  ): Promise<import("#public/schedules/subscription.js").ScheduleRecord>;
+  prepareUpdate(
+    name: string,
+    patch: ScheduleClientUpdate<unknown>,
+  ): Promise<PreparedScheduleUpdate<TPrepared>>;
+  update(
+    name: string,
+    patch: ScheduleClientUpdate<TInput>,
+    approved?: PreparedScheduleUpdate,
   ): Promise<import("#public/schedules/subscription.js").ScheduleRecord>;
 }
 
@@ -105,48 +123,68 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
     return { scope, provider };
   };
 
-  const prepareCreation = async (input: ScheduleClientCreate<TPayload>) => {
+  const prepareEnvelope = async (
+    value: unknown,
+    scope: ScheduleScopeValue,
+    operation: "create" | "update",
+    name: string,
+  ) => {
+    const creator = principalReference(callContext.session.auth.current);
+    if (creator === null)
+      throw new Error("Writing a schedule payload requires an authenticated principal.");
+    const validated = await validateSchedulePayload<TPayload>(definition.inputSchema, value);
+    // Definitions without preparation default TPrepared to the validated input type.
+    const preparedPayload = (
+      definition.preparePayload === undefined
+        ? validated
+        : await definition.preparePayload(validated, {
+            ...contextFor(operation, name),
+            operation,
+            name,
+          })
+    ) as TPrepared;
+    return createScheduleCollectionPayload({
+      application: callContext.application,
+      collection: callContext.collection,
+      envelope: { version: 3, payload: preparedPayload, scope, principal: creator },
+    }).envelope;
+  };
+
+  const prepareUpdate = async (name: string, patch: ScheduleClientUpdate<unknown>) => {
+    const unsupported = Object.keys(patch).filter(
+      (key) => key !== "expression" && key !== "payload",
+    );
+    if (unsupported.length > 0)
+      throw new Error(`Schedule update does not support: ${unsupported.join(", ")}.`);
+    if (patch.expression === undefined && patch.payload === undefined)
+      throw new Error("Schedule update requires an expression or replacement payload.");
+    const normalized = validateScheduleName(name);
+    if (patch.expression !== undefined) resolveScheduleTiming(patch.expression);
+    const { scope, provider } = await resolveNamespace("update", normalized);
+    if ((await definition.provider.get(provider, normalized)) === null)
+      throw new Error("Schedule was not found in the authorized scope.");
+    const prepared: PreparedScheduleUpdate<TPrepared> = {
+      name: normalized,
+      namespace: provider.namespace,
+      expression: patch.expression,
+      envelope:
+        patch.payload === undefined
+          ? undefined
+          : await prepareEnvelope(patch.payload, scope, "update", normalized),
+    };
+    return { prepared: snapshotPreparedWrite(prepared), provider };
+  };
+
+  const prepareCreation = async (input: ScheduleClientCreate<unknown>) => {
     const displayName = validateScheduleName(input.name);
     // Validate timing before preparation; relative delays are resolved again at the write boundary.
     resolveScheduleTiming(input.expression);
     const { scope, provider } = await resolveNamespace("create", displayName);
-    const creator = principalReference(callContext.session.auth.current);
-    if (creator === null)
-      throw new Error("Creating a schedule requires an authenticated principal.");
-    const validated = await validateSchedulePayload<TPayload>(
-      definition.inputSchema,
-      input.payload,
-    );
-    const preparedPayload =
-      definition.preparePayload === undefined
-        ? validated
-        : await definition.preparePayload(validated, {
-            ...contextFor("create", displayName),
-            operation: "create",
-            name: displayName,
-          });
-    const envelope: ScheduleEnvelope<TPayload | TPrepared> = {
-      version: 3,
-      payload: preparedPayload,
-      scope,
-      principal: creator,
-    };
-    const payload = createScheduleCollectionPayload({
-      application: callContext.application,
-      collection: callContext.collection,
-      envelope,
-    });
-    const prepared = {
+    const prepared = snapshotPreparedWrite({
       displayName,
-      expression: JSON.parse(
-        JSON.stringify(input.expression),
-      ) as import("#public/schedules/subscription.js").ScheduleTiming,
-      envelope: payload.envelope,
-    };
-    if (Buffer.byteLength(JSON.stringify(prepared)) > 64 * 1024)
-      throw new Error(
-        "Prepared schedule creation exceeds the 64 KB limit, including timing and payload.",
-      );
+      expression: input.expression,
+      envelope: await prepareEnvelope(input.payload, scope, "create", displayName),
+    });
     return { prepared, provider };
   };
 
@@ -169,6 +207,33 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
       });
       return projectScheduleRecord(
         await definition.provider.create(provider, { expression, name, payload }),
+      );
+    },
+    async prepareUpdate(name, patch) {
+      return (await prepareUpdate(name, patch)).prepared;
+    },
+    async update(name, patch, approved) {
+      const { prepared, provider } = await prepareUpdate(name, patch);
+      if (approved !== undefined && !isDeepStrictEqual(prepared, approved))
+        throw new Error(
+          "Schedule update changed after approval. Request a new update approval; no schedule was written.",
+        );
+      const update: SchedulePatch<ScheduleCollectionPayload<TPrepared>> = {
+        expression:
+          prepared.expression === undefined
+            ? undefined
+            : resolveScheduleTiming(prepared.expression),
+        payload:
+          prepared.envelope === undefined
+            ? undefined
+            : createScheduleCollectionPayload({
+                application: callContext.application,
+                collection: callContext.collection,
+                envelope: prepared.envelope,
+              }),
+      };
+      return projectScheduleRecord(
+        await definition.provider.update(provider, prepared.name, update),
       );
     },
     async delete(name) {
@@ -207,6 +272,15 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
       return { ...page, data: page.data.map(projectScheduleRecord) };
     },
   };
+}
+
+function snapshotPreparedWrite<T extends PreparedScheduleWrite>(prepared: T): T {
+  const json = JSON.stringify(prepared);
+  if (Buffer.byteLength(json) > 64 * 1024)
+    throw new Error(
+      "Prepared schedule write exceeds the 64 KB limit, including timing and payload.",
+    );
+  return JSON.parse(json) as T;
 }
 
 export function assertScheduleManagementAllowed(schedule?: SessionSchedule): void {

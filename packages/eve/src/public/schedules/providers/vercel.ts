@@ -1,6 +1,7 @@
 import type {
   Schedule as VercelSchedule,
   SchedulesClient,
+  UpdateScheduleParams,
 } from "#compiled/@vercel/schedules/index.js";
 
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
@@ -70,6 +71,19 @@ export function vercelScheduleProvider(
         context.namespace,
       );
       return response === null ? null : fromVercelSchedule(response);
+    },
+    async update(context, name, patch) {
+      const expression = patch.expression;
+      const params: UpdateScheduleParams = { name, namespace: context.namespace };
+      if (expression !== undefined) {
+        params.expression = toVercelExpression(expression);
+        params.timezone = expression.timezone ?? "UTC";
+        params.jitter = expression.type === "cron" ? (expression.jitter ?? null) : null;
+      }
+      if (patch.payload !== undefined)
+        params.payload = createDispatchPayload(context, patch.payload);
+      const schedule = await (await client(context.abortSignal)).update(params);
+      return fromVercelSchedule(schedule);
     },
     async enable(context, name) {
       return fromVercelSchedule(

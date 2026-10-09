@@ -23,9 +23,9 @@ describe("normalizeScheduleCollectionDefinition", () => {
       '"preparePayload" must be a function',
     ],
     [
-      "approval for the removed update tool",
-      { approval: { update: () => "user-approval" } },
-      "update",
+      "approval for an unsupported operation",
+      { approval: { rename: () => "user-approval" } },
+      "rename",
     ],
     ["unsupported deferral", { tool: "deferred" }, "deferred tools are not supported"],
     ["the removed capture hook", { resolvePayload: () => ({}) }, "resolvePayload"],

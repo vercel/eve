@@ -150,7 +150,7 @@ function AgentMessagePart({
           <Tool>
             <ToolHeader
               state={part.state}
-              title={part.toolName}
+              title={part.toolMetadata?.eve?.label ?? part.toolName}
               toolName={part.toolName}
               type="dynamic-tool"
             />

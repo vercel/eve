@@ -3,6 +3,7 @@ import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
 import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import type { HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
 
 // The harness runs outside a workflow body here, where run attributes cannot
@@ -58,7 +59,7 @@ function findToolResult(messages: readonly ModelMessage[], toolCallId: string): 
 }
 
 describe("framework tool input validation (real AI SDK)", () => {
-  it("rejects invalid final_output input instead of settling the turn", async () => {
+  it("rejects invalid eve__reply input instead of settling the turn", async () => {
     const invalidCallId = "final-invalid";
     const validCallId = "final-valid";
     const outputSchema = {
@@ -70,11 +71,11 @@ describe("framework tool input validation (real AI SDK)", () => {
     const model = new MockLanguageModelV4({
       doStream: scriptedStreams([
         [
-          toolCall(invalidCallId, "final_output", JSON.stringify({ answer: 42 })),
+          toolCall(invalidCallId, REPLY_TOOL_NAME, JSON.stringify({ answer: 42 })),
           finish("tool-calls"),
         ],
         [
-          toolCall(validCallId, "final_output", JSON.stringify({ answer: "done" })),
+          toolCall(validCallId, REPLY_TOOL_NAME, JSON.stringify({ answer: "done" })),
           finish("tool-calls"),
         ],
       ]),
@@ -104,7 +105,7 @@ describe("framework tool input validation (real AI SDK)", () => {
     expect(typeof invalidStep.next).toBe("function");
     expect(findToolResult(invalidStep.session.history, invalidCallId)).toMatchObject({
       output: expect.objectContaining({ type: "error-text" }),
-      toolName: "final_output",
+      toolName: REPLY_TOOL_NAME,
     });
 
     if (typeof invalidStep.next !== "function") {

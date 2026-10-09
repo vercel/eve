@@ -113,8 +113,9 @@ export type DynamicSentinel<TResult = unknown> = {
  * handlers. It is shared across tools, skills, connections, and agent definitions;
  * the directory it is authored in (not this function) decides what each
  * handler must return and which events are honored. The file's path-derived
- * slug names the single-entry case; a `Record<string, ...>` return names
- * entries `slug__key`. Return `null` to contribute nothing for that event.
+ * slug names the single-entry case; a `Record<string, ...>` return names each
+ * entry by its bare key, prefixed with the mount namespace for an extension's
+ * resolver. Return `null` to contribute nothing for that event.
  *
  * Per-slot return shape:
  * - `agent/tools/`: return a single `defineTool(...)`, a
@@ -153,9 +154,10 @@ export type DynamicSentinel<TResult = unknown> = {
  *
  * A single return is named after the file slug. A map names each entry by its
  * bare key — there is no automatic slug prefix, so namespace keys yourself
- * (e.g. `team__playbook`) when a bare name might collide. A dynamic tool/skill
- * whose name matches an authored one overrides it; two dynamic resolvers
- * emitting the same name is an error.
+ * (e.g. `team__playbook`) when a bare name might collide. Tool names must match
+ * the tool filename charset, and a name under a connection's `<name>__` prefix
+ * is rejected. A dynamic tool/skill whose name matches an authored one
+ * overrides it; two dynamic resolvers emitting the same name is an error.
  */
 export function defineDynamic<const TEvents extends DynamicEvents>(definition: {
   readonly events: TEvents;

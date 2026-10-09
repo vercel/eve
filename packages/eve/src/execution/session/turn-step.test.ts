@@ -262,8 +262,8 @@ function createTurnStepTestBundle(modelCallsPerStep?: number) {
     },
     hookRegistry: createRuntimeHookRegistry([]),
     moduleMap: { nodes: {} },
-    resolvedAgent: { config },
-    subagentRegistry: {},
+    resolvedAgent: { config, dynamicSkillResolvers: [], dynamicToolResolvers: [] },
+    subagentRegistry: { dynamicResolvers: [] },
     toolRegistry: {},
     turnAgent: TestTurnAgent,
   } as never;
@@ -2013,7 +2013,7 @@ describe("turnStep", () => {
       serializedContext: {
         ...createSerializedContext(),
         [TurnDeliveryIdsKey.name]: ["previous-delivery"],
-        [HistoryStateKey.name]: { availableSkills: announcement },
+        [HistoryStateKey.name]: { announcements: { skills: announcement } },
       },
       sessionState: createStubSessionState(),
     });
@@ -2022,7 +2022,7 @@ describe("turnStep", () => {
       action: "cancelled",
       serializedContext: {
         [TurnDeliveryIdsKey.name]: ["cancelled-delivery"],
-        [HistoryStateKey.name]: { availableSkills: announcement },
+        [HistoryStateKey.name]: { announcements: { skills: announcement } },
         [SessionDynamicModelReferenceKey.name]: {
           id: "anthropic/claude-opus-4.6",
           contextWindowTokens: 1_000_000,
@@ -3005,8 +3005,8 @@ describe("turnStep", () => {
         config: {},
         dynamicToolResolvers: [dynamicToolResolver],
       },
-      subagentRegistry: {},
-      toolRegistry: {},
+      subagentRegistry: { dynamicResolvers: [], preparedTools: [] },
+      toolRegistry: { toolsByName: new Map() },
       turnAgent: TestTurnAgent,
     } as never;
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);

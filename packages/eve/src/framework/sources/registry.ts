@@ -9,7 +9,7 @@ import {
   type ProgrammaticModuleNamespace,
 } from "#compiler/source-graph.js";
 
-const revision = `eve@${resolveInstalledPackageInfo().version}:compiled-manifest-v52`;
+const revision = `eve@${resolveInstalledPackageInfo().version}:compiled-manifest-v53`;
 
 const localDefaults = defineProgrammaticAgentSource({
   id: "eve:defaults",
@@ -36,14 +36,6 @@ const localDefaults = defineProgrammaticAgentSource({
     {
       logicalPath: "tools/web_fetch.ts",
       loadNamespace: () => import("#tools/provided/web-fetch.js"),
-    },
-    {
-      logicalPath: "tools/load_skill.ts",
-      loadNamespace: () => import("#tools/provided/load-skill.js"),
-    },
-    {
-      logicalPath: "tools/connection_tools.ts",
-      loadNamespace: () => import("#tools/framework/connection-tools.js"),
     },
     {
       logicalPath: "tools/web_search.ts",

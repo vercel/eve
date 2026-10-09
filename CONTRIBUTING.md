@@ -89,6 +89,19 @@ credentials.
 
 Do not commit fixture trees under `packages/eve/test/fixtures/` — scenario app content is defined inline as `ScenarioAppDescriptor` objects under `packages/eve/src/internal/testing/scenario-apps/` (CI enforces this).
 
+### Testing packaged builds
+
+`pkg.eve.dev` serves `main` and same-repository PR builds. It does not serve fork
+PRs or direct branch deployments. A PR package is available after its Vercel –
+eve-pkg deployment succeeds.
+
+```bash
+pnpm dlx https://pkg.eve.dev/pr/<pull-request-id>/eve.tgz dev
+```
+
+`pnpm dlx` may reuse a cached package for the same PR URL. To test a newer
+commit, use its full-SHA URL: `https://pkg.eve.dev/<full-sha>/eve.tgz`.
+
 ## Linting and formatting
 
 ```bash

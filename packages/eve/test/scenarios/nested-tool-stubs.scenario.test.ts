@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import { Client } from "../../src/client/client.js";
+import { TASK_WAIT_TOOL_NAME } from "../../src/protocol/task-tools.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { startEveDev } from "./dev-server-harness.js";
 
@@ -96,7 +97,7 @@ export default defineAgent({
     const completed = request.messages.find(message => message.role === "user" && message.text.startsWith("<task_result"));
     if (completed) return completed.text.slice(completed.text.indexOf(">") + 1, completed.text.lastIndexOf("</task_result>"));
     const result = request.toolResults.find(result => result.name === ${JSON.stringify(tool)});
-    if (result && ${tool !== "lookup"}) return { toolCalls: [{ name: "task_wait", input: {} }] };
+    if (result && ${tool !== "lookup"}) return { toolCalls: [{ name: ${JSON.stringify(TASK_WAIT_TOOL_NAME)}, input: {} }] };
     if (result) return typeof result.output === "string" ? result.output : JSON.stringify(result.output);
     return { toolCalls: [{ name: ${JSON.stringify(tool)}, input: ${
       tool === "lookup" ? "{}" : '{ message: "Look up Alice\'s assigned tasks." }'

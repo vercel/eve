@@ -633,7 +633,7 @@ const compiledAgentConfigBaseFields = {
     .enum(["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"])
     .optional(),
   source: moduleSourceRefSchema,
-  tool: z.boolean().optional(),
+  tool: z.union([z.boolean(), z.literal("deferred")]).optional(),
   limits: compiledAgentLimitsDefinitionSchema.optional(),
 };
 
@@ -681,6 +681,7 @@ const compiledInstructionsSchema: z.ZodType<CompiledInstructionsDefinition> = z.
 
 const compiledSkillBaseFields = {
   name: z.string(),
+  deferred: z.boolean().optional(),
   description: z.string(),
   license: z.string().optional(),
   markdown: z.string(),
@@ -859,7 +860,6 @@ const compiledToolBehaviorSchema: z.ZodType<CompiledToolBehavior> = z
           .strict(),
       ])
       .optional(),
-    presentation: z.literal("load-skill").optional(),
     shape: z
       .object({
         suspend: z.enum(["none", "workflow"]),
@@ -873,6 +873,7 @@ const compiledToolDefinitionSchema = z
   .object({
     availableInSubagents: z.boolean().optional(),
     behavior: compiledToolBehaviorSchema.optional(),
+    deferred: z.boolean().optional(),
     description: z.string(),
     exportName: z.string().optional(),
     hasExecute: z.boolean(),

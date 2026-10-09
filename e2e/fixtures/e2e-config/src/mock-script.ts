@@ -1,6 +1,8 @@
 // Helpers for scripted mock responders: a scenario is a fixed sequence of tool
 // calls with stable ids, played one model step at a time.
-import type { MockModelRequest, MockModelResponse } from "eve/evals";
+import type { EveEvalContext, MockModelRequest, MockModelResponse } from "eve/evals";
+
+import { CALL_TOOL, SKILL_TOOL } from "./catalog-tools";
 
 /** One tool call of a scripted scenario. Its fixed id marks it as done once its result is in the prompt. */
 export interface ScriptedCall {
@@ -22,6 +24,37 @@ export function playScript(
   const next = calls.find((call) => !done.has(call.id));
   if (next === undefined) return finish(request);
   return { toolCalls: [{ id: next.id, input: next.input?.(request) ?? {}, name: next.name }] };
+}
+
+/** A scripted `eve__tool` call: a catalog tool by name, with its input. */
+export function callTool(id: string, name: string, input?: object): ScriptedCall {
+  return { id, input: () => (input === undefined ? { name } : { input, name }), name: CALL_TOOL };
+}
+
+/** A scripted `eve__skill` call that loads the named skill. */
+export function loadSkill(id: string, name: string): ScriptedCall {
+  return { id, input: () => ({ name }), name: SKILL_TOOL };
+}
+
+/** Loads each named skill with `eve__skill({ name })`, then replies with each skill's last line. */
+export function loadSkills(
+  request: MockModelRequest,
+  names: readonly string[],
+): MockModelResponse | string {
+  return playScript(
+    request,
+    names.map((skill) => loadSkill(`load-${skill}`, skill)),
+    (finished) =>
+      names.map((skill) => outputOf(finished, `load-${skill}`).trim().split("\n").at(-1)).join(" "),
+  );
+}
+
+/** Skips an eval whose scripted calls only the deterministic mock model makes. */
+export function requireMockModel(
+  t: EveEvalContext,
+  reason = "Requires the deterministic mock model to issue the exact calls.",
+): void {
+  if (process.env.EVE_E2E_MODEL !== "mock") t.skip(reason);
 }
 
 /** The output of the call with `id`, as the model sees it. */

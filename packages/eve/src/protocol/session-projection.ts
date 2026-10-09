@@ -235,7 +235,7 @@ function settleCall(call: SessionCall, status: SessionCallStatus, error?: Action
 function actionName(action: RuntimeActionRequest): string {
   switch (action.kind) {
     case "load-skill":
-      return "load_skill";
+      return action.name;
     case "subagent-call":
     case "remote-agent-call":
       return action.name;
@@ -248,7 +248,7 @@ function actionName(action: RuntimeActionRequest): string {
 function resultName(result: RuntimeActionResult): string {
   switch (result.kind) {
     case "load-skill-result":
-      return "load_skill";
+      return result.name;
     case "subagent-result":
       return result.subagentName;
     default:

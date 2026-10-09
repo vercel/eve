@@ -28,7 +28,7 @@ const SCENARIOS: Readonly<Record<string, Scenario>> = {
       request,
       [
         { id: "stage", input: apiService, name: "stage_deploy" },
-        { id: "stage-wait", name: "task_wait" },
+        { id: "stage-wait", name: "eve__task_wait" },
       ],
       () => report("WORKFLOW-STAGE-RESULT", latestTaskResult(request, "stage_deploy")),
     ),
@@ -53,7 +53,7 @@ const SCENARIOS: Readonly<Record<string, Scenario>> = {
       request,
       [
         { id: "canary", input: apiService, name: "canary_deploy" },
-        { id: "canary-cancel", input: taskOf("canary"), name: "task_cancel" },
+        { id: "canary-cancel", input: taskOf("canary"), name: "eve__task_cancel" },
       ],
       () => report("WORKFLOW-CANARY-RESULT", outputOf(request, "canary-cancel")),
     ),
@@ -63,7 +63,7 @@ const SCENARIOS: Readonly<Record<string, Scenario>> = {
       request,
       [
         { id: "plan-draft", input: () => ({ request: "draft" }), name: "revise_plan" },
-        { id: "plan-draft-wait", name: "task_wait" },
+        { id: "plan-draft-wait", name: "eve__task_wait" },
       ],
       () => report("WORKFLOW-PLAN-RESULT", latestTaskResult(request, "revise_plan")),
     ),
@@ -74,10 +74,10 @@ const SCENARIOS: Readonly<Record<string, Scenario>> = {
       request,
       [
         { id: "plan-hold", input: revisionOf(HOLD_REQUEST), name: "revise_plan" },
-        { id: "plan-hold-wait", input: () => ({ timeoutSeconds: 1 }), name: "task_wait" },
-        { id: "plan-cancel", input: taskOf("plan-draft"), name: "task_cancel" },
+        { id: "plan-hold-wait", input: () => ({ timeoutSeconds: 1 }), name: "eve__task_wait" },
+        { id: "plan-cancel", input: taskOf("plan-draft"), name: "eve__task_cancel" },
         { id: "plan-final", input: revisionOf("final"), name: "revise_plan" },
-        { id: "plan-final-wait", name: "task_wait" },
+        { id: "plan-final-wait", name: "eve__task_wait" },
       ],
       () => report("WORKFLOW-PLAN-RESULT", latestTaskResult(request, "revise_plan")),
     ),
@@ -101,7 +101,7 @@ const SCENARIOS: Readonly<Record<string, Scenario>> = {
     playScript(
       request,
       [
-        { id: "signoff-cancel", input: taskOf("signoff"), name: "task_cancel" },
+        { id: "signoff-cancel", input: taskOf("signoff"), name: "eve__task_cancel" },
         {
           id: "signoff-note",
           input: (current) => ({
@@ -110,7 +110,7 @@ const SCENARIOS: Readonly<Record<string, Scenario>> = {
           }),
           name: "sign_off_plan",
         },
-        { id: "signoff-note-wait", name: "task_wait" },
+        { id: "signoff-note-wait", name: "eve__task_wait" },
       ],
       () => report("WORKFLOW-SIGNOFF-RESULT", latestTaskResult(request, "sign_off_plan")),
     ),
@@ -129,7 +129,7 @@ const SCENARIOS: Readonly<Record<string, Scenario>> = {
           }),
           name: "collect_notes",
         },
-        { id: "notes-wait", name: "task_wait" },
+        { id: "notes-wait", name: "eve__task_wait" },
       ],
       () =>
         report(
