@@ -81,7 +81,7 @@ async function resolveConnections(input: {
 }): Promise<readonly ResolvedConnectionDefinition[]> {
   const handler = input.resolver.events[input.event.type];
   if (handler === undefined) return [];
-  const value = await handler(input.event, buildConnectionResolveContext(input.ctx));
+  const value = await handler(input.event.fact, buildConnectionResolveContext(input.ctx));
   if (value === null || value === undefined) return [];
 
   return qualifyConnectionNames(input.resolver, value).map(({ name, value: definition }) =>

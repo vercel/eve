@@ -39,18 +39,16 @@ export function promptQueueEvents<TChannel extends { state: PromptQueueState }>(
 
   return {
     async "interaction.opened"(
-      _data: InteractionOpenedData,
-      channel: TChannel,
-      ctx: { readonly view: SessionView },
+      _event: { readonly data: InteractionOpenedData },
+      ctx: { readonly channel: TChannel; readonly view: SessionView },
     ): Promise<void> {
-      await refresh(channel, ctx.view);
+      await refresh(ctx.channel, ctx.view);
     },
     async "interaction.settled"(
-      _data: InteractionSettledData,
-      channel: TChannel,
-      ctx: { readonly view: SessionView },
+      _event: { readonly data: InteractionSettledData },
+      ctx: { readonly channel: TChannel; readonly view: SessionView },
     ): Promise<void> {
-      await refresh(channel, ctx.view);
+      await refresh(ctx.channel, ctx.view);
     },
   };
 }

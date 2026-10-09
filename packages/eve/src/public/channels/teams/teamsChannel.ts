@@ -1,4 +1,4 @@
-import type { ChannelEventContext } from "#public/definitions/channel.js";
+import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
 import type { TeamsInstrumentationMetadata } from "#public/channels/teams/index.js";
@@ -65,9 +65,6 @@ import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { InputOption } from "#shared/input.js";
 
 const log = createLogger("teams.channel");
-
-type EventData<T extends SessionEvent["type"]> =
-  Extract<SessionEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /** Pre-dispatch Teams context passed to invoke hooks. */
 export interface TeamsContext {
@@ -169,9 +166,8 @@ export type TeamsInvokeResult = Record<string, unknown> | Response | null | unde
 export type TeamsInvokeResultOrPromise = TeamsInvokeResult | Promise<TeamsInvokeResult>;
 
 type TeamsEventHandler<T extends SessionEvent["type"]> = (
-  data: EventData<T>,
-  channel: TeamsEventContext,
-  ctx: ChannelEventContext,
+  event: ChannelEventOf<T>,
+  ctx: ChannelEventContext<TeamsEventContext>,
 ) => void | Promise<void>;
 
 /** Event handlers supported by `teamsChannel({ events })`. */

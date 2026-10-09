@@ -28,6 +28,8 @@ export interface SessionTurn {
   readonly waiting?: boolean;
   /** The step the turn's latest `step.started` opened; absent before its first. */
   readonly stepIndex?: number;
+  /** The model run that step requested. */
+  readonly runId?: string;
   /** The turn streamed assistant output, so steering can no longer restart it. */
   readonly outputStarted?: boolean;
   /** The content parts that reply, in order: what `turn.settled.reply` lists. */
@@ -330,7 +332,7 @@ export function foldSession<S extends SessionProjection>(
       return updateTurn(
         { ...next, runs: { ...state.runs, [runId]: run } },
         owner.turnId,
-        (current) => ({ ...current, stepIndex }),
+        (current) => ({ ...current, runId, stepIndex }),
       );
     }
     case "model.started": {

@@ -1,6 +1,5 @@
-import type { SessionEvent } from "#protocol/session-event.js";
 import type { TaskCardView } from "#channel/task-card.js";
-import type { SessionContext } from "#public/definitions/callback-context.js";
+import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
 import type { SlackMessage } from "#public/channels/slack/inbound.js";
 import type {
@@ -9,9 +8,6 @@ import type {
   SlackContext,
   SlackEventContext,
 } from "#public/channels/slack/slackChannel.js";
-
-type EventData<T extends SessionEvent["type"]> =
-  Extract<SessionEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /** The session events a Slack renderer can handle, in no particular order. */
 const SLACK_RENDERED_EVENTS = [
@@ -38,33 +34,33 @@ export type SlackRenderedEvent = (typeof SLACK_RENDERED_EVENTS)[number];
 type SlackSessionEvent = Exclude<SlackRenderedEvent, "interaction.opened">;
 
 /**
- * Runs the rest of the chain, ending with eve's default. Pass changed data to
- * hand it on instead of the event; the rest of the chain runs at most once.
+ * Runs the rest of the chain, ending with eve's default. Pass a changed event to
+ * hand it on instead of this one; the rest of the chain runs at most once.
  * Await it, so the rest of the chain finishes before the event does.
  */
-export type SlackRenderNext<T extends SlackRenderedEvent> = (data?: EventData<T>) => Promise<void>;
+export type SlackRenderNext<T extends SlackRenderedEvent> = (
+  event?: ChannelEventOf<T>,
+) => Promise<void>;
 
 /** Renders one session event, before, after, around, or instead of the rest of the chain. */
 export type SlackRenderHandler<T extends SlackSessionEvent> = (
-  data: EventData<T>,
-  channel: SlackEventContext,
-  ctx: SessionContext,
+  event: ChannelEventOf<T>,
+  ctx: ChannelEventContext<SlackEventContext>,
   next: SlackRenderNext<T>,
 ) => void | Promise<void>;
 
 /**
  * Session event handlers of one {@link SlackRenderer}. For a sign-in, `interaction.opened`
- * receives only the private delivery surface, because the challenge is a credential; its
- * `next` reaches eve's default, which posts the public, link-free status. Any other
- * `interaction.opened` receives the full channel context.
+ * receives only the private delivery surface as `ctx.channel`, because the challenge is a
+ * credential; its `next` reaches eve's default, which posts the public, link-free status. Any
+ * other `interaction.opened` receives the full channel context.
  */
 export type SlackRendererEvents = {
   readonly [T in SlackSessionEvent]?: SlackRenderHandler<T>;
 } & {
   readonly "interaction.opened"?: (
-    data: EventData<"interaction.opened">,
-    channel: SlackEventContext | SlackAuthorizationEventContext,
-    ctx: SessionContext,
+    event: ChannelEventOf<"interaction.opened">,
+    ctx: ChannelEventContext<SlackEventContext | SlackAuthorizationEventContext>,
     next: SlackRenderNext<"interaction.opened">,
   ) => void | Promise<void>;
 };
@@ -146,13 +142,17 @@ function composeEvents(
       return handler === undefined ? [] : [handler];
     });
     if (handlers.length === 0 && fallback === undefined) continue;
-    events[type] = (data, channel, ctx) =>
+    events[type] = (event, ctx) =>
       runChain(
         handlers,
-        data,
+        event,
         (handler, value, next) =>
-          handler(value, userChannel(type, channel as SlackEventContext, value), ctx, next),
-        (value) => fallback?.(value, channel, ctx),
+          handler(
+            value,
+            userContext(type, ctx as ChannelEventContext<SlackEventContext>, value),
+            next,
+          ),
+        (value) => fallback?.(value, ctx),
       );
   }
   return events as SlackChannelInternalEvents;
@@ -160,11 +160,11 @@ function composeEvents(
 
 /**
  * Runs `handlers` in order around `last`. Each handler's `next` runs the rest
- * once, with the data it passes or the data it received.
+ * once, with the event it passes or the event it received.
  */
 async function runChain(
   handlers: readonly AnyHandler[],
-  data: unknown,
+  event: unknown,
   invoke: (
     handler: AnyHandler,
     value: unknown,
@@ -182,26 +182,29 @@ async function runChain(
       (ran ??= run(index + 1, changed === undefined ? value : changed));
     await invoke(handlers[index]!, value, next);
   };
-  await run(0, data);
+  await run(0, event);
 }
 
 /** User renderers see only the private delivery surface for a sign-in challenge. */
-function userChannel(
+function userContext(
   type: SlackRenderedEvent,
-  channel: SlackEventContext,
-  data: unknown,
-): SlackEventContext | SlackAuthorizationEventContext {
-  if (type !== "interaction.opened" || !isSignIn(data)) return channel;
-  return {
+  ctx: ChannelEventContext<SlackEventContext>,
+  event: unknown,
+): ChannelEventContext<SlackEventContext | SlackAuthorizationEventContext> {
+  if (type !== "interaction.opened" || !isSignIn(event)) return ctx;
+  const { channel } = ctx;
+  const restricted: SlackAuthorizationEventContext = {
     postDirectMessage: (userId, message) => channel.thread.postDirectMessage(userId, message),
     postEphemeral: (userId, message) => channel.thread.postEphemeral(userId, message),
     state: channel.state,
   };
+  return { ...ctx, channel: restricted };
 }
 
-function isSignIn(data: unknown): boolean {
+function isSignIn(event: unknown): boolean {
   return (
-    (data as Partial<EventData<"interaction.opened">> | undefined)?.request?.kind === "sign-in"
+    (event as Partial<ChannelEventOf<"interaction.opened">> | undefined)?.data?.request?.kind ===
+    "sign-in"
   );
 }
 

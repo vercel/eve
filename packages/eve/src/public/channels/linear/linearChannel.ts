@@ -1,4 +1,4 @@
-import type { ChannelEventContext } from "#public/definitions/channel.js";
+import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { PromptQueueState } from "#channel/prompt-queue.js";
 import type { SessionHandle } from "#channel/session.js";
@@ -39,9 +39,6 @@ import { isObject, readNonEmptyString } from "#shared/guards.js";
 import type { JsonObject } from "#shared/json.js";
 
 const log = createLogger("linear.channel");
-
-type EventData<T extends SessionEvent["type"]> =
-  Extract<SessionEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /** JSON-serializable state for one Linear Agent Session conversation. */
 export interface LinearChannelState extends PromptQueueState {
@@ -126,9 +123,8 @@ export interface LinearHandle {
 }
 
 type LinearEventHandler<T extends SessionEvent["type"]> = (
-  data: EventData<T>,
-  channel: LinearEventContext,
-  ctx: ChannelEventContext,
+  event: ChannelEventOf<T>,
+  ctx: ChannelEventContext<LinearEventContext>,
 ) => void | Promise<void>;
 
 /** Event handlers supported by `linearChannel({ events })`. */
