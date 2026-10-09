@@ -18,6 +18,9 @@ export const LOOPBACK_CONNECTION = "loopback";
 
 export const MCP_PATH = "/eve/v1/mcp";
 
+/** Why the loopback connection refuses a tool its server marks destructive. */
+export const DESTRUCTIVE_DENIAL = "The front desk does not run tools the server marks destructive.";
+
 /** Where the note tools keep the front-desk note in the sandbox. */
 export const NOTE_PATH = "/workspace/front-desk-note.txt";
 

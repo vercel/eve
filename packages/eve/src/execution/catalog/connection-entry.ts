@@ -15,12 +15,13 @@ import {
   type ApprovalResponseDecision,
   type ApprovalResponsePolicy,
   type ApprovalStatus,
+  type ConnectionToolAnnotations,
 } from "#approval/definition.js";
 import { isConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import { connectionToolName } from "#connections/ownership.js";
 import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
-import { isApprovalRecheck } from "#harness/approval-recheck.js";
+import { isApprovalRecheck, markApprovalRecheck } from "#harness/approval-recheck.js";
 import type { AuthorizationSignal } from "#harness/authorization.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
@@ -78,7 +79,7 @@ export function connectionEntry(
 ): HarnessToolDefinition {
   const label = `${displayProperName(connection.connectionName)}: ${displayTitle(toolName)}`;
   return {
-    approval: connectionApproval(connection),
+    approval: connectionApproval(registry, connection, toolName),
     deferred: true,
     description: "",
     execute: (input: unknown, options: ToolExecuteOptions) =>
@@ -255,11 +256,20 @@ function unknownToolMessage(
  * phase exists only when the connection defines one; without it, the pin is
  * checked when the approved call runs.
  */
-function connectionApproval(connection: ResolvedConnectionDefinition): Approval | undefined {
+function connectionApproval(
+  registry: ConnectionRegistry,
+  connection: ResolvedConnectionDefinition,
+  toolName: string,
+): Approval | undefined {
   const { approval } = connection;
   if (approval === undefined) return undefined;
   const policy = resolveApprovalPolicy(approval);
-  const request = (context: ApprovalContext) => requestApproval(connection, policy, context);
+  const request = async (context: ApprovalContext) =>
+    requestApproval(
+      connection,
+      policy,
+      withToolAnnotations(context, await toolAnnotations(registry, connection, toolName)),
+    );
   const response = typeof approval === "function" ? undefined : approval.response;
   if (response === undefined) return request;
   return {
@@ -284,6 +294,33 @@ async function requestApproval(
     pinApprovedInstance(context.callId, connection);
   }
   return status;
+}
+
+/** What the server declared about `toolName`, or nothing when it declared none or can't list. */
+async function toolAnnotations(
+  registry: ConnectionRegistry,
+  connection: ResolvedConnectionDefinition,
+  toolName: string,
+): Promise<ConnectionToolAnnotations | undefined> {
+  try {
+    const tools = await listToolMetadata(
+      connection.connectionName,
+      registry.getClient(connection.connectionName),
+    );
+    return tools.find((tool) => tool.name === toolName)?.annotations;
+  } catch {
+    // Input validation already reported a listing failure; a sign-in the call needs comes later.
+    return undefined;
+  }
+}
+
+function withToolAnnotations(
+  context: ApprovalContext,
+  annotations: ConnectionToolAnnotations | undefined,
+): ApprovalContext {
+  if (annotations === undefined) return context;
+  const annotated = { ...context, toolAnnotations: annotations };
+  return isApprovalRecheck(context) ? markApprovalRecheck(annotated) : annotated;
 }
 
 function parksForApproval(status: ApprovalStatus): boolean {
