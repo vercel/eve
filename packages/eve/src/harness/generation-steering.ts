@@ -42,6 +42,11 @@ export class GenerationSteering {
     this.check();
   }
 
+  /** Steering cut the generation; what the step still publishes settles it, so nothing stops it. */
+  end(): void {
+    this.active = false;
+  }
+
   protectToolExecution(): void {
     this.check();
     this.effectsStarted = true;

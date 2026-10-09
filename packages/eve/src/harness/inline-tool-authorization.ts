@@ -1,29 +1,17 @@
-import type { ModelMessage, ToolSet, TypedToolResult } from "ai";
+import type { ModelMessage } from "ai";
 
-import { contextStorage } from "#context/container.js";
 import {
   type AuthorizationSignal,
-  isAuthorizationSignal,
-  isPendingAuthorizationToolOutput,
 } from "#harness/authorization.js";
 import { resolveActiveAuthorizationChallenges } from "#harness/hitl/sign-ins.js";
-import { readToolInterrupt } from "#harness/tool-interrupts.js";
-
-/** Returns whether an inline tool result represents a pending authorization interrupt. */
-export function isInlineAuthorizationToolResult(toolResult: TypedToolResult<ToolSet>): boolean {
-  return (
-    isPendingAuthorizationToolOutput(toolResult.output) ||
-    readAuthorizationSignal(toolResult) !== undefined
-  );
-}
 
 /**
- * Resolves authorization interrupts and keeps only protocol-complete sibling
- * calls from the response that produced them.
+ * Resolves the sign-ins that stopped calls, and keeps only protocol-complete sibling calls from
+ * the response that made them.
  */
 export function resolveInlineAuthorizationInterrupt(input: {
   readonly messages: readonly ModelMessage[];
-  readonly toolResults: readonly TypedToolResult<ToolSet>[] | undefined;
+  readonly signIns: readonly { readonly callId: string; readonly signal: AuthorizationSignal }[];
 }):
   | {
       readonly challenges: AuthorizationSignal["challenges"];
@@ -32,39 +20,20 @@ export function resolveInlineAuthorizationInterrupt(input: {
       readonly history: ModelMessage[];
     }
   | undefined {
-  const signals: AuthorizationSignal[] = [];
-  const interruptedCallIds = new Set<string>();
+  if (input.signIns.length === 0) return undefined;
   const callIdsByName = new Map<string, string[]>();
-
-  for (const toolResult of input.toolResults ?? []) {
-    const signal = readAuthorizationSignal(toolResult);
-    if (signal === undefined) continue;
-    signals.push(signal);
-    interruptedCallIds.add(toolResult.toolCallId);
+  for (const { callId, signal } of input.signIns) {
     for (const challenge of signal.challenges) {
-      const callIds = callIdsByName.get(challenge.name) ?? [];
-      callIdsByName.set(challenge.name, [...callIds, toolResult.toolCallId]);
+      callIdsByName.set(challenge.name, [...(callIdsByName.get(challenge.name) ?? []), callId]);
     }
   }
-
-  if (signals.length === 0) return undefined;
-
   return {
     callIdsByName,
     challenges: resolveActiveAuthorizationChallenges(
-      signals.flatMap((signal) => signal.challenges),
+      input.signIns.flatMap(({ signal }) => signal.challenges),
     ),
-    history: withoutCalls(input.messages, interruptedCallIds),
+    history: withoutCalls(input.messages, new Set(input.signIns.map(({ callId }) => callId))),
   };
-}
-
-function readAuthorizationSignal(
-  toolResult: TypedToolResult<ToolSet>,
-): AuthorizationSignal | undefined {
-  const ctx = contextStorage.getStore();
-  const stashed = ctx === undefined ? undefined : readToolInterrupt(ctx, toolResult.toolCallId);
-  if (stashed !== undefined && isAuthorizationSignal(stashed)) return stashed;
-  return isAuthorizationSignal(toolResult.output) ? toolResult.output : undefined;
 }
 
 /** Drops the given calls and their results, keeping protocol-complete sibling calls. */

@@ -22,6 +22,10 @@ function authorizationResult(toolCallId: string, attemptId: string) {
   } satisfies TypedToolResult<ToolSet>;
 }
 
+function signIn(result: ReturnType<typeof authorizationResult>) {
+  return { callId: result.toolCallId, signal: result.output };
+}
+
 const interruptedCall = {
   input: { action: "authorize" },
   toolCallId: "call-auth",
@@ -70,7 +74,7 @@ describe("resolveInlineAuthorizationInterrupt", () => {
     expect(
       resolveInlineAuthorizationInterrupt({
         messages,
-        toolResults: [authorizationResult(interruptedCall.toolCallId, "attempt-1")],
+        signIns: [signIn(authorizationResult(interruptedCall.toolCallId, "attempt-1"))],
       }),
     ).toMatchObject({
       challenges: [{ attemptId: "attempt-1" }],
@@ -94,7 +98,7 @@ describe("resolveInlineAuthorizationInterrupt", () => {
     expect(
       resolveInlineAuthorizationInterrupt({
         messages,
-        toolResults: [authorization, siblingResult],
+        signIns: [signIn(authorization)],
       })?.history,
     ).toEqual([
       { content: [siblingCall], role: "assistant" },
@@ -109,7 +113,7 @@ describe("resolveInlineAuthorizationInterrupt", () => {
     expect(
       resolveInlineAuthorizationInterrupt({
         messages: [],
-        toolResults: [first, latest],
+        signIns: [signIn(first), signIn(latest)],
       })?.challenges,
     ).toMatchObject([{ attemptId: "attempt-2" }]);
   });
