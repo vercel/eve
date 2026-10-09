@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import type { ModelMessage } from "ai";
 
 import { contextStorage } from "#context/container.js";
@@ -8,7 +9,6 @@ import { readTurnState, writeTurnState } from "#harness/session-machine/state.js
 import { eventsOf } from "#harness/publication.js";
 import {
   ensureSessionProjection,
-  recordPublishedEvent,
   saveProjection,
   stepProjection,
 } from "#harness/session-machine/current.js";
@@ -22,12 +22,6 @@ import {
   type TurnPosition,
 } from "#harness/session-machine/view.js";
 import type { HarnessEmitFn, HarnessSession, SessionStateMap, StepInput } from "#harness/types.js";
-import {
-  createSessionStartedEvent,
-  createStepStartedEvent,
-  createTurnStartedEvent,
-  type UnstampedMessageStreamEvent,
-} from "#protocol/message.js";
 import { initialSessionProjection } from "#protocol/session-projection.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { InputRequest } from "#shared/input.js";
@@ -39,10 +33,10 @@ import type { InputRequest } from "#shared/input.js";
 /** The session as publishing `events` leaves it. */
 export function withPublished(
   session: HarnessSession,
-  events: readonly UnstampedMessageStreamEvent[],
+  events: readonly SessionEvent[],
 ): HarnessSession {
   const projection = stepProjection(undefined, session.state);
-  for (const event of events) projection.record(event);
+  projection.record(events);
   return saveProjection(session, projection.read());
 }
 
@@ -52,19 +46,24 @@ export function withOpenTurn(
   position: { readonly sequence: number; readonly turnId: string; readonly stepIndex?: number },
 ): HarnessSession {
   const projection = storedProjection(session.state);
-  const events: UnstampedMessageStreamEvent[] = [];
-  if (projection.started !== true) events.push(createSessionStartedEvent());
+  const events: SessionEvent[] = [];
+  if (projection.started !== true) events.push({ type: "session.started", data: {} });
   if (projection.activeTurnId !== position.turnId) {
-    events.push(createTurnStartedEvent({ sequence: position.sequence, turnId: position.turnId }));
+    events.push({
+      type: "turn.started",
+      data: {
+        turnId: position.turnId,
+        follows: projection.latestTurn?.turnId ?? null,
+        cause: { hook: "test" },
+      },
+    });
   }
   if (position.stepIndex !== undefined) {
+    const runId = `test_${position.turnId}_${position.stepIndex}`;
+    const scope = { runId, turnId: position.turnId };
     events.push(
-      createStepStartedEvent({
-        modelId: "test-model",
-        sequence: position.sequence,
-        stepIndex: position.stepIndex,
-        turnId: position.turnId,
-      }),
+      { type: "model.requested", data: { runId, owner: { turnId: position.turnId } }, scope },
+      { type: "model.started", data: { runId, modelId: "test-model" }, scope },
     );
   }
   return withPublished(session, events);
@@ -121,7 +120,7 @@ export function foldingHandler(handleEvent?: TestEventHandler): HarnessEmitFn {
     const ctx = contextStorage.getStore();
     if (ctx !== undefined) {
       ensureSessionProjection(ctx, undefined);
-      for (const event of eventsOf(publication)) recordPublishedEvent(ctx, event);
+      stepProjection(ctx, undefined).record(publication);
     }
     if (handleEvent !== undefined) await eachEvent(handleEvent)(publication, messages);
   };
@@ -129,7 +128,7 @@ export function foldingHandler(handleEvent?: TestEventHandler): HarnessEmitFn {
 
 /** A test's event handler: one event at a time, with the conversation its participants read. */
 export type TestEventHandler = (
-  event: UnstampedMessageStreamEvent,
+  event: SessionEvent,
   messages?: readonly ModelMessage[],
 ) => void | Promise<void>;
 

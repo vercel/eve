@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import {
   readDurableSession,
   replaceDurableSessionSnapshot,
@@ -22,7 +23,8 @@ import {
   type TaskTable,
 } from "#execution/tasks/table.js";
 import { ignoreGoneTarget } from "#execution/tasks/workflow-target.js";
-import { countRunUsage } from "#execution/agent-sessions/usage.js";
+import { countRunUsage, usageSince } from "#execution/agent-sessions/usage.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 import {
   publishSessionEvents,
   relaySessionEvents,
@@ -41,11 +43,11 @@ import type {
 import { workflowToolRunFailureOutput } from "#execution/tools/workflow/owner-inbox.js";
 import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { sessionView } from "#harness/session-machine/commit.js";
-import { finishRun, settleTask } from "#harness/session-machine/transitions.js";
+import { delegatedUsageFact, finishRun, settleTask } from "#harness/session-machine/transitions.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import { stopRuns, waitedCallRuns, type RunStopTarget } from "#execution/stop-runs.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
-import type { TaskCancelReason, UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { TaskCancelReason } from "#protocol/message.js";
 
 /** The messages a task's run sends that change its record. */
 export type TaskRunMessage = Extract<
@@ -74,8 +76,9 @@ async function applyTaskRunMessage(
     return { serializedContext: input.serializedContext, sessionState: input.sessionState };
   }
   let table = readTaskTable(session.state);
-  const events: UnstampedMessageStreamEvent[] = [];
-  let withdrawn: readonly UnstampedMessageStreamEvent[] = [];
+  const events: SessionEvent[] = [];
+  let spend: TokenUsage | undefined;
+  let withdrawn: readonly SessionEvent[] = [];
   switch (message.kind) {
     case "started": {
       const started = markTaskRunStarted(table, taskId, message.from.runId);
@@ -84,7 +87,7 @@ async function applyTaskRunMessage(
       break;
     }
     case "reply": {
-      ({ session, table } = countTaskRunUsage(session, table, taskId, message));
+      ({ session, table, spend } = countTaskRunUsage(session, table, taskId, message));
       const outcome: TaskOutcome = { output: message.output, status: "completed" };
       const record = findTask(table, taskId);
       const settled = settleTaskCalls(table, { callIds: message.callIds, outcome, taskId });
@@ -93,10 +96,10 @@ async function applyTaskRunMessage(
       break;
     }
     case "usage":
-      ({ session, table } = countTaskRunUsage(session, table, taskId, message));
+      ({ session, table, spend } = countTaskRunUsage(session, table, taskId, message));
       break;
     case "outcome": {
-      ({ session, table } = countTaskRunUsage(session, table, taskId, message));
+      ({ session, table, spend } = countTaskRunUsage(session, table, taskId, message));
       const outcome = toOutcome(message);
       const record = findTask(table, taskId);
       const settled = settleRemainingTaskCalls(table, taskId, outcome);
@@ -108,6 +111,24 @@ async function applyTaskRunMessage(
         taskId,
       }).events;
       break;
+    }
+  }
+  if (spend !== undefined) {
+    const settled = events.filter((event) => event.type === "call.settled");
+    // One reply may settle several calls with the same result. Its spend belongs once to the
+    // latest served call (the message's source), never once per recipient.
+    const call = settled.find((event) => event.data.callId === message.from.callId) ?? settled[0];
+    const turnId = call?.scope?.turnId;
+    if (call !== undefined && turnId !== undefined) {
+      events.push(delegatedUsageFact(call.data.callId, spend, { turnId }));
+    } else {
+      // A serve body can keep spending after it replied or while cancellation unwinds. No
+      // open call owns that late spend, and an immutable settlement cannot be amended.
+      events.push({
+        type: "usage.recorded",
+        data: { kind: "delegated-late", usage: spend },
+        scope: { taskId },
+      });
     }
   }
   const relayed = await relaySessionEvents(
@@ -147,9 +168,9 @@ async function cancelTasks(
 ): Promise<PublishedSessionEvents> {
   const session = readDurableSession(input.sessionState);
   let table = readTaskTable(session.state);
-  const events: UnstampedMessageStreamEvent[] = [];
+  const events: SessionEvent[] = [];
   const view = viewOf(session);
-  const withdrawn: UnstampedMessageStreamEvent[] = [];
+  const withdrawn: SessionEvent[] = [];
   const outcome: TaskOutcome = { reason: input.reason, status: "cancelled" };
   const targets: RunStopTarget[] = [];
   const taskOfRun = new Map<string, string>();
@@ -197,7 +218,7 @@ function taskSettledEvents(
   record: TaskRecord | undefined,
   calls: readonly TaskCall[],
   outcome: TaskOutcome,
-): readonly UnstampedMessageStreamEvent[] {
+): readonly SessionEvent[] {
   if (record === undefined) return [];
   return settleTask(viewOf(session), { calls, outcome, task: record }).events;
 }
@@ -251,12 +272,20 @@ function countTaskRunUsage(
   table: TaskTable,
   taskId: string,
   message: Extract<TaskRunMessage, { readonly kind: "outcome" | "reply" | "usage" }>,
-): { readonly session: DurableSession; readonly table: TaskTable } {
+): { readonly session: DurableSession; readonly table: TaskTable; readonly spend?: TokenUsage } {
   const run = findTask(table, taskId)?.run;
   if (message.usage === undefined || run?.runId !== message.from.runId) return { session, table };
+  const delta = usageSince(message.usage, run.usage);
+  const changed =
+    delta.inputTokens !== 0 ||
+    delta.outputTokens !== 0 ||
+    delta.cacheReadTokens !== 0 ||
+    delta.cacheWriteTokens !== 0 ||
+    (delta.costUsd !== undefined && (delta.costUsd !== 0 || run.usage?.costUsd === undefined));
   return {
     session: countRunUsage(session, message.usage, run.usage),
     table: recordTaskRunUsage(table, taskId, message.usage),
+    spend: changed ? delta : undefined,
   };
 }
 

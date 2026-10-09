@@ -1,12 +1,12 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { EveAgentEventLog } from "#client/eve-agent-projection.js";
 import type { PendingMessageSubmission } from "#client/eve-agent-store-state.js";
 import { createSubmissionId, summarizeUserContent } from "#client/eve-agent-store-helpers.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import type { SendTurnPayload } from "#client/types.js";
 
 interface ReconciledSubmissions {
   readonly alreadyProjected: boolean;
-  readonly event: Extract<MessageStreamEvent, { readonly type: "message.received" }>;
+  readonly event: Extract<SessionStreamEvent, { readonly type: "delivery.consumed" }>;
   readonly ids: readonly string[];
 }
 
@@ -61,8 +61,8 @@ export class OptimisticMessageSubmissions {
     return this.submit(input, pending?.eventStartIndex ?? 0, pending?.turnId);
   }
 
-  apply(event: MessageStreamEvent): ReconciledSubmissions | undefined {
-    if (event.type !== "message.received") {
+  apply(event: SessionStreamEvent): ReconciledSubmissions | undefined {
+    if (!isConsumedMessage(event)) {
       for (const projection of this.#projections) projection.append(event);
       return undefined;
     }
@@ -77,7 +77,7 @@ export class OptimisticMessageSubmissions {
   correlate(
     submissionId: string | undefined,
     deliveryId: string | undefined,
-    events: readonly MessageStreamEvent[],
+    events: readonly SessionStreamEvent[],
   ): ReconciledSubmissions | undefined {
     if (submissionId === undefined) return undefined;
     this.#pending = this.#pending.map((pending) =>
@@ -88,7 +88,7 @@ export class OptimisticMessageSubmissions {
     const pending = this.#pending.find((candidate) => candidate.id === submissionId);
     if (pending === undefined) return undefined;
     for (const event of events.slice(pending.eventStartIndex)) {
-      if (event.type !== "message.received") continue;
+      if (!isConsumedMessage(event)) continue;
       const matching = this.#matching(event);
       if (matching.some((candidate) => candidate.id === submissionId)) {
         return this.#reconcile(matching, event, true);
@@ -126,17 +126,17 @@ export class OptimisticMessageSubmissions {
     for (const pending of this.#pending) this.fail(error, pending.id);
   }
 
-  #matching(event: Extract<MessageStreamEvent, { readonly type: "message.received" }>) {
+  #matching(event: ConsumedMessage) {
     return this.#pending.filter((pending) =>
       pending.deliveryId === undefined
         ? !pending.requiresDeliveryId
-        : event.meta.deliveryIds?.includes(pending.deliveryId) === true,
+        : event.data.deliveryId === pending.deliveryId,
     );
   }
 
   #reconcile(
     submissions: readonly PendingMessageSubmission[],
-    event: Extract<MessageStreamEvent, { readonly type: "message.received" }>,
+    event: ConsumedMessage,
     alreadyProjected: boolean,
   ): ReconciledSubmissions {
     const ids = submissions.map((pending) => pending.id);
@@ -155,4 +155,11 @@ export class OptimisticMessageSubmissions {
       );
     }
   }
+}
+
+type ConsumedMessage = Extract<SessionStreamEvent, { readonly type: "delivery.consumed" }>;
+
+/** A message a person sent, as its turn consumed it: an answer or context sends none. */
+function isConsumedMessage(event: SessionStreamEvent): event is ConsumedMessage {
+  return event.type === "delivery.consumed" && event.data.parts.length > 0;
 }

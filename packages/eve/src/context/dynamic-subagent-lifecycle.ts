@@ -16,7 +16,7 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createLogger } from "#internal/logging.js";
 import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
 import type { DynamicSessionOrTurnEvent } from "#dynamic/definition.js";
-import type { SessionStartedStreamEvent } from "#protocol/message.js";
+import type { SessionStartedPoint as SessionStartedStreamEvent } from "#harness/session-machine/change-points.js";
 import type { ResolvedDynamicSubagentResolver } from "#runtime/subagents/registry.js";
 import { createPreparedRuntimeSubagentTool } from "#runtime/subagents/registry.js";
 import { normalizeDynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";

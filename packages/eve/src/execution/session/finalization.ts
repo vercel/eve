@@ -76,7 +76,7 @@ export async function finalizeSession(
   const latest = stored.latestTurn;
   if (outcome.kind === "expired") {
     await emitTerminalSessionCompletionStep({
-      position: stored.position,
+      projection: stored,
       sessionWritable: context.sessionWritable,
       serializedContext,
       turn: latest && { id: latest.turnId, sequence: latest.sequence },
@@ -85,7 +85,7 @@ export async function finalizeSession(
   } else if (outcome.kind === "failed") {
     await emitTerminalSessionFailureStep({
       error: normalizeSerializableError(outcome.error),
-      position: stored.position,
+      projection: stored,
       sessionWritable: context.sessionWritable,
       serializedContext,
       turnId: outcome.turnId ?? latest?.turnId,

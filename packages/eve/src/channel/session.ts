@@ -1,9 +1,9 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { ContextAccessor } from "#context/key.js";
 import {
   createChannelDeliveryMetadata,
   type ChannelDeliverySource,
 } from "#channel/delivery-metadata.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import type { UserContent } from "ai";
 import type {
   CancelTurnResult,
@@ -57,7 +57,7 @@ export interface Session {
   clear(): Promise<ClearSessionResult>;
   /** Terminally retires this exact session ID. */
   reset(options?: { reason?: string }): Promise<ResetSessionResult>;
-  getEventStream(options?: { startIndex?: number }): Promise<ReadableStream<MessageStreamEvent>>;
+  getEventStream(options?: { startIndex?: number }): Promise<ReadableStream<SessionStreamEvent>>;
   /** The session's stored lines from `startIndex`: one parsed record per line. */
   getLineStream(options?: { startIndex?: number }): Promise<ReadableStream<unknown>>;
   getStreamTailIndex(): Promise<number>;

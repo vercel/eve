@@ -7,13 +7,13 @@
  * directory to the ingress files that route into it, so removing protocol 1
  * means deleting this directory and fixing the compile errors it leaves.
  */
+import type { SessionEvent } from "#protocol/session-event.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type { ContextContainer } from "#context/container.js";
 import { ContinuationTokenKey, SessionCallbackKey, SessionIdKey } from "#context/keys.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { createLogger, logError } from "#internal/logging.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import { isObject } from "#shared/guards.js";
@@ -60,7 +60,7 @@ export function splitLegacyTaskFields(input: Record<string, unknown>): {
 export async function forwardLegacySessionInput(
   ctx: ContextContainer,
   caller: LegacyRemoteAgentCaller,
-  event: UnstampedMessageStreamEvent,
+  event: SessionEvent,
 ): Promise<boolean> {
   const callback = ctx.get(SessionCallbackKey);
   // The caller answers through the create-once session token it derived its capability from.

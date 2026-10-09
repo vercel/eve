@@ -390,13 +390,13 @@ class CallWait {
     if (ready === undefined) return undefined;
     const delegatedUsage = ready.flatMap((result) => {
       const usage = this.delegatedUsage.get(result.callId);
-      return usage === undefined ? [] : [usage];
+      return usage === undefined ? [] : [[result.callId, usage] as const];
     });
     return {
       acceptedAtMsByCallId: Object.fromEntries(
         ready.map((result) => [result.callId, this.acceptedAtMs.get(result.callId)!]),
       ),
-      ...(delegatedUsage.length > 0 && { delegatedUsage }),
+      ...(delegatedUsage.length > 0 && { delegatedUsage: Object.fromEntries(delegatedUsage) }),
       results: ready,
     };
   }

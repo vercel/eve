@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { RouteHandlerArgs } from "#channel/routes.js";
@@ -8,7 +9,7 @@ import {
 } from "#internal/nitro/routes/channel-route-context.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { stampTestEvent } from "#internal/testing/events.js";
-import { createAgentStartedEvent, type MessageStreamEvent } from "#protocol/message.js";
+import { createAgentStartedEvent } from "#protocol/message.js";
 import { EVE_SUBAGENT_STREAM_ROUTE_PATTERN } from "#protocol/routes.js";
 import { none, type AuthFn } from "#public/channels/auth.js";
 import { eveChannel } from "#public/channels/eve.js";
@@ -159,7 +160,7 @@ describe("eveChannel remote subagent stream", () => {
   });
 });
 
-function remoteStartedEvent(overrides: Partial<typeof coordinates> = {}): MessageStreamEvent {
+function remoteStartedEvent(overrides: Partial<typeof coordinates> = {}): SessionStreamEvent {
   const values = { ...coordinates, ...overrides };
   return stampTestEvent(
     createAgentStartedEvent({
@@ -177,7 +178,7 @@ function remoteStartedEvent(overrides: Partial<typeof coordinates> = {}): Messag
   );
 }
 
-function localStartedEvent(): MessageStreamEvent {
+function localStartedEvent(): SessionStreamEvent {
   return stampTestEvent(
     createAgentStartedEvent({
       callId: coordinates.callId,
@@ -193,7 +194,7 @@ function localStartedEvent(): MessageStreamEvent {
 function createHarness(input: {
   readonly auth?: AuthFn<Request>;
   readonly bindingCancelled?: () => void;
-  readonly events: readonly MessageStreamEvent[];
+  readonly events: readonly SessionStreamEvent[];
   readonly resolveHeaders?: RemoteAgentStreamHeadersResolver;
 }) {
   const channel = eveChannel({ auth: input.auth ?? none() });
@@ -223,7 +224,7 @@ function createHarness(input: {
       return new ReadableStream();
     },
     async getEventStream() {
-      return new ReadableStream<MessageStreamEvent>({
+      return new ReadableStream<SessionStreamEvent>({
         start(controller) {
           for (const event of input.events) controller.enqueue(event);
         },

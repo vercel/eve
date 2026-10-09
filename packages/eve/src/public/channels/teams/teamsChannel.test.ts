@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { callAdapterEventHandler } from "#channel/adapter.js";
@@ -10,7 +11,6 @@ import {
   mockChannelContext,
   type ObservedChannelDelivery,
 } from "#internal/testing/mocks/mock-channel-operations.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { teamsChannel, type TeamsChannelState } from "#public/channels/teams/index.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 
@@ -18,11 +18,8 @@ function adapter(channel: unknown) {
   return asCompiled<TeamsChannelState>(channel).adapter;
 }
 
-function makeEvent<T extends UnstampedMessageStreamEvent["type"]>(
-  type: T,
-  data: unknown,
-): UnstampedMessageStreamEvent {
-  return { type, data } as UnstampedMessageStreamEvent;
+function makeEvent<T extends SessionEvent["type"]>(type: T, data: unknown): SessionEvent {
+  return { type, data } as SessionEvent;
 }
 
 function stubAccessor() {
@@ -41,7 +38,7 @@ const stubAlsContext = (() => {
 
 function callEvent(
   teamsAdapter: ReturnType<typeof adapter>,
-  event: UnstampedMessageStreamEvent,
+  event: SessionEvent,
   ctx: ReturnType<typeof buildAdapterContext>,
 ) {
   return contextStorage.run(stubAlsContext, () =>

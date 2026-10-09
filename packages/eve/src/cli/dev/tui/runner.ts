@@ -9,7 +9,7 @@ import {
   EveAgentStore,
 } from "#client/eve-agent-store.js";
 import { isAbortError } from "#client/eve-agent-store-helpers.js";
-import { normalizeActionRequest, normalizeActionResult } from "#client/message-action-parts.js";
+import { failureOf } from "#client/session-utils.js";
 import { isTerminalToolCallPart } from "./terminal-tool-part.js";
 import { userText } from "./transcript-parts.js";
 import { isTaskRetryRefusal } from "#protocol/task-tools.js";
@@ -21,7 +21,7 @@ import type {
   InputOption,
   InputRequest,
   InputResponse,
-  MessageStreamEvent,
+  SessionStreamEvent,
 } from "#client/index.js";
 import { renderApplicationInfo } from "#cli/commands/info.js";
 import type { EveCliSetupStepEvent, EveCliSetupTerminalEvent } from "#cli/telemetry/index.js";
@@ -1545,34 +1545,37 @@ export class EveTUIRunner {
   }
 
   /** Records session activity that the diagnostics log keeps regardless of display. */
-  #recordDiagnostics(event: MessageStreamEvent): void {
+  #recordDiagnostics(event: SessionStreamEvent): void {
     const diagnostics = this.#diagnostics;
     if (diagnostics === undefined) return;
     switch (event.type) {
       case "turn.started":
         this.#recordedFailures.clear();
         break;
-      case "actions.requested":
-        for (const action of event.data.actions) {
-          const descriptor = normalizeActionRequest(action);
-          if (descriptor.kind === "tool-call") diagnostics.recordToolCall(descriptor.toolName);
-        }
+      case "call.requested":
+        if (event.data.capability.kind === "tool")
+          diagnostics.recordToolCall(event.data.capability.name);
         break;
-      case "action.result":
+      case "call.settled": {
+        const call = this.#store.snapshot.conversation.messages
+          .flatMap((message) => message.parts)
+          .find((part) => part.type === "dynamic-tool" && part.toolCallId === event.data.callId);
+        const name = call?.type === "dynamic-tool" ? call.toolName : event.data.callId;
         if (isTaskRetryRefusal(event)) {
           diagnostics.append({
             source: "tool",
-            summary: `${normalizeActionResult(event.data.result).toolName} was refused for the model to retry`,
+            summary: `${name} was refused for the model to retry`,
             detail: event.data.error?.message ?? "Refused.",
           });
-        } else if (event.data.status === "failed") {
+        } else if (event.data.outcome === "failed" && event.scope?.taskId === undefined) {
           diagnostics.append({
             source: "tool",
-            summary: `${normalizeActionResult(event.data.result).toolName} failed`,
+            summary: `${name} failed`,
             detail: event.data.error?.message ?? "Tool failed.",
           });
         }
         break;
+      }
       // A task call's receipt never fails; its task's outcome does.
       case "task.settled":
         if (event.data.status === "failed") {
@@ -1586,12 +1589,12 @@ export class EveTUIRunner {
       case "agent.started":
         diagnostics.recordSubagentDispatch(event.data.callId);
         break;
-      case "step.completed":
+      case "usage.recorded":
         diagnostics.recordStepUsage(event.data.usage);
         break;
-      case "step.failed":
-      case "turn.failed":
-      case "session.failed": {
+      case "turn.settled":
+      case "session.ended": {
+        if (failureOf(event) === undefined) break;
         const key = failureKey(event);
         if (this.#recordedFailures.has(key)) break;
         this.#recordedFailures.add(key);

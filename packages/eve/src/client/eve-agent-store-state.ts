@@ -1,9 +1,9 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { Client } from "#client/client.js";
 import type { MessageResponse } from "#client/message-response.js";
 import type { EveAgentReducer } from "#client/reducer.js";
 import type { ConversationState } from "#client/conversation-state.js";
 import type { ClientSession } from "#client/session.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import type {
   CancelSessionResult,
   ClientAuth,
@@ -33,7 +33,7 @@ export interface EveAgentStoreSnapshot<TData> {
   readonly conversation: ConversationState;
   /** The latest session creation, stream, resume, or turn failure. */
   readonly error: Error | undefined;
-  readonly events: readonly MessageStreamEvent[];
+  readonly events: readonly SessionStreamEvent[];
   readonly session: ClientSessionState | undefined;
   readonly status: EveAgentStoreStatus;
 }
@@ -44,7 +44,7 @@ export interface EveAgentStoreSnapshot<TData> {
  */
 export interface EveAgentStoreCallbacks<TData> {
   readonly onError?: (error: Error) => void;
-  readonly onEvent?: (event: MessageStreamEvent) => void;
+  readonly onEvent?: (event: SessionStreamEvent) => void;
   readonly onFinish?: (snapshot: EveAgentStoreSnapshot<TData>) => void;
   readonly onSessionChange?: (session: ClientSessionState | undefined) => void;
   readonly prepareSend?: PrepareSend;
@@ -63,7 +63,7 @@ export interface EveAgentStoreInit<TData> {
   readonly headers?: HeadersValue;
   readonly host?: string;
   /** Ordered prefix of the session stream used to rehydrate projected state. */
-  readonly initialEvents?: readonly MessageStreamEvent[];
+  readonly initialEvents?: readonly SessionStreamEvent[];
   readonly initialSession?: ClientSessionState;
   readonly optimistic?: boolean;
   /**
@@ -92,7 +92,7 @@ export interface ActiveTurn {
   readonly completion: Promise<void>;
   readonly followUpDispatches: Set<Promise<void>>;
   receivedFollowUps: number;
-  readonly receivedFollowUpEvents: Map<MessageStreamEvent, number>;
+  readonly receivedFollowUpEvents: Map<SessionStreamEvent, number>;
   readonly followUpSubmissionIds: Set<string>;
   readonly resolveCompletion: () => void;
   readonly response: Promise<MessageResponse | undefined>;

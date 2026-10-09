@@ -1,11 +1,11 @@
+import type { ChannelEventContext } from "#public/definitions/channel.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import type { DiscordInstrumentationMetadata } from "#public/channels/discord/index.js";
 import type { ChannelFrom } from "#channel/channel-operations.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
-import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 import { createLogger, logError } from "#internal/logging.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   callDiscordApi,
   createDiscordFollowupMessage,
@@ -64,8 +64,8 @@ import { discordAudience, discordInstrumentationMetadata } from "./audience.js";
 
 const log = createLogger("discord.channel");
 
-type EventData<T extends UnstampedMessageStreamEvent["type"]> =
-  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
+type EventData<T extends SessionEvent["type"]> =
+  Extract<SessionEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /** Pre-dispatch Discord context passed to inbound command hooks. */
 export interface DiscordContext {
@@ -151,33 +151,25 @@ export type DiscordInputResponseInteraction =
   | DiscordComponentInteraction
   | DiscordModalSubmitInteraction;
 
-type DiscordEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
+type DiscordEventHandler<T extends SessionEvent["type"]> = (
   data: EventData<T>,
   channel: DiscordEventContext,
-  ctx: SessionContext,
-) => void | Promise<void>;
-
-type DiscordSessionFailedHandler = (
-  data: EventData<"session.failed">,
-  channel: DiscordEventContext,
+  ctx: ChannelEventContext,
 ) => void | Promise<void>;
 
 /** Per-event handlers for `discordChannel({ events })`. Supplied handlers override built-in defaults per key; unspecified events keep their defaults. `session.failed` receives only `(data, channel)` and exposes the ID as `data.sessionId`; every other handler also gets the session `ctx`. */
 export interface DiscordChannelEvents {
   readonly "turn.started"?: DiscordEventHandler<"turn.started">;
-  readonly "actions.requested"?: DiscordEventHandler<"actions.requested">;
-  readonly "action.partial"?: DiscordEventHandler<"action.partial">;
-  readonly "action.result"?: DiscordEventHandler<"action.result">;
-  readonly "message.completed"?: DiscordEventHandler<"message.completed">;
-  readonly "message.appended"?: DiscordEventHandler<"message.appended">;
+  readonly "call.requested"?: DiscordEventHandler<"call.requested">;
+  readonly "call.progress"?: DiscordEventHandler<"call.progress">;
+  readonly "call.settled"?: DiscordEventHandler<"call.settled">;
+  readonly "content.completed"?: DiscordEventHandler<"content.completed">;
+  readonly "content.delta"?: DiscordEventHandler<"content.delta">;
   readonly "input.requested"?: DiscordEventHandler<"input.requested">;
   readonly "input.resolved"?: DiscordEventHandler<"input.resolved">;
-  readonly "turn.failed"?: DiscordEventHandler<"turn.failed">;
-  readonly "turn.completed"?: DiscordEventHandler<"turn.completed">;
-  readonly "turn.cancelled"?: DiscordEventHandler<"turn.cancelled">;
-  readonly "session.failed"?: DiscordSessionFailedHandler;
-  readonly "session.completed"?: DiscordEventHandler<"session.completed">;
-  readonly "session.waiting"?: DiscordEventHandler<"session.waiting">;
+  readonly "turn.settled"?: DiscordEventHandler<"turn.settled">;
+  readonly "session.ended"?: DiscordEventHandler<"session.ended">;
+  readonly "delivery.settled"?: DiscordEventHandler<"delivery.settled">;
   readonly "authorization.required"?: DiscordEventHandler<"authorization.required">;
   readonly "authorization.completed"?: DiscordEventHandler<"authorization.completed">;
 }

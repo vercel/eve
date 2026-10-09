@@ -167,11 +167,14 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
 
   const result: {
     attributedInputResponses?: StepInput["attributedInputResponses"];
+    deliveries?: StepInput["deliveries"];
     inputResponses?: readonly InputResponse[];
     message?: string | UserContent;
     context?: readonly string[];
     outputSchema?: StepInput["outputSchema"];
   } = {};
+  const deliveries = [...(a.deliveries ?? []), ...(b.deliveries ?? [])];
+  if (deliveries.length > 0) result.deliveries = deliveries;
 
   if (inputResponses !== undefined) {
     result.inputResponses = inputResponses;

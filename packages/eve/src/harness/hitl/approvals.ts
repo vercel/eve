@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { ModelMessage } from "ai";
 
@@ -23,16 +24,14 @@ import { resolveSessionLimitContinuation } from "#harness/hitl/budget-request.js
 import type { StepInput } from "#harness/types.js";
 import { readClientContext } from "#internal/client-context.js";
 import {
-  createActionResultEvent,
   createApprovalCandidateEvent,
   createApprovalSettledEvent,
   createAuthorizationCompletedEvent,
   createAuthorizationRequiredEvent,
   createInputRequestedEvent,
   createInputResolvedEvent,
-  createMessageCompletedEvent,
-  type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
+import { callSettledFrom } from "#harness/call-facts.js";
 import {
   openInputs,
   turnCoordinates,
@@ -227,16 +226,17 @@ export function answer(
 ): Answered {
   const { policy } = input;
   const { projection } = view;
-  const position = turnPosition(projection);
-  const events: UnstampedMessageStreamEvent[] = [
-    ...policy.feedback.map((message) =>
-      createMessageCompletedEvent({
-        message,
-        sequence: position.sequence,
-        stepIndex: position.stepIndex,
-        turnId: position.turnId,
-      }),
-    ),
+  // What a responder may not do refuses their delivery, with why: a notice, not the model's.
+  const refusal = policy.feedback.join("\n");
+  const refused: SessionEvent[] =
+    policy.feedback.length === 0
+      ? []
+      : (input.delivery?.deliveries ?? []).map(({ deliveryId }) => ({
+          data: { deliveryId, outcome: "refused", reason: refusal },
+          type: "delivery.settled",
+        }));
+  const events: SessionEvent[] = [
+    ...refused,
     ...reportApprovalProgress(projection, policy.audit, policy.challengesAtStart),
   ];
   let turn: TurnState = input.takeQueued ? { ...view.turn, queued: undefined } : view.turn;
@@ -327,7 +327,7 @@ export function answer(
 
   const grants = new Set(turn.grants);
   const batches: ResolvedInputBatch[] = [];
-  const results: UnstampedMessageStreamEvent[] = [];
+  const results: SessionEvent[] = [];
   const unavailable = new Set(
     policy.audit.settlements
       .filter((settlement) => settlement.outcome === "unavailable")
@@ -346,7 +346,7 @@ export function answer(
           toolName,
         });
         messages = withResult(messages, failed.part);
-        results.push(createActionResultEvent({ result: failed.result, ...step.event }));
+        results.push(callSettledFrom(failed.result, { scope: { turnId: step.event.turnId } }));
         continue;
       }
       const { approved, reason, status } = resolveApprovalOutcome(byId.get(request.requestId));
@@ -361,24 +361,25 @@ export function answer(
         toolName,
         type: "tool-result",
       });
-      results.push(
-        createActionResultEvent({
-          rejected: true,
-          result: {
-            callId,
-            isError: true,
-            kind: "tool-result",
-            output: {
-              approval: { requestId: request.requestId, status },
-              code: "TOOL_EXECUTION_DENIED",
-              message: reason ?? TOOL_EXECUTION_DENIED_MESSAGE,
-              tool: { result: "not_run" },
-            },
-            toolName,
+      const settled = callSettledFrom(
+        {
+          callId,
+          isError: true,
+          kind: "tool-result",
+          output: {
+            approval: { requestId: request.requestId, status },
+            code: "TOOL_EXECUTION_DENIED",
+            message: reason ?? TOOL_EXECUTION_DENIED_MESSAGE,
+            tool: { result: "not_run" },
           },
-          ...step.event,
-        }),
+          toolName,
+        },
+        { rejected: true, scope: { turnId: step.event.turnId } },
       );
+      results.push({
+        ...settled,
+        data: { ...settled.data, cause: { interactionId: request.requestId } },
+      });
     }
     batches.push({
       event: step.event,
@@ -401,7 +402,7 @@ export function answer(
 }
 
 /** The `input.resolved` for a batch, at the coordinates of the step that asked. */
-function resolvedEvent(batch: ResolvedInputBatch): UnstampedMessageStreamEvent {
+function resolvedEvent(batch: ResolvedInputBatch): SessionEvent {
   return createInputResolvedEvent({
     resolutions: batch.inputs.map((resolved) => {
       const resolution = {
@@ -426,13 +427,13 @@ function reportApprovalProgress(
   projection: SessionProjection,
   audit: ReturnType<typeof getApprovalAuditState>,
   challenges: readonly AuthorizationChallenge[],
-): readonly UnstampedMessageStreamEvent[] {
+): readonly SessionEvent[] {
   const at = turnCoordinates(projection);
   const isOpen = (requestId: string) => {
     const open = projection.inputs[requestId];
     return open !== undefined && open.status !== "settled";
   };
-  const events: UnstampedMessageStreamEvent[] = [];
+  const events: SessionEvent[] = [];
   for (const challenge of challenges) {
     const expired = audit.candidateHistory.some(
       (candidate) =>
@@ -630,7 +631,7 @@ export function requireSignIn(
     stepIndex: position.stepIndex,
     turnId: position.turnId,
   };
-  const events: UnstampedMessageStreamEvent[] = [
+  const events: SessionEvent[] = [
     ...supersededChallenges(view.signIns, input.challenges).map((superseded) =>
       createAuthorizationCompletedEvent({
         ...authorizationEventFields(superseded),

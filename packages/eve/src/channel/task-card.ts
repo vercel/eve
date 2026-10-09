@@ -1,11 +1,7 @@
-import type {
-  ActionPresentationByCallId,
-  TaskCancelReason,
-  UnstampedMessageStreamEvent,
-} from "#protocol/message.js";
-import { actionLabel, visibleActions } from "#shared/action-label.js";
-import { actionRequestName } from "#shared/action-request-name.js";
-import type { RuntimeActionRequest } from "#shared/action-types.js";
+import type { SessionEvent } from "#protocol/session-event.js";
+import type { TaskCancelReason } from "#protocol/message.js";
+import type { CallOutcome, Capability } from "#protocol/session-events/families/call.js";
+import { isTaskControlTool } from "#protocol/task-tools.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import { displayTitle } from "#shared/display-name.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
@@ -124,7 +120,7 @@ type TurnChanges = Readonly<Record<string, TaskCardTurn>>;
  */
 export function trackTaskCardEvent(
   turns: Readonly<Record<string, TaskCardTurn>>,
-  event: UnstampedMessageStreamEvent,
+  event: SessionEvent,
   at: string,
 ): TurnChanges {
   switch (event.type) {
@@ -209,31 +205,33 @@ function updateBlockers(
 
 function trackTurnEvent(
   turns: Readonly<Record<string, TaskCardTurn>>,
-  event: UnstampedMessageStreamEvent,
+  event: SessionEvent,
   at: string,
 ): { readonly turnId: string; readonly turn: TaskCardTurn } | undefined {
   switch (event.type) {
-    case "actions.requested": {
-      const { turnId } = event.data;
+    case "call.requested": {
+      const turnId = event.scope?.turnId;
+      const { callId, capability, input, owner } = event.data;
+      // eve's own task controls, and calls a tool makes on the model's behalf, stay out of view.
+      if (turnId === undefined || isTaskControlTool(capability.name) || "callId" in owner) {
+        return undefined;
+      }
       const current = turns[turnId] ?? { calls: [], ended: false };
-      const known = new Set(current.calls.map((call) => call.callId));
-      const requested = visibleActions(event.data.actions).filter(
-        (action) => !known.has(action.callId),
-      );
-      if (requested.length === 0) return undefined;
-      const calls = requested.map((action) => requestedCall(action, event.data.presentation, at));
-      return { turn: { ...current, calls: bounded([...current.calls, ...calls]) }, turnId };
+      if (current.calls.some((call) => call.callId === callId)) return undefined;
+      const call = requestedCall(callId, capability, input, at);
+      return { turn: { ...current, calls: bounded([...current.calls, call]) }, turnId };
     }
-    case "action.result": {
-      const { turnId } = event.data;
-      const current = turns[turnId];
-      const call = current?.calls.find(
-        (candidate) => candidate.callId === event.data.result.callId,
-      );
-      // A task call's result is its receipt; the task settles with `task.settled`.
-      if (current === undefined || call === undefined || call.task !== undefined) return undefined;
-      const status = actionStatus(event.data.status);
-      return { turn: replaceCall(current, { ...call, settledAt: at, status }), turnId };
+    case "call.settled": {
+      const { callId, outcome } = event.data;
+      for (const [turnId, current] of Object.entries(turns)) {
+        const call = current.calls.find((candidate) => candidate.callId === callId);
+        if (call === undefined) continue;
+        // A task call's result is its receipt; the task settles with `task.settled`.
+        if (call.task !== undefined) return undefined;
+        const status = callStatus(outcome);
+        return { turn: replaceCall(current, { ...call, settledAt: at, status }), turnId };
+      }
+      return undefined;
     }
     case "task.started": {
       const { callId, kind, name, taskId, turnId } = event.data;
@@ -274,9 +272,7 @@ function trackTurnEvent(
       if (cancelReason !== undefined) task.cancelReason = cancelReason;
       return { turn: replaceCall(current, { ...call, settledAt: at, status, task }), turnId };
     }
-    case "turn.completed":
-    case "turn.failed":
-    case "turn.cancelled": {
+    case "turn.settled": {
       const current = turns[event.data.turnId];
       if (current === undefined || current.ended) return undefined;
       return { turn: { ...current, ended: true }, turnId: event.data.turnId };
@@ -333,20 +329,20 @@ export function workingTaskNames(turn: TaskCardTurn | undefined): readonly strin
 }
 
 function requestedCall(
-  action: RuntimeActionRequest,
-  presentation: ActionPresentationByCallId | undefined,
+  callId: string,
+  capability: Capability,
+  input: unknown,
   at: string,
 ): TrackedCall {
-  const name = actionRequestName(action);
   const call: { -readonly [K in keyof TrackedCall]: TrackedCall[K] } = {
-    callId: action.callId,
-    name,
+    callId,
+    name: capability.name,
     startedAt: at,
     status: "working",
-    title: actionLabel(action, presentation),
+    title: capability.title ?? displayTitle(capability.name),
   };
-  const input = boundedInput(action.input);
-  if (input !== undefined) call.input = input;
+  const bounded = boundedInput(input);
+  if (bounded !== undefined) call.input = bounded;
   return call;
 }
 
@@ -414,11 +410,13 @@ function bounded(calls: readonly TrackedCall[]): readonly TrackedCall[] {
   });
 }
 
-function actionStatus(status: string): TaskCardStatus {
-  switch (status) {
+function callStatus(outcome: CallOutcome): TaskCardStatus {
+  switch (outcome) {
     case "completed":
-    case "cancelled":
-      return status;
+      return "completed";
+    case "interrupted":
+    case "abandoned":
+      return "cancelled";
     default:
       return "failed";
   }

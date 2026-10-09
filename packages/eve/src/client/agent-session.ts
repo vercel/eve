@@ -1,7 +1,8 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { followStreamIterable, type FollowedEvent } from "#client/open-stream.js";
 import type { ClientSessionContext } from "#client/session.js";
 import type { StreamOptions } from "#client/types.js";
-import type { AgentStartedStreamEvent, MessageStreamEvent } from "#protocol/message.js";
+import type { AgentStartedStreamEvent } from "#protocol/message.js";
 
 /**
  * A session an agent run opened, reached through the parent session whose
@@ -35,7 +36,7 @@ export class ClientAgentSession {
    * parent session's cursor. The child cursor starts at `0`; pass `startIndex`
    * to resume. Stop at a child turn boundary with `isCurrentTurnBoundaryEvent`.
    */
-  async *stream(options?: StreamOptions): AsyncGenerator<MessageStreamEvent> {
+  async *stream(options?: StreamOptions): AsyncGenerator<SessionStreamEvent> {
     for await (const { event } of this.follow(options)) yield event;
   }
 

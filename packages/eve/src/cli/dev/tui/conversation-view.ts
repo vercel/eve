@@ -1,4 +1,5 @@
 import type { ConversationState } from "#client/conversation-state.js";
+import { failureOf } from "#client/session-utils.js";
 import { stripAnsi } from "#cli/ui/terminal-text.js";
 import type { EveAgentStoreSnapshot } from "#client/eve-agent-store.js";
 import type { EveAgentReducer } from "#client/reducer.js";
@@ -18,14 +19,14 @@ export interface TokenUsage {
 
 /** Terminal presentation facts that the canonical conversation does not model. */
 export interface TuiSessionData {
-  /** Step usage summed across the session; the renderer subtracts a turn baseline. */
+  /** Usage records summed across the session; the renderer subtracts a turn baseline. */
   readonly usage: TokenUsage;
   /** The latest step's report, whose input restates the context size. */
   readonly lastStepUsage?: { readonly inputTokens?: number; readonly outputTokens?: number };
   /** The model the latest turn resolved; cleared when another turn starts. */
   readonly modelId?: string;
   readonly modelTurnId?: string;
-  /** One entry per failure cascade (`step.failed` → `turn.failed` → `session.failed`). */
+  /** One entry per distinct turn/session failure. */
   readonly failures: readonly FailureStreamEvent[];
   readonly sessionFailed: boolean;
   /** Failure keys seen since the last `turn.started`, for cascade deduplication. */
@@ -52,22 +53,34 @@ export const tuiSessionReducer: EveAgentReducer<TuiSessionData> = {
   }),
   reduce(data, event) {
     switch (event.type) {
-      case "actions.requested": {
-        const presentation = event.data.presentation;
-        if (presentation === undefined) return data;
-        const toolLabels = { ...data.toolLabels };
-        for (const action of event.data.actions) {
-          const start = presentation[action.callId]?.label;
-          if (start !== undefined) toolLabels[action.callId] = { start };
-        }
-        return { ...data, toolLabels };
+      case "call.requested": {
+        const start = event.data.capability.title;
+        if (start === undefined) return data;
+        return {
+          ...data,
+          toolLabels: {
+            ...data.toolLabels,
+            [event.data.callId]: { start },
+          },
+        };
       }
-      case "action.result": {
-        const { callId } = event.data.result;
+      case "call.progress": {
+        const start = event.data.title;
+        if (start === undefined) return data;
+        return {
+          ...data,
+          toolLabels: {
+            ...data.toolLabels,
+            [event.data.callId]: { ...data.toolLabels[event.data.callId], start },
+          },
+        };
+      }
+      case "call.settled": {
+        const { callId } = event.data;
         if (isTaskRetryRefusal(event)) {
           return { ...data, withdrawnCallIds: [...data.withdrawnCallIds, callId] };
         }
-        const complete = event.data.presentation?.[callId]?.label;
+        const complete = event.data.title;
         if (complete === undefined) return data;
         const toolLabels = {
           ...data.toolLabels,
@@ -83,32 +96,36 @@ export const tuiSessionReducer: EveAgentReducer<TuiSessionData> = {
           ? { ...data, turnFailureKeys: [] }
           : { ...rest, modelTurnId: turnId, turnFailureKeys: [] };
       }
-      case "step.started": {
+      case "model.started": {
+        if (event.scope?.changeId !== undefined) return data;
         // The model id is printed in the status line, so it must not carry terminal controls.
         const modelId =
           stripAnsi(event.data.modelId.slice(0, 256)).replace(/\s+/gu, " ").trim() || undefined;
         if (modelId === data.modelId) return data;
         const { modelId: _modelId, ...rest } = data;
-        const modelTurnId = event.data.turnId;
+        const modelTurnId = event.scope?.turnId;
         return modelId === undefined ? { ...rest, modelTurnId } : { ...rest, modelId, modelTurnId };
       }
-      case "step.completed": {
-        const usage = event.data.usage;
-        if (usage === undefined) return data;
+      case "usage.recorded": {
+        const { usage, owner } = event.data;
+        const lastStepUsage =
+          owner !== undefined && "runId" in owner && event.scope?.changeId === undefined
+            ? usage
+            : data.lastStepUsage;
         return {
           ...data,
-          lastStepUsage: usage,
+          lastStepUsage,
           usage: {
             inputTokens: data.usage.inputTokens + (usage.inputTokens ?? 0),
             outputTokens: data.usage.outputTokens + (usage.outputTokens ?? 0),
           },
         };
       }
-      case "step.failed":
-      case "turn.failed":
-      case "session.failed": {
+      case "turn.settled":
+      case "session.ended": {
+        if (failureOf(event) === undefined) return data;
         const key = failureKey(event);
-        const sessionFailed = data.sessionFailed || event.type === "session.failed";
+        const sessionFailed = data.sessionFailed || event.type === "session.ended";
         if (data.turnFailureKeys.includes(key)) return { ...data, sessionFailed };
         return {
           ...data,

@@ -1,3 +1,6 @@
+import { errorHintOf } from "#public/channels/reply.js";
+import { contentPhase } from "#protocol/session-events/catalog.js";
+import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 import { type PromptQueueState, promptQueueEvents } from "#channel/prompt-queue.js";
 import type { UserContent } from "ai";
 
@@ -13,10 +16,11 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
 import { assertWithinLimit } from "#internal/attachments/limited-read.js";
-import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
-import type { InputResolution, UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { createLogger, formatErrorHint } from "#internal/logging.js";
+import type { InputResolution } from "#protocol/message.js";
 import type { FetchFileResult } from "#shared/channel-definition.js";
-import { actionLabel, visibleActions } from "#shared/action-label.js";
+import { isTaskControlTool } from "#protocol/task-tools.js";
+import { displayTitle } from "#shared/display-name.js";
 import type { InputRequest } from "#shared/input.js";
 import {
   type InputResponse,
@@ -57,9 +61,6 @@ const MAX_TYPING_STATUS = 80;
 const streamTextByState = new WeakMap<ChatSdkChannelState, string>();
 
 type ChatSdkAdapters = Record<string, Adapter>;
-type EventData<T extends UnstampedMessageStreamEvent["type"]> =
-  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
-
 interface ActiveWebhookContext {
   readonly from: ChannelFrom<ChatSdkChannelState>;
 }
@@ -90,7 +91,7 @@ export interface ChatSdkChannelState extends Record<string, unknown>, PromptQueu
   usersByPrincipal?: Record<string, string | null>;
   /** Posted input request cards, keyed by message id, until eve resolves every request on them. */
   pendingInputCards?: Record<string, ChatSdkPendingInputCard>;
-  streamStepIndex?: number | null;
+  streamPartId?: string | null;
 }
 
 /** One posted card's requests and the resolutions eve has reported for them so far. */
@@ -441,33 +442,32 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
       clearStream(channel.state);
       await safeStartTyping(channel.thread, "Working...");
     },
-    async "actions.requested"(event, channel, _ctx) {
+    async "call.requested"(event, channel, _ctx) {
       const buffered = channel.state.pendingToolCallMessage;
       channel.state.pendingToolCallMessage = null;
       if (buffered) {
         await safeStartTyping(channel.thread, truncate(buffered));
         return;
       }
-      const labels = visibleActions(event.actions).map((action) =>
-        actionLabel(action, event.presentation),
-      );
-      if (labels.length === 0) return;
-      await safeStartTyping(channel.thread, truncate(`${labels.join(", ")}...`));
+      // eve's own task controls stay out of view.
+      if (isTaskControlTool(event.capability.name)) return;
+      const label = event.capability.title ?? displayTitle(event.capability.name);
+      await safeStartTyping(channel.thread, truncate(`${label}...`));
     },
-    async "message.appended"(event, channel, _ctx) {
+    async "content.delta"(event, channel, _ctx) {
       if (!channel.thread || !canStream(channel)) return;
-      const currentText =
-        channel.state.streamStepIndex === event.stepIndex
-          ? streamTextByState.get(channel.state)
-          : undefined;
-      const message = (currentText ?? "") + event.messageDelta;
+      // Only text streams: a part announces its kind with its first delta.
+      const streaming = channel.state.streamPartId === event.partId;
+      if (event.kind === undefined ? !streaming : event.kind !== "text") return;
+      const currentText = streaming ? streamTextByState.get(channel.state) : undefined;
+      const message = (currentText ?? "") + event.delta;
       if (!message) return;
       streamTextByState.set(channel.state, message);
       const anchor = channel.state.anchorMessageId;
-      if (!anchor || channel.state.streamStepIndex !== event.stepIndex) {
+      if (!anchor || !streaming) {
         const sent = await channel.thread.post({ markdown: message });
         channel.state.anchorMessageId = sent.id;
-        channel.state.streamStepIndex = event.stepIndex;
+        channel.state.streamPartId = event.partId;
         channel.state.lastEditAtMs = Date.now();
         return;
       }
@@ -490,34 +490,40 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
       await clearAnsweredCards(event, channel);
       await prompts["input.resolved"](event, channel);
     },
-    async "message.completed"(event, channel, _ctx) {
-      if (event.finishReason === "tool-calls") {
-        channel.state.pendingToolCallMessage = event.message
-          ? (firstNonEmptyLine(event.message) ?? null)
-          : null;
+    async "content.completed"(event, channel, _ctx) {
+      if (event.kind !== "text") return;
+      const text = typeof event.value === "string" ? event.value : "";
+      if (contentPhase(event.phase) === "narration") {
+        channel.state.pendingToolCallMessage = text ? (firstNonEmptyLine(text) ?? null) : null;
         // Finalize the streamed anchor so it shows the complete pre-tool-call
         // text rather than the last throttled edit. Pass `false` so nothing new
         // is posted when nothing was streamed — intermediate tool-call narration
         // must not become a standalone message on non-streaming surfaces.
-        if (event.message) {
-          await finalizeStreamedMessage(channel, event.message, false);
+        if (text) {
+          await finalizeStreamedMessage(channel, text, false);
         } else {
           clearStream(channel.state);
         }
         return;
       }
       channel.state.pendingToolCallMessage = null;
-      if (!event.message) {
+      if (!text) {
         clearStream(channel.state);
         return;
       }
-      await finalizeStreamedMessage(channel, event.message, true);
+      await finalizeStreamedMessage(channel, text, true);
     },
-    async "turn.failed"(event, channel, _ctx) {
-      await postFailure(channel.thread, "I hit an error while handling your request", event);
+    async "turn.settled"(event, channel, _ctx) {
+      if (event.outcome !== "failed") return;
+      await postFailure(channel.thread, "I hit an error while handling your request", event.error);
     },
-    async "session.failed"(event, channel) {
-      await postFailure(channel.thread, "This session could not recover from an error", event);
+    async "session.ended"(event, channel, _ctx) {
+      if (event.outcome !== "failed") return;
+      await postFailure(
+        channel.thread,
+        "This session could not recover from an error",
+        event.error,
+      );
     },
   };
 }
@@ -587,7 +593,7 @@ function canStream(channel: ChatSdkChannelContext): boolean {
 function clearStream(state: ChatSdkChannelState): void {
   state.anchorMessageId = null;
   state.lastEditAtMs = null;
-  state.streamStepIndex = null;
+  state.streamPartId = null;
   streamTextByState.delete(state);
 }
 
@@ -608,11 +614,11 @@ function truncate(text: string, max = MAX_TYPING_STATUS): string {
 async function postFailure(
   thread: Thread | null,
   prefix: string,
-  event: EventData<"turn.failed"> | EventData<"session.failed">,
+  error: ErrorInfo | undefined,
 ): Promise<void> {
   if (!thread) return;
-  const hint = formatErrorHint(event);
-  const errorId = extractErrorId(event.details);
+  const hint = formatErrorHint(errorHintOf(error));
+  const errorId = error?.id;
   await thread.post(
     [
       `${prefix}${hint}.`,

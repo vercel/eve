@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { onMount } from "svelte";
 import { createSubscriber } from "svelte/reactivity";
 import type { UserContent } from "ai";
@@ -24,7 +25,6 @@ import type {
   SendTurnOptions,
   ClientSessionState,
 } from "#client/types.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 
 export type { PrepareSend };
 
@@ -59,7 +59,7 @@ export interface UseEveAgentReturn<TData> {
   /** Last transport-level error, or `undefined` when healthy. */
   readonly error: Error | undefined;
   /** Raw server events received during this session (authoritative stream). */
-  readonly events: readonly MessageStreamEvent[];
+  readonly events: readonly SessionStreamEvent[];
   /** Replay the attached durable session and follow its in-flight turn, if any. */
   readonly resume: () => Promise<void>;
   /** Create the session without starting its first turn. */
@@ -121,12 +121,12 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
    */
   readonly host?: string;
   /** Ordered prefix of the session stream used to rehydrate projected state. */
-  readonly initialEvents?: readonly MessageStreamEvent[];
+  readonly initialEvents?: readonly SessionStreamEvent[];
   /** Seed session identity and stream cursor for resuming a prior conversation. */
   readonly initialSession?: ClientSessionState;
   /**
    * Project submitted user messages before eve confirms them with a
-   * `message.received` stream event. Optimistic events are reducer-facing
+   * `delivery.consumed` fact. Optimistic events are reducer-facing
    * projection only and never appear in `events`, which stays the
    * authoritative eve stream.
    *
@@ -187,7 +187,7 @@ class SvelteEveAgent<TData> implements UseEveAgentReturn<TData> {
     return this.#snapshot.error;
   }
 
-  get events(): readonly MessageStreamEvent[] {
+  get events(): readonly SessionStreamEvent[] {
     this.#subscribe();
     return this.#snapshot.events;
   }

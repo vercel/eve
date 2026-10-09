@@ -4,15 +4,16 @@ import type {
   AuthorizationOutcome,
   AuthorizationRequiredStreamEvent,
   InputResolutionOutcome,
-  UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
-import type { RuntimeActionRequest, RuntimeActionResult } from "#shared/action-types.js";
+import type { SessionEvent } from "#protocol/session-event.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { JsonValue } from "#shared/json.js";
 
-// The one fold from a session's stream events to its lifecycle: turns, requests, calls, tasks,
-// and sign-ins. Server and client readers are meant to share it, so it reads only the public
-// protocol and must stay free of runtime dependencies, which also lets workflow bodies import it.
+// The session's private lifecycle fold: turns, runs, calls, requests, tasks, and sign-ins, with
+// the coordinates the v26 work events still carry. Execution reads it; it folds the v27 facts the
+// session publishes and the v26 work events not yet moved. It reads only the protocol and stays
+// free of runtime dependencies, so workflow bodies import it. Public readers fold the v27 view.
 
 export interface SessionTurn {
   readonly turnId: string;
@@ -24,6 +25,8 @@ export interface SessionTurn {
   readonly stepIndex?: number;
   /** The turn streamed assistant output, so steering can no longer restart it. */
   readonly outputStarted?: boolean;
+  /** The content parts that reply, in order: what `turn.settled.reply` lists. */
+  readonly reply?: readonly string[];
 }
 
 export interface SessionInput {
@@ -153,6 +156,19 @@ export interface SessionProjection {
   readonly authorizations: Readonly<Record<string, SessionAuthorization>>;
   /** By `candidateId`. */
   readonly candidates: Readonly<Record<string, SessionApprovalCandidate>>;
+  /** Open model runs, by `runId`: what owns each, and a turn's run's step index. */
+  readonly runs?: Readonly<Record<string, SessionRun>>;
+  /** Runs and context changes minted so far, so their ids are deterministic. */
+  readonly counters?: { readonly runs: number; readonly changes: number };
+  /** The public view, kept with operational retention, for observers and server readers. */
+  readonly view?: SessionView;
+}
+
+/** One open model run: the turn it serves with its step index, or the context change it summarizes. */
+export interface SessionRun {
+  readonly turnId?: string;
+  readonly stepIndex?: number;
+  readonly changeId?: string;
 }
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
@@ -240,30 +256,6 @@ function settleCall(call: SessionCall, status: SessionCallStatus, error?: Action
   return settled;
 }
 
-function actionName(action: RuntimeActionRequest): string {
-  switch (action.kind) {
-    case "load-skill":
-      return action.name;
-    case "subagent-call":
-    case "remote-agent-call":
-      return action.name;
-    case "tool-call":
-    case "workflow-tool-call":
-      return action.toolName;
-  }
-}
-
-function resultName(result: RuntimeActionResult): string {
-  switch (result.kind) {
-    case "load-skill-result":
-      return result.name;
-    case "subagent-result":
-      return result.subagentName;
-    default:
-      return result.toolName;
-  }
-}
-
 /** The status an approval's resolution leaves its call in. */
 function callStatusAfterApproval(outcome: InputResolutionOutcome | "approved" | "cancelled") {
   switch (outcome) {
@@ -278,23 +270,21 @@ function callStatusAfterApproval(outcome: InputResolutionOutcome | "approved" | 
   }
 }
 
-/** A policy's automatic denial, which writers before `rejected` reported as a failure. */
-const TOOL_EXECUTION_DENIED = "TOOL_EXECUTION_DENIED";
-
 /**
  * Folds one stream event into a session's lifecycle. Events this fold doesn't track, and
  * client-only events, return `state` unchanged, so callers may pass any event through it.
  */
 export function foldSession<S extends SessionProjection>(
   state: S,
-  event: UnstampedMessageStreamEvent | { readonly type: string },
+  event: SessionEvent | { readonly type: string },
 ): S {
-  const typed = event as UnstampedMessageStreamEvent;
+  const typed = event as SessionEvent;
   switch (typed.type) {
     case "session.started":
       return state.started ? state : { ...state, started: true };
     case "turn.started": {
-      const { sequence, turnId } = typed.data;
+      const { turnId } = typed.data;
+      const sequence = turnSequence(turnId) ?? state.nextSequence;
       const turn: SessionTurn = { turnId, sequence, status: "active" };
       return {
         ...state,
@@ -304,108 +294,120 @@ export function foldSession<S extends SessionProjection>(
             ? state.latestTurn
             : { turnId, sequence },
         nextSequence: Math.max(state.nextSequence, sequence + 1),
-        turns: {
-          ...state.turns,
-          [turnId]: turn,
-        },
+        turns: { ...state.turns, [turnId]: turn },
       };
     }
-    case "step.started":
-      return updateTurn(state, typed.data.turnId, (turn) => {
-        if (!turn.waiting && turn.stepIndex === typed.data.stepIndex) return turn;
-        const { waiting: _waiting, ...rest } = turn;
-        return { ...rest, stepIndex: typed.data.stepIndex };
-      });
-    case "turn.waiting":
+    case "turn.paused":
       return updateTurn(state, typed.data.turnId, (turn) =>
         turn.status === "active" && !turn.waiting ? { ...turn, waiting: true } : turn,
       );
-    case "message.appended":
-    case "message.completed":
-    case "result.completed": {
-      const output =
-        typed.type === "message.appended"
-          ? typed.data.messageDelta.length > 0
-          : typed.type === "message.completed"
-            ? (typed.data.message?.length ?? 0) > 0
-            : true;
-      if (!output) return state;
-      return updateTurn(state, typed.data.turnId, (turn) =>
-        turn.outputStarted ? turn : { ...turn, outputStarted: true },
-      );
-    }
-    case "turn.completed":
-    case "turn.cancelled":
-    case "turn.failed": {
-      const { turnId } = typed.data;
+    case "turn.resumed":
+      return updateTurn(state, typed.data.turnId, (turn) => {
+        if (!turn.waiting) return turn;
+        const { waiting: _waiting, ...rest } = turn;
+        return rest;
+      });
+    case "turn.settled": {
+      const { outcome, turnId } = typed.data;
       const status =
-        typed.type === "turn.completed"
-          ? "completed"
-          : typed.type === "turn.failed"
-            ? "failed"
-            : "cancelled";
+        outcome === "completed" ? "completed" : outcome === "failed" ? "failed" : "cancelled";
       const turn = state.turns[turnId];
-      const { waiting: _waiting, ...rest } = turn ?? { turnId, sequence: typed.data.sequence };
+      const { waiting: _waiting, ...rest } = turn ?? {
+        sequence: turnSequence(turnId) ?? state.nextSequence,
+        turnId,
+      };
       return {
         ...state,
         activeTurnId: state.activeTurnId === turnId ? undefined : state.activeTurnId,
         turns: { ...state.turns, [turnId]: { ...rest, status } },
       };
     }
-    case "context.cleared":
+    case "model.requested": {
+      const { owner, runId } = typed.data;
+      const counters = state.counters ?? { changes: 0, runs: 0 };
+      const next = { ...state, counters: { ...counters, runs: counters.runs + 1 } };
+      if ("changeId" in owner) {
+        return { ...next, runs: { ...state.runs, [runId]: { changeId: owner.changeId } } };
+      }
+      const turn = state.turns[owner.turnId];
+      const stepIndex = turn?.stepIndex === undefined ? 0 : turn.stepIndex + 1;
+      const run: SessionRun = { stepIndex, turnId: owner.turnId };
+      return updateTurn(
+        { ...next, runs: { ...state.runs, [runId]: run } },
+        owner.turnId,
+        (current) => ({ ...current, stepIndex }),
+      );
+    }
+    case "model.started": {
+      const turnId = state.runs?.[typed.data.runId]?.turnId;
+      if (turnId === undefined) return state;
+      return updateTurn(state, turnId, (turn) => {
+        if (!turn.waiting) return turn;
+        const { waiting: _waiting, ...rest } = turn;
+        return rest;
+      });
+    }
+    case "model.settled": {
+      if (state.runs?.[typed.data.runId] === undefined) return state;
+      const { [typed.data.runId]: _settled, ...runs } = state.runs;
+      return { ...state, runs };
+    }
+    case "content.delta": {
+      const { delta, kind } = typed.data;
+      if (kind !== "text" || delta.length === 0) return state;
+      return markOutputStarted(state, typed.scope?.runId);
+    }
+    case "content.completed": {
+      const { kind, partId, phase, runId, value } = typed.data;
+      const output =
+        kind === "result" || (kind === "text" && typeof value === "string" && value.length > 0);
+      const next = output ? markOutputStarted(state, runId) : state;
+      if (phase !== "reply") return next;
+      const turnId = next.runs?.[runId]?.turnId;
+      if (turnId === undefined) return next;
+      return updateTurn(next, turnId, (turn) => ({
+        ...turn,
+        reply: [...(turn.reply ?? []), partId],
+      }));
+    }
+    case "context.started": {
+      const counters = state.counters ?? { changes: 0, runs: 0 };
+      return { ...state, counters: { ...counters, changes: counters.changes + 1 } };
+    }
+    case "context.settled":
+      if (typed.data.kind !== "clear" || typed.data.outcome !== "completed") return state;
       return {
         ...state,
         calls: Object.fromEntries(
           Object.entries(state.calls).filter(([, call]) => call.taskId !== undefined),
         ),
       };
-    // Only a turn's end reaches a session boundary, so no turn stays open across one.
-    case "session.waiting":
-      return state.activeTurnId === undefined ? state : { ...state, activeTurnId: undefined };
-    case "session.completed":
-    case "session.failed": {
+    case "session.ended": {
       const { activeTurnId: _activeTurnId, ...rest } = state;
       return { ...rest, ended: true } as S;
     }
-    case "actions.requested": {
-      let calls: Record<string, SessionCall> | undefined;
-      for (const action of typed.data.actions) {
-        if (state.calls[action.callId] !== undefined) continue;
-        calls ??= { ...state.calls };
-        calls[action.callId] = {
-          callId: action.callId,
-          name: actionName(action),
-          turnId: typed.data.turnId,
-          stepIndex: typed.data.stepIndex,
-          status: "running",
-        };
-      }
-      return calls === undefined ? state : { ...state, calls };
+    case "call.requested": {
+      const { callId, capability, owner } = typed.data;
+      if (state.calls[callId] !== undefined) return state;
+      const at = "runId" in owner ? state.runs?.[owner.runId] : state.calls[owner.callId];
+      const turnId = at?.turnId ?? state.activeTurnId ?? turnCoordinates(state).turnId;
+      const stepIndex = at?.stepIndex ?? state.turns[turnId]?.stepIndex ?? 0;
+      return putCall(state, {
+        callId,
+        name: capability.name,
+        status: "running",
+        stepIndex,
+        turnId,
+      });
     }
-    case "action.result": {
-      const { result, status, error } = typed.data;
-      const call = state.calls[result.callId];
-      // A task call's result is the receipt the model reads; its outcome is its task.settled.
-      if (call?.taskId !== undefined) return state;
-      const settled =
-        status === "rejected" || error?.code === TOOL_EXECUTION_DENIED
-          ? "rejected"
-          : status === "failed" || result.isError === true
-            ? "failed"
-            : "completed";
-      if (call === undefined) {
-        // A result whose call wasn't announced, such as an approved call resuming.
-        const unannounced: Mutable<LocalCall> = {
-          callId: result.callId,
-          name: resultName(result),
-          turnId: typed.data.turnId,
-          stepIndex: typed.data.stepIndex,
-          status: settled,
-        };
-        if (error !== undefined) unannounced.error = error;
-        return putCall(state, unannounced);
-      }
-      return updateCall(state, result.callId, (current) => settleCall(current, settled, error));
+    case "call.settled": {
+      const { callId, error, outcome } = typed.data;
+      const call = state.calls[callId];
+      // A task's call settles through its task.
+      if (call === undefined || call.taskId !== undefined) return state;
+      const status: SessionCallStatus =
+        outcome === "interrupted" ? "cancelled" : outcome === "abandoned" ? "failed" : outcome;
+      return updateCall(state, callId, (current) => settleCall(current, status, error));
     }
     case "task.started": {
       const { callId, kind, name, taskId, turnId } = typed.data;
@@ -559,6 +561,40 @@ export function foldSession<S extends SessionProjection>(
   }
 }
 
+/** A turn id's sequence: `turn_${n}`. */
+function turnSequence(turnId: string): number | undefined {
+  const match = /^turn_(\d+)$/.exec(turnId);
+  return match === null ? undefined : Number(match[1]);
+}
+
+/** The turn a run serves streamed output, so steering can no longer restart it. */
+function markOutputStarted<S extends SessionProjection>(state: S, runId: string | undefined): S {
+  const turnId = runId === undefined ? state.activeTurnId : state.runs?.[runId]?.turnId;
+  if (turnId === undefined) return state;
+  return updateTurn(state, turnId, (turn) =>
+    turn.outputStarted ? turn : { ...turn, outputStarted: true },
+  );
+}
+
+/** The id the session's next model run takes. */
+export function nextRunId(state: SessionProjection): string {
+  return `run_${String(state.counters?.runs ?? 0)}`;
+}
+
+/** The id the session's next context change takes. */
+export function nextChangeId(state: SessionProjection): string {
+  return `change_${String(state.counters?.changes ?? 0)}`;
+}
+
+/** The open run that serves a turn: its latest run. */
+export function openRunOf(state: SessionProjection, turnId: string): string | undefined {
+  let found: string | undefined;
+  for (const [runId, run] of Object.entries(state.runs ?? {})) {
+    if (run.turnId === turnId) found = runId;
+  }
+  return found;
+}
+
 /** A sign-in's attempt, or its connection name from a writer that sent no attempt. */
 function signInAttemptId(data: { readonly attemptId?: string; readonly name: string }): string {
   return data.attemptId ?? data.name;
@@ -613,7 +649,7 @@ export function openSignIns(state: SessionProjection): readonly SessionAuthoriza
  * Folds a read of a session's events. `observe` sees each event with the projection as it stood
  * before the event, for what a reader shows that the projection doesn't keep.
  */
-export async function foldSessionEvents<E extends UnstampedMessageStreamEvent>(
+export async function foldSessionEvents<E extends SessionEvent>(
   events: AsyncIterable<E>,
   observe?: (event: E, before: SessionProjection) => void,
 ): Promise<{

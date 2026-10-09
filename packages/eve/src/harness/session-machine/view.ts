@@ -8,6 +8,7 @@ import type { SessionStateMap, StepInput } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import {
   initialSessionProjection,
+  openRunOf,
   turnCoordinates,
   type SessionProjection,
 } from "#protocol/session-projection.js";
@@ -56,6 +57,8 @@ export interface TurnPosition {
   readonly turnId: string;
   /** The open turn streamed assistant output, so steering can no longer restart it. */
   readonly assistantOutputStarted?: boolean;
+  /** The open turn's latest open model run, which content and calls belong to. */
+  readonly runId?: string;
 }
 
 export function turnPosition(projection: SessionProjection): TurnPosition {
@@ -69,6 +72,8 @@ export function turnPosition(projection: SessionProjection): TurnPosition {
     turnId: turn?.turnId ?? "",
   };
   if (turn?.outputStarted === true) position.assistantOutputStarted = true;
+  const runId = turn === undefined ? undefined : openRunOf(projection, turn.turnId);
+  if (runId !== undefined) position.runId = runId;
   return position;
 }
 

@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -5,7 +6,6 @@ import { describe, expect, it } from "vitest";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { expectScheduleRun, SCHEDULE_ADAPTER_KIND, ScheduleDispatcher } from "#channel/schedule.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import type { RunHandle, Runtime } from "#channel/types.js";
 import { compileAgent } from "#compiler/compile-agent.js";
 import { ContextContainer } from "#context/container.js";
@@ -64,7 +64,7 @@ function createCapturingRuntime(captured: CapturedRun[]): Runtime {
       });
 
       const handle: RunHandle = {
-        events: new ReadableStream<MessageStreamEvent>(),
+        events: new ReadableStream<SessionStreamEvent>(),
         sessionId: "scenario-session",
       };
       return handle;
@@ -79,7 +79,7 @@ function createCapturingRuntime(captured: CapturedRun[]): Runtime {
       return new ReadableStream();
     },
     async getEventStream() {
-      return new ReadableStream<MessageStreamEvent>();
+      return new ReadableStream<SessionStreamEvent>();
     },
     async getStreamTailIndex() {
       return -1;

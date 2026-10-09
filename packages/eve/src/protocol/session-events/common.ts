@@ -72,7 +72,12 @@ export const principal = conforming<Principal>()(
 );
 
 export const errorInfo = conforming<ErrorInfo>()(
-  z.object({ code: z.string(), message: z.string() }),
+  z.object({
+    code: z.string(),
+    hint: z.string().optional(),
+    id: z.string().optional(),
+    message: z.string(),
+  }),
 );
 
 const count = z.number().int().nonnegative();

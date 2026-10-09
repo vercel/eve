@@ -1,4 +1,4 @@
-import type { MessageStreamEvent } from "#protocol/message.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import type { StreamEventHook } from "../../public/definitions/hook.js";
 import type { ResolvedHookDefinition } from "../types.js";
 
@@ -10,7 +10,7 @@ import type { ResolvedHookDefinition } from "../types.js";
  */
 interface RuntimeStreamEventHookEntry {
   readonly slug: string;
-  readonly handler: StreamEventHook<MessageStreamEvent>;
+  readonly handler: StreamEventHook<SessionEvent>;
   readonly eventType: string;
 }
 

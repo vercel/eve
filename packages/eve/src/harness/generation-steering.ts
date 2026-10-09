@@ -1,4 +1,4 @@
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 
 class GenerationSteeredError extends Error {
   constructor() {
@@ -52,21 +52,26 @@ export class GenerationSteering {
     this.effectsStarted = true;
   }
 
-  beforeEvent(event: UnstampedMessageStreamEvent): void {
+  beforeEvent(event: SessionEvent): void {
     if (!this.active) return;
     this.check();
     // Published requests and terminal events must finish committing, even
     // when the model produced no assistant text.
     if (
       event.type === "input.requested" ||
-      event.type === "step.failed" ||
-      event.type === "turn.completed"
+      (event.type === "model.settled" && event.data.outcome === "failed") ||
+      event.type === "turn.settled"
     )
       this.effectsStarted = true;
     if (
-      (event.type === "message.appended" && event.data.messageDelta.length > 0) ||
-      (event.type === "message.completed" && (event.data.message?.length ?? 0) > 0) ||
-      event.type === "result.completed"
+      (event.type === "content.delta" &&
+        event.data.kind === "text" &&
+        event.data.delta.length > 0) ||
+      (event.type === "content.completed" &&
+        (event.data.kind === "result" ||
+          (event.data.kind === "text" &&
+            typeof event.data.value === "string" &&
+            event.data.value.length > 0)))
     )
       this.outputStarted = true;
   }
