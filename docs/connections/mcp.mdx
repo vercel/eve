@@ -115,7 +115,7 @@ Use the shared `approval` option to gate every tool served by an MCP connection.
 
 ### Gate specific tools by name or input
 
-A remote MCP server usually mixes read tools with destructive or publishing ones, so a blanket `always()` would prompt on every harmless call. Pass a custom policy instead — the same [`Approval`](/docs/human-in-the-loop#approvals) shape authored tools use — to gate only the calls that matter. The policy receives `{ session, toolName, toolInput, approvedTools, callId, abortSignal }` and returns an approval status, synchronously or as a promise.
+A remote MCP server usually mixes read tools with destructive or publishing ones, so a blanket `always()` would prompt on every harmless call. Pass a custom policy instead — the same [`Approval`](/docs/human-in-the-loop#approvals) shape authored tools use — to gate only the calls that matter. The policy receives `{ session, toolName, toolInput, toolAnnotations, approvedTools, callId, abortSignal }` and returns an approval status, synchronously or as a promise.
 
 This connection always gates deletes, gates a publish only when the call actually schedules a post, and lets everything else through:
 
@@ -156,6 +156,27 @@ Two details are specific to connection tools:
 - **`toolInput` is the raw input the model produced**, typed as `Record<string, unknown> | undefined`. With an authored tool you define the `inputSchema`, so its approval policy gets input typed and checked against your schema; a connection tool's schema is published by the remote MCP server, not you, so the shape is one you neither own nor can rely on. It is also `undefined` whenever the model's input isn't an object. Read nested fields defensively — as `publishesNow` does — instead of trusting the shape.
 
 Return `"user-approval"` (or `true`) to pause for a person and `"not-applicable"` (or `false`) to run without a prompt; return `"approved"` or `"denied"` to decide automatically without involving anyone.
+
+### Gate by the server's tool annotations
+
+Many MCP servers declare [tool annotations](https://modelcontextprotocol.io/specification/2025-06-18/server/tools#tool) such as `readOnlyHint` and `destructiveHint` for each tool. eve passes what the server declared for the called tool as `toolAnnotations`, typed as `ConnectionToolAnnotations` from `eve/tools/approval`. It is `undefined` when the server declares none, so keep a fallback:
+
+```ts title="agent/connections/linear.ts"
+import { connect } from "@vercel/connect/eve";
+import { defineMcpClientConnection } from "eve/connections";
+
+export default defineMcpClientConnection({
+  url: "https://mcp.linear.app/mcp",
+  description: "Linear issues and projects.",
+  auth: connect("mcp.linear.app/linear"),
+  approval: ({ toolAnnotations }) => {
+    if (toolAnnotations?.readOnlyHint === true) return "not-applicable";
+    return "user-approval";
+  },
+});
+```
+
+Annotations are hints from the server, not guarantees. Trust them only as far as you trust the server that sent them.
 
 [Human-in-the-loop](/docs/human-in-the-loop#approvals) covers the full set of statuses, how `approvedTools` and `session.auth` factor in, and how a gated call pauses and resumes durably.
 
