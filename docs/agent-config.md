@@ -67,11 +67,12 @@ Gateway, share that ID so their Gateway generations can be found together.
 Direct-provider calls do not receive the option. An authored `gateway.sessionId`
 takes precedence; AI Gateway hashes IDs longer than 256 characters.
 
-For direct OpenAI model calls, eve sets `providerOptions.openai.promptCacheKey`
-to a SHA-256 hash of the session ID, which helps OpenAI route a session's calls
-to the cache that holds its prompt prefix. Each subagent session gets its own
-key. An authored `openai.promptCacheKey` takes precedence. Gateway-routed and
-`chatgpt()` calls do not receive the option.
+For direct OpenAI and `chatgpt()` model calls, eve sets
+`providerOptions.openai.promptCacheKey` to a SHA-256 hash of the session ID,
+which helps OpenAI route a session's calls to the cache that holds its prompt
+prefix. Each subagent session gets its own key. An authored
+`openai.promptCacheKey` takes precedence. Gateway-routed calls do not receive
+the option.
 
 ### Choose the model dynamically
 

@@ -50,10 +50,16 @@ export function resolveCallProviderOptions(input: {
       resolveConversationId(session.rootSessionId ?? session.sessionId),
     );
   }
-  return input.profile.provider === "openai"
+  return PROMPT_CACHE_KEY_PROVIDERS.has(input.profile.provider)
     ? mergeOpenAIPromptCacheKey(providerOptions, session.sessionId)
     : providerOptions;
 }
+
+/**
+ * Direct OpenAI, and the ChatGPT subscription's Codex backend, which the Codex CLI itself sends a
+ * per-session `prompt_cache_key`.
+ */
+const PROMPT_CACHE_KEY_PROVIDERS: ReadonlySet<string> = new Set(["openai", "codex"]);
 
 /**
  * OpenAI uses the cache key to route requests that share a prompt prefix toward the same cache,

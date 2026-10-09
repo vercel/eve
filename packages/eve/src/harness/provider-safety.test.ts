@@ -124,6 +124,7 @@ describe("resolveCallProviderOptions", () => {
 
     expect(key).toMatch(/^[\w-]{43}$/);
     expect(resolve(openai)).toEqual({ openai: { promptCacheKey: key } });
+    expect(resolve({ ...openai, provider: "codex" })).toEqual({ openai: { promptCacheKey: key } });
     expect(resolve(openai, undefined, "session-2")).not.toEqual({
       openai: { promptCacheKey: key },
     });

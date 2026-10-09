@@ -143,6 +143,21 @@ describe("Codex model", () => {
     expect(JSON.parse(requests[0]?.body ?? "{}").service_tier).toBe("priority");
   });
 
+  it("sends the prompt cache key to the Codex backend", async () => {
+    const requests: RecordedRequest[] = [];
+    const model = createCodexSubscriptionModel(
+      { model: "gpt-6.1-sol" },
+      { broker: fakeBroker(), fetch: createRecordingFetch(requests) },
+    );
+
+    await model.doGenerate({
+      prompt: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
+      providerOptions: { openai: { promptCacheKey: "session-key" } },
+    });
+
+    expect(JSON.parse(requests[0]?.body ?? "{}").prompt_cache_key).toBe("session-key");
+  });
+
   it("groups summaries by reasoning item and preserves encrypted-only items", async () => {
     const requests: RecordedRequest[] = [];
     const model = createCodexSubscriptionModel(
