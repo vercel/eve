@@ -2,7 +2,12 @@ import type { ModelMessage } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
 import { COMPACTION_PROMPT_ENVELOPE } from "#harness/compaction/prompt.js";
-import { compactMessages, getInputTokenCount, shouldCompact } from "#harness/compaction/engine.js";
+import {
+  compactMessages,
+  getInputTokenCount,
+  overflowCompactionThreshold,
+  shouldCompact,
+} from "#harness/compaction/engine.js";
 import { createFrameworkUserMessage } from "#harness/messages.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import type { CompactionConfig } from "#harness/types.js";
@@ -445,6 +450,33 @@ function summarizeWith(summary: string) {
     async (_prompt: { readonly messages: ModelMessage[]; readonly system: string }) => summary,
   );
 }
+
+describe("overflowCompactionThreshold", () => {
+  const window: CompactionConfig = {
+    recentWindowSize: 10,
+    threshold: 90_000,
+    thresholdPercent: 0.9,
+  };
+
+  it.each([
+    // eve counted 60k of a 120k request: half the threshold fits.
+    {
+      estimated: 60_000,
+      overflow: { inputTokens: 120_000, maxInputTokens: 100_000 },
+      expected: 45_000,
+    },
+    // The provider's limit is below the configured window, so the target shrinks to it too.
+    {
+      estimated: 40_000,
+      overflow: { inputTokens: 80_000, maxInputTokens: 50_000 },
+      expected: 22_500,
+    },
+    // Without counts the request was at least the configured window.
+    { estimated: 60_000, overflow: {}, expected: 54_000 },
+  ])("calibrates $estimated against $overflow", ({ estimated, overflow, expected }) => {
+    expect(overflowCompactionThreshold(window, estimated, overflow)).toBe(expected);
+  });
+});
 
 describe("compactMessages: tool-result cap heuristic", () => {
   it.each([false, true])(

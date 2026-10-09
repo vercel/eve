@@ -24,7 +24,9 @@ import { canonicalizeMemoryRecords, shouldCanonicalizeMemory } from "#shared/mem
 import {
   compactMessages,
   type CompactionSummarizer,
+  type ContextOverflowTokens,
   getInputTokenCount,
+  overflowCompactionThreshold,
   shouldCompact,
 } from "#harness/compaction/engine.js";
 import { contextStorage } from "#context/container.js";
@@ -140,6 +142,12 @@ export async function maybeCompact(input: {
   readonly auth: SessionAuthContext | null;
   /** A manual compaction runs between turns, so no turn's usage reports its summary calls. */
   readonly betweenTurns?: boolean;
+  /**
+   * The provider rejected this prompt as too long, so eve's estimate undercounted it. Compacts
+   * regardless of the threshold, measuring every budget against the calibrated one
+   * ({@link overflowCompactionThreshold}) so the cheap heuristics and the recent window still apply.
+   */
+  readonly contextOverflow?: ContextOverflowTokens;
   readonly emissionState: TurnPosition;
   readonly force?: boolean;
   readonly historyProjector?: HistoryViewProjector;
@@ -167,11 +175,28 @@ export async function maybeCompact(input: {
   const projectedPromptMessages = validateHarnessModelMessages(
     input.historyProjector?.({ messages: promptMessages, state: session.state }) ?? promptMessages,
   );
+  const compaction =
+    input.contextOverflow === undefined
+      ? session.compaction
+      : {
+          ...session.compaction,
+          threshold: overflowCompactionThreshold(
+            session.compaction,
+            getInputTokenCount(
+              projectedPromptMessages,
+              session.compaction,
+              input.requestEnvelopeTokens,
+              getRequestEnvelopeTokens(session),
+            ),
+            input.contextOverflow,
+          ),
+        };
   const needsSummary =
     input.force === true ||
+    input.contextOverflow !== undefined ||
     shouldCompact(
       projectedPromptMessages,
-      session.compaction,
+      compaction,
       input.requestEnvelopeTokens,
       getRequestEnvelopeTokens(session),
     );
@@ -247,8 +272,8 @@ export async function maybeCompact(input: {
   );
   const requestEnvelopeTokens = input.requestEnvelopeTokens ?? 0;
   const historyCompaction: CompactionConfig = {
-    ...session.compaction,
-    threshold: Math.max(1, session.compaction.threshold - requestEnvelopeTokens),
+    ...compaction,
+    threshold: Math.max(1, compaction.threshold - requestEnvelopeTokens),
     lastKnownInputTokens:
       session.compaction.lastKnownInputTokens === undefined
         ? undefined

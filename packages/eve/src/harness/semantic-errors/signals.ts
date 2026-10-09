@@ -11,7 +11,10 @@ import { isObject } from "#shared/guards.js";
 export interface ErrorLink {
   readonly name?: string;
   readonly message: string;
-  /** Node/undici style error code (`ECONNREFUSED`, `EADDRINUSE`, …). */
+  /**
+   * Node/undici style error code (`ECONNREFUSED`, `EADDRINUSE`, …), or a
+   * provider error body's string `code` (`context_length_exceeded`).
+   */
   readonly code?: string;
   readonly statusCode?: number;
   /** Gateway error body discriminator (`rate_limit_exceeded`, …). */
@@ -40,13 +43,12 @@ export function extractErrorSignals(error: unknown): ErrorSignals {
     if (typeof candidate.name === "string" && candidate.name.length > 0) {
       link.name = candidate.name;
     }
-    if (typeof candidate.code === "string" && candidate.code.length > 0) {
-      link.code = candidate.code;
-    }
+    const code = readStructuredField(candidate, "code");
+    if (code !== undefined) link.code = code;
     if (typeof candidate.statusCode === "number") {
       link.statusCode = candidate.statusCode;
     }
-    const type = readGatewayType(candidate);
+    const type = readStructuredField(candidate, "type");
     if (type !== undefined) link.type = type;
     if (typeof candidate.hint === "string" && candidate.hint.length > 0) {
       link.hint = candidate.hint;
@@ -56,27 +58,32 @@ export function extractErrorSignals(error: unknown): ErrorSignals {
   return { chain };
 }
 
-function readGatewayType(candidate: Record<string, unknown>): string | undefined {
-  if (typeof candidate.type === "string" && candidate.type.length > 0) {
-    return candidate.type;
-  }
+/** Reads a discriminator from the error itself, else from its parsed or raw response body. */
+function readStructuredField(
+  candidate: Record<string, unknown>,
+  key: "code" | "type",
+): string | undefined {
+  const own = candidate[key];
+  if (typeof own === "string" && own.length > 0) return own;
 
-  const dataType = readGatewayTypeFromBody(candidate.data);
-  if (dataType !== undefined) return dataType;
+  const dataValue = readBodyField(candidate.data, key);
+  if (dataValue !== undefined) return dataValue;
 
   if (typeof candidate.responseBody !== "string") return undefined;
   try {
-    return readGatewayTypeFromBody(JSON.parse(candidate.responseBody));
+    return readBodyField(JSON.parse(candidate.responseBody), key);
   } catch {
     return undefined;
   }
 }
 
-function readGatewayTypeFromBody(value: unknown): string | undefined {
+function readBodyField(value: unknown, key: "code" | "type"): string | undefined {
   if (!isObject(value)) return undefined;
   const nestedError = value.error;
-  if (isObject(nestedError) && typeof nestedError.type === "string") {
-    return nestedError.type.length > 0 ? nestedError.type : undefined;
+  if (isObject(nestedError) && typeof nestedError[key] === "string") {
+    const field = nestedError[key];
+    return field.length > 0 ? field : undefined;
   }
-  return typeof value.type === "string" && value.type.length > 0 ? value.type : undefined;
+  const field = value[key];
+  return typeof field === "string" && field.length > 0 ? field : undefined;
 }

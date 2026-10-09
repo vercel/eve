@@ -51,6 +51,7 @@ import { addTurnUsage, type TokenUsageDelta } from "#harness/turn-tag-state.js";
 import type { StepResult } from "#harness/types.js";
 import type { InstrumentationAttempt } from "#instrumentation/runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
+import type { ContextOverflowTokens } from "#harness/compaction/engine.js";
 import { maybeCompact } from "#harness/compaction/step.js";
 import { buildGatewayAttributionHeaders } from "./model.js";
 import { isEmptyModelResponse, rethrowNoOutputAsEmptyResponse } from "./recovery.js";
@@ -78,7 +79,9 @@ const log = createLogger("harness.tool-loop");
 export interface ModelCallOptions {
   readonly disabledProviderTools?: ReadonlySet<string>;
   readonly extraSystemNote?: string;
-  readonly retryReason?: "empty-response";
+  /** The provider rejected the prompt as too long: compact against the calibrated threshold. */
+  readonly contextOverflow?: ContextOverflowTokens;
+  readonly retryReason?: "context-overflow" | "empty-response";
   readonly suppressStepStartedEmission?: boolean;
   readonly trailingUserNote?: string;
 }
@@ -150,6 +153,8 @@ export class ModelCaller {
         return await this.attempt(
           {
             ...options,
+            // A transient retry reuses the first attempt's compacted prompt.
+            contextOverflow: attempt === 1 ? options.contextOverflow : undefined,
             suppressStepStartedEmission: attempt === 1 ? options.suppressStepStartedEmission : true,
           },
           unsettledActionToolNames,
@@ -246,7 +251,10 @@ export class ModelCaller {
     return tools;
   }
 
-  /** Compacts the prompt when it's over the threshold, then rebuilds what depends on it. */
+  /**
+   * Compacts the prompt when it's over the threshold, or after a context overflow, then rebuilds
+   * what depends on it.
+   */
   private async compact(options: ModelCallOptions, tools: ToolSet): Promise<ToolSet> {
     const { step, prompt } = this;
     const { config } = step;
@@ -255,6 +263,7 @@ export class ModelCaller {
       compaction = await maybeCompact({
         abortSignal: config.abortSignal,
         auth: step.ctx?.get(AuthKey) ?? null,
+        contextOverflow: options.contextOverflow,
         emissionState: step.position(),
         historyProjector: config.historyProjector,
         messages: [...prompt.messages],

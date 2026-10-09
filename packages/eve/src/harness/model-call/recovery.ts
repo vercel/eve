@@ -2,8 +2,11 @@ import { createLogger } from "#internal/logging.js";
 import {
   EmptyModelResponseError,
   extractUnsupportedProviderToolTypes,
+  isContextOverflowError,
   isNoOutputGeneratedError,
+  readContextOverflowTokens,
 } from "#harness/model-call/errors.js";
+import type { ContextOverflowTokens } from "#harness/compaction/engine.js";
 import type { HarnessStepResult } from "#harness/step-hooks.js";
 import { resolveAssistantStepText } from "#harness/messages.js";
 import { resolveFrameworkToolFromUpstreamType } from "#harness/provider-tools.js";
@@ -13,7 +16,8 @@ const log = createLogger("harness.tool-loop");
 type RecoveryCall = (options: {
   readonly disabledProviderTools?: ReadonlySet<string>;
   readonly extraSystemNote?: string;
-  readonly retryReason?: "empty-response";
+  readonly contextOverflow?: ContextOverflowTokens;
+  readonly retryReason?: "context-overflow" | "empty-response";
   readonly suppressStepStartedEmission?: boolean;
   readonly trailingUserNote?: string;
 }) => Promise<HarnessStepResult>;
@@ -25,7 +29,10 @@ type RecoveryCall = (options: {
  * 1. AI Gateway rejected a provider-specific tool a fallback provider can't serve ("tool type 'X'
  *    is not supported"): the call is reissued without it, and a system note tells the model which
  *    capability went away. Only known provider tools are dropped, never an authored one.
- * 2. The response was empty (see {@link EmptyModelResponseError}), including the first
+ * 2. The provider rejected the request as longer than the context window, including the first
+ *    recovery's: the call is reissued after compacting against a threshold calibrated by the
+ *    provider's token counts. A second overflow fails the step.
+ * 3. The response was empty (see {@link EmptyModelResponseError}), including an earlier
  *    recovery's: the call is reissued with {@link EMPTY_RESPONSE_NUDGE}, repeating what the first
  *    recovery removed.
  *
@@ -60,6 +67,27 @@ export async function recoverModelCall(input: {
     };
     try {
       return { result: await input.call({ ...options, suppressStepStartedEmission: true }) };
+    } catch (retryError) {
+      error = retryError;
+    }
+  }
+
+  if (isContextOverflowError(error)) {
+    log.warn("model context window exceeded; compacting and reissuing the model call once", {
+      ...diagnostics,
+      error,
+    });
+    try {
+      // Only this reissue compacts on overflow: its compaction rewrote the step's prompt, so a
+      // later recovery reads the compacted prompt and must not compact it again.
+      return {
+        result: await input.call({
+          ...options,
+          contextOverflow: readContextOverflowTokens(error),
+          retryReason: "context-overflow",
+          suppressStepStartedEmission: true,
+        }),
+      };
     } catch (retryError) {
       error = retryError;
     }

@@ -24,6 +24,19 @@ input token count plus an estimate of new messages. A smaller character estimate
 alone cannot satisfy compaction triggered by a higher provider count. If trimming
 cannot free enough space, eve summarizes the older history.
 
+The trigger count is an estimate, so a provider can still reject a request as
+longer than the model's context window. When that happens, eve compacts the
+conversation once for the current step and reissues the model call. When the
+provider's error reports token counts, eve uses them to correct its estimate, so
+this compaction aims for a size the provider will accept. It works like regular
+compaction: eve shortens oversized tool results first, including one that just
+arrived, and summarizes older history only if that isn't enough. It emits the
+usual `compaction.requested` and `compaction.completed` events. If the reissued
+call is rejected too, the step fails. eve recognizes the context-window errors
+from Anthropic, Amazon Bedrock, OpenAI, and Gemini, including through AI Gateway.
+A custom `LanguageModel` can opt in by throwing an error with
+`code: "context_length_exceeded"`.
+
 First-class [memory](../memory) participates in a separate lifecycle. eve asks
 providers to capture before compaction, excludes attributed recalled records
 from the summarizer, keeps their canonical latest values, and recalls again
