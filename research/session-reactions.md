@@ -128,7 +128,7 @@ Authors never choose the moment. eve does, from when each kind of entry is read 
 
 ### Facts are selections too
 
-The view keeps the position of the latest fact of each type, so a new fact is an ordinary change in a selection:
+The view keeps the position of the latest fact of each type, a fold of about 30 numbers, so a new fact is an ordinary change in a selection:
 
 ```ts
 // agent/hooks/audit.ts
@@ -496,7 +496,7 @@ Before every model call, the runner costs microseconds, against seconds of model
 
 ### Costs to manage
 
-- **Selections that scan history** are quadratic over a long turn. In the prototype, with tiny messages, that took about 16 ms in total over 5,000 calls, against 0.01 ms with an aggregate in the view. Aggregates for common facts (attachments, usage, successful calls by tool) and a development time budget per `select` keep it in check.
+- **Selections that scan history** are quadratic over a long turn. In the prototype, with tiny messages, that took about 0.7 ms in total over 1,000 calls and 16 ms over 5,000, against 0.01 ms with an aggregate in the view. Aggregates for common facts (attachments, usage, successful calls by tool) and a development time budget per `select` keep it in check.
 - **Tool changes mid-turn miss the prompt cache.** eve's Anthropic cache breakpoint sits at the end of the tools block (`harness/prompt-cache.ts`). Equal re-runs change nothing, and presenting rare changes differently would keep them cheap ([Open questions](#open-questions)).
 - **Churn.** Development mode warns about a reaction that re-runs at most of its evaluations.
 - **Redeploys** re-run every reaction in every active session at its next evaluation, spread over those sessions' next turns. The external calls still happen. A code fingerprint per reaction would re-run only what changed.
@@ -561,7 +561,7 @@ There are three steps in the overall plan ([`session-event-lifecycle.md`](./sess
 
    It deletes the private payload, the redeploy refresh, and the callback rebind paths. If it isn't ready, the break merges without it ([Compatibility](#compatibility)).
 
-**Size:** a small net reduction, not measured. The three steps remove a few hundred lines of dispatch and synthetic-event code (`turn-event-handler.ts`, `resolver-events.ts`, `memory-event-lifecycle.ts`, and the filtering in the six lifecycle files). Step 3 also replaces the per-kind recording in `context/dynamic-*.ts`, about 1,600 lines, with one slot per reaction; how much goes depends on how much of the durable callback and schema replay machinery survives.
+**Size:** a small net reduction, not measured. The three steps remove a few hundred lines of dispatch and synthetic-event code (`turn-event-handler.ts` at 140 lines, `resolver-events.ts` at 29, `memory-event-lifecycle.ts` at 76, and the filtering in the six lifecycle files). Step 3 also replaces the per-kind recording in `context/dynamic-*.ts`, about 1,600 lines, with one slot per reaction; how much goes depends on how much of the durable callback and schema replay machinery survives.
 
 **Beyond the plan, not scheduled:**
 
