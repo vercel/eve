@@ -83,6 +83,9 @@ function createMockSession(overrides: Partial<Session> = {}): Session {
       previousSessionId: "test-session-id",
       status: "reset",
     }),
+    async getLineStream() {
+      return new ReadableStream();
+    },
     async getEventStream() {
       return new ReadableStream();
     },

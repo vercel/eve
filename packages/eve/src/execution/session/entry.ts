@@ -20,6 +20,7 @@ import { createTurnControl, type TurnControl } from "#execution/session/turn-con
 import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
+import { closeSessionStreamStep } from "#execution/close-session-stream-step.js";
 import { settleContinuationConflictStep } from "#execution/continuation-conflict-step.js";
 import {
   SESSION_INBOX_CONTEXT_KEY,
@@ -204,6 +205,8 @@ export async function bootInitialOwner(
         });
       }
       await disposeInitialBoot(inbox, owner);
+      // This run never becomes the session, so nothing else would end its stream.
+      await closeSessionStreamStep({ sessionWritable });
       return undefined;
     }
     const caller = unwrapSettled(callerResolution);

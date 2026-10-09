@@ -1,3 +1,4 @@
+import { eachEvent } from "#internal/testing/session-machine.js";
 import { jsonSchema, type LanguageModel } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
@@ -37,9 +38,9 @@ function createEventCollector(): {
   events: UnstampedMessageStreamEvent[];
 } {
   const events: UnstampedMessageStreamEvent[] = [];
-  const emit: HarnessEmitFn = async (event) => {
+  const emit: HarnessEmitFn = eachEvent(async (event) => {
     events.push(event);
-  };
+  });
   return { emit, events };
 }
 

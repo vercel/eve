@@ -1,3 +1,4 @@
+import { eachEvent } from "#internal/testing/session-machine.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { createOrderedStreamEmitter } from "#harness/ordered-stream-emitter.js";
@@ -65,7 +66,7 @@ describe("createOrderedStreamEmitter", () => {
       events.push(event);
       if (events.length === 1) await firstWrite.promise;
     });
-    const emitter = createOrderedStreamEmitter(emitFn);
+    const emitter = createOrderedStreamEmitter(eachEvent(emitFn));
 
     await emitter.emit(message("A"));
     await emitter.emit(message("B"));
@@ -85,7 +86,7 @@ describe("createOrderedStreamEmitter", () => {
       events.push(event);
       if (events.length === 1) await firstWrite.promise;
     });
-    const emitter = createOrderedStreamEmitter(emitFn);
+    const emitter = createOrderedStreamEmitter(eachEvent(emitFn));
 
     await emitter.emit(message("A"));
     await emitter.emit(message(" abandoned"));
@@ -105,7 +106,7 @@ describe("createOrderedStreamEmitter", () => {
       events.push(event);
       if (events.length === 1) await firstWrite.promise;
     });
-    const emitter = createOrderedStreamEmitter(emitFn);
+    const emitter = createOrderedStreamEmitter(eachEvent(emitFn));
 
     await emitter.emit(message("A"));
     await emitter.emit(input("call_1", "{"));
@@ -130,7 +131,7 @@ describe("createOrderedStreamEmitter", () => {
       events.push(event);
       if (events.length === 1) await firstWrite.promise;
     });
-    const emitter = createOrderedStreamEmitter(emitFn);
+    const emitter = createOrderedStreamEmitter(eachEvent(emitFn));
     const completed = createMessageCompletedEvent({
       message: "CD",
       sequence: 1,
@@ -165,7 +166,7 @@ describe("createOrderedStreamEmitter", () => {
       events.push(event);
       if (events.length === 1) await firstWrite.promise;
     });
-    const emitter = createOrderedStreamEmitter(emitFn);
+    const emitter = createOrderedStreamEmitter(eachEvent(emitFn));
     const result = createActionResultEvent({
       result: { callId: "call_1", kind: "tool-result", output: "done", toolName: "progress" },
       sequence: 1,
@@ -216,10 +217,10 @@ describe("createOrderedStreamEmitter", () => {
     const firstWrite = deferred();
     const events: UnstampedMessageStreamEvent[] = [];
     const emitter = createOrderedStreamEmitter(
-      async (event) => {
+      eachEvent(async (event) => {
         events.push(event);
         if (events.length === 1) await firstWrite.promise;
-      },
+      }),
       { maxPendingEvents: 2 },
     );
 

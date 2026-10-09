@@ -4,6 +4,7 @@ import type {
   MessageAppendedStreamEvent,
   ReasoningAppendedStreamEvent,
 } from "#protocol/message.js";
+import { eventsOf } from "#harness/publication.js";
 import type { HarnessEmitFn } from "#harness/types.js";
 
 type AppendStreamEvent =
@@ -18,12 +19,15 @@ interface PendingEmission {
   deltaCharacters: number;
   deltaParts?: string[];
   event: UnstampedMessageStreamEvent;
+  /** A commit of several events, emitted together and never merged. */
+  commit?: readonly UnstampedMessageStreamEvent[];
   messages?: readonly import("ai").ModelMessage[];
   sourceEvents: number;
 }
 
 interface OrderedStreamEmitter {
   closeAndDrain(): Promise<void>;
+  /** Emits one streamed event, merged with adjacent deltas, or one commit, which is a barrier. */
   emit: HarnessEmitFn;
   readonly failureSignal: AbortSignal;
 }
@@ -86,7 +90,7 @@ export function createOrderedStreamEmitter(
       settleCapacityWaiters();
 
       try {
-        await emitFn(materializeEvent(next), next.messages);
+        await emitFn(next.commit ?? materializeEvent(next), next.messages);
       } catch (error) {
         if (!failed) {
           failure = error;
@@ -131,16 +135,37 @@ export function createOrderedStreamEmitter(
       void pump();
       await waitForIdle();
     },
-    async emit(event, messages) {
+    async emit(publication, messages) {
       throwIfFailed();
       if (closeRequested) {
         throw new TypeError("Cannot emit after the ordered stream emitter has closed.");
+      }
+      const events = eventsOf(publication);
+      const event = events[0];
+      if (event === undefined) return;
+      if (events.length > 1) {
+        pending.push({
+          commit: events,
+          deltaCharacters: 0,
+          event,
+          messages,
+          sourceEvents: events.length,
+        });
+        pendingSourceEvents += events.length;
+        void pump();
+        if (pendingSourceEvents >= maxPendingEvents) await waitForCapacity();
+        throwIfFailed();
+        return;
       }
 
       const lastIndex = pending.length - 1;
       const last = pending[lastIndex];
       const delta = appendDelta(event);
-      if (last === undefined || !mergeAdjacentEmissions(last, event, messages)) {
+      if (
+        last === undefined ||
+        last.commit !== undefined ||
+        !mergeAdjacentEmissions(last, event, messages)
+      ) {
         pending.push({
           deltaCharacters: delta?.length ?? 0,
           event,

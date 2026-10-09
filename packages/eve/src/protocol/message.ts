@@ -6,7 +6,6 @@ import {
   isSerializedUrlFilePart,
 } from "#internal/attachments/url-refs.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
-import { createEventId } from "#protocol/event-id.js";
 import {
   createEveSessionStreamRoutePath,
   createEveSubagentStreamRoutePath,
@@ -27,16 +26,7 @@ export const EVE_STREAM_TAIL_INDEX_HEADER = "x-eve-stream-tail-index";
 export const EVE_STREAM_VERSION_HEADER = "x-eve-stream-version";
 export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=utf-8";
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
-export const EVE_MESSAGE_STREAM_VERSION = "26";
-
-/** Version of transport control records understood by this eve release. */
-export const EVE_STREAM_CONTROL_VERSION = "1";
-export const EVE_STREAM_CONTROL_VERSION_QUERY = "streamControlVersion";
-/** Internal record emitted when a leased HTTP response should be renewed. */
-export const EVE_STREAM_LEASE_ENDED_CONTROL = {
-  $eve: "stream.lease-ended",
-  version: 1,
-} as const;
+export const EVE_MESSAGE_STREAM_VERSION = "27";
 
 /**
  * eve-owned finish reason for one completed assistant step.
@@ -904,8 +894,6 @@ export type MessageStreamEvent = UnstampedMessageStreamEvent & {
  * @deprecated Use {@link MessageStreamEvent}.
  */
 export type HandleMessageStreamEvent = MessageStreamEvent;
-
-const textEncoder = new TextEncoder();
 
 /**
  * Returns true when the current stream has reached a turn boundary or terminal
@@ -1887,39 +1875,6 @@ export function createSessionCompletedEvent(
   return usage === undefined
     ? { type: "session.completed" }
     : { data: { usage }, type: "session.completed" };
-}
-
-/**
- * Stamps one session event with its durable identity and emission time.
- *
- * Runtime/execution code only, once per event, immediately before the write.
- * One stamping seam is what makes the persisted stream and authored hooks
- * observe the same `meta.id`.
- */
-export function stampMessageStreamEvent(
-  event: UnstampedMessageStreamEvent,
-  deliveryIds?: readonly string[],
-): MessageStreamEvent {
-  const meta: {
-    at: string;
-    id: string;
-    deliveryIds?: readonly string[];
-  } = {
-    at: new Date().toISOString(),
-    id: createEventId(),
-  };
-  if (deliveryIds !== undefined && deliveryIds.length > 0) meta.deliveryIds = deliveryIds;
-  return {
-    ...event,
-    meta,
-  };
-}
-
-/**
- * Encodes one message stream event as newline-delimited JSON.
- */
-export function encodeMessageStreamEvent(event: MessageStreamEvent): Uint8Array {
-  return textEncoder.encode(`${JSON.stringify(event)}\n`);
 }
 
 function normalizeActionResultOutcome(result: RuntimeActionResult): {

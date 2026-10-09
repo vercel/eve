@@ -58,6 +58,8 @@ export interface Session {
   /** Terminally retires this exact session ID. */
   reset(options?: { reason?: string }): Promise<ResetSessionResult>;
   getEventStream(options?: { startIndex?: number }): Promise<ReadableStream<MessageStreamEvent>>;
+  /** The session's stored lines from `startIndex`: one parsed record per line. */
+  getLineStream(options?: { startIndex?: number }): Promise<ReadableStream<unknown>>;
   getStreamTailIndex(): Promise<number>;
 }
 
@@ -172,6 +174,9 @@ export function createSession(
     },
     async getEventStream(options?: { startIndex?: number }) {
       return runtime.getEventStream(id, options);
+    },
+    async getLineStream(options?: { startIndex?: number }) {
+      return runtime.getLineStream(id, options);
     },
     async getStreamTailIndex() {
       return runtime.getStreamTailIndex(id);

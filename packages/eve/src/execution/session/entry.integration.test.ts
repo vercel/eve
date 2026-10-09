@@ -21,7 +21,6 @@ import { defineHook } from "#public/definitions/hook.js";
 import { defineDynamic } from "#dynamic/definition.js";
 import { sessions } from "#public/server/index.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
-import { isEventId } from "#internal/testing/event-id.js";
 import type { Approval } from "#approval/definition.js";
 import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
@@ -572,7 +571,7 @@ describe("workflowEntry integration", () => {
         expect(firstTurn.length).toBeGreaterThan(1);
         // No two events share an id, including appends that share
         // `(turnId, sequence, stepIndex)`.
-        expect(firstTurn.every((event) => isEventId(event.meta.id))).toBe(true);
+        expect(firstTurn.every((event) => /^evt_\d+_\d+$/.test(event.meta.id))).toBe(true);
         expect(new Set(firstTurn.map((event) => event.meta.id)).size).toBe(firstTurn.length);
 
         // No stream-order assertion on the ids: they sort in mint order per
@@ -705,7 +704,7 @@ describe("workflowEntry integration", () => {
 
         expect(events.some((event) => event.type === "session.waiting")).toBe(true);
         expect(events.at(-1)?.type).toBe("session.completed");
-        expect(isEventId(events.at(-1)?.meta.id ?? "")).toBe(true);
+        expect(/^evt_\d+_\d+$/.test(events.at(-1)?.meta.id ?? "")).toBe(true);
         expect(filterEventsByType(events, "session.failed")).toHaveLength(0);
         await expect(run.returnValue).resolves.toEqual({ output: "" });
 

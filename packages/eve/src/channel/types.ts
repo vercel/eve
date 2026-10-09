@@ -629,6 +629,16 @@ export interface Runtime {
   ): Promise<ReadableStream<MessageStreamEvent>>;
 
   /**
+   * Returns a session's stored lines from `options.startIndex`, one parsed record per line: a
+   * commit (`{at, facts}`) or a progress record (`{progress}`). A line's position is its index,
+   * counting every line, including ones this version can't read. Backs the HTTP stream route.
+   */
+  getLineStream(
+    sessionId: string,
+    options?: GetEventStreamOptions,
+  ): Promise<ReadableStream<unknown>>;
+
+  /**
    * Resolves the durable tail of a session's event stream: the zero-based
    * index of the last recorded event, or `-1` before the first. Callers use
    * it to bound a read at the tail they observed instead of following the

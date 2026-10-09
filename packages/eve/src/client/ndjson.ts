@@ -1,9 +1,4 @@
-import { EVE_STREAM_LEASE_ENDED_CONTROL, type MessageStreamEvent } from "#protocol/message.js";
-import {
-  normalizeMessageStreamEvent,
-  type MessageStreamEventForVersion,
-  type MessageStreamVersion,
-} from "#protocol/message-version.js";
+import { classifyRecord, type ReadRecord } from "#protocol/session-events/envelope.js";
 
 /**
  * Returns true when an error looks like a stream socket disconnection that
@@ -34,10 +29,9 @@ export function isStreamDisconnectError(error: unknown): boolean {
 }
 
 /**
- * Reads newline-delimited JSON events from a `ReadableStream<Uint8Array>`.
- *
- * Yields one parsed {@link MessageStreamEvent} per complete NDJSON line.
- * Handles partial lines across chunks via an internal buffer.
+ * Reads the records of one stream response: stored lines (commits and progress records),
+ * transport records (`$eve`), and lines this version can't read, each classified by key. Blank
+ * lines are skipped. Handles partial lines across chunks via an internal buffer.
  *
  * All read errors — including socket disconnections — propagate to the caller.
  * Use {@link isStreamDisconnectError} to classify them.
@@ -45,13 +39,10 @@ export function isStreamDisconnectError(error: unknown): boolean {
 export async function* readNdjsonStream(
   body: ReadableStream<Uint8Array>,
   options: {
-    readonly controlVersion?: "1";
     readonly idleTimeoutMs?: number;
-    readonly onLeaseEnded?: () => void;
     readonly signal?: AbortSignal;
-    readonly streamVersion: MessageStreamVersion;
-  },
-): AsyncGenerator<MessageStreamEvent> {
+  } = {},
+): AsyncGenerator<ReadRecord> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -64,7 +55,7 @@ export async function* readNdjsonStream(
   try {
     while (true) {
       options.signal?.throwIfAborted();
-      const result = await readWithIdleTimeout(reader, options?.idleTimeoutMs);
+      const result = await readWithIdleTimeout(reader, options.idleTimeoutMs);
       options.signal?.throwIfAborted();
 
       if (result.done) {
@@ -83,30 +74,14 @@ export async function* readNdjsonStream(
       while (newlineIndex !== -1) {
         const line = buffer.slice(0, newlineIndex).trim();
         buffer = buffer.slice(newlineIndex + 1);
-
-        if (line.length > 0) {
-          const value = JSON.parse(line) as unknown;
-          if (options.controlVersion === "1" && isLeaseEndedControl(value)) {
-            options.onLeaseEnded?.();
-          } else {
-            yield parseMessageStreamEvent(value, options.streamVersion);
-          }
-        }
-
+        if (line.length > 0) yield parseRecord(line);
         newlineIndex = buffer.indexOf("\n");
       }
     }
 
     // Yield any trailing content without a final newline.
     const trailing = buffer.trim();
-    if (trailing.length > 0) {
-      const value = JSON.parse(trailing) as unknown;
-      if (options.controlVersion === "1" && isLeaseEndedControl(value)) {
-        options.onLeaseEnded?.();
-      } else {
-        yield parseMessageStreamEvent(value, options.streamVersion);
-      }
-    }
+    if (trailing.length > 0) yield parseRecord(trailing);
   } finally {
     options.signal?.removeEventListener("abort", abort);
     if (!reachedEof) {
@@ -118,20 +93,14 @@ export async function* readNdjsonStream(
   }
 }
 
-function isLeaseEndedControl(value: unknown): boolean {
-  if (value === null || typeof value !== "object") return false;
-  const record = value as Record<string, unknown>;
-  return (
-    record.$eve === EVE_STREAM_LEASE_ENDED_CONTROL.$eve &&
-    record.version === EVE_STREAM_LEASE_ENDED_CONTROL.version
-  );
-}
-
-function parseMessageStreamEvent<Version extends MessageStreamVersion>(
-  value: unknown,
-  version: Version,
-): MessageStreamEvent {
-  return normalizeMessageStreamEvent(version, value as MessageStreamEventForVersion<Version>);
+function parseRecord(line: string): ReadRecord {
+  let value: unknown;
+  try {
+    value = JSON.parse(line);
+  } catch {
+    return { kind: "invalid", value: line };
+  }
+  return classifyRecord(value);
 }
 
 async function readWithIdleTimeout(

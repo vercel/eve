@@ -16,6 +16,7 @@ function makeRuntime(): Runtime {
     dispatchContinuation: vi.fn(),
     dispatchSession: vi.fn(),
     getEventStream: vi.fn(),
+    getLineStream: vi.fn().mockResolvedValue(new ReadableStream()),
     getStreamTailIndex: vi.fn(),
     resolveContinuation: vi.fn(),
   };
@@ -26,6 +27,9 @@ function makeSession(): Session {
     id: "sess_1",
     async cancel() {
       return { status: "no_active_turn" };
+    },
+    async getLineStream() {
+      return new ReadableStream();
     },
     async getEventStream() {
       return new ReadableStream();

@@ -1,3 +1,4 @@
+import { eachEvent } from "#internal/testing/session-machine.js";
 import { jsonSchema, simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { afterAll, expect, it, vi } from "vitest";
@@ -155,10 +156,10 @@ function fixture(
     capabilities: { requestInput: true },
     tools,
     resolveModel: async () => model,
-    handleEvent: async (event) => {
+    handleEvent: eachEvent(async (event) => {
       events.push(event);
       recorder.record(event);
-    },
+    }),
   });
   async function step(input?: StepInput): Promise<StepResult> {
     const before = events.length;

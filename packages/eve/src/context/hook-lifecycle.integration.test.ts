@@ -97,6 +97,8 @@ describe("dispatchStreamEventHooks", () => {
 
     await contextStorage.run(ctx, () =>
       dispatchStreamEventHooks({
+        position: { index: 0, line: 0 },
+        progress: false,
         cancelTurn: undefined,
         ctx,
         registry,
@@ -155,7 +157,14 @@ describe("dispatchStreamEventHooks", () => {
     const ctx = buildCtx();
     const stamped = stampTestEvent(event);
     await contextStorage.run(ctx, () =>
-      dispatchStreamEventHooks({ cancelTurn: undefined, ctx, registry, event: stamped }),
+      dispatchStreamEventHooks({
+        position: { index: 0, line: 0 },
+        progress: false,
+        cancelTurn: undefined,
+        ctx,
+        registry,
+        event: stamped,
+      }),
     );
     expect(calls).toEqual(["broken-typed", "healthy-typed", "broken-wildcard", "healthy-wildcard"]);
     expect(records).toMatchObject([
@@ -200,6 +209,8 @@ describe("dispatchStreamEventHooks", () => {
     const ctx = buildCtx();
     await contextStorage.run(ctx, () =>
       dispatchStreamEventHooks({
+        position: { index: 0, line: 0 },
+        progress: false,
         cancelTurn: () => calls.push("cancelTurn"),
         ctx,
         registry,
@@ -225,6 +236,8 @@ describe("dispatchStreamEventHooks", () => {
     const ctx = buildCtx();
     await contextStorage.run(ctx, () =>
       dispatchStreamEventHooks({
+        position: { index: 0, line: 0 },
+        progress: false,
         cancelTurn: () => cancelled.push("cancelTurn"),
         ctx,
         registry,
@@ -251,7 +264,14 @@ describe("dispatchStreamEventHooks", () => {
     const ctx = buildCtx();
     const stamped = stampTestEvent({ type: "session.completed" });
     await contextStorage.run(ctx, () =>
-      dispatchStreamEventHooks({ cancelTurn: undefined, ctx, registry, event: stamped }),
+      dispatchStreamEventHooks({
+        position: { index: 0, line: 0 },
+        progress: false,
+        cancelTurn: undefined,
+        ctx,
+        registry,
+        event: stamped,
+      }),
     );
     expect(records).toMatchObject([
       {
@@ -274,6 +294,8 @@ describe("dispatchStreamEventHooks", () => {
     await expect(
       contextStorage.run(ctx, () =>
         dispatchStreamEventHooks({
+          position: { index: 0, line: 0 },
+          progress: false,
           cancelTurn: undefined,
           ctx,
           registry,
@@ -306,6 +328,8 @@ describe("dispatchStreamEventHooks", () => {
 
     await contextStorage.run(ctx, () =>
       dispatchStreamEventHooks({
+        position: { index: 0, line: 0 },
+        progress: false,
         cancelTurn: undefined,
         ctx,
         registry,
