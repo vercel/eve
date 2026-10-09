@@ -174,6 +174,7 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
       conversationId: resolveConversationId(session.rootSessionId ?? session.sessionId),
       profile,
       providerOptions: modelReference.providerOptions,
+      sessionId: session.sessionId,
     });
     if (profile.gateway) {
       stepResult.providerOptions = mergeGatewayAutoCaching(providerOptions) as NonNullable<

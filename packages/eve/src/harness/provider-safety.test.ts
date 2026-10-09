@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
-import { mergeProviderSafetyIdentifier } from "#harness/provider-safety.js";
+import type { ModelProfile } from "#harness/model-profile.js";
+import {
+  mergeProviderSafetyIdentifier,
+  resolveCallProviderOptions,
+} from "#harness/provider-safety.js";
 import { invocationOwnerKey } from "#internal/invocation/metadata.js";
 
 const auth: SessionAuthContext = {
@@ -92,5 +96,50 @@ describe("mergeProviderSafetyIdentifier", () => {
     const providerOptions = { anthropic: { thinking: { type: "adaptive" } } };
 
     expect(mergeProviderSafetyIdentifier("anthropic", providerOptions, null)).toBe(providerOptions);
+  });
+});
+
+describe("resolveCallProviderOptions", () => {
+  const openai: ModelProfile = {
+    anthropicCache: false,
+    filesOutsideToolResults: false,
+    gateway: false,
+    googleSearchDropsTools: false,
+    provider: "openai",
+  };
+  const resolve = (
+    profile: ModelProfile,
+    providerOptions?: Record<string, unknown>,
+    sessionId = "session-1",
+  ) =>
+    resolveCallProviderOptions({
+      auth: null,
+      conversationId: "conversation-1",
+      profile,
+      providerOptions,
+      sessionId,
+    });
+
+  it("keys a direct OpenAI call's prompt cache to its session", () => {
+    const key = (resolve(openai) as { openai: { promptCacheKey: string } }).openai.promptCacheKey;
+
+    expect(key).toMatch(/^[\w-]{43}$/);
+    expect(resolve(openai)).toEqual({ openai: { promptCacheKey: key } });
+    expect(resolve(openai, undefined, "session-2")).not.toEqual({
+      openai: { promptCacheKey: key },
+    });
+  });
+
+  it("preserves an authored OpenAI prompt cache key", () => {
+    const providerOptions = { openai: { promptCacheKey: "authored", store: false } };
+
+    expect(resolve(openai, providerOptions)).toEqual(providerOptions);
+  });
+
+  it("leaves Gateway and other providers to their own cache routing", () => {
+    expect(resolve({ ...openai, gateway: true })).toEqual({
+      gateway: { sessionId: "conversation-1" },
+    });
+    expect(resolve({ ...openai, provider: "anthropic" })).toBeUndefined();
   });
 });

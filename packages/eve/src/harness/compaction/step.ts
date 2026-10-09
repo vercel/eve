@@ -193,6 +193,7 @@ export async function maybeCompact(input: {
     conversationId: resolveConversationId(session.rootSessionId ?? session.sessionId),
     profile,
     providerOptions: compactionModelReference.providerOptions,
+    sessionId: session.sessionId,
   }) as Parameters<typeof streamText>[0]["providerOptions"];
   const call = {
     abortSignal: input.abortSignal,

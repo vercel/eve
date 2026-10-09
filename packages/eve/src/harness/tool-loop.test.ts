@@ -1380,7 +1380,9 @@ describe("createToolLoopHarness", () => {
         stepNumber: 0,
         steps: [],
       });
-      expect(prepared.providerOptions).toEqual({ openai: { parallelToolCalls: false } });
+      expect(prepared.providerOptions).toEqual({
+        openai: { parallelToolCalls: false, promptCacheKey: expect.any(String) },
+      });
       expect(dispatchDynamicModelEvent).toHaveBeenCalledTimes(1);
       expect(resolveModel).not.toHaveBeenCalled();
       expect(result.session.agent.modelReference).toEqual({
@@ -7919,6 +7921,7 @@ describe("createToolLoopHarness", () => {
     });
     expect(summaryCall()?.providerOptions).toEqual({
       openai: {
+        promptCacheKey: expect.any(String),
         safetyIdentifier: invocationOwnerKey(auth),
         store: false,
       },
@@ -8314,7 +8317,9 @@ describe("createToolLoopHarness", () => {
     );
     expect(call?.[1].threshold).toBeLessThan(100_000);
     expect(call?.[1].threshold).toBeGreaterThan(99_000);
-    expect(summaryCall()?.providerOptions).toBeUndefined();
+    expect(summaryCall()?.providerOptions).toEqual({
+      openai: { promptCacheKey: expect.any(String) },
+    });
   });
 
   it("emits reasoning.completed when reasoning text is available", async () => {
@@ -9042,7 +9047,7 @@ describe("createToolLoopHarness", () => {
       });
     });
 
-    it("none path: direct OpenAI instance gets no caching changes", async () => {
+    it("none path: direct OpenAI instance gets only a prompt cache key", async () => {
       setupStopResult();
       const config: ToolLoopHarnessConfig = {
         resolveModel: vi.fn().mockResolvedValue({
@@ -9077,7 +9082,9 @@ describe("createToolLoopHarness", () => {
         model: agentCall?.model,
         context: undefined,
       });
-      expect(stepResult.providerOptions).toBeUndefined();
+      expect(stepResult.providerOptions).toEqual({
+        openai: { promptCacheKey: expect.any(String) },
+      });
       expect(agentCall?.providerOptions).toBeUndefined();
       const toolsPassed = agentCall?.tools as Record<
         string,
