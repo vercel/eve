@@ -47,7 +47,6 @@ export function normalizeProviderToolHistory(input: {
     let toolContent: ToolModelMessage["content"] = [];
     let afterProviderResult = false;
     const localCallParts: typeof message.content = [];
-    const localCallIds = new Set<string>();
     const splits = message.content.some(
       (part) => part.type === "tool-result" && toolCallIdsToNormalize.has(part.toolCallId),
     );
@@ -76,9 +75,6 @@ export function normalizeProviderToolHistory(input: {
         // Local results arrive after the whole response. Keeping their calls
         // in an earlier split would put a later provider result between a
         // call and its result, which providers reject.
-        localCallIds.add(part.toolCallId);
-        localCallParts.push(part);
-      } else if (part.type === "tool-approval-request" && localCallIds.has(part.toolCallId)) {
         localCallParts.push(part);
       } else {
         flushTool();

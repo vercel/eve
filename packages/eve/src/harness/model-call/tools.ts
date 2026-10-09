@@ -1,22 +1,15 @@
 import type { ToolSet } from "ai";
 
 import type { StepCatalog } from "#execution/catalog/step-catalog.js";
-import { dispatchesAfterStep } from "#harness/execute-call.js";
 import { SKILL_ENTRY_NAME } from "#protocol/catalog-tools.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { buildFinalOutputTool } from "#harness/final-output.js";
 import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
-import type { GenerationSteering } from "#harness/generation-steering.js";
 import type { ModelProfile } from "#harness/model-profile.js";
 import { applyLastToolCacheBreakpoint } from "#harness/prompt-cache.js";
 import type { Step } from "#harness/step/context.js";
 import { buildToolSetWithProviderTools } from "#harness/tools.js";
-import { isTurnCancellation } from "#harness/turn-cancellation.js";
-import type { CallResolver } from "#harness/types.js";
-import { createLogger, logError } from "#internal/logging.js";
 import { toModelSchema } from "#tools/schema.js";
-
-const log = createLogger("harness.tool-loop");
 
 /**
  * Assembles the tools one model call offers: the catalog's listed entries with provider tools in
@@ -27,7 +20,6 @@ export async function prepareModelTools(
   input: {
     readonly catalog: StepCatalog;
     readonly disabledProviderTools?: ReadonlySet<string>;
-    readonly generation: GenerationSteering;
     readonly profile: ModelProfile;
   },
 ): Promise<ToolSet> {
@@ -36,7 +28,6 @@ export async function prepareModelTools(
     describe: catalog.describe,
     disabledProviderTools: input.disabledProviderTools,
     profile,
-    resolve: catalog.resolve,
     tools: catalog.advertised,
   });
   if (step.session.outputSchema !== undefined) {
@@ -46,23 +37,12 @@ export async function prepareModelTools(
   const effectiveTools = profile.anthropicCache
     ? applyLastToolCacheBreakpoint(modelTools)
     : modelTools;
-  for (const [name, tool] of Object.entries(effectiveTools)) {
+  for (const tool of Object.values(effectiveTools)) {
     // Whatever produced this tool, the AI SDK must only receive its own
     // schema type; see toModelSchema.
     tool.inputSchema = toModelSchema(tool.inputSchema, "input");
     if (tool.outputSchema !== undefined) {
       tool.outputSchema = toModelSchema(tool.outputSchema, "output");
-    }
-    const execute = tool.execute;
-    if (execute !== undefined) {
-      tool.execute = (...args) => {
-        // A call the harness dispatches after the step has no effects yet, so steering can still
-        // interrupt it, as it can the same call made directly.
-        if (!dispatchesAfterStep(catalog.resolve({ input: args[0], toolName: name }))) {
-          input.generation.protectToolExecution();
-        }
-        return execute(...args);
-      };
     }
   }
   return effectiveTools;
@@ -89,33 +69,6 @@ export function frameworkToolNames(catalog: StepCatalog): ReadonlySet<string> {
       catalog.get(SKILL_ENTRY_NAME),
     ].flatMap((definition) => (definition?.frameworkTool === true ? [definition.name] : [])),
   );
-}
-
-/**
- * Wired as the agent's `onToolExecutionEnd`. On the `tool-error` branch
- * the `error` is still the original throwable (stack/cause intact),
- * unlike the message-only `tool-error` part the model later sees.
- */
-export function logToolExecutionError(
-  event: {
-    readonly toolCall: {
-      readonly input: unknown;
-      readonly toolName: string;
-      readonly toolCallId: string;
-    };
-    readonly toolOutput: { readonly type: string; readonly error?: unknown };
-  },
-  resolve: CallResolver,
-): void {
-  // A tool unwinding because its turn was cancelled is the expected outcome
-  // of a user action, not a failure worth an error log.
-  if (event.toolOutput.type !== "tool-error" || isTurnCancellation(event.toolOutput.error)) {
-    return;
-  }
-  logError(log, "tool execution failed", event.toolOutput.error, {
-    toolName: resolve(event.toolCall)?.definition.name ?? event.toolCall.toolName,
-    toolCallId: event.toolCall.toolCallId,
-  });
 }
 
 export type EndsTurnTools = ReadonlyMap<string, NonNullable<HarnessToolDefinition["endsTurn"]>>;

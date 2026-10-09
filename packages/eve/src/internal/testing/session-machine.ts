@@ -3,7 +3,6 @@ import type { ModelMessage } from "ai";
 import { contextStorage } from "#context/container.js";
 import { grantedApprovalKeys, parkOnApprovals } from "#harness/hitl/approvals.js";
 import { suspendStep } from "#harness/session-machine/transitions.js";
-import { withoutApprovalParts } from "#harness/step/after-model.js";
 import { sessionView } from "#harness/session-machine/commit.js";
 import { readTurnState, writeTurnState } from "#harness/session-machine/state.js";
 import {
@@ -88,10 +87,9 @@ export function withParkedStep(
   const event = step.event ?? { sequence: 1, stepIndex: 0, turnId: "turn-1" };
   const opened = withOpenTurn(session, event);
   const view = sessionView(storedProjection(opened.state), opened.state);
-  // A response parks without the SDK's approval parts, as the step normalizes it.
   const parkedStep = {
     event,
-    messages: withoutApprovalParts(step.messages ?? []),
+    messages: step.messages ?? [],
     tasks: step.tasks ?? [],
   };
   const transition =
