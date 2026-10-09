@@ -84,13 +84,13 @@ class ConsoleReporter implements EvalReporter {
       }
     }
 
-    // Every reporter aggregates scores by exported name, so repeated names
-    // collapse to one value. Surface that where the author is looking.
+    // Reporters keep one score per exported name, the lowest. Warn only when
+    // that merge drops information: repeated names whose scores differ.
     for (const [name, group] of groupAssertionScores(assertions, exportedAssertionName)) {
-      if (group.assertions.length < 2) continue;
+      if (group.assertions.every((assertion) => assertion.score === group.score)) continue;
       this.#log(
         `  ${this.#colors.yellow(
-          `⚠ ${name} recorded ${group.assertions.length} times; reporters aggregate scores by name. Add .label() to tell them apart.`,
+          `⚠ ${name} recorded ${group.assertions.length} times with different scores; reporters keep only the lowest. Add .label() to tell them apart.`,
         )}`,
       );
     }
