@@ -278,11 +278,13 @@ describe("getProxyInputRequests type safety", () => {
 
   it("ignores malformed values in the state map", () => {
     const session = createSession({
-      "eve.runtime.proxyInputRequests": {
-        "req-1": 42,
-        "req-2": { childContinuationToken: 42, event: REQUEST_EVENT, kind: "question" },
-        "req-3": { childContinuationToken: "child-c", kind: "other" },
-        "req-4": { childContinuationToken: "child-d", event: REQUEST_EVENT, kind: "question" },
+      "eve.runtime.hitl.requests": {
+        relays: {
+          "req-1": 42,
+          "req-2": { childContinuationToken: 42, event: REQUEST_EVENT, kind: "question" },
+          "req-3": { childContinuationToken: "child-c", kind: "other" },
+          "req-4": { childContinuationToken: "child-d", event: REQUEST_EVENT, kind: "question" },
+        },
       },
     });
     const entries = readHitlState(session.state).relays;
@@ -296,20 +298,22 @@ describe("getProxyInputRequests type safety", () => {
 
   it("ignores a legacy array-shaped value", () => {
     const session = createSession({
-      "eve.runtime.proxyInputRequests": [{ requestId: "req-1" }],
+      "eve.runtime.hitl.requests": { relays: [{ requestId: "req-1" }] },
     });
     expect(readHitlState(session.state).relays.size).toBe(0);
   });
 
   it("keeps legacy routes and ignores malformed optional batch metadata", () => {
     const session = createSession({
-      "eve.runtime.proxyInputRequests": {
-        legacy: { childContinuationToken: "child-a", event: REQUEST_EVENT, kind: "question" },
-        malformed: {
-          batch: { approvalRequestIds: ["other"], requestIds: ["malformed"] },
-          childContinuationToken: "child-a",
-          event: REQUEST_EVENT,
-          kind: "tool-approval",
+      "eve.runtime.hitl.requests": {
+        relays: {
+          legacy: { childContinuationToken: "child-a", event: REQUEST_EVENT, kind: "question" },
+          malformed: {
+            batch: { approvalRequestIds: ["other"], requestIds: ["malformed"] },
+            childContinuationToken: "child-a",
+            event: REQUEST_EVENT,
+            kind: "tool-approval",
+          },
         },
       },
     });

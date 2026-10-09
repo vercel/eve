@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { SessionStateMap } from "#harness/types.js";
-import { holdsHitlRequests, readHitlState, writeHitlState } from "./session-state.js";
+import {
+  discardClearedHitlState,
+  holdsHitlRequests,
+  readHitlState,
+  writeHitlState,
+} from "./session-state.js";
 import { type ProxyInputRequest } from "./relays.js";
 
 const EVENT = { sequence: 1, stepIndex: 0, turnId: "turn_1" };
@@ -39,6 +44,7 @@ describe("writeHitlState", () => {
       },
       signIns: [signIn("github", "a-1")],
     });
+    expect(Object.keys(state ?? {})).toEqual(["eve.runtime.hitl.requests"]);
     const hitl = readHitlState(state);
     expect(hitl.signIns.map((challenge) => challenge.attemptId)).toEqual(["a-1"]);
     expect([...hitl.relays.keys()]).toEqual(["q-1"]);
@@ -101,6 +107,12 @@ describe("holdsHitlRequests", () => {
   it("is false for a session with no sign-in or relay records", () => {
     expect(holdsHitlRequests(undefined)).toBe(false);
     expect(holdsHitlRequests({ "eve.unrelated": true })).toBe(false);
+    expect(holdsHitlRequests({ "eve.runtime.hitl.requests": { approvals: {} } })).toBe(false);
+  });
+
+  it("is true for a requests record it can't read", () => {
+    expect(holdsHitlRequests({ "eve.runtime.hitl.requests": [] })).toBe(true);
+    expect(holdsHitlRequests({ "eve.runtime.hitl.requests": { relays: 42 } })).toBe(true);
   });
 
   it("is true for a pending sign-in or relayed request", () => {
@@ -111,5 +123,23 @@ describe("holdsHitlRequests", () => {
       },
     });
     expect(holdsHitlRequests(relayed)).toBe(true);
+  });
+});
+
+describe("discardClearedHitlState", () => {
+  it("drops approvals and sign-ins and keeps relayed requests", () => {
+    const state = save(
+      { "eve.runtime.hitl.requests": { approvals: { activeCandidates: {} } } },
+      {
+        relays: {
+          upsert: { entries: [["q-1", route("child")]], forChildContinuationToken: "child" },
+        },
+        signIns: [signIn("github", "a-1")],
+      },
+    );
+    const cleared = discardClearedHitlState({ state } as Parameters<
+      typeof discardClearedHitlState
+    >[0]).state;
+    expect(cleared).toEqual({ "eve.runtime.hitl.requests": { relays: { "q-1": route("child") } } });
   });
 });
