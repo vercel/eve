@@ -180,9 +180,11 @@ export default defineAgent({
 
 `ttl` is `"5m"` (the default) or `"1h"`, and applies to every breakpoint in
 the request. Anthropic bills a 1-hour cache write at 2x the base input price,
-compared with 1.25x for a 5-minute write, so `"1h"` pays off when turns are
-often more than five minutes apart. Use `promptCache: { anthropic: {} }` to
-turn breakpoints on with the default lifetime.
+compared with 1.25x for a 5-minute write, so `"1h"` pays off when turns often
+land between five minutes and an hour apart. Past an hour, the entry has expired
+either way. Only some Claude models accept a 1-hour TTL, so check that yours
+does on the provider you call. Use `promptCache: { anthropic: {} }` to turn
+breakpoints on with the default lifetime.
 
 `promptCache` applies only to models eve calls directly. eve rejects it on an
 AI Gateway model, at build time for a static model and when a dynamic resolver

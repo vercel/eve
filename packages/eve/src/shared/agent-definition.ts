@@ -33,8 +33,8 @@ export interface AgentPromptCacheDefinition {
 export interface AgentAnthropicPromptCacheDefinition {
   /**
    * How long each breakpoint's cache entry lives: `"5m"` (the default) or `"1h"`. A 1-hour write
-   * costs more than a 5-minute one, so `"1h"` pays off when turns are often more than five
-   * minutes apart.
+   * costs more than a 5-minute one, so `"1h"` pays off when turns often land between five minutes
+   * and an hour apart. Only some Claude models accept a 1-hour TTL.
    */
   readonly ttl?: AnthropicPromptCacheTtl;
 }

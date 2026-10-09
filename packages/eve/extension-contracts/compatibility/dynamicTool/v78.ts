@@ -1,7 +1,8 @@
 import { defineDynamic, defineTool } from "#public/tools/index.js";
 
-// Epoch 79 adds an optional `promptCache` to the resolver context's model
-// reference. A dynamic tool that reads only the model id is unaffected.
+// Epoch 79 adds an optional `promptCache` to the `modelOptions` a dynamic model
+// selection can return, which reaches this capability through `auto`'s result
+// type. Dynamic tools don't return model selections.
 export default defineDynamic({
   events: {
     "turn.started": (_event, ctx) => ({
