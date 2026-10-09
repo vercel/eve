@@ -46,7 +46,7 @@ export const evalLifecycleReporter: EvalReporter = {
   },
 };
 
-/** Proves `t.score` results keep the raw score and report the rule separately. */
+/** Checks that `t.score` results keep the score and report the rule separately. */
 function assertScoreContract(result: EveEvalResult): void {
   const brevity = result.assertions.find((assertion) => assertion.key === "reply-brevity");
   const ping = result.assertions.find((assertion) => assertion.key === "mentions-ping");

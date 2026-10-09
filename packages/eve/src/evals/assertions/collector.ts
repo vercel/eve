@@ -12,7 +12,7 @@ import type { EveEvalAssertionSubject } from "#evals/assertions/run.js";
 
 export type AssertionOutcome = AssertionEvaluation;
 
-/** A raw score or rich evaluation accepted by `t.score`, possibly still pending. */
+/** A score or evaluation accepted by `t.score`, possibly still pending. */
 export type ScoreInput = number | AssertionOutcome | Promise<number | AssertionOutcome>;
 
 /**
@@ -33,7 +33,7 @@ interface MutableEntry {
   readonly kind: "deferred" | "resolved";
   readonly spec?: RunAssertion;
   readonly selectSubject?: (result: EveEvalTaskResult) => EveEvalAssertionSubject;
-  /** Raw measurement once produced; stays `undefined` when the scorer threw. */
+  /** The measurement once produced; stays `undefined` when the scorer threw. */
   score: number | undefined;
   message?: string;
   metadata?: Readonly<Record<string, unknown>>;
@@ -87,7 +87,7 @@ export class AssertionCollector {
     return makeHandle(entry);
   }
 
-  /** Record a raw score. It has no verdict unless the handle chains `.gate()` or `.atLeast()`. */
+  /** Record a score. It has no verdict unless the handle chains `.gate()` or `.atLeast()`. */
   recordScore(evaluation: ScoreInput): AssertionHandle {
     return this.recordValue({
       name: "score",
@@ -182,8 +182,8 @@ function ruleThreshold(entry: MutableEntry): number | undefined {
 }
 
 /**
- * Verdict of the entry's acceptance rule. A thrown scorer never passes; an
- * entry without a rule (soft, no threshold) is tracked only and has no verdict.
+ * Verdict of the entry's rule. A thrown scorer fails; an entry without a rule
+ * (soft, no threshold) has no verdict.
  */
 function computePassed(entry: MutableEntry): boolean | undefined {
   if (entry.errored) return false;

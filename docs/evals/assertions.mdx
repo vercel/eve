@@ -85,7 +85,7 @@ Pick the cheapest builder that captures what "correct" means. When exact match i
 
 ## Scores with `t.score`
 
-`t.score(evaluation)` records a measurement you computed yourself, from code or from your own model call, without wrapping it in an assertion. The evaluation is a number or `{ score, message?, metadata? }`, or a promise of either. Chain `.label(key)` to name it: reporters and artifacts expose the label as `key`, so a results store can compare runs without parsing display names. Without a label the score reports as `score`, and several unlabeled scores share that name.
+`t.score(evaluation)` records a score. The evaluation is a number or `{ score, message?, metadata? }`, or a promise of either. Chain `.label(key)` to name it; reporters and artifacts expose the label as `key`. Without a label the score reports as `score`, and several unlabeled scores share that name.
 
 ```ts
 const reply = turn.message ?? "";
@@ -93,19 +93,19 @@ t.score({
   score: Math.max(0, 1 - reply.length / 400),
   metadata: { length: reply.length },
 }).label("reply-brevity");
-t.score(gradeFaithfulness(reply, reference)).label("faithfulness"); // your own async evaluator
+t.score(gradeFaithfulness(reply, reference)).label("faithfulness"); // async
 ```
 
-Without a rule, a score has no verdict: it lands in reports and artifacts, and the eval's outcome does not depend on it. Chain a rule to make the measurement decide:
+On its own a score has no verdict and does not affect the eval's outcome. Chain a rule when it should:
 
 ```ts
 t.score(gradeFaithfulness(reply, reference)).label("faithfulness").gate(0.9); // fails below 0.9
 t.score(brevity).label("reply-brevity").atLeast(0.5); // marks the eval `scored`, fatal under --strict
 ```
 
-The rule never rewrites the measurement. A `0.82` gated at `0.9` is reported as `score: 0.82`, `threshold: 0.9`, `passed: false`. An evaluator that throws or returns a non-finite number records an errored outcome with the error message and no score, and fails the eval.
+The score is reported as measured. A `0.82` gated at `0.9` is reported as `score: 0.82`, `threshold: 0.9`, `passed: false`. An evaluator that throws or returns a non-finite number records an errored outcome with the error message and no score, and fails the eval.
 
-Read the plain score back by `key` from `result.assertions`, which every [reporter](./reporters#custom-reporters) receives in `onEvalComplete`:
+Every [reporter](./reporters#custom-reporters) receives the entries in `onEvalComplete` and can read them by `key`:
 
 ```ts
 onEvalComplete(result) {
@@ -128,7 +128,7 @@ The same entries land in the [run artifacts](./running#artifacts) under `.eve/ev
 }
 ```
 
-`threshold` and `passed` appear only once a rule is chained, so a consumer can tell a measurement from a decision without reading the eval source.
+`threshold` and `passed` are present only when a rule was chained.
 
 ## The matcher mini-language
 
@@ -211,9 +211,9 @@ const request = session.requireInputRequest({ toolName: "guarded" });
 Every assertion returns a chainable handle. Severity rides on the assertion, so there is no separate thresholds map to keep in sync.
 
 - `.gate(threshold?)` is hard. A miss marks the eval `failed` and `eve eval` exits non-zero.
-- `.soft(threshold?)` is tracked data. A below-threshold miss marks the eval `scored`, fatal only under `--strict`. With no threshold, it is tracked only: it records no verdict and never fails.
+- `.soft(threshold?)` is tracked data. A below-threshold miss marks the eval `scored`, fatal only under `--strict`. With no threshold it records no verdict and never fails.
 - `.atLeast(threshold)` is soft with a bar (equivalent to `.soft(threshold)`).
-- `.label(key)` adds a stable name when an eval records several assertions from the same family. Reporters and artifacts expose it as `key`. Reporters keep one score per name, the lowest, so `eve eval` warns under an eval that records the same name more than once with different scores.
+- `.label(key)` adds a stable name when an eval records several assertions from the same family. Reporters and artifacts expose it as `key`. Reporters keep one score per name, so `eve eval` warns when an eval records the same name more than once with different scores.
 
 The defaults are chosen so you rarely set severity. Run-level methods and `includes`/`equals`/`matches` are gates; `similarity` and every `t.judge(...)` assertion are soft. Annotate only when you deviate:
 

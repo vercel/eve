@@ -97,7 +97,7 @@ interface EvalReporter {
 - `onSessionStart` fires once for each session after eve receives its first trace context. It includes `sessionId`, `primary`, and `traceContext` with `traceId`, `spanId`, and `traceFlags`.
 - `onEvalComplete` fires with the checks, scores, and verdict. The runner also supplies `context`, including every distinct trace context collected across the eval's sessions. The same list is available as `result.result.traceContexts`.
 
-Each entry in `result.assertions` is an `AssertionResult`. `name` is the display label, `key` the stable identifier set by `.label(key)`, and `score` the raw measurement. `threshold` and `passed` describe the acceptance rule and are absent when the entry is tracked only, so persist them as-is. When a scorer threw, `errored` is `true`, `message` carries the error, and `score` is absent. The `.eve/evals/` artifacts write the same fields.
+Each entry in `result.assertions` is an `AssertionResult`. `name` is the display label, `key` the identifier set by `.label(key)`, and `score` the measurement. `threshold` and `passed` describe the rule and are absent when no rule applies. When a scorer threw, `errored` is `true`, `message` carries the error, and `score` is absent. The `.eve/evals/` artifacts write the same fields.
 
 An eval can create several sessions, and a long session can produce several traces, so completion exposes a list instead of a single trace id. `onEvalStart` does not include a trace because the agent session has not started yet. If the target has no tracing configured, `onSessionStart` does not fire and the completed trace list is empty.
 

@@ -239,17 +239,17 @@ export interface AssertionHandle {
 }
 
 /**
- * The recorded outcome of one assertion or `t.score` measurement, consumed by
- * the verdict, reporters, and artifacts. `score` is the raw measurement and is
- * never rewritten by a rule; `threshold` and `passed` describe the acceptance
- * rule and are absent when none applies. A boolean assertion has `score` 0 or 1.
+ * The recorded outcome of one assertion or `t.score`, consumed by the verdict,
+ * reporters, and artifacts. `score` is the measurement and a rule does not
+ * change it; `threshold` and `passed` describe the rule and are absent when
+ * none applies. A boolean assertion has `score` 0 or 1.
  */
 export interface AssertionResult {
   /** Display name, e.g. `judge.boolean [citation]`. */
   readonly name: string;
   /** Stable identifier set by `.label(key)`; absent for unlabeled assertions. */
   readonly key?: string;
-  /** Raw measurement; absent when the scorer threw. */
+  /** The measurement; absent when the scorer threw. */
   readonly score?: number;
   readonly severity: AssertionSeverity;
   /** Effective minimum passing score (a gate defaults to 1); absent when no rule applies. */
@@ -509,10 +509,9 @@ export interface EveEvalContext<TContext = unknown> extends EveEvalAssertions {
   /** Apply a value-level assertion (from `eve/evals/expect`) to a value. */
   check(value: unknown, assertion: Assertion): AssertionHandle;
   /**
-   * Record a raw score you computed yourself. Chain `.label(key)` to name it
-   * for reporters and stores. On its own the score never passes or fails the
-   * eval. Chain `.gate(0.9)` to fail the eval below 0.9, or `.atLeast(0.9)` to
-   * mark it `scored`. The score itself is never rewritten.
+   * Record a score. Chain `.label(key)` to name it, `.gate(0.9)` to fail the
+   * eval below 0.9, or `.atLeast(0.9)` to mark it `scored`. Without a rule the
+   * score has no verdict.
    */
   score(
     evaluation: number | AssertionEvaluation | Promise<number | AssertionEvaluation>,

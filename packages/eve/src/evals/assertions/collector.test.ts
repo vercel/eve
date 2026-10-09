@@ -17,7 +17,7 @@ function taskResult(): EveEvalTaskResult {
 }
 
 describe("AssertionCollector.recordScore", () => {
-  it("records a bare measurement with no verdict and never fails the eval", async () => {
+  it("records a score with no verdict that does not affect the eval", async () => {
     const collector = new AssertionCollector();
     collector.recordScore(0.82).label("fidelity");
     collector
@@ -51,7 +51,7 @@ describe("AssertionCollector.recordScore", () => {
     expect(computeEvalVerdict({ assertions })).toBe("passed");
   });
 
-  it("keeps the raw score when a gate threshold fails", async () => {
+  it("keeps the score when a gate threshold fails", async () => {
     const collector = new AssertionCollector();
     collector.recordScore(Promise.resolve(0.82)).label("fidelity").gate(0.9);
 
