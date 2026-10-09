@@ -97,6 +97,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
         runtimeIdentity: config.runtimeIdentity,
         session: step.session,
         telemetry: step.instrumentation?.telemetry(),
+        traceContextHeaders: step.instrumentation?.gatewayTraceContextHeaders,
       });
       step.session = compacted.session;
       if (compacted.failure !== undefined) throw compacted.failure.error;
@@ -153,6 +154,7 @@ export async function maybeCompact(input: {
   readonly runtimeIdentity?: ToolLoopHarnessConfig["runtimeIdentity"];
   readonly session: HarnessSession;
   readonly telemetry?: TelemetryOptions;
+  readonly traceContextHeaders?: () => Record<string, string> | undefined;
 }): Promise<{
   readonly compacted: boolean;
   /** The summary failed; `session` still counts the summary calls that finished. */
@@ -197,7 +199,7 @@ export async function maybeCompact(input: {
   const call = {
     abortSignal: input.abortSignal,
     headers: buildGatewayAttributionHeaders(profile, input.runtimeIdentity),
-    model: withGatewayTraceContext(model, profile),
+    model: withGatewayTraceContext(model, profile, input.traceContextHeaders),
     providerOptions,
     telemetry: input.telemetry && { ...input.telemetry, functionId: "eve.compaction" },
   };

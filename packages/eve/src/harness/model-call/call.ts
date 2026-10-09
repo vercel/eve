@@ -269,6 +269,7 @@ export class ModelCaller {
         runtimeIdentity: config.runtimeIdentity,
         session: step.session,
         telemetry: step.instrumentation?.telemetry(),
+        traceContextHeaders: step.instrumentation?.gatewayTraceContextHeaders,
       });
       if (compaction.failure !== undefined) throw compaction.failure.error;
     } catch (error) {
@@ -344,7 +345,11 @@ export class ModelCaller {
     const settings = {
       headers: this.attributionHeaders,
       instructions,
-      model: withGatewayTraceContext(model, this.profile),
+      model: withGatewayTraceContext(
+        model,
+        this.profile,
+        this.step.instrumentation?.gatewayTraceContextHeaders,
+      ),
       onLanguageModelCallEnd: (event: LanguageModelCallEndEvent) => {
         if (generation.interrupted) return;
         this.interruptedUsage = extractTokenUsageDelta({

@@ -17,6 +17,7 @@ import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { withGatewayTraceContext } from "#harness/model-call/model.js";
 import { resolveModelProfile } from "#harness/model-profile.js";
+import { createGatewayTraceContextHeaders } from "#tracing/gateway-trace-context.js";
 import { suppressTracing } from "#tracing/suppress-tracing.js";
 
 const TRACE_ID = "1".repeat(32);
@@ -54,6 +55,7 @@ describe("Gateway trace propagation", () => {
     const tracedModel = withGatewayTraceContext(
       model,
       resolveModelProfile(model),
+      createGatewayTraceContextHeaders,
     ) as LanguageModelV4;
     const callOptions: LanguageModelV4CallOptions = {
       headers: { "x-eve-test": "preserved" },
@@ -107,6 +109,7 @@ describe("Gateway trace propagation", () => {
     const tracedModel = withGatewayTraceContext(
       model,
       resolveModelProfile(model),
+      createGatewayTraceContextHeaders,
     ) as LanguageModelV4;
     const activeContext = apiTrace.setSpan(
       ROOT_CONTEXT,
@@ -134,6 +137,7 @@ describe("Gateway trace propagation", () => {
     const model = withGatewayTraceContext(
       "anthropic/claude-sonnet-4-5",
       resolveModelProfile("anthropic/claude-sonnet-4-5"),
+      createGatewayTraceContextHeaders,
     );
 
     expect(typeof model).not.toBe("string");
@@ -146,13 +150,18 @@ describe("Gateway trace propagation", () => {
       languageModel: vi.fn(() => directModel),
     });
 
-    expect(withGatewayTraceContext(directModel, resolveModelProfile(directModel))).toBe(
-      directModel,
-    );
+    expect(
+      withGatewayTraceContext(
+        directModel,
+        resolveModelProfile(directModel),
+        createGatewayTraceContextHeaders,
+      ),
+    ).toBe(directModel);
     expect(
       withGatewayTraceContext(
         "anthropic/claude-sonnet-4-5",
         resolveModelProfile("anthropic/claude-sonnet-4-5"),
+        createGatewayTraceContextHeaders,
       ),
     ).toBe("anthropic/claude-sonnet-4-5");
   });

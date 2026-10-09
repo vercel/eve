@@ -6,16 +6,6 @@ import { contextStorage } from "#context/container.js";
 import { getEffectiveModelSelection } from "#context/effective-model.js";
 import type { ModelProfile } from "#harness/model-profile.js";
 import { appendPackageUserAgent } from "#internal/user-agent.js";
-import { createGatewayTraceContextHeaders } from "#tracing/gateway-trace-context.js";
-
-const gatewayTraceContextMiddleware: LanguageModelMiddleware = {
-  async transformParams({ params }) {
-    const traceHeaders = createGatewayTraceContextHeaders();
-    return traceHeaders === undefined
-      ? params
-      : { ...params, headers: { ...params.headers, ...traceHeaders } };
-  },
-};
 
 /**
  * Builds AI Gateway app attribution headers, including eve's User-Agent product token, for a
@@ -41,13 +31,22 @@ export function buildGatewayAttributionHeaders(
 export function withGatewayTraceContext(
   model: LanguageModel,
   profile: ModelProfile,
+  createTraceContextHeaders?: () => Record<string, string> | undefined,
 ): LanguageModel {
-  if (!profile.gateway) return model;
+  if (!profile.gateway || createTraceContextHeaders === undefined) return model;
   const provider = globalThis.AI_SDK_DEFAULT_PROVIDER ?? gateway;
   if (typeof model === "string" && typeof provider.languageModel !== "function") return model;
   const gatewayModel = typeof model === "string" ? provider.languageModel(model) : model;
   if (gatewayModel.provider.split(".")[0] !== "gateway") return model;
-  return wrapLanguageModel({ model: gatewayModel, middleware: gatewayTraceContextMiddleware });
+  const middleware: LanguageModelMiddleware = {
+    async transformParams({ params }) {
+      const traceHeaders = createTraceContextHeaders();
+      return traceHeaders === undefined
+        ? params
+        : { ...params, headers: { ...params.headers, ...traceHeaders } };
+    },
+  };
+  return wrapLanguageModel({ model: gatewayModel, middleware });
 }
 
 export async function resolveEffectiveRuntimeModel(input: {
