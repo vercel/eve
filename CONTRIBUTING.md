@@ -71,6 +71,17 @@ pnpm test:e2e           # fixture-owned eve eval suites
 pnpm test:tui           # TUI smoke scripts (not e2e)
 ```
 
+You can test a packaged build of `eve` without changing your checkout. Packages
+are published for commits and pull requests at `pkg.eve.dev`. To run the CLI
+build for a pull request, use its PR number in the URL:
+
+```bash
+pnpm dlx https://pkg.eve.dev/pr/<pull-request-id>/eve.tgz dev
+```
+
+Replace `<pull-request-id>` with the pull request number, then append the `eve`
+command and arguments you want to run.
+
 E2E tests are fixture-owned evals. Run them from the fixture directory:
 
 ```bash
