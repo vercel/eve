@@ -172,9 +172,7 @@ export default defineAgent({
 });
 ```
 
-A 1-hour write costs 2x base input versus 1.25x for 5 minutes, so it pays off
-when turns are often 5–60 minutes apart. Not every Claude model supports it.
-eve rejects `promptCache` on Gateway models; use `providerOptions.gateway.caching`
+Not every Claude model supports a 1-hour cache. eve rejects `promptCache` on Gateway models; use `providerOptions.gateway.caching`
 instead.
 
 ## Compaction
