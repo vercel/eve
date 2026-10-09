@@ -4,6 +4,8 @@ import { Client } from "#client/client.js";
 import type { CreatedClientSession, CreatedIdleClientSession } from "#client/sessions.js";
 import type { SendTurnInput } from "#client/types.js";
 import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/message.js";
+import type { SessionEvent } from "#protocol/session-event.js";
+import { encodeTestLine } from "#internal/testing/events.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -32,9 +34,31 @@ describe("Client.sessions", () => {
   });
 
   it("returns structured output when fetch instrumentation clones the live stream", async () => {
-    const events = [
-      { type: "result.completed", data: { result: { answer: "child-result" } } },
-      { type: "session.waiting", data: { wait: "next-user-message" } },
+    const scope = { runId: "run_0", turnId: "turn_0" };
+    const events: SessionEvent[] = [
+      {
+        data: { cause: { deliveryId: "delivery_0" }, follows: null, turnId: "turn_0" },
+        scope: { turnId: "turn_0" },
+        type: "turn.started",
+      },
+      { data: { owner: { turnId: "turn_0" }, runId: "run_0" }, scope, type: "model.requested" },
+      {
+        data: {
+          kind: "result",
+          partId: "part_0",
+          phase: "reply",
+          runId: "run_0",
+          value: { answer: "child-result" },
+        },
+        scope,
+        type: "content.completed",
+      },
+      { data: { outcome: "completed", runId: "run_0" }, scope, type: "model.settled" },
+      {
+        data: { outcome: "completed", reply: ["part_0"], turnId: "turn_0" },
+        scope: { turnId: "turn_0" },
+        type: "turn.settled",
+      },
     ];
     let source: ReadableStreamDefaultController<Uint8Array> | undefined;
     let streamSignal: AbortSignal | undefined;
@@ -48,11 +72,7 @@ describe("Client.sessions", () => {
         new ReadableStream<Uint8Array>({
           start(controller) {
             source = controller;
-            controller.enqueue(
-              new TextEncoder().encode(
-                events.map((event) => JSON.stringify(event)).join("\n") + "\n",
-              ),
-            );
+            controller.enqueue(new TextEncoder().encode(events.map(encodeTestLine).join("")));
             streamSignal?.addEventListener("abort", () => controller.error(streamSignal?.reason));
           },
         }),
@@ -74,7 +94,7 @@ describe("Client.sessions", () => {
     try {
       await vi.waitFor(() => expect(settled).toHaveBeenCalledOnce());
       expect(settled).toHaveBeenCalledWith(
-        expect.objectContaining({ data: { answer: "child-result" }, status: "waiting" }),
+        expect.objectContaining({ data: { answer: "child-result" }, status: "completed" }),
       );
       expect(streamSignal?.aborted).toBe(true);
       expect(session.state.streamIndex).toBe(events.length);
@@ -97,10 +117,8 @@ describe("Client.sessions", () => {
       .mockImplementationOnce(async (request) => {
         requests.push({ url: String(request) });
         return new Response(
-          `${JSON.stringify({ data: { reason: "completed" }, type: "session.completed" })}\n`,
-          {
-            headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
-          },
+          encodeTestLine({ data: { outcome: "completed" }, type: "session.ended" }),
+          { headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION } },
         );
       });
     const client = new Client({ host: "https://eve.test" });

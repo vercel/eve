@@ -238,3 +238,49 @@ export function encodeTestLine(event: SessionEvent): string {
     .map((line) => `${JSON.stringify(line)}\n`)
     .join("");
 }
+
+/**
+ * One turn's facts as a session writes them: its deliveries admitted, consumed, answered with
+ * `message` in one model run, and settled. For client tests that read a stream.
+ */
+export function testTurnFacts(sequence: number, message: string, deliveryIds: readonly string[]): SessionEvent[] {
+  const turnId = `turn_${sequence}`;
+  const runId = `run_${sequence}`;
+  const partId = `part_${sequence}`;
+  const scope = { turnId };
+  return [
+    ...deliveryIds.map(
+      (deliveryId): SessionEvent => ({ data: { deliveryId }, type: "delivery.admitted" }),
+    ),
+    {
+      data: {
+        cause: { deliveryId: deliveryIds[0] ?? "none" },
+        follows: sequence === 0 ? null : `turn_${sequence - 1}`,
+        turnId,
+      },
+      scope,
+      type: "turn.started",
+    },
+    ...deliveryIds.map(
+      (deliveryId): SessionEvent => ({
+        data: { deliveryId, parts: [{ kind: "text", text: message.toLowerCase() }], turnId },
+        scope,
+        type: "delivery.consumed",
+      }),
+    ),
+    { data: { owner: { turnId }, runId }, scope: { runId, turnId }, type: "model.requested" },
+    {
+      data: { kind: "text", partId, phase: "reply", runId, value: message },
+      scope: { runId, turnId },
+      type: "content.completed",
+    },
+    { data: { outcome: "completed", runId }, scope: { runId, turnId }, type: "model.settled" },
+    { data: { outcome: "completed", reply: [partId], turnId }, scope, type: "turn.settled" },
+    ...deliveryIds.map(
+      (deliveryId): SessionEvent => ({
+        data: { deliveryId, outcome: "handled", turnId },
+        type: "delivery.settled",
+      }),
+    ),
+  ];
+}
