@@ -65,6 +65,11 @@ describe("resolveModelProfile", () => {
       model("google.generative-ai", "models/gemini-2.5-pro"),
       { ...direct, googleSearchDropsTools: true, provider: "google" },
     ],
+    [
+      "Gemini Robotics-ER 1.5, which the SDK treats as pre-Gemini 2",
+      "google/gemini-robotics-er-1.5-preview",
+      { ...direct, gateway: true, googleSearchDropsTools: true, provider: "google" },
+    ],
     ["a provider-less test double", {} as LanguageModel, { ...direct, provider: "" }],
   ])("describes %s", (_, input, expected) => {
     expect(resolveModelProfile(input)).toEqual(expected);

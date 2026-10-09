@@ -54,7 +54,8 @@ export function resolveModelProfile(model: LanguageModel): ModelProfile {
 }
 
 // Mirrors the Gemini generations `@ai-sdk/google` treats as pre-Gemini 3.
-const PRE_GEMINI_3_MODEL = /(^|\/)gemini-(?:[12](?:[.-]|$)|pro(?:-vision)?$)/i;
+const PRE_GEMINI_3_MODEL =
+  /(^|\/)gemini-(?:[12](?:[.-]|$)|pro(?:-vision)?$|robotics-er-1\.5(?:[.-]|$))/i;
 
 /** A test double may omit `provider` or `modelId`; it reads as a direct model with no known provider. */
 function lowerCaseOrEmpty(value: unknown): string {
