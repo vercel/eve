@@ -56,6 +56,18 @@
     }
   },
   "exports": {
+    "./world-hub": {
+      "eve-source": "./src/public/world-hub/index.ts",
+      "types": "./dist/src/public/world-hub/index.d.ts",
+      "import": "./dist/src/public/world-hub/index.js",
+      "default": "./dist/src/public/world-hub/index.js"
+    },
+    "./world-hub/server": {
+      "eve-source": "./src/public/world-hub/server.ts",
+      "types": "./dist/src/public/world-hub/server.d.ts",
+      "import": "./dist/src/public/world-hub/server.js",
+      "default": "./dist/src/public/world-hub/server.js"
+    },
     ".": {
       "types": "./dist/src/index.d.ts",
       "import": "./dist/src/index.js",

@@ -1,6 +1,10 @@
 import type { DevelopmentGenerationAvailability } from "#internal/workflow/development-runtime-compatibility.js";
 import type { AgentWorkflowWorldDefinition } from "#shared/agent-definition.js";
-import { resolveWorkflowWorldImport } from "#internal/workflow/world-target.js";
+import {
+  resolveConfiguredWorkflowWorld,
+  resolveWorkflowWorldImport,
+} from "#internal/workflow/world-target.js";
+import type { WorldOperation } from "#internal/workflow/world-protocol.js";
 
 export const DEVELOPMENT_WORKFLOW_WORLD_ROUTE = "/eve/v1/dev/internal/workflow-world";
 
@@ -15,7 +19,10 @@ export const DEVELOPMENT_WORKFLOW_WORLD_ROUTE = "/eve/v1/dev/internal/workflow-w
 export function usesParentDevelopmentWorkflowWorld(
   configuredWorld: AgentWorkflowWorldDefinition | undefined,
 ): boolean {
-  return resolveWorkflowWorldImport(configuredWorld ?? "local") === "@workflow/world-local";
+  return (
+    resolveWorkflowWorldImport(resolveConfiguredWorkflowWorld(configuredWorld) ?? "local") ===
+    "@workflow/world-local"
+  );
 }
 export const DEVELOPMENT_WORKFLOW_SECRET_ENV = "EVE_DEV_WORKFLOW_TRANSPORT_SECRET";
 export const DEVELOPMENT_WORKER_APP_ROOT_ENV = "EVE_DEV_WORKER_APP_ROOT";
@@ -31,6 +38,13 @@ export const DEVELOPMENT_WORKFLOW_DELIVERY_HEADER = "x-eve-dev-workflow-delivery
  * members NOT listed are the deliberate exceptions — `streams.get` returns
  * a live stream over its own route, `createQueueHandler` runs entirely in
  * the worker, and `start`/`close` belong to the parent's lifecycle.
+ *
+ * Only operations `@workflow/world-local` implements belong here. The
+ * client defines a forwarder for every entry and the workflow runtime
+ * feature-detects optional ones (`typeof world.events.createBatch`), so an
+ * entry the parent lacks would be called and answer `undefined`. The
+ * world-hub transport forwards the wider `WORLD_OPERATIONS`, filtered by
+ * what its server advertises.
  */
 export const DEVELOPMENT_WORLD_OPERATIONS = [
   "events.create",
@@ -54,7 +68,7 @@ export const DEVELOPMENT_WORLD_OPERATIONS = [
   "streams.list",
   "streams.write",
   "streams.writeMulti",
-] as const;
+] as const satisfies readonly WorldOperation[];
 
 export type DevelopmentWorldOperation = (typeof DEVELOPMENT_WORLD_OPERATIONS)[number];
 

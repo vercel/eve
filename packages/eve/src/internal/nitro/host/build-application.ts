@@ -1,3 +1,4 @@
+import { usesHubWorkflowWorld } from "#internal/workflow/world-target.js";
 import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
@@ -362,7 +363,12 @@ async function buildApplicationInWorkspace(
     await buildNitroOutput(nitro, profiler, "nitro");
     if (isVercelBuild) {
       await measureBuildPhase(profiler, "vercel.workflow-function.materialize", () =>
-        materializeVercelWorkflowFunctionOutput(workspace.publication.output.stagedDir),
+        materializeVercelWorkflowFunctionOutput(
+          workspace.publication.output.stagedDir,
+          usesHubWorkflowWorld(
+            preparedHost.compileResult.manifest.config.experimental?.workflow?.world,
+          ),
+        ),
       );
     }
     if (servicePrefix !== undefined) {

@@ -1,3 +1,7 @@
+import {
+  resolveConfiguredWorkflowWorld,
+  usesHubWorkflowWorld,
+} from "#internal/workflow/world-target.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 
@@ -391,6 +395,17 @@ export async function configureDevelopmentNitroRoutes(
       workflowRoute,
     );
   }
+  if (
+    usesHubWorkflowWorld(preparedHost.compileResult.manifest.config.experimental?.workflow?.world)
+  ) {
+    await registerWorkflowRoute(
+      nitro,
+      preparedHost,
+      workflowBundlePath,
+      [createWorkflowDirectHandlerEntry(preparedHost, workflowBundlePath)],
+      "/eve/v1/workflow/dispatch",
+    );
+  }
   nitro.routing.sync();
 }
 
@@ -438,7 +453,9 @@ export async function configureProductionNitroRoutes(
 
   const workflowBundlePath = join(preparedHost.workflowBuildDir, "workflows.mjs");
   const hasConfiguredWorkflowWorld =
-    preparedHost.compileResult.manifest.config.experimental?.workflow?.world !== undefined;
+    resolveConfiguredWorkflowWorld(
+      preparedHost.compileResult.manifest.config.experimental?.workflow?.world,
+    ) !== undefined;
   const directHandlers =
     !isVercelBuildEnvironment() && hasConfiguredWorkflowWorld
       ? [createWorkflowDirectHandlerEntry(preparedHost, workflowBundlePath)]
@@ -454,5 +471,16 @@ export async function configureProductionNitroRoutes(
     );
   }
 
+  if (
+    usesHubWorkflowWorld(preparedHost.compileResult.manifest.config.experimental?.workflow?.world)
+  ) {
+    await registerWorkflowRoute(
+      nitro,
+      preparedHost,
+      workflowBundlePath,
+      [createWorkflowDirectHandlerEntry(preparedHost, workflowBundlePath)],
+      "/eve/v1/workflow/dispatch",
+    );
+  }
   nitro.routing.sync();
 }
