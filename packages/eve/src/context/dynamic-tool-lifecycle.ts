@@ -4,7 +4,6 @@ import { isFrameworkTool } from "#tools/provided/framework-tool.js";
 import { isWorkflowToolDefinition } from "#tools/workflow-definition.js";
 
 import { contextStorage, type AlsContext } from "#context/container.js";
-import type { ContextKey } from "#context/key.js";
 import {
   SessionIdKey,
   SessionDynamicToolMetadataKey,
@@ -20,16 +19,12 @@ import {
 } from "#context/dynamic-tool-metadata.js";
 import { buildResolveContext } from "#context/dynamic-resolve-context.js";
 import { createLogger } from "#internal/logging.js";
-import type {
-  SessionStartedStreamEvent,
-  StepStartedStreamEvent,
-  UnstampedMessageStreamEvent,
-} from "#protocol/message.js";
+import type { SessionStartedStreamEvent, StepStartedStreamEvent } from "#protocol/message.js";
 import { assertNotConnectionOwned } from "#connections/ownership.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { TOOL_SLUG_PATTERN, TOOL_SLUG_RULE } from "#discover/grammar.js";
 import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
-import { ALLOWED_DYNAMIC_TOOL_EVENTS } from "#dynamic/definition.js";
+import type { DynamicScopeEvent } from "#dynamic/definition.js";
 import { isBrandedToolEntry, type DynamicToolEntry } from "#tools/dynamic.js";
 import {
   hasUnregisteredDurableDynamicCallbacks,
@@ -82,21 +77,6 @@ function qualifyDynamicToolNames(
     }
     return { entry: entries[entryKey]!, entryKey, name };
   });
-}
-
-function durableKeyForEvent(
-  eventType: string,
-): ContextKey<readonly PersistedDynamicToolMetadata[]> | undefined {
-  switch (eventType) {
-    case "session.started":
-      return SessionDynamicToolMetadataKey;
-    case "turn.started":
-      return TurnDynamicToolMetadataKey;
-    case "step.started":
-      return StepDynamicToolMetadataKey;
-    default:
-      return undefined;
-  }
 }
 
 function readDynamicToolResult(
@@ -386,7 +366,7 @@ interface ResolvedDynamicToolEvent {
 async function resolveToolsFromEvent(
   ctx: AlsContext,
   resolvers: readonly ResolvedDynamicToolResolver[],
-  event: UnstampedMessageStreamEvent,
+  event: DynamicScopeEvent,
   messages: readonly ModelMessage[],
 ): Promise<ResolvedDynamicToolEvent> {
   const sessionId = ctx.require(SessionIdKey);
@@ -531,41 +511,35 @@ export async function preparePersistedStepDynamicToolMetadata(input: {
   });
 }
 
-export async function dispatchDynamicToolEvent(input: {
+/** Runs the dynamic tool resolvers for a session, a turn, or one model call. */
+export async function resolveDynamicTools(input: {
   readonly ctx: AlsContext;
   readonly resolvers: readonly ResolvedDynamicToolResolver[];
-  readonly event: UnstampedMessageStreamEvent;
+  readonly event: DynamicScopeEvent;
   readonly messages: readonly ModelMessage[];
 }): Promise<void> {
-  if (input.event.type === "session.completed") {
-    const sessionId = input.ctx.get(SessionIdKey);
-    if (sessionId !== undefined) clearDurableDynamicCallbacks(sessionId);
-    return;
-  }
-  if (!ALLOWED_DYNAMIC_TOOL_EVENTS.has(input.event.type)) return;
-  if (input.event.type === "step.started") {
-    await resolveStepDynamicTools({ ...input, event: input.event });
+  const { event } = input;
+  if (event.type === "step.started") {
+    await resolveStepDynamicTools({ ...input, event });
     return;
   }
 
-  if (input.event.type === "turn.started") input.ctx.set(StepDynamicToolMetadataKey, []);
-  const matching = input.resolvers.filter((resolver) =>
-    resolver.eventNames.includes(input.event.type),
-  );
+  if (event.type === "turn.started") input.ctx.set(StepDynamicToolMetadataKey, []);
+  const matching = input.resolvers.filter((resolver) => resolver.eventNames.includes(event.type));
   const { metadata } =
     matching.length === 0
       ? { metadata: [] }
-      : await resolveToolsFromEvent(input.ctx, matching, input.event, input.messages);
-  const durableKey = durableKeyForEvent(input.event.type);
-  if (durableKey === undefined) return;
+      : await resolveToolsFromEvent(input.ctx, matching, event, input.messages);
 
-  if (input.event.type === "session.started") {
+  if (event.type === "session.started") {
     input.ctx.set(SessionDynamicToolMetadataKey, metadata);
     return;
   }
   const slugs = new Set(matching.map((resolver) => resolver.slug));
-  const kept = (input.ctx.get(durableKey) ?? []).filter((entry) => !slugs.has(entry.resolverSlug));
-  input.ctx.set(durableKey, [...kept, ...metadata]);
+  const kept = (input.ctx.get(TurnDynamicToolMetadataKey) ?? []).filter(
+    (entry) => !slugs.has(entry.resolverSlug),
+  );
+  input.ctx.set(TurnDynamicToolMetadataKey, [...kept, ...metadata]);
 }
 
 /**
@@ -613,7 +587,7 @@ export async function refreshDynamicSessionToolsForRuntimeRevision(input: {
 /** Re-registers missing callbacks while preserving the active turn's persisted tool set. */
 export async function rebindMissingCompiledDynamicToolCallbacks(input: {
   readonly ctx: AlsContext;
-  readonly event: UnstampedMessageStreamEvent;
+  readonly event: DynamicScopeEvent;
   readonly messages: readonly ModelMessage[];
   readonly resolvers: readonly ResolvedDynamicToolResolver[];
 }): Promise<void> {
