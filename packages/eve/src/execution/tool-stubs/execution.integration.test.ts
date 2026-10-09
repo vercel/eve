@@ -1,8 +1,9 @@
 import { FatalError } from "#compiled/@workflow/errors/index.js";
 import { STUB_FAILURE_NAMESPACE, stubResponseNamespace } from "#tool-stubs/types.js";
 import { describe, expect, it, vi } from "vitest";
-import { getWorld, start } from "#internal/workflow/runtime.js";
+import { getWorld } from "#internal/workflow/runtime.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
+import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import { buildSerializedContext, handoffFollowUp } from "#internal/testing/entry-test-helpers.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import { workflowEntry } from "#execution/session/entry.js";
@@ -60,7 +61,7 @@ describe("tool replacement through the session runtime", () => {
         ],
       });
       await runtime.run(async () => {
-        const run = await start(workflowEntry, [
+        const run = await startSessionOwner(workflowEntry, [
           {
             kind: "initial",
             ownerDeploymentId: "dpl_inline",
@@ -135,7 +136,7 @@ describe("tool replacement through the session runtime", () => {
       });
       await runtime.run(async () => {
         const message = 'Run deploy_service with service "api"';
-        const run = await start(workflowEntry, [
+        const run = await startSessionOwner(workflowEntry, [
           {
             kind: "initial",
             ownerDeploymentId: "dpl_inline",
@@ -216,7 +217,7 @@ describe("tool replacement through the session runtime", () => {
         ],
       });
       await runtime.run(async () => {
-        const run = await start(workflowEntry, [
+        const run = await startSessionOwner(workflowEntry, [
           {
             kind: "initial",
             ownerDeploymentId: "dpl_inline",
@@ -300,7 +301,7 @@ describe("tool replacement through the session runtime", () => {
       ],
     });
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -355,7 +356,7 @@ describe("tool replacement through the session runtime", () => {
   it("replaces the whole agent tool without starting a remote or local agent", async () => {
     const runtime = await createTestRuntime();
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -410,7 +411,7 @@ describe("tool replacement through the session runtime", () => {
       ],
     });
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -491,7 +492,7 @@ describe("tool replacement through the session runtime", () => {
       ],
     });
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -557,7 +558,7 @@ describe("tool replacement through the session runtime", () => {
       toolName: "deploy_service",
     });
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",

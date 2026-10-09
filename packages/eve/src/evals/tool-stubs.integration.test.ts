@@ -7,12 +7,12 @@ import { createEvalTargetHandle } from "#evals/target.js";
 import { workflowEntry } from "#execution/session/entry.js";
 import { reportStubFailureStep } from "#execution/tool-stubs/steps.js";
 import { dispatchWorkflowSessionCommand } from "#execution/workflow-runtime.js";
-import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
+import { startSessionOwner, waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { buildSerializedContext, handoffFollowUp } from "#internal/testing/entry-test-helpers.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { failingDeployWorkflow } from "#internal/testing/workflow-tool-fixtures.js";
-import { start, type Run } from "#internal/workflow/runtime.js";
+import type { Run } from "#internal/workflow/runtime.js";
 import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/message.js";
 import { parseToolStubs } from "#tool-stubs/rules.js";
 import { STUB_CONTEXT_KEY } from "#tool-stubs/types.js";
@@ -61,7 +61,7 @@ it.each(["output processing", "failure reporting", "injected error"])(
         if (url.origin !== "https://eve.test") return await originalFetch(request, init);
         if (url.pathname === "/eve/v1/session") {
           const body = JSON.parse(String(init?.body));
-          run = await start(workflowEntry, [
+          run = await startSessionOwner(workflowEntry, [
             {
               kind: "initial",
               ownerDeploymentId: "dpl_inline",
