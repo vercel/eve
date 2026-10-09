@@ -2,7 +2,9 @@ import { createHash } from "node:crypto";
 
 import type { SessionAuthContext } from "#channel/types.js";
 import type { ModelProfile } from "#harness/model-profile.js";
+import type { HarnessSession } from "#harness/types.js";
 import { invocationOwnerKey } from "#internal/invocation/metadata.js";
+import { resolveConversationId } from "#shared/conversation-identity.js";
 import { mergeObjects } from "#shared/objects.js";
 
 /**
@@ -32,27 +34,30 @@ export function mergeProviderSafetyIdentifier(
 /** Composes the per-call defaults shared by model steps and compaction. */
 export function resolveCallProviderOptions(input: {
   readonly auth: SessionAuthContext | null;
-  readonly conversationId: string;
   readonly profile: ModelProfile;
   readonly providerOptions: Readonly<Record<string, unknown>> | undefined;
-  readonly sessionId: string;
+  readonly session: Pick<HarnessSession, "rootSessionId" | "sessionId">;
 }): Record<string, unknown> | undefined {
+  const { session } = input;
   const providerOptions = mergeProviderSafetyIdentifier(
     input.profile.provider,
     input.providerOptions,
     input.auth,
   );
   if (input.profile.gateway) {
-    return mergeGatewaySessionId(providerOptions, input.conversationId);
+    return mergeGatewaySessionId(
+      providerOptions,
+      resolveConversationId(session.rootSessionId ?? session.sessionId),
+    );
   }
   return input.profile.provider === "openai"
-    ? mergeOpenAIPromptCacheKey(providerOptions, input.sessionId)
+    ? mergeOpenAIPromptCacheKey(providerOptions, session.sessionId)
     : providerOptions;
 }
 
 /**
- * OpenAI routes requests that share a prompt prefix and cache key to the same cache, and matches
- * unreliably without a key. Each session keeps its own prefix, so its id makes the key. The hash
+ * OpenAI uses the cache key to route requests that share a prompt prefix toward the same cache,
+ * and matches less reliably without one. Each session keeps its own prefix, so its id makes the key. The hash
  * keeps the key short and opaque whatever the session id looks like.
  */
 function mergeOpenAIPromptCacheKey(

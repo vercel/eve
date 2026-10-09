@@ -49,7 +49,6 @@ import {
 import { getRequestEnvelopeTokens } from "#harness/request-envelope.js";
 import { idle } from "#harness/session-machine/transitions.js";
 import { resolveCallProviderOptions } from "#harness/provider-safety.js";
-import { resolveConversationId } from "#shared/conversation-identity.js";
 
 const log = createLogger("harness.tool-loop");
 /**
@@ -190,10 +189,9 @@ export async function maybeCompact(input: {
   const profile = resolveModelProfile(model);
   const providerOptions = resolveCallProviderOptions({
     auth: input.auth,
-    conversationId: resolveConversationId(session.rootSessionId ?? session.sessionId),
     profile,
     providerOptions: compactionModelReference.providerOptions,
-    sessionId: session.sessionId,
+    session,
   }) as Parameters<typeof streamText>[0]["providerOptions"];
   const call = {
     abortSignal: input.abortSignal,

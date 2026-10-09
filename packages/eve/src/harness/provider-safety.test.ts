@@ -114,10 +114,9 @@ describe("resolveCallProviderOptions", () => {
   ) =>
     resolveCallProviderOptions({
       auth: null,
-      conversationId: "conversation-1",
       profile,
       providerOptions,
-      sessionId,
+      session: { rootSessionId: "conversation-1", sessionId },
     });
 
   it("keys a direct OpenAI call's prompt cache to its session", () => {
