@@ -5,28 +5,31 @@ import {
 import type { ModelMessage, ToolSet, TypedToolCall, TypedToolResult } from "ai";
 
 import { historyCallNames } from "#harness/execute-call.js";
+import type { InlineCallResults } from "#harness/call-executor.js";
 import type { HarnessStepResult } from "#harness/step-hooks.js";
+import { isRunnableTool } from "#harness/tools.js";
 import type { HarnessToolLookup } from "#harness/types.js";
 
 type StepResponseMessage = HarnessStepResult["response"]["messages"][number];
 type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
 type ToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
 
-export function withAccumulatedResponseMessages(input: {
-  readonly invalidInputToolCallIds?: ReadonlySet<string>;
-  readonly responseMessages: readonly StepResponseMessage[];
+/**
+ * The step as the harness reads it: the AI SDK's result, with the results of the calls eve ran or
+ * answered appended to the response, and what the calls wait on.
+ */
+export function withCallResults(input: {
   readonly stepResult: HarnessStepResult;
-  readonly toolResults?: readonly TypedToolResult<ToolSet>[];
+  readonly responseMessages: readonly StepResponseMessage[];
+  readonly calls: InlineCallResults;
+  /** Results for calls that didn't run. */
+  readonly answers: readonly ToolResultPart[];
+  readonly invalidInputToolCallIds?: ReadonlySet<string>;
 }): HarnessStepResult {
-  const { stepResult } = input;
-
-  /*
-   * AI SDK `StepResult` fields are prototype getters, so spreading the
-   * instance drops them. Materialize each field while replacing the final
-   * step's messages with the SDK's accumulated response, which also contains
-   * approval-resume results created before the model step.
-   */
+  const { calls, stepResult } = input;
+  // AI SDK `StepResult` fields are prototype getters, so spreading the instance drops them.
   return {
+    approvalRequests: calls.approvals,
     content: stepResult.content,
     finishReason: stepResult.finishReason,
     ...(input.invalidInputToolCallIds === undefined
@@ -35,11 +38,18 @@ export function withAccumulatedResponseMessages(input: {
     providerMetadata: stepResult.providerMetadata,
     response: {
       ...stepResult.response,
-      messages: [...input.responseMessages],
+      messages: appendMissingToolResultMessages({
+        append: [...calls.parts, ...input.answers],
+        responseMessages: input.responseMessages,
+      }),
     },
+    signIns: calls.signIns,
     text: stepResult.text,
     toolCalls: stepResult.toolCalls,
-    toolResults: input.toolResults === undefined ? stepResult.toolResults : [...input.toolResults],
+    toolResults: [
+      ...((stepResult.toolResults ?? []) as TypedToolResult<ToolSet>[]),
+      ...calls.toolResults,
+    ],
     usage: stepResult.usage,
   };
 }
@@ -65,12 +75,14 @@ export function hasUnansweredToolCall(messages: readonly ModelMessage[]): boolea
 }
 
 /**
- * Appends synthesized tool results for calls that have no result anywhere in
- * the step's response messages. Exported for its dedupe contract: a call
- * already answered — including provider-executed results the SDK keeps
- * inline in the assistant message — must never receive a second
- * `tool-result`, or the next Anthropic call rejects the history with
- * "each tool_use must have a single result".
+ * Appends tool results for calls that have no result anywhere in the step's response messages.
+ * The response's results share one tool message, in the order the model made its calls: the AI
+ * SDK answers an invalid call as it streams, and eve's calls run once the response ends.
+ *
+ * Exported for its dedupe contract: a call already answered — including provider-executed
+ * results the SDK keeps inline in the assistant message — must never receive a second
+ * `tool-result`, or the next Anthropic call rejects the history with "each tool_use must have a
+ * single result".
  */
 export function appendMissingToolResultMessages(input: {
   readonly append: readonly ToolResultPart[];
@@ -81,11 +93,29 @@ export function appendMissingToolResultMessages(input: {
   const append = input.append
     .filter((part) => !existingCallIds.has(part.toolCallId))
     .map((part) => ({ ...part, toolName: callNames.get(part.toolCallId) ?? part.toolName }));
+  if (append.length === 0) return [...input.responseMessages];
 
+  const last = input.responseMessages.at(-1);
+  const answered = last?.role === "tool" ? last : undefined;
+  const order = new Map<string, number>();
+  for (const message of input.responseMessages) {
+    if (message.role !== "assistant" || !Array.isArray(message.content)) continue;
+    for (const part of message.content) {
+      if (part.type === "tool-call" && !order.has(part.toolCallId)) {
+        order.set(part.toolCallId, order.size);
+      }
+    }
+  }
+  // Anything that answers no call of the response keeps its place after those that do.
+  const position = (part: ToolResponsePart) =>
+    (part.type === "tool-result" ? order.get(part.toolCallId) : undefined) ?? order.size;
+  const content = [...(answered?.content ?? []), ...append].sort(
+    (a, b) => position(a) - position(b),
+  );
   return [
-    ...input.responseMessages,
-    ...(append.length > 0 ? [{ role: "tool" as const, content: [...append] }] : []),
-  ] satisfies StepResponseMessage[];
+    ...(answered === undefined ? input.responseMessages : input.responseMessages.slice(0, -1)),
+    { role: "tool", content },
+  ];
 }
 
 /**
@@ -113,31 +143,23 @@ export function extractToolResultCallIds(messages: readonly ModelMessage[]): Rea
   return callIds;
 }
 
+/** Answers the local calls of a response that ended early: eve doesn't run them. */
 export function answerSkippedToolCalls(
   step: HarnessStepResult,
   tools: HarnessToolLookup,
+  excludedCallIds: ReadonlySet<string>,
 ): ToolResultPart[] {
   const { finishReason } = step;
   if (finishReason === "stop" || finishReason === "tool-calls") return [];
-
-  const answeredCallIds = extractToolResultCallIds(step.response.messages);
-  const pendingApprovalCallIds = new Set(
-    (step.content ?? []).flatMap((part) =>
-      part.type === "tool-approval-request" && part.isAutomatic !== true
-        ? [part.toolCall.toolCallId]
-        : [],
-    ),
-  );
   const value = `The tool did not run because the model response ended early (finish reason: ${finishReason}). Call the tool again if you still need its result.`;
   return ((step.toolCalls ?? []) as TypedToolCall<ToolSet>[])
     .filter(
       (toolCall) =>
-        tools.get(toolCall.toolName)?.execute !== undefined &&
+        isRunnableTool(tools.get(toolCall.toolName)) &&
         toolCall.providerExecuted !== true &&
         !isInvalidToolCall(toolCall) &&
         getInvalidToolCallInputError({ toolCall }) === undefined &&
-        !answeredCallIds.has(toolCall.toolCallId) &&
-        !pendingApprovalCallIds.has(toolCall.toolCallId),
+        !excludedCallIds.has(toolCall.toolCallId),
     )
     .map((toolCall) => ({
       output: { type: "error-text", value },

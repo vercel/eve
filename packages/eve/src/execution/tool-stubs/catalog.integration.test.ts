@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { SessionKey, ToolStubsKey } from "#context/keys.js";
 import { toolStubProvider } from "#context/providers/tool-stubs.js";
 import { workflowEntry } from "#execution/session/entry.js";
-import { buildToolSet } from "#harness/tools.js";
+import { invokeTool, isRunnableTool } from "#harness/tools.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import {
   catalogContext,
@@ -17,9 +17,8 @@ import { start } from "#internal/workflow/runtime.js";
 import { CALL_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { STUB_CONTEXT_KEY, type ToolStub } from "#tool-stubs/types.js";
-import type { ToolExecuteOptions } from "#tools/definition.js";
 
-/** The last value a tool execution produced, as the AI SDK records it. */
+/** The last value a tool execution produced, as eve records it. */
 async function settle(output: unknown): Promise<unknown> {
   if (!isAsyncIterable(output)) return await output;
   let last: unknown;
@@ -94,13 +93,16 @@ describe("tool stubs through eve__tool", () => {
         });
         ctx.set(ToolStubsKey, { rootSessionId: run.runId, rules, token });
         ctx.setVirtualContext(toolStubProvider.key, toolStubProvider.create(ctx)!.value);
-        const execute = buildToolSet({
-          describe: (definition) => definition.description,
-          resolve: catalog.resolve,
-          tools: catalog.advertised,
-        })[CALL_TOOL_NAME]!.execute as (input: unknown, options: ToolExecuteOptions) => unknown;
+        // eve runs an eve__tool call as the call to the entry it resolves to.
         const call = (toolCallId: string, input: Record<string, unknown>) =>
-          inSession(async () => await settle(execute(input, { messages: [], toolCallId })));
+          inSession(async () => {
+            const resolved = catalog.resolve({ input, toolName: CALL_TOOL_NAME });
+            if (resolved === undefined || !isRunnableTool(resolved.definition)) {
+              throw new Error(`eve__tool ${JSON.stringify(input)} reached no runnable entry.`);
+            }
+            const options = { messages: [], toolCallId };
+            return await settle(invokeTool(resolved.definition, resolved.call.input, options));
+          });
 
         expect(
           await call("refund-1", { name: "refund_invoice", input: { invoiceId: "inv_1" } }),
