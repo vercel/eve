@@ -19,6 +19,8 @@ export interface SessionEventMeta {
   readonly position: FactPosition;
   /** The time of the commit that holds it, or of the latest commit for a progress record. */
   readonly at: string;
+  /** False while more known records remain in this line; readers stop only after the commit. */
+  readonly endOfLine?: boolean;
 }
 
 /** One event as a reader reads it back. */

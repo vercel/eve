@@ -1,5 +1,5 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
-import { isCurrentTurnBoundaryEvent } from "#protocol/message.js";
+import { endsTurn } from "#client/session-utils.js";
 import { openDevelopmentMessageStream } from "./live-stream.js";
 
 /**
@@ -32,7 +32,7 @@ export async function readMessageStreamEvents(input: {
  * Test-only helper.
  */
 export function countCurrentTurnBoundaryEvents(events: readonly SessionStreamEvent[]): number {
-  return events.filter(isCurrentTurnBoundaryEvent).length;
+  return new Set(events.filter(endsTurn).map((event) => event.meta.position.line)).size;
 }
 
 /**
@@ -44,5 +44,5 @@ export function countCurrentTurnBoundaryEvents(events: readonly SessionStreamEve
 export function extractCurrentTurnBoundaryEvent(
   events: readonly SessionStreamEvent[],
 ): SessionStreamEvent | undefined {
-  return [...events].reverse().find(isCurrentTurnBoundaryEvent);
+  return [...events].reverse().find(endsTurn);
 }

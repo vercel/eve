@@ -61,7 +61,11 @@ async function rewriteDeclarationSpecifiers(declarationRoot) {
   }
 }
 
-async function emitDeclarations(tempRoot, configuration, { contractRoot, eveRoot }) {
+async function emitDeclarations(
+  tempRoot,
+  configuration,
+  { contractRoot, eveRoot, checkRetainedFixtures = true },
+) {
   const declarationRoot = join(tempRoot, "declarations");
   await mkdir(declarationRoot, { recursive: true });
   const tsconfigPath = join(tempRoot, "tsconfig.json");
@@ -71,10 +75,11 @@ async function emitDeclarations(tempRoot, configuration, { contractRoot, eveRoot
       extends: join(contractRoot, "tsconfig.json"),
       include: [
         join(contractRoot, "entrypoints/**/*.ts"),
-        ...Object.entries(configuration.contracts ?? {}).flatMap(([capability, contract]) =>
-          contract.supported
-            .filter((version) => version < contract.current)
-            .map((version) => join(contractRoot, "compatibility", capability, `v${version}.ts`)),
+        ...Object.entries(checkRetainedFixtures ? (configuration.contracts ?? {}) : {}).flatMap(
+          ([capability, contract]) =>
+            contract.supported
+              .filter((version) => version < contract.current)
+              .map((version) => join(contractRoot, "compatibility", capability, `v${version}.ts`)),
         ),
       ],
     }),
@@ -181,7 +186,7 @@ function extractorConfig({ capabilities, capability, declarationRoot, tempRoot }
 
 export async function generateCapabilityReports(
   configuration,
-  { contractRoot = CONTRACT_ROOT, eveRoot = EVE_ROOT } = {},
+  { contractRoot = CONTRACT_ROOT, eveRoot = EVE_ROOT, checkRetainedFixtures = true } = {},
 ) {
   const cacheRoot = join(EVE_ROOT, ".extension-contracts-cache");
   await mkdir(cacheRoot, { recursive: true });
@@ -190,6 +195,7 @@ export async function generateCapabilityReports(
     const declarationRoot = await emitDeclarations(tempRoot, configuration, {
       contractRoot,
       eveRoot,
+      checkRetainedFixtures,
     });
     const capabilities = Object.keys(configuration.current);
     const configs = [];
@@ -295,10 +301,10 @@ export async function generateHistoricalCapabilityReport(capability, version) {
   }
 }
 
-export async function checkCapabilityReports(configuration, update) {
+export async function checkCapabilityReports(configuration, update, options = {}) {
   const issues = [];
   try {
-    const reports = await generateCapabilityReports(configuration);
+    const reports = await generateCapabilityReports(configuration, options);
     for (const surface of PUBLIC_SURFACES) {
       const paths = publicSurfacePaths(surface);
       const publicNames = new Set();
@@ -372,7 +378,7 @@ export async function checkCapabilityReports(configuration, update) {
         : undefined;
     issues.push({
       file: toPosix(relative(REPO_ROOT, CONTRACT_ROOT)),
-      message: `Could not generate extension capability reports: ${stderr || (error instanceof Error ? error.message : String(error))}`,
+      message: `Could not generate extension capability reports: ${stderr || error?.stdout?.toString().trim() || (error instanceof Error ? error.message : String(error))}`,
     });
   }
   return issues;

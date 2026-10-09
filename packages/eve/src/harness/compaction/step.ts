@@ -47,6 +47,9 @@ import {
 } from "#harness/turn-tag-state.js";
 import { getRequestEnvelopeTokens } from "#harness/request-envelope.js";
 import { contextStarted, idle } from "#harness/session-machine/transitions.js";
+import { closeFacts, closureFor, publicViewOf } from "#harness/session-machine/closure.js";
+import { openWork } from "#protocol/session-projection/selectors.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
 import { resolveCallProviderOptions } from "#harness/provider-safety.js";
 import { resolveConversationId } from "#shared/conversation-identity.js";
 
@@ -107,9 +110,6 @@ export async function compactHistory(step: Step): Promise<StepResult> {
       config,
       ctx: step.ctx,
       session: step.session,
-    }).catch(async (error: unknown) => {
-      await step.publish(summaryFailed({ changeId, error, runId }));
-      throw error;
     });
     step.session = resolvedModel.session;
     const summaryModel =
@@ -130,6 +130,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
       messages: [...step.session.history],
       model: resolvedModel.model,
       publish: step.publish,
+      view: () => publicViewOf(step.view().projection),
       requestEnvelopeTokens: getRequestEnvelopeTokens(step.session),
       resolveModel: config.resolveModel,
       runtimeIdentity: config.runtimeIdentity,
@@ -141,6 +142,8 @@ export async function compactHistory(step: Step): Promise<StepResult> {
     if (compacted.failure !== undefined) throw compacted.failure.error;
   } catch (error) {
     outcome = "failed";
+    const facts = summaryFailed(publicViewOf(step.view().projection), { changeId, error });
+    if (facts.length > 0) await step.publish(facts);
     logError(log, "manual session compaction failed", error, {
       sessionId: step.session.sessionId,
     });
@@ -175,26 +178,19 @@ function summaryUsageOf(deltas: readonly (TokenUsageDelta | undefined)[]): Usage
 }
 
 /** The summary run and its change failed. */
-function summaryFailed(input: {
-  readonly changeId: string;
-  readonly runId: string | undefined;
-  readonly error: unknown;
-}): SessionEvent[] {
+function summaryFailed(
+  view: SessionView,
+  input: {
+    readonly changeId: string;
+    readonly error: unknown;
+  },
+): SessionEvent[] {
   const error = { code: "COMPACTION_FAILED", message: toErrorMessage(input.error) };
-  const facts: SessionEvent[] = [];
-  if (input.runId !== undefined) {
-    facts.push({
-      data: { error, outcome: "failed", runId: input.runId },
-      scope: { changeId: input.changeId, runId: input.runId },
-      type: "model.settled",
-    });
-  }
-  facts.push({
-    data: { changeId: input.changeId, error, kind: "compaction", outcome: "failed" },
-    scope: { changeId: input.changeId },
-    type: "context.settled",
-  });
-  return facts;
+  return closeFacts(
+    view,
+    openWork(view, { changeId: input.changeId }),
+    closureFor({ change: "failed", error }),
+  ).work;
 }
 
 export function replaceSessionHistory(
@@ -222,7 +218,21 @@ export function replaceSessionHistory(
  * the compacted messages flow through the same `messages` variable the
  * harness uses to rebuild `session.history` after the step.
  */
-export async function maybeCompact(input: {
+export async function maybeCompact(
+  input: Parameters<typeof compactOnce>[0],
+): ReturnType<typeof compactOnce> {
+  try {
+    return await compactOnce(input);
+  } catch (error) {
+    // Setup, model resolution and history/memory preparation can fail outside the summary
+    // retry loop. Close only entities actually introduced, using the latest committed view.
+    const facts = summaryFailed(input.view(), { changeId: input.change.changeId, error });
+    if (facts.length > 0) await input.publish(facts);
+    throw error;
+  }
+}
+
+async function compactOnce(input: {
   readonly abortSignal?: AbortSignal;
   readonly auth: SessionAuthContext | null;
   /** A manual compaction runs between turns, so no turn's usage reports its summary calls. */
@@ -244,6 +254,7 @@ export async function maybeCompact(input: {
   readonly messages: HarnessModelMessage[];
   readonly model: LanguageModel;
   readonly publish: Publish;
+  readonly view: () => SessionView;
   /** Model-visible prompt used only to decide whether durable history needs compaction. */
   readonly promptMessages?: readonly HarnessModelMessage[];
   readonly requestEnvelopeTokens?: number;
@@ -425,10 +436,9 @@ export async function maybeCompact(input: {
   }
   if (failure !== undefined) {
     await publish([
-      ...summaryFailed({
+      ...summaryFailed(input.view(), {
         changeId: change.changeId,
         error: failure.error,
-        runId: needsSummary ? change.summaryRunId : undefined,
       }),
       ...usageFacts,
     ]);

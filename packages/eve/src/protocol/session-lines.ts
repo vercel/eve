@@ -72,9 +72,13 @@ export function eventsOfLine(
     if (!isKnownRecordType(record.type)) return;
     events.push({
       ...record,
-      meta: { at, position: { index, line: position } },
+      meta: { at, endOfLine: false, position: { index, line: position } },
     } as SessionStreamEvent);
   });
+  const last = events.at(-1);
+  if (last !== undefined) {
+    events[events.length - 1] = { ...last, meta: { ...last.meta, endOfLine: true } };
+  }
   return events;
 }
 

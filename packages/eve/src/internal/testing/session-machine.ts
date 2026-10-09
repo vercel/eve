@@ -9,7 +9,6 @@ import { readTurnState, writeTurnState } from "#harness/session-machine/state.js
 import { eventsOf } from "#harness/publication.js";
 import {
   ensureSessionProjection,
-  recordPublishedEvent,
   saveProjection,
   stepProjection,
 } from "#harness/session-machine/current.js";
@@ -23,11 +22,6 @@ import {
   type TurnPosition,
 } from "#harness/session-machine/view.js";
 import type { HarnessEmitFn, HarnessSession, SessionStateMap, StepInput } from "#harness/types.js";
-import {
-  createSessionStartedEvent,
-  createStepStartedEvent,
-  createTurnStartedEvent,
-} from "#protocol/message.js";
 import { initialSessionProjection } from "#protocol/session-projection.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { InputRequest } from "#shared/input.js";
@@ -42,7 +36,7 @@ export function withPublished(
   events: readonly SessionEvent[],
 ): HarnessSession {
   const projection = stepProjection(undefined, session.state);
-  for (const event of events) projection.record(event);
+  projection.record(events);
   return saveProjection(session, projection.read());
 }
 
@@ -53,18 +47,23 @@ export function withOpenTurn(
 ): HarnessSession {
   const projection = storedProjection(session.state);
   const events: SessionEvent[] = [];
-  if (projection.started !== true) events.push(createSessionStartedEvent());
+  if (projection.started !== true) events.push({ type: "session.started", data: {} });
   if (projection.activeTurnId !== position.turnId) {
-    events.push(createTurnStartedEvent({ sequence: position.sequence, turnId: position.turnId }));
+    events.push({
+      type: "turn.started",
+      data: {
+        turnId: position.turnId,
+        follows: projection.latestTurn?.turnId ?? null,
+        cause: { hook: "test" },
+      },
+    });
   }
   if (position.stepIndex !== undefined) {
+    const runId = `test_${position.turnId}_${position.stepIndex}`;
+    const scope = { runId, turnId: position.turnId };
     events.push(
-      createStepStartedEvent({
-        modelId: "test-model",
-        sequence: position.sequence,
-        stepIndex: position.stepIndex,
-        turnId: position.turnId,
-      }),
+      { type: "model.requested", data: { runId, owner: { turnId: position.turnId } }, scope },
+      { type: "model.started", data: { runId, modelId: "test-model" }, scope },
     );
   }
   return withPublished(session, events);
@@ -121,7 +120,7 @@ export function foldingHandler(handleEvent?: TestEventHandler): HarnessEmitFn {
     const ctx = contextStorage.getStore();
     if (ctx !== undefined) {
       ensureSessionProjection(ctx, undefined);
-      for (const event of eventsOf(publication)) recordPublishedEvent(ctx, event);
+      stepProjection(ctx, undefined).record(publication);
     }
     if (handleEvent !== undefined) await eachEvent(handleEvent)(publication, messages);
   };

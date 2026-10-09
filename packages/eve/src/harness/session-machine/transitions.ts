@@ -7,6 +7,8 @@ import type {
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import { authorizationEventFields } from "#harness/authorization-event-fields.js";
 import { callSettledFrom } from "#harness/call-facts.js";
+import { closeFacts, closureFor, notIn, publicViewOf } from "#harness/session-machine/closure.js";
+import { type OpenWork, openWork } from "#protocol/session-projection/selectors.js";
 import {
   createAuthorizationCompletedEvent,
   createAuthorizationRequiredEvent,
@@ -21,7 +23,8 @@ import {
   type TaskStartedStreamEvent,
 } from "#protocol/message.js";
 import type { SessionEvent } from "#protocol/session-event.js";
-import type { Cause, ErrorInfo, UserPart } from "#protocol/session-events/envelope.js";
+import type { Cause, ErrorInfo, Usage, UserPart } from "#protocol/session-events/envelope.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 import type { FactOf } from "#protocol/session-events/facts.js";
 import type { TurnAwaiting } from "#protocol/session-events/families/turn.js";
 import {
@@ -311,36 +314,26 @@ interface TurnEnding {
   readonly outcome: FactOf<"turn.settled">["data"]["outcome"];
   readonly cause?: Cause;
   readonly error?: ErrorInfo;
-  /** Why the turn's open calls stopped. */
-  readonly reason: string;
 }
 
 /**
- * The facts that end the open turn, in one commit: its open runs and calls, the turn, and the
+ * The facts that end the open turn, in one commit: what it leaves open, the turn, and the
  * deliveries it answered.
  */
 function closeTurn(projection: SessionProjection, ending: TurnEnding): SessionEvent[] {
   const turnId = projection.activeTurnId;
-  if (turnId === undefined) return [];
-  const facts: SessionEvent[] = [];
-  for (const [runId, run] of Object.entries(projection.runs ?? {})) {
-    if (run.turnId !== turnId) continue;
-    facts.push(
-      ...runSettledFacts(projection, {
-        error: ending.outcome === "failed" ? ending.error : undefined,
-        outcome: ending.outcome === "failed" ? "failed" : "interrupted",
-        runId,
-      }),
-    );
-  }
-  for (const call of Object.values(projection.calls)) {
-    if (call.turnId !== turnId || call.taskId !== undefined || call.status !== "running") continue;
-    facts.push({
-      data: { callId: call.callId, outcome: "interrupted", reason: ending.reason },
-      scope: { turnId },
-      type: "call.settled",
-    });
-  }
+  return turnId === undefined ? [] : turnClosure(projection, turnId, ending).facts;
+}
+
+function turnClosure(
+  projection: SessionProjection,
+  turnId: string,
+  ending: TurnEnding,
+): { readonly facts: SessionEvent[]; readonly closed: OpenWork } {
+  const tables = publicViewOf(projection);
+  const open = openWork(tables, { turnId });
+  const closure = closureFor({ error: ending.error, turn: ending.outcome });
+  const { deliveries, work } = closeFacts(tables, open, closure);
   const turn = projection.turns[turnId];
   const data: {
     -readonly [K in keyof FactOf<"turn.settled">["data"]]: FactOf<"turn.settled">["data"][K];
@@ -351,19 +344,31 @@ function closeTurn(projection: SessionProjection, ending: TurnEnding): SessionEv
   if (turn?.reply !== undefined && turn.reply.length > 0) data.reply = turn.reply;
   if (ending.cause !== undefined) data.cause = ending.cause;
   if (ending.error !== undefined) data.error = ending.error;
-  facts.push({ data, scope: { turnId }, type: "turn.settled" });
-  for (const deliveryId of openDeliveriesOf(projection, turnId)) {
-    facts.push({ data: { deliveryId, outcome: "handled", turnId }, type: "delivery.settled" });
-  }
-  return facts;
+  return {
+    closed: open,
+    facts: [...work, { data, scope: { turnId }, type: "turn.settled" }, ...deliveries],
+  };
 }
 
 /** Nothing is left to run: the turn completes. */
 export function finishTurn(view: SessionView): Transition {
-  return unchanged(
-    view,
-    closeTurn(view.projection, { outcome: "completed", reason: "turn-ended" }),
-  );
+  return unchanged(view, closeTurn(view.projection, { outcome: "completed" }));
+}
+
+/** A failure as the stream reports it: its code and message, with its support id and remedy. */
+export function errorInfoOf(failure: {
+  readonly code: string;
+  readonly details?: JsonObject;
+  readonly message: string;
+}): ErrorInfo {
+  const error: { -readonly [K in keyof ErrorInfo]: ErrorInfo[K] } = {
+    code: failure.code,
+    message: failure.message,
+  };
+  const { errorId, hint } = failure.details ?? {};
+  if (typeof errorId === "string") error.id = errorId;
+  if (typeof hint === "string" && hint.trim().length > 0) error.hint = hint.trim();
+  return error;
 }
 
 /**
@@ -381,22 +386,17 @@ export function fail(
 ): Transition {
   // The calls the turn approved but hadn't run never run: the model reads that they stopped.
   const stopped = view.turn.suspended.filter((step) => (step.approved?.length ?? 0) > 0);
-  const errorId = failure.details?.errorId;
-  const error: ErrorInfo =
-    typeof errorId === "string"
-      ? { code: failure.code, id: errorId, message: failure.message }
-      : { code: failure.code, message: failure.message };
+  const error = errorInfoOf(failure);
   const turnId = view.projection.activeTurnId;
-  const events = closeTurn(view.projection, { error, outcome: "failed", reason: "turn-failed" });
-  if (failure.terminal !== undefined) {
-    events.push(
-      ...sessionEndedFacts(view.projection, {
-        cause: turnId === undefined ? undefined : { turnId },
-        error,
-        outcome: "failed",
-      }),
-    );
-  }
+  // A terminal failure ends the session, which ends the turn with it, in one commit.
+  const events =
+    failure.terminal === undefined
+      ? closeTurn(view.projection, { error, outcome: "failed" })
+      : sessionEndedFacts(view.projection, {
+          cause: turnId === undefined ? undefined : { turnId },
+          error,
+          outcome: "failed",
+        });
   return {
     commit: stopped.flatMap(cancelledTranscript),
     events,
@@ -417,8 +417,9 @@ export function idle(view: SessionView): Transition {
 // ---------------------------------------------------------------------------
 
 /**
- * The facts that end a session: every delivery it hasn't settled fails, an open context change
- * is interrupted, and `session.ended` is last. Every reader stops there.
+ * The facts that end a session, in one commit: an open turn ends first (failed with the session's
+ * error, or cancelled), then everything else the session leaves open, and `session.ended` is
+ * last. Every reader stops there.
  */
 export function sessionEndedFacts(
   projection: SessionProjection | undefined,
@@ -429,20 +430,24 @@ export function sessionEndedFacts(
   },
 ): SessionEvent[] {
   const facts: SessionEvent[] = [];
-  for (const delivery of Object.values(projection?.view?.deliveries ?? {})) {
-    if (delivery.status === "settled") continue;
-    facts.push({
-      data: { deliveryId: delivery.deliveryId, outcome: "failed", reason: "session-ended" },
-      type: "delivery.settled",
+  let closed: OpenWork = { calls: [], changes: [], deliveries: [], runs: [] };
+  const turnId = projection?.activeTurnId;
+  if (projection !== undefined && turnId !== undefined) {
+    const turn = turnClosure(projection, turnId, {
+      error: ending.error,
+      outcome: ending.outcome === "failed" ? "failed" : "cancelled",
     });
+    facts.push(...turn.facts);
+    closed = turn.closed;
   }
-  for (const change of Object.values(projection?.view?.changes ?? {})) {
-    if (change.status !== "running") continue;
-    facts.push({
-      data: { changeId: change.changeId, kind: change.kind, outcome: "interrupted" },
-      type: "context.settled",
-    });
-  }
+  const tables = publicViewOf(projection);
+  const rest = notIn(openWork(tables, { session: true }), closed);
+  const { deliveries, work } = closeFacts(
+    tables,
+    rest,
+    closureFor({ error: ending.error, session: ending.outcome }),
+  );
+  facts.push(...work, ...deliveries);
   const data: {
     -readonly [K in keyof FactOf<"session.ended">["data"]]: FactOf<"session.ended">["data"][K];
   } = {
@@ -463,6 +468,28 @@ export interface SettledCall {
   readonly part: ToolResultPart;
   /** A runtime result, reported at the coordinates of the step that made the call. */
   readonly result?: RuntimeActionResult;
+  /** What the agent behind the call spent, which its settlement records. */
+  readonly usage?: TokenUsage;
+}
+
+/** What the agent behind a call spent, recorded against the call. */
+export function delegatedUsageFact(
+  callId: string,
+  usage: TokenUsage,
+  scope: { readonly turnId: string },
+): SessionEvent {
+  const recorded: { -readonly [K in keyof Usage]: Usage[K] } = {
+    cacheReadTokens: usage.cacheReadTokens,
+    cacheWriteTokens: usage.cacheWriteTokens,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+  };
+  if (usage.costUsd !== undefined) recorded.costUsd = usage.costUsd;
+  return {
+    data: { kind: "model", owner: { callId }, usage: recorded },
+    scope,
+    type: "usage.recorded",
+  };
 }
 
 /**
@@ -472,7 +499,7 @@ export interface SettledCall {
 export function settle(view: SessionView, input: { readonly results: readonly SettledCall[] }) {
   const events: SessionEvent[] = [];
   const steps = [...view.turn.suspended];
-  for (const { part, result } of input.results) {
+  for (const { part, result, usage } of input.results) {
     const index = steps.findIndex((step) => stepCallIds(step).has(part.toolCallId));
     const step = steps[index];
     if (step === undefined) continue;
@@ -481,7 +508,10 @@ export function settle(view: SessionView, input: { readonly results: readonly Se
       new Set([part.toolCallId]),
     );
     if (result !== undefined) {
-      events.push(callSettledFrom(result, { scope: { turnId: step.event.turnId } }));
+      const scope = { turnId: step.event.turnId };
+      events.push(callSettledFrom(result, { scope }));
+      // A child's usage counts once, in the commit that settles its call.
+      if (usage !== undefined) events.push(delegatedUsageFact(result.callId, usage, scope));
     }
   }
   // A step that parked approvals beside its tasks asks for them once the tasks finish.
@@ -499,38 +529,34 @@ export function settle(view: SessionView, input: { readonly results: readonly Se
   } satisfies Transition;
 }
 
-/** A call a discarded model-call attempt announced without a result. */
-export interface DiscardedCall {
-  readonly callId: string;
-  readonly toolName: string;
-}
-
 /**
- * A model-call attempt failed after the stream accepted output, and the step retries it in a new
- * run. eve can't tell whether the calls the attempt announced ran, so each settles `abandoned`,
- * and so does the run; nothing reaches history, since the discarded response was never committed.
+ * A model-call attempt ends without its response reaching history, in one commit with the calls
+ * it announced. A retry replaces it: eve can't tell whether those calls ran, so they and the run
+ * settle `abandoned`. Steering cut it off: the calls are interrupted, and the run completed what
+ * it streamed, with what it spent.
  */
 export function discardAttempt(
   view: SessionView,
   input: {
-    readonly calls: readonly DiscardedCall[];
-    readonly runId?: string;
-    /** `interrupted` when steering cut the attempt off; `abandoned` when a retry replaces it. */
-    readonly outcome?: "abandoned" | "interrupted";
+    readonly runId: string;
+    readonly ending: "retried" | "steered";
+    readonly usage?: FactOf<"usage.recorded">["data"]["usage"];
   },
 ): Transition {
-  const { turnId } = at(view.projection);
-  const outcome = input.outcome ?? "abandoned";
-  const reason = outcome === "abandoned" ? "model-call-retried" : "steered";
-  const events: SessionEvent[] = input.calls.map(({ callId }) => ({
-    data: { callId, outcome, reason },
-    scope: { turnId },
-    type: "call.settled",
-  }));
-  if (input.runId !== undefined && view.projection.runs?.[input.runId] !== undefined) {
-    events.push(...runSettledFacts(view.projection, { outcome: "abandoned", runId: input.runId }));
-  }
-  return unchanged(view, events);
+  const tables = publicViewOf(view.projection);
+  const open = openWork(tables, { runId: input.runId });
+  const { work } = closeFacts(tables, { ...open, runs: [] }, closureFor({ attempt: input.ending }));
+  if (open.runs.length === 0) return unchanged(view, work);
+  const run =
+    input.ending === "retried"
+      ? { outcome: "abandoned" as const, runId: input.runId, usage: input.usage }
+      : {
+          finishReason: "other",
+          outcome: "completed" as const,
+          runId: input.runId,
+          usage: input.usage,
+        };
+  return unchanged(view, [...work, ...runSettledFacts(view.projection, run)]);
 }
 
 /**
@@ -904,7 +930,6 @@ export function cancel(view: SessionView, input: { readonly cause?: Cause } = {}
     ...closeTurn(projection, {
       cause: input.cause,
       outcome: "cancelled",
-      reason: "turn-cancelled",
     }),
   );
   return {

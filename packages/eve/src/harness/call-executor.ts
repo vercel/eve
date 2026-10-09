@@ -10,10 +10,7 @@ import {
   type TypedToolResult,
 } from "ai";
 
-import {
-  createRuntimeToolResultFromMessagePart,
-  createRuntimeToolResultFromValue,
-} from "#harness/action-result-helpers.js";
+import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import {
   type AuthorizationSignal,
   isAuthorizationSignal,
@@ -561,10 +558,15 @@ async function publishDenial(
   const scope = scopeOf(input.position);
   await input.publish(
     input.approval === "evaluate"
-      ? callSettledFrom(createRuntimeToolResultFromMessagePart(part, call.toolName), {
-          rejected: true,
-          scope,
-        })
+      ? callSettledFrom(
+          createRuntimeToolResultFromValue({
+            callId: call.callId,
+            isError: true,
+            output: input.reason ?? TOOL_EXECUTION_DENIED_MESSAGE,
+            toolName: call.toolName,
+          }),
+          { scope },
+        )
       : callSettledFrom(
           {
             callId: call.callId,

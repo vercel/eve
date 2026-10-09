@@ -1,12 +1,14 @@
 import { contextStorage } from "#context/container.js";
 import type { ContextReader } from "#context/key.js";
-import type { HarnessSessionBase, SessionStateMap } from "#harness/types.js";
+import type { HarnessSessionBase, SessionPublication, SessionStateMap } from "#harness/types.js";
 import {
   foldSession,
   pruneSessionProjection,
   type SessionProjection,
 } from "#protocol/session-projection.js";
 import type { SessionEvent } from "#protocol/session-event.js";
+import { linesOf } from "#protocol/session-lines.js";
+import { eventsOf } from "#harness/publication.js";
 import type { StoredLine } from "#protocol/session-events/envelope.js";
 import { cloneView, emptySessionView, foldLine } from "#protocol/session-projection/fold.js";
 import type { SessionView as PublicSessionView } from "#protocol/session-projection/tables.js";
@@ -162,8 +164,8 @@ export function saveProjection<T extends HarnessSessionBase>(
 /** The projection one step reads and folds what it publishes into. */
 export interface StepProjection {
   read(): SessionProjection;
-  /** Folds an event no publish sink folded: the step runs without one. */
-  record(event: SessionEvent): void;
+  /** Folds a publication no sink folded, preserving its commit boundaries. */
+  record(publication: SessionPublication): void;
 }
 
 /**
@@ -178,14 +180,28 @@ export function stepProjection(
     ensureSessionProjection(ctx, state);
     return {
       read: () => currentProjection(ctx),
-      record: (event) => recordPublishedEvent(ctx, event),
+      record: (publication) => {
+        for (const line of linesOf(eventsOf(publication), new Date().toISOString())) {
+          const events = "facts" in line ? line.facts : [line.progress];
+          recordPublishedLine(ctx, line, nextLinePosition(ctx), events);
+        }
+      },
     };
   }
   let projection = storedProjection(state);
   return {
     read: () => projection,
-    record(event) {
-      projection = foldAndPrune(projection, event);
+    record(publication) {
+      for (const line of linesOf(eventsOf(publication), new Date().toISOString())) {
+        const position = projection.position ?? 0;
+        const events = "facts" in line ? line.facts : [line.progress];
+        for (const event of events) projection = foldAndPrune(projection, event);
+        projection = {
+          ...projection,
+          position: position + 1,
+          view: advanceView(projection.view, line, position),
+        };
+      }
     },
   };
 }

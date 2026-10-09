@@ -38,7 +38,7 @@ export function summarizeTurnEvents(events: readonly SessionEvent[]): TurnEventS
   let message: string | undefined;
 
   for (const event of events) {
-    if (segment.observe(event)) boundary = event;
+    if (segment.observe(event)) boundary = segment.boundary;
     failure = failureOf(event) ?? failure;
     if (event.type === "content.completed") {
       parts.set(event.data.partId, { kind: event.data.kind, value: event.data.value });
@@ -118,6 +118,7 @@ export class ResponseSegment {
   #projection = initialSessionProjection();
   readonly #authorizations = new Map<string, PendingAuthorization>();
   readonly #deliveryId: string | undefined;
+  #boundary: SessionEvent | undefined;
 
   constructor(options: { readonly deliveryId?: string } = {}) {
     this.#deliveryId = options.deliveryId;
@@ -133,15 +134,28 @@ export class ResponseSegment {
     );
   }
 
-  /** Records `event` and returns true when it ends the response. */
+  get boundary(): SessionEvent | undefined {
+    return this.#boundary;
+  }
+
+  /** Records `event`; an ending fact ends the response after the rest of its commit. */
   observe(event: SessionEvent): boolean {
     this.#projection = foldSession(this.#projection, event);
     if (event.type === "authorization.required") {
       this.#authorizations.set(event.data.attemptId ?? event.data.name, event.data);
     }
-    if (this.#deliveryId === undefined) return endsTurn(event);
-    if (event.type === "session.ended") return true;
-    return event.type === "delivery.settled" && event.data.deliveryId === this.#deliveryId;
+    const ends =
+      this.#deliveryId === undefined
+        ? endsTurn(event)
+        : event.type === "session.ended" ||
+          (event.type === "delivery.settled" && event.data.deliveryId === this.#deliveryId);
+    if (ends) this.#boundary = event;
+    // Raw producer facts have no metadata. Materialized reader events mark the last known
+    // record so a turn terminal never hides its deliveries or a session terminal in that line.
+    const meta = "meta" in event ? event.meta : undefined;
+    const endOfLine =
+      meta !== null && typeof meta === "object" && "endOfLine" in meta ? meta.endOfLine : undefined;
+    return this.#boundary !== undefined && endOfLine !== false;
   }
 }
 

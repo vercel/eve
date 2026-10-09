@@ -62,9 +62,12 @@ export function updateDevelopmentSessionState(input: {
 }): DevelopmentSessionState {
   const boundaryEvent = extractCurrentTurnBoundaryEvent(input.events);
   const boundaryCount = input.session.boundaryCount + countCurrentTurnBoundaryEvents(input.events);
-  const streamIndex = input.session.streamIndex + input.events.length;
+  const streamIndex = input.events.reduce(
+    (next, event) => Math.max(next, event.meta.position.line + 1),
+    input.session.streamIndex,
+  );
 
-  if (boundaryEvent?.type === "session.waiting") {
+  if (boundaryEvent !== undefined && boundaryEvent.type !== "session.ended") {
     return createDevelopmentSessionState({
       boundaryCount,
       sessionId: input.sessionId,

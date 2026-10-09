@@ -1,4 +1,5 @@
 import { errorHintOf } from "#public/channels/reply.js";
+import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 import { displayTitle } from "#shared/display-name.js";
 import { isTaskControlTool } from "#protocol/task-tools.js";
 import { contentPhase } from "#protocol/session-events/catalog.js";
@@ -111,9 +112,33 @@ async function showReasoning(
   stream.reasoningShownAtMs = now;
 }
 
-
-
-
+/**
+ * A failure eve recognized, quoted with how to fix it and the id to give support. Only a
+ * recognized failure carries a hint.
+ */
+function formatFixableErrorReply(
+  introduction: string,
+  error: ErrorInfo,
+  hint: string,
+  options?: { readonly followUp?: string },
+): string {
+  const quoted = [
+    error.message,
+    "",
+    "**How to fix**",
+    hint,
+    ...(error.id === undefined ? [] : ["", "**Error id:**", `\`${error.id}\``]),
+  ]
+    .flatMap((line) => line.split("\n"))
+    .map((line) => (line.length > 0 ? `> ${line}` : "> "))
+    .join("\n");
+  return [
+    `${introduction}.`,
+    "",
+    quoted,
+    ...(options?.followUp === undefined ? [] : ["", options.followUp]),
+  ].join("\n");
+}
 
 /**
  * Workspace-scoped projection of the Slack actor that produced
@@ -306,6 +331,13 @@ export const defaultEvents: SlackChannelInternalEvents = {
       await clearStatus(channel);
       return;
     }
+    const hint = event.error?.hint;
+    if (event.error !== undefined && hint !== undefined) {
+      await channel.thread.post(
+        formatFixableErrorReply("I hit an error while handling your request", event.error, hint),
+      );
+      return;
+    }
     const errorId = event.error?.id;
     const summary = formatErrorHint(errorHintOf(event.error));
     await channel.thread.post(
@@ -320,6 +352,15 @@ export const defaultEvents: SlackChannelInternalEvents = {
 
   async "session.ended"(event, channel, _ctx) {
     if (event.outcome !== "failed") return;
+    const hint = event.error?.hint;
+    if (event.error !== undefined && hint !== undefined) {
+      await channel.thread.post(
+        formatFixableErrorReply("This session couldn't recover from an error", event.error, hint, {
+          followUp: "Start a new thread to continue — I can't pick this one back up.",
+        }),
+      );
+      return;
+    }
     const errorId = event.error?.id;
     const summary = formatErrorHint(errorHintOf(event.error));
     await channel.thread.post(

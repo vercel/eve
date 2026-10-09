@@ -166,15 +166,15 @@ async function observeInvocation(
 ): Promise<InvokeResult> {
   const summary = summarizeTurnEvents(await collectTurnEvents(response));
   if (summary.boundary === undefined) return runningResult(target, session.state);
-  if (summary.boundary.type === "session.failed") {
-    return { status: "failed", message: summary.boundary.data.message };
+  if (summary.boundary.type === "session.ended" && summary.boundary.data.outcome === "failed") {
+    return { status: "failed", message: summary.failure?.message ?? "The session failed." };
   }
 
   const resume = createResume(target, session.state);
-  if (summary.failure?.type === "turn.failed") {
+  if (summary.failure !== undefined) {
     return {
       status: "ready",
-      outcome: { status: "failed", message: summary.failure.data.message },
+      outcome: { status: "failed", message: summary.failure.message },
       resume,
     };
   }

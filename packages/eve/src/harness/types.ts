@@ -175,6 +175,11 @@ export interface StepInput {
    */
   readonly runtimeActionResults?: readonly RuntimeActionResult[];
   /**
+   * What the agents behind some of {@link runtimeActionResults} spent, by call id. Each call's
+   * settlement records it, so the session counts a child's usage once.
+   */
+  readonly delegatedUsage?: Readonly<Record<string, TokenUsage>>;
+  /**
    * The deliveries this input carries, each with what its person sent, which the turn consumes.
    * Set at the delivery boundary; never produced by channels.
    */

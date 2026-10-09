@@ -53,7 +53,6 @@ interface StreamActionEmissionOptions {
    */
   readonly hidesHeldText?: boolean;
   readonly tools: HarnessToolLookup;
-  readonly unsettledActionToolNames?: Map<string, string>;
 }
 
 /**
@@ -73,11 +72,6 @@ export async function emitStreamContent(
   const orderedEmitter = createOrderedStreamEmitter(emitFn);
   const providerActionBatch = createProviderStreamActionBatch({
     emitFn: orderedEmitter.emit,
-    onActionsEmitted: (actions) => {
-      for (const { request, toolName } of actions) {
-        options?.unsettledActionToolNames?.set(request.action.callId, toolName);
-      }
-    },
     state,
   });
   try {
@@ -166,13 +160,9 @@ async function consumeStreamContent(
       : { data: { callId, delta, name: input.toolName }, scope, type: "call.input" };
     input.announced = true;
     await emitFn(event);
-    options?.unsettledActionToolNames?.set(callId, input.toolName);
   };
 
-  const emitActionRequest = async (
-    projection: RuntimeActionRequestProjection,
-    toolName: string,
-  ): Promise<void> => {
+  const emitActionRequest = async (projection: RuntimeActionRequestProjection): Promise<void> => {
     const { action } = projection;
     if (emittedActionCallIds.has(action.callId)) {
       return;
@@ -187,7 +177,6 @@ async function consumeStreamContent(
     await emitFn(
       callRequested({ action, owner: { runId }, scope, title: projection.presentationLabel }),
     );
-    options?.unsettledActionToolNames?.set(action.callId, toolName);
   };
 
   const collectProviderToolCall = async (toolCall: {
@@ -261,7 +250,6 @@ async function consumeStreamContent(
     await emitFn(
       callSettledFrom(result, { scope, title: resultPresentation?.[result.callId]?.label }),
     );
-    options?.unsettledActionToolNames?.delete(result.callId);
   };
 
   const emitToolCall = async (toolCall: TypedToolCall<ToolSet>): Promise<void> => {
@@ -279,7 +267,6 @@ async function consumeStreamContent(
           toolCall,
           tools: options.tools,
         }),
-        toolCall.toolName,
       );
     } catch (error) {
       if (error instanceof TypeError) {
