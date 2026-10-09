@@ -3,6 +3,8 @@ export type {
   ApprovalConfiguration,
   ApprovalContext,
   ApprovalPolicy,
+  ApprovalPrompt,
+  ApprovalPromptContext,
   ApprovalRequest,
   ApprovalResponse,
   ApprovalResponseAuth,
@@ -12,5 +14,7 @@ export type {
   ApprovalResponseSession,
   ApprovalStatus,
   ConnectionToolAnnotations,
+  ToolApproval,
+  ToolApprovalConfiguration,
 } from "#approval/definition.js";
 export { resolveApprovalPolicy } from "#approval/definition.js";

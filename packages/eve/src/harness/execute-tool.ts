@@ -1,6 +1,6 @@
 import type { FlexibleSchema } from "ai";
 
-import type { Approval } from "#approval/definition.js";
+import type { ToolApproval } from "#approval/definition.js";
 import type {
   InternalToolDefinition,
   InternalToolLabelDefinition,
@@ -29,7 +29,7 @@ export interface HarnessToolDefinition {
   readonly frameworkAction?: "task-cancel" | "task-wait";
   readonly inputSchema: FlexibleSchema;
   readonly name: string;
-  readonly approval?: Approval;
+  readonly approval?: ToolApproval;
   readonly outputSchema?: FlexibleSchema;
   /**
    * Advertise this tool only to the root session, hiding it from subagent

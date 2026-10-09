@@ -2,7 +2,7 @@ import type {
   StandardJSONSchemaV1,
   StandardSchemaV1,
 } from "#compiled/@standard-schema/spec/index.js";
-import type { Approval } from "#approval/definition.js";
+import type { ToolApproval } from "#approval/definition.js";
 import type { MessageResult, SendTurnOptions } from "#client/types.js";
 import type { JsonObject } from "#shared/json.js";
 import {
@@ -169,7 +169,7 @@ interface WorkflowToolDefinitionBase<TInput, TOutput> extends PublicToolDefiniti
   TOutput
 > {
   readonly [WORKFLOW_TOOL_BRAND]: true;
-  approval?: Approval<unknown extends TInput ? Record<string, unknown> : TInput>;
+  approval?: ToolApproval<unknown extends TInput ? Record<string, unknown> : TInput>;
   toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
 }
 

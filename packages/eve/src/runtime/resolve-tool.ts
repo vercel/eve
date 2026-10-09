@@ -2,7 +2,7 @@ import type { CompiledToolDefinition } from "#compiler/manifest.js";
 import { isFrameworkTool, frameworkTool } from "#tools/provided/framework-tool.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
-import { normalizeApproval } from "#internal/authored-definition/approval.js";
+import { normalizeToolApproval } from "#internal/authored-definition/approval.js";
 import { registerDefinitionSource } from "#internal/authored-definition/source-identity.js";
 import { isToolSchema, toInputSchema, toOutputSchema } from "#tools/schema.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -165,7 +165,7 @@ function extractOptionalHooks(
   }
 
   if (record.approval !== undefined) {
-    optional.approval = normalizeApproval(
+    optional.approval = normalizeToolApproval(
       record.approval,
       describe(definition, "to provide a valid approval definition"),
     );
