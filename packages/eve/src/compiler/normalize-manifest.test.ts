@@ -26,6 +26,11 @@ import { defineDynamicSchedules } from "#public/schedules/subscription.js";
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
 import { z } from "#compiled/zod/index.js";
 import { defineSkill } from "#public/definitions/skill.js";
+import {
+  EVE_NAMESPACE_NAMES,
+  EVE_NAMESPACE_RESERVATION,
+  NAMES_OUTSIDE_EVE_NAMESPACE,
+} from "#internal/testing/catalog-fixtures.js";
 import { resolveAgent } from "#runtime/resolve-agent.js";
 import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
 import { compiledAgentManifestSchema } from "#compiler/manifest.js";
@@ -217,7 +222,6 @@ describe("compileAgentManifest source graph", () => {
 
     expect(compiled.config.defaultTools).toBe(false);
     expect(compiled.tools.map((tool) => tool.name).sort()).toEqual(["bash", "weather"]);
-    expect(compiled.dynamicTools.map((tool) => tool.slug)).toEqual(["connection_tools"]);
     expect(compiled.tools.find((tool) => tool.name === "bash")?.description).toBe(
       "Application-owned shell replacement.",
     );
@@ -230,23 +234,6 @@ describe("compileAgentManifest source graph", () => {
         )
         .map((entry) => entry.source.logicalPath),
     ).toEqual(["tools/bash.ts"]);
-  });
-
-  it.each([
-    ["tools/connection_search.ts", disableTool()],
-    [
-      "tools/connection_execute.ts",
-      defineTool({ description: "Replacement.", execute: () => null, inputSchema: {} }),
-    ],
-    ["tools/connection_tools.ts", disableTool()],
-  ])("rejects authored %s because the connection tools are closed", async (logicalPath, entry) => {
-    const sourceRegistry = registry([
-      { logicalPath, loadNamespace: async () => ({ default: entry }) },
-    ]);
-
-    await expect(
-      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
-    ).rejects.toThrow(`"agent/${logicalPath}" is reserved.`);
   });
 
   it("allows disableTool for the root agent tool", async () => {
@@ -463,7 +450,7 @@ describe("compileAgentManifest source graph", () => {
       messages: [],
     });
     expect(Object.keys(tools as object).sort()).toEqual(
-      ["create", "delete", "disable", "enable", "get", "invoke", "list"].map(
+      ["create", "delete", "disable", "enable", "get", "invoke", "list", "update"].map(
         (operation) => `schedule__billing-requests__${operation}`,
       ),
     );
@@ -786,21 +773,142 @@ describe("compileAgentManifest source graph", () => {
     );
   });
 
-  it("reserves the task tools' names", async () => {
+  describe("eve's namespace", () => {
+    const authoredTool = (name: string) => ({
+      logicalPath: `tools/${name}.ts`,
+      loadNamespace: async () => ({
+        default: defineTool({ description: name, execute: () => null, inputSchema: {} }),
+      }),
+    });
+    const authoredSkill = (name: string) => ({
+      logicalPath: `skills/${name}.ts`,
+      loadNamespace: async () => ({
+        default: defineSkill({ description: name, markdown: `# ${name}\n` }),
+      }),
+    });
+    const compile = (sources: Parameters<typeof registry>[0]) =>
+      compileAgentManifest(manifest(), { sourceRegistries: [registry(sources)] });
+
+    it.each(EVE_NAMESPACE_NAMES)("rejects an authored tool named %s", async (name) => {
+      await expect(compile([authoredTool(name)])).rejects.toThrow(
+        `Tool "tools/${name}.ts" uses the reserved name "${name}". Rename its path; ${EVE_NAMESPACE_RESERVATION}.`,
+      );
+    });
+
+    it("rejects disabling a built-in tool, whose name is in eve's namespace", async () => {
+      await expect(
+        compile([
+          {
+            logicalPath: "tools/eve__search.ts",
+            loadNamespace: async () => ({ default: disableTool() }),
+          },
+        ]),
+      ).rejects.toThrow(EVE_NAMESPACE_RESERVATION);
+    });
+
+    it.each(EVE_NAMESPACE_NAMES)("rejects an authored skill named %s", async (name) => {
+      await expect(compile([authoredSkill(name)])).rejects.toThrow(
+        `uses the reserved name "${name}". Rename its path; ${EVE_NAMESPACE_RESERVATION}.`,
+      );
+    });
+
+    it("accepts tools and skills outside it, including the built-in tools' former names", async () => {
+      const compiled = await compile([
+        ...NAMES_OUTSIDE_EVE_NAMESPACE.map(authoredTool),
+        ...NAMES_OUTSIDE_EVE_NAMESPACE.map(authoredSkill),
+      ]);
+
+      expect(compiled.tools.map((entry) => entry.name)).toEqual(
+        expect.arrayContaining(NAMES_OUTSIDE_EVE_NAMESPACE),
+      );
+      expect(compiled.skills.map((entry) => entry.name).toSorted()).toEqual(
+        NAMES_OUTSIDE_EVE_NAMESPACE.toSorted(),
+      );
+    });
+  });
+
+  it("rejects a deferred provider tool, which the provider has to see", async () => {
     const sourceRegistry = registry([
       {
-        logicalPath: "tools/task_cancel.ts",
+        logicalPath: "tools/web_search.ts",
         loadNamespace: async () => ({
-          default: defineTool({ description: "Cancel.", inputSchema: {}, execute: () => null }),
+          default: { ...webSearch({ provider: "exa" }), deferred: true },
         }),
       },
     ]);
 
     await expect(
       compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
-    ).rejects.toThrow(
-      'Tool "tools/task_cancel.ts" uses the reserved name "task_cancel". Rename its path; eve reserves "task_cancel" for its built-in task tool.',
-    );
+    ).rejects.toThrow("Provider tools can't be deferred");
+  });
+
+  describe("connection name ownership", () => {
+    const linear = {
+      logicalPath: "connections/linear.ts",
+      loadNamespace: async () => ({
+        default: defineMcpClientConnection({
+          description: "Linear.",
+          url: "https://mcp.linear.example",
+        }),
+      }),
+    };
+    const tool = (name: string) => ({
+      logicalPath: `tools/${name}.ts`,
+      loadNamespace: async () => ({
+        default: defineTool({ description: name, execute: () => null, inputSchema: {} }),
+      }),
+    });
+
+    it.each([
+      [
+        "linear__sync",
+        'Tool "linear__sync" starts with "linear__", which belongs to connection "linear". Rename the tool file.',
+      ],
+      ["linear", 'Tool "linear" has the same name as connection "linear". Rename the tool file.'],
+    ])("rejects a tool named %s beside connection linear", async (name, message) => {
+      const sourceRegistry = registry([linear, tool(name)]);
+
+      await expect(
+        compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+      ).rejects.toThrow(message);
+    });
+
+    it("rejects a connection named eve, which would own eve's namespace", async () => {
+      const sourceRegistry = registry([{ ...linear, logicalPath: "connections/eve.ts" }]);
+
+      await expect(
+        compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+      ).rejects.toThrow(
+        `Connection "connections/eve.ts" uses the reserved name "eve". Rename its path; ${EVE_NAMESPACE_RESERVATION}.`,
+      );
+    });
+
+    it("accepts connections outside eve's namespace, including the catalog tools' former names", async () => {
+      const names = ["search", "execute", "steve", "eve-tools"];
+      const sourceRegistry = registry(
+        names.map((name) => ({ ...linear, logicalPath: `connections/${name}.ts` })),
+      );
+
+      const compiled = await compileAgentManifest(manifest(), {
+        sourceRegistries: [sourceRegistry],
+      });
+
+      expect(compiled.connections.map((entry) => entry.connectionName).toSorted()).toEqual(
+        names.toSorted(),
+      );
+    });
+
+    it("allows a convention prefix that no connection owns", async () => {
+      const sourceRegistry = registry([linear, tool("linearize"), tool("tenant__export")]);
+
+      const compiled = await compileAgentManifest(manifest(), {
+        sourceRegistries: [sourceRegistry],
+      });
+
+      expect(compiled.tools.map((entry) => entry.name)).toEqual(
+        expect.arrayContaining(["linearize", "tenant__export"]),
+      );
+    });
   });
 
   it("projects a local subagent node once", async () => {

@@ -10,13 +10,15 @@ import {
 } from "ai";
 
 import { AuthKey, HistoryStateKey } from "#context/keys.js";
+import type { StepCatalog } from "#execution/catalog/step-catalog.js";
 import { workingTaskIds } from "#execution/tasks/model-step.js";
 import {
   hydrateSandboxAttachments,
   moveToolResultFilesToUserMessages,
 } from "#harness/attachment-staging.js";
 import { emitStreamContent } from "#harness/emission.js";
-import { FINAL_OUTPUT_TOOL_NAME } from "#harness/final-output.js";
+import { toEntryStep, toEntryStream, toEntryTelemetry } from "#harness/execute-call.js";
+import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import type { GenerationSteering } from "#harness/generation-steering.js";
 import { interruptStreamOnFailure } from "#harness/interruptible-stream.js";
 import type { HarnessModelMessage, UserModelMessage } from "#harness/messages.js";
@@ -65,7 +67,7 @@ import {
   withAccumulatedResponseMessages,
 } from "./response.js";
 import { runModelCallWithRetries } from "./retry.js";
-import { logToolExecutionError, type ModelTools, prepareModelTools } from "./tools.js";
+import { logToolExecutionError, prepareModelTools } from "./tools.js";
 import { extractGatewayCostUsd, extractTokenUsageDelta } from "./usage.js";
 
 const environment = process.env.NODE_ENV ?? "unknown";
@@ -83,6 +85,8 @@ export interface ModelCallOptions {
 
 /** What a model step's caller needs from the step. */
 interface ModelCallerInput {
+  /** The step's catalog: what the model can call, and what each call runs. */
+  readonly catalog: StepCatalog;
   readonly model: LanguageModel;
   readonly generation: GenerationSteering;
   readonly hidesHeldText: boolean;
@@ -107,8 +111,6 @@ export class ModelCaller {
   private projectedMessages: HarnessModelMessage[];
   /** The latest attempt's request; its history is what the step commits. */
   request: RequestMessages;
-  /** The latest attempt's tools, which decide how the step's calls defer and end the turn. */
-  tools: ModelTools | undefined;
   /** The messages the latest attempt sent, after attachments were hydrated. */
   modelMessages: ModelMessage[] = [];
   requestEnvelopeTokens = 0;
@@ -132,7 +134,7 @@ export class ModelCaller {
       step.config.runtimeIdentity,
     );
     this.projectedMessages = input.projectedMessages;
-    this.request = this.buildRequest(step.config.tools);
+    this.request = this.buildRequest();
   }
 
   /** Calls the model, retrying transient failures. */
@@ -207,9 +209,9 @@ export class ModelCaller {
     this.interruptedUsage = undefined;
   }
 
-  private buildRequest(coordinationTools: ModelTools["coordinationTools"]): RequestMessages {
+  private buildRequest(): RequestMessages {
     return requestMessages(this.step, {
-      coordinationTools,
+      catalog: this.input.catalog,
       hidesHeldText: this.input.hidesHeldText,
       messages: this.prompt.messages,
       pendingApprovalsNote: this.input.pendingApprovalsNote,
@@ -227,26 +229,25 @@ export class ModelCaller {
     });
   }
 
-  private async prepare(options: ModelCallOptions): Promise<ModelTools> {
+  private async prepare(options: ModelCallOptions): Promise<ToolSet> {
     const tools = await prepareModelTools(this.step, {
-      approvedTools: this.input.approvedTools,
+      catalog: this.input.catalog,
       disabledProviderTools: options.disabledProviderTools,
       generation: this.input.generation,
       profile: this.profile,
     });
-    this.tools = tools;
-    this.request = this.buildRequest(tools.coordinationTools);
+    this.request = this.buildRequest();
     this.requestEnvelopeTokens = await estimateRequestEnvelope({
       history: this.projectedMessages,
       instructions: this.instructions(options.extraSystemNote),
       messages: withTrailingUserNote(this.request.nonSystemMessages, options.trailingUserNote),
-      tools: tools.effectiveTools,
+      tools,
     });
     return tools;
   }
 
   /** Compacts the prompt when it's over the threshold, then rebuilds what depends on it. */
-  private async compact(options: ModelCallOptions, tools: ModelTools): Promise<ModelTools> {
+  private async compact(options: ModelCallOptions, tools: ToolSet): Promise<ToolSet> {
     const { step, prompt } = this;
     const { config } = step;
     let compaction: Awaited<ReturnType<typeof maybeCompact>>;
@@ -292,7 +293,7 @@ export class ModelCaller {
     unsettledActionToolNames: Map<string, string>,
   ): Promise<HarnessStepResult> {
     const { step } = this;
-    const { generation, model } = this.input;
+    const { catalog, generation, model } = this.input;
     const tools = await this.compact(options, await this.prepare(options));
     // New announcements join durable history, so they must not inflate the
     // envelope baseline and hide instruction growth on the next step.
@@ -348,7 +349,8 @@ export class ModelCaller {
           usage: event.usage,
         });
       },
-      onToolExecutionEnd: logToolExecutionError,
+      onToolExecutionEnd: (event: Parameters<typeof logToolExecutionError>[0]) =>
+        logToolExecutionError(event, catalog.resolve),
       // Replaces the AI SDK's default `console.error`; the harness reports failures as events.
       onError(event: { error: unknown }) {
         if (generation.interrupted) return;
@@ -363,9 +365,13 @@ export class ModelCaller {
       reasoning: step.session.agent.modelReference?.reasoning ?? step.session.agent.reasoning,
       runtimeContext,
       stopWhen: isStepCount(1),
-      telemetry: attempt?.telemetry,
-      toolApproval: buildToolApproval(tools.modelTools, generation.signal),
-      tools: tools.effectiveTools,
+      telemetry: toEntryTelemetry(attempt?.telemetry, catalog.resolve),
+      toolApproval: buildToolApproval({
+        abortSignal: generation.signal,
+        approvedTools: this.input.approvedTools,
+        resolve: catalog.resolve,
+      }),
+      tools,
     };
     const agent = new ToolLoopAgent(settings);
 
@@ -373,13 +379,7 @@ export class ModelCaller {
       const result =
         step.emit === undefined
           ? await this.generate(agent, callMessages, hooks.stepResult)
-          : await this.stream(
-              agent,
-              callMessages,
-              hooks.stepResult,
-              tools,
-              unsettledActionToolNames,
-            );
+          : await this.stream(agent, callMessages, hooks.stepResult, unsettledActionToolNames);
       await attempt?.complete();
       return result;
     } catch (error) {
@@ -395,12 +395,11 @@ export class ModelCaller {
     agent: ToolLoopAgent,
     messages: ModelMessage[],
     stepResultPromise: Promise<HarnessStepResult>,
-    tools: ModelTools,
     unsettledActionToolNames: Map<string, string>,
   ): Promise<HarnessStepResult> {
     const { step } = this;
-    const { generation } = this.input;
-    const excludedActionToolNames = new Set([FINAL_OUTPUT_TOOL_NAME]);
+    const { catalog, generation } = this.input;
+    const excludedActionToolNames = new Set([REPLY_TOOL_NAME]);
     const streamResult = await agent.stream({ abortSignal: generation.signal, messages });
     const {
       emittedActionCallIds,
@@ -411,26 +410,29 @@ export class ModelCaller {
     } = await emitStreamContent(
       step.publish,
       step.position(),
-      interruptStreamOnFailure(streamResult.fullStream, generation.signal),
+      toEntryStream(
+        interruptStreamOnFailure(streamResult.fullStream, generation.signal),
+        catalog.resolve,
+      ),
       {
         excludedActionToolNames,
         hidesHeldText: this.input.hidesHeldText && workingTaskIds(step.session).length > 0,
-        tools: tools.presentationTools,
+        tools: catalog,
         unsettledActionToolNames,
       },
     );
     throwIfTurnAborted(step.config.abortSignal);
     generation.check();
-    const [stepResult, accumulatedResponseMessages] = await Promise.all([
-      stepResultPromise,
-      streamResult.responseMessages,
-    ]);
+    const [stepResult, accumulatedResponseMessages] = toEntryStep(
+      ...(await Promise.all([stepResultPromise, streamResult.responseMessages])),
+      catalog.resolve,
+    );
     assertUsableResponse(
       stepResult,
       accumulatedResponseMessages,
       inlineAuthorizationResults.length > 0 || trailingInlineToolResultParts.length > 0,
     );
-    const skipped = answerSkippedToolCalls(stepResult, tools.effectiveTools);
+    const skipped = answerSkippedToolCalls(stepResult, catalog);
     await emitStepActions(
       step.publish,
       step.position(),
@@ -448,7 +450,7 @@ export class ModelCaller {
         excludedActionCallIds: invalidInputToolCallIds,
         excludedActionToolNames,
         handledInlineToolResultCallIds,
-        tools: tools.presentationTools,
+        tools: catalog,
       },
     );
     const toolResultsByCallId = new Map(
@@ -463,10 +465,7 @@ export class ModelCaller {
     return withAccumulatedResponseMessages({
       invalidInputToolCallIds,
       responseMessages: appendMissingToolResultMessages({
-        append: [
-          ...trailingInlineToolResultParts,
-          ...answerSkippedToolCalls(stepResult, tools.effectiveTools),
-        ],
+        append: [...trailingInlineToolResultParts, ...answerSkippedToolCalls(stepResult, catalog)],
         responseMessages: accumulatedResponseMessages,
       }),
       stepResult,
@@ -480,16 +479,20 @@ export class ModelCaller {
     messages: ModelMessage[],
     stepResultPromise: Promise<HarnessStepResult>,
   ): Promise<HarnessStepResult> {
-    const { generation } = this.input;
+    const { catalog, generation } = this.input;
     const generateResult = await agent.generate({ abortSignal: generation.signal, messages });
     throwIfTurnAborted(this.step.config.abortSignal);
     generation.check();
-    const stepResult = await stepResultPromise;
-    assertUsableResponse(stepResult, generateResult.responseMessages, false);
+    const [stepResult, responseMessages] = toEntryStep(
+      await stepResultPromise,
+      generateResult.responseMessages,
+      catalog.resolve,
+    );
+    assertUsableResponse(stepResult, responseMessages, false);
     return withAccumulatedResponseMessages({
       responseMessages: appendMissingToolResultMessages({
-        append: answerSkippedToolCalls(stepResult, this.tools!.effectiveTools),
-        responseMessages: generateResult.responseMessages,
+        append: answerSkippedToolCalls(stepResult, catalog),
+        responseMessages,
       }),
       stepResult,
     });

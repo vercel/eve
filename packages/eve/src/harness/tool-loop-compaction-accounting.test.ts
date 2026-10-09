@@ -288,7 +288,7 @@ describe("tool-loop structured compaction accounting", () => {
           },
         ],
         usage: {
-          inputTokens: 100,
+          inputTokens: 600,
         },
       },
       {
@@ -314,7 +314,7 @@ describe("tool-loop structured compaction accounting", () => {
       createTestSession({
         compaction: {
           recentWindowSize: 10,
-          threshold: 500,
+          threshold: 1000,
         },
       }),
       { message: "Compute something" },
@@ -322,7 +322,7 @@ describe("tool-loop structured compaction accounting", () => {
 
     expect(first.next).toBe(runStep);
     expect(first.session.compaction).toMatchObject({
-      lastKnownInputTokens: 100,
+      lastKnownInputTokens: 600,
       lastKnownPromptMessageCount: 1,
     });
 

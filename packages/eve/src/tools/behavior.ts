@@ -22,7 +22,6 @@ export interface ToolExecutionShape {
 export interface CompiledToolBehavior {
   readonly availability: readonly ToolAvailabilityCondition[];
   readonly handling?: CompiledToolHandling;
-  readonly presentation?: "load-skill";
   readonly shape?: ToolExecutionShape;
 }
 
@@ -58,7 +57,6 @@ export type PreparedToolHandling =
 export interface PreparedToolBehavior {
   readonly availability: readonly ToolAvailabilityCondition[];
   readonly handling?: PreparedToolHandling;
-  readonly presentation?: CompiledToolBehavior["presentation"];
 }
 
 // Framework definitions and the compiler may come from different bundled copies.

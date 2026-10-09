@@ -17,7 +17,7 @@ export function respondToRemoteQuestion(request: MockModelRequest): MockModelRes
   const answer = latestTaskResult(request, "remote-loopback");
   if (answer !== undefined) return `PARENT-QUESTION-COMPLETE: ${answer}`;
   if (request.toolResults.some((entry) => entry.name === "remote-loopback")) {
-    return { toolCalls: [{ name: "task_wait", input: {} }] };
+    return { toolCalls: [{ name: "eve__task_wait", input: {} }] };
   }
   return {
     toolCalls: [

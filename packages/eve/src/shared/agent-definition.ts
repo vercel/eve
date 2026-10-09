@@ -296,6 +296,13 @@ export interface AgentWorkflowDefinition {
 }
 
 /**
+ * How eve exposes an agent to its parent model: `true` as a tool in the
+ * model's tool list, `"deferred"` as a catalog entry the model finds with
+ * `eve__search` and calls with `eve__tool`, and `false` not at all.
+ */
+export type AgentToolExposure = boolean | "deferred";
+
+/**
  * Compiled-side agent definition. Carries a `name` because the compiler
  * stamps the path-derived `agentId` onto every compiled agent node.
  */
@@ -309,7 +316,7 @@ export type InternalAgentDefinition = {
   model: InternalAgentModelDefinition;
   reasoning?: AgentReasoningDefinition;
   source?: ModuleSourceRef;
-  tool?: boolean;
+  tool?: AgentToolExposure;
   limits?: AgentLimitsDefinition;
 };
 
@@ -350,13 +357,15 @@ type PublicAgentDefinitionBase = {
    */
   readonly limits?: AgentLimitsDefinition;
   /**
-   * Whether eve exposes this agent to its parent model as a tool. On the root
+   * How eve exposes this agent to its parent model. `true` lists it as a
+   * tool, `"deferred"` makes it a catalog entry the model finds with `eve__search`
+   * and calls with `eve__tool`, and `false` hides it from the model. On the root
    * agent, this controls the built-in `agent` tool. Defaults to `true`.
    *
    * A subagent with this set to `false` remains callable through `ctx.agent()`
    * in workflow tools.
    */
-  readonly tool?: boolean;
+  readonly tool?: AgentToolExposure;
 };
 
 /**

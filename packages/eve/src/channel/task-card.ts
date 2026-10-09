@@ -1,5 +1,9 @@
-import { isTaskControlTool } from "#protocol/task-tools.js";
-import type { TaskCancelReason, UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type {
+  ActionPresentationByCallId,
+  TaskCancelReason,
+  UnstampedMessageStreamEvent,
+} from "#protocol/message.js";
+import { actionLabel, visibleActions } from "#shared/action-label.js";
 import { actionRequestName } from "#shared/action-request-name.js";
 import type { RuntimeActionRequest } from "#shared/action-types.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
@@ -213,20 +217,11 @@ function trackTurnEvent(
       const { turnId } = event.data;
       const current = turns[turnId] ?? { calls: [], ended: false };
       const known = new Set(current.calls.map((call) => call.callId));
-      // Nested actions (such as a connection tool run by connection_execute)
-      // already appear as their parent call's row.
-      const requested = event.data.actions.filter(
-        (action) =>
-          !known.has(action.callId) &&
-          !(
-            action.kind === "tool-call" &&
-            (isTaskControlTool(action.toolName) || action.parentCallId !== undefined)
-          ),
+      const requested = visibleActions(event.data.actions).filter(
+        (action) => !known.has(action.callId),
       );
       if (requested.length === 0) return undefined;
-      const calls = requested.map((action) =>
-        requestedCall(action, event.data.presentation?.[action.callId]?.label, at),
-      );
+      const calls = requested.map((action) => requestedCall(action, event.data.presentation, at));
       return { turn: { ...current, calls: bounded([...current.calls, ...calls]) }, turnId };
     }
     case "action.result": {
@@ -339,7 +334,7 @@ export function workingTaskNames(turn: TaskCardTurn | undefined): readonly strin
 
 function requestedCall(
   action: RuntimeActionRequest,
-  label: string | undefined,
+  presentation: ActionPresentationByCallId | undefined,
   at: string,
 ): TrackedCall {
   const name = actionRequestName(action);
@@ -348,7 +343,7 @@ function requestedCall(
     name,
     startedAt: at,
     status: "working",
-    title: presentationText(label) ?? displayTitle(name),
+    title: actionLabel(action, presentation),
   };
   const input = boundedInput(action.input);
   if (input !== undefined) call.input = input;

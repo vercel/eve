@@ -5,7 +5,7 @@ import {
 } from "#runtime/agent/bootstrap-model-utils.js";
 import { TASK_ID_INPUT } from "#execution/tasks/task-id-input.js";
 import { createJsonSchemaSample } from "#runtime/agent/mock-structured-output.js";
-import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
+import { getSkillLoads } from "#runtime/agent/mock-model-skill-selection.js";
 
 export interface AvailableBootstrapTool {
   readonly description?: string;
@@ -161,6 +161,7 @@ function getTrailingUserText(prompt: BootstrapPrompt): string {
 }
 
 function getLoadedSkillResultTexts(prompt: BootstrapPrompt): string[] {
+  const skillLoads = getSkillLoads(prompt);
   return prompt.flatMap((message) => {
     if (message.role !== "tool" && message.role !== "assistant") {
       return [];
@@ -173,7 +174,7 @@ function getLoadedSkillResultTexts(prompt: BootstrapPrompt): string[] {
         return [];
       }
 
-      if (part.toolName !== LOAD_SKILL_TOOL_NAME || part.output.type === "execution-denied") {
+      if (!skillLoads.has(part.toolCallId) || part.output.type === "execution-denied") {
         return [];
       }
 

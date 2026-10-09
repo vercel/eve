@@ -198,7 +198,7 @@ function getTraceActionNameFromRequest(action: Record<string, unknown>): string 
   const kind = getTraceActionKindFromRequest(action);
   switch (kind) {
     case "load-skill":
-      return "load_skill";
+      return readString(action.name);
     case "subagent-call":
       return readString(action.subagentName) ?? readString(action.name);
     case "tool-call":
@@ -214,7 +214,7 @@ function getTraceActionNameFromResult(result: Record<string, unknown>): string |
   const kind = getTraceActionKindFromResult(result);
   switch (kind) {
     case "load-skill":
-      return readString(result.name) ?? "load_skill";
+      return readString(result.name);
     case "subagent-call":
       return readString(result.subagentName);
     case "tool-call":

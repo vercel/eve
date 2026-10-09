@@ -1,0 +1,10 @@
+---
+"eve": minor
+---
+
+Skills now load through `eve__skill({ name })`, which every agent with a skill has in place of `load_skill`, and a skill with `deferred: true` (in `SKILL.md` frontmatter or on `defineSkill`, static or dynamic) leaves the system prompt and is found with `eve__search` instead.
+
+- The `load_skill` tool and the `eve/tools/load_skill` export are removed. Delete any `agent/tools/load_skill.ts` override or approval policy that names it; an authored `agent/tools/load_skill.ts` is now an ordinary tool.
+- A skill load's `load-skill` action now carries the skill's `name`, and its `input` is the model's `{ name }` instead of `{ skill }`. Its result is a `load-skill-result` with the same `name` instead of a `tool-result` named `load_skill`. Its client message part has the `toolName` `eve__skill` instead of `eve:load-skill`, with the skill's name in `toolMetadata.eve.name`. Sessions recorded by earlier versions replay with `name` filled in from `input.skill`.
+- Eval facts report skill loads in `skillLoads`, which `t.loadedSkill` reads. They no longer count toward `toolCallCount`, `usedNoTools`, or `maxToolCalls`.
+- Skill names must use only ASCII letters, digits, underscores, and dashes, start with a letter or digit, and have at most 64 characters. The compiler rejects a static skill with another name, and eve skips a dynamic skill resolver that returns one.

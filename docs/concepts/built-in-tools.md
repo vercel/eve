@@ -24,7 +24,7 @@ export default defineAgent({
 
 This turns off the optional defaults described below. Add back only the tools the agent needs with the command in each tool's section. Existing files under `agent/tools/` remain available, including same-name replacements such as `agent/tools/bash.ts`.
 
-`connection_search` and `connection_execute` stay available when the agent has connections because they provide access to connection tools.
+`defaultTools` doesn't affect [the catalog tools](#eve__search-eve__tool-and-eve__skill): eve adds them from what the agent declares, as listed in that section.
 
 ### `bash`
 
@@ -270,7 +270,7 @@ eve add tool/agent
 export { default } from "eve/tools/agent";
 ```
 
-An authored tool at `agent/tools/agent.ts` replaces the framework behavior. Re-export the definition above to restore direct root-copy delegation, export another tool such as `agentRouter()` to change the model-facing behavior, or disable the slot. `agentRouter()` runs each call as a [task](/docs/tools/workflows#run-calls-as-tasks-task), which adds `task_wait` and `task_cancel`:
+An authored tool at `agent/tools/agent.ts` replaces the framework behavior. Re-export the definition above to restore direct root-copy delegation, export another tool such as `agentRouter()` to change the model-facing behavior, or disable the slot. `agentRouter()` runs each call as a [task](/docs/tools/workflows#run-calls-as-tasks-task), which adds `eve__task_wait` and `eve__task_cancel`:
 
 ```ts title="agent/tools/agent.ts"
 import { disableTool } from "eve/tools";
@@ -278,56 +278,36 @@ import { disableTool } from "eve/tools";
 export default disableTool();
 ```
 
-### `load_skill`
+### `eve__search`, `eve__tool`, and `eve__skill`
 
-`load_skill` pulls an on-demand [skill](../skills)'s instructions into the current turn. It appears only when the agent declares skills and adds no execution surface by itself.
+These tools let the model reach what isn't in its tool list. `eve__search` finds tools defined with `deferred: true`, agents defined with `tool: "deferred"`, every tool from the agent's [connections](../connections), and deferred [skills](../skills). `eve__tool` calls a deferred tool, agent, or connection tool by name, and `eve__skill` loads a skill, deferred or not. There is no add command; eve adds each one from what the agent declares, even when `defaultTools` is `false`:
 
-```sh
-eve add tool/load_skill
-```
+- `eve__tool` comes with anything it can call: a deferred tool or agent, a connection, or a dynamic resolver in `agent/tools/`, `agent/subagents/`, or `agent/connections/` that may add one at runtime.
+- `eve__skill` comes with any skill, static or from a dynamic skill resolver, so an agent whose only catalog entries are listed skills gets `eve__skill` alone.
+- `eve__search` comes with anything it could find: whatever `eve__tool` can call, plus deferred skills and dynamic skill resolvers.
+- An agent with none of these gets no catalog tools.
 
-```ts title="agent/tools/load_skill.ts"
-export { default } from "eve/tools/load_skill";
-```
+The decision depends only on what the agent declares, never on what its resolvers return, so the tool list stays the same for a deployment and never changes within a session.
 
-Override it:
+- `eve__search({ query, limit? })` returns the best matches, up to `limit` (default 10, at most 50). `query` is required and must contain a word. A tool match has its exact `tool` name, its `description`, and a TypeScript `signature` rendered from its schemas. A deferred skill's match has its `skill` name, its `description`, and the `path` of its `SKILL.md` when it has supporting files. A result with `tool` is called with `eve__tool`, and one with `skill` is loaded with `eve__skill`. Tools and skills rank together, in tiers: an entry whose name is exactly the query, then one whose name after its last `__` is the query, such as `linear__create_issue` or `sre__create_issue` for `create_issue`, then the tools of a connection named by the query, then entries whose names, or names after their last `__`, start with the query, then keyword matches in names, parameters, and descriptions. So `eve__search({ query: "linear" })` lists the `linear` connection's tools first. One-letter and filler words such as `a` and `the` don't count toward keyword matches unless the query has nothing else.
+- A query whose first word contains `__` searches one namespace: everything before its last `__`, without trailing underscores. The namespace only filters. `eve__search` keeps names under `<namespace>__` and anything named exactly the namespace, such as a connection's sign-in entry, then ranks them by the whole query, so `eve__search({ query: "linear__" })` returns only the `linear` connection's tools, or its sign-in result, and an exact name that contains `__` still ranks first. eve lists only the connections that can own names in that namespace, so other connections make no network call and don't appear in `unavailable`. A namespace that matches nothing fails with the closest connection names. Characters that can't appear in a name, such as a leading `^`, are ignored; `query` isn't a regular expression.
+- `eve__search` never asks the user to sign in. A connection whose server won't list its tools until the user signs in appears as one result named after the connection, such as `linear`; a connection whose server lists its tools without a token is searched like any other. A connection whose tools fail to load, or don't load within 10 seconds, appears under `unavailable` with its `error`, such as `"crm" did not list its tools within 10s. Try again later.` Matches from everything else are still returned, so a slow server doesn't hold up the search. An `eve__tool` call on that connection's tools fails with the same error.
+- `eve__tool({ name: "linear" })`, with a connection's own name, asks the user to sign in to that connection when its tools need it, and returns once they can be listed, so the next `eve__search` finds them. On a server that lists its tools without sign-in, it confirms the tools are available without asking.
+- `eve__tool({ name, input? })` calls the entry named `name` with `input`, which defaults to `{}`. A connection tool's name is `<connection>__<tool>`, such as `linear__list_issues`. eve checks `input` against the entry's input schema. An invalid input fails with the entry's signature, an unknown name fails with the closest names, and a skill's name fails with a reminder to load it with `eve__skill`. When the server asks for the user's authorization, the call asks the user to sign in and parks until sign-in completes.
+- `eve__skill({ name })` loads the named skill, deferred or not, and returns its instructions. An unknown name fails with the closest skill names, a tool's name fails with a reminder to call it with `eve__tool` or directly, and a name that matches a connection says to find its tools with `eve__search({ query: "<connection>__" })`.
 
-```ts title="agent/tools/load_skill.ts"
-import { defineTool } from "eve/tools";
-import { loadSkill } from "eve/tools/load_skill";
+After `eve__tool` or `eve__skill` resolves its entry, the call runs exactly like a direct call to that entry. A skill load reports a `load-skill` action and a `load-skill-result`, both with the skill's `name`, and an `execute_tool eve:load-skill` span. Approval policies and `approvedTools`, workflow tools and tasks, agents, `endsTurn`, `toModelOutput`, hooks, and stream events all see the entry's own name and input, such as `linear__list_issues`. Only model history records the call as `eve__tool` or `eve__skill`.
 
-export default defineTool({
-  ...loadSkill,
-  description: "Load instructions for an available skill.",
-});
-```
+eve tells the model what it can reach in an append-only context message rather than in the system prompt: which kinds of deferred entries exist, up to 20 namespaces (the first `__` segment of deferred names, such as `sre` for `sre__list_alerts`), and up to 20 connections with their descriptions. It never names a deferred entry, so deferred entries stay out of context until `eve__search` finds them. A later step appends the listing again only when that changes; a deferred entry added to a listed namespace, or without one, changes nothing. The definitions of the catalog tools never change within a deployment, so adding a deferred entry, signing in, or resolving a dynamic connection keeps the cached prompt prefix.
 
-Disable it:
+The tools eve adds itself all live in the `eve` namespace: `eve__search`, `eve__tool`, `eve__skill`, `eve__task_wait`, `eve__task_cancel`, and `eve__reply`. Nothing you author or resolve may be named `eve` or start with `eve__`: tools, subagents, skills, connections, and extension mounts, static or dynamic, since a connection or mount named `eve` would own every `eve__` name. The compiler rejects an authored tool, skill, connection, or mount, such as `agent/tools/eve__search.ts`; eve rejects an authored subagent when the agent loads, and a dynamic entry when its resolver returns it. Any other name is free, including `search` and `execute`. A connection's own name is also the entry that signs the user in to it.
 
-```ts title="agent/tools/load_skill.ts"
-import { disableTool } from "eve/tools";
+### `eve__task_wait` and `eve__task_cancel`
 
-export default disableTool();
-```
+eve adds `eve__task_wait` and `eve__task_cancel` when the agent has a tool that runs its calls as [tasks](/docs/tools/tasks): any agent tool, including the built-in `agent` tool, declared subagents, and remote agents, or a tool such as `agentRouter()`, the `workflow` tool, or an authored workflow tool that defines `task(input, ctx)` or `serve(receive, ctx)`. There is no add command, and the tools are not workflow tools. Like every `eve__` name, both are reserved.
 
-### `connection_search`
-
-`connection_search` and `connection_execute` give the model every tool from the agent's [connections](../connections) without adding each tool to the model's tool list. eve adds both when the agent has a static connection or a dynamic connection resolver, even when `defaultTools` is `false`, so there is no add command.
-
-- `connection_search({ query?, connection?, signIn?, limit?, offset? })` returns matching tools with their connection, name, description, and a TypeScript signature rendered from the tool's schemas. Omit `query` to list every tool, or pair it with `connection` to list one connection's tools. A plain search never asks the user to sign in. For a connection whose server will not list its tools until the user signs in, the result tells the model that sign-in is needed: the connection appears under `unavailable` with `requiresSignIn: true` and an error that points to `signIn: true`. Tools from the other connections are still returned.
-- `connection_search({ connection, signIn: true, query? })` asks the user to sign in to that one connection when they have not yet, then returns its matching tools. Without `connection` it fails, so the user is asked about one service at a time.
-- `connection_execute({ connection, tool, input })` checks `input` against the tool's input schema, calls the tool, and returns its result. When the server asks for the user's authorization, it also asks the user to sign in and the call parks until sign-in completes. The stream reports the call as a nested action named `<connection>__<tool>`, such as `linear__list_issues`, whose `parentCallId` is the `connection_execute` call id.
-
-The definitions of both tools never change during a session. eve lists connection names and descriptions in append-only context messages rather than in the system prompt, so finding a tool, signing in, or resolving a dynamic connection keeps the cached prompt prefix.
-
-The tools cannot be replaced or disabled. The compiler rejects an authored `agent/tools/connection_search.ts`, `agent/tools/connection_execute.ts`, or `agent/tools/connection_tools.ts`. An agent without connections has neither tool.
-
-### `task_wait` and `task_cancel`
-
-eve adds `task_wait` and `task_cancel` when the agent has a tool that runs its calls as [tasks](/docs/tools/tasks): any agent tool, including the built-in `agent` tool, declared subagents, and remote agents, or a tool such as `agentRouter()`, the `workflow` tool, or an authored workflow tool that defines `task(input, ctx)` or `serve(receive, ctx)`. There is no add command, and the tools are not workflow tools. Both names are reserved: the compiler rejects an authored `agent/tools/task_wait.ts` or `agent/tools/task_cancel.ts`.
-
-- `task_wait({ timeoutSeconds? })` parks the turn until any task has a result, a new message arrives, or `timeoutSeconds` pass, and returns at once when a result is already waiting. While it waits, the stream reports `turn.waiting` for the open turn. Results arrive in a `<task_result>` message right after it returns. Waiting never stops a task.
-- `task_cancel({ taskId })` stops a task's current work and says so, or says the task had no work to stop when it already finished or is an idle [resumable task](/docs/tools/workflows#resumable-tasks-serve). An id that names no task fails with `UNKNOWN_TASK`. A resumable task stays available after a cancel.
+- `eve__task_wait({ timeoutSeconds? })` parks the turn until any task has a result, a new message arrives, or `timeoutSeconds` pass, and returns at once when a result is already waiting. While it waits, the stream reports `turn.waiting` for the open turn. Results arrive in a `<task_result>` message right after it returns. Waiting never stops a task.
+- `eve__task_cancel({ taskId })` stops a task's current work and says so, or says the task had no work to stop when it already finished or is an idle [resumable task](/docs/tools/workflows#resumable-tasks-serve). An id that names no task fails with `UNKNOWN_TASK`. A resumable task stays available after a cancel.
 
 Review these tools before production use. Disable, wrap, restrict, or require approval for any tool that can access the filesystem, network, shell, or sensitive data.
 

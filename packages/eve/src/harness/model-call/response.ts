@@ -4,7 +4,9 @@ import {
 } from "#harness/tool-call-input-errors.js";
 import type { ModelMessage, ToolSet, TypedToolCall, TypedToolResult } from "ai";
 
+import { historyCallNames } from "#harness/execute-call.js";
 import type { HarnessStepResult } from "#harness/step-hooks.js";
+import type { HarnessToolLookup } from "#harness/types.js";
 
 type StepResponseMessage = HarnessStepResult["response"]["messages"][number];
 type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
@@ -75,7 +77,10 @@ export function appendMissingToolResultMessages(input: {
   readonly responseMessages: readonly StepResponseMessage[];
 }): StepResponseMessage[] {
   const existingCallIds = extractToolResultCallIds(input.responseMessages);
-  const append = input.append.filter((part) => !existingCallIds.has(part.toolCallId));
+  const callNames = historyCallNames(input.responseMessages);
+  const append = input.append
+    .filter((part) => !existingCallIds.has(part.toolCallId))
+    .map((part) => ({ ...part, toolName: callNames.get(part.toolCallId) ?? part.toolName }));
 
   return [
     ...input.responseMessages,
@@ -108,7 +113,10 @@ export function extractToolResultCallIds(messages: readonly ModelMessage[]): Rea
   return callIds;
 }
 
-export function answerSkippedToolCalls(step: HarnessStepResult, tools: ToolSet): ToolResultPart[] {
+export function answerSkippedToolCalls(
+  step: HarnessStepResult,
+  tools: HarnessToolLookup,
+): ToolResultPart[] {
   const { finishReason } = step;
   if (finishReason === "stop" || finishReason === "tool-calls") return [];
 
@@ -124,7 +132,7 @@ export function answerSkippedToolCalls(step: HarnessStepResult, tools: ToolSet):
   return ((step.toolCalls ?? []) as TypedToolCall<ToolSet>[])
     .filter(
       (toolCall) =>
-        tools[toolCall.toolName]?.execute !== undefined &&
+        tools.get(toolCall.toolName)?.execute !== undefined &&
         toolCall.providerExecuted !== true &&
         !isInvalidToolCall(toolCall) &&
         getInvalidToolCallInputError({ toolCall }) === undefined &&

@@ -273,8 +273,8 @@ Each call is a task with its own id, `<tool>-<6 characters>`:
   `task.result` message, which eve appends at the next step boundary. `toModelOutput` projects the
   result, not the receipt.
 
-The model waits for results with `task_wait` and stops a task with `task_cancel`, and a turn can't
-end while tasks are working. `task_cancel`, `session.cancel()`, a failed turn, and the
+The model waits for results with `eve__task_wait` and stops a task with `eve__task_cancel`, and a turn can't
+end while tasks are working. `eve__task_cancel`, `session.cancel()`, a failed turn, and the
 end of the session abort the call's `abortSignal`; the run waits up to 30 seconds for the body to
 finish unwinding, then ends as cancelled. See [Tasks](/docs/tools/tasks) for what the model sees,
 how held turns look on the stream, steering, events, and limits.
@@ -370,9 +370,9 @@ described in [Tasks](/docs/tools/tasks). What differs:
 - **One `abortSignal` per stretch of work:** a stretch starts when a call reaches an idle task and
   ends when a reply or a cancel settles its calls. Calls that arrive during a stretch share its
   signal, and the next stretch gets a new one, so a task can be cancelled any number of times.
-- **Cancellation:** `task_cancel`, `session.cancel()`, and a failed turn settle the task's waiting
+- **Cancellation:** `eve__task_cancel`, `session.cancel()`, and a failed turn settle the task's waiting
   calls as `cancelled` and abort the stretch's `abortSignal`. The run keeps waiting for more calls,
-  so the task becomes idle and stays available. `task_cancel` on an idle task says the task had no
+  so the task becomes idle and stays available. `eve__task_cancel` on an idle task says the task had no
   work to stop. To stay available, a body must catch its stretch's abort and
   return to `receive()`, as the example does; an abort that escapes the body finishes the task. A
   body that ignores the signal keeps working and its reply is dropped, but a body that doesn't
@@ -408,7 +408,7 @@ async function readRepository(ctx: WorkflowStepToolContext, repository: string) 
 }
 ```
 
-Connection tools called through `connection_execute`, ordinary tools, and workflow steps use the same
+Connection tools, ordinary tools, and workflow steps use the same
 authorization machinery for requester identity, token caching, callback completion, and rejection
 after sign-in. The execution runtime owns the wait: an agent returns to its model after authorization,
 while a workflow retries the interrupted step and continues the authored body.
@@ -709,7 +709,7 @@ Use [`ctx.ask`](#ask-a-human-ctxask) when the workflow needs a human answer. See
 ## Cancel and clean up: `ctx.abortSignal`
 
 `ctx.abortSignal` aborts when the call is cancelled: by `session.cancel()`, or, for a task, by
-`task_cancel`, a failed turn, or the end of the session. A steering message also aborts it for an
+`eve__task_cancel`, a failed turn, or the end of the session. A steering message also aborts it for an
 `execute` call; see [Stop early for a new message](#stop-early-for-a-new-message). It is durable:
 it survives replay, and a step that receives it observes the abort. Pass it into the steps that
 should stop, and clean up in `try/finally`:

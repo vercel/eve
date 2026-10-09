@@ -360,19 +360,6 @@
       ]
     },
     {
-      "name": "tool/load_skill",
-      "type": "registry:item",
-      "title": "Load Skill",
-      "description": "Load instructions from an agent skill.",
-      "files": [
-        {
-          "path": "registry/tools/load_skill.ts",
-          "type": "registry:file",
-          "target": "agent/tools/load_skill.ts"
-        }
-      ]
-    },
-    {
       "name": "tool/read_file",
       "type": "registry:item",
       "title": "Read File",

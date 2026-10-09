@@ -112,6 +112,7 @@ describe("schedule subscription client", () => {
     });
     await expect(bob.get(created.name)).resolves.toBeNull();
     await expect(bob.list()).resolves.toEqual({ cursor: null, data: [] });
+    await expect(bob.update(created.name, { payload })).rejects.toThrow("not found");
     const scope = vi.fn(() => null);
     const prepare = vi.fn(
       (value: { task: string; destination: "my-dm" | "team-channel" }) => value,
@@ -123,10 +124,33 @@ describe("schedule subscription client", () => {
     const get = vi.spyOn(provider, "get");
     await expect(denied.get(created.name)).rejects.toThrow("not available");
     await expect(denied.delete(created.name)).rejects.toThrow("not available");
+    await expect(denied.update(created.name, { payload })).rejects.toThrow("not available");
     await expect(denied.create(input)).rejects.toThrow("not available");
-    expect(scope.mock.calls).toHaveLength(3);
+    expect(scope.mock.calls).toHaveLength(4);
     expect(prepare).not.toHaveBeenCalled();
     expect(get).not.toHaveBeenCalled();
+  });
+
+  it("rejects empty, unsupported, invalid, and missing schedule updates without writing", async () => {
+    const { client, provider } = setup();
+    const created = await client.create(input);
+    const update = vi.spyOn(provider, "update");
+    // @ts-expect-error TypeScript callers must supply timing or replacement payload.
+    await expect(client.update(created.name, {})).rejects.toThrow(
+      "requires an expression or replacement payload",
+    );
+    await expect(client.update(created.name, { name: "renamed" } as never)).rejects.toThrow(
+      "does not support",
+    );
+    await expect(
+      client.update(created.name, { payload: { ...payload, task: "" } }),
+    ).rejects.toThrow("Invalid schedule payload");
+    await expect(client.update("missing", { payload })).rejects.toThrow("not found");
+    await expect(
+      client.update(created.name, { expression: { type: "delay", minutes: 0 } }),
+    ).rejects.toThrow();
+    expect(update).not.toHaveBeenCalled();
+    await expect(client.get(created.name)).resolves.toEqual(created);
   });
 
   it("refuses scheduled-execution management through the custom client too", async () => {
@@ -139,6 +163,9 @@ describe("schedule subscription client", () => {
       },
     });
     await expect(scheduled.create(input)).rejects.toThrow("unavailable during scheduled execution");
+    await expect(scheduled.update("report", { payload })).rejects.toThrow(
+      "unavailable during scheduled execution",
+    );
     expect(create).not.toHaveBeenCalled();
   });
 });

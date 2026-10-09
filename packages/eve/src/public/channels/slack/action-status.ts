@@ -1,21 +1,10 @@
 /**
- * Typing-indicator text for the turn's calls. It uses each call's start label,
- * the same text its task card row shows, so both surfaces name a call the same
- * way: `Run pnpm test`, `researcher: Find the March incidents`.
+ * Typing-indicator text for the turn's calls. A call reads as its
+ * `actionLabel`, the same text its task card row shows, so both surfaces name a
+ * call the same way: `Run pnpm test`, `researcher: Find the March incidents`.
  */
-import type { ActionPresentationByCallId } from "#protocol/message.js";
-import { actionRequestName } from "#shared/action-request-name.js";
-import type { RuntimeActionRequest } from "#shared/action-types.js";
-import { displayName, displayTitle } from "#shared/display-name.js";
+import { displayName } from "#shared/display-name.js";
 import { AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
-
-/** The call's start label, or its tool or agent display title. */
-export function actionLabel(
-  action: RuntimeActionRequest,
-  presentation: ActionPresentationByCallId | undefined,
-): string {
-  return presentation?.[action.callId]?.label ?? displayTitle(actionRequestName(action));
-}
 
 /** The first call's label, plus `+N more` when the model made several calls in one step. */
 export function withMoreCalls(label: string, count: number): string {

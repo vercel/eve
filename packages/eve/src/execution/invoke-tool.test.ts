@@ -236,14 +236,14 @@ describe("invokeTool", () => {
 
   it("refuses unknown, framework, and badly typed calls before running anything", async () => {
     const execute = vi.fn();
-    const runtime = runtimeWith([tool("note", execute), tool("load_skill", execute)], undefined, {
-      load_skill: "framework",
+    const runtime = runtimeWith([tool("note", execute), tool("web_fetch", execute)], undefined, {
+      web_fetch: "framework",
     });
     expect(await invokeTool(runtime, "missing", {}, { auth: alice })).toMatchObject({
       message: 'The agent has no tool named "missing".',
       status: "failed",
     });
-    expect(await invokeTool(runtime, "load_skill", {}, { auth: alice })).toMatchObject({
+    expect(await invokeTool(runtime, "web_fetch", {}, { auth: alice })).toMatchObject({
       message: expect.stringContaining("framework tool"),
       status: "failed",
     });

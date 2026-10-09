@@ -3839,7 +3839,7 @@ describe("TerminalRenderer conversation", () => {
       stamped(createTaskStartedEvent(call)),
       stamped(
         createActionsRequestedEvent({
-          actions: [{ callId: "wait_1", input: {}, kind: "tool-call", toolName: "task_wait" }],
+          actions: [{ callId: "wait_1", input: {}, kind: "tool-call", toolName: "eve__task_wait" }],
           sequence: 2,
           stepIndex: 1,
           turnId: "turn_1",
@@ -3859,7 +3859,7 @@ describe("TerminalRenderer conversation", () => {
     expect(during).not.toContain("Waiting for");
     expect(during).not.toContain("↑");
     expect(during).not.toContain("↓");
-    expect(during).not.toContain("task_wait");
+    expect(during).not.toContain("eve__task_wait");
 
     const approval = renderer.readToolApproval({
       approvalId: "approval_1",

@@ -7,6 +7,7 @@ import {
   isDynamicModelDefinition,
   type AgentLimitsDefinition,
   type AgentReasoningDefinition,
+  type AgentToolExposure,
 } from "#shared/agent-definition.js";
 
 export interface DynamicSubagentAgentConfig {
@@ -18,7 +19,7 @@ export interface DynamicSubagentAgentConfig {
   readonly limits?: AgentLimitsDefinition;
   readonly model: DynamicSubagentModelReference;
   readonly reasoning?: AgentReasoningDefinition;
-  readonly tool?: boolean;
+  readonly tool?: AgentToolExposure;
 }
 
 export type DynamicSubagentModelReference = RuntimeModelReference;
@@ -54,7 +55,7 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
     limits?: AgentLimitsDefinition;
     model: DynamicSubagentModelReference;
     reasoning?: AgentReasoningDefinition;
-    tool?: boolean;
+    tool?: AgentToolExposure;
   } = {
     description: definition.description,
     model: await normalizeDurableModelSelection({

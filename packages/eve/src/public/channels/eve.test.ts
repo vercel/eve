@@ -610,7 +610,20 @@ describe("eveChannel — stream cursor", () => {
 
     expect(response.status).toBe(404);
     expect(await response.json()).toEqual({ error: "Session not found.", ok: false });
-    expect(handler.getEventStream).not.toHaveBeenCalled();
+  });
+
+  it("cancels the early-opened event stream when the tail lookup fails", async () => {
+    const handler = createEveStreamHandler({ auth: none() });
+    const cancelled = vi.fn();
+    handler.getEventStream.mockResolvedValueOnce(new ReadableStream({ cancel: cancelled }));
+    handler.getStreamTailIndex.mockRejectedValueOnce(
+      new WorkflowRunNotFoundError("test-session-id"),
+    );
+
+    const response = await handler.fetch("https://eve.test/eve/v1/session/test-session-id/stream");
+
+    expect(response.status).toBe(404);
+    await vi.waitFor(() => expect(cancelled).toHaveBeenCalledOnce());
   });
 
   it("returns 503 when the session lookup fails transiently", async () => {
@@ -621,7 +634,6 @@ describe("eveChannel — stream cursor", () => {
 
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ error: "Session stream unavailable.", ok: false });
-    expect(handler.getEventStream).not.toHaveBeenCalled();
   });
 
   it("reports the durable tail index when the request opts in", async () => {

@@ -112,6 +112,43 @@ describe("message stream protocol", () => {
     });
   });
 
+  it("names skill loads that eve 0.75 recorded only by their load_skill input", () => {
+    // Parsed like a stored line: its `load-skill` action has no `name`.
+    const released = JSON.parse(
+      JSON.stringify({
+        data: {
+          actions: [
+            { callId: "call_skill", input: { skill: "pdf-forms" }, kind: "load-skill" },
+            { callId: "call_tool", input: {}, kind: "tool-call", toolName: "lookup" },
+          ],
+          sequence: 2,
+          stepIndex: 0,
+          turnId: "turn_1",
+        },
+        meta: { at: "2026-10-01T00:00:00.000Z", id: "evt_released_skill" },
+        type: "actions.requested",
+      }),
+    ) as MessageStreamEventForVersion<"26">;
+    const named = {
+      ...released,
+      data: {
+        ...released.data,
+        actions: [
+          {
+            callId: "call_skill",
+            input: { skill: "pdf-forms" },
+            kind: "load-skill",
+            name: "pdf-forms",
+          },
+          { callId: "call_tool", input: {}, kind: "tool-call", toolName: "lookup" },
+        ],
+      },
+    };
+
+    expect(normalizeMessageStreamEvent("26", released)).toEqual(named);
+    expect(normalizePersistedMessageStreamEvent(released)).toEqual(named);
+  });
+
   it("strips repeated v24 zero offsets without adding stream markers", () => {
     const normalize = (inputTextDelta: string) => {
       const event = normalizeMessageStreamEvent("24", {

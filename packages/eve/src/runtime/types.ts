@@ -31,7 +31,7 @@ import type {
   MarkdownSourceRef,
 } from "#shared/source-ref.js";
 import type { NamedSkillDefinition } from "#shared/skill-definition.js";
-import type { InternalAgentDefinition } from "#shared/agent-definition.js";
+import type { InternalAgentDefinition, AgentToolExposure } from "#shared/agent-definition.js";
 import type { RuntimeDynamicModelReference } from "#runtime/agent/bootstrap.js";
 import type { InternalToolDefinitionWithExecuteFn } from "#tools/definition.js";
 import type { CompiledToolBehavior } from "#tools/behavior.js";
@@ -276,7 +276,7 @@ export type ResolvedRuntimeSubagentNode = Readonly<
     Node & {
       kind: "subagent";
       name: string;
-      tool?: boolean;
+      tool?: AgentToolExposure;
     } & (
       | {
           description: string;
@@ -303,7 +303,7 @@ export type ResolvedRuntimeRemoteAgentNode = Readonly<
       kind: "remote";
       name: string;
       path: string;
-      tool?: boolean;
+      tool?: AgentToolExposure;
       url: string;
     }
 >;

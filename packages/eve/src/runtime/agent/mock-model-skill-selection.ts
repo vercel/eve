@@ -1,3 +1,4 @@
+import { SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
 import type { BootstrapPrompt } from "#runtime/agent/bootstrap-model-utils.js";
 import { getPromptContentText } from "#runtime/agent/bootstrap-model-utils.js";
 
@@ -10,14 +11,15 @@ export function getAvailableSkills(prompt: BootstrapPrompt): AvailableBootstrapS
   const skillsById = new Map<string, AvailableBootstrapSkill>();
 
   for (const message of prompt) {
-    if (message.role !== "system") {
+    if (message.role !== "system" && message.role !== "user") {
       continue;
     }
 
     // The "Available skills" section may be a standalone announcement
     // (dynamic skills) or embedded inside the agent's static instructions
     // (authored skills); parse bullet lines from the section header to the
-    // first blank line either way.
+    // first blank line either way. Deferred skills aren't listed, so only
+    // these are offered.
     const lines = getPromptContentText(message.content).split("\n");
     const headerIndex = lines.findIndex((line) => line.trim() === "Available skills");
 
@@ -80,14 +82,15 @@ export function getActivatedSkillIds(prompt: BootstrapPrompt): string[] {
     });
 
   // Static skill adverts stay in the prompt for the whole session (prompt
-  // caching), so activation must also be derived from `load_skill` calls
-  // already present in the history — otherwise the mock would re-load the
-  // same skill on every step.
-  return [...fromSystemLabels, ...getLoadedSkillIdsFromHistory(prompt)];
+  // caching), so activation must also be derived from skill loads already
+  // present in the history — otherwise the mock would re-load the same skill
+  // on every step.
+  return [...fromSystemLabels, ...getSkillLoads(prompt).values()];
 }
 
-function getLoadedSkillIdsFromHistory(prompt: BootstrapPrompt): string[] {
-  const ids: string[] = [];
+/** Skill loads in the history: each `eve__skill({ name })` call's id and skill. */
+export function getSkillLoads(prompt: BootstrapPrompt): ReadonlyMap<string, string> {
+  const loads = new Map<string, string>();
 
   for (const message of prompt) {
     if (message.role !== "assistant" || typeof message.content === "string") {
@@ -95,18 +98,22 @@ function getLoadedSkillIdsFromHistory(prompt: BootstrapPrompt): string[] {
     }
 
     for (const part of message.content) {
-      if (typeof part === "string" || part.type !== "tool-call" || part.toolName !== "load_skill") {
+      if (
+        typeof part === "string" ||
+        part.type !== "tool-call" ||
+        part.toolName !== SKILL_TOOL_NAME
+      ) {
         continue;
       }
 
       const skill = readSkillFromToolInput(part.input);
       if (skill !== undefined) {
-        ids.push(skill);
+        loads.set(part.toolCallId, skill);
       }
     }
   }
 
-  return ids;
+  return loads;
 }
 
 function readSkillFromToolInput(input: unknown): string | undefined {
@@ -115,10 +122,10 @@ function readSkillFromToolInput(input: unknown): string | undefined {
   if (
     typeof parsed === "object" &&
     parsed !== null &&
-    "skill" in parsed &&
-    typeof parsed.skill === "string"
+    "name" in parsed &&
+    typeof parsed.name === "string"
   ) {
-    return parsed.skill;
+    return parsed.name;
   }
 
   return undefined;

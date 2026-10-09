@@ -1,4 +1,5 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
+import { CALL_TOOL } from "@eve-e2e/config/catalog-tools";
 import { defineAgent } from "eve";
 import type { MockModelRequest, MockModelResponse, MockModelToolCall } from "eve/evals";
 
@@ -11,16 +12,16 @@ function directiveCall(message: string): MockModelToolCall | undefined {
   if (message.includes("MCP_WHOAMI")) {
     return {
       id: "mcp-whoami",
-      input: { connection: LOOPBACK_CONNECTION, input: {}, tool: "whoami" },
-      name: "connection_execute",
+      input: { input: {}, name: `${LOOPBACK_CONNECTION}__whoami` },
+      name: CALL_TOOL,
     };
   }
   const notice = PUBLISH_DIRECTIVE.exec(message)?.[1];
   if (notice !== undefined) {
     return {
       id: "mcp-publish",
-      input: { connection: LOOPBACK_CONNECTION, input: { notice }, tool: "publish_notice" },
-      name: "connection_execute",
+      input: { input: { notice }, name: `${LOOPBACK_CONNECTION}__publish_notice` },
+      name: CALL_TOOL,
     };
   }
   return undefined;
