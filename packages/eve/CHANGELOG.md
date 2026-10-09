@@ -1,5 +1,17 @@
 # eve
 
+## 0.76.1
+
+### Patch Changes
+
+- fcbd479: A denied tool approval that carries `text` now passes that note to the model in the denial reason instead of dropping it.
+- 9626748: Use build-stamped package metadata in bundled runtimes so serverless functions can start without resolving `eve/package.json` at runtime.
+- 25b3f35: `/login chatgpt` now lists current subscription models such as `gpt-6-luna`, and the default `chatgpt()` model (`gpt-6-luna-fast`) works: eve sends it to Codex as `gpt-6-luna` on the priority service tier, since Codex rejects `-fast` model IDs.
+- 416e63e: Direct OpenAI and `chatgpt()` model calls now send a per-session `promptCacheKey`, which helps OpenAI route a session's calls to the cache holding its prompt prefix. `chatgpt()` calls also send it as the `session-id` header the Codex backend routes on. An authored `providerOptions.openai.promptCacheKey` still takes precedence.
+- b04acbb: On worlds without per-deployment routing, incompatible subagent sessions and workflow tool runs (including tasks) are now cancelled when their queue deliveries arrive, instead of attempting replay on the new eve version. Top-level sessions remain available for replacement or reset, and session timeout workflows continue to run.
+- b04acbb: Sessions whose workflow run cannot execute after an eve upgrade (a stranded session) are no longer accepted and left unanswered, and the local World and Postgres stop replaying and failing them with `CORRUPTED_EVENT_LOG`. eve treats every World other than Vercel as running one eve version at a time, so the next message through a channel address (Slack, `from(address).send()`) ends a stranded session and starts a fresh one. Sends by session ID throw `SessionStrandedError` (`ClientSessionStrandedError` in `eve/client`), and the eve HTTP channel returns `409 session_stranded`; `reset()` ends a stranded session while `clear()` refuses one, and recorded history stays readable with `stream({ follow: false })` or `follow=false` on the stream route. On Worlds other than Vercel, a retired session's own session timeout now ends it at its deadline, so a retired session no longer stays active forever when no message arrives.
+- cf72486: Agents whose OpenAI model is served by an endpoint without OpenAI web search, such as Amazon Bedrock through `createOpenAI({ baseURL })` or AI Gateway, now retry the step without `web_search` instead of failing every turn.
+
 ## 0.76.0
 
 ### Minor Changes
