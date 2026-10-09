@@ -44,7 +44,7 @@ Three things change state, and each has one writer:
 
 - **Inputs,** such as messages, approvals, and cancels, arrive from outside.
 - **Facts** come only from the machine, which is pure: it does no I/O. v27 already makes it the only writer of facts ([`session-event-lifecycle.md`](./session-event-lifecycle.md)).
-- **Slots** come from reactions. Each reaction writes only its own slot: the tools, skills, context, data, or intents it currently contributes. A slot change is the `capabilities.changed` entry from the session-log sketch ([`session-event-lifecycle.md`](./session-event-lifecycle.md#toward-a-session-log)).
+- **Slots** come from reactions. Each reaction writes only its own slot: the tools, skills, context, data, or intents it currently contributes ([Slots](#slots)).
 
 Folds are the only way anything becomes state, so the model call, context assembly, and the machine all just read the view.
 
@@ -75,6 +75,36 @@ Four authoring surfaces react to a session (dynamic resolvers, memory providers,
 - **Built-ins that are reactions in disguise:** skill and connection announcements, the tasks and pending-approval notes, the compaction trigger, memory canonicalization, the auto model, and task cards.
 
 </details>
+
+## Slots
+
+A slot holds a reaction's current contribution: the latest result of its `resolve`, such as a set of tools, a recalled note, or an intent. Each reaction has one slot, named by its file, and readers fold every slot when they read. Together with what's folded from facts, the slots make up the session view:
+
+```text
+session view
+├─ folded from facts: public, on the stream
+│    turns · runs · calls · tasks · interactions · messages · latest positions
+└─ slots: private, in the checkpoint, one per reaction
+     reaction                current contribution             read by
+     skills/team_playbook    the team_playbook skill          turn start
+     tools/query             orders, users                    every model call
+     memory/notes (recall)   3 recalled notes, as context     every model call
+     memory/notes (capture)  cursor at message 42, as data    its own next run
+     hooks/csv-import        preview_rows                     every model call
+                             after_import, a compact intent   the machine
+     hooks/notify            nothing                          —
+```
+
+Each slot also keeps a digest of the selection that produced it, so eve knows when to call `resolve` again.
+
+Reactions write to slots, and facts come only from the machine, for four reasons:
+
+- **A contribution describes the present.** A fact records something that happened, once. "These tools are available" stays true until it changes, so as facts it would need added and removed events, and every reader would diff them to find what's current. A slot is replaced whole, so withdrawing something means leaving it out.
+- **Reactions can run again.** Restores, redeploys, and retries may call `resolve` a second time. In a slot, an equal result changes nothing; as a fact, it would repeat history. When a reaction wants something to happen once, such as a compaction, it declares an intent, and the machine records the fact.
+- **One decider keeps facts consistent.** The machine is pure, checks its rules before it writes, and can refuse, for example after the session has closed or past a cap. Reactions do I/O, so any facts they wrote would depend on whatever an outside call returned.
+- **Facts are public, and slots are private.** Facts are the v27 stream that clients, channels, and evals read. Slots hold code, recalled context, and selections that can include auth. They ride the checkpoint, never reach the stream, and can change shape without breaking a client.
+
+A slot change is still an entry: the `capabilities.changed` entry from the session-log sketch ([`session-event-lifecycle.md`](./session-event-lifecycle.md#toward-a-session-log)). Only new facts start another round of reactions, which is why the loop settles.
 
 ## Sync and async reactions
 
