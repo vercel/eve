@@ -150,6 +150,10 @@ describe("schedule creation and invocation", () => {
       const updateInput = { name: created.name, payload: { task: "A new joke" } };
       const updateRequest = resolveApprovalPolicy(update.approval!);
       const updateResponse = (update.approval as ApprovalConfiguration).response!;
+      await expect(
+        updateRequest(policyContext("empty-update", { name: created.name })),
+      ).resolves.toMatchObject({ type: "denied" });
+      expect(updateWrite).not.toHaveBeenCalled();
       await expect(updateRequest(policyContext("update-changed", updateInput))).resolves.toBe(
         "user-approval",
       );
@@ -172,6 +176,8 @@ describe("schedule creation and invocation", () => {
         "user-approval",
       );
       expect(approvedTargets.at(-1)).toBe("timing-only");
+      await updateResponse({ request: { callId: "timing" } } as never);
+      expect(responseTargets.at(-1)).toBe("timing-only");
       await update.execute(timingInput, { callId: "timing" } as never);
       expect(updateWrite.mock.calls[1]![2].payload).toBeUndefined();
       const invoke = tools.schedule__requests__invoke!;

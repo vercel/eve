@@ -176,12 +176,10 @@ export interface SchedulePageResult {
   readonly data: readonly ScheduleRecord[];
 }
 
-export interface ScheduleClientUpdate<TPayload> {
-  /** Complete timing replacement; omitted timezone means UTC and omitted jitter clears jitter. */
-  readonly expression?: ScheduleTiming;
-  /** Complete replacement input; preparation captures the updating caller as the new creator. */
-  readonly payload?: TPayload;
-}
+/** Requires timing or complete replacement input, which captures the updating caller as creator. */
+export type ScheduleClientUpdate<TPayload> =
+  | { readonly expression: ScheduleTiming; readonly payload?: TPayload }
+  | { readonly expression?: ScheduleTiming; readonly payload: TPayload };
 
 /** Authenticated client; timing-only updates preserve payload and creator identity. */
 export interface ScheduleClient<TPayload> {

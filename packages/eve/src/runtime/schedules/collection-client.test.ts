@@ -135,6 +135,7 @@ describe("schedule subscription client", () => {
     const { client, provider } = setup();
     const created = await client.create(input);
     const update = vi.spyOn(provider, "update");
+    // @ts-expect-error TypeScript callers must supply timing or replacement payload.
     await expect(client.update(created.name, {})).rejects.toThrow(
       "requires an expression or replacement payload",
     );

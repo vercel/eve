@@ -55,17 +55,15 @@ export type PreparedScheduleWrite = PreparedScheduleCreate | PreparedScheduleUpd
 
 /** Internal preparation capabilities used by generated write approval. */
 export interface ScheduleCollectionClient<TInput, TPrepared> extends ScheduleClient<TInput> {
-  prepareCreate(
-    input: ScheduleClientCreate<TInput>,
-  ): Promise<PreparedScheduleCreate<TInput | TPrepared>>;
+  prepareCreate(input: ScheduleClientCreate<unknown>): Promise<PreparedScheduleCreate<TPrepared>>;
   create(
     input: ScheduleClientCreate<TInput>,
     approved?: PreparedScheduleCreate,
   ): Promise<import("#public/schedules/subscription.js").ScheduleRecord>;
   prepareUpdate(
     name: string,
-    patch: ScheduleClientUpdate<TInput>,
-  ): Promise<PreparedScheduleUpdate<TInput | TPrepared>>;
+    patch: ScheduleClientUpdate<unknown>,
+  ): Promise<PreparedScheduleUpdate<TPrepared>>;
   update(
     name: string,
     patch: ScheduleClientUpdate<TInput>,
@@ -126,7 +124,7 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
   };
 
   const prepareEnvelope = async (
-    value: TPayload,
+    value: unknown,
     scope: ScheduleScopeValue,
     operation: "create" | "update",
     name: string,
@@ -135,14 +133,16 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
     if (creator === null)
       throw new Error("Writing a schedule payload requires an authenticated principal.");
     const validated = await validateSchedulePayload<TPayload>(definition.inputSchema, value);
-    const preparedPayload =
+    // Definitions without preparation default TPrepared to the validated input type.
+    const preparedPayload = (
       definition.preparePayload === undefined
         ? validated
         : await definition.preparePayload(validated, {
             ...contextFor(operation, name),
             operation,
             name,
-          });
+          })
+    ) as TPrepared;
     return createScheduleCollectionPayload({
       application: callContext.application,
       collection: callContext.collection,
@@ -150,7 +150,7 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
     }).envelope;
   };
 
-  const prepareUpdate = async (name: string, patch: ScheduleClientUpdate<TPayload>) => {
+  const prepareUpdate = async (name: string, patch: ScheduleClientUpdate<unknown>) => {
     const unsupported = Object.keys(patch).filter(
       (key) => key !== "expression" && key !== "payload",
     );
@@ -163,7 +163,7 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
     const { scope, provider } = await resolveNamespace("update", normalized);
     if ((await definition.provider.get(provider, normalized)) === null)
       throw new Error("Schedule was not found in the authorized scope.");
-    const prepared: PreparedScheduleUpdate<TPayload | TPrepared> = {
+    const prepared: PreparedScheduleUpdate<TPrepared> = {
       name: normalized,
       namespace: provider.namespace,
       expression: patch.expression,
@@ -175,7 +175,7 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
     return { prepared: snapshotPreparedWrite(prepared), provider };
   };
 
-  const prepareCreation = async (input: ScheduleClientCreate<TPayload>) => {
+  const prepareCreation = async (input: ScheduleClientCreate<unknown>) => {
     const displayName = validateScheduleName(input.name);
     // Validate timing before preparation; relative delays are resolved again at the write boundary.
     resolveScheduleTiming(input.expression);
@@ -218,7 +218,7 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
         throw new Error(
           "Schedule update changed after approval. Request a new update approval; no schedule was written.",
         );
-      const update: SchedulePatch<ScheduleCollectionPayload<TPayload | TPrepared>> = {
+      const update: SchedulePatch<ScheduleCollectionPayload<TPrepared>> = {
         expression:
           prepared.expression === undefined
             ? undefined
