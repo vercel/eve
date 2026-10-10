@@ -1,4 +1,5 @@
 import { jsonSchema } from "ai";
+import type { ApprovalContext } from "#approval/definition.js";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -139,6 +140,52 @@ function resultCallIds(session: HarnessSession) {
 }
 
 describe("workflow approval resume (real AI SDK)", () => {
+  it.each(["workflow", "agent"])("rechecks an approved %s call before dispatch", async (kind) => {
+    let frozen = false;
+    const policy = vi.fn((ctx: ApprovalContext) =>
+      frozen && ctx.session.auth.current?.principalId === "user-1"
+        ? { type: "denied" as const, reason: "A change freeze is in effect." }
+        : ("user-approval" as const),
+    );
+    const tool = {
+      ...workflow("deploy", policy),
+      ...(kind === "agent" && { workflowId: "workflow//./agent/subagents/release//run" }),
+    };
+    const fixture = setup([tool]);
+    const initial = await fixture.step(fixture.session, { message: "Deploy Alice's release." });
+    const [request] = requests(initial.session);
+    expect(request).toBeDefined();
+    frozen = true;
+    const start = fixture.events.length;
+    const approved = await fixture.step(initial.session, {
+      inputResponses: [{ optionId: "approve", requestId: request!.requestId }],
+    });
+    expect(runtimeWait(approved.session.state)).toBeUndefined();
+    expect(policy.mock.calls.at(-1)?.[0].session.auth.current?.principalId).toBe("user-1");
+    expect(
+      fixture.events.slice(start).filter((event) => event.type === "action.result"),
+    ).toMatchObject([
+      {
+        data: {
+          status: "rejected",
+          result: {
+            output: {
+              code: "TOOL_EXECUTION_DENIED",
+              message: "A change freeze is in effect.",
+            },
+          },
+        },
+      },
+    ]);
+    expect(
+      approved.session.history
+        .flatMap((message) => (message.role === "tool" ? message.content : []))
+        .filter((part) => part.type === "tool-result"),
+    ).toMatchObject([
+      { output: { type: "execution-denied", reason: "A change freeze is in effect." } },
+    ]);
+  });
+
   it("resumes the held turn before dispatch and replays accompanying input after completion", async () => {
     const fixture = setup([workflow("deploy", always())]);
     const initial = await fixture.step(fixture.session, { message: "Deploy Alice's release." });

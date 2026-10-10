@@ -1,4 +1,3 @@
-import type { SessionAuthContext } from "#channel/types.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { ModelMessage } from "ai";
 
@@ -122,8 +121,6 @@ export interface RuntimeWait {
   readonly callIds: readonly string[];
   readonly tasks: readonly RuntimeWorkflowTaskRequest[];
   readonly taskToolCalls: readonly TaskToolCall[];
-  /** Who approved each task an approval started, by call id. */
-  readonly approvers: Readonly<Record<string, SessionAuthContext>>;
 }
 
 /** The calls suspended steps wait on the runtime for, or `undefined` when none do. */
@@ -138,7 +135,6 @@ export function runtimeWait(state: SessionStateMap | undefined): RuntimeWait | u
   const tasks = waiting.flatMap((entry) => entry.tasks);
   const taskToolCalls = waiting.flatMap((entry) => entry.taskToolCalls);
   return {
-    approvers: Object.assign({}, ...waiting.map((entry) => entry.step.approvers)),
     callIds: [...tasks.map((task) => task.callId), ...taskToolCalls.map((call) => call.callId)],
     event: first.step.event,
     taskToolCalls,

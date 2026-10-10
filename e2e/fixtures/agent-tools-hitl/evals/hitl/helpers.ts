@@ -16,7 +16,7 @@ export const BOB = "bob";
 export const RELEASE_MANAGER = "e2e-approval-responder";
 
 /** Headers for one person on the scripted hitl model; `flag` feeds fixture policies. */
-export function as(principalId: string, flag?: "retire") {
+export function as(principalId: string, flag?: "retire" | "freeze") {
   return {
     headers: {
       "x-eve-fixture-model": "hitl",
