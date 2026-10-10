@@ -104,6 +104,7 @@ function enqueueToolCall(
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -384,6 +385,67 @@ describe("tool loop streamed provider retries", () => {
     expect(events.filter((event) => event.type === "step.failed")).toHaveLength(0);
     expect(events.filter((event) => event.type === "turn.failed")).toHaveLength(0);
     expect(events.filter((event) => event.type === "session.failed")).toHaveLength(0);
+  });
+
+  it("retries a provider stream that stops sending chunks without closing", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const abortSignals: (AbortSignal | undefined)[] = [];
+    const doStream = vi.fn(
+      async ({ abortSignal }: Parameters<MockLanguageModelV3["doStream"]>[0]) => {
+        abortSignals.push(abortSignal);
+        const attempt = abortSignals.length;
+        return {
+          stream: new ReadableStream<StreamPart>({
+            start(controller) {
+              if (attempt > 1) {
+                enqueueTextSuccess(controller, "Recovered answer.");
+                return;
+              }
+              // The response body stalls mid-answer without closing. Only an abort releases it,
+              // the way an aborted `fetch` errors its body.
+              controller.enqueue({ type: "stream-start", warnings: [] });
+              controller.enqueue({ id: "stalled", type: "text-start" });
+              controller.enqueue({ delta: "Partial ans", id: "stalled", type: "text-delta" });
+              abortSignal?.addEventListener("abort", () => controller.error(abortSignal.reason), {
+                once: true,
+              });
+            },
+          }),
+        };
+      },
+    );
+    const model = new MockLanguageModelV3({
+      doStream,
+      modelId: "retry-integration-model",
+      provider: "eve-integration-mock",
+    });
+    const { emit, events } = createEventCollector();
+
+    let settled = false;
+    const run = createToolLoopHarness(createConfig(model, emit))(createSession(), {
+      message: "Continue.",
+    }).finally(() => {
+      settled = true;
+    });
+
+    // Well past any plausible idle window for a stream that sends nothing.
+    await vi.advanceTimersByTimeAsync(30 * 60_000);
+    await vi.waitFor(
+      () => expect(settled, "the stalled model stream never released the turn").toBe(true),
+      { timeout: 5_000 },
+    );
+    const result = await run;
+
+    expect(abortSignals[0]?.aborted).toBe(true);
+    expect(doStream).toHaveBeenCalledTimes(2);
+    expect(result.next).toBeNull();
+    expect(result.settledTurn).toEqual({ output: "Recovered answer." });
+    expect(events.filter((event) => event.type === "step.failed")).toHaveLength(0);
+    expect(events.filter((event) => event.type === "turn.failed")).toHaveLength(0);
   });
 
   it("fails once after the overloaded retry attempts are exhausted", async () => {
