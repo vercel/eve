@@ -3,6 +3,7 @@ import { resolveRuntimeTraceLinks } from "#evals/runner/reporters/datadog-runtim
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 import {
   composeAssertionScoreMetadata,
+  exportedAssertionName,
   groupAssertionScores,
 } from "#evals/runner/reporters/assertion-scores.js";
 import {
@@ -483,7 +484,7 @@ function resolveResultMetadata(
   }
   if (recordAssertionDetails) {
     const failedAssertions = result.assertions
-      .filter((assertion) => !assertion.passed)
+      .filter((assertion) => assertion.passed === false)
       .map((assertion) => ({ name: assertion.name, message: assertion.message }));
     if (failedAssertions.length > 0) {
       metadata.eveFailedAssertions = failedAssertions;
@@ -500,16 +501,17 @@ function resolveEvaluationMetrics(result: EveEvalResult): DatadogEvaluationMetri
   const metrics: DatadogEvaluationMetricInput[] = [];
   const usedLabels = new Set<string>(BUILT_IN_METRIC_LABELS);
   const groups = groupAssertionScores(result.assertions, (assertion) =>
-    toDatadogMetricLabel(assertion.severity === "gate" ? `gate_${assertion.name}` : assertion.name),
+    toDatadogMetricLabel(exportedAssertionName(assertion)),
   );
 
   for (const [label, group] of groups) {
+    if (group.score === undefined) continue;
     metrics.push({
       label: reserveDatadogMetricLabel(label, usedLabels),
       value: group.score,
       tags: {
         assertion_severity: group.assertions[0]?.severity ?? "soft",
-        assertion_passed: String(group.assertions.every((assertion) => assertion.passed)),
+        assertion_passed: String(group.assertions.every((assertion) => assertion.passed !== false)),
         assertion_count: String(group.assertions.length),
       },
     });

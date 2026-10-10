@@ -50,6 +50,7 @@ export function createEvalContext(deps: {
 
     // Value-level assertion over an explicit value.
     check: (value, assertion) => recordCheck(collector, value, assertion),
+    score: (evaluation) => collector.recordScore(evaluation),
     require: (value, assertion) => requireCheck(collector, value, assertion),
     skip: (reason) => {
       if (reason.trim().length === 0) throw new Error("skip() requires a non-empty reason.");
