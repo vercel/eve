@@ -4,6 +4,7 @@ import { Card, CardText } from "#compiled/chat/index.js";
 import { decodeSlackApiBody } from "#internal/testing/slack-api-body.js";
 import {
   buildSlackBinding,
+  fetchSlackThreadWindow,
   callSlackApi,
   resolveSlackBotToken,
   type SlackBotTokenContext,
@@ -398,6 +399,58 @@ describe("Slack outbound text", () => {
     expect(complete?.body).toMatchObject({
       initial_comment: "report for @scope/package and <@U012ABC456>",
     });
+  });
+});
+
+describe("fetchSlackThreadWindow", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("pages to the trigger and keeps the last messages before it", async () => {
+    const pages = [
+      {
+        messages: [
+          { text: "a", ts: "1.0" },
+          { text: "b", ts: "2.0" },
+        ],
+        next_cursor: "page2",
+      },
+      {
+        messages: [
+          { text: "c", ts: "3.0" },
+          { text: "d", ts: "4.0" },
+        ],
+        next_cursor: "",
+      },
+    ];
+    const bodies: (Record<string, unknown> | undefined)[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+        const contentType = init?.headers ? new Headers(init.headers).get("content-type") : null;
+        bodies.push(decodeSlackApiBody(init?.body, contentType) as Record<string, unknown>);
+        const page = pages[bodies.length - 1]!;
+        return Response.json({
+          ok: true,
+          messages: page.messages,
+          response_metadata: { next_cursor: page.next_cursor },
+        });
+      }),
+    );
+    const { thread } = buildSlackBinding({
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: undefined,
+    });
+
+    const window = await fetchSlackThreadWindow(thread, "4.0", 3);
+
+    expect(window?.map((message) => message.ts)).toEqual(["2.0", "3.0", "4.0"]);
+    expect(bodies[0]).toMatchObject({ inclusive: "true", latest: "4.0", ts: "1.0" });
+    expect(bodies[1]).toMatchObject({ cursor: "page2" });
+    expect(thread.recentMessages).toEqual([]);
   });
 });
 

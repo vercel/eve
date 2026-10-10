@@ -8,6 +8,7 @@ import {
   resolveSlackBotToken,
   type SlackBotToken,
   type SlackThread,
+  type SlackThreadMessage,
 } from "#public/channels/slack/api.js";
 import {
   parseAttachments,
@@ -87,7 +88,9 @@ function toSlackFilePart(attachment: SlackAttachment, index: number): FilePart |
  * carries none, refreshes the thread via {@link SlackThread.refresh} and
  * collects, in thread order, the files of the messages between the previous
  * mention of the app and the trigger, up to {@link THREAD_LOOKBACK_MESSAGES}
- * messages back. A trigger the refresh didn't return gets no lookback.
+ * messages back. When the cached replies don't reach the trigger, as in a
+ * thread past Slack's first page, the window ending at the trigger is
+ * fetched; a trigger neither returns gets no lookback.
  * That earlier mention started its own turn, which collected the files before
  * it. The app's own messages and remote files are skipped. A message that
  * didn't mention the app gets no lookback: the app answers every message in
@@ -105,6 +108,11 @@ export async function collectInboundFileParts(input: {
   /** Whether the triggering message mentions the app. */
   readonly isMentioned: boolean;
   readonly botUserId: string | undefined;
+  /** Fetches the `size` thread messages ending at `latest`, oldest first. */
+  readonly fetchThreadWindow?: (
+    latest: string,
+    size: number,
+  ) => Promise<readonly SlackThreadMessage[] | undefined>;
 }): Promise<FilePart[]> {
   const fromMention = collectSlackFileParts(input.mention.attachments, input.policy);
   if (fromMention.length > 0 || !input.isMentioned) return fromMention;
@@ -119,9 +127,8 @@ export async function collectInboundFileParts(input: {
     }
   }
 
-  // Anchor on the trigger: a refresh returns at most the thread's oldest
-  // replies, and messages posted after the trigger aren't its files.
-  const recent = input.thread.recentMessages;
+  // Anchor on the trigger: messages posted after it aren't its files.
+  const recent = await withTrigger(input);
   const trigger = recent.findIndex((message) => message.ts === input.mention.ts);
   if (trigger === -1) return [];
   const earlier = recent.slice(Math.max(0, trigger - THREAD_LOOKBACK_MESSAGES), trigger);
@@ -138,6 +145,29 @@ export async function collectInboundFileParts(input: {
     attachments.unshift(...files);
   }
   return collectSlackFileParts(attachments, input.policy);
+}
+
+/**
+ * Returns thread messages that include the trigger. The cached replies are
+ * the thread's first page, so a later trigger needs its own window.
+ */
+async function withTrigger(input: {
+  readonly mention: Pick<SlackMessage, "ts">;
+  readonly thread: SlackThread;
+  readonly fetchThreadWindow?: (
+    latest: string,
+    size: number,
+  ) => Promise<readonly SlackThreadMessage[] | undefined>;
+}): Promise<readonly SlackThreadMessage[]> {
+  const cached = input.thread.recentMessages;
+  if (cached.some((message) => message.ts === input.mention.ts)) return cached;
+  if (input.fetchThreadWindow === undefined) return [];
+  try {
+    return (await input.fetchThreadWindow(input.mention.ts, THREAD_LOOKBACK_MESSAGES + 1)) ?? [];
+  } catch (error) {
+    log.warn("slack thread window fetch failed for attachment collection", { error });
+    return [];
+  }
 }
 
 /** Matches `<@U123>` and the labelled `<@U123|name>` form. */

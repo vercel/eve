@@ -453,6 +453,46 @@ describe("collectInboundFileParts", () => {
     );
   });
 
+  it("fetches the window ending at a trigger past the cached first page", async () => {
+    // The cache holds the thread's first 50 replies; the mention is reply 80.
+    const thread = {
+      recentMessages: Array.from({ length: 50 }, (_, index) => ({
+        isMe: false,
+        raw: { files: [slackFile(`EARLY${index}`)] },
+        text: "",
+        ts: `${index + 1}.0`,
+      })),
+      refresh: vi.fn(),
+    } as never;
+    const fetchThreadWindow = vi.fn(
+      async () =>
+        [
+          { isMe: false, raw: { files: [slackFile("F79")] }, text: "", ts: "79.0" },
+          { isMe: false, raw: {}, text: "<@UBOT> what is this?", ts: "80.0" },
+        ] as never,
+    );
+    const mention = { attachments: [], ts: "80.0" };
+
+    const parts = await collect({
+      fetchThreadWindow,
+      mention,
+      thread,
+      policy: DEFAULT_UPLOAD_POLICY,
+    });
+
+    expect(fetchThreadWindow).toHaveBeenCalledWith("80.0", 11);
+    expect(parts.map((part) => part.filename)).toEqual(["F79.csv"]);
+    // Past the paging limit, the window is unknown and nothing is collected.
+    await expect(
+      collect({
+        fetchThreadWindow: async () => undefined,
+        mention,
+        thread,
+        policy: DEFAULT_UPLOAD_POLICY,
+      }),
+    ).resolves.toEqual([]);
+  });
+
   it("stops at a labelled mention of the app", async () => {
     const thread = makeSlackThread({
       refresh: vi.fn(),
