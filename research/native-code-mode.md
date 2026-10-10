@@ -1,646 +1,646 @@
 ---
 issue: TBD
 status: proposed
-last_updated: "2026-09-27"
+last_updated: "2026-10-10"
 ---
 
 # Native code mode
 
 ## Summary
 
-eve replaces `connection_search` and the `workflow()` tool with one code
-tool, `execute`. The model writes a short JavaScript program. The program
-can call any of the agent's tools, call connection tools, and spawn
-subagents, all through a typed `tools` object, and it composes the results.
-Connection tools never enter the provider `tools` array. Connecting,
-authorizing, or discovering them never breaks the prompt cache. Today, every
-successful `connection_search` breaks the whole cached prefix.
+[Deferred tools and skills](./deferred-tools.md) (#4400) gave every agent one
+catalog of tools, agents, connection tools, and skills, reached through fixed
+tools that never change the `tools` array. That work reserved one more name
+for code mode. This doc fills it in.
 
-- **Scope.** This ships as default behavior, with no flag and no per-tool
-  opt-in. Direct tools stay direct, and scripts can also call them.
-- **Raw JavaScript.** On providers with grammar-constrained tools, the model
-  writes the program as raw JavaScript instead of a JSON-escaped string.
-  Elsewhere it sends `{ code }`.
-- **Subagents.** `workflow()` merges into `execute`. Everything it covers
-  moves to `tools.agents.<name>(...)`, and `workflow()` is removed in the
-  same release, so models never see two JavaScript tools.
-- **Catalog.** The catalog arrives as append-only conversation messages, and
-  the `execute` description never changes.
-- **Nested calls** go through the existing harness tool path: approvals,
-  connection authorization, tracing, and protocol events. A call that must
-  wait for a person, a sign-in, or a subagent parks the program durably. The
-  program then resumes from a replay ledger.
-- **Output schemas.** A tool without an `outputSchema` is still callable and
-  typed `unknown`. `eve build` warns about authored tools that lack one, and
-  a future version may require it.
-- **Ship gate.** Measured cache reuse, model calls, and task success gate
-  the release against today's baseline.
+```ts
+eve__execute(opts: { code: string }): Promise<{
+  result?: unknown; // the program's JSON return value
+  error?: string; // why the program failed, when it did
+  logs?: string[]; // console output
+  calls: Array<{ tool: string; status: "completed" | "failed" | "denied" | "cancelled" }>;
+}>;
+```
 
-This is also the substrate for skill sets. Activating one appends a catalog
-namespace instead of rewriting the `tools` array.
+The model writes a JavaScript program. The program calls catalog entries and
+direct tools by name, composes their results, and returns one value. Only that
+value and a short call summary go back to the model, so intermediate data
+never enters the conversation.
+
+```js
+const issues = await tools.linear__list_issues({ teamId: "ENG", first: 50 });
+const stale = issues.nodes.filter((issue) => issue.state.type === "started");
+const reviews = await Promise.all(
+  stale.map((issue) =>
+    tools.billing_specialist({ message: `Check whether ${issue.identifier} blocks a refund.` }),
+  ),
+);
+return stale.map((issue, i) => ({ id: issue.identifier, review: reviews[i] }));
+```
+
+- **Opt-in per agent.** `defineAgent({ codeMode: true })` adds `eve__execute`.
+  The setting is fixed for each deployment, so the `tools` array never changes
+  within a session. Everything else in the catalog design stays as it is:
+  `eve__search`, `eve__tool`, and `eve__skill` keep their behavior.
+- **A program is a batch of `eve__tool` calls.** Each `tools.<name>(input)`
+  call resolves through the step catalog and runs on the same dispatch path
+  as a model-issued call. That covers input validation, approval, connection
+  sign-in, workflow runs, child sessions, stubs, hooks, labels, and eval facts.
+  `eve__tool({ name, input })` is a one-call program.
+- **One name everywhere.** Programs call entries by their flat catalog names,
+  such as `tools.linear__list_issues` and `tools.crm__api__list_issues`. These
+  are the names used in `eve__search`, `eve__tool`, protocol actions,
+  approvals, and evals. There is no second, nested naming scheme.
+- **Inline first, park only to wait.** Calls run inline inside the program.
+  The program interrupts only for a call that must wait: an approval, a
+  sign-in, a workflow tool, an agent, or a question. The `eve__execute` call
+  then parks durably and holds no compute. It resumes from a signed replay
+  ledger, so completed calls never run again.
+- **Agents are awaited, not tasked.** Inside a program, an agent call resolves
+  to the agent's reply. The execute call owns the child sessions, so they
+  never appear in the model's task table.
+- **`workflow()` is removed.** `eve__execute` does everything the `workflow`
+  program tool does and more, so `eve/tools/workflow` goes away in the same
+  release.
+- **Cache stable.** The `eve__execute` definition never changes within a
+  deployment and names no tool. A program never adds a definition. The only
+  listing change is one fixed sentence in the existing `catalog`
+  announcement.
 
 ## Why now
 
-- **One agent that activates capabilities.** V showed that routing work to
-  specialist subagents fails in ways that are hard to undo. The direction is
-  one agent that pulls in specialist capability when it needs it. That is only
-  affordable if activation does not bust the cache, and mutating the `tools`
-  array always does.
-- **The AI SDK shipped code mode.** `@ai-sdk/code-mode` provides a QuickJS
-  runtime with interrupts, approvals, and signed continuations. eve already
-  vendors 1.0.62 and uses it in the `workflow` tool.
-- **Output types are available.** Composition needs known output types.
-  Almost every eve framework tool, MCP output schemas, OpenAPI response
-  schemas, and authored schemas provide them.
+- **The catalog exists.** #4400 shipped a step catalog that resolves any name
+  to its entry and dispatches it like a direct call (`execution/catalog/`,
+  `harness/execute-call.ts`). Code mode needs nothing else for discovery or
+  routing. All it adds is a runtime that issues many calls per model call.
+- **Composition is where round trips go.** Reconciling, filtering, fanning
+  out, and joining across tools all cost one model step per call today, and
+  every intermediate result stays in history for the rest of the session.
+  Programs remove both costs.
+- **Prior art converged.** pi and opencode v2 both shipped code mode in the
+  last month, with signatures rendered from schemas and budgeted catalogs.
+  Neither can pause a program mid-flight. Durable pause and resume is what eve
+  adds.
+- **The runtime is vendored.** eve already runs model-written JavaScript in
+  QuickJS through `@ai-sdk/code-mode` 1.0.85 for the `workflow` tool, with
+  signed continuations whose key comes from a durable step.
 
 ## Current state
 
-**Any tool change invalidates the full cache.** `prepareModelTools`
-(`harness/tool-loop.ts`) rebuilds the `ToolSet` every step. Providers
-render tools before the system prompt and messages, so any change to the
-`tools` array invalidates the entire cached prefix. eve places Anthropic
-breakpoints on the last tool, the system prompt, and the conversation tail
-(`harness/prompt-cache.ts`). None of them survive a tool change.
+What #4400 left on `main`:
 
-**`connection_search` busts the cache on every hit.**
-(`execution/tools/connection-search.ts`)
-
-- Each discovered tool is added to the `tools` array on the next step as
-  `<connection>__<tool>`, which invalidates the cached prefix.
-- Each schema is paid for twice: once in the search result, once in the tool
-  definition.
-- The tool exists only while connections are registered. A dynamic
-  connection that appears or disappears mid-session also changes the
-  `tools` array.
-- Matching is naive token overlap.
-- A tool cannot be discovered and called in the same step.
-
-**The append-only channel leaks.** Dynamic skill changes are appended as
-framework `context.state` user messages (`harness/current-messages.ts`). When
-the tail message is an approval response, the text falls back to a system
-message, which breaks the cache.
-
-**Pieces to build on**
-
-- **Durable code mode.** The `workflow` tool already runs model-written
-  JavaScript in QuickJS as a pure step. Each `ctx.agent()` call becomes an
-  interrupt, and the program resumes from a signed continuation. The signing
-  key is created in a durable step (`execution/dynamic-workflow/`).
-- **Framework output schemas.** Every framework tool except `web_search`
-  declares an `outputSchema`.
-- **MCP output schemas.** MCP connections forward the server's
-  `outputSchema` when one exists.
-- **Untyped OpenAPI results.** OpenAPI connections declare no output schema.
-  They return `{ status, statusText, body }` untyped, even when the spec
-  describes the response.
-- **Grammar-constrained tools.** eve's pinned `@ai-sdk/openai` 4.0.69 exposes
-  `openai.tools.customTool` with a Lark or regex `format`. The model returns
-  a raw string that matches the grammar.
+- **Step catalog.** `buildStepCatalog` (`execution/catalog/step-catalog.ts`)
+  builds one table per step from authored, dynamic, and subagent entries,
+  split into `advertised` and `deferred` maps. Connection tools resolve by
+  prefix ownership (`connectionEntryNamed`). The catalog's `resolve` turns an
+  `eve__tool` or `eve__skill` call into the call to its entry.
+- **Which listed tools `eve__tool` will run.** `callableByName` accepts
+  deferred entries and any listed tool eve runs itself. It rejects `eve__*`
+  tools and provider-run or client-run tools.
+- **Dispatch path.** After resolution, a call to an inline entry runs its
+  `execute`. A call to a workflow tool or agent returns a `DISPATCHED` marker
+  from inside the AI SDK. `toEntryStep` and `toEntryStream` drop the marker
+  and rewrite the step so the harness sees the call as a call to its entry
+  (`harness/execute-call.ts`). Only model history keeps `eve__tool`.
+- **Nested actions are gone.** `harness/nested-actions.ts` and the tool-call
+  action's `parentCallId` were deleted. The deferred-tools doc says code mode
+  adds the field back. `parentCallId` survives only in subagent
+  `session.started` metadata (`protocol/message.ts`).
+- **Signatures.** `renderToolSignature` (`tools/signature.ts`) renders input
+  and output JSON Schema as TypeScript, capped at 4,000 characters, with
+  `Promise<unknown>` when there is no output schema. `eve__search` returns
+  these signatures.
+- **Connection results.** `toConnectionToolResult` already describes itself as
+  "what the model receives for the call and what a code mode program receives
+  later". MCP results arrive as `structuredContent`, otherwise as text, which
+  is parsed as JSON when the tool declares no output schema. OpenAPI results
+  arrive as untyped `{ status, statusText, body }`, because OpenAPI tools
+  declare no output schema.
+- **Tasks.** Every agent tool is a `serve` tool, and the `workflow` tool is a
+  `task` tool. Each call returns a receipt, and the result arrives later in a
+  `task.result` message (`docs/tools/tasks.md`).
+- **`workflow()`.** `tools/provided/workflow.ts` runs `{ js }` in a durable
+  workflow. The program step is pure QuickJS
+  (`execution/dynamic-workflow/program-step.ts`). Each `ctx.agent()` call is a
+  parking host call (`createParkingHostTool` in `shared/workflow-sandbox.ts`)
+  that resumes from a signed continuation. Agent calls are capped by
+  `maxSubagents`, which defaults to 100 and allows 1 through 128. The tool
+  can call agents hidden with `tool: false`.
+- **Reserved name.** `eve__execute` is reserved, and eval assertions reject it
+  with "reserved for code mode" (`evals/reported-tool-name.ts`).
 
 ## Prior art
 
-Sources:
+Read at pi
+[`4ac0bd8`](https://github.com/earendil-works/pi/tree/4ac0bd8c7b96d72cb6a73226edc7c9ecaae1d14e)
+(code mode shipped in 0.99.0; PR #10040 was closed without merging) and
+opencode
+[`v2@4617210`](https://github.com/anomalyco/opencode/tree/4617210822bdbb31e5749751afbfb4584ccedac8).
+Both were read from source, not run.
 
-- opencode v2: branch `v2` at
-  [`c0d49f1`](https://github.com/sst/opencode/tree/c0d49f101c3079f4fb3f08af4026fb5cb0873745).
-  The `dev` branch is v1.
-- pi: open PR [earendil-works/pi#10040](https://github.com/earendil-works/pi/pull/10040)
-  ("Codemode and MCP") at `fd7798b`. Its author notes it "should not be
-  merged yet" in this form.
-- `@ai-sdk/code-mode`: `vercel/ai` at `5d12eaa`, 1.0.75. It has the same API
-  as eve's 1.0.62. See the [docs](https://ai-sdk.dev/docs/ai-sdk-core/code-mode).
+|                       | pi                                                                                | opencode v2                                                                                  | eve (proposed)                                                   |
+| --------------------- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Tool                  | `codemode`, off by default; auto-enabled by code-mode MCP servers                 | `execute`, on by default                                                                     | `eve__execute`, per-agent `codeMode: true`                       |
+| Input                 | JSON `{ code }`, plus a Lark grammar for raw JavaScript on OpenAI                 | JSON `{ code }`                                                                              | JSON `{ code }`; grammar form later, gated by evals              |
+| Callable from code    | Active direct tools, plus every code-mode or deferred tool                        | Only tools with `codemode !== false`; direct and code tools are disjoint                     | Every catalog entry, plus every listed tool `eve__tool` accepts  |
+| Built-in coding tools | Declared and callable                                                             | Direct only                                                                                  | Declared and callable                                            |
+| Names in code         | Flat (`tools.mcp__server__tool`)                                                  | Nested by namespace                                                                          | Flat catalog names                                               |
+| Catalog               | Tool description, budgeted at 3,000 tokens; deferred MCP tools never listed       | System prompt baseline plus appended deltas, budgeted at 2,000 tokens; invariant description | Existing `catalog` announcement, unchanged; no inline signatures |
+| Discovery in code     | Async `searchTools`, `describeTool`, `describeNamespace`, `ALL_TOOLS`             | Synchronous `search()` with paging                                                           | Async `search()`, same result as `eve__search`                   |
+| Untyped outputs       | `string`; MCP tools return the full `CallToolResult`                              | `string \| null`; MCP tools without a schema return `unknown`                                | `unknown`                                                        |
+| Nested calls          | Same hooks; child ids `<parent>/<n>`; `parentToolCallId` events; record on parent | Same before and after hooks; share the parent's call id; progress rows                       | Standard actions with `parentCallId`                             |
+| Permissions           | Extension `tool_call` hooks                                                       | Each leaf calls `permission.assert` and waits in memory                                      | Entry approval policies; the program parks durably               |
+| Sign-in mid-program   | Throws "Run /mcp to sign in"                                                      | Throws "Sign in from /mcps"                                                                  | Parks until sign-in completes, then resumes                      |
+| Runtime               | QuickJS WASM in a worker thread, 256 MB heap, no default timeout                  | In-process acorn interpreter, no default limits                                              | QuickJS (`@ai-sdk/code-mode`) in the app runtime, eve-set limits |
+| Network               | None                                                                              | `fetch`, with no SSRF guard, permission check, or size cap                                   | None; HTTP goes through tools                                    |
+| Extras                | `store`/`load`, `models.*`, `image()`                                             | File parts from child results                                                                | None at ship                                                     |
 
-|                   | opencode v2                                        | pi PR #10040                                               | AI SDK code mode                                    | eve (proposed)                                  |
-| ----------------- | -------------------------------------------------- | ---------------------------------------------------------- | --------------------------------------------------- | ----------------------------------------------- |
-| Tool input        | JSON `{ code }`                                    | raw JavaScript via Lark grammar where supported            | JSON `{ js }`                                       | raw JavaScript via Lark grammar where supported |
-| Default           | always on                                          | off; enabled when code-mode MCP servers connect            | opt-in                                              | always on                                       |
-| Callable in code  | MCP tools and 5 admin tools; built-ins direct only | every tool by default, including built-ins                 | tools routed to code mode                           | every tool, connections, subagents              |
-| Catalog placement | session baseline plus appended deltas              | codemode tool description                                  | tool description (default) or appended full catalog | appended baseline plus deltas                   |
-| Discovery         | budgeted listing plus `search()`                   | budgeted listing plus `searchTools()` and `describeTool()` | full declarations                                   | budgeted listing plus `search()`                |
-| Unknown outputs   | `Promise<unknown>`                                 | typed MCP `CallToolResult` envelope                        | `Promise<unknown>`                                  | `Promise<unknown>`                              |
-| Pausing           | none                                               | none; OAuth throws "Run /mcp to sign in"                   | signed interrupts (undocumented)                    | durable parking and ledger replay               |
-| Subagents in code | no                                                 | no                                                         | no                                                  | `tools.agents.*`                                |
-| Nested visibility | progress on the parent call                        | metadata on the parent result                              | none                                                | protocol actions with `parentCallId`            |
+**What we take**
 
-**opencode v2**
+- From both: a fixed tool description with runtime rules only, TypeScript
+  signatures rendered from schemas, `unknown` for missing output types,
+  `console` capture, and errors returned as data.
+- From pi: direct tools stay direct and are also callable from code, with no
+  exposure enum. Flat names. Nested calls run every hook a direct call runs,
+  and each carries a parent call id. The model learns direct tools' output
+  types through their own definitions, not through the code tool. Failures
+  list the calls that ran before them, with "they are not undone".
+- From opencode: `execute` as the name, catalog changes delivered as appended
+  messages, and MCP result handling (`structuredContent`, otherwise text
+  parsed as JSON, and `isError` throws), which eve already matches.
 
-- **Tool split.** Every built-in tool is direct and not callable from code
-  (`codemode: false`, `core/src/tool/plugin/`). Code mode holds all MCP
-  tools plus five opencode-owned tools.
-- **Invariant description.** The `execute` description contains runtime rules
-  only.
-- **Catalog.** `codemode/catalog.ts` lists every namespace with its tool
-  count, then inlines signatures round-robin up to about 2,000 tokens. The
-  model reaches the rest through a synchronous `search()`.
-- **Catalog updates.** Changes append as deltas (`session/instruction-state.ts`),
-  and the baseline resets only at compaction. On AI SDK provider routes,
-  deltas become escaped `<system-update>` user messages
-  (`ai/src/protocols/shared.ts`), the same shape as eve's `context.state`.
-- **MCP results.** A program receives `structuredContent` when present,
-  otherwise text. JSON-looking text is parsed when the tool declares no
-  output schema.
-- **What not to copy.** opencode sets no limits, and adds a `fetch` global
-  with no permission check or SSRF guard.
+**What we don't take**
 
-**pi PR #10040**
-
-- **Every tool is callable from scripts.** A `ToolExposure` of `direct`
-  (the default) declares a tool to the model _and_ makes it callable from
-  scripts (`coding-agent/src/core/extensions/types.ts`). Built-ins such as
-  read, write, edit, and bash stay direct and are composable in code. bash
-  gains an `outputSchema`.
-- **Raw JavaScript input.** On providers that support it, `codemode` is
-  declared with a Lark grammar, so the model writes raw source instead of a
-  JSON-escaped string (`codemode/src/source.ts`, `openai_lark`).
-- **Nested calls** run the same steps as model-issued calls, including
-  extension hooks, with a parent call id.
-- **What not to copy.**
-  - The catalog lives in the `codemode` tool description, so an MCP server
-    connecting changes the declaration. Its docs note this "can invalidate
-    the cached prefix".
-  - There is no way to pause a script: a nested call that needs sign-in
-    fails.
-
-**AI SDK**
-
-- **Replay ledger.** On resume, `run` reads completed host calls from the
-  ledger instead of re-invoking them. It keeps guest `Date.now()` and
-  `Math.random()` deterministic, and rejects divergent replays. Calls first
-  reached after the recorded frontier run normally, which allows "run inline,
-  interrupt only to park."
-- **Host-owned rendering.** `experimental_runCodeMode` lets the host own the
-  description and catalog rendering.
-- **Default cache behavior.** The default discovery mode, `"description"`,
-  embeds the catalog in the tool description and breaks the cache on any
-  change. Local `toolSearch()` adds discovered tools to the `tools` array
-  (`ai/src/tool-search/prepare-tool-search.ts`), which breaks the cache the
-  same way `connection_search` does.
-
-**Others**
-
-- [Cloudflare Code Mode](https://developers.cloudflare.com/agents/tools/codemode/)
-  runs programs in Worker isolates and adds in-program `search()` and
-  `describe()`.
-- Anthropic's
-  [programmatic tool calling](https://platform.claude.com/docs/en/agents-and-tools/tool-use/programmatic-tool-calling)
-  and
-  [tool search](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool)
-  are provider-native equivalents. They are possible future backends, but
-  they don't work across providers.
+- **Catalog in the tool description (pi).** Its listing changes whenever a
+  server connects. eve's catalog stays in the append-only announcement.
+- **Budgeted inline signatures (both).** #4400 decided the listing never names
+  a deferred entry. Deferring a tool is the author's choice to keep it out of
+  context, and code mode does not override that choice. `search()` and
+  `eve__search` return signatures on demand.
+- **Disjoint direct and code tools (opencode).** It forces the model to pick a
+  surface for each tool. In eve, `deferred` already decides what is declared.
+- **`fetch` without policy (opencode).** HTTP goes through `web_fetch` or
+  connections, which enforce SSRF checks and authorization.
+- **Failing on sign-in or approval (both).** eve's harness can park, so a
+  program parks too.
+- **`store`, `load`, and `models.*` (pi).** Session state and model calls
+  already have eve surfaces (memory, Jev). Adding them to programs is a
+  separate decision.
 
 ## Principles
 
-1. **Every tool is callable from code.** Direct tools keep their direct form,
-   so models keep the behavior they are trained on, and scripts can compose
-   them with everything else. Connections and subagent calls that return the
-   child's output exist only in code, so the `tools` array never grows with them. This follows
-   pi.
-2. **Catalog placement protects the cache, not code mode itself.** Three
-   things must hold: a description that never changes, a catalog that only
-   appends, and a new baseline only at compaction. The AI SDK default and pi
-   both break the first by putting the catalog in the tool description.
-3. **Unknown outputs limit composition, not calls.** A program that returns
-   `await tools.x.y(input)` is equivalent to a direct call and keeps the cache
-   intact. Rejecting tools without schemas would forfeit the cache win for
-   most MCP servers.
-4. **Search belongs inside the program.** Discovering and calling a tool in
-   one `execute` call changes nothing in the `tools` array.
-5. **Durability reuses what exists.** `run`'s replay ledger maps onto eve's
-   parking model (approval, OAuth, and durable waits), and the `workflow`
-   tool already exercises it.
+1. **One dispatch path.** A nested call is a model call that a program
+   issued. It shares everything after name resolution with `eve__tool`. No
+   tool runs differently because a program called it.
+2. **One name per entry.** The program, search results, protocol, approvals,
+   stubs, and evals all use the catalog name, so deferring a tool, calling it
+   directly, or calling it from code never renames it.
+3. **Code mode composes; it does not decide visibility.** `deferred` decides
+   what the model sees. `codeMode` decides only whether the model can script
+   calls. Programs reach exactly what `eve__tool` reaches.
+4. **Park, never fail, for waits.** Anything that waits for a person, a
+   sign-in, a workflow run, or an agent parks the program durably, exactly as
+   it parks a direct call.
+5. **Fixed per deployment.** Whether `eve__execute` exists, its schema, and its
+   description depend only on agent config and eve version.
 
 ## Design
 
-### Model surface
+### Authoring API
 
-**`execute`**
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
 
-- **Input.** The input is one JavaScript program, `code`.
-  - On OpenAI Responses models, eve declares `execute` as an OpenAI custom
-    tool with a Lark grammar that accepts any non-empty source, so the model
-    writes raw JavaScript.
-  - Other providers receive a JSON tool with `{ code: string }`.
-  - Either way, eve normalizes the call to `{ code }` in history, protocol
-    events, and evals.
-  - The declaration is fixed per provider, so it never changes mid-session.
-- **Fixed description.** The description is fixed per eve version. It states
-  the runtime rules, tells the model to prefer connected services over web
-  search or general knowledge, and never names a tool or connection.
-- **Presence.** `execute` is present in every agent. Every agent has tools
-  scripts can call, so it never appears or disappears mid-session.
-- **Closed and required.** `execute` replaces `connection_search` in the
-  required framework slot. It cannot be disabled or overridden.
-  - An authored `agent/tools/execute.ts` is a compile error.
-  - So is `agent/tools/connection_search.ts`, whose error names `execute` as
-    the replacement.
-  - `workflow()` and the `eve/tools/workflow` export are removed. An agent
-    that still imports it gets a compile error naming `tools.agents.*` in
-    `execute` as the replacement.
-- **Naming in docs.** Docs call it "the code mode `execute` tool" to
-  distinguish it from a tool definition's `execute` function.
-
-**Program globals**
-
-- `tools.<namespace>.<name>(input)` and `tools.<name>(input)`
-- An async `search({ query?, namespace?, limit?, offset? })` over the
-  catalog, called as `await search(...)`. See [Search](#search).
-- `console`
-- No `fetch`, filesystem, timers, or imports. HTTP and files go through tools
-  that enforce eve's authorization, SSRF, and sandbox policies.
-
-**Result**
-
-- The model receives the JSON return value, captured logs, and a summary of
-  nested calls.
-- Errors are returned as data with suggestions, such as "Did you mean
-  `tools.linear.list_issues`?", or the available namespaces when a
-  connection name is wrong.
-
-**What scripts can call**
-
-Every tool the agent has, with two exceptions:
-
-- `execute` itself, since programs don't start programs;
-- the final output tool, which ends the turn and belongs to the model.
-
-**How that relates to direct calls**
-
-- **Direct tools** remain in the `tools` array, unchanged, and are also
-  callable from scripts: `bash`, `read_file`, `write_file`, `glob`, `grep`,
-  `web_fetch`, `web_search`, `load_skill`, `ask_question`, `task_cancel`, and
-  authored and extension tools.
-- **Connection tools** are reachable only from scripts.
-- **Subagents** keep their direct tool, which starts a background task and
-  returns a receipt. In scripts they appear only as
-  `tools.agents.<name>(...)`, which resolves to the child's output. The
-  `execute` call parks durably while the child runs, so no compute is held.
-- **Nested calls that need a person.** A nested `ask_question` parks the
-  program until the person answers, the same way a nested approval does.
-
-**Skills** keep their listing, and `load_skill` stays a direct tool.
-Skill-list updates follow the same append-only rule as the catalog.
-`load_skill`'s hint for connection names points to `search({ namespace })`
-inside `execute`.
-
-### Catalog
-
-**Namespaces** derive from file paths, and collisions are compile errors.
-
-| Source                       | Path                                                        |
-| ---------------------------- | ----------------------------------------------------------- |
-| Framework and authored tools | `tools.<tool>`, for example `tools.read_file`               |
-| Extension tools              | `tools.<extension>.<tool>`                                  |
-| Connection tools             | `tools.<connection>.<tool>`                                 |
-| Subagents                    | `tools.agents.<name>({ message, agentId?, outputSchema? })` |
-
-`agents` is a reserved namespace. A connection, extension, or tool named
-`agents` is a compile error. Dynamic tools and dynamic subagents join the
-catalog through deltas.
-
-**Subagents in `execute`** cover everything `workflow()` does today:
-
-- **Returns output.** A call resolves directly to the child's
-  JSON-serializable output, with no metadata wrapper. When `outputSchema` is
-  given, the output is validated against it.
-- **Continues a child.** Passing an `agentId` from the conversation's
-  `<agents>` block continues that child. Omitting it starts a new child
-  session.
-- **Same checks.** The owning agent resolves the target and applies its
-  existing availability and authorization checks. That covers local,
-  remote, and dynamic subagents.
-- **Durable.** Every agent call interrupts. The program parks until the
-  child settles, then resumes from the ledger. Calls started together with
-  `Promise.all` run concurrently.
-- **Cap.** Each `execute` call can make at most 100 agent calls, the current
-  `workflow()` default. Over the cap, the call fails with the existing
-  `WORKFLOW_PROGRAM_SUBAGENT_LIMIT_REACHED` error, renamed for `execute`.
-  The cap is fixed because code mode has no settings.
-- **Failures are catchable.** A child failure reaches the program as a
-  thrown error the program can catch.
-
-**Signatures** are TypeScript rendered from JSON Schema, with JSDoc from the
-schema descriptions. Outputs without a schema render as `Promise<unknown>`.
-The instructions tell the model to narrow at runtime, or to return the raw
-value and transform it in a later call.
-
-**Budget**
-
-- Every namespace is listed with its description and tool count.
-- Direct tools are pinned, so their output types are always shown.
-- Other signatures are inlined up to a fixed token budget, round-robin
-  across namespaces.
-- `search()` reaches the rest.
-- Choosing which tools to show inline is deterministic, so the listing is
-  byte-stable for the same inputs. Only `search()` may use a model.
-
-**Placement**
-
-- The baseline catalog is appended as a `context.state` message on the first
-  step of a session.
-- Later changes append a diff of added or removed tools and changed
-  signatures. They are triggered by:
-  - dynamic tools, connections, or subagents resolving,
-  - OAuth completing,
-  - MCP `tools/list_changed`,
-  - skill sets activating.
-- Compaction writes a fresh baseline.
-- The last announced catalog is tracked in `HistoryState`, as the skill list
-  already is.
-- Catalog text never enters the system prompt or a tool description. The
-  system prompt's Connections section is removed, because namespace entries
-  carry connection descriptions.
-- When the tail message is an approval response, the delta is deferred
-  instead of falling back to a system message. This also fixes the leak in
-  the skill-list channel.
-
-### Search
-
-`search()` returns ranked catalog entries (path, description, and
-signature), with a cursor for the next page. The contract is independent of
-how results are ranked.
-
-- **Async host call.** `search()` is an ordinary async host call, not a
-  synchronous binding. Programs can run searches concurrently with
-  `Promise.all`.
-- **Pausing.** A search can pause the program. For example, searching a
-  namespace that needs sign-in starts authorization. `run`'s synchronous
-  host functions cannot interrupt a run, and they hold the worker while
-  they settle.
-- **Call limit.** Searches count toward the per-program call limit.
-- **Default implementation.** Word matching over tool paths, descriptions,
-  and input property names, as in opencode.
-- **Future extension.** The implementation can be swapped for a
-  model-backed one with no model-facing change. For example, an evaluation
-  model such as Jev could rerank a capped set of word-match candidates,
-  following the `auto({ model })` pattern used for approvals.
-  - Results are recorded in the replay ledger, so a nondeterministic ranker
-    still replays identically after a pause.
-  - Results only appear in `execute` results, so any implementation is
-    cache-safe.
-  - How authors configure it belongs to that future design.
-
-### Connections in `execute`
-
-`execute` takes over every responsibility `connection_search` has today:
-
-- **Configuration applies unchanged.**
-  - `tools: { allow | block }` filters both the catalog and calls.
-  - `toolCall.providedArguments` stay out of signatures and are injected at
-    execution.
-  - A connection's `approval` policy gates each nested call.
-- **Authorization**
-  - A connection that needs sign-in before listing tools appears as a
-    namespace marked "sign-in required".
-  - A `search()` or call against it starts interactive authorization, which
-    parks the program until sign-in completes.
-  - A failed authorization marks the namespace unavailable with the error.
-  - The existing check still rejects completion if the connection instance
-    changed while sign-in was pending.
-  - A server `401` still evicts the cached token and re-runs authorization.
-- **MCP results.** Programs receive `structuredContent` when present,
-  otherwise text. JSON-looking text is parsed when the tool declares no
-  output schema, matching opencode.
-- **OpenAPI results.** Programs receive `{ status, statusText, body }`, with
-  `body` typed from the operation's success response schema.
-- **State.** No per-session discovery state remains. The
-  `eve.connectionSearchResults` key and the per-tool `<connection>__<tool>`
-  dynamic tools are removed. The catalog is derived from the connection
-  registry every step.
-
-### Execution and durability
-
-```text
-model ── execute(code) ──▶ program step (QuickJS, pure)
-                              │ nested call
-                              ▼
-                   harness tool path (validation, approval policy,
-                   connection auth, tracing, protocol events)
-                      │ runs now             │ must wait (approval, OAuth,
-                      ▼                      ▼  question, subagent, durable wait)
-               result to program      interrupt ─▶ execute call parks
-                                                ─▶ resume: ledger replay,
-                                                   completed calls not re-run
-```
-
-**Runtime**
-
-- Programs run on `experimental_runCodeMode` in the app runtime, not the
-  sandbox, so credentials stay app-side.
-- Sandbox tools such as `bash` reach the sandbox through their normal
-  executors.
-- eve owns the description and catalog rendering.
-
-**Nested calls** take the same path as model-issued calls:
-
-- input validation,
-- approval policies,
-- connection authorization,
-- tracing,
-- labels.
-
-Programs receive raw JSON. `toModelOutput` applies only to what reaches the
-model.
-
-**Parking**
-
-- Calls run inline unless they must wait for a person, a sign-in, a
-  subagent, or a durable wait.
-- A call that must wait interrupts, and the `execute` call parks the same way
-  a tool approval does.
-- On resume, the ledger skips every completed call.
-
-**Crash semantics** match today's inline tools. A crashed step re-runs its
-whole program, and the ledger protects only across interrupts. The
-idempotency guidance for `defineTool` applies unchanged.
-
-**Limits.** The AI SDK defaults become eve's defaults. Continuation signing
-reuses the durable key step `workflow()` uses today
-(`execution/dynamic-workflow/security-step.ts`).
-
-### Nested calls on the protocol
-
-- **Standard events.** Each nested call emits the standard
-  `actions.requested` and `action.result` events, plus a new optional
-  `parentCallId` that points to its `execute` call.
-- **Qualified names.** `toolName` keeps eve's existing qualified names, such
-  as `linear__list_issues` or `read_file`. These work unchanged:
-  - labels,
-  - approval and sign-in prompts,
-  - channel rendering,
-  - eval `t.calledTool(...)`.
-- **Grouping.** Clients may group actions by `parentCallId`. Clients that
-  ignore the field render them flat.
-- **Model history.** Nested calls never enter model history. The model sees
-  only the `execute` call and its result.
-- **Replay.** Replay after an interrupt does not re-emit events for
-  completed calls. A crashed step re-emits events under new ids, as it does
-  today.
-
-`parentCallId` is an additive public protocol change. It ships with
-protocol docs and a changeset.
-
-### Output schemas
-
-There is no opt-in and no code mode setting. What authors control is output
-types:
-
-```ts
-export default defineTool({
-  description: "Look up an order by id.",
-  inputSchema: z.object({ id: z.string() }),
-  outputSchema: orderSchema, // gives scripts a typed result
-  execute: async ({ id }) => getOrder(id),
+export default defineAgent({
+  model: "openai/gpt-5.6-luna",
+  codeMode: true,
 });
 ```
 
-- **Without a schema.** A tool without an `outputSchema` is callable from
-  scripts and typed `Promise<unknown>`.
-- **Build warning.** `eve build` and `eve dev` warn for each tool in the
-  agent's own directory that lacks one, and name the tool file. A future
-  version may require output schemas.
-- **eve's own tools.** `web_search` gains an `outputSchema`, so every tool
-  eve owns declares one.
-- **Validation.** When a tool declares a schema, its output is validated
-  before a script sees it. A mismatch reaches the program as
-  `InvalidToolOutput`, so the catalog never advertises a shape the tool
-  doesn't return. Direct calls are unchanged.
-- **OpenAPI connections** derive `outputSchema` from each operation's
-  success response schema, so `body` becomes typed.
+- **`codeMode?: boolean`**, which defaults to `false`.
+  - It applies to the agent that declares it, root or subagent. A root copy
+    started by the `agent` tool follows the root.
+  - It is static. Dynamic agent configuration can't set it, because that
+    would let the `tools` array change between sessions of one deployment.
+  - `defaultTools: false` doesn't remove `eve__execute`.
+  - An authored `agent/tools/eve__execute.ts` is already a compile error under
+    the `eve` namespace rule.
+- **Output schemas are the authoring lever.** There is no per-tool code mode
+  setting. A tool's `outputSchema` gives programs a typed result. See
+  [Output types](#output-types).
+- **Hidden agents.** Programs reach what `eve__tool` reaches, so an agent with
+  `tool: false` can't be called from code. Set `tool: "deferred"` to keep an
+  agent out of the tool list while letting programs call it. This replaces
+  `workflow()`'s ability to call hidden agents.
+
+### Model surface
+
+**`eve__execute`**
+
+- **Input.** One JSON schema, `{ code: string }`, with `required: ["code"]`
+  and `additionalProperties: false`. The code is the body of an async
+  function, so top-level `await` and `return` work.
+- **Description.** Fixed for each deployment. It states runtime rules and
+  names no tool. It mentions `eve__search` only when the agent has
+  `eve__search`, the same way `eve__tool` adds its connections clause. A
+  draft:
+
+  > Run a JavaScript program that calls your tools and returns one JSON value.
+  > Use it to chain, loop over, filter, or combine tool calls so intermediate
+  > data stays out of the conversation. Call any tool you can use as
+  > `await tools.<name>(input)`, using its exact name (`tools["name"]` when the
+  > name isn't an identifier), including tools found with eve\_\_search.
+  > `await search({ query })` searches the same way inside the program. Calls
+  > resolve to the tool's output; a failed or denied call throws. There is no
+  > fetch, file system, timers, or imports. `console.log` output is returned
+  > with the result.
+
+- **Presence.** The tool is present exactly when `codeMode` is `true`. It
+  goes in the tool list after the other catalog tools.
+- **Label.** People see `Run code`, then `Ran code, <n> calls`. Nested calls
+  have their own labels.
+
+**Listing.** The `catalog` announcement keeps its rules: kinds, capped
+namespaces, capped connections, no deferred names, and appended only on
+change. With code mode on, its first sentence adds one fixed clause: "or call
+several from eve__execute as `tools.<name>(input)`". The clause is fixed per
+deployment, so it adds no churn.
+
+**Direct tools' output types.** A model writing a program needs to know what
+a direct tool returns, and the provider tool definition carries no output
+type. With code mode on, each direct tool a program can call, and that has an
+output schema, gets one appended line, the same way the `endsTurn` note is
+appended (`describeEntry`):
+
+```text
+In eve__execute, tools.read_file(input) resolves to: { content: string; path: string; totalLines: number; truncated: boolean; nextOffset?: number; image?: { ... } }
+```
+
+The line is a pure function of the schema, capped at 1,000 characters, and
+omitted when the output is `unknown`. Deferred entries get their output types
+from the `signature` in search results.
+
+### Programs
+
+**Globals**
+
+```ts
+declare const tools: Record<string, (input?: object) => Promise<unknown>>;
+declare function search(opts: { query: string; limit?: number }): Promise<{
+  results: Array<
+    | { tool: string; description: string; signature: string }
+    | { skill: string; description: string; path?: string }
+  >;
+  unavailable?: Array<{ connection: string; error: string }>;
+}>;
+declare const console: Pick<Console, "log" | "info" | "warn" | "error">;
+```
+
+- **`tools.<name>(input)`** calls the entry with that exact catalog name.
+  `input` defaults to `{}`. A connection's own name is its sign-in entry, so
+  `await tools.linear()` signs the user in and parks until they finish, as
+  `eve__tool({ name: "linear" })` does.
+- **`search()`** is `eve__search`, with the same input, ranking, namespace
+  queries, 10-second listing bound, and result. It is an async host call, so
+  searches can run concurrently and a search can count toward the call limit.
+  Skill hits tell the model what to load with `eve__skill`; programs don't
+  load skills.
+- **Nothing else.** There is no `fetch`, file system, timers, imports, or
+  ambient state. Guest `Date` and `Math.random()` are deterministic across
+  replay.
+
+**What programs can call:** whatever `eve__tool` can call
+(`callableByName`), minus tools that end the turn:
+
+| Entry                                                | From code | Why                                                                  |
+| ---------------------------------------------------- | --------- | -------------------------------------------------------------------- |
+| Deferred tools, workflow tools, agents               | Yes       | Catalog entries                                                      |
+| Connection tools and connection sign-in entries      | Yes       | Catalog entries                                                      |
+| Listed tools eve runs (`bash`, `read_file`, …)       | Yes       | `eve__tool` accepts them                                             |
+| `ask_question`, `sleep`, and other workflow tools    | Yes       | They park the program like any workflow tool                         |
+| `eve__*` (search, tool, skill, task, reply, execute) | No        | eve's own surface; `search()` replaces `eve__search` inside programs |
+| Provider-run and client-run tools (`web_search`)     | No        | eve never runs them, so it can't return their result to a program    |
+| `endsTurn` tools (`no_reply`) and the final output   | No        | They end the turn, which only the model may do                       |
+
+A name a program can't call fails the same way `eve__tool` fails: with the
+closest names, or with `"<name>" is in your tool list; call it directly.`
+
+**Agents in programs**
+
+- **Awaited.** An agent call resolves to the agent's reply text, or to its
+  structured value when `outputSchema` is given. It never returns a task
+  receipt. The `eve__execute` call parks durably while the child runs.
+- **Input.** The input is the agent tool's input without `taskId`, plus an
+  optional `outputSchema`. The program is a caller, like `ctx.agent`, and
+  `outputSchema` stays a caller-side option, as
+  [tasks](./eve-tasks.md) requires. Every call starts a new child session, as
+  `workflow()` does today.
+- **Owned by the call.** Child sessions belong to the `eve__execute` call, not
+  to the model's task table. `eve__task_wait` doesn't see them, and they end
+  when the call settles. Cancelling the call or the turn cancels them.
+- **Failures throw.** A failed child turn rejects at its call, so the program
+  can catch it.
+- **The same rule covers `task` and `serve` workflow tools.** From code they
+  resolve to their first result instead of a receipt.
+
+**Result**
+
+- **Completed.** The model receives `{ result, logs?, calls }`. `result` is the
+  JSON return value. `calls` lists each nested call's catalog name and final
+  status, bounded at 256 entries.
+- **Failed.** The model receives `{ error, logs?, calls }`, with the error
+  message and the guest stack location. `calls` shows what ran before the
+  failure, with the note that completed calls are not undone. The tool result
+  is an error result.
+- **Size.** What reaches the model is capped at 10,000 estimated tokens,
+  keeping the head and tail with a truncation note, as pi does. Programs
+  should return only what the model needs.
+- **Raw values in programs.** Programs receive each call's raw output, never
+  its `toModelOutput` projection. MCP media results arrive as content blocks.
+  Forwarding media from a program to the model is out of scope at ship.
+
+### Execution and parking
+
+```text
+model step ── eve__execute({ code }) ── program runs (QuickJS, app runtime)
+                                           │ tools.x(input)
+                                           ▼
+                          step catalog: resolve → validate input
+                    ┌──────────────────────┴───────────────────────┐
+         inline entry, approval not                 approval asks, sign-in needed,
+         needed: runs now, result in ledger         workflow tool, agent, question
+                    │                                              │ interrupt
+                    ▼                                              ▼
+          program completes → tool result     execute call parks; harness dispatches
+          in the same model step              the batch on the direct-call path
+                                              (one action per call, parentCallId)
+                                                                   │ batch settles
+                                                                   ▼
+                                       program resumes from the continuation; the
+                                       ledger replays completed calls without
+                                       running them → completes or parks again
+```
+
+- **Where it runs.** Programs run in the app runtime, never the sandbox, so
+  credentials stay app-side. Sandbox tools reach the sandbox through their
+  normal executors.
+- **Inline first.** `eve__execute` is an inline tool. Its program runs inside
+  the model step, and calls to inline entries that need no approval run
+  immediately. Crash semantics match today's inline tools: a crashed step
+  re-runs its program, and the idempotency guidance for `defineTool` applies.
+- **Parking.** A call that must wait raises a code-mode interrupt. Concurrent
+  calls that interrupt together form one batch. The step ends with the
+  `eve__execute` call pending. The harness stores the continuation in session
+  state and dispatches each pending call exactly as if the model had called
+  it:
+  - an approval request for the nested action;
+  - a sign-in through the shared connection helper;
+  - a workflow run;
+  - a child session.
+
+  When every call in the batch settles, a program step resumes with their
+  resolutions. Calls first reached after the replay frontier run normally, and
+  may park again.
+
+- **Resolutions.** A completed call resolves with its raw output. A failed
+  call, a denied approval (with the denial note), a failed sign-in, or a
+  cancelled call rejects with an error the program can catch.
+- **Continuation key.** The signing key comes from a durable step, reusing
+  `createWorkflowProgramContinuationSecurityStep`, and is bound to the call.
+  Continuations carry every recorded result in plaintext base64. They live in
+  session state and the workflow event log, which already hold the same
+  results.
+- **Steering.** A new message while the program runs inline applies at the
+  next step boundary, as it does for any inline tool. A new message while the
+  call is parked aborts it the way it aborts an `execute` workflow tool. eve
+  withdraws pending approvals and questions, cancels owned child sessions, and
+  settles the call with `{ error: "Stopped early because a new message arrived.", calls }`.
+- **Turn cancellation** cancels the call and everything it owns.
+
+**Limits.** These are fixed, and there are no settings at ship:
+
+| Limit                          | Value                                            | Notes                                                                         |
+| ------------------------------ | ------------------------------------------------ | ----------------------------------------------------------------------------- |
+| Nested calls per execute call  | 256                                              | The `maxBridgeRequests` default. Agent calls and searches count toward it     |
+| In-flight nested calls         | 32                                               | The AI SDK default                                                            |
+| Guest compute per program step | 30 s of guest execution (`cpuTimeoutMs`)         | Excludes time spent waiting on nested calls; needs run#78, see open questions |
+| Memory, stack, source, console | AI SDK defaults (64 MiB, 2 MiB, 256 KiB, 64 KiB) |                                                                               |
+| Nested input and output        | 1 MiB input, 4 MiB output per call               |                                                                               |
+| Continuation size              | 8 MiB                                            | Over the cap, the call fails and tells the model to return less               |
+| Model-facing result            | 10,000 estimated tokens                          | Head and tail kept                                                            |
+
+Errors over a limit name the limit, such as
+`EXECUTE_CALL_LIMIT_REACHED: a program may make at most 256 calls; "linear__get_issue" was not called.`
+
+### Nested calls on the protocol
+
+- **Standard actions.** Each nested call emits the standard action events
+  under its catalog name, with a restored optional `parentCallId` that points
+  to its `eve__execute` call. `eve__execute` is itself an action.
+- **Child call ids** are `<executeCallId>/<n>`, in the order calls start. That
+  order is deterministic across replay. Child sessions record the nested call
+  id as their `parentCallId`.
+- **Everything keyed by name keeps working:** approval policies, `approvalKey`,
+  recorded approve-always decisions, labels, display titles, hooks, audience
+  policy, tool stubs (matched as direct calls, through `stubbedCall`), and
+  `t.calledTool(...)`.
+- **Replay.** Resuming from a continuation doesn't re-emit events for
+  completed calls. A crashed step re-emits them under the same ids, because
+  the ids derive from program order.
+- **Clients** may group actions by `parentCallId`. Clients that ignore the
+  field render them flat. The TUI, task card, and framework templates show
+  nested calls under the execute row.
+- **Model history** holds only the `eve__execute` call and its result.
+- **Evals.** `t.calledTool("eve__execute")` becomes valid for agents with code
+  mode on. `reported-tool-name.ts` stops rejecting the name.
+
+`parentCallId` on actions is an additive protocol change. It ships with
+protocol docs.
+
+### Output types
+
+- **No schema.** Callable, and typed `Promise<unknown>`. The description tells
+  the model to narrow at runtime, or to return the value and read it in the
+  next step.
+- **Validation.** When an entry declares an output schema, its output is
+  validated before a program sees it. A mismatch rejects with
+  `InvalidToolOutput`, so a signature never advertises a shape the tool
+  doesn't return. Direct and `eve__tool` calls are unchanged.
+- **OpenAPI.** Each operation derives `outputSchema` from its success response
+  schema, so `body` is typed. This also improves `eve__search` signatures for
+  agents without code mode.
+- **Build warning.** For agents with `codeMode: true`, `eve build` and
+  `eve dev` warn once for each authored tool without an `outputSchema`, and
+  name the tool file.
 
 ### Cache invariants
 
-Each invariant is a test target:
+These extend the six in [deferred tools](./deferred-tools.md#cache-invariants):
 
-1. **Stable tools.** The tools array and every tool description are
-   byte-identical across steps when:
-   - connections are discovered, authorized, or resolved dynamically,
-   - the catalog changes,
-   - dynamic skills change,
-   - skill sets activate.
-2. **Clean system prompt.** The system prompt contains no catalog text that
-   varies by session.
-3. **Append-only history.** Catalog and skill-list changes only append;
-   earlier messages are never rewritten.
-4. **No fallback.** No announcement falls back to a system message.
-5. **Deterministic rendering.** Catalog rendering is sorted and memoized per
-   revision.
+1. **Fixed tools.** The presence, schema, and description of `eve__execute`
+   depend only on `codeMode` and the eve version.
+2. **Deterministic notes.** The output-type line on direct tools is a pure
+   function of the schema.
+3. **Programs add nothing.** A nested call, park, sign-in, child session, or
+   resume never adds a definition or a system message.
+4. **Listing unchanged.** The only difference is the fixed code-mode clause.
 
-Two tests cover them:
+## Removing `workflow()`
 
-- A unit test over the rendered request prefix covers all five.
-- A real-model e2e eval asserts cache reuse across discovery, following
-  `e2e/fixtures/agent-prompt-cache`.
+`eve__execute` covers everything `workflow()` does: fan-out and fan-in over
+agents, structured output, catchable failures, and durable parking. It also
+calls tools and connections. Keeping both would give models two JavaScript
+tools.
 
-## Skill sets
-
-Activating a skill set appends two deltas:
-
-- its tools, as `tools.<skillSet>.*`, executed remotely over MCP-style RPC;
-- its skills, as unloaded skill-list entries.
-
-The `tools` array does not change, so activation is cache-safe, and a removal
-delta reverses it. Hooks, presentation, and identity forwarding belong to the
-skill sets design.
+- **Removed.** `workflow()`, `eve/tools/workflow`, and
+  `execution/dynamic-workflow/tool.ts`. An agent that imports it fails to
+  compile with: `workflow() was removed. Set codeMode: true in agent.ts; programs call agents as tools.<name>({ message }).`
+- **Survives, generalized.** The program step, the continuation security
+  step, and `shared/workflow-sandbox.ts` move behind `eve__execute`. The
+  parking host tool becomes the interrupt for every waiting call kind.
+- **Behavior differences to document in the migration:**
+  - The call holds the turn instead of running as a task.
+  - Hidden agents need `tool: "deferred"`.
+  - The 100-agent default becomes the 256-call limit.
+  - The program's input is `code`, not `js`.
 
 ## Rollout
 
-This ships all at once, and there is no flag. Validation happens before
-merge.
+### Pull requests
 
-**Baseline.** Measure the current `connection_search` and `workflow()`
-paths on `main`:
+Stacked, following the #4400 shape.
 
-- cache read ratio per step,
-- input tokens and cost per task,
-- model calls per task,
-- latency,
-- task success.
+| PR            | Scope                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [1/3] Runtime | `codeMode` on `defineAgent`; `eve__execute` and its description; programs on the generalized program step; nested resolution through the step catalog; inline runs, interrupts, and the program state in session state; nested approval, sign-in, workflow, and agent dispatch; steering and cancellation; `parentCallId`; labels and client grouping; removal of `workflow()` |
+| [2/3] Types   | Output-type notes on direct tools; output validation for program calls; OpenAPI output schemas; the build warning                                                                                                                                                                                                                                                              |
+| [3/3] Tests   | Every new test, below                                                                                                                                                                                                                                                                                                                                                          |
 
-**Build and migrate.** One release carries everything:
+Docs and a `minor` changeset go with [1/3]: it adds a public option, changes
+the protocol, and removes `eve/tools/workflow`. [2/3] carries a `patch`.
 
-- `execute`, with the grammar and JSON forms, the catalog, and `search()`,
-- nested approvals, questions, and authorization,
-- `parentCallId`,
-- OpenAPI output schemas,
-- the `web_search` output schema,
-- output-schema build warnings,
-- `tools.agents.*`.
+### Tests
 
-It also removes `connection_search` and `workflow()`. Their docs move to
-`execute`:
+- **Captured-request unit test.** One session with code mode on drives
+  programs through:
+  - an inline tool, a deferred tool, and a connection tool in one program;
+  - an approval mid-program, both approved and denied;
+  - a sign-in mid-program;
+  - a foreground workflow tool;
+  - parallel agents with `outputSchema`;
+  - `search()` followed by a call in the same program;
+  - a call limit hit;
+  - a steering message while parked;
+  - compaction between programs.
 
-- `connections/overview`,
-- `connections/mcp`,
-- `concepts/built-in-tools`,
-- `guides/dynamic-capabilities`,
-- `tools/workflows`.
+  It asserts the cache invariants and that nested calls never reach history.
 
-Their e2e fixtures move too:
+- **Replay.** After a resume, completed calls aren't re-invoked, events
+  aren't re-emitted, and child ids are stable.
+- **E2E.**
+  - Extend `agent-deferred-tools` with a code-mode agent. Its world suites run
+    on the mock model, which must call `eve__execute`. They cover approval
+    keyed to the nested entry, the workflow tool parking and resuming, an
+    agent fan-out, and `t.calledTool` on nested calls.
+  - Its real-model suite covers cache reads after programs.
+  - Move the `workflow()` evals in `agent-subagents` and `agent-cancellation`
+    to `eve__execute`, written fresh against the new surface.
+- **New real-model evals**, written as process narratives:
+  - Alice reconciles orders against payments and support tickets across two
+    connections.
+  - Bob reads an export with `read_file` and checks each row against a
+    connection.
+  - A fan-out to parallel agents, combined with connection data.
+  - An MCP server with untyped outputs.
 
-- `agent-workflow-tools` and `agent-openapi-swagger` for connections,
-- `agent-subagents` and `agent-cancellation` for `workflow()`.
+### Measurements and ship gate
 
-The `agent-subagents` limit test currently uses `maxSubagents: 3`. It moves
-to the fixed cap of 100.
+Run one task set in two arms, code mode off and code mode on, at a moderate
+and a large tool count. Measure task success, model calls, input tokens, cache
+read ratio, and latency.
 
-**New evals**
+- **Composition tasks.** Code mode must cut model calls and input tokens with
+  no loss in success.
+- **Single-call tasks.** No regression in success or latency.
+- **Cache.** No regression in cache reads after programs or after
+  discovery.
+- **World suites.** No new nondeterminism.
+- **Recorded, not gated:** whether agents with code mode still call
+  `eve__tool`. If they almost never do, a follow-up drops `eve__tool` for those
+  agents.
 
-- a multi-connection correlation task (Alice reconciles orders against
-  payments and support tickets),
-- a script that combines file tools with connection data (Bob reads an
-  export with `read_file` and checks each row against a connection),
-- discovery across 100+ tools,
-- OAuth mid-program,
-- approval mid-program,
-- an MCP server with untyped outputs,
-- a dynamic connection resolving mid-session,
-- a program that fans out to parallel subagents and combines their outputs
-  with connection data,
-- cancelling a turn while subagents run inside `execute`,
-- the same composition tasks on an OpenAI model (grammar input) and a
-  non-OpenAI model (JSON input).
+Defaulting `codeMode` to `true` is a separate decision, made after shipping
+with this data.
 
-**Ship gate.** Compared with the baseline, the branch must show:
+### Docs
 
-- no task-success regression on connection, subagent, or sandbox evals,
-- a clearly higher cache read ratio on discovery-heavy sessions,
-- fewer model calls on composition tasks,
-- no new nondeterminism in world-suite e2e runs.
-
-If it misses the gate, it does not merge.
-
-**Follow-up.** After ship, A/B test `Promise<Opaque>` ("return it whole or
-pass it on; never read its fields") against `Promise<unknown>`. `Opaque`
-becomes the default only if it reduces invented field accesses without
-adding round trips or lowering task success.
+- `agent-config`: `codeMode`.
+- `concepts/built-in-tools`: an `eve__execute` section, and the reserved-name
+  list.
+- `tools/overview`: why output schemas matter.
+- `tools/workflows`: remove the `workflow` tool section and add the migration.
+- `tools/tasks`: agent and task calls inside programs.
+- `subagents`: `tool: "deferred"` for agents only programs should call.
+- `connections/overview`: connections in programs, and sign-in mid-program.
+- `evals/assertions`: nested calls and `eve__execute`.
+- Protocol docs: `parentCallId`.
 
 ## Decisions and alternatives considered
 
-| Decision                       | Chosen                                                                                                 | Rejected                                                                                         |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
-| Rollout                        | Ship as default, replacing `connection_search`; gated by evals                                         | An `experimental.codeMode` flag (root-only or per agent)                                         |
-| Tool name                      | `execute`, matching opencode v2                                                                        | `code_mode`, `code`, `run_code`                                                                  |
-| Input                          | Raw JavaScript via Lark grammar where supported, otherwise `{ code }`, as in pi                        | JSON `{ js }` everywhere                                                                         |
-| What scripts can call          | Every tool except `execute` and final output; direct tools stay direct too, as in pi                   | Per-tool `codeMode: true` opt-in; direct-only built-ins (opencode v2); code-only framework tools |
-| `workflow()`                   | Merged into `execute` as `tools.agents.*`; removed in the same release                                 | Keeping it as a separate direct tool; a transition period with both                              |
-| Agent-call cap                 | Fixed at 100 per `execute` call, the current `workflow()` default                                      | A configurable `maxSubagents` (code mode has no settings)                                        |
-| `execute` presence             | Always present                                                                                         | Present only while connections are registered (flips the `tools` array)                          |
-| Outputs without schemas        | Callable and typed `Promise<unknown>`; `eve build` warns; `Opaque` tested after ship                   | Requiring schemas now; rejecting tools without them; `Opaque` from day one                       |
-| Authored tools without schemas | Warning now; a future version may require `outputSchema`                                               | Build-time TypeScript extraction (needs a type checker and adds nothing at runtime)              |
-| Skills in `search()`           | Tools only; skills move in with a future deferred-skills design                                        | Skill hits in `search()`; `tools.skills.load()`                                                  |
-| `search()`                     | Async host call; word matching by default; replaceable later (for example, evaluation-model reranking) | Synchronous binding (cannot pause for sign-in, holds the worker, blocks model-backed search)     |
-| Nested call visibility         | Protocol actions with `parentCallId`                                                                   | Progress only (breaks `t.calledTool` and approval correlation)                                   |
-| Catalog placement              | Appended messages, as in opencode v2                                                                   | Tool description (pi, AI SDK default), which changes when servers connect                        |
-| System prompt Connections list | Removed; namespace entries carry descriptions                                                          | Keeping it alongside the catalog                                                                 |
+| Decision                      | Chosen                                                                                       | Rejected                                                                                                                                                                      |
+| ----------------------------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Name                          | `eve__execute`, reserved by #4400                                                            | `execute` (an ordinary authored name since #4400); `codemode`                                                                                                                 |
+| Enablement                    | `codeMode: true` on `defineAgent`, fixed per deployment, off by default until measured       | Always on (unmeasured, and costs tokens for agents that never compose); derived from declarations (nothing in declarations signals intent); a dynamic setting (flips `tools`) |
+| Relation to the catalog tools | Added beside `eve__search`, `eve__tool`, and `eve__skill`                                    | Replacing `eve__tool` at ship (one-call JSON calls are cheaper and well trained; revisit with data); search only inside code (opencode)                                       |
+| Dispatch                      | Every nested call resolves through the step catalog and runs on the direct-call path         | A workflow-tool program like `workflow()`, re-implementing approval, sign-in, and dispatch inside a workflow run (a second path for every job)                                |
+| Execution                     | Inline first; interrupt only to wait; ledger replay                                          | Interrupt on every call (one durable step per call, with latency on every sequential `await`); a program that can't pause (pi, opencode)                                      |
+| Names in code                 | Flat catalog names                                                                           | Nested owner paths such as `tools.crm.api.list_issues` (sketched in #4400; needs owner records and a second naming scheme)                                                    |
+| What code can call            | Whatever `eve__tool` accepts, minus turn-ending tools                                        | Per-tool `codemode` flags (opencode); pi's exposure enum; deferred entries only                                                                                               |
+| Skills                        | Found by `search()`, loaded by the model with `eve__skill`                                   | Loading from a program (a skill instructs the model, not a program; neither pi nor opencode does it)                                                                          |
+| Agents in code                | Awaited replies owned by the execute call; `outputSchema` allowed; a new child per call      | Task receipts in programs; continuing a child by `taskId` at ship                                                                                                             |
+| Catalog presentation          | Existing listing plus one fixed clause; output types on direct tools; signatures from search | Budgeted inline signatures (overrides `deferred`); catalog in the tool description (pi)                                                                                       |
+| Untyped outputs               | `Promise<unknown>`; build warning when code mode is on                                       | Requiring output schemas; `string` (pi)                                                                                                                                       |
+| Input form                    | JSON `{ code }` at ship                                                                      | Lark grammar at ship (provider-specific declaration, history normalization, and unverified on AI Gateway); see open questions                                                 |
+| `workflow()`                  | Removed in the same release                                                                  | Keeping a second JavaScript tool; a transition period                                                                                                                         |
+| Network                       | None in programs                                                                             | `fetch` (opencode has no SSRF guard or permission check)                                                                                                                      |
+| Limits                        | Fixed AI SDK defaults plus eve caps on continuation and result size                          | Settings on `codeMode` at ship                                                                                                                                                |
+
+## Open questions
+
+- **Compute timeout versus nested waits.** In `run` 2.1, `timeoutMs` is a
+  wall-clock deadline that includes time awaiting host calls. The only compute
+  bound is a hidden 10,000-check interrupt cap, which replay spends again
+  ([vercel-labs/run#76](https://github.com/vercel-labs/run/issues/76)).
+  [vercel-labs/run#78](https://github.com/vercel-labs/run/pull/78) adds
+  `cpuTimeoutMs`, which counts only guest execution, and removes the cap.
+  eve then sets `cpuTimeoutMs` tight and the wall-clock `timeoutMs` from the
+  step's budget. `@ai-sdk/code-mode` still needs a matching
+  `executionPolicy.cpuTimeoutMs`.
+- **Raw JavaScript input.** pi declares a Lark grammar for OpenAI models so
+  the model writes source instead of a JSON-escaped string. eve's
+  `@ai-sdk/openai` 4.0.84 exposes `customTool`. Shipping it means a
+  provider-specific declaration, and normalizing calls to `{ code }` in
+  history so a session can switch providers. It is worth one eval arm, after
+  ship.
+- **Continuing an agent from code.** `workflow()` can't, and neither can this
+  design at ship. If evals show programs re-briefing the same agent, add a
+  returned handle, not a raw `taskId`.
+- **Background programs.** `workflow()` ran as a task. Programs here hold the
+  turn. If long fan-outs need the conversation to continue, a later option can
+  run an `eve__execute` call as a task.
+- **Media out of programs.** Images from `read_file` or MCP content can't
+  reach the model through a program at ship. opencode attaches them, and pi
+  has `image()`.
+- **Default on.** Revisit after the ship gate.
 
 ## Evidence limits
 
-- **Cache hit rates are unmeasured.** No cache hit rates have been measured
-  for any approach. The baseline and ship gate measure them.
-- **Prior art comes from source reading.** The opencode v2, pi, and AI SDK
-  behavior is from reading source at the cited commits. None of their code
-  was executed. The pi PR is unmerged and may change.
-- **Grammar support.** Only OpenAI Responses models are confirmed to support
-  grammar-constrained tools through eve's AI SDK version. It is unverified
-  whether AI Gateway routes pass OpenAI custom tools through. Other
-  providers, and any route that can't, use the JSON form.
+- **Prior art is from source reading.** pi `4ac0bd8` and opencode `v2@4617210`
+  were read, not run. Neither publishes cache-hit measurements.
+- **Nothing is measured yet.** Cache, cost, and success numbers come from the
+  measurement arms above.
+- **Inline-first is unproven at scale.** Its performance assumes most nested
+  calls don't park. Programs that park on every call get one program step per
+  call. That is no worse than one model step per call, but it isn't free.
+- **Continuation growth.** The ledger re-serializes every recorded result on
+  each resume. The 8 MiB cap is an estimate to tune against real programs.
