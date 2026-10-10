@@ -15,9 +15,18 @@ export async function correctKeeperWhileItWorks(t: EveEvalContext, tool: string)
     `NOTEBOOK-CORRECT ${tool} Alice corrects the pier she asked about.`,
   );
   corrected.expectOk();
+  // One reply settles both calls: the first carries the output, the correction shares it.
   corrected.event("call.settled", {
     count: 1,
-    data: { callId: "notebook-correction", output: CORRECTED_MEASUREMENT, outcome: "completed" },
+    data: { callId: "notebook-measure", output: CORRECTED_MEASUREMENT, outcome: "completed" },
+  });
+  corrected.event("call.settled", {
+    count: 1,
+    data: {
+      callId: "notebook-correction",
+      outcome: "completed",
+      outputOf: { callId: "notebook-measure" },
+    },
   });
   corrected.messageIncludes(`NOTEBOOK-REPLY ${CORRECTED_MEASUREMENT}`);
 

@@ -2,7 +2,6 @@
 // requests a commit opened, a sign-in prompt, how a request or sign-in settled, and a responder an
 // approval refused. Built-in channels render these; authored handlers can read the facts directly.
 
-import { SESSION_LIMIT_CONTINUATION_TOOL_NAME } from "#protocol/budget-request.js";
 import type { AuthorizationOutcome, InputResolution } from "#protocol/message.js";
 import type { Principal, Scope } from "#protocol/session-events/envelope.js";
 import type {
@@ -16,57 +15,17 @@ import {
   interactionOwner,
 } from "#protocol/session-projection/selectors.js";
 import type { InteractionRow, SessionView } from "#protocol/session-projection/tables.js";
-import type { InputOption, InputRequest, InputResponse } from "#shared/input.js";
-import { isJsonObjectValue, type JsonObject } from "#shared/json.js";
+import { readerInput } from "#protocol/session-reader.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
-/** A request as the session that serves this one reads it: with the call it's about. */
+/**
+ * A request as the session that serves this one reads it: with the call it's about, or, for a
+ * request this session relays, the asker's call its origin names.
+ */
 export function inputRequestOf(view: SessionView, row: InteractionRow): InputRequest | undefined {
-  const { request, subject } = row;
-  const kind =
-    request.kind === "approval"
-      ? "tool-approval"
-      : request.kind === "budget"
-        ? "session-limit"
-        : request.kind === "question"
-          ? "question"
-          : undefined;
-  if (kind === undefined) return undefined;
-  const call = "callId" in subject ? view.calls[subject.callId] : undefined;
-  const input: JsonObject = isJsonObjectValue(call?.input) ? call.input : {};
-  const rebuilt: Mutable<InputRequest> = {
-    action: {
-      callId: call?.callId ?? row.interactionId,
-      input,
-      kind: "tool-call",
-      // A budget prompt is about the session, whatever call relayed it.
-      toolName:
-        kind === "session-limit"
-          ? SESSION_LIMIT_CONTINUATION_TOOL_NAME
-          : (call?.capability.name ?? kind),
-    },
-    kind,
-    prompt: request.prompt,
-    requestId: row.interactionId,
-  };
-  if (request.allowFreeform !== undefined) rebuilt.allowFreeform = request.allowFreeform;
-  if (
-    request.display === "confirmation" ||
-    request.display === "select" ||
-    request.display === "text"
-  )
-    rebuilt.display = request.display;
-  if (request.options !== undefined) {
-    rebuilt.options = request.options.map((option) => {
-      const entry: Mutable<InputOption> = { id: option.id, label: option.label };
-      if (option.description !== undefined) entry.description = option.description;
-      if (option.style === "primary" || option.style === "danger" || option.style === "default")
-        entry.style = option.style;
-      return entry;
-    });
-  }
-  return rebuilt;
+  return readerInput(view, row.interactionId)?.request;
 }
 
 /** One commit's requests: what a person is asked at once. */
