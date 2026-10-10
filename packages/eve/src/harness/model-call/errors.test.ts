@@ -200,6 +200,19 @@ describe("classifyModelCallError", () => {
     expect(classifyModelCallError(new Error("stream failed", { cause: overloaded }))).toBe("retry");
   });
 
+  it("returns retry for an AI Gateway stream timeout payload", () => {
+    // The gateway aborts a long stream with a plain payload keyed on
+    // `code`; the harness wraps it through normalizeModelStreamError.
+    const payload = {
+      code: "gateway_stream_timeout",
+      message: "Stream exceeded maximum duration before function timeout",
+      origin: "gateway",
+    };
+
+    expect(classifyModelCallError(normalizeModelStreamError(payload))).toBe("retry");
+    expect(classifyModelCallError(payload)).toBe("retry");
+  });
+
   it("returns retry for HTTP statuses the AI SDK treats as retryable", () => {
     for (const statusCode of [408, 409, 429]) {
       const err = Object.assign(new Error("retryable"), { statusCode });
