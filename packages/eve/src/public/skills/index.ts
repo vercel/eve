@@ -9,7 +9,7 @@ export {
   type SkillFileContent,
   type SkillPackageDefinition,
 } from "#public/definitions/skill.js";
-export { defineDynamic } from "#public/definitions/skill.js";
+export { defineDynamic, type DynamicSkillResult } from "#public/definitions/skill.js";
 export type {
   DynamicSentinel,
   ReactionView,

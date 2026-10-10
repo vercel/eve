@@ -31,6 +31,8 @@ export function memoryReactions(memory: ResolvedMemoryDefinition): readonly Reac
       return { value: messages.length === 0 ? null : messages.map(({ content }) => content) };
     },
     conversation: true,
+    // A recall that fails fails the turn, rather than running it without what it would bring.
+    failure: "throw",
     id: `memory:${memory.slot}:recall`,
     kind: "memory",
     label: memory.logicalPath,

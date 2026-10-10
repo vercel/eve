@@ -12,8 +12,8 @@ describe("defineDynamic connections", () => {
       });
 
     expect(defineDynamic({ resolve: handler })).toMatchObject({
-      events: { "session.started": handler },
       kind: "eve:dynamic",
+      resolve: handler,
     });
   });
 });

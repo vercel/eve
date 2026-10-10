@@ -78,8 +78,13 @@ export function createCurrentMessages(
   return {
     add,
     addContext(message, kind) {
-      nonSystemMessages.splice(userInsertionIndex, 0, createFrameworkUserMessage(kind, message));
-      userInsertionIndex += 1;
+      // Ahead of the person's latest message, so a continuation still ends with its tool results.
+      const index = nonSystemMessages.findLastIndex(
+        (entry) => entry.role === "user" && (entry.kind === undefined || entry.kind === "user"),
+      );
+      const at = index === -1 ? userInsertionIndex : index;
+      nonSystemMessages.splice(at, 0, createFrameworkUserMessage(kind, message));
+      if (at <= userInsertionIndex) userInsertionIndex += 1;
     },
     addAnnouncements(announcements) {
       for (const key of Object.keys(announcements).sort()) {

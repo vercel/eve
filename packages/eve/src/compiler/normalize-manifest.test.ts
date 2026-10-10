@@ -571,7 +571,6 @@ describe("compileAgentManifest source graph", () => {
 
     expect(compiled.dynamicConnections).toContainEqual(
       expect.objectContaining({
-        eventNames: ["turn.started"],
         logicalPath: "connections/accounts.ts",
         slug: "accounts",
       }),
@@ -591,36 +590,6 @@ describe("compileAgentManifest source graph", () => {
       "tools/executable.ts": { compile: true, runtimeEntry: true },
       "tools/web_search.ts": { compile: true, runtimeEntry: false },
     });
-  });
-
-  it("rejects step-scoped dynamic connections", async () => {
-    const sourceRegistry = registry([
-      {
-        logicalPath: "agent.ts",
-        loadNamespace: async () => ({
-          default: defineAgent({ model: "openai/gpt-5.4" }),
-        }),
-      },
-      {
-        logicalPath: "connections/accounts.ts",
-        loadNamespace: async () => ({
-          default: defineDynamic({
-            select: (view) => view.latest["model.requested"] ?? null,
-            resolve: () =>
-              defineMcpClientConnection({
-                description: "Caller account.",
-                url: "https://mcp.accounts.example",
-              }),
-          }),
-        }),
-      },
-    ]);
-
-    await expect(
-      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
-    ).rejects.toThrow(
-      'Dynamic connection resolvers support only "session.started" and "turn.started" handlers.',
-    );
   });
 
   it("projects the root node once and finalizes its filesystem bindings after config", async () => {
@@ -1215,11 +1184,7 @@ describe("compileAgentManifest source graph", () => {
       slot: "profile",
       visibility: "scope",
     });
-    expect(wrapper).toMatchObject({
-      eventNames: ["turn.started"],
-      logicalPath: "tools/profile.ts",
-      rebindMissingCallbacks: true,
-    });
+    expect(wrapper).toMatchObject({ logicalPath: "tools/profile.ts" });
     expect(compiled.bindings[wrapper.sourceId]?.backing).toMatchObject({
       dependencies: { memory: memory.sourceId },
       kind: "programmatic",
