@@ -336,16 +336,18 @@ function applyTransform(source: string, callbacks: readonly CallbackInfo[]): { c
       callback.phase === "execute"
         ? `__eve_dynamic_exec_${index}`
         : `__eve_dynamic_${safePhase}_${index}`;
-    const originalParams = callback.params;
-    const hoistedParams = originalParams ? `__vars, ${originalParams}` : "__vars";
-    const varsDestructure = allVars.length > 0 ? `const ${closure} = __vars;\n  ` : "";
+    // Captures are free in the callback, so they never collide with its own
+    // parameters, and destructuring them first keeps them visible to defaults.
+    const hoistedParams = [allVars.length > 0 ? closure : "__vars", callback.params]
+      .filter(Boolean)
+      .join(", ");
     const bodyContent = callback.body.slice(1, -1).trim();
     const asyncPrefix = callback.isAsync ? "async " : "";
     const generatorStar = callback.isGenerator ? "*" : "";
 
     hoistedFunctions.push(
       `${asyncPrefix}function${generatorStar} ${hoistedName}(${hoistedParams}) {\n` +
-        `  ${varsDestructure}${bodyContent}\n` +
+        `  ${bodyContent}\n` +
         `}`,
     );
 

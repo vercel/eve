@@ -624,8 +624,9 @@ export default defineDynamic({
     const result = await transformDynamicToolExecute("tools/typescript-expressions.ts", source);
 
     expect(result).not.toBeNull();
-    expect(result!.code).toContain("const { asserted, nonNull, satisfied } = __vars");
-    expect(result!.code).not.toContain("const { TypeName, asserted, nonNull, satisfied } = __vars");
+    expect(result!.code).toContain(
+      "function __eve_dynamic_exec_0({ asserted, nonNull, satisfied })",
+    );
   });
 
   it("async execute preserves await semantics", async () => {
@@ -1361,6 +1362,31 @@ export default defineDynamic({
     expect(callbacks.approvalRequest!.closure).toEqual({});
     expect(callbacks.toModelOutput!.closure).toEqual({});
     expect(Object.keys(callbacks.execute!.closure)).toEqual(["e"]);
+  });
+
+  it("callback parameter defaults can read captured names", async () => {
+    const source = `
+import { defineDynamic, defineTool } from "eve/tools";
+
+function makeTool(fallback) {
+  return defineTool({
+    description: "T",
+    inputSchema: { type: "object" },
+    execute({ limit = fallback }) { return limit; },
+  });
+}
+
+export default defineDynamic({
+  events: { "session.started": async () => ({ tool: makeTool(10) }) },
+});
+`;
+
+    const { callHandler } = await transformAndEval("tools/default-capture.ts", source);
+    const tool = (await callHandler()).tool as Record<string, Function>;
+
+    expect(tool.execute!({})).toBe(10);
+    expect(tool.execute!({ limit: 3 })).toBe(3);
+    expect(durableCallbacks(tool).execute!.closure).toEqual({ fallback: 10 });
   });
 
   it("resolver ctx values are captured separately from execute ctx", async () => {
@@ -2260,7 +2286,7 @@ export default defineDynamic({
     expect(result).not.toBeNull();
     const code = result!.code;
 
-    const destructureMatch = code.match(/const \{([^}]+)\} = __vars/);
+    const destructureMatch = code.match(/function __eve_dynamic_exec_\d+\(\{([^}]+)\}/);
     expect(destructureMatch).not.toBeNull();
     const captured = destructureMatch![1]!.split(",").map((s) => s.trim());
 
@@ -2271,50 +2297,6 @@ export default defineDynamic({
     expect(captured).not.toContain("unused");
     expect(captured).not.toContain("event");
     expect(captured).not.toContain("ctx");
-  });
-
-  it("no duplicate __vars bindings when execute has no overlapping params", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async (event, ctx) => {
-      const value = 42;
-      return {
-        tool: defineTool({
-          description: "T",
-          inputSchema: {},
-          execute(input) { return value + input.x; },
-        }),
-      };
-    },
-  },
-});
-`;
-
-    const result = await transformDynamicToolExecute("tools/nobinding.ts", source);
-    expect(result).not.toBeNull();
-    const code = result!.code;
-
-    // The hoisted function signature should be: __vars, input
-    // The body should destructure: const { event, ctx, value } = __vars
-    // There must be no name collision between `input` (param) and the
-    // destructured vars
-    const fnMatch = code.match(
-      /function __eve_dynamic_exec_\d+\(([^)]+)\)\s*\{\s*\n\s*const \{([^}]+)\} = __vars/,
-    );
-    expect(fnMatch).not.toBeNull();
-
-    const params = fnMatch![1]!
-      .split(",")
-      .map((s) => s.trim())
-      .filter((s) => s !== "__vars");
-    const destructured = fnMatch![2]!.split(",").map((s) => s.trim());
-
-    // No name should appear in both
-    const overlap = params.filter((p) => destructured.includes(p));
-    expect(overlap).toEqual([]);
   });
 
   it("handles defineDynamic with single-tool return", async () => {
@@ -2394,7 +2376,7 @@ export default defineDynamic({
 
     // The for-of variable `item` should be captured
     const code = result!.code;
-    const destructureMatch = code.match(/const \{([^}]+)\} = __vars/);
+    const destructureMatch = code.match(/function __eve_dynamic_exec_\d+\(\{([^}]+)\}/);
     expect(destructureMatch).not.toBeNull();
     const captured = destructureMatch![1]!.split(",").map((s) => s.trim());
     expect(captured).toContain("item");
@@ -2497,7 +2479,7 @@ export default defineDynamic({
     expect(result).not.toBeNull();
     const code = result!.code;
 
-    expect(code).toContain("const { tag } = __vars");
+    expect(code).toMatch(/function __eve_dynamic_exec_\d+\(\{ tag \}, _input/);
     expect(code).toMatch(/\(\.\.\.__args\) => __eve_dynamic_exec_\d+\(\{ tag \}, \.\.\.__args\)/);
   });
 });
