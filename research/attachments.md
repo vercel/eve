@@ -43,7 +43,9 @@ size, media type, and image dimensions or PDF page count.
 
 - History holds only `eve-sandbox:` refs or text notes for attachments. It
   never holds a raw URL, an `eve-url:` marker, or inline bytes. This covers user
-  messages, cancelled turns, and tool results.
+  messages, cancelled turns, and tool results. The one exception is an AI SDK
+  provider file reference, which names a file the provider already holds and
+  passes through unchanged.
 - The provider never fetches an attachment. eve fetches it or writes a note,
   so an expired or private link can't fail later calls.
 - The inline decision stays a pure function of the ref, so the prompt cache
@@ -54,17 +56,18 @@ size, media type, and image dimensions or PDF page count.
 
 ## Authoring surface
 
-| Surface                    | Change                                                                                                   |
-| -------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `FilePart.data`            | Bytes, base64, and `data:` URLs are bytes. Any other string or `URL` with a scheme is a link to resolve. |
-| `fetchFile(url, ctx)`      | Also on `eveChannel()`. Returning `null` now means "not mine", not "let the provider fetch it".          |
-| `attachmentError(message)` | New in `eve/channels`. A `fetchFile` throws it to give the model a safe reason.                          |
-| `FetchFileContext`         | Exposes `session`, which staging already passes.                                                         |
-| `read_file`                | Opens PDFs up to 20 MiB as files the model reads.                                                        |
+| Surface                    | Change                                                                                                                                        |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `FilePart.data`            | Bytes, base64, and `data:` URLs are bytes. Any other string or `URL` with a scheme is a link to resolve. A provider reference passes through. |
+| `fetchFile(url, ctx)`      | Also on `eveChannel()`. Returning `null` now means "not mine", not "let the provider fetch it".                                               |
+| `attachmentError(message)` | New in `eve/channels`. A `fetchFile` throws it to give the model a safe reason.                                                               |
+| `FetchFileContext`         | Exposes `session`, which staging already passes. `FetchFileFunction` and its types export from `eve/channels`.                                |
+| `read_file`                | Opens PDFs up to 20 MiB as files the model reads.                                                                                             |
 
 When `fetchFile` returns `null`, or the channel has none, eve fetches public
-`https:` links itself. The fetch rejects private and reserved addresses, stops
-at the 25 MB default upload cap, and times out. Any other scheme, or a failed
+`https:` links itself, at most 10 per message and one at a time. The fetch
+rejects private and reserved addresses, stops at the 25 MB default upload cap,
+and times out. Any other scheme, or a failed
 fetch, becomes a note. Built-in channel fetchers keep their own caps.
 
 ```ts title="agent/channels/eve.ts"
@@ -152,8 +155,8 @@ Each step is one PR in a stack, in this order:
    inline rule for inbound and tool-result files.
 5. `read_file` opens PDFs.
 6. `fetchFile` on `eveChannel()` (#4194).
-7. `attachmentError` and `FetchFileContext.session` (#4304), and a `deliver`
-   that returns nothing falls back to the default input.
+7. `attachmentError`, `FetchFileContext.session`, and the exported `fetchFile`
+   types (#4304).
 8. Slack thread lookback, external files, audio and video, and fetch timeout
    (#705, #855).
 
