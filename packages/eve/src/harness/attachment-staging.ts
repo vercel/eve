@@ -13,7 +13,13 @@ import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { isUnresolvedFileData, readFileData } from "#internal/attachments/data.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
 import { createLogger } from "#internal/logging.js";
+import { maxBytesOf } from "#internal/attachments/limited-read.js";
 import { readMediaMetadata, verifyMediaType } from "#internal/attachments/media-metadata.js";
+import {
+  DEFAULT_UPLOAD_POLICY,
+  isMediaTypeAllowed,
+  type UploadPolicy,
+} from "#public/channels/upload-policy.js";
 import { createPublicDownloads, type PublicDownloads } from "#internal/attachments/public-link.js";
 import { deserializeUrlFilePart, isSerializedUrlFilePart } from "#internal/attachments/url-refs.js";
 import {
@@ -71,12 +77,13 @@ export async function stageAttachmentsForAdapter(
   }
 
   const reconstituted = reconstitueFilePartUrls(content);
-  const downloads = createPublicDownloads();
+  const policy = adapterCtx.ctx.get(ChannelKey)?.uploadPolicy;
+  const downloads = createPublicDownloads(maxBytesOf(policy ?? DEFAULT_UPLOAD_POLICY));
 
   return Promise.all(
     reconstituted.map(async (part) => {
       if (part.type === "file") {
-        return stageFilePart(part, sandbox, adapterCtx, downloads);
+        return stageFilePart(part, sandbox, adapterCtx, downloads, policy);
       }
       return part;
     }),
@@ -485,6 +492,7 @@ async function stageFilePart(
   sandbox: SandboxSession,
   adapterCtx: ChannelAdapterContext,
   downloads: PublicDownloads,
+  policy: UploadPolicy | undefined,
 ): Promise<FilePart | TextPart> {
   if (isSandboxRefUrl(part.data)) {
     return part;
@@ -492,7 +500,7 @@ async function stageFilePart(
 
   const data = readFileData(part.data);
   if (data.kind === "bytes") {
-    return stageResolvedBytes(part, { bytes: data.bytes }, sandbox);
+    return stageResolvedBytes(part, { bytes: data.bytes }, sandbox, policy);
   }
   // The provider already holds a referenced file.
   if (data.kind === "reference") {
@@ -519,7 +527,7 @@ async function stageFilePart(
     });
     return attachmentNote(part, `could not be retrieved: ${error.message}`);
   }
-  return stageResolvedBytes(part, resolved, sandbox);
+  return stageResolvedBytes(part, resolved, sandbox, policy);
 }
 
 /** A model-visible note that stands in for an attachment eve could not stage. */
@@ -527,12 +535,36 @@ function attachmentNote(part: FilePart, outcome: string): TextPart {
   return { text: `Attachment ${part.filename?.trim() || "file"} ${outcome}`, type: "text" };
 }
 
+/**
+ * Stages resolved bytes, or a note when they break the channel's upload
+ * policy. A link's size is unknown until it downloads, and only the bytes
+ * prove the media type, so the policy runs here as well as at the route.
+ */
 async function stageResolvedBytes(
   part: FilePart,
   resolved: FetchFileResult,
   sandbox: SandboxSession,
-): Promise<FilePart> {
-  const mediaType = resolved.mediaType ?? part.mediaType ?? DEFAULT_MEDIA_TYPE;
+  policy: UploadPolicy | undefined,
+): Promise<FilePart | TextPart> {
+  const mediaType = verifyMediaType(
+    resolved.bytes,
+    resolved.mediaType ?? part.mediaType ?? DEFAULT_MEDIA_TYPE,
+  );
+  if (policy !== undefined) {
+    const limit = maxBytesOf(policy);
+    if (resolved.bytes.byteLength > limit) {
+      return attachmentNote(
+        part,
+        `was not accepted: it is ${resolved.bytes.byteLength} bytes, over this channel's ${limit}-byte upload limit.`,
+      );
+    }
+    if (!isMediaTypeAllowed(mediaType, policy)) {
+      return attachmentNote(
+        part,
+        `was not accepted: this channel doesn't accept ${mediaType} files.`,
+      );
+    }
+  }
   const ref = await writeSandboxRef(
     resolved.bytes,
     mediaType,

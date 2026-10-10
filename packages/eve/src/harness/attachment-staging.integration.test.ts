@@ -422,6 +422,50 @@ describe("stageAttachmentsToSandbox (integration)", () => {
     expect(maxInFlight).toBe(1);
   });
 
+  it("holds every staged file to the channel's upload policy, on its bytes and verified type", async () => {
+    vi.mocked(requestPublicUrl).mockResolvedValueOnce(
+      new Response("a much larger file", { headers: { "content-type": "text/plain" } }),
+    );
+    const adapter: ChannelAdapter<any> = {
+      kind: "custom-channel",
+      state: {},
+      uploadPolicy: { allowedMediaTypes: ["application/pdf", "text/*"], maxBytes: 64 },
+    };
+    const sandbox = mockSandbox({ id: "sbx_policy" });
+    const runtime = await createTestRuntime();
+    const content: UserContent = [
+      {
+        data: "https://example.com/notes.txt",
+        filename: "notes.txt",
+        mediaType: "text/plain",
+        type: "file",
+      },
+      // Declared as an allowed PDF, but the bytes are a PNG.
+      { data: pngBytes(1, 1), filename: "scan.pdf", mediaType: "application/pdf", type: "file" },
+      { data: Buffer.alloc(65, 0x41), filename: "big.txt", mediaType: "text/plain", type: "file" },
+    ];
+
+    const staged = await runtime.runAsSession({ channel: adapter, sandbox }, async () =>
+      stageAttachmentsToSandbox(content),
+    );
+
+    expect(vi.mocked(requestPublicUrl)).toHaveBeenCalledWith(
+      "https://example.com/notes.txt",
+      expect.objectContaining({ maxResponseSize: 64 }),
+    );
+    expect((staged as Exclude<UserContent, string>).slice(1)).toEqual([
+      {
+        text: "Attachment scan.pdf was not accepted: this channel doesn't accept image/png files.",
+        type: "text",
+      },
+      {
+        text: "Attachment big.txt was not accepted: it is 65 bytes, over this channel's 64-byte upload limit.",
+        type: "text",
+      },
+    ]);
+    expect(sandbox.writes).toHaveLength(1);
+  });
+
   it("leaves a provider file reference for the provider to resolve", async () => {
     const sandbox = mockSandbox({ id: "sbx_reference" });
     const runtime = await createTestRuntime();

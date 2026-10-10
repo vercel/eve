@@ -6,6 +6,7 @@ import { createLogger } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { DeliverPayload } from "#channel/types.js";
+import type { UploadPolicy } from "#public/channels/upload-policy.js";
 import type {
   FetchFileContext,
   FetchFileResult,
@@ -169,6 +170,14 @@ export type ChannelAdapter<TCtx extends ChannelAdapterContext<any> = ChannelAdap
    * construction time.
    */
   readonly fetchFile?: FetchFileFunction;
+
+  /**
+   * Upload policy staging applies to every inbound attachment, on its final
+   * bytes and verified media type, including links eve downloads itself.
+   * Without one, staging checks nothing and eve's own downloads stop at the
+   * framework default size.
+   */
+  readonly uploadPolicy?: UploadPolicy;
 
   /**
    * Framework-owned observability projection for the active channel.

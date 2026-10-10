@@ -1,7 +1,6 @@
 import type { FetchFileResult } from "#channel/adapter.js";
 import { requestPublicUrl } from "#execution/web-fetch/request.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
-import { DEFAULT_UPLOAD_POLICY } from "#public/channels/upload-policy.js";
 
 const DOWNLOAD_TIMEOUT_MS = 30_000;
 /** Links eve downloads for one message. Each buffers up to the upload cap, so they run one at a time. */
@@ -11,8 +10,8 @@ const GENERIC_MEDIA_TYPES = new Set(["application/octet-stream", "binary/octet-s
 /** Downloads one message's unclaimed links: at most {@link MAX_DOWNLOADS_PER_MESSAGE}, one at a time. */
 export type PublicDownloads = (url: URL, adapterKind: string) => Promise<FetchFileResult>;
 
-/** Starts the download budget for one message's attachments. */
-export function createPublicDownloads(): PublicDownloads {
+/** Starts the download budget for one message's attachments, each capped at `maxBytes`. */
+export function createPublicDownloads(maxBytes: number): PublicDownloads {
   let started = 0;
   let previous: Promise<unknown> = Promise.resolve();
   return async (url, adapterKind) => {
@@ -22,7 +21,7 @@ export function createPublicDownloads(): PublicDownloads {
         `eve downloads at most ${MAX_DOWNLOADS_PER_MESSAGE} links per message.`,
       );
     }
-    const download = previous.then(() => fetchPublicAttachment(url, adapterKind));
+    const download = previous.then(() => fetchPublicAttachment(url, adapterKind, maxBytes));
     previous = download.catch(() => undefined);
     return await download;
   };
@@ -34,7 +33,11 @@ export function createPublicDownloads(): PublicDownloads {
  * of on every later model call. Only public `https:` destinations qualify;
  * private and reserved addresses are refused.
  */
-async function fetchPublicAttachment(url: URL, adapterKind: string): Promise<FetchFileResult> {
+async function fetchPublicAttachment(
+  url: URL,
+  adapterKind: string,
+  maxBytes: number,
+): Promise<FetchFileResult> {
   if (url.protocol !== "https:") {
     throw refusal(adapterKind, "eve downloads only public https:// links.");
   }
@@ -42,7 +45,7 @@ async function fetchPublicAttachment(url: URL, adapterKind: string): Promise<Fet
   try {
     response = await requestPublicUrl(url.href, {
       headers: {},
-      maxResponseSize: DEFAULT_UPLOAD_POLICY.maxBytes,
+      maxResponseSize: maxBytes,
       signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
     });
   } catch (cause) {
