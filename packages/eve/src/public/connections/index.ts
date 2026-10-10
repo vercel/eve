@@ -21,12 +21,15 @@ export type { JsonValue } from "#public/types/json.js";
 export {
   defineDynamic,
   type DynamicConnectionDefinition,
-  type DynamicConnectionEvents,
-  type DynamicConnectionResolveContext,
   type DynamicConnectionResult,
   type DynamicConnectionSet,
 } from "#public/definitions/connections/dynamic.js";
-export type { DynamicResolveContext, DynamicSentinel } from "#dynamic/definition.js";
+export type {
+  DynamicSentinel,
+  ReactionView,
+  ResolveContext,
+  SelectContext,
+} from "#dynamic/definition.js";
 export {
   defineMcpClientConnection,
   type McpClientConnectionDefinition,

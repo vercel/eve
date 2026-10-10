@@ -6,7 +6,6 @@
  */
 
 import type { ContextReader } from "#context/key.js";
-import { DynamicSkillManifestKey } from "#context/keys.js";
 import { skillFilePath } from "#execution/skills/instructions.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { SEARCH_TOOL_NAME, SKILL_ENTRY_NAME } from "#protocol/catalog-tools.js";
@@ -14,6 +13,7 @@ import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { skillTarget } from "#shared/action-request-name.js";
 import { stripSkillFrontmatter } from "#shared/skill-package.js";
 import { toInputSchema } from "#tools/schema.js";
+import { dynamicSkillManifest } from "#reactions/kinds/skill.js";
 
 import { closestNames } from "./rank.js";
 
@@ -40,7 +40,7 @@ export function sessionSkills(ctx: ContextReader | undefined): ReadonlyMap<strin
       path: skillFilePath(skill.name),
     });
   }
-  for (const skill of Object.values(ctx?.get(DynamicSkillManifestKey) ?? {}).flat()) {
+  for (const skill of Object.values(dynamicSkillManifest(ctx)).flat()) {
     skills.set(skill.name, {
       deferred: skill.deferred === true,
       description: skill.description,

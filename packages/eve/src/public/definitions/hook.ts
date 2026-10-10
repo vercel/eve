@@ -1,6 +1,7 @@
 import type { SessionEvent } from "../../protocol/session-event.js";
 import type { FactPosition } from "../../protocol/session-events/envelope.js";
 import type { SessionView } from "../../protocol/session-projection/tables.js";
+import type { ReactionSelect, ResolveContext } from "../../dynamic/definition.js";
 import type { SessionContext } from "./callback-context.js";
 import type { ExactDefinition } from "./exact.js";
 
@@ -57,6 +58,48 @@ export type HookEvent<TKey extends HookEventKey = HookEventType> = TKey extends 
   ? HookEventMap[TKey]
   : HookEventMap[HookEventType];
 
+/** A hook's request that the session act: see {@link cancel} and {@link compact}. */
+export type HookIntent = CancelIntent | CompactIntent;
+
+/** Stops the running turn: it settles `cancelled` with `cause: {hook}`. */
+export interface CancelIntent {
+  readonly kind: typeof INTENT_KIND;
+  readonly type: "cancel";
+  readonly reason?: string;
+}
+
+/** Compacts the conversation once per `key`, before the next model call. */
+export interface CompactIntent {
+  readonly kind: typeof INTENT_KIND;
+  readonly type: "compact";
+  readonly key: string;
+}
+
+export const INTENT_KIND = "eve:intent" as const;
+
+/**
+ * Asks eve to stop the running turn. Return it from a hook: the turn settles `cancelled`, like
+ * `session.cancel()`, with `cause: {hook}`. eve ignores it when the commit that ran the hook can't
+ * stop a turn, such as one that settles it.
+ */
+export function cancel(reason?: string): CancelIntent {
+  return reason === undefined
+    ? { kind: INTENT_KIND, type: "cancel" }
+    : { kind: INTENT_KIND, reason, type: "cancel" };
+}
+
+/**
+ * Asks eve to compact the conversation before the next model call. A key compacts once: the
+ * compaction that follows satisfies it, so returning it again changes nothing. Use a new key, such
+ * as one with a count in it, to compact again.
+ */
+export function compact(key = "hook"): CompactIntent {
+  return { key, kind: INTENT_KIND, type: "compact" };
+}
+
+/** What a hook may return: nothing, one intent, or several. */
+export type HookResult = HookIntent | readonly HookIntent[] | null | undefined | void;
+
 /**
  * Every hook handler receives this context.
  *
@@ -82,27 +125,26 @@ export interface HookContext extends SessionContext {
    * settled. Read what changed from the event, and where things stand from the view.
    */
   readonly view: SessionView;
-  /**
-   * Cancels the running turn. The event's remaining subscribers still run,
-   * then the turn settles like `session.cancel()`: `turn.settled` with
-   * `outcome: "cancelled"` and `cause: {hook}`. Returns `void` because the turn stops after the hook
-   * returns; call it before the handler's promise settles.
-   *
-   * eve logs a warning and ignores the call when the event cannot stop a
-   * running turn (terminal facts, context changes, and work events a task's
-   * run causes) or when it arrives after the event's hooks returned.
-   */
-  cancel(): void;
+}
+
+/** What a hook's `resolve` receives besides its selection. */
+export interface HookResolveContext extends ResolveContext, Omit<SessionContext, "session"> {
+  readonly session: SessionContext["session"];
+  readonly agent: HookContext["agent"];
 }
 
 /**
- * Side-effect-only handler for one accepted runtime stream event.
+ * Handler for one accepted runtime stream event. It may return intents, such as
+ * {@link cancel}.
  *
  * `TEvent` is one variant of {@link HookEvent}. {@link StreamEventHooks}
  * infers it from the event key. The typed event is the first argument, `ctx`
  * is the last.
  */
-export type StreamEventHook<TEvent> = (event: TEvent, ctx: HookContext) => void | Promise<void>;
+export type StreamEventHook<TEvent> = (
+  event: TEvent,
+  ctx: HookContext,
+) => HookResult | Promise<HookResult>;
 
 /**
  * Map of stream-event subscribers an authored hook file may declare.
@@ -116,16 +158,20 @@ export type StreamEventHooks<TKey extends HookEventKey = HookEventKey> = {
 };
 
 /**
- * Public hook definition authored in `agent/hooks/*.ts`.
+ * Public hook definition authored in `agent/hooks/*.ts`: a reaction to the session.
  *
- * Hook files declare stream-event subscribers (under `events:`) that
- * fire after eve has accepted and durably recorded each event.
- * Handlers are observe-only: they cannot inject model context. To
- * contribute runtime model messages, use `defineDynamic` +
- * `defineInstructions` in `agent/instructions/`.
+ * Either `events`, handlers for the events a commit carries, or `select` and `resolve`: `select`
+ * reads what the hook depends on from the session's view, and `resolve` runs right after each
+ * commit that changes it. Both run after eve has durably recorded the commit, and both may return
+ * intents such as {@link cancel}.
  */
-export interface HookDefinition<TKey extends HookEventKey = HookEventKey> {
+export interface HookDefinition<TKey extends HookEventKey = HookEventKey, TSelected = unknown> {
   readonly events?: StreamEventHooks<TKey>;
+  readonly select?: ReactionSelect<TSelected>;
+  readonly resolve?: (
+    selected: TSelected,
+    ctx: HookResolveContext,
+  ) => HookResult | Promise<HookResult>;
 }
 
 type DefinedHookEventKeys<TDefinition extends HookDefinition> = Extract<
@@ -136,12 +182,25 @@ type DefinedHookEventKeys<TDefinition extends HookDefinition> = Extract<
 /**
  * Identity-with-types helper. Returns the passed definition unchanged at
  * runtime while preserving its authored event keys behind the public
- * {@link HookDefinition} boundary and rejecting any key outside `events`.
- * Authors export
- * `defineHook({ events: { "session.started": (event, ctx) => { ... } } })`.
+ * {@link HookDefinition} boundary and rejecting any key outside the definition.
+ *
+ * ```ts
+ * export default defineHook({
+ *   events: { "turn.started": async (fact, ctx) => ((await allowed(ctx)) ? null : cancel()) },
+ * });
+ * ```
  */
-export function defineHook<const T extends HookDefinition>(
-  definition: ExactDefinition<T, HookDefinition>,
-): HookDefinition<DefinedHookEventKeys<T>> {
-  return definition;
+export function defineHook<const T extends HookDefinition<HookEventKey, any>>(
+  definition: ExactDefinition<T, HookDefinition<HookEventKey, any>>,
+): HookDefinition<
+  DefinedHookEventKeys<T>,
+  T extends HookDefinition<HookEventKey, infer S> ? S : unknown
+> {
+  if (definition.events !== undefined && definition.resolve !== undefined) {
+    throw new Error("defineHook() takes either events or select and resolve, not both.");
+  }
+  if (definition.select !== undefined && definition.resolve === undefined) {
+    throw new Error("defineHook() with select also needs resolve.");
+  }
+  return definition as never;
 }

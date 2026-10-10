@@ -35,7 +35,6 @@ import type { InstrumentationAttempt, InstrumentationStepScope } from "#instrume
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createHistoryViewPreparer } from "#shared/history-view.js";
 import { eventsOf } from "#harness/publication.js";
-import { clearMemorySessionState } from "#shared/memory-state.js";
 
 const environment = process.env.NODE_ENV ?? "unknown";
 const eveVersion = resolveInstalledPackageInfo().version;
@@ -183,10 +182,7 @@ async function clearContext(step: Step): Promise<StepResult> {
       clear(step.view(), { cause, sessionId: step.session.sessionId }),
     ),
   );
-  const cleared = discardClearedHumanInput({
-    ...step.session,
-    state: clearMemorySessionState(step.session.state),
-  });
+  const cleared = discardClearedHumanInput(step.session);
   return { next: null, session: replaceSessionHistory(cleared, []) };
 }
 

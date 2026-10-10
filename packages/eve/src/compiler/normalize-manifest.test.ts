@@ -441,20 +441,21 @@ describe("compileAgentManifest source graph", () => {
       sourceRegistry,
     ]);
     const namespace = moduleMap.nodes.__root__!.modules[wrapper.sourceId]!;
-    const tools = await (namespace.default as ReturnType<typeof defineDynamic>).events[
-      "turn.started"
-    ]!(undefined, {
-      model: null,
-      session: { id: "session", auth: { current: null, initiator: null } },
-      channel: {},
-      messages: [],
-    });
+    const tools = await (namespace.default as ReturnType<typeof defineDynamic>).resolve(
+      null as never,
+      {
+        abortSignal: new AbortController().signal,
+        channel: {},
+        facts: [],
+        session: { id: "session", auth: { current: null, initiator: null } },
+      } as never,
+    );
     expect(Object.keys(tools as object).sort()).toEqual(
       ["create", "delete", "disable", "enable", "get", "invoke", "list", "update"].map(
         (operation) => `schedule__billing-requests__${operation}`,
       ),
     );
-    const entries = tools as Record<string, import("#tools/dynamic.js").DynamicToolEntry>;
+    const entries = tools as Record<string, import("#tools/definition.js").ToolDefinition>;
     expect(
       entries["schedule__billing-requests__create"]!.label?.start({ name: "daily-digest" }),
     ).toBe("Create schedule: daily-digest");
@@ -482,7 +483,7 @@ describe("compileAgentManifest source graph", () => {
         logicalPath: "instructions/dynamic.ts",
         loadNamespace: async () => ({
           default: defineDynamic({
-            events: { "session.started": () => ({ content: "Dynamic instructions." }) },
+            resolve: () => ({ content: "Dynamic instructions." }),
           }),
         }),
       },
@@ -496,10 +497,7 @@ describe("compileAgentManifest source graph", () => {
         logicalPath: "skills/dynamic.ts",
         loadNamespace: async () => ({
           default: defineDynamic({
-            events: {
-              "session.started": () =>
-                defineSkill({ description: "Dynamic skill.", markdown: "# Dynamic\n" }),
-            },
+            resolve: () => defineSkill({ description: "Dynamic skill.", markdown: "# Dynamic\n" }),
           }),
         }),
       },
@@ -525,10 +523,8 @@ describe("compileAgentManifest source graph", () => {
         logicalPath: "tools/dynamic.ts",
         loadNamespace: async () => ({
           default: defineDynamic({
-            events: {
-              "session.started": () =>
-                defineTool({ description: "Dynamic.", execute: () => null, inputSchema: {} }),
-            },
+            resolve: () =>
+              defineTool({ description: "Dynamic.", execute: () => null, inputSchema: {} }),
           }),
         }),
       },
@@ -549,13 +545,12 @@ describe("compileAgentManifest source graph", () => {
         logicalPath: "connections/accounts.ts",
         loadNamespace: async () => ({
           default: defineDynamic({
-            events: {
-              "turn.started": () =>
-                defineMcpClientConnection({
-                  description: "Caller account.",
-                  url: "https://mcp.accounts.example",
-                }),
-            },
+            select: (view) => view.latest["turn.started"] ?? null,
+            resolve: () =>
+              defineMcpClientConnection({
+                description: "Caller account.",
+                url: "https://mcp.accounts.example",
+              }),
           }),
         }),
       },
@@ -610,13 +605,12 @@ describe("compileAgentManifest source graph", () => {
         logicalPath: "connections/accounts.ts",
         loadNamespace: async () => ({
           default: defineDynamic({
-            events: {
-              "step.started": () =>
-                defineMcpClientConnection({
-                  description: "Caller account.",
-                  url: "https://mcp.accounts.example",
-                }),
-            },
+            select: (view) => view.latest["model.requested"] ?? null,
+            resolve: () =>
+              defineMcpClientConnection({
+                description: "Caller account.",
+                url: "https://mcp.accounts.example",
+              }),
           }),
         }),
       },
@@ -663,11 +657,7 @@ describe("compileAgentManifest source graph", () => {
       {
         logicalPath: "agent.ts",
         loadNamespace: async () => ({
-          default: defineAgent({
-            model: defineDynamic({
-              events: { "session.started": () => "openai/gpt-5.4" },
-            }),
-          }),
+          default: defineDynamic({ resolve: () => "openai/gpt-5.4" }),
         }),
       },
     ]);

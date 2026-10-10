@@ -1,18 +1,12 @@
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import { z } from "#compiled/zod/index.js";
 import { isDeepStrictEqual } from "node:util";
-import type {
-  ApprovalContext,
-  Approval,
-  ApprovalPolicy,
-  ApprovalResponsePolicy,
-} from "#approval/definition.js";
+import type { Approval, ApprovalPolicy, ApprovalResponsePolicy } from "#approval/definition.js";
 import { loadContext, contextStorage } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { readSessionSchedule } from "#context/session-schedule.js";
 import { defineDynamic } from "#dynamic/definition.js";
 import { isApprovalRecheck } from "#harness/approval-recheck.js";
-import { markDynamicCallbackRebind } from "#internal/dynamic-tool-rebind.js";
 import { bindScheduleCollection, schedules } from "#public/experimental/schedules/client.js";
 import type {
   DefinedDynamicSchedules,
@@ -25,15 +19,10 @@ import {
 } from "#runtime/schedules/collection-client.js";
 import { scheduleDisplayName } from "#runtime/schedules/record.js";
 import { MAX_SCHEDULE_DELAY_MINUTES } from "#runtime/schedules/validation.js";
-import { parseJsonObject } from "#shared/json.js";
 import { scheduleCollectionToolPrefix } from "#shared/schedule-collection-tools.js";
 import { always } from "#tools/approval/policies.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 import type { DynamicToolEntry } from "#tools/dynamic.js";
-import {
-  readDurableDynamicToolCallbacks,
-  stampDurableDynamicToolCallbacks,
-} from "#tools/durable-callbacks.js";
 
 // Approval must retain prepared data across durable suspension, not in a resolver closure.
 const PreparedWritesKey = new ContextKey<Readonly<Record<string, PreparedScheduleWrite>>>(
@@ -91,174 +80,173 @@ export function createScheduleCollectionToolDynamicDefinition<TInput, TPrepared 
     bindScheduleCollection(
       definition as DefinedDynamicSchedules<TInput, StandardSchemaV1<unknown, TInput>, TPrepared>,
     );
-  return markDynamicCallbackRebind(
-    defineDynamic({
-      events: {
-        "turn.started": async (_event, context) => {
-          const scope = contextStorage.getStore();
-          if (
-            definition.tool === false ||
-            context.session.schedule !== undefined ||
-            (scope !== undefined && readSessionSchedule(scope) !== undefined)
-          )
-            return null;
-          const prefix = `${scheduleCollectionToolPrefix(identity.collection)}__`;
-          const keyFor = (operation: "create" | "update", callId: string) =>
-            `${prefix}${operation}:${callId}`;
-          const createSchema = z
-            .object({
-              name: nameSchema,
-              expression: expressionSchema,
-              payload: definition.inputSchema,
-            })
-            .strict();
-          const updateSchema = createSchema
-            .partial({ expression: true, payload: true })
-            .extend({ name: nameInput.shape.name })
-            .refine((input) => input.expression !== undefined || input.payload !== undefined, {
-              message: "Schedule update requires an expression or replacement payload.",
-            });
-          const createApproval = writeApproval(
-            definition.approval?.create ?? always(),
-            (callId) => keyFor("create", callId),
-            async (input) => (await bind()).prepareCreate(await createSchema.parseAsync(input)),
-            (prepared) => prepared.envelope.payload,
-          );
-          const updateApproval = writeApproval(
-            definition.approval?.update ?? always(),
-            (callId) => keyFor("update", callId),
-            async (input) => {
-              const { name, expression, payload } = await updateSchema.parseAsync(input);
-              const client = await bind();
-              return expression === undefined
-                ? client.prepareUpdate(name, { payload })
-                : client.prepareUpdate(name, { expression, payload });
-            },
-            (prepared) => prepared.envelope?.payload,
-          );
-          const define = (
-            action: string,
-            description: string,
-            inputSchema: any,
-            execute: ToolDefinition<any, unknown>["execute"],
-            approval?: Approval,
-          ) => {
-            const tool = defineTool({
-              description: `${definition.description ? `${definition.description}\n\n` : ""}${description}`,
-              inputSchema,
-              approval,
-              label: {
-                start: (input: { name?: string }) =>
-                  input.name ? `${action}: ${scheduleDisplayName(input.name)}` : action,
-              },
-              execute: (input: any, context) => {
-                assertScheduleManagementAllowed();
-                return execute(input, context);
-              },
-            });
-            stampCallbacks(tool);
-            return tool as DynamicToolEntry;
-          };
-          return {
-            [`${prefix}create`]: define(
-              "Create schedule",
-              `Create future work, not an immediate action. The display name may repeat; use the returned unique name for management. ${timingGuidance} Preparation validates the destination before approval; a changed prepared payload requires fresh approval.`,
-              createSchema,
-              async (input, context) => {
-                const key = keyFor("create", context.callId);
-                const approved = loadContext().get(PreparedWritesKey)?.[key];
-                if (approved === undefined || !("displayName" in approved))
-                  throw new Error(
-                    "Schedule creation has no prepared approval snapshot. Request creation again.",
-                  );
-                const created = await (
-                  await bindScheduleCollection(definition as never)
-                ).create(input, approved);
-                const snapshots = { ...loadContext().get(PreparedWritesKey) };
-                delete snapshots[key];
-                loadContext().set(PreparedWritesKey, snapshots);
-                return created;
-              },
-              createApproval,
-            ),
-            [`${prefix}update`]: define(
-              "Update schedule",
-              `Replace timing and/or the complete payload of an existing schedule. A payload replacement prepares new work and makes the updating caller its creator; timing-only updates preserve ownership. State and dispatch target are unchanged. Already started work is not cancelled. ${timingGuidance}`,
-              updateSchema,
-              async ({ name, ...patch }, context) => {
-                const key = keyFor("update", context.callId);
-                const approved = loadContext().get(PreparedWritesKey)?.[key];
-                if (approved === undefined || !("name" in approved))
-                  throw new Error(
-                    "Schedule update has no prepared approval snapshot. Request update again.",
-                  );
-                const updated = await (
-                  await bindScheduleCollection(definition as never)
-                ).update(name, patch, approved);
-                const snapshots = { ...loadContext().get(PreparedWritesKey) };
-                delete snapshots[key];
-                loadContext().set(PreparedWritesKey, snapshots);
-                return updated;
-              },
-              updateApproval,
-            ),
-            [`${prefix}get`]: define(
-              "Read schedule",
-              "Read timing/state; stored payload is not returned.",
-              nameInput,
-              async ({ name }) => await (await schedules(definition as never)).get(name),
-              definition.approval?.get,
-            ),
-            [`${prefix}list`]: define(
-              "List schedules",
-              "List identity, timing/state, and timestamps; payload is not returned.",
-              z
-                .object({
-                  cursor: z.string().optional(),
-                  limit: z.number().int().min(1).max(100).optional(),
-                })
-                .strict(),
-              async (input) => await (await schedules(definition as never)).list(input),
-              definition.approval?.list,
-            ),
-            [`${prefix}enable`]: define(
-              "Enable schedule",
-              "Enable future occurrences.",
-              nameInput,
-              async ({ name }) => await (await schedules(definition as never)).enable(name),
-              definition.approval?.enable ?? always(),
-            ),
-            [`${prefix}disable`]: define(
-              "Disable schedule",
-              "Disable future occurrences; already started work is not cancelled.",
-              nameInput,
-              async ({ name }) => await (await schedules(definition as never)).disable(name),
-              definition.approval?.disable ?? always(),
-            ),
-            [`${prefix}invoke`]: define(
-              "Run schedule",
-              "Enqueue an extra occurrence as the stored creator; acceptance is not execution success.",
-              nameInput,
-              async ({ name }) => {
-                await (await schedules(definition as never)).invoke(name);
-                return { accepted: true };
-              },
-              definition.approval?.invoke ?? always(),
-            ),
-            [`${prefix}delete`]: define(
-              "Delete schedule",
-              "Delete a schedule; already started work is not cancelled.",
-              nameInput,
-              async ({ name }) => ({
-                deleted: await (await schedules(definition as never)).delete(name),
-              }),
-              definition.approval?.delete ?? always(),
-            ),
-          };
-        },
-      },
+  return defineDynamic({
+    select: (view, ctx) => ({
+      schedule: ctx.session.schedule ?? null,
+      turn: view.latest["turn.started"] ?? null,
     }),
-  );
+    resolve: async (_selected, context) => {
+      const scope = contextStorage.getStore();
+      if (
+        definition.tool === false ||
+        context.session.schedule !== undefined ||
+        (scope !== undefined && readSessionSchedule(scope) !== undefined)
+      )
+        return null;
+      const prefix = `${scheduleCollectionToolPrefix(identity.collection)}__`;
+      const keyFor = (operation: "create" | "update", callId: string) =>
+        `${prefix}${operation}:${callId}`;
+      const createSchema = z
+        .object({
+          name: nameSchema,
+          expression: expressionSchema,
+          payload: definition.inputSchema,
+        })
+        .strict();
+      const updateSchema = createSchema
+        .partial({ expression: true, payload: true })
+        .extend({ name: nameInput.shape.name })
+        .refine((input) => input.expression !== undefined || input.payload !== undefined, {
+          message: "Schedule update requires an expression or replacement payload.",
+        });
+      const createApproval = writeApproval(
+        definition.approval?.create ?? always(),
+        (callId) => keyFor("create", callId),
+        async (input) => (await bind()).prepareCreate(await createSchema.parseAsync(input)),
+        (prepared) => prepared.envelope.payload,
+      );
+      const updateApproval = writeApproval(
+        definition.approval?.update ?? always(),
+        (callId) => keyFor("update", callId),
+        async (input) => {
+          const { name, expression, payload } = await updateSchema.parseAsync(input);
+          const client = await bind();
+          return expression === undefined
+            ? client.prepareUpdate(name, { payload })
+            : client.prepareUpdate(name, { expression, payload });
+        },
+        (prepared) => prepared.envelope?.payload,
+      );
+      const define = (
+        action: string,
+        description: string,
+        inputSchema: any,
+        execute: ToolDefinition<any, unknown>["execute"],
+        approval?: Approval,
+      ) => {
+        const tool = defineTool({
+          description: `${definition.description ? `${definition.description}\n\n` : ""}${description}`,
+          inputSchema,
+          approval,
+          label: {
+            start: (input: { name?: string }) =>
+              input.name ? `${action}: ${scheduleDisplayName(input.name)}` : action,
+          },
+          execute: (input: any, context) => {
+            assertScheduleManagementAllowed();
+            return execute(input, context);
+          },
+        });
+        return tool as DynamicToolEntry;
+      };
+      return {
+        [`${prefix}create`]: define(
+          "Create schedule",
+          `Create future work, not an immediate action. The display name may repeat; use the returned unique name for management. ${timingGuidance} Preparation validates the destination before approval; a changed prepared payload requires fresh approval.`,
+          createSchema,
+          async (input, context) => {
+            const key = keyFor("create", context.callId);
+            const approved = loadContext().get(PreparedWritesKey)?.[key];
+            if (approved === undefined || !("displayName" in approved))
+              throw new Error(
+                "Schedule creation has no prepared approval snapshot. Request creation again.",
+              );
+            const created = await (
+              await bindScheduleCollection(definition as never)
+            ).create(input, approved);
+            const snapshots = { ...loadContext().get(PreparedWritesKey) };
+            delete snapshots[key];
+            loadContext().set(PreparedWritesKey, snapshots);
+            return created;
+          },
+          createApproval,
+        ),
+        [`${prefix}update`]: define(
+          "Update schedule",
+          `Replace timing and/or the complete payload of an existing schedule. A payload replacement prepares new work and makes the updating caller its creator; timing-only updates preserve ownership. State and dispatch target are unchanged. Already started work is not cancelled. ${timingGuidance}`,
+          updateSchema,
+          async ({ name, ...patch }, context) => {
+            const key = keyFor("update", context.callId);
+            const approved = loadContext().get(PreparedWritesKey)?.[key];
+            if (approved === undefined || !("name" in approved))
+              throw new Error(
+                "Schedule update has no prepared approval snapshot. Request update again.",
+              );
+            const updated = await (
+              await bindScheduleCollection(definition as never)
+            ).update(name, patch, approved);
+            const snapshots = { ...loadContext().get(PreparedWritesKey) };
+            delete snapshots[key];
+            loadContext().set(PreparedWritesKey, snapshots);
+            return updated;
+          },
+          updateApproval,
+        ),
+        [`${prefix}get`]: define(
+          "Read schedule",
+          "Read timing/state; stored payload is not returned.",
+          nameInput,
+          async ({ name }) => await (await schedules(definition as never)).get(name),
+          definition.approval?.get,
+        ),
+        [`${prefix}list`]: define(
+          "List schedules",
+          "List identity, timing/state, and timestamps; payload is not returned.",
+          z
+            .object({
+              cursor: z.string().optional(),
+              limit: z.number().int().min(1).max(100).optional(),
+            })
+            .strict(),
+          async (input) => await (await schedules(definition as never)).list(input),
+          definition.approval?.list,
+        ),
+        [`${prefix}enable`]: define(
+          "Enable schedule",
+          "Enable future occurrences.",
+          nameInput,
+          async ({ name }) => await (await schedules(definition as never)).enable(name),
+          definition.approval?.enable ?? always(),
+        ),
+        [`${prefix}disable`]: define(
+          "Disable schedule",
+          "Disable future occurrences; already started work is not cancelled.",
+          nameInput,
+          async ({ name }) => await (await schedules(definition as never)).disable(name),
+          definition.approval?.disable ?? always(),
+        ),
+        [`${prefix}invoke`]: define(
+          "Run schedule",
+          "Enqueue an extra occurrence as the stored creator; acceptance is not execution success.",
+          nameInput,
+          async ({ name }) => {
+            await (await schedules(definition as never)).invoke(name);
+            return { accepted: true };
+          },
+          definition.approval?.invoke ?? always(),
+        ),
+        [`${prefix}delete`]: define(
+          "Delete schedule",
+          "Delete a schedule; already started work is not cancelled.",
+          nameInput,
+          async ({ name }) => ({
+            deleted: await (await schedules(definition as never)).delete(name),
+          }),
+          definition.approval?.delete ?? always(),
+        ),
+      };
+    },
+  });
 }
 
 function writeApproval<TWrite extends PreparedScheduleWrite, TPayload>(
@@ -329,34 +317,4 @@ function writeApproval<TWrite extends PreparedScheduleWrite, TPayload>(
     };
   }
   return approval;
-}
-
-function stampCallbacks(tool: ToolDefinition<any, unknown>): void {
-  const closure = parseJsonObject({});
-  const existing = readDurableDynamicToolCallbacks(tool);
-  const callbacks: Parameters<typeof stampDurableDynamicToolCallbacks>[1] = {
-    ...existing,
-    execute: {
-      callback: async (_closure, input, context) => await tool.execute(input, context),
-      closure,
-    },
-    inputSchema: { callback: () => tool.inputSchema, closure },
-    label: { start: { callback: (_closure, input) => tool.label!.start(input), closure } },
-  };
-  if (tool.approval !== undefined) {
-    const approval = tool.approval;
-    callbacks.approvalRequest = {
-      callback: async (_closure, context) =>
-        typeof approval === "function"
-          ? await approval(context as ApprovalContext)
-          : await approval.request(context as ApprovalContext),
-      closure,
-    };
-    if (typeof approval !== "function" && approval.response !== undefined)
-      callbacks.approvalResponse = {
-        callback: async (_closure, context) => await approval.response!(context),
-        closure,
-      };
-  }
-  stampDurableDynamicToolCallbacks(tool, callbacks);
 }

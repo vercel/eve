@@ -1,11 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
-import {
-  ParentSessionKey,
-  SessionDynamicSubagentSelectionsKey,
-  TurnDynamicSubagentSelectionsKey,
-} from "#context/keys.js";
+import { ParentSessionKey } from "#context/keys.js";
+import { ReactionsStateKey } from "#reactions/state.js";
 import { resolveWorkflowAgentMetadata } from "#execution/agent-sessions/metadata.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 
@@ -53,23 +50,22 @@ describe("resolveWorkflowAgentMetadata", () => {
     expect(resolveWorkflowAgentMetadata(ctx)).toEqual({});
   });
 
-  it("uses effective dynamic descriptions with turn precedence without adding self-delegation", () => {
+  it("uses the descriptions dynamic subagent slots hold without adding self-delegation", () => {
     const ctx = context({ nodeId: "subagents/coordinator", subagentsByName: new Map() });
-    const prepared = { name: "reviewer" };
-    ctx.set(SessionDynamicSubagentSelectionsKey, {
-      reviewer: {
-        agentConfig: { description: "Review generally." },
-        kind: "subagent",
-        prepared,
-      } as never,
-    });
-    ctx.set(TurnDynamicSubagentSelectionsKey, {
-      reviewer: {
-        kind: "remote",
-        prepared,
-        remoteAgent: { description: "Review this tenant." },
-      } as never,
-    });
+    ctx.set(ReactionsStateKey, {
+      latest: {},
+      slots: {
+        "subagent:subagents/reviewer": {
+          digest: "d",
+          since: 1,
+          value: {
+            kind: "remote",
+            prepared: { name: "reviewer" },
+            remoteAgent: { description: "Review this tenant." },
+          },
+        },
+      },
+    } as never);
 
     expect(resolveWorkflowAgentMetadata(ctx)).toEqual({
       reviewer: { description: "Review this tenant." },

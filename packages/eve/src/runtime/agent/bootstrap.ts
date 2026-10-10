@@ -29,11 +29,7 @@ export type RuntimeModelReference = Readonly<
 /**
  * Runtime-owned reference to a dynamic model resolver authored in `agent.ts`.
  */
-export type RuntimeDynamicModelReference = Readonly<
-  ModuleSourceRef & {
-    readonly eventNames: readonly string[];
-  }
->;
+export type RuntimeDynamicModelReference = Readonly<ModuleSourceRef>;
 
 /**
  * Minimal runtime-owned agent shape prepared for one harness turn.

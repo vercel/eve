@@ -1,8 +1,6 @@
-import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
 import {
-  DYNAMIC_SENTINEL_KIND,
-  type DynamicResolveContext,
-  type DynamicSentinel,
+  defineDynamic as defineDynamicDefinition,
+  type DefineDynamic,
 } from "#dynamic/definition.js";
 import type { ExactDefinition } from "#public/definitions/exact.js";
 import {
@@ -31,23 +29,5 @@ export function defineInstructions<TInstructions extends InstructionsDefinition>
 
 export type DynamicInstructionsResult = InstructionsDefinition | null;
 
-export type DynamicInstructionsEvents = {
-  readonly [K in "session.started" | "turn.started"]?: (
-    event: unknown,
-    ctx: DynamicResolveContext,
-  ) => DynamicInstructionsResult | Promise<DynamicInstructionsResult>;
-};
-
-/**
- * Defines a runtime instructions resolver for session and turn boundaries.
- */
-export function defineDynamic<const TEvents extends DynamicInstructionsEvents>(definition: {
-  readonly events: ExactDefinition<TEvents, DynamicInstructionsEvents>;
-}): DynamicSentinel<DynamicInstructionsResult> {
-  const sentinel = {
-    kind: DYNAMIC_SENTINEL_KIND,
-    events: definition.events,
-  } as DynamicSentinel<DynamicInstructionsResult>;
-  stampDefinitionKey(sentinel, `dynamic-instructions:${Object.keys(definition.events).join(",")}`);
-  return sentinel;
-}
+/** `defineDynamic()` for `agent/instructions/`: `resolve` returns `defineInstructions()` or `null`. */
+export const defineDynamic: DefineDynamic<DynamicInstructionsResult> = defineDynamicDefinition;

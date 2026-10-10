@@ -31,54 +31,24 @@ describe("normalizeAgentDefinition", () => {
     expect(definition.reasoning).toBe("high");
   });
 
-  it("accepts dynamic model definitions", () => {
-    const model = defineDynamic({
-      events: {
-        "session.started": () => "openai/gpt-5.5-mini",
-      },
-    });
+  it("accepts a dynamic agent, with its static fields beside", () => {
+    const resolve = () => ({ model: "openai/gpt-5.5-mini" });
     const definition = normalizeAgentDefinition(
-      {
-        model,
-      },
+      defineDynamic({ defaultTools: false, resolve }),
       FAILURE_MESSAGE,
     );
 
-    expect(definition.model).toMatchObject({
-      kind: "eve:dynamic",
-    });
-    expect(typeof (definition.model as typeof model).events["session.started"]).toBe("function");
+    expect(definition.defaultTools).toBe(false);
+    expect(definition.model).toMatchObject({ kind: "eve:dynamic", resolve });
   });
 
-  it("rejects fallback-shaped dynamic models", () => {
+  it("rejects a dynamic model field", () => {
     expect(() =>
       normalizeAgentDefinition(
-        {
-          model: {
-            events: { "session.started": () => "openai/gpt-5.5-mini" },
-            fallback: "openai/gpt-5.5",
-            kind: "eve:dynamic",
-          },
-        },
+        { model: defineDynamic({ resolve: () => "openai/gpt-5.5-mini" }) },
         FAILURE_MESSAGE,
       ),
-    ).toThrow('Unknown key "fallback"');
-  });
-
-  it("rejects definition-level model metadata for dynamic models", () => {
-    expect(() =>
-      normalizeAgentDefinition(
-        {
-          model: defineDynamic({
-            events: {
-              "session.started": () => "openai/gpt-5.5-mini",
-            },
-          }),
-          modelContextWindowTokens: 128_000,
-        },
-        FAILURE_MESSAGE,
-      ),
-    ).toThrow(/Dynamic model.*modelContextWindowTokens/);
+    ).toThrow(/Make the whole agent.ts dynamic/);
   });
 
   it("rejects a dynamic compaction model", () => {
@@ -87,9 +57,7 @@ describe("normalizeAgentDefinition", () => {
         {
           compaction: {
             model: defineDynamic({
-              events: {
-                "session.started": () => "openai/gpt-5.5-mini",
-              },
+              resolve: () => "openai/gpt-5.5-mini",
             }),
           },
           model: "openai/gpt-5.5",

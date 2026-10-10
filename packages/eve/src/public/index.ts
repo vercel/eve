@@ -20,7 +20,12 @@ export {
   defineAgent,
   defineDynamic,
 } from "#public/definitions/agent.js";
-export type { DynamicResolveContext, DynamicSentinel } from "#dynamic/definition.js";
+export type {
+  DynamicSentinel,
+  ReactionView,
+  ResolveContext,
+  SelectContext,
+} from "#dynamic/definition.js";
 export {
   defineWorkspaceAgent,
   type WorkspaceAgentDefinition,

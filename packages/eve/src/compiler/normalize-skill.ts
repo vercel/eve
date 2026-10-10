@@ -13,12 +13,7 @@ import {
   requireModuleBackedDefinitionLoadOptions,
   type SourceDefinitionCompileOptions,
 } from "#compiler/normalize-helpers.js";
-import {
-  assertDynamicResolverEvents,
-  assertResolverOnlyDynamicSentinel,
-  isDynamicSentinel,
-  type DynamicToolEventName,
-} from "#dynamic/definition.js";
+import { assertDynamicSentinelKeys, isDynamicSentinel } from "#dynamic/definition.js";
 
 /**
  * Compiled skill entry produced from one authored `skills/*` file.
@@ -96,13 +91,11 @@ export async function compileSkillSource(
 
   if (isDynamicSentinel(exportValue)) {
     const message = `Expected the skill export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`;
-    assertResolverOnlyDynamicSentinel(exportValue, message);
-    assertDynamicResolverEvents("skill", Object.keys(exportValue.events), message);
+    assertDynamicSentinelKeys(exportValue, message);
     const slug = stripLogicalPathExtension(source.logicalPath).replace(/^skills\//, "");
     return {
       kind: "dynamic-skill",
       definition: {
-        eventNames: Object.keys(exportValue.events) as DynamicToolEventName[],
         exportName: source.exportName,
         logicalPath: source.logicalPath,
         slug,

@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { inMemory } from "#public/memory/file/backends/in-memory.js";
 import { fileMemory } from "#public/memory/file/provider.js";
 import type {
-  MemoryCompactionCompletedContext,
   MemoryProvider,
   MemoryToolDefinition,
   MemoryToolsContext,
@@ -57,7 +56,7 @@ describe("fileMemory", () => {
       key: "mem_scope",
       signal,
     });
-    await expect(recallAfterCompaction(provider)).resolves.toEqual({
+    await expect(recallAtTurnStart(provider)).resolves.toEqual({
       messages: [{ content: expect.stringContaining("4: Uses vim."), id: "file-memory-document" }],
     });
   });
@@ -74,7 +73,6 @@ describe("fileMemory", () => {
 
     const first = await recallAtTurnStart(provider);
     await expect(recallAtTurnStart(provider)).resolves.toEqual(first);
-    await expect(recallAfterCompaction(provider)).resolves.toEqual(first);
   });
 
   it("recalls an empty state after the final entry is removed", async () => {
@@ -400,12 +398,6 @@ function recallAtTurnStart(provider: MemoryProvider) {
   return provider.recall["turn.started"](turnStartedContext());
 }
 
-function recallAfterCompaction(provider: MemoryProvider) {
-  const recall = provider.recall["compaction.completed"];
-  if (recall === undefined) throw new Error("compaction recall was not registered");
-  return recall(compactionCompletedContext());
-}
-
 function turnStartedContext(): MemoryTurnStartedContext {
   return {
     ...operationContext(),
@@ -413,25 +405,16 @@ function turnStartedContext(): MemoryTurnStartedContext {
   };
 }
 
-function compactionCompletedContext(): MemoryCompactionCompletedContext {
-  return {
-    ...operationContext(),
-    compaction: { modelId: "mock/model" },
-    turn: { id: "turn-1", input: [], sequence: 1 },
-  };
-}
-
 function toolsContext(): MemoryToolsContext {
   return {
+    abortSignal: signal,
     channel: { kind: "http" },
-    model: null,
+    facts: [],
     memory: operationContext().memory,
-    messages: [],
     session: {
       auth: { current: null, initiator: null },
       id: "session-1",
     },
-    turn: { id: "turn-1", input: [], sequence: 1 },
   };
 }
 

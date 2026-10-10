@@ -27,23 +27,21 @@ For source-modification tasks, return a concise handoff to the caller. Use at mo
 For investigation tasks, report the findings and supporting evidence requested by the caller.`;
 
 export default defineDynamic({
-  events: {
-    "session.started": () => {
-      if (!isDeployedRuntime()) return null;
+  resolve: () => {
+    if (!isDeployedRuntime()) return null;
 
-      return defineInstructions({
-        markdown: renderInstructions([
-          roleInstructions,
-          sourceWorkspaceInstructions,
-          sourceEditingInstructions,
-          toolAuthoringInstructions,
-          registryWorkflowInstructions,
-          documentationInstructions,
-          deployedGuidance,
-          workingInstructions,
-          deployedReportingGuidance,
-        ]),
-      });
-    },
+    return defineInstructions({
+      markdown: renderInstructions([
+        roleInstructions,
+        sourceWorkspaceInstructions,
+        sourceEditingInstructions,
+        toolAuthoringInstructions,
+        registryWorkflowInstructions,
+        documentationInstructions,
+        deployedGuidance,
+        workingInstructions,
+        deployedReportingGuidance,
+      ]),
+    });
   },
 });

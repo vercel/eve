@@ -1,6 +1,6 @@
 import { contextStorage, type ContextContainer } from "#context/container.js";
 import { AuthKey, TurnDeliveryIdsKey } from "#context/keys.js";
-import { preserveSerializedSessionDynamicModelSelection } from "#context/serialized-dynamic-model-selection.js";
+import { ReactionsStateKey } from "#reactions/state.js";
 import { serializeContext } from "#context/serialize.js";
 import { preserveCancelledTurnMessage } from "#execution/cancelled-turn-message.js";
 import { createDurableSessionValues } from "#execution/durable-session-store.js";
@@ -57,15 +57,14 @@ export async function createCancelledModelCallBatchResult(input: {
     ...(input.checkpoint?.serializedContext ?? input.beforeBatchContext),
     [AuthKey.name]: interruptedContext[AuthKey.name],
     [TurnDeliveryIdsKey.name]: interruptedContext[TurnDeliveryIdsKey.name],
+    // Reactions saw every commit the stream kept.
+    [ReactionsStateKey.name]: interruptedContext[ReactionsStateKey.name],
   };
 
   return {
     action: "cancelled",
     serializedContext: preserveSerializedInstrumentationState(
-      preserveSerializedAgentTraceState(
-        preserveSerializedSessionDynamicModelSelection(checkpointContext, interruptedContext),
-        interruptedContext,
-      ),
+      preserveSerializedAgentTraceState(checkpointContext, interruptedContext),
       interruptedContext,
     ),
     ...createDurableSessionValues(saveSessionProjection(cancelledSession, input.ctx)),

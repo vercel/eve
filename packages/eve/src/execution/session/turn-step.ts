@@ -1,8 +1,6 @@
 import { publicViewOf } from "#harness/session-machine/closure.js";
 import { bindTurnCallerContext } from "#subagents/parent-notification.js";
 import type { HandleEventFn } from "#harness/types.js";
-import { bindSessionParticipants } from "#execution/participants.js";
-import { recoverDynamicConnectionRehydration } from "#execution/dynamic-connection-recovery.js";
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
@@ -72,6 +70,7 @@ import type { SessionEvent } from "#protocol/session-event.js";
 import type { FactOf } from "#protocol/session-events/facts.js";
 import { eventsOf } from "#harness/publication.js";
 import { createTurnEventHandler } from "#execution/session/turn-event-handler.js";
+import { applyReactionEffects, restoreReactions } from "#reactions/runner.js";
 import { CallbackBaseUrlKey, PendingAuthorizationResultKey } from "#harness/authorization.js";
 import { readHitlState } from "#harness/hitl/index.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
@@ -293,19 +292,12 @@ async function runSessionStepBody(
       : AbortSignal.any([input.abortSignal, hookCancellation.signal]);
   try {
     const effectiveNode = { ...bundle.graph.root, turnAgent: effectiveAgent.turnAgent };
-    const participants = bindSessionParticipants({
-      abortSignal,
-      bundle,
-      ctx,
-      effectiveAgent,
-      effectiveNode,
-      instrumentation,
-    });
     let compacted = false;
     const emitTurnEvent = createTurnEventHandler({
+      abortSignal,
       canCancelTurn: input.input?.control === undefined,
+      conversation: history.initial.messages,
       hookCancellation,
-      participants,
       publisher,
     });
     const handleEvent: HandleEventFn = async (publication, messages) => {
@@ -503,20 +495,10 @@ async function runSessionStepBody(
     try {
       const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
       ctx.setVirtualContext(StaticModelReferenceKey, effectiveAgent.turnAgent.model ?? null);
-      await participants.restore({
-        messages: history.initial.messages,
-        runtime: runtimeIdentity,
-        runtimeRevision: deploymentId
-          ? `deployment:${deploymentId}`
-          : await resolveRuntimeCompiledArtifactsVersionedCacheKey(bundle.compiledArtifactsSource),
-        sessionStarted: initialEmissionState.sessionStarted,
-        turn: startedBetweenTurns
-          ? undefined
-          : {
-              sequence: initialEmissionState.sequence,
-              turnId: activeTurnId(initialEmissionState),
-            },
-      });
+      const revision = deploymentId
+        ? `deployment:${deploymentId}`
+        : await resolveRuntimeCompiledArtifactsVersionedCacheKey(bundle.compiledArtifactsSource);
+      await contextStorage.run(ctx, () => restoreReactions(ctx, { abortSignal, revision }));
     } catch (error) {
       await failChannelDeliveries(error);
       throw error;
@@ -556,7 +538,6 @@ async function runSessionStepBody(
         controlDelivery: input.input?.controlDelivery,
         createRuntime: createWorkflowRuntime,
         handleEvent,
-        participants,
         signInCompletions,
         historyProjector: history.projector,
         historyView: history.prepare(modelSession),
@@ -587,30 +568,12 @@ async function runSessionStepBody(
           const result = await runStep(ctx, session, async (enrichedSession) => {
             ctx.setVirtualContext(HandleEventKey, handleEvent);
             ctx.setVirtualContext(StaticModelReferenceKey, effectiveAgent.turnAgent.model ?? null);
-            let schemaSession =
+            const schemaSession =
               firstCall && resolved?.outputSchema !== undefined
                 ? { ...enrichedSession, outputSchema: resolved.outputSchema }
                 : enrichedSession;
-            const connectionState = turnPosition(currentProjection(ctx));
-            try {
-              if (connectionState.sessionStarted) {
-                await participants.rehydrateConnections({
-                  runtime: runtimeIdentity,
-                  turn: isBetweenTurns(currentProjection(ctx))
-                    ? undefined
-                    : { sequence: connectionState.sequence, turnId: activeTurnId(connectionState) },
-                });
-              }
-            } catch (error) {
-              const recovered = await recoverDynamicConnectionRehydration({
-                emit: handleEvent,
-                error,
-                projection: currentProjection(ctx),
-                session: schemaSession,
-              });
-              if (recovered !== undefined) return recovered;
-              throw error;
-            }
+            // The scope's providers start empty; the slots fill what they own.
+            await applyReactionEffects(ctx);
             // A sign-in completes before the turn it resumes, in the first call only.
             const completions =
               firstCall && completedAuths !== undefined

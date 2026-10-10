@@ -14,12 +14,7 @@ import {
 } from "#compiler/normalize-helpers.js";
 import { readConnectionProtocol } from "#public/definitions/connections/protocol.js";
 import { extractVercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
-import {
-  assertDynamicResolverEvents,
-  assertResolverOnlyDynamicSentinel,
-  isDynamicSentinel,
-  type DynamicToolEventName,
-} from "#dynamic/definition.js";
+import { assertDynamicSentinelKeys, isDynamicSentinel } from "#dynamic/definition.js";
 
 type CompiledConnectionEntry =
   | { readonly kind: "connection"; readonly definition: CompiledConnectionDefinition }
@@ -60,13 +55,10 @@ export async function compileConnectionDefinition(
   const message = `Expected the connection export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`;
 
   if (isDynamicSentinel(loaded)) {
-    assertResolverOnlyDynamicSentinel(loaded, message);
-    const eventNames = Object.keys(loaded.events);
-    assertDynamicResolverEvents("connection", eventNames, message);
+    assertDynamicSentinelKeys(loaded, message);
     return {
       kind: "dynamic-connection",
       definition: {
-        eventNames: eventNames as DynamicToolEventName[],
         exportName: source.exportName,
         logicalPath: source.logicalPath,
         slug: source.connectionName,

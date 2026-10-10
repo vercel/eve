@@ -1,14 +1,9 @@
 import type { ModelMessage } from "ai";
 
 import type { AlsContext } from "#context/container.js";
-import {
-  drainDynamicInstructionUserMessages,
-  prepareDynamicInstructionPreamble,
-} from "#context/dynamic-instruction-lifecycle.js";
-import { isDynamicConnectionResolutionError } from "#context/dynamic-connection-lifecycle.js";
-import { isDynamicModelSelectionError } from "#context/dynamic-model-lifecycle.js";
 import { ParentSessionKey, SessionCallbackKey, SessionPredecessorKey } from "#context/keys.js";
-import { drainMemoryCommit, prepareMemoryPreamble } from "#context/memory-lifecycle.js";
+import { takeUserInstructionMessages } from "#reactions/kinds/instructions.js";
+import { isDynamicModelSelectionError } from "#reactions/kinds/model.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
 import {
   applyTransition,
@@ -106,9 +101,9 @@ export function createStep(input: {
 }
 
 /**
- * Opens the turn, or joins the open one, with the preamble its hooks prepare: memory recall and
- * dynamic instructions join history ahead of the turn's input. Returns the step's result when the
- * preamble failed the session.
+ * Opens the turn, or joins the open one. User-role dynamic instructions that changed with the
+ * turn's start join history ahead of its input. Returns the step's result when opening failed the
+ * session.
  */
 export async function openTurn(
   step: Step,
@@ -120,15 +115,6 @@ export async function openTurn(
   },
 ): Promise<StepResult | undefined> {
   const { config, ctx } = step;
-  if (ctx !== undefined) {
-    prepareDynamicInstructionPreamble(ctx, step.projectHistory(step.session.history));
-    prepareMemoryPreamble(ctx, {
-      history: step.session.history,
-      input: [...opened.input],
-      projector: config.historyProjector,
-      state: step.session.state,
-    });
-  }
   let failure: { readonly error: unknown } | undefined;
   try {
     const position = step.position();
@@ -150,57 +136,24 @@ export async function openTurn(
   } catch (error) {
     failure = { error };
   }
-  // The hooks' pending state drains even when the preamble failed.
-  const instructionMessages = ctx === undefined ? [] : drainDynamicInstructionUserMessages(ctx);
-  const memoryCommit = ctx === undefined ? undefined : drainMemoryCommit(ctx);
-  step.session = {
-    ...step.session,
-    history: validateHarnessModelMessages([
-      ...step.session.history,
-      ...(memoryCommit?.recalledMessages ?? []),
-      ...instructionMessages,
-    ]),
-    state: memoryCommit?.state ?? step.session.state,
-  };
+  const instructionMessages = ctx === undefined ? [] : takeUserInstructionMessages(ctx);
+  if (instructionMessages.length > 0) {
+    step.session = {
+      ...step.session,
+      history: validateHarnessModelMessages([...step.session.history, ...instructionMessages]),
+    };
+  }
   if (failure !== undefined) return failBoundaryEvent(step, failure.error);
   step.instrumentation?.setTurnId(step.position().turnId);
   return undefined;
 }
 
-/**
- * A lifecycle event failed to publish: a dynamic model selection failure ends the session, and a
- * dynamic connection resolver failure parks it. Anything else throws.
- */
+/** A lifecycle event failed to publish: a dynamic model selection failure ends the session. */
 export async function failBoundaryEvent(step: Step, error: unknown): Promise<StepResult> {
   throwIfTurnAborted(step.config.abortSignal);
   if (isTurnCancellation(error)) throw error;
   if (isDynamicModelSelectionError(error)) return failModelSelection(step, error);
-  if (isDynamicConnectionResolutionError(error)) return failConnectionResolution(step, error);
   throw error;
-}
-
-/** A dynamic connection resolver threw: the session parks so the next message can retry. */
-export async function failConnectionResolution(step: Step, error: unknown): Promise<StepResult> {
-  if (step.emit === undefined) throw error;
-  step.instrumentation?.recordError(error);
-
-  const errorId = createErrorId();
-  const message = toErrorMessage(error);
-  log.error("dynamic connection resolver failed — parking session", {
-    error,
-    errorId,
-    sessionId: step.session.sessionId,
-    turnId: activeTurnId(step.position()),
-  });
-  await step.apply(
-    fail(step.view(), { code: "EVENT_HANDLER_FAILED", details: { errorId }, message }),
-  );
-  step.session = { ...step.session, outputSchema: undefined };
-  return {
-    next: null,
-    session: step.session,
-    settledTurn: { isError: true, output: message },
-  };
 }
 
 /** No model can serve the turn: the session fails. */

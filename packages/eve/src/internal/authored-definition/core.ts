@@ -24,16 +24,9 @@ import {
   type AnthropicPromptCacheTtl,
   type PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
-import {
-  isDynamicSentinel,
-  type DynamicEvents,
-  type DynamicToolEventName,
-} from "#dynamic/definition.js";
+import { isDynamicSentinel } from "#dynamic/definition.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
-type MutableDynamicEvents = {
-  -readonly [K in DynamicToolEventName]?: DynamicEvents[DynamicToolEventName];
-};
 
 type NormalizedAgentDefinition = Omit<AgentDefinition, "build"> & {
   build?: {
@@ -51,6 +44,24 @@ export function normalizeAgentDefinition(
   value: unknown,
   message: string,
 ): Readonly<NormalizedAgentDefinition> {
+  // A dynamic `agent.ts` resolves its model per session; its other fields are static.
+  if (isDynamicSentinel(value)) {
+    const { kind, resolve, select, ...fields } = value as unknown as Record<string, unknown>;
+    if (fields.model !== undefined) {
+      throw new Error(
+        `${message} A dynamic agent returns its model from resolve; remove the static "model" field.`,
+      );
+    }
+    const normalized = normalizeAgentDefinition({ ...fields, model: "dynamic" }, message);
+    return {
+      ...normalized,
+      model: {
+        kind,
+        resolve: expectFunction(resolve, message),
+        ...(select === undefined ? {} : { select: expectFunction(select, message) }),
+      } as unknown as NormalizedAgentDefinition["model"],
+    };
+  }
   const record = expectObjectRecord(value, message);
   expectOnlyKnownKeys(
     record,
@@ -73,18 +84,14 @@ export function normalizeAgentDefinition(
     throw new Error(`${message} The "model" field is required.`);
   }
 
-  const definition: Mutable<NormalizedAgentDefinition> = {
-    model: normalizeAgentModelDefinition(record.model, message),
-  };
-
-  if (
-    isDynamicSentinel(definition.model) &&
-    (record.modelContextWindowTokens !== undefined || record.modelOptions !== undefined)
-  ) {
+  if (isDynamicSentinel(record.model)) {
     throw new Error(
-      `${message} Dynamic model definitions do not support sibling "modelContextWindowTokens" or "modelOptions" fields. Return those overrides from the resolver selection instead.`,
+      `${message} The "model" field takes a static model. Make the whole agent.ts dynamic instead: export default defineDynamic({ select, resolve: () => defineAgent({ model }) }).`,
     );
   }
+  const definition: Mutable<NormalizedAgentDefinition> = {
+    model: record.model as NormalizedAgentDefinition["model"],
+  };
 
   if (record.description !== undefined) {
     definition.description = expectString(record.description, message);
@@ -138,31 +145,6 @@ function normalizeAgentReasoningDefinition(
 ): NonNullable<NormalizedAgentDefinition["reasoning"]> {
   if (!isAgentReasoningDefinition(value)) throw new Error(message);
   return value;
-}
-
-function normalizeAgentModelDefinition(
-  value: unknown,
-  message: string,
-): NormalizedAgentDefinition["model"] {
-  if (!isDynamicSentinel(value)) {
-    return value as NormalizedAgentDefinition["model"];
-  }
-
-  const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["events", "kind"], message);
-
-  const rawEvents = expectObjectRecord(record.events, message);
-  const events: MutableDynamicEvents = {};
-  for (const [eventName, handler] of Object.entries(rawEvents)) {
-    events[eventName as DynamicToolEventName] = expectFunction(handler, message) as NonNullable<
-      DynamicEvents[DynamicToolEventName]
-    >;
-  }
-
-  return {
-    events,
-    kind: record.kind,
-  } as NormalizedAgentDefinition["model"];
 }
 
 /** `false` explicitly disables one numeric runtime limit. */

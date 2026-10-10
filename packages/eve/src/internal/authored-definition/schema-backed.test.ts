@@ -345,47 +345,37 @@ describe("normalizeToolDefinition", () => {
 
   it("returns a dynamic-tool entry for a defineDynamic({ events }) export with a map", () => {
     const dynamicTools = defineDynamic({
-      events: {
-        "session.started": async () => ({
-          echo: defineTool({
-            description: "Echo tool",
-            inputSchema: { type: "object" as const },
-            execute: (input: Record<string, unknown>) => input,
-          }),
+      resolve: async () => ({
+        echo: defineTool({
+          description: "Echo tool",
+          inputSchema: { type: "object" as const },
+          execute: (input: Record<string, unknown>) => input,
         }),
-      },
+      }),
     });
 
     const entry = normalizeToolDefinition(dynamicTools, FAILURE_MESSAGE);
     expect(entry.kind).toBe("dynamic-tool");
-    if (entry.kind !== "dynamic-tool") throw new Error("expected dynamic-tool");
-    expect(entry.eventNames).toEqual(["session.started"]);
   });
 
   it("returns a dynamic-tool entry for a defineDynamic({ events }) export with a single entry", () => {
     const dynamicTool = defineDynamic({
-      events: {
-        "session.started": async () =>
-          defineTool({
-            description: "Dynamic echo",
-            inputSchema: { type: "object" as const },
-            execute: (input: Record<string, unknown>) => input,
-          }),
-      },
+      resolve: async () =>
+        defineTool({
+          description: "Dynamic echo",
+          inputSchema: { type: "object" as const },
+          execute: (input: Record<string, unknown>) => input,
+        }),
     });
 
     const entry = normalizeToolDefinition(dynamicTool, FAILURE_MESSAGE);
     expect(entry.kind).toBe("dynamic-tool");
-    if (entry.kind !== "dynamic-tool") throw new Error("expected dynamic-tool");
-    expect(entry.eventNames).toEqual(["session.started"]);
   });
 
   it("rejects a defineDynamic tool export carrying a fallback", () => {
     const dynamicTools = {
       ...defineDynamic({
-        events: {
-          "session.started": async () => ({}),
-        },
+        resolve: async () => ({}),
       }),
       fallback: "not-supported-here",
     } as never;
@@ -397,15 +387,11 @@ describe("normalizeToolDefinition", () => {
 
   it("handles defineDynamic with multiple events", () => {
     const dynamicTools = defineDynamic({
-      events: {
-        "session.started": async () => ({}),
-        "step.started": async () => ({}),
-      },
+      select: (view) => view.latest["model.requested"] ?? null,
+      resolve: async () => ({}),
     });
 
     const entry = normalizeToolDefinition(dynamicTools, FAILURE_MESSAGE);
     expect(entry.kind).toBe("dynamic-tool");
-    if (entry.kind !== "dynamic-tool") throw new Error("expected dynamic-tool");
-    expect(entry.eventNames).toEqual(expect.arrayContaining(["session.started", "step.started"]));
   });
 });

@@ -4,7 +4,6 @@ import {
   type HistoryViewProjector,
   type PreparedHistoryView,
 } from "#shared/history-view.js";
-import { projectMemoryHistoryFromSessionState } from "#shared/memory-state.js";
 
 interface ExecutionHistoryView {
   readonly initial: PreparedHistoryView;
@@ -14,7 +13,7 @@ interface ExecutionHistoryView {
 }
 
 export function createExecutionHistoryView(session: HarnessSession): ExecutionHistoryView {
-  const projector: HistoryViewProjector = projectMemoryHistoryFromSessionState;
+  const projector: HistoryViewProjector = ({ messages }) => messages;
   const prepareHistory = createHistoryViewPreparer({ projector });
   const prepare = (next: HarnessSession) => prepareHistory(next.history, next.state);
 

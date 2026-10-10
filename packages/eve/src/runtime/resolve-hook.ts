@@ -59,8 +59,24 @@ export async function resolveHookDefinition(
       }
     }
 
+    const select =
+      resolvedRecord.select === undefined
+        ? undefined
+        : expectFunction(
+            resolvedRecord.select,
+            describe(definition, "to provide select as a function"),
+          );
+    const resolve =
+      resolvedRecord.resolve === undefined
+        ? undefined
+        : expectFunction(
+            resolvedRecord.resolve,
+            describe(definition, "to provide resolve as a function"),
+          );
     return {
       events,
+      ...(select === undefined ? {} : { select: select as ResolvedHookDefinition["select"] }),
+      ...(resolve === undefined ? {} : { resolve: resolve as ResolvedHookDefinition["resolve"] }),
       exportName: definition.exportName,
       logicalPath: definition.logicalPath,
       slug: definition.slug,

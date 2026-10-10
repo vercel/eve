@@ -86,14 +86,12 @@ const guardedMarker = createDurableMarkerTool("guarded");
 const companionMarker = createDurableMarkerTool("companion");
 
 export default defineDynamic({
-  events: {
-    "session.started": () => {
-      appendFileSync(join(process.cwd(), ".dynamic-resolver-runs"), process.pid + "\\n");
-      return {
-        guarded_marker: guardedMarker,
-        companion_marker: companionMarker,
-      };
-    },
+  resolve: () => {
+    appendFileSync(join(process.cwd(), ".dynamic-resolver-runs"), process.pid + "\\n");
+    return {
+      guarded_marker: guardedMarker,
+      companion_marker: companionMarker,
+    };
   },
 });
 `;

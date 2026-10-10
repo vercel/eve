@@ -52,7 +52,7 @@ export interface ModelResponse {
  *
  * Approved work runs before the run is requested: approved workflow calls join their runs, the
  * budget gate passes, then approved local calls run and the model reads their results. Then the
- * turn requests a model run, whose participants choose its model and tools, and the run starts
+ * turn requests a model run, after which reactions choose its model and tools, and the run starts
  * as its provider call begins.
  */
 export async function runModelStep(
@@ -165,7 +165,7 @@ export async function runModelStep(
 }
 
 /**
- * The turn requests a model run: its participants choose the model and tools from the prompt, or
+ * The turn requests a model run: reactions choose the model and tools from the prompt, or
  * the agent's model serves. No model fails the session.
  */
 async function requestRun(

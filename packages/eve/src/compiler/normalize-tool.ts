@@ -98,10 +98,8 @@ export async function compileToolEntry(
     return {
       kind: "dynamic-tool",
       definition: {
-        eventNames: [...entry.eventNames],
         exportName: source.exportName,
         logicalPath: source.logicalPath,
-        rebindMissingCallbacks: entry.rebindMissingCallbacks || undefined,
         slug: toolName,
         sourceId: source.sourceId,
         sourceKind: "module",
