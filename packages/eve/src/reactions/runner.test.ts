@@ -23,11 +23,14 @@ function written(line: number, type = "turn.started") {
   ] as never;
 }
 
-/** A session whose bundle declares one dynamic tool resolver. */
-function session(resolver: {
-  readonly select?: (view: never, ctx: never) => unknown;
-  readonly resolve: (selected: never, ctx: never) => unknown;
-}) {
+/** A session whose bundle declares one dynamic tool resolver, and optionally hooks. */
+function session(
+  resolver: {
+    readonly select?: (view: never, ctx: never) => unknown;
+    readonly resolve: (selected: never, ctx: never) => unknown;
+  },
+  hooks: readonly object[] = [],
+) {
   const ctx = new ContextContainer();
   ctx.set(SessionIdKey, `session-${Math.random()}`);
   ctx.set(BundleKey, {
@@ -37,7 +40,7 @@ function session(resolver: {
       dynamicToolResolvers: [
         { logicalPath: "tools/count.ts", slug: "count", sourceId: "tools/count.ts", ...resolver },
       ],
-      hooks: [],
+      hooks,
       memories: [],
     },
     subagentRegistry: { dynamicResolvers: [], preparedTools: [], subagentsByName: new Map() },
@@ -115,6 +118,35 @@ describe("runReactions", () => {
     await expect(tool!.execute!({}, {} as never)).rejects.toThrow(
       'Tool "count" changed since it was offered.',
     );
+  });
+
+  it("keeps the model out of the view of reactions that run before it", async () => {
+    const seen: unknown[] = [];
+    const ctx = session(
+      {
+        resolve: (() => null) as never,
+        select: ((view: { readonly model: unknown }) => {
+          seen.push(view.model);
+          return null;
+        }) as never,
+      },
+      [
+        {
+          events: {},
+          logicalPath: "hooks/modal.ts",
+          resolve: () => null,
+          select: (view: { readonly model: unknown }) => view.model,
+          slug: "modal",
+        },
+      ],
+    );
+    await runReactions(ctx, { written: written(1) });
+
+    // The tool runs after the model and reads it; the hook's select threw, so its slot is empty.
+    expect(seen).toEqual([null]);
+    expect(slotsOf(ctx, "hook").map(({ slot }) => slot.error)).toEqual([
+      expect.stringContaining("view.model isn't available to a hook reaction"),
+    ]);
   });
 
   it("withdraws the slot of a resolve that throws, retrying when the selection changes", async () => {

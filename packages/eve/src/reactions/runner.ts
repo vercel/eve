@@ -21,11 +21,12 @@ import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
 import { bundleReactions } from "./bundle.js";
 import { effectiveModelId } from "./kinds/model.js";
-import type {
-  BundleReactions,
-  InternalResolveContext,
-  Reaction,
-  ReactionKind,
+import {
+  REACTION_ORDER,
+  type BundleReactions,
+  type InternalResolveContext,
+  type Reaction,
+  type ReactionKind,
 } from "./reaction.js";
 import {
   canonicalJson,
@@ -75,7 +76,11 @@ export async function runReactions(ctx: ContextContainer, input: RunReactionsInp
     if (reaction.conversation === true && input.conversation === undefined) continue;
     let selection: JsonValue;
     try {
-      selection = selectionOf(reaction, reactionView(ctx, input.conversation), selectContext);
+      selection = selectionOf(
+        reaction,
+        reactionView(ctx, reaction.kind, input.conversation),
+        selectContext,
+      );
     } catch (error) {
       if (error === CONVERSATION_UNAVAILABLE) continue;
       const failed = { digest: SELECT_FAILED, line, revision };
@@ -311,8 +316,19 @@ function withLatest(state: ReactionsState, written: readonly WrittenEvent[]): Re
   return { ...state, latest };
 }
 
+/** Kinds that run before the model this commit, so can't read the model it chooses. */
+const BEFORE_MODEL = new Set<ReactionKind>(
+  REACTION_ORDER.slice(0, REACTION_ORDER.indexOf("model") + 1),
+);
+
+/**
+ * The view a reaction of `kind` selects from. It holds only what earlier kinds have contributed
+ * this commit: a kind that runs before the model, or the model itself, would otherwise read the
+ * previous commit's model.
+ */
 function reactionView(
   ctx: ContextContainer,
+  kind: ReactionKind,
   conversation: readonly ModelMessage[] | undefined,
 ): ReactionView {
   const latest = readReactionsState(ctx).latest;
@@ -330,6 +346,11 @@ function reactionView(
       model: {
         enumerable: true,
         get() {
+          if (BEFORE_MODEL.has(kind)) {
+            throw new Error(
+              `view.model isn't available to a ${kind} reaction: it runs before the model is chosen. Select the model from a capability instead.`,
+            );
+          }
           const id = effectiveModelId(ctx);
           return id === undefined ? null : { id };
         },
