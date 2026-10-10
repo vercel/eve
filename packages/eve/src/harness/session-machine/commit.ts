@@ -1,10 +1,10 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { getSessionUsage } from "#harness/turn-tag-state.js";
 import type { ModelMessage } from "ai";
 
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import { validateHarnessModelMessages } from "#harness/messages.js";
 import type { HarnessSession, HarnessSessionBase, SessionStateMap } from "#harness/types.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { SessionProjection } from "#protocol/session-projection.js";
 import { readHitlState, writeHitlState, type RelayChange } from "#harness/hitl/requests.js";
 import { readTurnState, writeTurnState, type TurnState } from "./state.js";
@@ -19,7 +19,7 @@ import type { SessionView } from "./view.js";
 /** What a machine transition returns; approval storage still has direct writers. */
 export interface Transition {
   readonly turn: TurnState;
-  readonly events: readonly UnstampedMessageStreamEvent[];
+  readonly events: readonly SessionEvent[];
   /** Messages the transition commits to the end of history. */
   readonly commit?: readonly ModelMessage[];
   /** The transition empties history, as `clear` does. */
@@ -35,7 +35,7 @@ export interface Transition {
  * the participants of the events that read history see.
  */
 export type Publish = (
-  publication: UnstampedMessageStreamEvent | readonly UnstampedMessageStreamEvent[],
+  publication: SessionEvent | readonly SessionEvent[],
   messages?: readonly ModelMessage[],
 ) => Promise<void>;
 
@@ -54,13 +54,13 @@ export function sessionView(
 }
 
 /**
- * The events resolvers read the conversation at: a turn's and a step's boundaries. The session
- * starts before any history, so `session.started` never carries the turn's input.
+ * The facts participants read the conversation at: a turn's start and end, and each model run's
+ * request. The session starts before any history, so `session.started` never carries it.
  */
 const READS_HISTORY: ReadonlySet<string> = new Set([
   "turn.started",
-  "step.started",
-  "turn.completed",
+  "model.requested",
+  "turn.settled",
 ]);
 
 /** True for an event whose participants read the conversation. */

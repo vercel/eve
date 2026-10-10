@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
 
@@ -18,7 +19,6 @@ import {
 } from "#compiled/@agentclientprotocol/sdk/index.js";
 import { Client, ClientError } from "#client/index.js";
 import type { ClientOptions, SendTurnInput, SendTurnPayload } from "#client/types.js";
-import type { ActionPresentationByCallId, HandleMessageStreamEvent } from "#protocol/message.js";
 import {
   callStatus,
   foldSession,
@@ -26,7 +26,11 @@ import {
   type SessionCallStatus,
   type SessionProjection,
 } from "#protocol/session-projection.js";
-import { actionLabel, visibleActions } from "#shared/action-label.js";
+import { actionLabel } from "#shared/action-label.js";
+import { failureOf } from "#client/session-utils.js";
+import type { ErrorInfo } from "#protocol/session-events/envelope.js";
+import { isTaskControlTool } from "#protocol/task-tools.js";
+import { displayTitle } from "#shared/display-name.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#shared/action-types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 
@@ -45,10 +49,8 @@ interface ActivePrompt {
 }
 
 interface AdapterClientSession {
-  send(message: SendTurnInput["message"]): Promise<AsyncIterable<HandleMessageStreamEvent>>;
-  respond(
-    inputResponses: readonly InputResponse[],
-  ): Promise<AsyncIterable<HandleMessageStreamEvent>>;
+  send(message: SendTurnInput["message"]): Promise<AsyncIterable<SessionStreamEvent>>;
+  respond(inputResponses: readonly InputResponse[]): Promise<AsyncIterable<SessionStreamEvent>>;
   cancel(options?: { turnId?: string }): Promise<unknown>;
   reset(): Promise<unknown>;
 }
@@ -56,7 +58,7 @@ interface AdapterClientSession {
 interface AdapterClient {
   readonly sessions: {
     create(input: SendTurnInput): Promise<{
-      readonly response: AsyncIterable<HandleMessageStreamEvent>;
+      readonly response: AsyncIterable<SessionStreamEvent>;
       readonly session: AdapterClientSession;
     }>;
   };
@@ -68,6 +70,7 @@ interface AcpSession {
   /** The session's lifecycle, folded from every event it streams. */
   projection: SessionProjection;
   readonly tools: Map<string, ToolCall>;
+  readonly parts: Map<string, "text" | "reasoning">;
 }
 
 /** ACP v1 has no statuses for denied or stopped calls, so they report `failed`. */
@@ -164,6 +167,7 @@ export class EveAcpAdapter {
     this.#sessions.set(sessionId, {
       projection: initialSessionProjection(),
       tools: new Map(),
+      parts: new Map(),
     });
     return { sessionId };
   }
@@ -183,6 +187,7 @@ export class EveAcpAdapter {
 
     const message = promptContent(params);
     session.tools.clear();
+    session.parts.clear();
     const settled = Promise.withResolvers<void>();
     const active: ActivePrompt = {
       cancelRequested: false,
@@ -208,7 +213,7 @@ export class EveAcpAdapter {
       }
       let input: SendTurnPayload = { message };
       for (;;) {
-        let response: AsyncIterable<HandleMessageStreamEvent>;
+        let response: AsyncIterable<SessionStreamEvent>;
         if (session.client === undefined) {
           if (input.message === undefined) {
             throw new Error("ACP session has not started.");
@@ -228,9 +233,7 @@ export class EveAcpAdapter {
 
         const inputRequests: InputRequest[] = [];
         let cancelled = false;
-        let failure:
-          | Extract<HandleMessageStreamEvent, { type: "turn.failed" | "session.failed" }>
-          | undefined;
+        let failure: ErrorInfo | undefined;
         let unsupportedEvent: RequestError | undefined;
 
         for await (const event of response) {
@@ -244,8 +247,8 @@ export class EveAcpAdapter {
               "Connection authorization cannot be completed through eve ACP mode.",
             );
           }
-          if (event.type === "turn.cancelled") cancelled = true;
-          if (event.type === "turn.failed" || event.type === "session.failed") failure = event;
+          if (event.type === "turn.settled" && event.data.outcome === "cancelled") cancelled = true;
+          failure = failureOf(event) ?? failure;
           await this.#projectEvent(params.sessionId, session, event, client);
         }
 
@@ -355,7 +358,7 @@ export class EveAcpAdapter {
   async #projectEvent(
     sessionId: string,
     session: AcpSession,
-    event: HandleMessageStreamEvent,
+    event: SessionStreamEvent,
     client: AgentContext,
   ): Promise<void> {
     const before = session.projection;
@@ -363,9 +366,9 @@ export class EveAcpAdapter {
     await this.#projectContent(sessionId, session, event, client);
     // A call's status is the projection's: a task call runs until its task settles, and a
     // stopped or denied call ends when the stream says so.
-    // `tool_call` already announced the calls an `actions.requested` adds. Only an announced
-    // call gets updates: an approval reaches the client through its permission request.
-    if (event.type === "actions.requested") return;
+    // `tool_call` already announced the request. Only an announced call gets updates:
+    // an approval reaches the client through its permission request.
+    if (event.type === "call.requested") return;
     const updated = new Set<string>();
     const { calls, tasks, turns } = session.projection;
     if (calls !== before.calls || tasks !== before.tasks || turns !== before.turns) {
@@ -386,8 +389,8 @@ export class EveAcpAdapter {
     // A result reports its content even when its call had already settled, such as the reason
     // for a denial that `input.resolved` decided first.
     const resultCallId =
-      event.type === "action.result"
-        ? event.data.result.callId
+      event.type === "call.settled"
+        ? event.data.callId
         : event.type === "task.settled"
           ? event.data.callId
           : undefined;
@@ -427,31 +430,49 @@ export class EveAcpAdapter {
   async #projectContent(
     sessionId: string,
     session: AcpSession,
-    event: HandleMessageStreamEvent,
+    event: SessionStreamEvent,
     client: AgentContext,
   ): Promise<void> {
     switch (event.type) {
-      case "message.appended":
+      case "content.delta": {
+        const { partId, kind, delta } = event.data;
+        if (kind === "text") session.parts.set(partId, "text");
+        else if (kind === "reasoning") session.parts.set(partId, "reasoning");
+        const partKind = session.parts.get(partId);
+        if (partKind === undefined || delta === undefined) return;
         await notifyUpdate(client, sessionId, {
-          sessionUpdate: "agent_message_chunk",
-          content: { type: "text", text: event.data.messageDelta },
-          messageId: `${event.data.turnId}:message:${event.data.stepIndex}`,
+          sessionUpdate: partKind === "text" ? "agent_message_chunk" : "agent_thought_chunk",
+          content: { type: "text", text: delta },
+          messageId: partId,
         });
         return;
-      case "reasoning.appended":
+      }
+      case "content.completed": {
+        const { partId, kind, value } = event.data;
+        if (session.parts.has(partId) || typeof value !== "string") return;
+        if (kind !== "text" && kind !== "reasoning") return;
+        session.parts.set(partId, kind === "text" ? "text" : "reasoning");
         await notifyUpdate(client, sessionId, {
-          sessionUpdate: "agent_thought_chunk",
-          content: { type: "text", text: event.data.reasoningDelta },
-          messageId: `${event.data.turnId}:thought:${event.data.stepIndex}`,
+          sessionUpdate: kind === "text" ? "agent_message_chunk" : "agent_thought_chunk",
+          content: { type: "text", text: value },
+          messageId: partId,
         });
         return;
-      case "actions.requested":
-        for (const action of visibleActions(event.data.actions)) {
-          const toolCall = toolCallForAction(action, event.data.presentation);
-          session.tools.set(action.callId, toolCall);
-          await notifyUpdate(client, sessionId, { sessionUpdate: "tool_call", ...toolCall });
-        }
+      }
+      case "call.requested": {
+        const { callId, capability, input } = event.data;
+        if (capability.kind === "tool" && isTaskControlTool(capability.name)) return;
+        const toolCall: ToolCall = {
+          toolCallId: callId,
+          title: capability.title ?? displayTitle(capability.name),
+          kind: "other",
+          status: "pending",
+          rawInput: input,
+        };
+        session.tools.set(callId, toolCall);
+        await notifyUpdate(client, sessionId, { sessionUpdate: "tool_call", ...toolCall });
         return;
+      }
       default:
         return;
     }
@@ -574,13 +595,10 @@ function promptContent(params: PromptRequest): Array<{ type: "text"; text: strin
   return content;
 }
 
-function toolCallForAction(
-  action: RuntimeActionRequest,
-  presentation?: ActionPresentationByCallId,
-): ToolCall {
+function toolCallForAction(action: RuntimeActionRequest): ToolCall {
   return {
     toolCallId: action.callId,
-    title: actionLabel(action, presentation),
+    title: actionLabel(action, undefined),
     kind: "other",
     status: "pending",
     rawInput: action.input,
@@ -621,12 +639,11 @@ function unsupported(message: string): RequestError {
   return new RequestError(ERROR_CODE_UNSUPPORTED, message);
 }
 
-function eveFailure(
-  event: Extract<HandleMessageStreamEvent, { type: "turn.failed" | "session.failed" }>,
-): RequestError {
-  return new RequestError(ERROR_CODE_EVE, event.data.message, {
-    code: event.data.code,
-    details: event.data.details,
+function eveFailure(error: ErrorInfo): RequestError {
+  return new RequestError(ERROR_CODE_EVE, error.message, {
+    code: error.code,
+    id: error.id,
+    hint: error.hint,
   });
 }
 
@@ -643,17 +660,17 @@ function errorMessage(error: unknown): string {
 }
 
 /** A result's completion label retitles its call, such as a search reporting what it found. */
-function resultTitle(event: HandleMessageStreamEvent, callId: string): { title?: string } {
-  const label =
-    event.type === "action.result" ? event.data.presentation?.[callId]?.label : undefined;
-  return label === undefined ? {} : { title: label };
+function resultTitle(event: SessionStreamEvent, callId: string): { title?: string } {
+  const title =
+    event.type === "call.settled" && event.data.callId === callId ? event.data.title : undefined;
+  return title === undefined ? {} : { title };
 }
 
 /** The output an event carries for a call, if it reports one. */
-function callOutput(event: HandleMessageStreamEvent, callId: string) {
+function callOutput(event: SessionStreamEvent, callId: string) {
   const output =
-    event.type === "action.result" && event.data.result.callId === callId
-      ? event.data.result.output
+    event.type === "call.settled" && event.data.callId === callId
+      ? (event.data.output ?? event.data.error?.message)
       : event.type === "task.settled" && event.data.callId === callId
         ? event.data.output !== undefined
           ? event.data.output

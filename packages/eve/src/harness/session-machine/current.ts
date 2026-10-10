@@ -1,12 +1,17 @@
 import { contextStorage } from "#context/container.js";
 import type { ContextReader } from "#context/key.js";
-import type { HarnessSessionBase, SessionStateMap } from "#harness/types.js";
+import type { HarnessSessionBase, SessionPublication, SessionStateMap } from "#harness/types.js";
 import {
   foldSession,
   pruneSessionProjection,
   type SessionProjection,
 } from "#protocol/session-projection.js";
-import type { MessageStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { SessionEvent } from "#protocol/session-event.js";
+import { linesOf } from "#protocol/session-lines.js";
+import { eventsOf } from "#harness/publication.js";
+import type { StoredLine } from "#protocol/session-events/envelope.js";
+import { cloneView, emptySessionView, foldLine } from "#protocol/session-projection/fold.js";
+import type { SessionView as PublicSessionView } from "#protocol/session-projection/tables.js";
 import { SESSION_PROJECTION_STATE_KEY, storedProjection } from "./view.js";
 
 // A step-local holder for the projection as the step publishes. It survives provider scope
@@ -28,11 +33,14 @@ export function enterSessionProjection(
 }
 
 /**
- * Enters an empty projection whose next line is at `position`, for a step that publishes without
- * the session's state, as the terminal event does.
+ * Enters a checkpointed projection directly, for a step that publishes without the session's
+ * state, as the session's end does.
  */
-export function enterSessionProjectionAt(ctx: ContextReader, position: number): void {
-  liveProjections.set(ctx, { projection: { ...storedProjection(undefined), position } });
+export function enterSessionProjectionAt(
+  ctx: ContextReader,
+  projection: SessionProjection | undefined,
+): void {
+  liveProjections.set(ctx, { projection: projection ?? storedProjection(undefined) });
 }
 
 /** Enters the stored projection unless this step already did. */
@@ -65,27 +73,58 @@ export function nextLinePosition(ctx: ContextReader): number {
   return currentProjection(ctx).position ?? 0;
 }
 
-/** Records that the step wrote one line: the events it carries fold in, and the position advances. */
+/**
+ * Records that the step wrote one line at `position`: its events fold into the private projection,
+ * its commit folds into the public view, and the position advances.
+ */
 export function recordPublishedLine(
   ctx: ContextReader,
-  events: readonly (MessageStreamEvent | UnstampedMessageStreamEvent)[],
+  line: StoredLine,
+  position: number,
+  events: readonly SessionEvent[],
 ): void {
   for (const event of events) recordPublishedEvent(ctx, event);
   const live = liveProjections.get(ctx);
   if (live === undefined)
     throw new Error("Session publication requires an initialized projection.");
-  live.projection = { ...live.projection, position: (live.projection.position ?? 0) + 1 };
+  const view = advanceView(live.projection.view, line, position);
+  live.projection = { ...live.projection, position: position + 1, view };
 }
 
-export function recordPublishedEvent(
-  ctx: ContextReader,
-  event: MessageStreamEvent | UnstampedMessageStreamEvent,
-): void {
+/**
+ * The public view after one line. A commit folds into a copy, so earlier holders keep theirs; a
+ * progress record changes no table, so only the position moves.
+ */
+function advanceView(
+  view: PublicSessionView | undefined,
+  line: StoredLine,
+  position: number,
+): PublicSessionView {
+  const current = view ?? emptySessionView();
+  if (!("facts" in line)) return { ...current, position: Math.max(current.position, position + 1) };
+  const next = cloneView(current);
+  foldLine(next, line, position, { retention: "operational" });
+  return next;
+}
+
+/** The public view as of the last line the step wrote. */
+export function currentView(
+  ctx: ContextReader | undefined = contextStorage.getStore(),
+): PublicSessionView {
+  return currentProjection(ctx).view ?? emptySessionView();
+}
+
+export function recordPublishedEvent(ctx: ContextReader, event: SessionEvent): void {
   const live = liveProjections.get(ctx);
   if (live === undefined)
     throw new Error("Session publication requires an initialized projection.");
-  const folded = foldSession(live.projection, event);
-  live.projection = event.type === "session.waiting" ? pruneSessionProjection(folded) : folded;
+  live.projection = foldAndPrune(live.projection, event);
+}
+
+/** Folds one event; the turn's end prunes what closed, so the stored projection stays small. */
+function foldAndPrune(projection: SessionProjection, event: SessionEvent): SessionProjection {
+  const folded = foldSession(projection, event);
+  return event.type === "turn.settled" ? pruneSessionProjection(folded) : folded;
 }
 
 // The session as the step's last applied transition left it. Each transition publishes its events
@@ -125,8 +164,8 @@ export function saveProjection<T extends HarnessSessionBase>(
 /** The projection one step reads and folds what it publishes into. */
 export interface StepProjection {
   read(): SessionProjection;
-  /** Folds an event no publish sink folded: the step runs without one. */
-  record(event: UnstampedMessageStreamEvent): void;
+  /** Folds a publication no sink folded, preserving its commit boundaries. */
+  record(publication: SessionPublication): void;
 }
 
 /**
@@ -141,15 +180,28 @@ export function stepProjection(
     ensureSessionProjection(ctx, state);
     return {
       read: () => currentProjection(ctx),
-      record: (event) => recordPublishedEvent(ctx, event),
+      record: (publication) => {
+        for (const line of linesOf(eventsOf(publication), new Date().toISOString())) {
+          const events = "facts" in line ? line.facts : [line.progress];
+          recordPublishedLine(ctx, line, nextLinePosition(ctx), events);
+        }
+      },
     };
   }
   let projection = storedProjection(state);
   return {
     read: () => projection,
-    record(event) {
-      const folded = foldSession(projection, event);
-      projection = event.type === "session.waiting" ? pruneSessionProjection(folded) : folded;
+    record(publication) {
+      for (const line of linesOf(eventsOf(publication), new Date().toISOString())) {
+        const position = projection.position ?? 0;
+        const events = "facts" in line ? line.facts : [line.progress];
+        for (const event of events) projection = foldAndPrune(projection, event);
+        projection = {
+          ...projection,
+          position: position + 1,
+          view: advanceView(projection.view, line, position),
+        };
+      }
     },
   };
 }

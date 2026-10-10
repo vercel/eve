@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { Client } from "#client/client.js";
 import type {
   ActiveTurn,
@@ -22,7 +23,6 @@ import { OptimisticMessageSubmissions } from "#client/optimistic-message-submiss
 import { ConversationClient } from "#client/conversation-client.js";
 import type { ClientSession } from "#client/session.js";
 import { dispatchSessionTurn } from "#client/session-turn-dispatch.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import {
   activeTurnForOptimisticFollowUp,
   assertAnswerable,
@@ -76,7 +76,7 @@ export class EveAgentStore<TData> {
   #activeTurn: ActiveTurn | undefined;
   #callbacks: EveAgentStoreCallbacks<TData> = {};
   #error: Error | undefined;
-  #events: readonly MessageStreamEvent[];
+  #events: readonly SessionStreamEvent[];
   readonly #messageSubmissions: OptimisticMessageSubmissions;
   #prewarmGeneration = 0;
   #prewarmPromise: Promise<void> | undefined;
@@ -607,7 +607,7 @@ export class EveAgentStore<TData> {
     return this.#activeTurn === turn;
   }
 
-  #acceptServerEvent(event: MessageStreamEvent): boolean {
+  #acceptServerEvent(event: SessionStreamEvent): boolean {
     const wasStreaming = this.#status === "streaming";
     if (
       !this.#conversationClient.observe(event, {
@@ -657,7 +657,7 @@ export class EveAgentStore<TData> {
     return true;
   }
 
-  #applyTerminalStreamFailure(event: MessageStreamEvent): void {
+  #applyTerminalStreamFailure(event: SessionStreamEvent): void {
     const error = toTerminalStreamFailureError(event);
     if (error === undefined) return;
     this.#status = "error";

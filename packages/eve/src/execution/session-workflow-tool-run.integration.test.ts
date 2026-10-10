@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { describe, expect, it } from "vitest";
 
 import { readHitlState } from "#harness/hitl/requests.js";
@@ -17,7 +18,6 @@ import type { WorkflowToolRunRef } from "#execution/tools/workflow/messages.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { containsEventSequence, filterEventsByType } from "#internal/testing/events.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 
 const serializedContext = {
@@ -53,7 +53,7 @@ describe("handleWorkflowToolRunMessage", () => {
       },
       { sequence: 2, stepIndex: 0, turnId: "turn_1" },
     );
-    const events: MessageStreamEvent[] = [];
+    const events: SessionStreamEvent[] = [];
     const decoder = new TextDecoder();
     const cursor = new SessionStateCursor({
       history: [],
@@ -65,7 +65,7 @@ describe("handleWorkflowToolRunMessage", () => {
       },
       sessionWritable: new WritableStream<Uint8Array>({
         write(chunk) {
-          events.push(JSON.parse(decoder.decode(chunk)) as MessageStreamEvent);
+          events.push(JSON.parse(decoder.decode(chunk)) as SessionStreamEvent);
         },
       }),
     });

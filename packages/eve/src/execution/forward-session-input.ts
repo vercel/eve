@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import type { ContextContainer } from "#context/container.js";
 import {
   ContinuationTokenKey,
@@ -10,12 +11,11 @@ import { forwardLegacySessionInput } from "#execution/legacy-remote-agent/protoc
 import { resolvedForParent } from "#harness/hitl/relays.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 /** A remote session sends input to its caller instead of presenting it on its own channel. */
 export async function forwardSessionInput(
   ctx: ContextContainer,
-  event: UnstampedMessageStreamEvent,
+  event: SessionEvent,
   inputSource?: string,
 ): Promise<boolean> {
   const callback = ctx.get(SessionCallbackKey);

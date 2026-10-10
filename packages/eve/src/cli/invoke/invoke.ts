@@ -2,7 +2,7 @@ import {
   Client,
   ClientError,
   type ClientSession,
-  type MessageStreamEvent,
+  type SessionStreamEvent,
   type ClientSessionState,
 } from "#client/index.js";
 import type { SendTurnPayload } from "#client/types.js";
@@ -142,7 +142,7 @@ async function createInvokeClient(input: RunInvokeInput): Promise<{
 async function observeSafely(
   input: RunInvokeInput,
   session: ClientSession,
-  response: AsyncIterable<MessageStreamEvent>,
+  response: AsyncIterable<SessionStreamEvent>,
   deploymentResolution?: VercelDeploymentResolution,
 ): Promise<InvokeResult> {
   try {
@@ -162,19 +162,19 @@ async function observeSafely(
 async function observeInvocation(
   target: RemoteDevelopmentTarget,
   session: ClientSession,
-  response: AsyncIterable<MessageStreamEvent>,
+  response: AsyncIterable<SessionStreamEvent>,
 ): Promise<InvokeResult> {
   const summary = summarizeTurnEvents(await collectTurnEvents(response));
   if (summary.boundary === undefined) return runningResult(target, session.state);
-  if (summary.boundary.type === "session.failed") {
-    return { status: "failed", message: summary.boundary.data.message };
+  if (summary.boundary.type === "session.ended" && summary.boundary.data.outcome === "failed") {
+    return { status: "failed", message: summary.failure?.message ?? "The session failed." };
   }
 
   const resume = createResume(target, session.state);
-  if (summary.failure?.type === "turn.failed") {
+  if (summary.failure !== undefined) {
     return {
       status: "ready",
-      outcome: { status: "failed", message: summary.failure.data.message },
+      outcome: { status: "failed", message: summary.failure.message },
       resume,
     };
   }

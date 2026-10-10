@@ -1,8 +1,9 @@
+import { errorHintOf, replyTextOf } from "#public/channels/reply.js";
 import { promptQueueEvents } from "#channel/prompt-queue.js";
 import { renderTextInputRequest } from "#channel/resolve-text.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
-import { extractErrorId, formatErrorHint } from "#internal/logging.js";
+import { formatErrorHint } from "#internal/logging.js";
 import type {
   TwilioTextMessage,
   TwilioVoiceCall,
@@ -75,9 +76,10 @@ export function defaultOnVoiceTranscription(
 
 /** Built-in Twilio event handlers for text delivery, sign-ins, and terminal errors. */
 export const defaultEvents: TwilioChannelEvents = {
-  async "message.completed"(event, channel, _ctx) {
-    if (event.finishReason === "tool-calls" || !event.message) return;
-    await channel.twilio.sendMessage(event.message);
+  async "content.completed"(event, channel, _ctx) {
+    const text = replyTextOf(event);
+    if (text === undefined) return;
+    await channel.twilio.sendMessage(text);
   },
 
   // SMS has no buttons, so a reply can only answer the request it sees.
@@ -110,9 +112,10 @@ export const defaultEvents: TwilioChannelEvents = {
     );
   },
 
-  async "turn.failed"(event, channel, _ctx) {
-    const hint = formatErrorHint(event);
-    const errorId = extractErrorId(event.details);
+  async "turn.settled"(event, channel, _ctx) {
+    if (event.outcome !== "failed") return;
+    const hint = formatErrorHint(errorHintOf(event.error));
+    const errorId = event.error?.id;
     await channel.twilio.sendMessage(
       [
         `I hit an error while handling your request${hint}.`,
@@ -123,9 +126,10 @@ export const defaultEvents: TwilioChannelEvents = {
     );
   },
 
-  async "session.failed"(event, channel) {
-    const hint = formatErrorHint(event);
-    const errorId = extractErrorId(event.details);
+  async "session.ended"(event, channel, _ctx) {
+    if (event.outcome !== "failed") return;
+    const hint = formatErrorHint(errorHintOf(event.error));
+    const errorId = event.error?.id;
     await channel.twilio.sendMessage(
       [
         `This session could not recover from an error${hint}.`,

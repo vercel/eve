@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import {
   agentToolTask,
   isAgentSessionCaughtUp,
@@ -5,7 +6,7 @@ import {
 } from "#client/conversation-state.js";
 import type { ClientSession } from "#client/session.js";
 import type { StreamReconnectPolicy } from "#client/types.js";
-import type { AgentStartedStreamEvent, MessageStreamEvent } from "#protocol/message.js";
+import type { AgentStartedStreamEvent } from "#protocol/message.js";
 
 /**
  * The dev server can restart underneath a followed session, so only an abort, the stream's end,
@@ -20,7 +21,7 @@ export interface AgentStreamFollowerOptions {
   readonly session: ClientSession;
   readonly getState: () => ConversationState;
   readonly onFollowing: (sessionId: string) => void;
-  readonly onEvent: (sessionId: string, event: MessageStreamEvent) => void;
+  readonly onEvent: (sessionId: string, event: SessionStreamEvent) => void;
   readonly onIdle: (sessionId: string) => void;
   readonly onUnavailable: (sessionId: string) => void;
   /** Retained by the transport owner across detach and reattach. */
@@ -43,7 +44,7 @@ export class AgentStreamFollower {
     this.#options = options;
   }
 
-  acceptParentEvent(event: MessageStreamEvent): void {
+  acceptParentEvent(event: SessionStreamEvent): void {
     if (event.type === "agent.started") this.#started.set(event.data.sessionId, event);
   }
 

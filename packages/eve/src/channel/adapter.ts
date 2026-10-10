@@ -1,10 +1,10 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import type { ContextAccessor } from "#context/key.js";
 import type { StepInput } from "#harness/types.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { attachInputText, readInputText } from "#internal/input-text.js";
 import { createLogger } from "#internal/logging.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import type { FactPosition } from "#protocol/session-events/envelope.js";
+import type { FactPosition, Scope } from "#protocol/session-events/envelope.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { DeliverPayload } from "#channel/types.js";
 import type {
@@ -57,6 +57,8 @@ export interface ChannelAdapterContext<TState = Record<string, unknown>> {
 
   /** Where the event a handler observes sits on the stream: its line, and its index there. */
   readonly position?: FactPosition;
+  /** The event's owners: its turn, task, model run, or context change. */
+  readonly scope?: Scope;
 }
 
 /**
@@ -74,15 +76,15 @@ type StateOf<TCtx> = TCtx extends ChannelAdapterContext<infer S> ? S : Record<st
  * Extracts the `data` field type from a stream event by its `type` discriminant.
  * Events that carry no `data` field (e.g. `session.completed`) resolve to `undefined`.
  */
-type EventData<T extends UnstampedMessageStreamEvent["type"]> =
-  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
+type EventData<T extends SessionEvent["type"]> =
+  Extract<SessionEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /**
  * A single outbound event handler. Receives the event's `data` (not the full
  * envelope) and the adapter context. Void return — side effects only.
  */
 type EventHandler<
-  T extends UnstampedMessageStreamEvent["type"],
+  T extends SessionEvent["type"],
   TCtx extends ChannelAdapterContext<any> = ChannelAdapterContext,
 > = (data: EventData<T>, ctx: TCtx) => void | Promise<void>;
 
@@ -93,7 +95,7 @@ type EventHandler<
  */
 export type ChannelEventHandlers<TCtx extends ChannelAdapterContext<any> = ChannelAdapterContext> =
   {
-    [K in UnstampedMessageStreamEvent["type"]]?: EventHandler<K, TCtx>;
+    [K in SessionEvent["type"]]?: EventHandler<K, TCtx>;
   };
 
 // ---------------------------------------------------------------------------
@@ -263,7 +265,7 @@ export function getAdapterKind(adapter: ChannelAdapter): string {
  */
 export async function callAdapterEventHandler(
   adapter: ChannelAdapter,
-  event: UnstampedMessageStreamEvent,
+  event: SessionEvent,
   ctx: ChannelAdapterContext,
 ): Promise<void> {
   const handler = adapter[event.type] as
@@ -279,19 +281,4 @@ export async function callAdapterEventHandler(
       error,
     });
   }
-}
-
-/** `session.waiting` carries the channel's continuation token, filled in before the write. */
-export function withWaitingContinuationToken(
-  event: UnstampedMessageStreamEvent,
-  ctx: ChannelAdapterContext,
-): UnstampedMessageStreamEvent {
-  if (event.type !== "session.waiting") return event;
-  return {
-    ...event,
-    data: {
-      ...event.data,
-      continuationToken: ctx.session.continuation?.token ?? ctx.session.id,
-    },
-  };
 }

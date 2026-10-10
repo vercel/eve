@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { describe, expect, it } from "vitest";
 
 import { readHitlState } from "#harness/hitl/requests.js";
@@ -8,7 +9,7 @@ import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.j
 
 import type { ProxyInputRequest } from "#harness/hitl/relays.js";
 import { filterEventsByType } from "#internal/testing/events.js";
-import { createInputRequestedEvent, type MessageStreamEvent } from "#protocol/message.js";
+import { createInputRequestedEvent } from "#protocol/message.js";
 import type { InputRequest } from "#shared/input.js";
 import { withPublished, withRelays } from "#internal/testing/session-machine.js";
 import {
@@ -37,11 +38,11 @@ const serializedContext = {
 async function settleCancelledTurn(
   input: Omit<Parameters<typeof settleCancelledTurnStep>[0], "sessionWritable">,
 ) {
-  const events: MessageStreamEvent[] = [];
+  const events: SessionStreamEvent[] = [];
   const decoder = new TextDecoder();
   const sessionWritable = new WritableStream<Uint8Array>({
     write(chunk) {
-      events.push(JSON.parse(decoder.decode(chunk)) as MessageStreamEvent);
+      events.push(JSON.parse(decoder.decode(chunk)) as SessionStreamEvent);
     },
   });
   const runtime = await createTestRuntime({ agent: { name: "settle-cancelled-turn" } });

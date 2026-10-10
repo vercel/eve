@@ -126,6 +126,32 @@ export function encodeLine(line: StoredLine | TransportRecord): string {
   return `${JSON.stringify(line)}\n`;
 }
 
+/** Below the workflow writer's 10 MiB per-chunk ceiling, including UTF-8 and the newline. */
+export const MAX_SESSION_LINE_BYTES = 8 * 1024 * 1024;
+
+export class SessionLineTooLargeError extends Error {
+  readonly bytes: number;
+
+  constructor(bytes: number) {
+    super(
+      `Session commit is ${bytes} bytes; the limit is ${MAX_SESSION_LINE_BYTES}. ` +
+        "A commit cannot be split. Reduce inline content or use a supported value reference.",
+    );
+    this.name = "SessionLineTooLargeError";
+    this.bytes = bytes;
+  }
+}
+
+const lineEncoder = new TextEncoder();
+
+/** Encodes one atomic chunk, refusing oversized lines before a durable write. */
+export function encodeLineBytes(line: StoredLine | TransportRecord): Uint8Array {
+  const bytes = lineEncoder.encode(encodeLine(line));
+  if (bytes.byteLength > MAX_SESSION_LINE_BYTES)
+    throw new SessionLineTooLargeError(bytes.byteLength);
+  return bytes;
+}
+
 // ---------------------------------------------------------------------------
 // Values facts share
 // ---------------------------------------------------------------------------
@@ -190,6 +216,10 @@ export interface Principal {
 export interface ErrorInfo {
   readonly code: string;
   readonly message: string;
+  /** An id to quote when asking for support; the server's logs carry the same id. */
+  readonly id?: string;
+  /** What to do about it, when eve recognizes the failure: a person-facing remedy. */
+  readonly hint?: string;
 }
 
 /** Tokens and cost one unit of work spent. */

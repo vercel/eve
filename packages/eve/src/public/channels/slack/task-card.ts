@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { createHash } from "node:crypto";
 
 import {
@@ -12,7 +13,6 @@ import {
 import { contextStorage } from "#context/container.js";
 import { ScheduleIdKey } from "#context/keys.js";
 import { createLogger, logError } from "#internal/logging.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { SlackHandle } from "#public/channels/slack/api.js";
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
 import { truncateMessageText } from "#public/channels/slack/limits.js";
@@ -285,22 +285,20 @@ export interface SlackTaskCardState {
 }
 
 const TRACKED_EVENTS = [
-  "actions.requested",
-  "action.result",
+  "call.requested",
+  "call.settled",
   "task.started",
   "task.settled",
   "input.requested",
   "input.resolved",
   "authorization.required",
   "authorization.completed",
-  "turn.completed",
-  "turn.failed",
-  "turn.cancelled",
+  "turn.settled",
 ] as const;
 
 type TrackedEvent = (typeof TRACKED_EVENTS)[number];
 type TrackedHandler = (
-  data: Extract<UnstampedMessageStreamEvent, { readonly type: TrackedEvent }>["data"],
+  data: Extract<SessionEvent, { readonly type: TrackedEvent }>["data"],
   channel: SlackEventContext,
   ctx: Parameters<NonNullable<SlackChannelInternalEvents["task.started"]>>[2],
 ) => Promise<void>;
@@ -319,7 +317,7 @@ export function withTaskCards(
   for (const type of TRACKED_EVENTS) {
     const handler = events[type] as TrackedHandler | undefined;
     wrapped[type] = async (data, channel, ctx) => {
-      const event = { data, type } as UnstampedMessageStreamEvent;
+      const event = { data, scope: ctx.scope, type } as SessionEvent;
       if (event.type === "task.started") await closeSettledCard(channel, event.data, taskCard);
       const changed = trackTaskCardEvent(
         trackedTurns(channel.state),

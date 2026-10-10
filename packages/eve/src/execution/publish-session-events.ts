@@ -1,18 +1,8 @@
 import { buildAdapterContext } from "#channel/adapter-context.js";
-import {
-  callAdapterEventHandler,
-  withWaitingContinuationToken,
-  type ChannelAdapterContext,
-} from "#channel/adapter.js";
+import { callAdapterEventHandler, type ChannelAdapterContext } from "#channel/adapter.js";
 import { type ContextContainer, contextStorage } from "#context/container.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
-import {
-  AuthKey,
-  InitiatorAuthKey,
-  ParentSessionKey,
-  SessionKey,
-  TurnDeliveryIdsKey,
-} from "#context/keys.js";
+import { AuthKey, InitiatorAuthKey, ParentSessionKey, SessionKey } from "#context/keys.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { setChannelContext } from "#execution/channel-context.js";
@@ -56,14 +46,13 @@ import type {
 } from "#harness/types.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { createLogger } from "#internal/logging.js";
-import { eventsOfLine, linesOf } from "#protocol/legacy-lines.js";
-import type { MessageStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
-import {
-  encodeLine,
-  type FactPosition,
-  type StoredLine,
-} from "#protocol/session-events/envelope.js";
+import { eventsOfLine, linesOf } from "#protocol/session-lines.js";
+import type { SessionEvent, SessionStreamEvent } from "#protocol/session-event.js";
+import { encodeLineBytes, type FactPosition } from "#protocol/session-events/envelope.js";
 import { type SessionProjection } from "#protocol/session-projection.js";
+import type { Cause, ErrorInfo } from "#protocol/session-events/envelope.js";
+import { sessionEndedFacts } from "#harness/session-machine/transitions.js";
+import { createStreamChecker, type StreamChecker } from "#protocol/session-events/checker.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
 const log = createLogger("execution.publish-session-events");
@@ -107,7 +96,7 @@ export interface PublishedSessionEvents {
  */
 export async function publishSessionEvents(
   target: SessionStepState,
-  events: readonly UnstampedMessageStreamEvent[],
+  events: readonly SessionEvent[],
 ): Promise<PublishedSessionEvents> {
   return await publishEventsFromStep(target, "own", events);
 }
@@ -115,7 +104,7 @@ export async function publishSessionEvents(
 async function publishEventsFromStep(
   target: SessionStepState,
   origin: SessionEventOrigin,
-  events: readonly UnstampedMessageStreamEvent[],
+  events: readonly SessionEvent[],
 ): Promise<PublishedSessionEvents> {
   if (events.length === 0) {
     return { serializedContext: target.serializedContext, sessionState: target.sessionState };
@@ -124,7 +113,7 @@ async function publishEventsFromStep(
   const { published } = await publishFromSessionStep(restored, {
     origin,
     async publish(emit) {
-      for (const event of events) await emit(event);
+      await emit(events);
     },
   });
   return published;
@@ -281,9 +270,9 @@ export interface SessionEventWriter {
   release(): void;
 }
 
-/** One event as written: as v26 readers read it back, and where it sits on the stream. */
+/** One event as written: as readers read it back, with where it sits on the stream. */
 export interface WrittenEvent {
-  readonly event: MessageStreamEvent;
+  readonly event: SessionStreamEvent;
   readonly position: FactPosition;
   /** It rode as a progress record, which only hooks keyed on its type hear. */
   readonly progress: boolean;
@@ -291,7 +280,7 @@ export interface WrittenEvent {
 
 interface StreamWriter extends SessionEventWriter {
   /** Writes one line: one chunk, so a crash leaves all of it or none. */
-  write(line: StoredLine): Promise<void>;
+  write(bytes: Uint8Array): Promise<void>;
 }
 
 /** Dispatches a session's written events to its channel and stream-event hooks. */
@@ -305,7 +294,7 @@ export interface SessionEventDispatcher {
    */
   runHooks(
     written: readonly WrittenEvent[],
-    cancelTurnFor?: (event: MessageStreamEvent) => (() => void) | undefined,
+    cancelTurnFor?: (event: SessionStreamEvent) => (() => void) | undefined,
   ): Promise<void>;
 }
 
@@ -338,26 +327,53 @@ export function openSessionEventPublisher(input: {
   readonly sessionWritable: WritableStream<Uint8Array>;
   readonly inputSource?: string;
 }): SessionEventPublisher {
-  const { ctx, origin } = input;
+  const { ctx } = input;
   const dispatcher = createSessionEventDispatcher(input);
   // Opened after the dispatcher, so a context that cannot build one leaves the
   // stream unlocked for the terminal event's fallback write.
   const writer = openSessionEventWriter(input.sessionWritable);
+  let checker: StreamChecker | undefined;
   const emit = async (publication: SessionPublication): Promise<readonly WrittenEvent[]> => {
-    const events = eventsOf(publication).map((event) =>
-      withWaitingContinuationToken(event, dispatcher.adapterCtx),
-    );
+    if (process.env.EVE_CHECK_SESSION_EVENTS === "1" && checker === undefined) {
+      const { schemaViolation } = await import("#protocol/session-events/schemas.js");
+      checker = createStreamChecker({
+        seed: currentProjection(ctx).view,
+        validate: schemaViolation,
+      });
+    }
+    const events = eventsOf(publication);
     const at = new Date().toISOString();
-    const deliveryIds = origin === "own" ? ctx.get(TurnDeliveryIdsKey) : undefined;
     const written: WrittenEvent[] = [];
-    for (const line of linesOf(events, at, deliveryIds)) {
+    // Preflight every line before the first write: an oversize progress record must not leave
+    // an earlier part of the publication durably written.
+    const lines = linesOf(events, at).map((line) => ({ line, bytes: encodeLineBytes(line) }));
+    lines.forEach(({ line }, index) => {
+      const violations = checker?.check(line, nextLinePosition(ctx) + index);
+      if (violations !== undefined && violations.length > 0) {
+        checker = undefined;
+        throw new Error(
+          `Session event contract: ${violations
+            .map(
+              (violation) =>
+                `${violation.rule} at ${violation.position}:${violation.index ?? "progress"}: ${violation.message}`,
+            )
+            .join("; ")}`,
+        );
+      }
+    });
+    for (const { line, bytes } of lines) {
       const position = nextLinePosition(ctx);
-      await writer.write(line);
+      await writer.write(bytes).catch((error: unknown) => {
+        // Validation ran ahead of the write. A failed write must not leave the checker ahead
+        // of the checkpoint; a later publication reseeds it from what actually committed.
+        checker = undefined;
+        throw error;
+      });
       const lineEvents = eventsOfLine(line, position, at);
-      recordPublishedLine(ctx, lineEvents);
+      recordPublishedLine(ctx, line, position, lineEvents);
       const progress = "progress" in line;
-      lineEvents.forEach((event, index) =>
-        written.push({ event, position: { index, line: position }, progress }),
+      lineEvents.forEach((event) =>
+        written.push({ event, position: event.meta.position, progress }),
       );
     }
     await dispatcher.deliver(written);
@@ -388,7 +404,8 @@ function createSessionEventDispatcher(input: {
       if (written.length === 0) return;
       for (const { event, position } of written) {
         if (await forwardSessionInput(ctx, event, inputSource)) continue;
-        await callAdapterEventHandler(adapter, event, { ...deliveryCtx, position });
+        const scope = "scope" in event ? event.scope : undefined;
+        await callAdapterEventHandler(adapter, event, { ...deliveryCtx, position, scope });
       }
       setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
     },
@@ -421,8 +438,8 @@ function openSessionEventWriter(sessionWritable: WritableStream<Uint8Array>): St
     streamWriter.releaseLock();
   };
   return {
-    async write(line) {
-      await streamWriter.write(textEncoder.encode(encodeLine(line)));
+    async write(bytes) {
+      await streamWriter.write(bytes);
     },
     close: async () => {
       await streamWriter.close();
@@ -432,49 +449,49 @@ function openSessionEventWriter(sessionWritable: WritableStream<Uint8Array>): St
   };
 }
 
-const textEncoder = new TextEncoder();
-
 /** The session's projection as of the last event it published. */
 export function readSessionProjection(ctx: ContextContainer): SessionProjection {
   return currentProjection(ctx);
 }
 
-type TerminalSessionEvent = Extract<
-  UnstampedMessageStreamEvent,
-  { type: "session.completed" | "session.failed" }
->;
+/** How a session ends from outside a turn. */
+export interface SessionEnding {
+  readonly outcome: "completed" | "failed";
+  readonly cause?: Cause;
+  readonly error?: ErrorInfo;
+}
 
 /**
- * Publishes a terminal `session.completed` or `session.failed` from outside a
- * turn as the session's own event, through its channel adapter and
- * instrumentation, then closes the session stream so readers following it
- * reach EOF. Stream-event hooks do not run: the ending session may not
- * restore, and no turn scope remains for authored code. Never throws.
+ * Ends the session from outside a turn: one commit settles what it left open and ends it
+ * (`session.ended`), through its channel adapter and instrumentation, then closes the session
+ * stream so readers following it reach its end. Stream-event hooks do not run: the ending session
+ * may not restore, and no turn scope remains for authored code. Never throws.
  *
- * When the context cannot be restored, the event is only stamped, written, and
- * the stream closed: the one degraded write of a session event.
+ * When the context cannot be restored, the commit is only written and the stream closed: the one
+ * degraded write of a session event.
  */
 export async function publishTerminalSessionEvent(input: {
   readonly errorId?: string;
-  readonly event: TerminalSessionEvent;
+  readonly ending: SessionEnding;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionWritable: WritableStream<Uint8Array>;
   /** The session's last turn, for channel handlers' `ctx.session.turn`. */
   readonly turn?: { readonly id: string; readonly sequence: number };
   /** The turn the event ends, for instrumentation. */
   readonly turnId?: string;
-  /** The position of the line the event takes, from the session's last checkpoint. */
-  readonly position?: number;
+  /** The session's last checkpointed projection: what's open, and the next line's position. */
+  readonly projection?: SessionProjection;
 }): Promise<void> {
   const sessionId = (input.serializedContext["eve.sessionId"] as string | undefined) ?? "";
   const fields = { errorId: input.errorId, sessionId };
-  const { type } = input.event;
+  const type = "session.ended";
+  const facts = sessionEndedFacts(input.projection, input.ending);
 
   let ctx: ContextContainer;
   let publisher: SessionEventPublisher;
   try {
     ctx = await deserializeContext(input.serializedContext);
-    enterSessionProjectionAt(ctx, input.position ?? 0);
+    enterSessionProjectionAt(ctx, input.projection);
     publisher = openSessionEventPublisher({
       ctx,
       origin: "own",
@@ -482,7 +499,7 @@ export async function publishTerminalSessionEvent(input: {
     });
   } catch (error) {
     log.error(`failed to restore context for terminal ${type} event`, { ...fields, error });
-    await writeUnroutedSessionEvent(input.sessionWritable, input.event).catch((writeError) =>
+    await writeUnroutedSessionEvent(input.sessionWritable, facts).catch((writeError) =>
       log.error(`failed to write terminal ${type} event`, { ...fields, error: writeError }),
     );
     return;
@@ -519,7 +536,7 @@ export async function publishTerminalSessionEvent(input: {
   const emit =
     instrumentation?.createHandleEvent({ handleEvent: publish, turnId: input.turnId }) ?? publish;
   try {
-    await contextStorage.run(ctx, () => emit(input.event));
+    await contextStorage.run(ctx, () => emit(facts));
   } catch (error) {
     log.error(`failed to publish terminal ${type} event`, { ...fields, error });
   } finally {
@@ -537,13 +554,12 @@ export async function publishTerminalSessionEvent(input: {
 
 async function writeUnroutedSessionEvent(
   sessionWritable: WritableStream<Uint8Array>,
-  event: UnstampedMessageStreamEvent,
+  facts: readonly SessionEvent[],
 ): Promise<void> {
   const writer = openSessionEventWriter(sessionWritable);
   try {
-    for (const line of linesOf([event], new Date().toISOString(), undefined)) {
-      await writer.write(line);
-    }
+    const lines = linesOf(facts, new Date().toISOString()).map(encodeLineBytes);
+    for (const bytes of lines) await writer.write(bytes);
     await writer.close();
   } finally {
     writer.release();

@@ -1,4 +1,4 @@
-import type { ActionResultStreamEvent } from "#protocol/message.js";
+import type { FactOf } from "#protocol/session-events/facts.js";
 
 export const TASK_WAIT_TOOL_NAME = "eve__task_wait";
 export const TASK_CANCEL_TOOL_NAME = "eve__task_cancel";
@@ -28,10 +28,14 @@ const TASK_RETRY_ERROR_CODES: readonly string[] = [TOO_MANY_TASKS_CODE, UNKNOWN_
  * keep it out of view. Only a failed result counts: an authored tool can
  * return the same `code` as ordinary output.
  */
-export function isTaskRetryRefusal(event: ActionResultStreamEvent): boolean {
-  if (event.data.status !== "failed" || event.data.result.kind !== "tool-result") return false;
-  const output = event.data.result.output;
-  if (typeof output !== "object" || output === null) return false;
+export function isTaskRetryRefusal(event: FactOf<"call.settled">): boolean {
+  if (event.data.outcome !== "failed" && event.data.outcome !== "rejected") return false;
+  const code = event.data.error?.code ?? readCode(event.data.output);
+  return code !== undefined && TASK_RETRY_ERROR_CODES.includes(code);
+}
+
+function readCode(output: unknown): string | undefined {
+  if (typeof output !== "object" || output === null) return undefined;
   const code: unknown = Reflect.get(output, "code");
-  return typeof code === "string" && TASK_RETRY_ERROR_CODES.includes(code);
+  return typeof code === "string" ? code : undefined;
 }

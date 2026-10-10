@@ -15,8 +15,7 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger } from "#internal/logging.js";
 import { isInactiveWorkflowRunError } from "#internal/workflow/is-inactive-workflow-run-error.js";
 import { cancelRun, getRun, getWorld } from "#internal/workflow/runtime.js";
-import { sessionFailed } from "#harness/session-machine/transitions.js";
-import { linesOf } from "#protocol/legacy-lines.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import { encodeLine } from "#protocol/session-events/envelope.js";
 
 type World = Awaited<ReturnType<typeof getWorld>>;
@@ -31,6 +30,14 @@ const log = createLogger("execution.session-inbox");
 
 /** What made eve end a stranded session; recorded for operators. */
 export type StrandedSessionEndTrigger = "message" | "reset" | "timeout";
+
+/**
+ * The `session.ended` cause naming what ended a stranded session: `stranded-reset`,
+ * `stranded-message`, or `stranded-timeout`.
+ */
+export function strandedEndPolicy(trigger: StrandedSessionEndTrigger): string {
+  return `stranded-${trigger}`;
+}
 
 /**
  * Ends a stranded session without running any of its code, so none of its
@@ -96,7 +103,7 @@ async function assertStillServesSession(sessionId: string, ownerRunId: string): 
 }
 
 /**
- * Appends `session.failed` and closes the stream without running authored
+ * Appends `session.ended` and closes the stream without running authored
  * hooks. Unavailable payload keys, an already-closed stream, or a stalled
  * write must not prevent the reset.
  */
@@ -106,17 +113,18 @@ async function publishTerminalEvent(
 ): Promise<void> {
   const writer = getRun(sessionId).getWritable<Uint8Array>().getWriter();
   const publication = (async () => {
-    const event = sessionFailed({
-      code: "session_stranded",
-      // A replacement reading this history skips it when a reset ended the session.
-      details: { trigger },
-      message: "This session is no longer available.",
-      sessionId,
-      usage: undefined,
-    });
-    for (const line of linesOf([event], new Date().toISOString(), undefined)) {
-      await writer.write(new TextEncoder().encode(encodeLine(line)));
-    }
+    // A replacement reading this history skips it when a reset ended the session.
+    const ended: SessionEvent = {
+      data: {
+        cause: { policy: strandedEndPolicy(trigger) },
+        error: { code: "session_stranded", message: "This session is no longer available." },
+        outcome: "failed",
+      },
+      type: "session.ended",
+    };
+    await writer.write(
+      new TextEncoder().encode(encodeLine({ at: new Date().toISOString(), facts: [ended] })),
+    );
     await writer.close();
     return true;
   })();

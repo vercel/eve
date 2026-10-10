@@ -1,11 +1,11 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { UserContent } from "ai";
 
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { createLegacyEventReader } from "#protocol/legacy-lines.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
+import { createEventReader } from "#protocol/session-lines.js";
 import { isStoredLine } from "#protocol/session-events/envelope.js";
 import type { ChannelCors } from "#public/definitions/channel.js";
 import {
@@ -67,7 +67,7 @@ export async function findRemoteAgentBinding(
   if (tailIndex < 0) return undefined;
 
   const reader = (await input.parent.getLineStream({ startIndex: 0 })).getReader();
-  const events = createLegacyEventReader();
+  const events = createEventReader();
   let binding: RemoteAgentBinding | undefined;
   try {
     for (let position = 0; position <= tailIndex; position += 1) {
@@ -85,7 +85,7 @@ export async function findRemoteAgentBinding(
 }
 
 function readRemoteAgentBinding(
-  event: MessageStreamEvent,
+  event: SessionStreamEvent,
   coordinates: RemoteAgentStreamCoordinates,
 ): RemoteAgentBinding | undefined {
   if (event.type !== "agent.started") return undefined;

@@ -115,6 +115,8 @@ export async function openTurn(
   opened: {
     readonly input: readonly HarnessModelMessage[];
     readonly message?: StepInput["message"];
+    /** The deliveries the turn consumes. */
+    readonly deliveries?: StepInput["deliveries"];
   },
 ): Promise<StepResult | undefined> {
   const { config, ctx } = step;
@@ -138,7 +140,7 @@ export async function openTurn(
     });
     await step.apply(
       receive(step.view(), {
-        message: opened.message,
+        deliveries: opened.deliveries,
         predecessor: ctx?.get(SessionPredecessorKey),
         runtime: config.runtimeIdentity,
         trace,

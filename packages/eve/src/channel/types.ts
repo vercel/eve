@@ -1,8 +1,8 @@
+import type { SessionEvent, SessionStreamEvent } from "#protocol/session-event.js";
 import type { UserContent } from "ai";
 
 import type { LegacyRemoteAgentCaller } from "#execution/legacy-remote-agent/protocol.js";
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
-import type { MessageStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { CancelTurnResult as ProtocolCancelTurnResult } from "#protocol/cancel-turn.js";
 import type {
   RuntimeSubagentChildResult,
@@ -349,7 +349,7 @@ export interface SubagentInputRequestHookPayload {
  * resolution of its requests. The parent relays it unchanged.
  */
 export type SubagentAuthorizationEvent = Extract<
-  UnstampedMessageStreamEvent,
+  SessionEvent,
   {
     type:
       | "approval.candidate"
@@ -583,7 +583,7 @@ export type RunResult =
  * Carries the identifiers needed for stream endpoints.
  */
 export interface RunHandle {
-  readonly events: ReadableStream<MessageStreamEvent>;
+  readonly events: ReadableStream<SessionStreamEvent>;
   /**
    * Runtime-owned identifier for this session. Stream and inspection APIs
    * key on it: workflow-backed runs expose the workflow run id.
@@ -648,7 +648,7 @@ export interface Runtime {
   getEventStream(
     sessionId: string,
     options?: GetEventStreamOptions,
-  ): Promise<ReadableStream<MessageStreamEvent>>;
+  ): Promise<ReadableStream<SessionStreamEvent>>;
 
   /**
    * Returns a session's stored lines from `options.startIndex`, one parsed record per line: a

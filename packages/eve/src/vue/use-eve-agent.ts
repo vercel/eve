@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { shallowRef, computed, onScopeDispose, type ComputedRef } from "vue";
 import type { UserContent } from "ai";
 
@@ -15,7 +16,6 @@ import type { EveAgentReducer } from "#client/reducer.js";
 import type { ClientSession } from "#client/session.js";
 import { conversationReducer } from "#client/conversation-reducer.js";
 import type { ConversationState } from "#client/conversation-state.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import type {
   CancelSessionResult,
   ClientAuth,
@@ -56,7 +56,7 @@ export interface UseEveAgentReturn<TData> {
   /** Last transport-level error, or `undefined` when healthy. */
   readonly error: ComputedRef<Error | undefined>;
   /** Raw server events from this session (authoritative stream). */
-  readonly events: ComputedRef<readonly MessageStreamEvent[]>;
+  readonly events: ComputedRef<readonly SessionStreamEvent[]>;
   /** Replay the attached durable session and follow its in-flight turn, if any. */
   readonly resume: () => Promise<void>;
   /** Create the session without starting its first turn. */
@@ -118,12 +118,12 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
    */
   readonly host?: string;
   /** Ordered prefix of the session stream used to rehydrate projected state. */
-  readonly initialEvents?: readonly MessageStreamEvent[];
+  readonly initialEvents?: readonly SessionStreamEvent[];
   /** Prior session cursor to resume from on mount. */
   readonly initialSession?: ClientSessionState;
   /**
    * Project submitted user messages before eve confirms them with a
-   * `message.received` stream event.
+   * `delivery.consumed` fact.
    *
    * Optimistic events are reducer-facing projection events only. They are not
    * exposed through `events`, which remains the authoritative eve stream.

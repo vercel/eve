@@ -1,13 +1,17 @@
+import { errorHintOf } from "#public/channels/reply.js";
+import type { ErrorInfo } from "#protocol/session-events/envelope.js";
+import { displayTitle } from "#shared/display-name.js";
+import { isTaskControlTool } from "#protocol/task-tools.js";
+import { contentPhase } from "#protocol/session-events/catalog.js";
 import { workingTaskNames } from "#channel/task-card.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
-import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
+import { createLogger, formatErrorHint } from "#internal/logging.js";
 import {
   reviewingResults,
   waitingOnTasks,
   withMoreCalls,
 } from "#public/channels/slack/action-status.js";
-import { actionLabel, visibleActions } from "#shared/action-label.js";
 import { buildSlackAuthContext, slackUserIdForPrincipal } from "#public/channels/slack/auth.js";
 import {
   buildAuthCompletedText,
@@ -47,30 +51,47 @@ const WRITING_REPLY_MIN_CHARS = 280;
  * needs to survive serialization, and a new step starts empty.
  */
 interface StepStream {
-  /** The step's tool calls: the first call's label, or the model's narration, and how many. */
+  /** The run's tool calls: the first call's label, or the model's narration, and how many. */
   calls: { readonly count: number; readonly label: string; readonly narrated: boolean } | null;
   /** The current reasoning block, and when a piece of it last showed. */
   reasoning: string;
   reasoningShownAtMs: number | null;
   replyChars: number;
-  readonly stepIndex: number;
-  readonly turnId: string;
+  readonly runId: string;
+  /** The kinds of the run's streaming parts: later deltas name only their part. */
+  readonly partKinds: Map<string, string>;
 }
 const streamByState = new WeakMap<SlackChannelState, StepStream>();
 
-function stepStream(state: SlackChannelState, turnId: string, stepIndex: number): StepStream {
+function stepStream(state: SlackChannelState, runId: string): StepStream {
   const current = streamByState.get(state);
-  if (current?.turnId === turnId && current.stepIndex === stepIndex) return current;
+  if (current?.runId === runId) return current;
   const fresh: StepStream = {
     calls: null,
+    partKinds: new Map(),
     reasoning: "",
     reasoningShownAtMs: null,
     replyChars: 0,
-    stepIndex,
-    turnId,
+    runId,
   };
   streamByState.set(state, fresh);
   return fresh;
+}
+
+/** The stream a content delta belongs to, and the kind of its part. */
+function deltaStream(
+  state: SlackChannelState,
+  event: { readonly partId: string; readonly kind?: string },
+  runId: string | undefined,
+): { readonly stream: StepStream; readonly kind: string } | undefined {
+  if (runId !== undefined && event.kind !== undefined) {
+    const stream = stepStream(state, runId);
+    stream.partKinds.set(event.partId, event.kind);
+    return { kind: event.kind, stream };
+  }
+  const current = streamByState.get(state);
+  const kind = current?.partKinds.get(event.partId);
+  return current === undefined || kind === undefined ? undefined : { kind, stream: current };
 }
 
 function heldWithin(atMs: number | null | undefined, now: number): boolean {
@@ -91,77 +112,31 @@ async function showReasoning(
   stream.reasoningShownAtMs = now;
 }
 
-interface SlackSemanticErrorSummary {
-  readonly hint?: string;
-  readonly message: string;
-  readonly name: string;
-}
-
-function extractSemanticErrorSummary(event: {
-  readonly details?: unknown;
-  readonly message?: string;
-}): SlackSemanticErrorSummary | null {
-  if (typeof event.details !== "object" || event.details === null) return null;
-  const details = event.details as {
-    readonly hint?: unknown;
-    readonly message?: unknown;
-    readonly name?: unknown;
-    readonly semanticErrorId?: unknown;
-  };
-  if (
-    typeof details.semanticErrorId !== "string" ||
-    details.semanticErrorId.length === 0 ||
-    typeof details.name !== "string" ||
-    details.name.length === 0
-  ) {
-    return null;
-  }
-
-  const message =
-    typeof details.message === "string" && details.message.trim().length > 0
-      ? details.message.trim()
-      : event.message?.trim();
-  if (!message) return null;
-
-  const hint =
-    typeof details.hint === "string" && details.hint.trim().length > 0
-      ? details.hint.trim()
-      : undefined;
-  return hint === undefined
-    ? { message, name: details.name }
-    : { hint, message, name: details.name };
-}
-
-function formatSemanticErrorBlock(
-  summary: SlackSemanticErrorSummary,
-  errorId: string | undefined,
+/**
+ * A failure eve recognized, quoted with how to fix it and the id to give support. Only a
+ * recognized failure carries a hint.
+ */
+function formatFixableErrorReply(
+  introduction: string,
+  error: ErrorInfo,
+  hint: string,
+  options?: { readonly followUp?: string },
 ): string {
-  const lines = [
-    `### ${summary.name}`,
+  const quoted = [
+    error.message,
     "",
-    summary.message,
-    ...(summary.hint ? ["", "**How to fix**", summary.hint] : []),
-    ...(errorId ? ["", "**Error id:**", `\`${errorId}\``] : []),
-  ];
-  return lines
+    "**How to fix**",
+    hint,
+    ...(error.id === undefined ? [] : ["", "**Error id:**", `\`${error.id}\``]),
+  ]
     .flatMap((line) => line.split("\n"))
     .map((line) => (line.length > 0 ? `> ${line}` : "> "))
     .join("\n");
-}
-
-function formatSemanticErrorReply(input: {
-  readonly errorId: string | undefined;
-  readonly followUp?: string;
-  readonly introduction: string;
-  readonly nextStep: string;
-  readonly summary: SlackSemanticErrorSummary;
-}): string {
   return [
-    `${input.introduction}.`,
+    `${introduction}.`,
     "",
-    formatSemanticErrorBlock(input.summary, input.errorId),
-    ...(!input.summary.hint ? ["", input.nextStep] : []),
-    ...(input.summary.hint && input.followUp ? ["", input.followUp] : []),
+    quoted,
+    ...(options?.followUp === undefined ? [] : ["", options.followUp]),
   ].join("\n");
 }
 
@@ -229,8 +204,8 @@ export const defaultEvents: SlackChannelInternalEvents = {
   ...approvalEvents,
   // A turn held on a person's approval, answer, or sign-in isn't working, and
   // the prompt asking them says so. Its status comes back when it resumes.
-  async "turn.waiting"(event, channel, _ctx) {
-    if (event.on === "input") {
+  async "turn.paused"(event, channel, _ctx) {
+    if (event.awaiting.some((entry) => "interactionId" in entry)) {
       await hideStatus(channel);
       return;
     }
@@ -238,7 +213,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
     if (working.length > 0) await showStatus(channel, waitingOnTasks(working));
   },
 
-  // The turn's next model step reads the results, so `step.started` can say so.
+  // The turn's next model run reads the results, so `model.started` can say so.
   async "task.settled"(event, channel, _ctx) {
     if (event.cancel !== undefined) return;
     const pending = channel.state.pendingTaskResults;
@@ -247,16 +222,17 @@ export const defaultEvents: SlackChannelInternalEvents = {
     channel.state.pendingTaskResults = { names: [...names, name], turnId: event.turnId };
   },
 
-  // A model step means nothing to someone reading the thread, so the status
+  // A model run means nothing to someone reading the thread, so the status
   // keeps naming the work, such as the call that just finished, and is written
-  // again so Slack doesn't time it out. Only task results the step is about to
-  // read change it. `turn.started` covers step 0.
-  async "step.started"(event, channel, _ctx) {
-    if (event.stepIndex === 0) return;
+  // again so Slack doesn't time it out. Only task results the run is about to
+  // read change it.
+  async "model.started"(_event, channel, ctx) {
+    const turnId = ctx.scope?.turnId;
+    if (turnId === undefined) return;
     const pending = channel.state.pendingTaskResults;
     channel.state.pendingTaskResults = null;
     const status =
-      pending?.turnId === event.turnId
+      pending?.turnId === turnId
         ? reviewingResults(pending.names)
         : (channel.state.threadStatus?.text ?? "Thinking...");
     await showStatus(channel, status, { force: true });
@@ -269,55 +245,43 @@ export const defaultEvents: SlackChannelInternalEvents = {
     await showStatus(channel, "Thinking...", { force: true });
   },
 
-  // A reply clears the status, but a turn ended by an `endsTurn` tool posts
-  // none, and Slack would otherwise show the status until it times out.
-  async "turn.completed"(_event, channel, _ctx) {
-    await clearStatus(channel);
-  },
-
-  // Shows the newest heading or sentence, each for at least a few seconds, so
-  // a long reasoning block reads as progress instead of its opening words.
-  async "reasoning.appended"(event, channel, _ctx) {
-    const stream = stepStream(channel.state, event.turnId, event.stepIndex);
-    if (stream.reasoning === "") stream.reasoningShownAtMs = null;
-    stream.reasoning += event.reasoningDelta;
-    await showReasoning(channel, stream);
-  },
-
-  // The block's last sentence never shows while it streams unless it fills
-  // the status, so a short one only shows once the block ends.
-  async "reasoning.completed"(event, channel, _ctx) {
-    const stream = stepStream(channel.state, event.turnId, event.stepIndex);
-    stream.reasoning = event.reasoning;
-    await showReasoning(channel, stream, { complete: true });
-    stream.reasoning = "";
-  },
-
-  async "message.appended"(event, channel, _ctx) {
-    const stream = stepStream(channel.state, event.turnId, event.stepIndex);
+  // Shows the newest heading or sentence of reasoning, each for at least a few seconds, so a
+  // long reasoning block reads as progress instead of its opening words, and says a reply is on
+  // its way once its text gets going.
+  async "content.delta"(event, channel, ctx) {
+    const found = deltaStream(channel.state, event, ctx.scope?.runId);
+    if (found === undefined) return;
+    const { kind, stream } = found;
+    if (kind === "reasoning") {
+      if (stream.reasoning === "") stream.reasoningShownAtMs = null;
+      stream.reasoning += event.delta;
+      await showReasoning(channel, stream);
+      return;
+    }
+    if (kind !== "text") return;
     const before = stream.replyChars;
-    stream.replyChars += event.messageDelta.length;
+    stream.replyChars += event.delta.length;
     if (before < WRITING_REPLY_MIN_CHARS && stream.replyChars >= WRITING_REPLY_MIN_CHARS) {
       await showStatus(channel, "Writing a reply...");
     }
   },
 
-  // Calls in one step stream in one at a time, so the step keeps its first
-  // label, or the model's narration, and counts the rest.
-  async "actions.requested"(event, channel, _ctx) {
+  // Calls in one run stream in one at a time, so the run keeps its first
+  // label, or the model's narration, and counts the rest. Calls a tool makes
+  // on the model's behalf, such as a connection tool, belong to their parent.
+  async "call.requested"(event, channel, _ctx) {
     const narration = channel.state.pendingToolCallMessage;
     channel.state.pendingToolCallMessage = null;
-    const actions = visibleActions(event.actions);
-    if (!narration && actions.length === 0) return;
-    const stream = stepStream(channel.state, event.turnId, event.stepIndex);
+    const { capability, owner } = event;
+    const counts = !("callId" in owner) && !isTaskControlTool(capability.name);
+    if (!narration && !counts) return;
+    if (!("runId" in owner)) return;
+    const stream = stepStream(channel.state, owner.runId);
+    const label = capability.title ?? displayTitle(capability.name);
     const calls =
       !narration && stream.calls
-        ? { ...stream.calls, count: stream.calls.count + actions.length }
-        : {
-            count: actions.length,
-            label: narration ?? actionLabel(actions[0]!, event.presentation),
-            narrated: narration != null,
-          };
+        ? { ...stream.calls, count: stream.calls.count + 1 }
+        : { count: counts ? 1 : 0, label: narration ?? label, narrated: narration != null };
     stream.calls = calls;
     await showStatus(
       channel,
@@ -325,50 +289,57 @@ export const defaultEvents: SlackChannelInternalEvents = {
     );
   },
 
-  async "action.partial"(event, channel, _ctx) {
-    const label = event.presentation?.[event.result.callId]?.label;
+  async "call.progress"(event, channel, _ctx) {
+    const label = event.title;
     if (!label || heldWithin(channel.state.threadStatus?.atMs, Date.now())) return;
     await showStatus(channel, label);
   },
 
-  async "action.result"(event, channel, _ctx) {
-    const label = event.presentation?.[event.result.callId]?.label;
-    if (label) await showStatus(channel, label);
+  async "call.settled"(event, channel, _ctx) {
+    if (event.title) await showStatus(channel, event.title);
   },
 
-  async "message.completed"(event, channel, _ctx) {
-    if (event.finishReason === "tool-calls") {
-      channel.state.pendingToolCallMessage = event.message
-        ? (firstNonEmptyLine(event.message) ?? null)
-        : null;
+  async "content.completed"(event, channel, ctx) {
+    if (event.kind === "reasoning") {
+      const stream = streamByState.get(channel.state);
+      if (stream?.runId !== event.runId || typeof event.value !== "string") return;
+      stream.reasoning = event.value;
+      await showReasoning(channel, stream, { complete: true });
+      stream.reasoning = "";
+      return;
+    }
+    if (event.kind !== "text") return;
+    const text = typeof event.value === "string" ? event.value : "";
+    if (contentPhase(event.phase) === "narration") {
+      channel.state.pendingToolCallMessage = text ? (firstNonEmptyLine(text) ?? null) : null;
       return;
     }
     channel.state.pendingToolCallMessage = null;
-    if (!event.message) {
+    if (!text) {
       await clearStatus(channel);
       return;
     }
     // Slack clears the status when the reply posts.
     channel.state.threadStatus = null;
-    await deliverCompletedSlackReply(channel, event.message, { turnId: event.turnId });
+    await deliverCompletedSlackReply(channel, text, { turnId: ctx.session.turn.id });
   },
 
-  async "turn.failed"(event, channel, _ctx) {
-    const errorId = extractErrorId(event.details);
-    const semanticSummary = extractSemanticErrorSummary(event);
-    if (semanticSummary !== null) {
+  // A reply clears the status, but a turn ended by an `endsTurn` tool posts
+  // none, and Slack would otherwise show the status until it times out.
+  async "turn.settled"(event, channel, _ctx) {
+    if (event.outcome !== "failed") {
+      await clearStatus(channel);
+      return;
+    }
+    const hint = event.error?.hint;
+    if (event.error !== undefined && hint !== undefined) {
       await channel.thread.post(
-        formatSemanticErrorReply({
-          errorId,
-          introduction: "I hit an error while handling your request",
-          nextStep: "Please try again, rephrase, or reach out if it keeps failing.",
-          summary: semanticSummary,
-        }),
+        formatFixableErrorReply("I hit an error while handling your request", event.error, hint),
       );
       return;
     }
-
-    const summary = formatErrorHint(event);
+    const errorId = event.error?.id;
+    const summary = formatErrorHint(errorHintOf(event.error));
     await channel.thread.post(
       [
         `I hit an error while handling your request${summary}.`,
@@ -379,23 +350,19 @@ export const defaultEvents: SlackChannelInternalEvents = {
     );
   },
 
-  async "session.failed"(event, channel) {
-    const errorId = extractErrorId(event.details);
-    const semanticSummary = extractSemanticErrorSummary(event);
-    if (semanticSummary !== null) {
+  async "session.ended"(event, channel, _ctx) {
+    if (event.outcome !== "failed") return;
+    const hint = event.error?.hint;
+    if (event.error !== undefined && hint !== undefined) {
       await channel.thread.post(
-        formatSemanticErrorReply({
-          errorId,
+        formatFixableErrorReply("This session couldn't recover from an error", event.error, hint, {
           followUp: "Start a new thread to continue — I can't pick this one back up.",
-          introduction: "This session couldn't recover from an error",
-          nextStep: "Resolve the issue, then start a new thread — I can't pick this one back up.",
-          summary: semanticSummary,
         }),
       );
       return;
     }
-
-    const summary = formatErrorHint(event);
+    const errorId = event.error?.id;
+    const summary = formatErrorHint(errorHintOf(event.error));
     await channel.thread.post(
       [
         `This session couldn't recover from an error${summary}.`,

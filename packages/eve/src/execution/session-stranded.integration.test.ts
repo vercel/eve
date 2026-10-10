@@ -27,14 +27,9 @@ import {
 } from "#internal/testing/session-inbox-workflow.js";
 import { startSessionOwner, waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { getRun, getWorld, start } from "#internal/workflow/runtime.js";
-import {
-  createMessageCompletedEvent,
-  createMessageReceivedEvent,
-  createSessionStartedEvent,
-  type SessionPredecessor,
-  type UnstampedMessageStreamEvent,
-} from "#protocol/message.js";
+import { type SessionPredecessor } from "#protocol/message.js";
 import { transcriptReducer, type TranscriptData } from "#client/transcript-reducer.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import { sessions } from "#public/server/index.js";
 import { defineDynamic, defineInstructions } from "#public/definitions/instructions.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -100,9 +95,10 @@ async function waitForReceivedMessages(sessionId: string, expected: readonly str
     while (pending.size > 0) {
       const { done, value } = await reader.read();
       if (done) break;
-      if (value.type === "message.received") {
+      if (value.type === "delivery.consumed") {
+        const text = value.data.parts.flatMap((part) => (part.kind === "text" ? [part.text] : []));
         for (const message of pending) {
-          if (value.data.message.includes(message)) pending.delete(message);
+          if (text.some((part) => part.includes(message))) pending.delete(message);
         }
       }
     }
@@ -127,10 +123,7 @@ async function readSessionStarted(sessionId: string) {
 }
 
 /** Appends events to a parked session's stream, as its earlier build recorded them. */
-async function recordHistory(
-  sessionId: string,
-  events: readonly UnstampedMessageStreamEvent[],
-): Promise<void> {
+async function recordHistory(sessionId: string, events: readonly SessionEvent[]): Promise<void> {
   const writer = getRun(sessionId).getWritable<Uint8Array>().getWriter();
   try {
     for (const event of events) {
@@ -141,18 +134,33 @@ async function recordHistory(
   }
 }
 
-const TURN = { sequence: 0, turnId: "turn_0" };
-
 /** A short conversation the stranded session recorded before the upgrade. */
-const OFFSITE_HISTORY: readonly UnstampedMessageStreamEvent[] = [
-  createSessionStartedEvent(),
-  createMessageReceivedEvent({ ...TURN, message: "Alice asks for help planning the offsite." }),
-  createMessageCompletedEvent({
-    ...TURN,
-    finishReason: "stop",
-    message: "Here is a draft agenda for the offsite.",
-    stepIndex: 0,
-  }),
+const OFFSITE_HISTORY: readonly SessionEvent[] = [
+  { data: {}, type: "session.started" },
+  { data: { deliveryId: "delivery_0" }, type: "delivery.admitted" },
+  {
+    data: { cause: { deliveryId: "delivery_0" }, follows: null, turnId: "turn_0" },
+    type: "turn.started",
+  },
+  {
+    data: {
+      deliveryId: "delivery_0",
+      parts: [{ kind: "text", text: "Alice asks for help planning the offsite." }],
+      turnId: "turn_0",
+    },
+    type: "delivery.consumed",
+  },
+  {
+    data: {
+      kind: "text",
+      partId: "part_0",
+      phase: "reply",
+      runId: "run_0",
+      value: "Here is a draft agenda for the offsite.",
+    },
+    scope: { turnId: "turn_0" },
+    type: "content.completed",
+  },
 ];
 
 /** A fresh session claims its address after `createSession` returns. */
@@ -208,12 +216,11 @@ describe("stranded sessions", () => {
         await expect(waiting).resolves.toMatchObject({
           done: false,
           value: {
-            type: "session.failed",
+            type: "session.ended",
             data: {
-              code: "session_stranded",
-              details: { trigger: "message" },
-              message: "This session is no longer available.",
-              sessionId: anchor.runId,
+              cause: { policy: "stranded-message" },
+              error: { code: "session_stranded", message: "This session is no longer available." },
+              outcome: "failed",
             },
           },
         });

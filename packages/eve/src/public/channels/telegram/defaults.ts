@@ -1,6 +1,7 @@
 import type { SessionAuthContext } from "#channel/types.js";
 
-import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
+import { createLogger, formatErrorHint } from "#internal/logging.js";
+import { errorHintOf, replyTextOf } from "#public/channels/reply.js";
 import {
   formatTelegramAuthorizationDisplayName,
   renderTelegramAuthorizationCompleted,
@@ -155,7 +156,7 @@ export const defaultEvents: TelegramChannelEvents = {
     channel.state.pendingAuthMessageIds = next;
   },
 
-  async "actions.requested"(_event, channel, _ctx) {
+  async "call.requested"(_event, channel, _ctx) {
     await channel.telegram.startTyping();
   },
 
@@ -200,14 +201,16 @@ export const defaultEvents: TelegramChannelEvents = {
     }
   },
 
-  async "message.completed"(event, channel, _ctx) {
-    if (event.finishReason === "tool-calls" || !event.message) return;
-    await channel.telegram.post(event.message);
+  async "content.completed"(event, channel, _ctx) {
+    const text = replyTextOf(event);
+    if (text === undefined) return;
+    await channel.telegram.post(text);
   },
 
-  async "turn.failed"(event, channel, _ctx) {
-    const hint = formatErrorHint(event);
-    const errorId = extractErrorId(event.details);
+  async "turn.settled"(event, channel, _ctx) {
+    if (event.outcome !== "failed") return;
+    const hint = formatErrorHint(errorHintOf(event.error));
+    const errorId = event.error?.id;
     await channel.telegram.post(
       [
         `I hit an error while handling your request${hint}.`,
@@ -218,9 +221,10 @@ export const defaultEvents: TelegramChannelEvents = {
     );
   },
 
-  async "session.failed"(event, channel) {
-    const hint = formatErrorHint(event);
-    const errorId = extractErrorId(event.details);
+  async "session.ended"(event, channel, _ctx) {
+    if (event.outcome !== "failed") return;
+    const hint = formatErrorHint(errorHintOf(event.error));
+    const errorId = event.error?.id;
     await channel.telegram.post(
       [
         `This session could not recover from an error${hint}.`,

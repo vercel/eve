@@ -1,10 +1,10 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { describe, expect, it, vi } from "vitest";
 import {
   CHANNEL_SENTINEL,
   type CompiledChannel,
   isCompiledChannel,
 } from "#channel/compiled-channel.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import {
   SCHEDULE_ADAPTER,
   SCHEDULE_ADAPTER_KIND,
@@ -24,14 +24,14 @@ import { z } from "#compiled/zod/index.js";
 import { defineChannel } from "#public/definitions/channel.js";
 
 function createMockRunHandle(): RunHandle {
-  return { events: new ReadableStream<MessageStreamEvent>(), sessionId: "mock-session-id" };
+  return { events: new ReadableStream<SessionStreamEvent>(), sessionId: "mock-session-id" };
 }
 function createMockRuntime(): Runtime {
   return {
     createSession: vi.fn().mockResolvedValue(createMockRunHandle()),
     dispatchContinuation: vi.fn().mockResolvedValue({ status: "session_not_active" }),
     dispatchSession: vi.fn(),
-    getEventStream: vi.fn().mockResolvedValue(new ReadableStream<MessageStreamEvent>()),
+    getEventStream: vi.fn().mockResolvedValue(new ReadableStream<SessionStreamEvent>()),
     getLineStream: vi.fn().mockResolvedValue(new ReadableStream()),
     getStreamTailIndex: vi.fn().mockResolvedValue(-1),
     resolveContinuation: vi

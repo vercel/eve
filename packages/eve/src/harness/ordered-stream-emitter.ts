@@ -1,16 +1,9 @@
-import type {
-  ActionInputAppendedStreamEvent,
-  UnstampedMessageStreamEvent,
-  MessageAppendedStreamEvent,
-  ReasoningAppendedStreamEvent,
-} from "#protocol/message.js";
 import { eventsOf } from "#harness/publication.js";
+import type { SessionEvent } from "#protocol/session-event.js";
+import type { ProgressOf } from "#protocol/session-events/facts.js";
 import type { HarnessEmitFn } from "#harness/types.js";
 
-type AppendStreamEvent =
-  | ActionInputAppendedStreamEvent
-  | MessageAppendedStreamEvent
-  | ReasoningAppendedStreamEvent;
+type AppendStreamEvent = ProgressOf<"content.delta"> | ProgressOf<"call.input">;
 
 const MAX_PENDING_EVENTS = 64;
 const MAX_PENDING_DELTA_CHARACTERS = 64 * 1024;
@@ -18,9 +11,9 @@ const MAX_PENDING_DELTA_CHARACTERS = 64 * 1024;
 interface PendingEmission {
   deltaCharacters: number;
   deltaParts?: string[];
-  event: UnstampedMessageStreamEvent;
+  event: SessionEvent;
   /** A commit of several events, emitted together and never merged. */
-  commit?: readonly UnstampedMessageStreamEvent[];
+  commit?: readonly SessionEvent[];
   messages?: readonly import("ai").ModelMessage[];
   sourceEvents: number;
 }
@@ -195,7 +188,7 @@ export function createOrderedStreamEmitter(
 
 function mergeAdjacentEmissions(
   left: PendingEmission,
-  right: UnstampedMessageStreamEvent,
+  right: SessionEvent,
   messages: readonly import("ai").ModelMessage[] | undefined,
 ): boolean {
   const leftAppendKey = appendKey(left.event);
@@ -205,20 +198,19 @@ function mergeAdjacentEmissions(
       leftAppendKey === undefined ||
       leftAppendKey !== rightAppendKey ||
       !isAppendEvent(left.event) ||
-      !isAppendEvent(right) ||
-      !sameCoordinates(left.event, right)
+      !isAppendEvent(right)
     ) {
       return false;
     }
+    // The first record announces the entity; merged deltas keep its announcement.
     left.deltaParts ??= [appendDelta(left.event)];
     left.deltaParts.push(appendDelta(right));
-    left.event = right;
     left.messages = messages;
     return true;
   }
 
-  if (left.event.type === "action.partial" && right.type === "action.partial") {
-    if (left.event.data.result.callId !== right.data.result.callId) return false;
+  if (left.event.type === "call.progress" && right.type === "call.progress") {
+    if (left.event.data.callId !== right.data.callId) return false;
     left.event = right;
     left.messages = messages;
     return true;
@@ -227,77 +219,41 @@ function mergeAdjacentEmissions(
   return false;
 }
 
-function appendKey(event: UnstampedMessageStreamEvent): string | undefined {
+function appendKey(event: SessionEvent): string | undefined {
   switch (event.type) {
-    case "message.appended":
-    case "reasoning.appended":
-      return event.type;
-    case "action.input.appended":
+    case "content.delta":
+      return `${event.type}:${event.data.partId}`;
+    case "call.input":
       return `${event.type}:${event.data.callId}`;
     default:
       return undefined;
   }
 }
 
-function isAppendEvent(event: UnstampedMessageStreamEvent): event is AppendStreamEvent {
+function isAppendEvent(event: SessionEvent): event is AppendStreamEvent {
   return appendKey(event) !== undefined;
 }
 
 function appendDelta(event: AppendStreamEvent): string;
-function appendDelta(event: UnstampedMessageStreamEvent): string | undefined;
-function appendDelta(event: UnstampedMessageStreamEvent): string | undefined {
+function appendDelta(event: SessionEvent): string | undefined;
+function appendDelta(event: SessionEvent): string | undefined {
   switch (event.type) {
-    case "message.appended":
-      return event.data.messageDelta;
-    case "reasoning.appended":
-      return event.data.reasoningDelta;
-    case "action.input.appended":
-      return event.data.inputTextDelta;
+    case "content.delta":
+    case "call.input":
+      return event.data.delta;
     default:
       return undefined;
   }
 }
 
-function materializeEvent(emission: PendingEmission): UnstampedMessageStreamEvent {
+function materializeEvent(emission: PendingEmission): SessionEvent {
   if (emission.deltaParts === undefined) return emission.event;
-
-  if (emission.event.type === "message.appended") {
+  const { event } = emission;
+  if (event.type === "content.delta" || event.type === "call.input") {
     return {
-      ...emission.event,
-      data: {
-        ...emission.event.data,
-        messageDelta: emission.deltaParts.join(""),
-      },
-    };
+      ...event,
+      data: { ...event.data, delta: emission.deltaParts.join("") },
+    } as SessionEvent;
   }
-
-  if (emission.event.type === "reasoning.appended") {
-    return {
-      ...emission.event,
-      data: {
-        ...emission.event.data,
-        reasoningDelta: emission.deltaParts.join(""),
-      },
-    };
-  }
-
-  if (emission.event.type === "action.input.appended") {
-    return {
-      ...emission.event,
-      data: {
-        ...emission.event.data,
-        inputTextDelta: emission.deltaParts.join(""),
-      },
-    };
-  }
-
-  return emission.event;
-}
-
-function sameCoordinates(left: AppendStreamEvent, right: AppendStreamEvent): boolean {
-  return (
-    left.data.sequence === right.data.sequence &&
-    left.data.stepIndex === right.data.stepIndex &&
-    left.data.turnId === right.data.turnId
-  );
+  return event;
 }

@@ -1,24 +1,17 @@
-import type { ResultCompletedStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 
 /**
- * Extracts the most recent finalized structured result from a turn event list.
+ * Extracts the most recent structured result from a response's events: the value of its latest
+ * `result` content part.
  */
 export function extractCompletedResult<TOutput>(
-  events: readonly UnstampedMessageStreamEvent[],
+  events: readonly SessionEvent[],
 ): TOutput | undefined {
   let result: TOutput | undefined;
-
   for (const event of events) {
-    if (isResultCompletedEvent(event)) {
-      result = event.data.result as TOutput;
+    if (event.type === "content.completed" && event.data.kind === "result") {
+      result = event.data.value as TOutput;
     }
   }
-
   return result;
-}
-
-function isResultCompletedEvent(
-  event: UnstampedMessageStreamEvent,
-): event is ResultCompletedStreamEvent {
-  return event.type === "result.completed";
 }

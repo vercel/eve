@@ -1,6 +1,6 @@
-import type { MessageStreamEvent } from "#protocol/message.js";
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { EVE_STREAM_TAIL_INDEX_HEADER } from "#protocol/message.js";
-import { createLegacyEventReader } from "#protocol/legacy-lines.js";
+import { createEventReader } from "#protocol/session-lines.js";
 import type { StoredLine } from "#protocol/session-events/envelope.js";
 import {
   ClientError,
@@ -237,7 +237,7 @@ export async function* followStreamLines(input: FollowStreamInput): AsyncGenerat
 
 /** One v26 event read from a line, with the position to resume from once it's handled. */
 export interface FollowedEvent {
-  readonly event: MessageStreamEvent;
+  readonly event: SessionStreamEvent;
   /**
    * The cursor after this event: past its line once the line's last event is handled, at the
    * line before then, so a resume re-reads the rest of the line.
@@ -252,7 +252,7 @@ export interface FollowedEvent {
 export async function* followStreamIterable(
   input: FollowStreamInput,
 ): AsyncGenerator<FollowedEvent> {
-  const events = createLegacyEventReader();
+  const events = createEventReader();
   for await (const { line, position } of followStreamLines(input)) {
     if (line === undefined) continue;
     const lineEvents = events.read(line, position);

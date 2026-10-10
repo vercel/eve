@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import {
   readDurableSession,
   replaceDurableSessionSnapshot,
@@ -22,7 +23,8 @@ import {
   type TaskTable,
 } from "#execution/tasks/table.js";
 import { ignoreGoneTarget } from "#execution/tasks/workflow-target.js";
-import { countRunUsage } from "#execution/agent-sessions/usage.js";
+import { countRunUsage, usageSince } from "#execution/agent-sessions/usage.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 import type {
   PublishedSessionEvents,
   SessionStepState,
@@ -40,7 +42,7 @@ import type {
 import { workflowToolRunFailureOutput } from "#execution/tools/workflow/owner-inbox.js";
 import { readHitlState } from "#harness/hitl/index.js";
 import type { Transition } from "#harness/session-machine/commit.js";
-import { finishRun, settleTask } from "#harness/session-machine/transitions.js";
+import { delegatedUsageFact, finishRun, settleTask } from "#harness/session-machine/transitions.js";
 import type { SessionView } from "#harness/session-machine/view.js";
 import { stopRuns, waitedCallRuns, type RunStopTarget } from "#execution/stop-runs.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
@@ -75,6 +77,7 @@ async function applyTaskRunMessage(
   let table = readTaskTable(session.state);
   const settles: Decision[] = [];
   const withdraws: Decision[] = [];
+  let spend: TokenUsage | undefined;
   switch (message.kind) {
     case "started": {
       const started = markTaskRunStarted(table, taskId, message.from.runId);
@@ -83,7 +86,7 @@ async function applyTaskRunMessage(
       break;
     }
     case "reply": {
-      ({ session, table } = countTaskRunUsage(session, table, taskId, message));
+      ({ session, table, spend } = countTaskRunUsage(session, table, taskId, message));
       const outcome: TaskOutcome = { output: message.output, status: "completed" };
       const record = findTask(table, taskId);
       const settled = settleTaskCalls(table, { callIds: message.callIds, outcome, taskId });
@@ -92,10 +95,10 @@ async function applyTaskRunMessage(
       break;
     }
     case "usage":
-      ({ session, table } = countTaskRunUsage(session, table, taskId, message));
+      ({ session, table, spend } = countTaskRunUsage(session, table, taskId, message));
       break;
     case "outcome": {
-      ({ session, table } = countTaskRunUsage(session, table, taskId, message));
+      ({ session, table, spend } = countTaskRunUsage(session, table, taskId, message));
       const outcome = toOutcome(message);
       const record = findTask(table, taskId);
       const settled = settleRemainingTaskCalls(table, taskId, outcome);
@@ -108,7 +111,7 @@ async function applyTaskRunMessage(
     }
   }
   return await commitTaskDecisions(input, saveTable(input.sessionState, session, table), {
-    settles,
+    settles: spend === undefined ? settles : [...settles, spendOf(settles, spend, message, taskId)],
     withdraws,
   });
 }
@@ -210,6 +213,37 @@ async function commitTaskDecisions(
   );
 }
 
+/**
+ * The spend a task run's message reports, as a fact after the calls it settles. One reply may
+ * settle several calls with the same result: its spend belongs once to the latest served call
+ * (the message's source), never once per recipient. A serve body can keep spending after it
+ * replied or while cancellation unwinds; no open call owns that late spend, and an immutable
+ * settlement can't be amended, so it is recorded on the task.
+ */
+function spendOf(
+  settles: readonly Decision[],
+  spend: TokenUsage,
+  message: TaskRunMessage,
+  taskId: string,
+): Decision {
+  return (view) => {
+    const settled = settles
+      .flatMap((decide) => decide(view).events)
+      .filter((event) => event.type === "call.settled");
+    const call = settled.find((event) => event.data.callId === message.from.callId) ?? settled[0];
+    const turnId = call?.scope?.turnId;
+    const fact: SessionEvent =
+      call !== undefined && turnId !== undefined
+        ? delegatedUsageFact(call.data.callId, spend, { turnId })
+        : {
+            data: { kind: "delegated-late", usage: spend },
+            scope: { taskId },
+            type: "usage.recorded",
+          };
+    return { events: [fact], turn: view.turn };
+  };
+}
+
 /** Settles a task's settled calls; calls only settle on a known task. */
 function taskSettled(
   record: TaskRecord | undefined,
@@ -269,12 +303,20 @@ function countTaskRunUsage(
   table: TaskTable,
   taskId: string,
   message: Extract<TaskRunMessage, { readonly kind: "outcome" | "reply" | "usage" }>,
-): { readonly session: DurableSession; readonly table: TaskTable } {
+): { readonly session: DurableSession; readonly table: TaskTable; readonly spend?: TokenUsage } {
   const run = findTask(table, taskId)?.run;
   if (message.usage === undefined || run?.runId !== message.from.runId) return { session, table };
+  const delta = usageSince(message.usage, run.usage);
+  const changed =
+    delta.inputTokens !== 0 ||
+    delta.outputTokens !== 0 ||
+    delta.cacheReadTokens !== 0 ||
+    delta.cacheWriteTokens !== 0 ||
+    (delta.costUsd !== undefined && (delta.costUsd !== 0 || run.usage?.costUsd === undefined));
   return {
     session: countRunUsage(session, message.usage, run.usage),
     table: recordTaskRunUsage(table, taskId, message.usage),
+    spend: changed ? delta : undefined,
   };
 }
 

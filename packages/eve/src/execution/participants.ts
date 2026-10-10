@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import type { ModelMessage } from "ai";
 
 import { contextStorage, type ContextContainer } from "#context/container.js";
@@ -29,14 +30,19 @@ import {
 import type { DynamicScopeEvent, DynamicSessionOrTurnEvent } from "#dynamic/definition.js";
 import type { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import {
+  compactionCompletedPoint,
+  compactionRequestedPoint,
   sessionStartedForResolvers,
   stepStartedForResolvers,
+  turnCompletedPoint,
   turnStartedForResolvers,
-} from "#harness/session-machine/resolver-events.js";
+} from "#harness/session-machine/change-points.js";
+import { currentProjection } from "#harness/session-machine/current.js";
+import { turnCoordinates } from "#protocol/session-projection.js";
 import type { StepParticipants } from "#harness/types.js";
 import type { ExecutionInstrumentation } from "#instrumentation/runtime.js";
 import { createLogger } from "#internal/logging.js";
-import type { RuntimeIdentity, UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { RuntimeIdentity } from "#protocol/message.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { clearDurableDynamicCallbacks } from "#tools/durable-callbacks.js";
 
@@ -51,7 +57,7 @@ type TurnRef = { readonly sequence: number; readonly turnId: string };
  */
 export interface SessionParticipants extends StepParticipants {
   /** Runs the participants that receive a published event. Progress reaches none of them. */
-  receive(event: UnstampedMessageStreamEvent, messages?: readonly ModelMessage[]): Promise<void>;
+  receive(event: SessionEvent, messages?: readonly ModelMessage[]): Promise<void>;
   /**
    * Rebuilds what recorded results need in this process: after a redeploy, the session's tools
    * and subagents resolve again, and a running turn's tools rebind their callbacks.
@@ -125,13 +131,23 @@ export function bindSessionParticipants(input: {
     });
   };
 
+  /** Where the session stands for a change point's payload: its turn, and a run's step. */
+  const coordinates = (runId?: string) => {
+    const projection = currentProjection(ctx);
+    const turn = turnCoordinates(projection);
+    const run = runId === undefined ? undefined : projection.runs?.[runId];
+    return { ...turn, stepIndex: run?.stepIndex ?? turn.stepIndex };
+  };
+  const previewModelId = () => input.effectiveAgent.turnAgent.model?.id ?? "dynamic";
+
   return {
     async receive(event, messages) {
       switch (event.type) {
         case "session.started":
-          await resolveScope(event, messages ?? []);
+          await resolveScope(sessionStartedForResolvers(event.data.runtime), messages ?? []);
           return;
         case "turn.started": {
+          const turn = turnStartedForResolvers(coordinates());
           // Recall runs first, so the resolvers see what it brought back.
           const recalled =
             memories.length === 0
@@ -139,39 +155,75 @@ export function bindSessionParticipants(input: {
               : await dispatchMemoryTurnStarted({
                   ...memory,
                   appRoot: effectiveNode.agent?.metadata?.appRoot ?? "",
-                  event,
+                  event: turn,
                   nodeId: bundle.nodeId ?? "__root__",
                 });
-          await resolveScope(event, recalled);
+          await resolveScope(turn, recalled);
           return;
         }
-        case "step.started":
-          // The model was chosen before the step started (`selectModel`).
-          await resolveDynamicTools({ ctx, event, messages: messages ?? [], resolvers: tools });
+        case "model.requested": {
+          const { owner, runId } = event.data;
+          const at = coordinates(runId);
+          const step = stepStartedForResolvers({ ...at, modelId: previewModelId() });
+          await resolveModel(step, messages ?? []);
+          // A compaction's summary run is the model's alone.
+          if ("changeId" in owner) return;
+          await resolveDynamicTools({
+            ctx,
+            event: step,
+            messages: messages ?? [],
+            resolvers: tools,
+          });
           return;
-        case "compaction.requested":
-          if (memories.length === 0) return;
+        }
+        case "context.started":
+          if (event.data.kind !== "compaction" || memories.length === 0) return;
           await dispatchMemoryCompactionRequested({
             ...memory,
             appRoot: effectiveNode.agent?.metadata?.appRoot ?? "",
-            event,
+            event: compactionRequestedPoint({
+              ...coordinates(),
+              modelId: previewModelId(),
+              sessionId: ctx.get(SessionIdKey) ?? "",
+              turnId: event.data.turnId ?? "",
+              usageInputTokens: event.data.trigger?.inputTokens ?? null,
+            }),
             messages: messages ?? [],
             nodeId: bundle.nodeId ?? "__root__",
           });
           return;
-        case "compaction.completed":
+        case "context.settled":
+          if (event.data.kind !== "compaction" || event.data.outcome !== "completed") return;
           if (memories.length === 0) return;
-          await dispatchMemoryCompactionCompleted({ ...memory, event, messages: messages ?? [] });
+          await dispatchMemoryCompactionCompleted({
+            ...memory,
+            event: compactionCompletedPoint({
+              ...coordinates(),
+              modelId: previewModelId(),
+              sessionId: ctx.get(SessionIdKey) ?? "",
+              turnId: currentProjection(ctx).activeTurnId ?? "",
+            }),
+            messages: messages ?? [],
+          });
           return;
-        case "turn.completed":
+        case "turn.settled":
+          if (event.data.outcome !== "completed") return;
           if (memories.length === 0 || messages === undefined) return;
           try {
-            await dispatchMemoryTurnCompleted({ ...memory, event, messages });
+            await dispatchMemoryTurnCompleted({
+              ...memory,
+              event: turnCompletedPoint({
+                sequence: currentProjection(ctx).turns[event.data.turnId]?.sequence ?? 0,
+                turnId: event.data.turnId,
+              }),
+              messages,
+            });
           } catch (error) {
             log.error("Completed-turn memory capture failed.", { error });
           }
           return;
-        case "session.completed": {
+        case "session.ended": {
+          if (event.data.outcome !== "completed") return;
           const sessionId = ctx.get(SessionIdKey);
           if (sessionId !== undefined) clearDurableDynamicCallbacks(sessionId);
           return;

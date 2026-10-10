@@ -1,5 +1,6 @@
-import { TurnSegment } from "#client/session-utils.js";
-import type { AgentStartedStreamEvent, MessageStreamEvent } from "#protocol/message.js";
+import type { SessionStreamEvent } from "#protocol/session-event.js";
+import { ResponseSegment } from "#client/session-utils.js";
+import type { AgentStartedStreamEvent } from "#protocol/message.js";
 import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
 import {
   EVE_SESSION_ROUTE_PATH,
@@ -101,7 +102,7 @@ export class ClientSession {
   /** Reads a finite prefix through the durable tail without advancing this handle. */
   async snapshot(options?: { readonly signal?: AbortSignal }): Promise<SessionSnapshot> {
     options?.signal?.throwIfAborted();
-    const events: MessageStreamEvent[] = [];
+    const events: SessionStreamEvent[] = [];
     let streamIndex = 0;
 
     for await (const { cursor, event } of this.#readStream({
@@ -202,7 +203,7 @@ export class ClientSession {
   }
 
   /** Opens this session's durable event stream from its stored cursor. */
-  stream(options?: StreamOptions): AsyncIterable<MessageStreamEvent> {
+  stream(options?: StreamOptions): AsyncIterable<SessionStreamEvent> {
     return this.#streamAndAdvance(options);
   }
 
@@ -216,7 +217,7 @@ export class ClientSession {
     return new ClientAgentSession(this.#context, started);
   }
 
-  [followSession](options: FollowSessionOptions): AsyncIterable<MessageStreamEvent> {
+  [followSession](options: FollowSessionOptions): AsyncIterable<SessionStreamEvent> {
     return this.#streamAndAdvance(options);
   }
 
@@ -240,14 +241,15 @@ export class ClientSession {
     initialStreamIndex: number,
     input: SendTurnPayload,
     deliveryId?: string,
-    source?: AsyncIterable<MessageStreamEvent>,
-  ): AsyncGenerator<MessageStreamEvent> {
+    source?: AsyncIterable<SessionStreamEvent>,
+  ): AsyncGenerator<SessionStreamEvent> {
     // A caller's own source advances the cursor as it reads; only this read's own lines move it.
     let cursor = initialStreamIndex;
+    // The response starts when its delivery is admitted, and ends when it settles.
     let started = deliveryId === undefined;
     let reachedBoundary = false;
-    const segment = new TurnSegment({ followCallbacks: true });
-    const events: AsyncIterable<{ readonly event: MessageStreamEvent; readonly cursor?: number }> =
+    const segment = new ResponseSegment({ deliveryId });
+    const events: AsyncIterable<{ readonly event: SessionStreamEvent; readonly cursor?: number }> =
       source === undefined
         ? this.#readStream({
             headers: input.headers,
@@ -259,17 +261,11 @@ export class ClientSession {
     try {
       for await (const { event, cursor: next } of events) {
         if (next !== undefined) cursor = next;
-        if (deliveryId !== undefined) {
-          const matches = event.meta?.deliveryIds?.includes(deliveryId) === true;
-          const terminal = event.type === "session.failed" || event.type === "session.completed";
-          if (!matches && terminal && (!started || event.type === "session.completed")) {
-            throw new Error(
-              "The session ended before the accepted message reached its turn boundary.",
-            );
+        if (!started) {
+          if (event.type === "session.ended") {
+            throw new Error("The session ended before it admitted the accepted message.");
           }
-          if (!started && !matches) continue;
-          const attributed = event.meta?.deliveryIds !== undefined;
-          if (!terminal && attributed && !matches) continue;
+          if (event.type !== "delivery.admitted" || event.data.deliveryId !== deliveryId) continue;
           started = true;
         }
         reachedBoundary = segment.observe(event);
@@ -280,7 +276,7 @@ export class ClientSession {
       }
       if (deliveryId !== undefined && !reachedBoundary && !input.signal?.aborted) {
         throw new Error(
-          "The response stream ended before the accepted message reached its turn boundary.",
+          "The response stream ended before the accepted message's response settled.",
         );
       }
     } finally {
@@ -288,7 +284,7 @@ export class ClientSession {
     }
   }
 
-  async *#streamAndAdvance(options?: FollowSessionOptions): AsyncGenerator<MessageStreamEvent> {
+  async *#streamAndAdvance(options?: FollowSessionOptions): AsyncGenerator<SessionStreamEvent> {
     const startIndex = options?.startIndex ?? this.#state.streamIndex;
     for await (const { cursor, event } of this.#readStream({
       follow: options?.follow,
@@ -341,13 +337,13 @@ export class ClientSession {
 export function followClientSession(
   session: ClientSession,
   options: FollowSessionOptions,
-): AsyncIterable<MessageStreamEvent> {
+): AsyncIterable<SessionStreamEvent> {
   return session[followSession](options);
 }
 
 async function* withoutCursor(
-  source: AsyncIterable<MessageStreamEvent>,
-): AsyncGenerator<{ readonly event: MessageStreamEvent }> {
+  source: AsyncIterable<SessionStreamEvent>,
+): AsyncGenerator<{ readonly event: SessionStreamEvent }> {
   for await (const event of source) yield { event };
 }
 

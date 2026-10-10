@@ -1,4 +1,5 @@
-import type { EveAgentReducer, EveAgentReducerEvent } from "#client/reducer.js";
+import type { EveAgentReducer } from "#client/reducer.js";
+import type { UserPart } from "#protocol/session-events/envelope.js";
 
 /** One user message or completed assistant message in a {@link TranscriptData}. */
 export interface TranscriptMessage {
@@ -26,10 +27,12 @@ export interface TranscriptReducerOptions {
  * conversation: user message text and completed assistant text, oldest
  * first.
  *
- * Reasoning, tool calls and results, attachments, approvals, and assistant
- * output that never completed are left out. A `context.cleared` event, or a
- * reset that ended a stranded session, starts the transcript over, so text
- * the session no longer holds is never returned. Client projection events
+ * The user's text is what each consumed delivery carries; the assistant's is
+ * each completed reply part. Reasoning, narration, tool calls and results,
+ * attachments, interactions, and interrupted or unfinished output are left
+ * out. A completed clear (`context.settled` selecting nothing), or a reset
+ * that ended a stranded session, starts the transcript over, so text the
+ * session no longer holds is never returned. Client projection events
  * such as optimistic submissions are ignored; the transcript reflects only
  * durable events.
  *
@@ -70,15 +73,21 @@ export function transcriptReducer(
     initial: () => ({ messages: [] }),
     reduce(data, event) {
       switch (event.type) {
-        case "message.received":
-          return append(data, { role: "user", text: receivedText(event) });
-        case "message.completed":
-          return append(data, { role: "assistant", text: event.data.message });
-        case "context.cleared":
-          return data.messages.length === 0 ? data : { messages: [] };
-        case "session.failed":
-          return event.data.code === "session_stranded" &&
-            event.data.details?.trigger === "reset" &&
+        case "delivery.consumed":
+          return append(data, { role: "user", text: textOf(event.data.parts) });
+        case "content.completed":
+          return event.data.kind === "text" &&
+            event.data.phase === "reply" &&
+            event.data.interrupted !== true &&
+            typeof event.data.value === "string"
+            ? append(data, { role: "assistant", text: event.data.value })
+            : data;
+        case "context.settled":
+          return event.data.selects === null && data.messages.length > 0 ? { messages: [] } : data;
+        case "session.ended":
+          return event.data.cause !== undefined &&
+            "policy" in event.data.cause &&
+            event.data.cause.policy === "stranded-reset" &&
             data.messages.length > 0
             ? { messages: [] }
             : data;
@@ -89,8 +98,6 @@ export function transcriptReducer(
   };
 }
 
-function receivedText(event: Extract<EveAgentReducerEvent, { type: "message.received" }>): string {
-  const { message, parts } = event.data;
-  if (parts === undefined) return message;
-  return parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n");
+function textOf(parts: readonly UserPart[]): string {
+  return parts.flatMap((part) => (part.kind === "text" ? [part.text] : [])).join("\n");
 }

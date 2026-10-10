@@ -1,52 +1,87 @@
-import { stampTestEvent } from "#internal/testing/events.js";
 import { describe, expect, it } from "vitest";
 
 import { transcriptReducer } from "#client/transcript-reducer.js";
-import {
-  createContextClearedEvent,
-  createMessageAppendedEvent,
-  createMessageCompletedEvent,
-  createMessageReceivedEvent,
-  createReasoningCompletedEvent,
-  createSessionFailedEvent,
-  createSessionStartedEvent,
-  type UnstampedMessageStreamEvent,
-} from "#protocol/message.js";
+import { stampTestEvent } from "#internal/testing/events.js";
+import type { SessionEvent } from "#protocol/session-event.js";
+import type { UserPart } from "#protocol/session-events/envelope.js";
 
-const TURN = { sequence: 0, turnId: "turn_0" };
+const TURN = "turn_0";
+let deliveries = 0;
+let parts = 0;
 
-function received(message: Parameters<typeof createMessageReceivedEvent>[0]["message"]) {
-  return createMessageReceivedEvent({ ...TURN, message });
+function received(message: string | readonly UserPart[]): SessionEvent {
+  deliveries += 1;
+  return {
+    data: {
+      deliveryId: `delivery_${deliveries}`,
+      parts: typeof message === "string" ? [{ kind: "text", text: message }] : message,
+      turnId: TURN,
+    },
+    type: "delivery.consumed",
+  };
 }
 
-function completed(message: string) {
-  return createMessageCompletedEvent({ ...TURN, finishReason: "stop", message, stepIndex: 0 });
+function content(
+  value: string,
+  options: { readonly kind?: string; readonly phase?: string; readonly interrupted?: true } = {},
+): SessionEvent {
+  parts += 1;
+  return {
+    data: {
+      kind: options.kind ?? "text",
+      partId: `part_${parts}`,
+      phase: options.phase ?? "reply",
+      runId: "run_0",
+      value,
+      ...(options.interrupted === undefined ? {} : { interrupted: options.interrupted }),
+    },
+    scope: { turnId: TURN },
+    type: "content.completed",
+  };
+}
+
+function cleared(): SessionEvent {
+  return {
+    data: { changeId: "change_0", kind: "clear", outcome: "completed", selects: null },
+    type: "context.settled",
+  };
+}
+
+function strandedEnd(trigger: string): SessionEvent {
+  return {
+    data: {
+      cause: { policy: `stranded-${trigger}` },
+      error: { code: "session_stranded", message: "ended" },
+      outcome: "failed",
+    },
+    type: "session.ended",
+  };
 }
 
 function reduce(
-  events: readonly UnstampedMessageStreamEvent[],
+  events: readonly SessionEvent[],
   reducer = transcriptReducer(),
 ): ReturnType<typeof reducer.initial> {
   return events.reduce(
-    (data, event) => reducer.reduce(data, stampTestEvent(event)),
+    (data, event, index) => reducer.reduce(data, stampTestEvent(event, index)),
     reducer.initial(),
   );
 }
 
 describe("transcriptReducer", () => {
-  it("keeps user text and completed assistant text, oldest first", () => {
+  it("keeps user text and completed reply text, oldest first", () => {
     expect(
       reduce([
-        createSessionStartedEvent(),
+        { data: {}, type: "session.started" },
         received([
-          { text: "Alice shares the venue list.", type: "text" },
-          { data: "aGVsbG8=", filename: "venues.pdf", mediaType: "application/pdf", type: "file" },
+          { kind: "text", text: "Alice shares the venue list." },
+          { filename: "venues.pdf", kind: "file", mediaType: "application/pdf" },
         ]),
-        createReasoningCompletedEvent({ ...TURN, reasoning: "Compare capacity.", stepIndex: 0 }),
-        createMessageAppendedEvent({ ...TURN, messageDelta: "The second venue", stepIndex: 0 }),
-        completed("The second venue seats everyone."),
-        // Output that never completed is partial and never part of the transcript.
-        createMessageAppendedEvent({ ...TURN, messageDelta: "Booking it", stepIndex: 1 }),
+        content("Compare capacity.", { kind: "reasoning" }),
+        content("Checking the venues.", { phase: "narration" }),
+        content("The second venue seats everyone."),
+        // Output a cancel stopped is partial and never part of the transcript.
+        content("Booking it", { interrupted: true }),
       ]).messages,
     ).toEqual([
       { role: "user", text: "Alice shares the venue list." },
@@ -58,22 +93,16 @@ describe("transcriptReducer", () => {
     expect(
       reduce([
         received("Alice asks about the budget."),
-        createContextClearedEvent({ ...TURN, sessionId: "wrun_old" }),
+        cleared(),
         received("Bob asks about the schedule."),
       ]).messages,
     ).toEqual([{ role: "user", text: "Bob asks about the schedule." }]);
 
-    const ended = (trigger: string) =>
-      createSessionFailedEvent({
-        code: "session_stranded",
-        details: { trigger },
-        message: "ended",
-        sessionId: "wrun_old",
-        usage: undefined,
-      });
-    expect(reduce([received("Bob asks about the schedule."), ended("reset")]).messages).toEqual([]);
     expect(
-      reduce([received("Bob asks about the schedule."), ended("message")]).messages,
+      reduce([received("Bob asks about the schedule."), strandedEnd("reset")]).messages,
+    ).toEqual([]);
+    expect(
+      reduce([received("Bob asks about the schedule."), strandedEnd("message")]).messages,
     ).toHaveLength(1);
   });
 
@@ -88,7 +117,7 @@ describe("transcriptReducer", () => {
   it("returns its input unchanged for events it ignores", () => {
     const reducer = transcriptReducer();
     const data = reducer.initial();
-    expect(reducer.reduce(data, stampTestEvent(createSessionStartedEvent()))).toBe(data);
+    expect(reducer.reduce(data, stampTestEvent({ data: {}, type: "session.started" }))).toBe(data);
   });
 
   it.each([0, -1, 1.5])("rejects maxMessages %s", (maxMessages) => {

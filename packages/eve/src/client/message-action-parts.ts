@@ -3,6 +3,7 @@ import { actionRequestName } from "#shared/action-request-name.js";
 import { displayTitle } from "#shared/display-name.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#shared/action-types.js";
 import type { InputRequest } from "#shared/input.js";
+import type { Capability } from "#protocol/session-events/families/call.js";
 import type {
   EveMessageInputRequest,
   EveMessageToolMetadata,
@@ -85,6 +86,22 @@ export function normalizeActionRequest(action: RuntimeActionRequest): ActionDesc
     case "subagent-call":
     case "remote-agent-call":
       return { kind: "subagent-call", name, toolName: `eve:subagent:${name}` };
+  }
+}
+
+/** Maps a call's capability onto its normalized tool descriptor. */
+export function normalizeCapability(capability: Capability): ActionDescriptor {
+  switch (capability.kind) {
+    case "skill":
+      return { kind: "load-skill", name: capability.name, toolName: "eve:load-skill" };
+    case "agent":
+      return {
+        kind: "subagent-call",
+        name: capability.name,
+        toolName: `eve:subagent:${capability.name}`,
+      };
+    default:
+      return { kind: "tool-call", name: capability.name, toolName: capability.name };
   }
 }
 

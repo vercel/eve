@@ -1,4 +1,3 @@
-import { createStepCompletedEvent } from "#protocol/message.js";
 import {
   isStepCount,
   type LanguageModel,
@@ -31,6 +30,7 @@ import { type ModelProfile, resolveModelProfile } from "#harness/model-profile.j
 import { estimateRequestEnvelope } from "#harness/request-envelope.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { discardAttempt } from "#harness/session-machine/transitions.js";
+import { publicViewOf } from "#harness/session-machine/closure.js";
 import { activeTurnId } from "#harness/session-machine/view.js";
 import type { Step } from "#harness/step/context.js";
 import {
@@ -49,9 +49,11 @@ import { estimateTokens } from "#harness/token-estimate.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { addTurnUsage, type TokenUsageDelta } from "#harness/turn-tag-state.js";
 import { requireSessionModelReference, type StepResult } from "#harness/types.js";
+import type { Usage } from "#protocol/session-events/envelope.js";
 import type { InstrumentationAttempt } from "#instrumentation/runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { maybeCompact } from "#harness/compaction/step.js";
+import { nextChangeId, nextRunId } from "#protocol/session-projection.js";
 import { buildGatewayAttributionHeaders } from "./model.js";
 import { isEmptyModelResponse, rethrowNoOutputAsEmptyResponse } from "./recovery.js";
 import {
@@ -72,6 +74,18 @@ import { extractGatewayCostUsd, extractTokenUsageDelta } from "./usage.js";
 
 const environment = process.env.NODE_ENV ?? "unknown";
 
+/** A usage delta as `usage.recorded` carries it: every count, zero when unreported. */
+function usageOf(delta: TokenUsageDelta): Usage {
+  const usage: { -readonly [K in keyof Usage]: Usage[K] } = {
+    cacheReadTokens: delta.cacheReadTokens ?? 0,
+    cacheWriteTokens: delta.cacheWriteTokens ?? 0,
+    inputTokens: delta.inputTokens ?? 0,
+    outputTokens: delta.outputTokens ?? 0,
+  };
+  if (delta.costUsd !== undefined) usage.costUsd = delta.costUsd;
+  return usage;
+}
+
 const log = createLogger("harness.tool-loop");
 
 /** How one attempt differs from the step's first: what recovery and retries change. */
@@ -79,7 +93,6 @@ export interface ModelCallOptions {
   readonly disabledProviderTools?: ReadonlySet<string>;
   readonly extraSystemNote?: string;
   readonly retryReason?: "empty-response";
-  readonly suppressStepStartedEmission?: boolean;
   readonly trailingUserNote?: string;
 }
 
@@ -95,7 +108,10 @@ interface ModelCallerInput {
   readonly pendingApprovalsNote: string | undefined;
   /** The prompt as the step started it, projected for the model. */
   readonly projectedMessages: HarnessModelMessage[];
-  readonly startStep: (messages: readonly ModelMessage[]) => Promise<void>;
+  /** Requests a run to replace one an attempt gave up. */
+  readonly newRun: () => Promise<void>;
+  /** Starts the run as its provider call begins, once any compaction settled. */
+  readonly startRun: () => Promise<void>;
   readonly setAttemptScope: (scope: InstrumentationAttempt | undefined) => void;
 }
 
@@ -119,7 +135,10 @@ export class ModelCaller {
   private compactionFailure: { readonly error: unknown } | undefined;
   private attemptIndex = 0;
   /** Calls the latest attempt announced that haven't received a result yet, by tool name. */
-  private readonly unsettledActions = new Map<string, string>();
+  /** The latest attempt published output, so retrying it gives its run up. */
+  private acceptedOutput = false;
+  /** The run's start is published, once per run. */
+  private runStarted = false;
 
   private readonly step: Step;
   private readonly prompt: Prompt;
@@ -146,11 +165,8 @@ export class ModelCaller {
   async call(options: ModelCallOptions): Promise<HarnessStepResult> {
     return await runModelCallWithRetries(
       async (attempt) => {
-        if (attempt > 1) await this.settleDiscardedActions();
-        return await this.attempt({
-          ...options,
-          suppressStepStartedEmission: attempt === 1 ? options.suppressStepStartedEmission : true,
-        });
+        if (attempt > 1) await this.prepareRetry();
+        return await this.attempt(options);
       },
       {
         canRetry: () => this.compactionFailure === undefined,
@@ -162,16 +178,17 @@ export class ModelCaller {
   }
 
   /**
-   * Answers the calls a discarded attempt announced, so none stays open: a retry's replacement
-   * attempt, or the step steering runs again, re-requests whatever the model still wants to run.
+   * Before an attempt replaces a failed one: the calls it announced settle `abandoned`, since eve
+   * can't tell whether they ran, and an attempt that published output gives its run up for a new
+   * one. An attempt that published nothing retries in the same run.
    */
-  private async settleDiscardedActions(): Promise<void> {
-    // One call per transition: publishing isn't atomic, so a publish that fails partway leaves
-    // only the calls it didn't reach for the next attempt to settle.
-    for (const [callId, toolName] of this.unsettledActions) {
-      await this.step.apply(discardAttempt(this.step.view(), { calls: [{ callId, toolName }] }));
-      this.unsettledActions.delete(callId);
-    }
+  async prepareRetry(): Promise<void> {
+    const runId = this.acceptedOutput ? this.step.position().runId : undefined;
+    if (runId === undefined) return;
+    await this.step.apply(discardAttempt(this.step.view(), { ending: "retried", runId }));
+    this.acceptedOutput = false;
+    this.runStarted = false;
+    await this.input.newRun();
   }
 
   /** A failed compaction fails the step, whatever recovery the call attempted. */
@@ -186,18 +203,20 @@ export class ModelCaller {
     this.input.generation.end();
     // The cut response never reaches history, so the calls it announced never run, even once its
     // response ended and only their approvals were being decided.
-    await this.settleDiscardedActions();
     step.ctx?.set(HistoryStateKey, this.request.historyState);
     if (this.interruptedUsage !== undefined) {
       step.session = addTurnUsage(step.session, step.position().turnId, this.interruptedUsage);
     }
-    await step.emit?.(
-      createStepCompletedEvent({
-        ...step.position(),
-        finishReason: "other",
-        usage: this.interruptedUsage,
-      }),
-    );
+    const runId = step.position().runId;
+    if (runId !== undefined) {
+      await step.apply(
+        discardAttempt(step.view(), {
+          ending: "steered",
+          runId,
+          usage: this.interruptedUsage === undefined ? undefined : usageOf(this.interruptedUsage),
+        }),
+      );
+    }
     return {
       next: step.runStep,
       session: { ...step.session, history: [...this.request.history] },
@@ -252,27 +271,34 @@ export class ModelCaller {
     const { config } = step;
     let compaction: Awaited<ReturnType<typeof maybeCompact>>;
     try {
+      const { projection } = step.view();
       compaction = await maybeCompact({
         abortSignal: config.abortSignal,
         auth: step.ctx?.get(AuthKey) ?? null,
+        change: {
+          changeId: nextChangeId(projection),
+          summaryRunId: nextRunId(projection),
+          turnId: step.position().turnId,
+        },
         emissionState: step.position(),
         historyProjector: config.historyProjector,
         messages: [...prompt.messages],
         model: this.input.model,
         promptMessages: withClientContext(prompt),
         publish: step.publish,
+        view: () => publicViewOf(step.view().projection),
         requestEnvelopeTokens: this.requestEnvelopeTokens,
         resolveModel: config.resolveModel,
         runtimeIdentity: config.runtimeIdentity,
         session: step.session,
         telemetry: step.instrumentation?.telemetry(),
       });
+      step.session = compaction.session;
       if (compaction.failure !== undefined) throw compaction.failure.error;
     } catch (error) {
       this.compactionFailure = { error };
       throw error;
     }
-    step.session = compaction.session;
     if (!compaction.compacted) return tools;
     compactPrompt(step, prompt, compaction.messages);
     const { compaction: settings } = step.session;
@@ -292,6 +318,10 @@ export class ModelCaller {
     const { step } = this;
     const { generation, model } = this.input;
     const tools = await this.compact(options, await this.prepare(options));
+    if (!this.runStarted) {
+      await this.input.startRun();
+      this.runStarted = true;
+    }
     // New announcements join durable history, so they must not inflate the
     // envelope baseline and hide instruction growth on the next step.
     this.requestEnvelopeTokens = Math.max(
@@ -333,7 +363,6 @@ export class ModelCaller {
       auth: step.ctx?.get(AuthKey) ?? null,
       profile: this.profile,
       session: step.session,
-      startStep: options.suppressStepStartedEmission === true ? undefined : this.input.startStep,
     });
     const settings = {
       headers: this.attributionHeaders,
@@ -391,8 +420,13 @@ export class ModelCaller {
     const { catalog, generation } = this.input;
     const excludedActionToolNames = new Set([REPLY_TOOL_NAME]);
     const streamResult = await agent.stream({ abortSignal: generation.signal, messages });
+    // Anything the attempt publishes ties a retry to a new run.
+    const publish: typeof step.publish = async (publication, published) => {
+      this.acceptedOutput = true;
+      await step.publish(publication, published);
+    };
     const { invalidInputToolCallIds, trailingInlineToolResultParts } = await emitStreamContent(
-      step.publish,
+      publish,
       step.position(),
       toEntryStream(
         interruptStreamOnFailure(streamResult.fullStream, generation.signal),
@@ -402,7 +436,7 @@ export class ModelCaller {
         excludedActionToolNames,
         hidesHeldText: this.input.hidesHeldText && workingTaskIds(step.session).length > 0,
         tools: catalog,
-        unsettledActionToolNames: this.unsettledActions,
+        interruptSignal: generation.signal,
       },
     );
     throwIfTurnAborted(step.config.abortSignal);
@@ -416,7 +450,6 @@ export class ModelCaller {
       excludedCallIds: invalidInputToolCallIds,
       telemetry,
     });
-    for (const part of calls.parts) this.unsettledActions.delete(part.toolCallId);
     const notRun = answerSkippedToolCalls(stepResult, catalog, invalidInputToolCallIds);
     await emitStepActions(step.publish, step.position(), stepResult, notRun);
     return withCallResults({

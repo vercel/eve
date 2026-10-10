@@ -57,6 +57,8 @@ export interface CallStartedData {
 export interface CallProgressData {
   readonly callId: string;
   readonly output: JsonValue;
+  /** The call's label for this output, from the tool. */
+  readonly title?: string;
 }
 
 export type CallOutcome = "completed" | "failed" | "rejected" | "interrupted" | "abandoned";
@@ -73,6 +75,8 @@ export interface CallSettledData {
   readonly reason?: string;
   /** Who rejected the call: `{interactionId}` or `{policy}`. */
   readonly cause?: Cause;
+  /** The call's label once it settled, from the tool. */
+  readonly title?: string;
 }
 
 export type CallInput = Envelope<"call.input", CallInputData>;
@@ -119,6 +123,7 @@ export const callSchemas = {
         outputOf: z.object({ callId: id }).optional(),
         outputRef: valueReference.optional(),
         reason: z.string().optional(),
+        title: z.string().optional(),
       }),
     ),
   ),
@@ -139,6 +144,8 @@ export const callProgressSchemas = {
   ),
   "call.progress": envelopeOf(
     "call.progress",
-    conforming<CallProgressData>()(z.object({ callId: id, output: jsonValue })),
+    conforming<CallProgressData>()(
+      z.object({ callId: id, output: jsonValue, title: z.string().optional() }),
+    ),
   ),
 };

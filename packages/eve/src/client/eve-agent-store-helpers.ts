@@ -1,37 +1,34 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { hasPendingAuthorizations, type ConversationState } from "#client/conversation-state.js";
 import type { ActiveTurn } from "#client/eve-agent-store-state.js";
 import type { MessageResponse } from "#client/message-response.js";
-import { endsTurnSegment, TurnSegment } from "#client/session-utils.js";
+import { endsTurn, ResponseSegment } from "#client/session-utils.js";
 import type { CancelSessionResult, SendTurnPayload } from "#client/types.js";
-import { isCurrentTurnBoundaryEvent, type MessageStreamEvent } from "#protocol/message.js";
 import type { UserContent } from "ai";
 
 export function activeTurnForOptimisticFollowUp(
-  events: readonly MessageStreamEvent[],
+  events: readonly SessionStreamEvent[],
 ): string | undefined {
   const lastTurn = events.findLast(
     (event) =>
       event.type === "turn.started" ||
-      event.type === "turn.completed" ||
-      event.type === "turn.failed" ||
-      event.type === "turn.cancelled" ||
-      isCurrentTurnBoundaryEvent(event),
+      event.type === "turn.settled" ||
+      event.type === "session.ended",
   );
   return lastTurn?.type === "turn.started" ? lastTurn.data.turnId : undefined;
 }
 
 /**
  * Where catch-up stops following and when an idle session counts as settled. These reads have no
- * response to scope them, so the {@link endsTurnSegment} rule reads the whole conversation.
+ * response to scope them, so the turn's end ({@link endsTurn}) reads the whole conversation. A
+ * turn waiting on a sign-in callback goes on once the callback arrives, so it isn't settled.
  */
 export function isResponseBoundary(
-  event: MessageStreamEvent,
+  event: SessionStreamEvent,
   conversation: ConversationState,
 ): boolean {
-  return endsTurnSegment(event, {
-    callbacks: hasPendingAuthorizations(conversation),
-    requests: Object.values(conversation.inputs).some((input) => input.status !== "settled"),
-  });
+  if (event.type === "turn.paused" && hasPendingAuthorizations(conversation)) return false;
+  return endsTurn(event);
 }
 
 /** A turn parked on a question stays open, so its session is still streaming. */
@@ -44,7 +41,7 @@ export function settledStatus(
 }
 
 export function isSettledSessionTail(
-  events: readonly MessageStreamEvent[],
+  events: readonly SessionStreamEvent[],
   conversation: ConversationState,
 ): boolean {
   const tail = events.at(-1);
@@ -121,11 +118,11 @@ export function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
 
-export function toTerminalStreamFailureError(event: MessageStreamEvent): Error | undefined {
-  if (event.type !== "session.failed") return undefined;
+export function toTerminalStreamFailureError(event: SessionStreamEvent): Error | undefined {
+  if (event.type !== "session.ended" || event.data.outcome !== "failed") return undefined;
 
-  const error = new Error(event.data.message);
-  error.name = event.data.code;
+  const error = new Error(event.data.error?.message ?? "The session failed.");
+  error.name = event.data.error?.code ?? "SESSION_FAILED";
   return error;
 }
 
@@ -155,7 +152,7 @@ export function countFollowUpDeliveries(
   turn: ActiveTurn,
   reconciliation: {
     readonly alreadyProjected: boolean;
-    readonly event: MessageStreamEvent;
+    readonly event: SessionStreamEvent;
     readonly ids: readonly string[];
   },
 ): void {
@@ -174,14 +171,14 @@ export function countFollowUpDeliveries(
 
 export async function followSteeredTurns(
   turn: ActiveTurn,
-  events: AsyncIterable<MessageStreamEvent>,
+  events: AsyncIterable<SessionStreamEvent>,
   isActive: () => boolean,
 ): Promise<void> {
   while (turn.followUpDispatches.size > 0) {
     await Promise.allSettled(turn.followUpDispatches);
   }
   if (turn.receivedFollowUps >= turn.acceptedFollowUps) return;
-  const segment = new TurnSegment({ followCallbacks: true });
+  const segment = new ResponseSegment();
   for await (const event of events) {
     if (!isActive()) return;
     turn.receivedFollowUps += turn.receivedFollowUpEvents.get(event) ?? 0;

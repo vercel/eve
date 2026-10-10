@@ -4,6 +4,7 @@ import {
   type CallOutcome,
   executeToolCall,
   type CallResult,
+  scopeOf,
   type ToolSignIn,
 } from "#harness/call-executor.js";
 import {
@@ -14,7 +15,7 @@ import {
 import { isRunnableTool } from "#harness/tools.js";
 import type { HandleEventFn, HarnessToolLookup } from "#harness/types.js";
 import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
-import { createActionResultEvent } from "#protocol/message.js";
+import { callSettledFrom } from "#harness/call-facts.js";
 import type { InputRequest } from "#shared/input.js";
 
 export { APPROVED_CALL_INTERRUPTED_MESSAGE } from "#harness/call-executor.js";
@@ -58,7 +59,7 @@ export async function runApprovedCalls(input: {
         message: unavailableToolMessage(toolName, searchable),
         toolName,
       });
-      await input.publish(createActionResultEvent({ ...input.position, result: failed.result }));
+      await input.publish(callSettledFrom(failed.result, { scope: scopeOf(input.position) }));
       return { settled: [{ part: failed.part }], toolResults: [] };
     }),
   );
@@ -90,21 +91,20 @@ export async function rejectApprovedCall(input: {
 }): Promise<ApprovedCallResult> {
   const { callId, toolName } = input.request.action;
   await input.publish(
-    createActionResultEvent({
-      ...input.position,
-      rejected: true,
-      result: {
+    callSettledFrom(
+      {
         callId,
         isError: true,
         kind: "tool-result",
-        toolName,
         output: {
           code: "TOOL_EXECUTION_DENIED",
           message: input.reason ?? TOOL_EXECUTION_DENIED_MESSAGE,
           tool: { result: "not_run" },
         },
+        toolName,
       },
-    }),
+      { rejected: true, scope: scopeOf(input.position) },
+    ),
   );
   return {
     part: {

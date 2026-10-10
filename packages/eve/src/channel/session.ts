@@ -1,9 +1,9 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { ContextAccessor } from "#context/key.js";
 import {
   createChannelDeliveryMetadata,
   type ChannelDeliverySource,
 } from "#channel/delivery-metadata.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import type { UserContent } from "ai";
 import type {
   CancelTurnResult,
@@ -67,7 +67,7 @@ export interface Session {
    * while its owner is stranded; `follow: false` reads recorded history up to
    * the current tail without inspecting or changing the session.
    */
-  getEventStream(options?: GetEventStreamOptions): Promise<ReadableStream<MessageStreamEvent>>;
+  getEventStream(options?: GetEventStreamOptions): Promise<ReadableStream<SessionStreamEvent>>;
   /** The session's stored lines from `startIndex`: one parsed record per line. Follows like `getEventStream`. */
   getLineStream(options?: GetEventStreamOptions): Promise<ReadableStream<unknown>>;
   getStreamTailIndex(): Promise<number>;

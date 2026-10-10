@@ -1,7 +1,7 @@
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import type { SessionPublication } from "#harness/types.js";
 
 /** The events of one publication, in order. */
-export function eventsOf(publication: SessionPublication): readonly UnstampedMessageStreamEvent[] {
-  return Array.isArray(publication) ? publication : [publication as UnstampedMessageStreamEvent];
+export function eventsOf(publication: SessionPublication): readonly SessionEvent[] {
+  return Array.isArray(publication) ? publication : [publication as SessionEvent];
 }

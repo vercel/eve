@@ -1,7 +1,7 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { Client } from "eve/client";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { EveTUIRunner, FakeEveServer, MockScreen, MockUserInput } from "./lib/tui.ts";
 
 import { theme } from "./lib/theme.ts";
@@ -35,7 +35,7 @@ const stepIndex = 0;
 let sequence = 0;
 const next = () => ++sequence;
 
-const firstTurn: UnstampedMessageStreamEvent[] = [
+const firstTurn: SessionEvent[] = [
   { type: "session.started", data: {} },
   { type: "turn.started", data: { sequence: next(), turnId } },
   { type: "step.started", data: { modelId: "eve-mock/test", sequence: next(), stepIndex, turnId } },
@@ -65,7 +65,7 @@ const firstTurn: UnstampedMessageStreamEvent[] = [
   },
 ];
 
-const firstCallbackTurn: UnstampedMessageStreamEvent[] = [
+const firstCallbackTurn: SessionEvent[] = [
   { type: "turn.started", data: { sequence: next(), turnId: "turn-1" } },
   {
     type: "authorization.completed",
@@ -89,7 +89,7 @@ const firstCallbackTurn: UnstampedMessageStreamEvent[] = [
 ];
 
 const secondTurnId = "turn-2";
-const secondTurn: UnstampedMessageStreamEvent[] = [
+const secondTurn: SessionEvent[] = [
   { type: "turn.started", data: { sequence: next(), turnId: secondTurnId } },
   {
     type: "step.started",
@@ -119,7 +119,7 @@ const secondTurn: UnstampedMessageStreamEvent[] = [
   },
 ];
 
-const secondCallbackTurn: UnstampedMessageStreamEvent[] = [
+const secondCallbackTurn: SessionEvent[] = [
   { type: "turn.started", data: { sequence: next(), turnId: "turn-3" } },
   {
     type: "authorization.completed",

@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { validateToolStubTargets } from "#tool-stubs/validate-targets.js";
 import { context, trace } from "#compiled/@opentelemetry/api/index.js";
 import {
@@ -38,7 +39,7 @@ import {
   type WorkflowFunction,
   type WorkflowMetadata,
 } from "#internal/workflow/runtime.js";
-import type { MessageStreamEvent, SessionPredecessor } from "#protocol/message.js";
+import type { SessionPredecessor } from "#protocol/message.js";
 import { SessionPredecessorKey } from "#context/keys.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
@@ -222,7 +223,7 @@ export function createWorkflowRuntime(config: {
       throw error;
     }
 
-    let events: ReadableStream<MessageStreamEvent> | undefined;
+    let events: ReadableStream<SessionStreamEvent> | undefined;
     const getEvents = () => {
       events ??= readSessionEventStream(run.runId);
       return events;
@@ -277,7 +278,7 @@ export function createWorkflowRuntime(config: {
     async getEventStream(
       sessionId: string,
       options?: GetEventStreamOptions,
-    ): Promise<ReadableStream<MessageStreamEvent>> {
+    ): Promise<ReadableStream<SessionStreamEvent>> {
       // Recorded history needs no owner, so reading it never inspects the session's lifecycle.
       if (options?.follow === false) return readSessionEventHistory(sessionId, options.startIndex);
       await assertFollowableSession(sessionId);

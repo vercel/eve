@@ -1,25 +1,22 @@
 import type { ModelMessage } from "ai";
 
 import type { SessionAuth, SessionPredecessor } from "#context/keys.js";
+import type {
+  SessionStartedPoint,
+  StepStartedPoint,
+  TurnStartedPoint,
+} from "#harness/session-machine/change-points.js";
 import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
 
-/**
- * Stream event types allowed for dynamic tool resolvers. Dispatch
- * supports any event; this extract restricts the public surface until
- * more events are validated.
- */
-export type DynamicToolEventName = Extract<
-  UnstampedMessageStreamEvent["type"],
-  "session.started" | "turn.started" | "step.started"
->;
+/** The change points dynamic resolvers name: a session's first turn, a turn, and each model run. */
+export type DynamicToolEventName = "session.started" | "turn.started" | "step.started";
 
-/** The event a dynamic resolver answers: a session's start, a turn's, or one model call's. */
-export type DynamicScopeEvent = Extract<
-  UnstampedMessageStreamEvent,
-  { type: DynamicToolEventName }
->;
+/**
+ * What a dynamic resolver's handler receives at its change point: the point's name and where the
+ * session is. A private payload, not a stream event.
+ */
+export type DynamicScopeEvent = SessionStartedPoint | TurnStartedPoint | StepStartedPoint;
 
 /** A session's or a turn's start: the events every resolver but the model's and tools' answers. */
 export type DynamicSessionOrTurnEvent = Exclude<DynamicScopeEvent, { type: "step.started" }>;

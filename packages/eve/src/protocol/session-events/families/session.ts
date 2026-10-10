@@ -26,6 +26,11 @@ export interface TraceContext {
 export interface SessionStartedData {
   /** The call whose agent opened this session, for a child session. */
   readonly parent?: { readonly sessionId: string; readonly callId: string };
+  /**
+   * The session this one replaced, when eve started it in place of one whose deployment was
+   * retired. Its recorded stream stays readable.
+   */
+  readonly predecessor?: { readonly sessionId: string };
   readonly runtime?: RuntimeIdentity;
   readonly trace?: TraceContext;
 }
@@ -46,6 +51,7 @@ export type SessionFact = SessionStarted | SessionEnded;
 const sessionStartedData = conforming<SessionStartedData>()(
   z.object({
     parent: z.object({ callId: id, sessionId: id }).optional(),
+    predecessor: z.object({ sessionId: id }).optional(),
     runtime: z
       .object({
         agentId: z.string(),

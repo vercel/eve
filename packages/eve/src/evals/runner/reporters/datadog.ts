@@ -440,8 +440,8 @@ function resolveResultTags(
 
 function resolveInput(result: EveEvalResult, evaluation: EveEval | undefined): unknown {
   for (const event of result.result.events) {
-    if (event.type !== "message.received") continue;
-    return event.data.message;
+    if (event.type !== "delivery.consumed") continue;
+    return event.data.parts;
   }
 
   return evaluation?.description ?? "";

@@ -390,7 +390,7 @@ async function settleTurn(
     history: [...history, { content: JSON.stringify(structured), role: "assistant" }],
     outputSchema: undefined,
   };
-  await step.apply(finishTurn(step.view(), { result: structured }), step.session.history);
+  await step.apply(finishTurn(step.view()), step.session.history);
   return { next: null, session: step.session, settledTurn: { output: structured } };
 }
 
