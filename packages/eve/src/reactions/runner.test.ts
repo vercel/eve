@@ -103,6 +103,32 @@ describe("runReactions", () => {
     expect(dynamicTools(ctx).map((tool) => tool.description)).toEqual(["Count 2."]);
   });
 
+  it("records the new selection of a code slot even when its declaration is unchanged", async () => {
+    // Both scopes declare the same tool; only the code that closes over the scope differs.
+    const built: string[] = [];
+    const ctx = session({
+      resolve: ((scope: string) => {
+        built.push(scope);
+        return defineTool({
+          description: "Forget a memory.",
+          execute: async () => scope,
+          inputSchema: {},
+        });
+      }) as never,
+      select: ((view: { readonly messages: readonly ModelMessage[] }) =>
+        String(view.messages.at(-1)?.content)) as never,
+    });
+    await runReactions(ctx, { conversation: [user("tenant-a")], written: written(1) });
+    await runReactions(ctx, { conversation: [user("tenant-b")], written: written(2) });
+    expect(slotsOf(ctx, "tool")[0]?.slot.selection).toBe("tenant-b");
+
+    forgetSessionLive(ctx.get(SessionIdKey)!);
+    await restoreReactions(ctx);
+
+    // The rebuild in a fresh process binds the tool to the latest tenant, not the first.
+    expect(built).toEqual(["tenant-a", "tenant-b", "tenant-b"]);
+  });
+
   it("fails calls to a tool whose rebuilt declaration differs from the one offered", async () => {
     let description = "Offered.";
     const ctx = session({
