@@ -364,6 +364,8 @@ async function consumeStreamContent(
         if (
           options === undefined ||
           part.providerExecuted === true ||
+          // AI Gateway streams a provider tool's input unflagged, under an id its call never uses.
+          options.tools.get(part.toolName)?.behavior?.handling?.kind === "provider-tool" ||
           options.excludedActionToolNames.has(part.toolName)
         ) {
           streamingActionInputs.delete(part.id);
