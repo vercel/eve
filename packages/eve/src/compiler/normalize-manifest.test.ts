@@ -1182,7 +1182,6 @@ describe("compileAgentManifest source graph", () => {
       description: "Manage the caller profile.",
       logicalPath: "memory/profile.ts",
       slot: "profile",
-      visibility: "scope",
     });
     expect(wrapper).toMatchObject({ logicalPath: "tools/profile.ts" });
     expect(compiled.bindings[wrapper.sourceId]?.backing).toMatchObject({
