@@ -5,6 +5,7 @@ import { ContextContainer } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
 import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { defineInstructions } from "#public/definitions/instructions.js";
 import { defineTool } from "#tools/definition.js";
 import { dynamicTools } from "./kinds/tool.js";
 import { restoreReactions, runReactions, slotsOf } from "./runner.js";
@@ -30,12 +31,13 @@ function session(
     readonly resolve: (selected: never, ctx: never) => unknown;
   },
   hooks: readonly object[] = [],
+  instructions: readonly object[] = [],
 ) {
   const ctx = new ContextContainer();
   ctx.set(SessionIdKey, `session-${Math.random()}`);
   ctx.set(BundleKey, {
     resolvedAgent: {
-      dynamicInstructionsResolvers: [],
+      dynamicInstructionsResolvers: instructions,
       dynamicSkillResolvers: [],
       dynamicToolResolvers: [
         { logicalPath: "tools/count.ts", slug: "count", sourceId: "tools/count.ts", ...resolver },
@@ -185,5 +187,29 @@ describe("runReactions", () => {
     await runReactions(ctx, { conversation: [user("a")], written: written(2) });
 
     expect(selections).toEqual([1, 1]);
+  });
+
+  it("keeps a data slot under a new runtime revision until its selection changes", async () => {
+    const resolved: unknown[] = [];
+    const ctx = session({ resolve: (() => null) as never, select: (() => null) as never }, [], [
+      {
+        logicalPath: "instructions/policy.ts",
+        resolve: (selected: unknown) => {
+          resolved.push(selected);
+          return defineInstructions({ markdown: `Policy ${String(selected)}.` });
+        },
+        select: (view: { readonly messages: readonly ModelMessage[] }) => view.messages.length,
+        slug: "policy",
+        sourceId: "instructions/policy.ts",
+      },
+    ]);
+    await restoreReactions(ctx, { revision: "r1" });
+    await runReactions(ctx, { conversation: [user("a")], written: written(1) });
+    await restoreReactions(ctx, { revision: "r2" });
+    await runReactions(ctx, { conversation: [user("a")], written: written(2) });
+    expect(resolved).toEqual([1]);
+
+    await runReactions(ctx, { conversation: [user("a"), user("b")], written: written(3) });
+    expect(resolved).toEqual([1, 2]);
   });
 });

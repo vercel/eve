@@ -89,13 +89,7 @@ export async function runReactions(ctx: ContextContainer, input: RunReactionsInp
     }
     const digest = digestOf(selection);
     const slot = readReactionsState(ctx).slots[reaction.id];
-    if (
-      slot !== undefined &&
-      slot.digest === digest &&
-      (revision === undefined || slot.revision === revision)
-    ) {
-      continue;
-    }
+    if (slot !== undefined && slot.digest === digest && !staleUnder(slot, revision)) continue;
     const changed = await resolveInto(ctx, reaction, {
       abortSignal: input.abortSignal,
       conversation: input.conversation,
@@ -211,6 +205,17 @@ function writeSlot(ctx: ContextContainer, id: string, slot: Slot | undefined): v
   if (slot === undefined) delete slots[id];
   else slots[id] = slot;
   writeReactionsState(ctx, { ...state, slots });
+}
+
+/**
+ * Whether a new runtime revision must resolve the slot again. Only slots with code, which another
+ * revision's code built, and failed slots, which new code may fix, do. A data slot keeps its value
+ * until its selection changes, so a redeploy doesn't re-run every reaction in every session; data
+ * that changed code would produce differently stays as it was until then.
+ */
+function staleUnder(slot: Slot, revision: string | undefined): boolean {
+  if (revision === undefined || slot.revision === revision) return false;
+  return slot.selection !== undefined || slot.error !== undefined;
 }
 
 /** Records a contribution; returns whether the slot's contribution changed. */
