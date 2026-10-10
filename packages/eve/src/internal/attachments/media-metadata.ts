@@ -55,6 +55,53 @@ export function estimateMediaTokens(metadata: MediaMetadata): number {
   return Math.ceil(metadata.size / 3);
 }
 
+const GENERIC_MEDIA_TYPE = "application/octet-stream";
+const PDF_MEDIA_TYPE = "application/pdf";
+// The PDF header may follow up to 1 KiB of leading bytes.
+const PDF_HEADER_WINDOW = 1024;
+
+/**
+ * The media type a staged file carries: the format its bytes prove for an
+ * image, PDF, or untyped file, or the declared type otherwise. A declared
+ * PNG, JPEG, GIF, WebP, or PDF that the bytes don't confirm becomes
+ * `application/octet-stream`, so no provider receives bytes it would reject.
+ */
+export function verifyMediaType(bytes: Uint8Array, declared: string): string {
+  const normalized = declared.toLowerCase();
+  const checkable =
+    normalized.startsWith("image/") ||
+    normalized === PDF_MEDIA_TYPE ||
+    normalized === GENERIC_MEDIA_TYPE;
+  if (!checkable) return declared;
+  const detected =
+    detectImageMediaType(bytes) ?? (hasPdfHeader(bytes) ? PDF_MEDIA_TYPE : undefined);
+  if (detected !== undefined) return detected;
+  return VERIFIABLE_MEDIA_TYPES.has(normalized) ? GENERIC_MEDIA_TYPE : declared;
+}
+
+/** The image formats eve can verify from bytes, and that every major provider reads. */
+export const INLINE_IMAGE_MEDIA_TYPES: ReadonlySet<string> = new Set([
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
+
+const VERIFIABLE_MEDIA_TYPES: ReadonlySet<string> = new Set([
+  ...INLINE_IMAGE_MEDIA_TYPES,
+  "image/jpg",
+  PDF_MEDIA_TYPE,
+]);
+
+function hasPdfHeader(bytes: Uint8Array): boolean {
+  const head = Buffer.from(
+    bytes.buffer,
+    bytes.byteOffset,
+    Math.min(bytes.byteLength, PDF_HEADER_WINDOW),
+  );
+  return head.includes("%PDF-", 0, "latin1");
+}
+
 /** Names the PNG, GIF, JPEG, or WebP format its leading bytes identify. */
 export function detectImageMediaType(bytes: Uint8Array): string | undefined {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);

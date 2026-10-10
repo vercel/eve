@@ -13,7 +13,7 @@ import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { isUnresolvedFileData, readFileData } from "#internal/attachments/data.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
 import { createLogger } from "#internal/logging.js";
-import { readMediaMetadata } from "#internal/attachments/media-metadata.js";
+import { readMediaMetadata, verifyMediaType } from "#internal/attachments/media-metadata.js";
 import { createPublicDownloads, type PublicDownloads } from "#internal/attachments/public-link.js";
 import { deserializeUrlFilePart, isSerializedUrlFilePart } from "#internal/attachments/url-refs.js";
 import {
@@ -165,9 +165,9 @@ export async function stageToolResultMedia<T extends ModelMessage>(
 /**
  * Hydrates `eve-sandbox:` file refs for a single model call.
  *
- * Tool-result refs always hydrate as bytes: the tool chose to show them to
- * the model. Inbound attachments inline small images and PDFs; larger or
- * unsupported files become text references to their sandbox path. Every
+ * Every attachment, inbound or returned by a tool, renders as a label naming
+ * its sandbox path. Small verified images and PDFs follow their label as
+ * bytes; anything else stays a label the agent can open with tools. Every
  * decision is pure in the ref, so each message renders identically on every
  * call and the provider's prompt cache stays valid. The returned messages
  * must not be written back to session history, which stays ref-only.
@@ -332,25 +332,27 @@ async function hydrateMessageContent(content: unknown, sandbox: SandboxSession):
   if (!Array.isArray(content)) {
     return content;
   }
-  return Promise.all(
-    content.map(async (part) => {
+  const hydrated = await Promise.all(
+    content.map(async (part): Promise<unknown[]> => {
       if (isSandboxRefFilePart(part)) {
         const ref = decodeSandboxRef(part.data as URL);
+        const label = renderSandboxRefAsTextPart(ref);
         if (!inlinesSandboxRefAsBytes(ref)) {
-          return renderSandboxRefAsTextPart(ref);
+          return [label];
         }
         const bytes = await readSandboxRefBytes(ref, sandbox);
         return bytes === null
-          ? renderMissingSandboxRef(ref)
-          : { ...part, data: bytes, mediaType: ref.mediaType };
+          ? [renderMissingSandboxRef(ref)]
+          : [label, { ...part, data: bytes, mediaType: ref.mediaType }];
       }
       if ((part as { type?: unknown }).type === "tool-result") {
         const toolResult = part as ToolResultPart;
-        return { ...toolResult, output: await hydrateToolOutput(toolResult.output, sandbox) };
+        return [{ ...toolResult, output: await hydrateToolOutput(toolResult.output, sandbox) }];
       }
-      return part;
+      return [part];
     }),
   );
+  return hydrated.flat();
 }
 
 async function hydrateToolOutput(
@@ -361,18 +363,20 @@ async function hydrateToolOutput(
     return output;
   }
   const value = await Promise.all(
-    output.value.map(async (part): Promise<ToolOutputContentPart> => {
-      if (!isToolOutputRefFile(part) || part.data.type !== "url") return part;
+    output.value.map(async (part): Promise<ToolOutputContentPart[]> => {
+      if (!isToolOutputRefFile(part) || part.data.type !== "url") return [part];
       const ref = decodeSandboxRef(part.data.url);
+      const label = renderSandboxRefAsTextPart(ref);
+      if (!inlinesSandboxRefAsBytes(ref)) return [label];
       const bytes = await readSandboxRefBytes(ref, sandbox);
-      if (bytes === null) return renderMissingSandboxRef(ref);
-      return {
-        ...part,
-        data: { data: Buffer.from(bytes).toString("base64"), type: "data" },
-      };
+      if (bytes === null) return [renderMissingSandboxRef(ref)];
+      return [
+        label,
+        { ...part, data: { data: Buffer.from(bytes).toString("base64"), type: "data" } },
+      ];
     }),
   );
-  return { ...output, value };
+  return { ...output, value: value.flat() };
 }
 
 async function readSandboxRefBytes(
@@ -459,8 +463,9 @@ function createReturnedFilesMessage(files: readonly FilePart[]): ModelMessage {
 }
 
 /**
- * Renders a sandbox-resident attachment as a {@link TextPart} the model
- * can use to reach the payload through filesystem tools.
+ * Labels a sandbox-resident attachment with a {@link TextPart} the model can
+ * use to reach the payload through filesystem tools, whether or not the
+ * bytes follow.
  *
  * Matches the text shape produced by the compaction summarizer for
  * `FilePart`s so the model sees one consistent surface for "there is a
@@ -530,16 +535,20 @@ async function stageResolvedBytes(
     resolved.filename ?? part.filename,
     sandbox,
   );
-  return { ...part, data: encodeSandboxRef(ref), filename: ref.path, mediaType };
+  return { ...part, data: encodeSandboxRef(ref), filename: ref.path, mediaType: ref.mediaType };
 }
 
-/** Writes content-addressed bytes under {@link ATTACHMENTS_ROOT} and describes them as a ref. */
+/**
+ * Writes content-addressed bytes under {@link ATTACHMENTS_ROOT} and describes
+ * them as a ref whose media type the bytes confirm.
+ */
 async function writeSandboxRef(
   bytes: Buffer,
-  mediaType: string,
+  declaredMediaType: string,
   filename: string | undefined,
   sandbox: SandboxSession,
 ): Promise<SandboxRef> {
+  const mediaType = verifyMediaType(bytes, declaredMediaType);
   const sha = sha256Prefix(bytes);
   const authored = `${ATTACHMENTS_ROOT}/${sha}/${safeFilename(filename, sha, mediaType)}`;
   await sandbox.writeBinaryFile({ content: bytes, path: authored });

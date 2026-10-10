@@ -1,4 +1,4 @@
-import type { FilePart, ModelMessage, UserContent } from "ai";
+import type { FilePart, ModelMessage, ToolResultPart, UserContent } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ChannelAdapter, FetchFileResult } from "#channel/adapter.js";
@@ -11,8 +11,10 @@ import {
   ATTACHMENTS_ROOT,
   hydrateSandboxAttachments,
   stageAttachmentsToSandbox,
+  stageToolResultMedia,
 } from "#harness/attachment-staging.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
+import { pngBytes } from "#internal/testing/media-fixtures.js";
 import { requestPublicUrl } from "#execution/web-fetch/request.js";
 
 vi.mock("#execution/web-fetch/request.js", () => ({ requestPublicUrl: vi.fn() }));
@@ -248,7 +250,7 @@ describe("stageAttachmentsToSandbox (integration)", () => {
   });
 
   it("refines FilePart.mediaType when fetchFile returns a FetchFileResult", async () => {
-    const resolvedBytes = Buffer.from("PNGDATA", "utf8");
+    const resolvedBytes = pngBytes(1, 1);
     const adapter: ChannelAdapter<any> = {
       async fetchFile() {
         const result: FetchFileResult = {
@@ -310,7 +312,7 @@ describe("stageAttachmentsToSandbox (integration)", () => {
 
   it("downloads a link no channel resolver claims, so the provider never fetches it", async () => {
     vi.mocked(requestPublicUrl).mockResolvedValueOnce(
-      new Response("PNG", { headers: { "content-type": "image/png" } }),
+      new Response(pngBytes(1, 1), { headers: { "content-type": "image/png" } }),
     );
     const adapter: ChannelAdapter<any> = { kind: "custom-channel", state: {} };
     const sandbox = mockSandbox({ id: "sbx_public_link" });
@@ -597,13 +599,10 @@ describe("stageAttachmentsToSandbox (integration)", () => {
 });
 
 describe("hydrateSandboxAttachments (integration)", () => {
-  // 1 KiB of PNG-like bytes. Small enough to fall under the image
-  // inline-cap, arbitrary enough that the byte-equality assertion
-  // catches any corruption on the sandbox round trip.
-  const smallImageBytes = Buffer.alloc(1024, 0x89);
-  // 1 KiB of PDF-like bytes. Small enough to fall under the PDF
-  // inline-cap.
-  const smallPdfBytes = Buffer.alloc(1024, 0x25);
+  // A small PNG and PDF under the inline caps; the byte-equality assertions
+  // catch any corruption on the sandbox round trip.
+  const smallImageBytes = pngBytes(32, 32, 1024);
+  const smallPdfBytes = pdfBytes(1024);
 
   it("hydrates small images inline as bytes — provider consumes them multimodally", async () => {
     const sandbox = mockSandbox({ id: "sbx_hydrate_image" });
@@ -641,6 +640,12 @@ describe("hydrateSandboxAttachments (integration)", () => {
     expect(hydratedFilePart.filename).toMatch(
       /^\/workspace\/\.eve\/attachments\/[0-9a-f]{16}\/logo\.png$/,
     );
+    // A label naming the sandbox path precedes the bytes.
+    expect(hydratedContent).toEqual([
+      { type: "text", text: "describe the image" },
+      { text: `Attached file ${hydratedFilePart.filename} (image/png)`, type: "text" },
+      hydratedFilePart,
+    ]);
   });
 
   it("hydrates small PDFs inline as bytes — provider handles them natively", async () => {
@@ -709,7 +714,7 @@ describe("hydrateSandboxAttachments (integration)", () => {
     const runtime = await createTestRuntime();
     // One byte over the 3 MiB cap so the ref size fails the inline
     // check without allocating two massive buffers in the test.
-    const oversizedImage = Buffer.alloc(3 * 1024 * 1024 + 1, 0x89);
+    const oversizedImage = pngBytes(32, 32, 3 * 1024 * 1024 + 1);
 
     const stagedContent = (await runtime.runAsSession({ sandbox }, async () =>
       stageAttachmentsToSandbox([
@@ -735,7 +740,7 @@ describe("hydrateSandboxAttachments (integration)", () => {
   it("treats oversized PDFs (>20 MiB) as non-inlinable — renders a text reference instead of bytes", async () => {
     const sandbox = mockSandbox({ id: "sbx_hydrate_big_pdf" });
     const runtime = await createTestRuntime();
-    const oversizedPdf = Buffer.alloc(20 * 1024 * 1024 + 1, 0x25);
+    const oversizedPdf = pdfBytes(20 * 1024 * 1024 + 1);
 
     const stagedContent = (await runtime.runAsSession({ sandbox }, async () =>
       stageAttachmentsToSandbox([
@@ -791,6 +796,94 @@ describe("hydrateSandboxAttachments (integration)", () => {
     expect(hydratedContent[0]).toEqual({
       text: `Attached file ${stagedPath} (application/octet-stream)`,
       type: "text",
+    });
+  });
+
+  it("inlines only images whose bytes prove a format every provider reads", async () => {
+    const sandbox = mockSandbox({ id: "sbx_verified_media" });
+    const runtime = await createTestRuntime();
+
+    const staged = (await runtime.runAsSession({ sandbox }, async () =>
+      stageAttachmentsToSandbox([
+        {
+          data: Buffer.from("not a png"),
+          filename: "fake.png",
+          mediaType: "image/png",
+          type: "file",
+        },
+        {
+          data: Buffer.from("ftypheic"),
+          filename: "photo.heic",
+          mediaType: "image/heic",
+          type: "file",
+        },
+        { data: pngBytes(8001, 10), filename: "wide.png", mediaType: "image/png", type: "file" },
+        { data: pngBytes(4, 4), filename: "real.jpg", mediaType: "image/jpeg", type: "file" },
+      ] as UserContent),
+    )) as FilePart[];
+    const hydrated = await runtime.runAsSession({ sandbox }, async () =>
+      hydrateSandboxAttachments([{ content: staged, role: "user" }]),
+    );
+
+    expect(staged.map((part) => part.mediaType)).toEqual([
+      "application/octet-stream",
+      "image/heic",
+      "image/png",
+      "image/png",
+    ]);
+    expect(hydrated[0]?.content).toEqual([
+      { text: `Attached file ${staged[0]!.filename} (application/octet-stream)`, type: "text" },
+      { text: `Attached file ${staged[1]!.filename} (image/heic)`, type: "text" },
+      { text: `Attached file ${staged[2]!.filename} (image/png)`, type: "text" },
+      { text: `Attached file ${staged[3]!.filename} (image/png)`, type: "text" },
+      expect.objectContaining({ mediaType: "image/png", type: "file" }),
+    ]);
+  });
+
+  it("applies the same rule to files a tool returns", async () => {
+    const sandbox = mockSandbox({ id: "sbx_tool_gate" });
+    const runtime = await createTestRuntime();
+    const file = (data: Buffer, filename: string) => ({
+      data: { data: data.toString("base64"), type: "data" as const },
+      filename,
+      mediaType: "image/png",
+      type: "file" as const,
+    });
+    const messages: ModelMessage[] = [
+      {
+        content: [
+          {
+            output: {
+              type: "content",
+              value: [file(pngBytes(9000, 9000), "huge.png"), file(pngBytes(8, 8), "shot.png")],
+            },
+            toolCallId: "shot-1",
+            toolName: "screenshot",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      },
+    ];
+
+    const hydrated = await runtime.runAsSession({ sandbox }, async () =>
+      hydrateSandboxAttachments(await stageToolResultMedia(messages)),
+    );
+
+    const [result] = hydrated[0]!.content as ToolResultPart[];
+    expect(result!.output).toEqual({
+      type: "content",
+      value: [
+        {
+          text: expect.stringMatching(/^Attached file .*\/huge\.png \(image\/png\)$/),
+          type: "text",
+        },
+        {
+          text: expect.stringMatching(/^Attached file .*\/shot\.png \(image\/png\)$/),
+          type: "text",
+        },
+        expect.objectContaining({ filename: "shot.png", type: "file" }),
+      ],
     });
   });
 
@@ -959,18 +1052,16 @@ describe("hydrateSandboxAttachments (integration)", () => {
 
     const stagedContent = (await runtime.runAsSession({ sandbox }, async () =>
       stageAttachmentsToSandbox([
-        {
-          data: Buffer.from("original"),
-          filename: "logo.png",
-          mediaType: "image/png",
-          type: "file",
-        },
+        { data: smallImageBytes, filename: "logo.png", mediaType: "image/png", type: "file" },
       ] as UserContent),
     )) as UserContent;
     const stagedPath = (stagedContent[0] as FilePart).filename as string;
 
     // Same size, different bytes: only the content address can tell them apart.
-    await sandbox.session.writeBinaryFile({ content: Buffer.from("replaced"), path: stagedPath });
+    await sandbox.session.writeBinaryFile({
+      content: Buffer.alloc(smallImageBytes.byteLength, 0x41),
+      path: stagedPath,
+    });
 
     const messages = [{ content: stagedContent, role: "user" as const }];
     const hydrated = await runtime.runAsSession({ sandbox }, async () =>
@@ -1012,3 +1103,7 @@ describe("hydrateSandboxAttachments (integration)", () => {
     }
   });
 });
+
+function pdfBytes(paddingBytes: number): Buffer {
+  return Buffer.concat([Buffer.from("%PDF-1.4\n"), Buffer.alloc(paddingBytes, 0x25)]);
+}
