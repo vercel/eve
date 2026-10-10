@@ -49,7 +49,8 @@ export function AgentChat({
     resume: sessionId !== undefined,
     onSessionChange(session) {
       if (sessionId === undefined && session !== undefined) {
-        // Next patches window.history to navigate, which would detach the active stream.
+        // Framework routers (Next.js, TanStack Router) patch window.history; navigating
+        // through them would remount this route and detach the active stream.
         History.prototype.replaceState.call(
           window.history,
           window.history.state,

@@ -1918,6 +1918,262 @@
       ]
     },
     {
+      "name": "channel/web-tanstack",
+      "type": "registry:item",
+      "title": "Web Chat (TanStack Start)",
+      "description": "The TanStack Start variant of channel/web. Install it with eve add channel/web and choose TanStack Start.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "setup", "web"]
+          },
+          "docs": "/docs/guides/frontend/tanstack",
+          "implementation": "native",
+          "hidden": true
+        }
+      },
+      "dependencies": [
+        "@fontsource-variable/geist-mono@5.3.0",
+        "@fontsource-variable/geist@5.3.0",
+        "@radix-ui/react-use-controllable-state@1.2.2",
+        "@shadcn/react@0.3.1",
+        "@shikijs/core@3.23.0",
+        "@shikijs/engine-javascript@3.23.0",
+        "@shikijs/engine-oniguruma@3.23.0",
+        "@streamdown/cjk@1.0.3",
+        "@streamdown/code@1.1.1",
+        "@streamdown/math@1.0.2",
+        "@streamdown/mermaid@1.0.2",
+        "@tailwindcss/vite@4.3.0",
+        "@tanstack/react-router@1.170.41",
+        "@tanstack/react-start@1.168.60",
+        "@vitejs/plugin-react@6.1.1",
+        "class-variance-authority@0.7.1",
+        "clsx@2.1.1",
+        "cmdk@1.1.1",
+        "lucide-react@1.16.0",
+        "motion@12.40.0",
+        "nanoid@5.1.11",
+        "nitro@3.0.260903-beta",
+        "radix-ui@1.4.3",
+        "react-dom@19.2.6",
+        "react@19.2.6",
+        "shiki@3.23.0",
+        "streamdown@2.5.0",
+        "tailwind-merge@3.6.0",
+        "tailwindcss@4.3.0",
+        "use-stick-to-bottom@1.1.4",
+        "vite@8.3.1",
+        "zod@4.5.4"
+      ],
+      "devDependencies": [
+        "@types/node@26",
+        "@types/react@19.2.15",
+        "@types/react-dom@19.2.3",
+        "typescript@6.0.3"
+      ],
+      "files": [
+        {
+          "path": "registry/channel/web/app/_components/agent-chat.tsx",
+          "type": "registry:file",
+          "target": "apps/web/app/_components/agent-chat.tsx"
+        },
+        {
+          "path": "registry/channel/web/app/_components/agent-message.tsx",
+          "type": "registry:file",
+          "target": "apps/web/app/_components/agent-message.tsx"
+        },
+        {
+          "path": "registry/channel/web-tanstack/app/fonts.css",
+          "type": "registry:file",
+          "target": "apps/web/app/fonts.css"
+        },
+        {
+          "path": "registry/channel/web/app/globals.css",
+          "type": "registry:file",
+          "target": "apps/web/app/globals.css"
+        },
+        {
+          "path": "registry/channel/web-tanstack/app/router.tsx",
+          "type": "registry:file",
+          "target": "apps/web/app/router.tsx"
+        },
+        {
+          "path": "registry/channel/web-tanstack/app/routes/__root.tsx",
+          "type": "registry:file",
+          "target": "apps/web/app/routes/__root.tsx"
+        },
+        {
+          "path": "registry/channel/web-tanstack/app/routes/index.tsx",
+          "type": "registry:file",
+          "target": "apps/web/app/routes/index.tsx"
+        },
+        {
+          "path": "registry/channel/web-tanstack/app/routes/s.session-id.tsx",
+          "type": "registry:file",
+          "target": "apps/web/app/routes/s.$sessionId.tsx"
+        },
+        {
+          "path": "registry/channel/web-tanstack/app/routes/s.index.tsx",
+          "type": "registry:file",
+          "target": "apps/web/app/routes/s.index.tsx"
+        },
+        {
+          "path": "registry/channel/web-tanstack/app/start.ts",
+          "type": "registry:file",
+          "target": "apps/web/app/start.ts"
+        },
+        {
+          "path": "registry/channel/web-tanstack/components.json",
+          "type": "registry:file",
+          "target": "apps/web/components.json"
+        },
+        {
+          "path": "registry/channel/web/components/ai-elements/chain-of-thought.tsx",
+          "type": "registry:file",
+          "target": "apps/web/components/ai-elements/chain-of-thought.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ai-elements/code-block.tsx",
+          "type": "registry:file",
+          "target": "apps/web/components/ai-elements/code-block.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ai-elements/conversation.tsx",
+          "type": "registry:file",
+          "target": "apps/web/components/ai-elements/conversation.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ai-elements/message.tsx",
+          "type": "registry:file",
+          "target": "apps/web/components/ai-elements/message.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ai-elements/prompt-input.tsx",
+          "type": "registry:file",
+          "target": "apps/web/components/ai-elements/prompt-input.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ai-elements/reasoning.tsx",
+          "type": "registry:file",
+          "target": "apps/web/components/ai-elements/reasoning.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ai-elements/shimmer.tsx",
+          "type": "registry:file",
+          "target": "apps/web/components/ai-elements/shimmer.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ai-elements/tool.tsx",
+          "type": "registry:file",
+          "target": "apps/web/components/ai-elements/tool.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/badge.tsx",
+          "type": "registry:file",
+          "target": "apps/web/components/ui/badge.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/button-group.tsx",
+          "type": "registry:file",
+          "target": "apps/web/components/ui/button-group.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/button.tsx",
+          "type": "registry:file",
+          "target": "apps/web/components/ui/button.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/collapsible.tsx",
+          "type": "registry:file",
+          "target": "apps/web/components/ui/collapsible.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/command.tsx",
+          "type": "registry:file",
+          "target": "apps/web/components/ui/command.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/dialog.tsx",
+          "type": "registry:file",
+          "target": "apps/web/components/ui/dialog.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/dropdown-menu.tsx",
+          "type": "registry:file",
+          "target": "apps/web/components/ui/dropdown-menu.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/hover-card.tsx",
+          "type": "registry:file",
+          "target": "apps/web/components/ui/hover-card.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/input-group.tsx",
+          "type": "registry:file",
+          "target": "apps/web/components/ui/input-group.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/input.tsx",
+          "type": "registry:file",
+          "target": "apps/web/components/ui/input.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/questionnaire.tsx",
+          "type": "registry:file",
+          "target": "apps/web/components/ui/questionnaire.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/select.tsx",
+          "type": "registry:file",
+          "target": "apps/web/components/ui/select.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/separator.tsx",
+          "type": "registry:file",
+          "target": "apps/web/components/ui/separator.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/spinner.tsx",
+          "type": "registry:file",
+          "target": "apps/web/components/ui/spinner.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/textarea.tsx",
+          "type": "registry:file",
+          "target": "apps/web/components/ui/textarea.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/tooltip.tsx",
+          "type": "registry:file",
+          "target": "apps/web/components/ui/tooltip.tsx"
+        },
+        {
+          "path": "registry/channel/web/lib/utils.ts",
+          "type": "registry:file",
+          "target": "apps/web/lib/utils.ts"
+        },
+        {
+          "path": "registry/channel/web/app/icon.svg",
+          "type": "registry:file",
+          "target": "apps/web/public/icon.svg"
+        },
+        {
+          "path": "registry/channel/web-tanstack/tsconfig.json",
+          "type": "registry:file",
+          "target": "apps/web/tsconfig.json"
+        },
+        {
+          "path": "registry/channel/web-tanstack/vite.config.ts",
+          "type": "registry:file",
+          "target": "apps/web/vite.config.ts"
+        }
+      ]
+    },
+    {
       "name": "channel/slack",
       "type": "registry:item",
       "title": "Slack",

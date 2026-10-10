@@ -11,6 +11,35 @@ description: "Run an eve agent and a TanStack Start app as one project with the 
 - An existing eve agent directory. If you don't have one, start from [Getting started](../../getting-started).
 - A TanStack Start app using React, with the [Nitro Vite plugin](https://tanstack.com/start/latest/docs/framework/react/guide/hosting#nitro) (`nitro` installed and `nitro()` registered). TanStack Start deploys to Vercel through Nitro, and the plugin attaches eve to it.
 
+## Add the generated Web Chat app
+
+Run the Web Chat installer and choose **TanStack Start** when it asks which framework to use:
+
+```bash
+eve add channel/web
+```
+
+In automation, answer the framework and hosting questions up front. Without a `web-framework` answer, non-interactive installs use Next.js:
+
+```bash
+eve add channel/web --non-interactive \
+  --answer 'web-framework="tanstack"' \
+  --answer 'web-hosting="vercel"'
+```
+
+The installer creates a TanStack Start app under `apps/web/` and adds the `dev:web` and `build:web` scripts. It asks how to deploy it:
+
+- **Vercel services** (recommended) deploys Web Chat and the agent as separate services. Run both locally with `pnpm dev:all`; you don't need to link a Vercel project to do that.
+- **TanStack Start** hosts the agent in the TanStack Start app through `eveTanStack()`. Run it with `pnpm dev:web`. The app lives in `apps/web/` while its dependencies are in the project root `package.json`, so a Vercel deploy from the project root doesn't build it. Choose **Vercel services** to deploy Web Chat on Vercel.
+
+Rerun `eve add channel/web --skip-install` with the other choice to switch modes; the installer removes the `vercel.ts` and scripts it wrote for the previous one. When `apps/web/` already contains a Web Chat app, the installer keeps that app's framework and stops if you answer a different one. To switch between Next.js and TanStack Start, remove `apps/web/` first.
+
+Sign in with Vercel setup is available only for the Next.js Web Chat app, so the TanStack Start installer doesn't ask about authentication.
+
+The chat has the same URL-addressed durable sessions as the [Next.js Web Chat](./nextjs#use-the-generated-web-chat-routes): `/`, `/s`, and `/s/$sessionId`. Before accepting production browser traffic, replace the generated placeholder authorization policy. See [Authenticate browser requests](./overview#authenticate-browser-requests).
+
+The installer doesn't support selecting a workspace agent for single-app hosting: a workspace agent always deploys as a separate Vercel service. If you already have a TanStack Start app, skip the installer and follow the steps below.
+
 ## Register the Vite plugin
 
 Add `eveTanStack()` to `vite.config.ts` next to `nitro()`:
