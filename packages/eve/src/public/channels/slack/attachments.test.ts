@@ -378,14 +378,16 @@ describe("collectInboundFileParts", () => {
       ts?: string;
     }[];
   }): never {
-    return {
-      refresh: input.refresh,
-      recentMessages: (input.recentMessages ?? []).map((message, index) => ({
-        text: "",
-        ts: `${index + 1}.0`,
-        ...message,
-      })),
-    } as never;
+    const messages = (input.recentMessages ?? []).map((message, index) => ({
+      text: "",
+      ts: `${index + 1}.0`,
+      ...message,
+    }));
+    // The refreshed thread holds the triggering mention, as Slack returns it.
+    if (messages.length > 0 && !messages.some((message) => message.ts === "9.0")) {
+      messages.push({ isMe: false, raw: {}, text: "<@UBOT> what is this?", ts: "9.0" });
+    }
+    return { refresh: input.refresh, recentMessages: messages } as never;
   }
 
   function collect(
@@ -422,6 +424,48 @@ describe("collectInboundFileParts", () => {
     const parts = await collect({ mention: emptyMention, thread, policy: DEFAULT_UPLOAD_POLICY });
 
     expect(parts.map((part) => part.filename)).toEqual(["F2.csv", "F4.csv"]);
+  });
+
+  it("looks back at most 10 messages before the trigger, once per file", async () => {
+    const thread = makeSlackThread({
+      refresh: vi.fn(),
+      recentMessages: [
+        ...Array.from({ length: 12 }, (_, index) => ({
+          isMe: false,
+          raw: { files: [slackFile(index === 11 ? "F10" : `F${index}`)] },
+          ts: `${index + 1}.0`,
+        })),
+        { isMe: false, raw: {}, text: "<@UBOT|eve> what are these?", ts: "20.0" },
+        { isMe: false, raw: { files: [slackFile("LATER")] }, ts: "21.0" },
+      ],
+    });
+
+    const parts = await collect({
+      mention: { attachments: [], ts: "20.0" },
+      thread,
+      policy: DEFAULT_UPLOAD_POLICY,
+    });
+
+    // Messages 3-12 fall in the window; message 12 repeats F10, and the reply
+    // after the trigger isn't collected.
+    expect(parts.map((part) => part.filename)).toEqual(
+      ["F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10"].map((id) => `${id}.csv`),
+    );
+  });
+
+  it("stops at a labelled mention of the app", async () => {
+    const thread = makeSlackThread({
+      refresh: vi.fn(),
+      recentMessages: [
+        { isMe: false, raw: { files: [slackFile("OLD")] } },
+        { isMe: false, raw: {}, text: "<@UBOT|eve> first question" },
+        { isMe: false, raw: { files: [slackFile("NEW")] } },
+      ],
+    });
+
+    const parts = await collect({ mention: emptyMention, thread, policy: DEFAULT_UPLOAD_POLICY });
+
+    expect(parts.map((part) => part.filename)).toEqual(["NEW.csv"]);
   });
 
   it("looks back only when the message mentions the app", async () => {

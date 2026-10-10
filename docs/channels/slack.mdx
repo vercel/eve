@@ -744,7 +744,7 @@ For a Slack post without an agent turn, use `ctx.thread.post(...)` in an inbound
 
 Inbound files behind authenticated Slack URLs are staged with `fetchFile`. See [File uploads](./custom#file-uploads) for the `fetchFile` contract.
 
-The agent receives the files attached to the message that reaches it. When a mention carries no files, eve also collects the files posted in the thread since the previous mention of the app, up to 10 messages back, so a person can share a file and then ask about it in a follow-up. The app's own messages are skipped. A message that doesn't mention the app, such as a DM, gets no lookback, because each earlier message brought its own files.
+The agent receives the files attached to the message that reaches it. When a mention carries no files, eve also collects the files posted in the thread since the previous mention of the app, up to 10 messages back, so a person can share a file and then ask about it in a follow-up. The app's own messages are skipped. A DM, or a thread where the app answers without a mention, gets no lookback, because each earlier message brought its own files.
 
 Images, PDFs, audio, video, and other files all reach the agent. See [Inbound attachments](../sandbox#inbound-attachments) for which files the model reads directly and which it opens with tools. Files shared through an integration such as Google Drive or Dropbox are links to the other service, not Slack files, so eve skips them; their link stays in the message text. A download that fails or takes longer than 30 seconds reaches the model as a note.
 

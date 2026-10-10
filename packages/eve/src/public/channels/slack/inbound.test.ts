@@ -434,6 +434,15 @@ describe("parseDirectMessageEvent", () => {
               name: "diagram.png",
               size: 2048,
             },
+            // A Dropbox file shared through Slack's integration is skipped (#855).
+            {
+              id: "F02",
+              is_external: true,
+              mimetype: "application/pdf",
+              mode: "external",
+              name: "plan.pdf",
+              url_private: "https://www.dropbox.com/s/abc/plan.pdf",
+            },
           ],
         },
       }),

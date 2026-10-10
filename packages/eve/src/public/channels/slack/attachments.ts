@@ -85,8 +85,9 @@ function toSlackFilePart(attachment: SlackAttachment, index: number): FilePart |
  * Prefers attachments on the triggering message (the common case: a person
  * uploads a file and mentions the app in the same message). When a mention
  * carries none, refreshes the thread via {@link SlackThread.refresh} and
- * collects, in thread order, the files of the messages since the previous
- * mention of the app, up to {@link THREAD_LOOKBACK_MESSAGES} messages back.
+ * collects, in thread order, the files of the messages between the previous
+ * mention of the app and the trigger, up to {@link THREAD_LOOKBACK_MESSAGES}
+ * messages back. A trigger the refresh didn't return gets no lookback.
  * That earlier mention started its own turn, which collected the files before
  * it. The app's own messages and remote files are skipped. A message that
  * didn't mention the app gets no lookback: the app answers every message in
@@ -118,13 +119,17 @@ export async function collectInboundFileParts(input: {
     }
   }
 
-  const mentionToken = input.botUserId === undefined ? undefined : `<@${input.botUserId}>`;
-  const earlier = input.thread.recentMessages.filter((message) => message.ts !== input.mention.ts);
+  // Anchor on the trigger: a refresh returns at most the thread's oldest
+  // replies, and messages posted after the trigger aren't its files.
+  const recent = input.thread.recentMessages;
+  const trigger = recent.findIndex((message) => message.ts === input.mention.ts);
+  if (trigger === -1) return [];
+  const earlier = recent.slice(Math.max(0, trigger - THREAD_LOOKBACK_MESSAGES), trigger);
   const attachments: SlackAttachment[] = [];
   const seen = new Set<string>();
-  for (const message of earlier.slice(-THREAD_LOOKBACK_MESSAGES).toReversed()) {
+  for (const message of earlier.toReversed()) {
     if (message.isMe) continue;
-    if (mentionToken !== undefined && message.text.includes(mentionToken)) break;
+    if (mentionsApp(message.text, input.botUserId)) break;
     const raw = message.raw as { files?: readonly Record<string, unknown>[] } | undefined;
     const files = parseAttachments(raw?.files).filter(
       (file) => file.id === "" || !seen.has(file.id),
@@ -133,6 +138,14 @@ export async function collectInboundFileParts(input: {
     attachments.unshift(...files);
   }
   return collectSlackFileParts(attachments, input.policy);
+}
+
+/** Matches `<@U123>` and the labelled `<@U123|name>` form. */
+function mentionsApp(text: string, botUserId: string | undefined): boolean {
+  return (
+    botUserId !== undefined &&
+    (text.includes(`<@${botUserId}>`) || text.includes(`<@${botUserId}|`))
+  );
 }
 
 /**

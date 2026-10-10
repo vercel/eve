@@ -1456,7 +1456,8 @@ async function deliverSlackMessage(input: {
     const threadContext = formatSlackThreadContext(priorMessages);
     const fileParts = await collectInboundFileParts({
       botUserId: input.botUserId,
-      isMentioned: input.isMentioned,
+      // A DM can mention the app too, but every DM message brings its own files.
+      isMentioned: input.kind === "app_mention",
       mention: message,
       thread,
       policy: input.uploadPolicy,
