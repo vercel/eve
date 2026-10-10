@@ -627,7 +627,11 @@ function dropRunPreviews(view: SessionView, previews: MutablePreviews, runId: st
   }
 }
 
-/** Operational retention: drops what closed before the latest line, keeping what's open. */
+/**
+ * Operational retention: drops what closed before the latest line, keeping what's open. A task
+ * stays while it runs, but it pins only its open calls' paths, not the call that started it: an
+ * idle task can live as long as its session, and its first call's input and output with it.
+ */
 function prune(view: MutableView, keep: FoldOptions["keep"]): void {
   // Open descendants need their ownership path even after an ancestor settles. Otherwise a
   // call outliving its model run loses its turn, and a terminal closer cannot find it.
@@ -683,9 +687,6 @@ function prune(view: MutableView, keep: FoldOptions["keep"]): void {
   }
   for (const row of Object.values(view.changes)) {
     if (row.status !== "settled") pinChange(row.changeId);
-  }
-  for (const row of Object.values(view.tasks)) {
-    if (row.status === "running") pinCall(row.startedBy.callId);
   }
   for (const row of Object.values(view.deliveries)) {
     if (row.status !== "settled" && row.turnId !== undefined) pinTurn(row.turnId);

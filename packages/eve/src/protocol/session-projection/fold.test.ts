@@ -132,6 +132,42 @@ describe("the shared fold", () => {
     expect(view.turns.turn_0).toBeDefined();
   });
 
+  it("keeps an idle task without the call that started it, so its payloads don't pile up", () => {
+    const [admitted, started] = turnLines(0, { opensSession: true });
+    const scope = { runId: "run_0", turnId: "turn_0" };
+    const lines: StoredLine[] = [
+      admitted!,
+      started!,
+      {
+        at,
+        facts: [
+          {
+            data: {
+              callId: "c_0",
+              capability: { kind: "agent", name: "helper" },
+              input: { brief: "x".repeat(1000) },
+              owner: { runId: "run_0" },
+            },
+            scope,
+            type: "call.requested",
+          },
+          {
+            data: { kind: "agent", name: "helper", startedBy: { callId: "c_0" }, taskId: "t_0" },
+            type: "task.started",
+          },
+          { data: { callId: "c_0", taskId: "t_0" }, type: "call.started" },
+          { data: { callId: "c_0", outcome: "completed", output: "done" }, type: "call.settled" },
+          { data: { outcome: "completed", runId: "run_0" }, scope, type: "model.settled" },
+          { data: { outcome: "completed", turnId: "turn_0" }, type: "turn.settled" },
+        ],
+      },
+      { at, facts: [{ data: { deliveryId: "d_1" }, type: "delivery.admitted" }] },
+    ];
+    const view = folded(lines, "operational");
+    expect(view.tasks.t_0?.status).toBe("running");
+    expect(view.calls.c_0).toBeUndefined();
+  });
+
   it("folds a reader's events by line, holding back a line still arriving", () => {
     const [first] = turnLines(0, { opensSession: true });
     const events: ReceivedEvent[] = [
