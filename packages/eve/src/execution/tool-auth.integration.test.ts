@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildApprovalResponseAuth,
+  createToolExecuteWithAuth,
   handleApprovalResponsePolicyError,
 } from "#execution/tool-auth.js";
 import { evictScopedToken, resolveScopedToken } from "#runtime/connections/scoped-authorization.js";
@@ -908,5 +909,55 @@ describe("tool-hosted authorization", () => {
         return runtime.executeTool(tool, {});
       }),
     ).rejects.toThrow("auth required");
+  });
+
+  it("fails an approved call's approver token lookup without starting a sign-in", async () => {
+    let starts = 0;
+    const provider: AuthorizationDefinition = {
+      principalType: "user",
+      async getToken() {
+        throw requiredError();
+      },
+      async startAuthorization() {
+        starts += 1;
+        return { challenge: { url: "https://idp.example/auth" } };
+      },
+      async completeAuthorization() {
+        return { token: "after-signin" };
+      },
+    };
+    const runtime = await createTestRuntime({ tools: [] });
+    const execute = createToolExecuteWithAuth({
+      scope: "grant-tool",
+      execute: async (_input, ctx) => await ctx.approval!.getToken(provider),
+    });
+
+    const outcome = runtime.runAsSession({ sessionId: "session_approver_token" }, async () => {
+      seedUserPrincipal();
+      // An interactive sign-in is possible here; the approver's lookup must still not start one.
+      loadContext().set(CallbackBaseUrlKey, "https://app.example");
+      return await execute(
+        {},
+        {
+          messages: [],
+          toolCallId: "call_grant",
+          approval: {
+            responder: {
+              attributes: {},
+              authenticator: "test-idp",
+              principalId: "bob",
+              principalType: "user",
+            },
+          },
+        },
+      );
+    });
+
+    await expect(outcome).rejects.toSatisfy(isConnectionAuthorizationFailedError);
+    await expect(outcome).rejects.toMatchObject({
+      reason: "approver_authorization_required",
+      retryable: false,
+    });
+    expect(starts).toBe(0);
   });
 });
