@@ -161,7 +161,7 @@ A call to a tool that runs as a [task](/docs/tools/workflows#run-calls-as-tasks-
 When a submitted message includes attachments, `message.received.data.message` stays the
 flattened compatibility summary, while `message.received.data.parts` carries renderable text and
 file metadata. File parts never include raw bytes or internal sandbox paths; `url` appears only for
-client-resolvable `http(s)` and `data:` URLs.
+`http(s)` URLs, and an inline file reports its `size` instead.
 
 ## Authorization pauses
 
