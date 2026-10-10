@@ -75,44 +75,6 @@ export function walkNode(
   }
 }
 
-/**
- * Collects identifiers used as runtime references in a function body AST.
- */
-export function collectReferencedIdentifierNames(node: DynamicToolAstNode): Set<string> {
-  const names = new Set<string>();
-
-  const visit = (current: DynamicToolAstNode, context: IdentifierContext): void => {
-    if (current.type?.startsWith("TS")) {
-      if (isRuntimeTypeScriptExpression(current) && current.expression) {
-        visit(current.expression, "reference");
-      }
-      return;
-    }
-
-    if (current.type === "Identifier" && current.name && context === "reference") {
-      names.add(current.name);
-    }
-
-    for (const [key, value] of Object.entries(current)) {
-      const childContext = getChildContext(current, key, context);
-      if (!childContext) continue;
-
-      if (Array.isArray(value)) {
-        for (const child of value) {
-          if (isAstNode(child)) {
-            visit(child, childContext);
-          }
-        }
-      } else if (isAstNode(value)) {
-        visit(value, childContext);
-      }
-    }
-  };
-
-  visit(node, "reference");
-  return names;
-}
-
 function getChildContext(
   parent: DynamicToolAstNode,
   parentKey: string,

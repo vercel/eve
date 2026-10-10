@@ -7,8 +7,8 @@
 
 import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
 import {
+  collectFreeVariables,
   collectPatternNames,
-  collectReferencedIdentifierNames,
   extractParamNames,
   findEveImportAliases,
   findProperty,
@@ -46,7 +46,8 @@ type CallbackPropertyName =
 
 interface CallbackInfo {
   readonly body: string;
-  readonly bodyNode: AstNode;
+  /** Node whose free variables are the callback's lexical captures. */
+  readonly captureNode: AstNode;
   readonly isAsync: boolean;
   readonly isGenerator: boolean;
   readonly isReference: boolean;
@@ -232,7 +233,7 @@ function collectToolCallbacks(
       continue;
     results.push({
       body: `{ return ${source.slice(value.start, value.end)}; }`,
-      bodyNode: value,
+      captureNode: value,
       isAsync: false,
       isGenerator: false,
       isReference: false,
@@ -284,11 +285,10 @@ function collectCallbackProperty(
   if (!value || value.start === undefined || value.end === undefined) return;
 
   if (isFunction(value) || property.method === true) {
-    const bodyNode = value.body as AstNode | undefined;
-    if (!bodyNode) return;
+    if (!value.body) return;
     results.push({
       body: extractFnBody(source, value),
-      bodyNode,
+      captureNode: value,
       isAsync: value.async === true,
       isGenerator: value.generator === true,
       isReference: false,
@@ -305,7 +305,7 @@ function collectCallbackProperty(
   if (value.type === "Identifier") {
     results.push({
       body: `{ return ${source.slice(value.start, value.end)}(...__args); }`,
-      bodyNode: value,
+      captureNode: value,
       isAsync: false,
       isGenerator: false,
       isReference: true,
@@ -324,31 +324,30 @@ function applyTransform(source: string, callbacks: readonly CallbackInfo[]): { c
   const hoistedFunctions: string[] = [];
 
   for (const [index, callback] of callbacks.entries()) {
-    const referencedNames = collectReferencedIdentifierNames(callback.bodyNode);
+    const freeNames = collectFreeVariables(callback.captureNode);
     const candidateVars = callback.nestedScopes.flatMap((scope) => [
       ...scope.params,
       ...scope.vars,
     ]);
-    const callbackParamNames = extractCallbackParamNames(callback.params);
-    const allVars = dedupeShadowed(candidateVars).filter(
-      (name) => !callbackParamNames.has(name) && referencedNames.has(name),
-    );
+    const allVars = dedupeShadowed(candidateVars).filter((name) => freeNames.has(name));
     const closure = allVars.length > 0 ? `{ ${allVars.join(", ")} }` : "{}";
     const safePhase = callback.phase.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
     const hoistedName =
       callback.phase === "execute"
         ? `__eve_dynamic_exec_${index}`
         : `__eve_dynamic_${safePhase}_${index}`;
-    const originalParams = callback.params;
-    const hoistedParams = originalParams ? `__vars, ${originalParams}` : "__vars";
-    const varsDestructure = allVars.length > 0 ? `const ${closure} = __vars;\n  ` : "";
+    // Captures are free in the callback, so they never collide with its own
+    // parameters, and destructuring them first keeps them visible to defaults.
+    const hoistedParams = [allVars.length > 0 ? closure : "__vars", callback.params]
+      .filter(Boolean)
+      .join(", ");
     const bodyContent = callback.body.slice(1, -1).trim();
     const asyncPrefix = callback.isAsync ? "async " : "";
     const generatorStar = callback.isGenerator ? "*" : "";
 
     hoistedFunctions.push(
       `${asyncPrefix}function${generatorStar} ${hoistedName}(${hoistedParams}) {\n` +
-        `  ${varsDestructure}${bodyContent}\n` +
+        `  ${bodyContent}\n` +
         `}`,
     );
 
@@ -435,50 +434,4 @@ function extractFnBody(source: string, fn: AstNode): string {
   return fn.type === "ArrowFunctionExpression" && body.type !== "BlockStatement"
     ? `{ return ${raw}; }`
     : raw;
-}
-
-function splitParamsTopLevel(raw: string): string[] {
-  const parts: string[] = [];
-  let depth = 0;
-  let start = 0;
-  for (let index = 0; index < raw.length; index++) {
-    const character = raw[index]!;
-    if (character === "<" || character === "(" || character === "[" || character === "{") {
-      depth++;
-    } else if (character === ">" || character === ")" || character === "]" || character === "}") {
-      depth--;
-    } else if (character === "," && depth === 0) {
-      parts.push(raw.slice(start, index));
-      start = index + 1;
-    }
-  }
-  parts.push(raw.slice(start));
-  return parts;
-}
-
-function extractParamBindingName(parameter: string): string {
-  const trimmed = parameter.trim();
-  let depth = 0;
-  for (let index = 0; index < trimmed.length; index++) {
-    const character = trimmed[index]!;
-    if (character === "<" || character === "(" || character === "[" || character === "{") {
-      depth++;
-    } else if (character === ">" || character === ")" || character === "]" || character === "}") {
-      depth--;
-    } else if (depth === 0 && (character === ":" || character === "=")) {
-      return trimmed.slice(0, index).trim();
-    }
-  }
-  return trimmed;
-}
-
-function extractCallbackParamNames(params: string): Set<string> {
-  const names: string[] = [];
-  if (!params) return new Set();
-  for (const parameter of splitParamsTopLevel(params)) {
-    const binding = extractParamBindingName(parameter);
-    if (binding.startsWith("...")) names.push(binding.slice(3));
-    else names.push(binding);
-  }
-  return new Set(names);
 }
