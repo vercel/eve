@@ -217,6 +217,7 @@ describe("createSlackFetchFile", () => {
     const fetchFile = createSlackFetchFile({ botToken: tokenFn });
 
     await fetchFile("https://files.slack.com/x", {
+      session: { auth: { current: null, initiator: null }, id: "session-1" },
       state: { installationTeamId: "T_INSTALLATION", teamId: "T_ACTOR" },
     });
 

@@ -306,6 +306,7 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
   >({
     kindHint: "teams",
     turnPolicy: config.turnPolicy,
+    uploadPolicy: config.files?.uploadPolicy,
     state: initialTeamsState(),
     fetchFile: createTeamsFetchFile(filesPolicy, {
       ...config.api,

@@ -53,7 +53,7 @@ let bundled: Promise<string> | undefined;
 export function webChatDriver(): ClientDriver {
   return {
     name: "web chat",
-    capabilities: ["buttons", "text-replies"],
+    capabilities: ["attachments", "buttons", "text-replies"],
     // A browser tab shows only the person using it.
     surface: "private",
     async open(host, wait) {
@@ -99,7 +99,17 @@ export function webChatDriver(): ClientDriver {
       }
 
       return {
-        async say(text) {
+        async say(text, _person, files) {
+          if (files !== undefined && files.length > 0) {
+            // The composer's "Add photos or files" button opens this input.
+            await page.locator('input[type="file"]').setInputFiles(
+              files.map((file) => ({
+                buffer: Buffer.from(file.bytes),
+                mimeType: file.mediaType,
+                name: file.name,
+              })),
+            );
+          }
           await composer.fill(text);
           await composer.press("Enter");
         },

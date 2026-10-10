@@ -744,5 +744,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
       }),
     ],
     events: input.events,
+    fetchFile: input.fetchFile,
+    uploadPolicy: input.uploadPolicy,
   });
 }

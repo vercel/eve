@@ -537,6 +537,14 @@ describe("slackChannel()", () => {
     });
   });
 
+  it("hands its upload policy to staging only when one is configured", () => {
+    expect(getAdapter(slackChannel()).uploadPolicy).toBeUndefined();
+    expect(getAdapter(slackChannel({ uploadPolicy: { maxBytes: 1024 } })).uploadPolicy).toEqual({
+      allowedMediaTypes: "*",
+      maxBytes: 1024,
+    });
+  });
+
   it("classifies from durable state through the audience hook", () => {
     const adapter = withState(getAdapter(slackChannel()), { audience: "private" });
 
