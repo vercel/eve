@@ -6237,6 +6237,86 @@ describe("createToolLoopHarness", () => {
       return { full, modelFacing: modelFacingAuthorizationOutput(full) };
     }
 
+    it("emits a sibling sign-in without approval while preserving the parked workflow call", async () => {
+      const { full, modelFacing } = createAuthSignals();
+      const delegateCall = {
+        input: { message: "probe" },
+        toolCallId: "delegate-1",
+        toolName: "delegate",
+        type: "tool-call" as const,
+      };
+      const signInCall = {
+        input: {},
+        toolCallId: "sign-in-1",
+        toolName: "add",
+        type: "tool-call" as const,
+      };
+      const signInResult = {
+        output: modelFacing,
+        toolCallId: signInCall.toolCallId,
+        toolName: signInCall.toolName,
+        type: "tool-result" as const,
+      };
+      setupMockAgent({
+        finishReason: "tool-calls",
+        response: {
+          messages: [
+            { content: [delegateCall, signInCall], role: "assistant" },
+            { content: [signInResult], role: "tool" },
+          ],
+        },
+        text: "",
+        toolCalls: [delegateCall, signInCall],
+        toolResults: [signInResult],
+      });
+      const { emit, events } = createEventCollector();
+      const runStep = createToolLoopHarness(
+        createTestConfig(emit, { tools: createDelegationToolMap() }),
+      );
+      const ctx = new ContextContainer();
+      stashToolInterrupt(ctx, signInCall.toolCallId, full);
+
+      const result = await contextStorage.run(ctx, () =>
+        runStep(createTestSession(), { message: "Delegate and check access." }),
+      );
+
+      expect(result.next).toBeNull();
+      expect(result.settledTurn).toBeUndefined();
+      expect(getPendingAuthorization(result.session.state)).toEqual({
+        challenges: full.challenges,
+      });
+      expect(events.filter((event) => event.type === "authorization.required")).toEqual([
+        expect.objectContaining({
+          data: expect.objectContaining({
+            attemptId: "attempt-protected-action",
+            authorization: full.challenges[0]!.challenge,
+            name: "protected_action",
+            webhookUrl: "https://app.example/callback",
+          }),
+        }),
+      ]);
+      expect(events.filter((event) => event.type === "input.requested")).toHaveLength(0);
+      expect(events.filter((event) => event.type === "action.result")).toHaveLength(0);
+      expect(runtimeWait(result.session.state)?.tasks).toEqual([
+        expect.objectContaining({ callId: delegateCall.toolCallId, kind: "workflow-task" }),
+      ]);
+      const parked = parkedSteps(result.session);
+      expect(parked).toHaveLength(1);
+      expect(parked[0]?.requests).toEqual([]);
+      expect(parked[0]?.messages).toEqual([{ content: [delegateCall], role: "assistant" }]);
+      for (const message of result.session.history) {
+        if (!Array.isArray(message.content)) continue;
+        expect(
+          message.content.filter(
+            (part) =>
+              (part.type === "tool-call" || part.type === "tool-result") &&
+              part.toolCallId === signInCall.toolCallId,
+          ),
+        ).toHaveLength(0);
+      }
+      expect(ToolLoopAgent).toHaveBeenCalledTimes(1);
+    });
+
     it("emits authorization.required and parks when an approved tool returns an auth signal on the inline resume path", async () => {
       const { full, modelFacing } = createAuthSignals();
 
