@@ -326,10 +326,11 @@ function inputRequestOf(
       callId: asked?.callId ?? callId,
       input: isJsonObjectValue(input) ? input : {},
       kind: "tool-call",
+      // A budget prompt is about the session, whatever call relayed it.
       toolName:
-        asked?.name ??
-        callRow?.capability.name ??
-        (kind === "session-limit" ? SESSION_LIMIT_CONTINUATION_TOOL_NAME : kind),
+        kind === "session-limit"
+          ? SESSION_LIMIT_CONTINUATION_TOOL_NAME
+          : (asked?.name ?? callRow?.capability.name ?? kind),
     },
     kind,
     prompt: request.prompt,

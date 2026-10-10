@@ -40,9 +40,11 @@ export function inputRequestOf(view: SessionView, row: InteractionRow): InputReq
       callId: call?.callId ?? row.interactionId,
       input,
       kind: "tool-call",
+      // A budget prompt is about the session, whatever call relayed it.
       toolName:
-        call?.capability.name ??
-        (kind === "session-limit" ? SESSION_LIMIT_CONTINUATION_TOOL_NAME : kind),
+        kind === "session-limit"
+          ? SESSION_LIMIT_CONTINUATION_TOOL_NAME
+          : (call?.capability.name ?? kind),
     },
     kind,
     prompt: request.prompt,

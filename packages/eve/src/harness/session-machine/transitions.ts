@@ -1,3 +1,8 @@
+import {
+  SESSION_LIMIT_CONTINUE_OPTION_ID,
+  SESSION_LIMIT_STOP_OPTION_ID,
+} from "#harness/hitl/budget-request.js";
+import type { InteractionRow } from "#protocol/session-projection/tables.js";
 import type { ModelMessage, ToolCallPart } from "ai";
 
 import type {
@@ -1063,6 +1068,20 @@ function decidedOutcome(outcome: InputResolution["outcome"]) {
 }
 
 /**
+ * How a relayed request this session decides at forward settles. A budget prompt's Stop
+ * declines it, as the asker's own prompt does; any other answer accepts it.
+ */
+function routedOutcome(row: InteractionRow, resolution: InputResolution) {
+  if (row.request.kind === "budget" && resolution.response !== undefined) {
+    const granted = resolution.response.optionId === SESSION_LIMIT_CONTINUE_OPTION_ID;
+    const stopped = resolution.response.optionId === SESSION_LIMIT_STOP_OPTION_ID;
+    if (granted || stopped) return granted ? ("accepted" as const) : ("declined" as const);
+    return "invalid" as const;
+  }
+  return decidedOutcome(resolution.outcome);
+}
+
+/**
  * Answers to requests this session relays went on to their askers. Each delivery that carried
  * such answers is admitted here, with the answers it forwarded: a message that answered joins
  * the turn that asked, one that also carries input for this session goes on to its turn, and
@@ -1138,7 +1157,7 @@ export function routeAnswer(
     if (owner.turnId !== undefined) scope.turnId = owner.turnId;
     if (owner.taskId !== undefined) scope.taskId = owner.taskId;
     events.push(
-      interactionSettled(row.interactionId, decidedOutcome(resolution.outcome), {
+      interactionSettled(row.interactionId, routedOutcome(row, resolution), {
         cause: decider === undefined ? undefined : { responseId: decider },
         response: resolution.response,
         scope,

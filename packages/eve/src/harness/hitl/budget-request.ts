@@ -15,7 +15,7 @@ import type { SessionUsageLimitViolation } from "#harness/turn-tag-state.js";
 /** Synthetic action tool name carried by session-limit continuation requests. */
 
 /** Option id that grants a fresh token budget window. */
-const SESSION_LIMIT_CONTINUE_OPTION_ID = "continue";
+export const SESSION_LIMIT_CONTINUE_OPTION_ID = "continue";
 
 /** Option id that declines continuation and ends the session. */
 export const SESSION_LIMIT_STOP_OPTION_ID = "stop";

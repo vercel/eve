@@ -492,10 +492,14 @@ class EvalLiveTurn implements EveEvalLiveTurn {
   ): Promise<EveEvalTurn> {
     try {
       let sawBoundary = false;
-      const segment = new ResponseSegment({ deliveryId });
+      // A turn ends at its boundary. A message's response may also end earlier, when its
+      // delivery settles without one, as an answer routed to a child does.
+      const turn = new ResponseSegment();
+      const delivery = deliveryId === undefined ? undefined : new ResponseSegment({ deliveryId });
       for await (const event of source) {
         this.#events.push(event);
-        const endsSegment = segment.observe(event);
+        const endsTurn = turn.observe(event);
+        const endsSegment = (delivery?.observe(event) ?? false) || endsTurn;
         observe(event);
         this.#resolveWaiters(event);
 
