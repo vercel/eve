@@ -176,6 +176,9 @@ export async function restoreReactions(
       previous: slot,
       written: [],
     });
+    log.debug("Rebuilding a reaction's code from its recorded selection", {
+      reaction: reaction.label,
+    });
     try {
       const contribution = await reaction.contribute(
         await reaction.resolve(slot.selection, rctx),
