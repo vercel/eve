@@ -1,12 +1,9 @@
-import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { UserContent } from "ai";
 
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { createEventReader } from "#protocol/session-lines.js";
-import { isStoredLine } from "#protocol/session-events/envelope.js";
 import type { ChannelCors } from "#public/definitions/channel.js";
 import {
   defaultEveAuth,
@@ -46,6 +43,8 @@ export interface RemoteAgentBinding {
   readonly name: string;
   readonly resolverId?: string;
   readonly url: string;
+  /** The child's remote agent protocol, when it speaks an earlier one. */
+  readonly earlierProtocol?: number;
 }
 
 interface RemoteAgentStreamCoordinates {
@@ -54,49 +53,39 @@ interface RemoteAgentStreamCoordinates {
   readonly childStreamPath: string;
 }
 
-/** Finds the remote child the parent session recorded for one proxy route, from its `agent.started` event. */
+/** Finds the remote child the parent session recorded for one proxy route, from its private binding. */
 export async function findRemoteAgentBinding(
   input: RemoteAgentStreamCoordinates & {
     readonly parent: {
-      getLineStream(options?: { startIndex?: number }): Promise<ReadableStream<unknown>>;
-      getStreamTailIndex(): Promise<number>;
+      getChildBinding?(childSessionId: string): Promise<
+        | {
+            readonly callId: string;
+            readonly name: string;
+            readonly resolverId?: string;
+            readonly streamPath: string;
+            readonly url: string;
+            readonly earlierProtocol?: number;
+          }
+        | undefined
+      >;
     };
   },
 ): Promise<RemoteAgentBinding | undefined> {
-  const tailIndex = await input.parent.getStreamTailIndex();
-  if (tailIndex < 0) return undefined;
-
-  const reader = (await input.parent.getLineStream({ startIndex: 0 })).getReader();
-  const events = createEventReader();
-  let binding: RemoteAgentBinding | undefined;
-  try {
-    for (let position = 0; position <= tailIndex; position += 1) {
-      const next = await reader.read();
-      if (next.done) break;
-      if (!isStoredLine(next.value)) continue;
-      for (const event of events.read(next.value, position)) {
-        binding = readRemoteAgentBinding(event, input) ?? binding;
-      }
-    }
-  } finally {
-    await reader.cancel().catch(() => {});
-  }
-  return binding;
-}
-
-function readRemoteAgentBinding(
-  event: SessionStreamEvent,
-  coordinates: RemoteAgentStreamCoordinates,
-): RemoteAgentBinding | undefined {
-  if (event.type !== "agent.started") return undefined;
-  const { data } = event;
+  const recorded = await input.parent.getChildBinding?.(input.childSessionId);
   // The stream path embeds the parent session id, so matching it binds the parent.
-  const matches =
-    data.callId === coordinates.callId &&
-    data.sessionId === coordinates.childSessionId &&
-    data.streamPath === coordinates.childStreamPath;
-  if (!matches || data.remote === undefined) return undefined;
-  return { name: data.name, ...data.remote };
+  if (
+    recorded === undefined ||
+    recorded.callId !== input.callId ||
+    recorded.streamPath !== input.childStreamPath
+  )
+    return undefined;
+  const binding: { -readonly [K in keyof RemoteAgentBinding]: RemoteAgentBinding[K] } = {
+    name: recorded.name,
+    url: recorded.url,
+  };
+  if (recorded.resolverId !== undefined) binding.resolverId = recorded.resolverId;
+  if (recorded.earlierProtocol !== undefined) binding.earlierProtocol = recorded.earlierProtocol;
+  return binding;
 }
 
 export function normalizeEveCors(cors: EveChannelCors | undefined): ChannelCors {

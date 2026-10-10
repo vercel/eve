@@ -20,7 +20,8 @@ import type {
   SessionCommand,
   TurnPolicy,
 } from "#channel/types.js";
-import { DEFAULT_TURN_POLICY } from "#channel/types.js";
+import { controlCommand, DEFAULT_TURN_POLICY } from "#channel/types.js";
+import type { SessionControlOptions } from "#channel/types.js";
 import { isReservedSessionCommandToken } from "#execution/session-inbox/address.js";
 
 interface BaseChannelAddressDeliveryOptions {
@@ -53,10 +54,12 @@ interface ChannelAddress<TState = undefined> {
     inputResponses: SendPayload["inputResponses"],
     options: ChannelAddressDeliveryOptions<TState>,
   ): Promise<Session>;
-  cancel(options?: { readonly turnId?: string }): Promise<CancelTurnResult>;
-  compact(): Promise<CompactSessionResult>;
-  clear(): Promise<ClearSessionResult>;
-  reset(options?: { readonly reason?: string }): Promise<ResetSessionResult>;
+  cancel(options?: { readonly turnId?: string } & SessionControlOptions): Promise<CancelTurnResult>;
+  compact(options?: SessionControlOptions): Promise<CompactSessionResult>;
+  clear(options?: SessionControlOptions): Promise<ClearSessionResult>;
+  reset(
+    options?: { readonly reason?: string } & SessionControlOptions,
+  ): Promise<ResetSessionResult>;
   resolveSession(): Promise<Session | undefined>;
 }
 
@@ -157,25 +160,25 @@ export function createChannelAddress<TState = undefined>(input: {
     },
     async cancel(options) {
       return await input.runtime.dispatchContinuation({
-        command: { kind: "cancel", turnId: options?.turnId },
+        command: controlCommand({ kind: "cancel", turnId: options?.turnId }, options),
         continuationToken: namespacedToken,
       });
     },
-    async compact() {
+    async compact(options) {
       return await input.runtime.dispatchContinuation({
-        command: { kind: "compact" },
+        command: controlCommand({ kind: "compact" }, options),
         continuationToken: namespacedToken,
       });
     },
-    async clear() {
+    async clear(options) {
       return await input.runtime.dispatchContinuation({
-        command: { kind: "clear" },
+        command: controlCommand({ kind: "clear" }, options),
         continuationToken: namespacedToken,
       });
     },
     async reset(options) {
       return await input.runtime.dispatchContinuation({
-        command: { kind: "reset", reason: options?.reason },
+        command: controlCommand({ kind: "reset", reason: options?.reason }, options),
         continuationToken: namespacedToken,
       });
     },

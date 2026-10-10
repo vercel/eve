@@ -1,3 +1,4 @@
+import { readRemoteChildBinding } from "#execution/child-binding.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { validateToolStubTargets } from "#tool-stubs/validate-targets.js";
 import { context, trace } from "#compiled/@opentelemetry/api/index.js";
@@ -296,6 +297,10 @@ export function createWorkflowRuntime(config: {
 
     async getStreamTailIndex(sessionId: string): Promise<number> {
       return await readSessionStreamTailIndex(sessionId);
+    },
+
+    async readChildBinding(sessionId: string, childSessionId: string) {
+      return await readRemoteChildBinding(sessionId, childSessionId);
     },
 
     async resolveContinuation(

@@ -1,14 +1,11 @@
+import type { ChildOpened } from "#protocol/session-events/families/child.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { Experimental_DecisionModel as DecisionModel } from "ai";
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { ClientAgentSession } from "#client/agent-session.js";
-import type {
-  RuntimeIdentity,
-  RuntimeTraceContext,
-  AgentStartedStreamEvent,
-} from "#protocol/message.js";
+import type { RuntimeIdentity, RuntimeTraceContext } from "#protocol/message.js";
 import type {
   CancelSessionResult,
   ClientSessionState,
@@ -73,22 +70,19 @@ export interface EveEvalSkillLoad {
 }
 
 /**
- * One call to an agent task extracted from the captured stream: its
- * `task.started`, joined with its `task.settled` and the task's
- * `agent.started`.
+ * One call served by an agent task: its `call.started {taskId}`, joined with
+ * `call.settled`, the task's single `task.started`, and its child-session link.
  */
 export interface EveEvalSubagentCall {
-  /** The agent tool call's id, as on its task events. */
+  /** The agent tool call's id. */
   readonly callId?: string;
   /** The agent's session id, shared by every call to one task; absent if it never opened. */
   readonly childSessionId?: string;
   /** Subagent name. */
   readonly name: string;
-  /** Remote agent URL for remote delegations (`agent.started` remote metadata). */
-  readonly remoteUrl?: string;
-  /** Output from the call's `task.settled`; `undefined` until the call completes. */
+  /** Output from `call.settled`, resolving shared replies; absent until it completes. */
   readonly output?: JsonValue;
-  /** The call's task status: `working` until its `task.settled` arrives. */
+  /** `working` until this call settles; interruptions present as `cancelled`. */
   readonly status: "working" | "completed" | "failed" | "cancelled";
   /** Zero-based index of the turn the delegation happened in. */
   readonly turnIndex: number;
@@ -377,7 +371,7 @@ interface EveEvalSessionDriver {
    * `agent.started`. Its `stream()` follows the child through this parent session
    * with the eval client's credentials, and stops with the eval unless given a `signal`.
    */
-  agent(started: AgentStartedStreamEvent): EveEvalAgentSession;
+  agent(opened: ChildOpened): EveEvalAgentSession;
 }
 
 /** A session an agent run opened, reached through the parent eval session. */

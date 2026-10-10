@@ -1,3 +1,4 @@
+import { publicViewOf } from "#harness/session-machine/closure.js";
 import { bindTurnCallerContext } from "#subagents/parent-notification.js";
 import type { HandleEventFn } from "#harness/types.js";
 import { bindSessionParticipants } from "#execution/participants.js";
@@ -45,7 +46,7 @@ import { saveTransition, dropClosedRecords, sessionView } from "#harness/session
 import { matchSignIns } from "#harness/session-machine/transitions.js";
 import type { DeliverPayload } from "#channel/types.js";
 import { coalesceTurnInputs, validateHarnessModelMessages } from "#harness/messages.js";
-import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
+import type { HarnessSession, HarnessStepInput, StepResult } from "#harness/types.js";
 import { attributeAnswers } from "#execution/session/answer-caller.js";
 import type {
   DurableStepResult,
@@ -311,11 +312,11 @@ async function runSessionStepBody(
         ? structuredClone(adapterCtx.state)
         : undefined;
     // Run the adapter's deliver hook for each queued payload and coalesce
-    // the resulting StepInput values; runtime results ride the same input.
-    let resolved: StepInput | undefined;
+    // the resulting HarnessStepInput values; runtime results ride the same input.
+    let resolved: HarnessStepInput | undefined;
     let admission: DeliveryAdmission | undefined;
     if (delivery !== undefined) {
-      const delivered: { payload: DeliverPayload; input: StepInput | undefined }[] = [];
+      const delivered: { payload: DeliverPayload; input: HarnessStepInput | undefined }[] = [];
       try {
         for (const payload of delivery.payloads) {
           const result = adapter.deliver
@@ -332,6 +333,8 @@ async function runSessionStepBody(
       admission = admitDeliveries({
         channelKind: getAdapterKind(adapter),
         delivery: rawDelivery ?? delivery,
+        admitted: (deliveryId) =>
+          publicViewOf(currentProjection(ctx)).deliveries[deliveryId] !== undefined,
         payloads: delivered,
         position: nextLinePosition(ctx),
       });
@@ -380,7 +383,11 @@ async function runSessionStepBody(
       }
     }
     if (resolved !== undefined && admission !== undefined && admission.consumed.length > 0) {
-      resolved = { ...resolved, deliveries: admission.consumed };
+      resolved = {
+        ...resolved,
+        deliveries: admission.consumed,
+        responseBindings: [...(resolved.responseBindings ?? []), ...admission.responseBindings],
+      };
     }
     if (runtimeResults !== undefined) {
       if (runtimeResults.acceptedAtMsByCallId !== undefined) {
@@ -477,7 +484,7 @@ async function runSessionStepBody(
 
     const runHarnessStep = async (
       lifecycleSession: HarnessSession,
-      stepInput: StepInput | undefined,
+      stepInput: HarnessStepInput | undefined,
       signInCompletions: readonly AuthorizationChallenge[] | undefined,
     ): Promise<StepResult> => {
       const refreshedSession = refreshSessionFromTurnAgent({
@@ -495,6 +502,7 @@ async function runSessionStepBody(
         capabilities,
         clearOnly: input.input?.control === "clear",
         compactOnly: input.input?.control === "compact",
+        controlDelivery: input.input?.controlDelivery,
         createRuntime: createWorkflowRuntime,
         handleEvent,
         participants,

@@ -47,7 +47,10 @@ export async function dispatchTelegramAuthorizationCallback(input: {
 
     await input.telegram.telegram.postEphemeral(
       input.query.from.id,
-      renderTelegramAuthorizationPrompt(authorization),
+      renderTelegramAuthorizationPrompt({
+        authorization: authorization.signIn,
+        name: authorization.name,
+      }),
       { callbackQueryId: input.query.id },
     );
     await input.telegram.telegram.answerCallbackQuery({
@@ -73,7 +76,7 @@ async function inactiveAuthorization(
 /** The latest sign-in still open. An approval responder's sign-in has its own prompt. */
 async function findOpenAuthorization(session: Session) {
   const { signIns } = await foldSessionEvents(eventsToTail(session));
-  return signIns.findLast((prompt) => prompt.candidateId === undefined);
+  return signIns.findLast((prompt) => prompt.responseId === undefined);
 }
 
 /** The session's events up to its tail when the read starts. Its stream follows the session. */

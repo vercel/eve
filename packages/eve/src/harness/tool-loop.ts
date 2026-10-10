@@ -15,14 +15,19 @@ import {
   admitApprovedWork,
   discardClearedHumanInput,
 } from "#harness/hitl/index.js";
-import { clear, join } from "#harness/session-machine/transitions.js";
+import {
+  clear,
+  controlDeliveryFor,
+  controlled,
+  join,
+} from "#harness/session-machine/transitions.js";
 import { activeTurnId, turnPosition } from "#harness/session-machine/view.js";
 import { createStep, openTurn, type Step } from "#harness/step/context.js";
 import { prepareTurnInput, settleRuntimeWork } from "#harness/step/intake.js";
 import type {
   HarnessSession,
   StepFn,
-  StepInput,
+  HarnessStepInput,
   StepResult,
   ToolLoopHarnessConfig,
 } from "#harness/types.js";
@@ -47,7 +52,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
   async function runStep(
     initialSession: Readonly<Parameters<StepFn>[0]>,
-    input?: StepInput,
+    input?: HarnessStepInput,
   ): Promise<StepResult> {
     const executeStep = async (scope?: InstrumentationStepScope<HarnessSession>) => {
       const current = scope?.session ?? initialSession;
@@ -77,7 +82,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     initialSession: HarnessSession,
     generation: GenerationSteering,
     live: StepProjection,
-    input: StepInput | undefined,
+    input: HarnessStepInput | undefined,
     instrumentation: InstrumentationStepScope<HarnessSession> | undefined,
   ): Promise<StepResult> {
     const prepareHistory = createHistoryViewPreparer({
@@ -167,19 +172,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
  * The control is a delivery, applied in the same commit as the clear.
  */
 async function clearContext(step: Step): Promise<StepResult> {
-  const deliveryId = `control_${String(step.view().projection.position ?? 0)}`;
-  const transition = clear(step.view(), {
-    cause: { deliveryId },
-    sessionId: step.session.sessionId,
-  });
-  await step.apply({
-    ...transition,
-    events: [
-      { data: { deliveryId, source: { control: "clear" } }, type: "delivery.admitted" },
-      ...transition.events,
-      { data: { deliveryId, outcome: "applied" }, type: "delivery.settled" },
-    ],
-  });
+  const delivery = controlDeliveryFor(step.view(), step.config.controlDelivery);
+  await step.apply(
+    controlled(delivery, "clear", (cause) =>
+      clear(step.view(), { cause, sessionId: step.session.sessionId }),
+    ),
+  );
   const cleared = discardClearedHumanInput({
     ...step.session,
     state: clearMemorySessionState(step.session.state),
@@ -188,7 +186,7 @@ async function clearContext(step: Step): Promise<StepResult> {
 }
 
 /** Whether the input carries user-facing turn input. */
-function hasStepInput(input: StepInput | undefined): boolean {
+function hasStepInput(input: HarnessStepInput | undefined): boolean {
   if (input === undefined) return false;
   return input.message !== undefined || (input.inputResponses?.length ?? 0) > 0;
 }

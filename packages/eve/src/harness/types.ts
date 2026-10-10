@@ -11,6 +11,8 @@ import type { InputResponse } from "#shared/input.js";
 import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
+import type { ResponseSubmittedData } from "#protocol/session-events/families/response.js";
+import type { Principal } from "#protocol/session-events/envelope.js";
 import type { InternalToolDefinition } from "#tools/definition.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -149,6 +151,13 @@ export interface AttributedInputResponse {
   readonly response: InputResponse;
 }
 
+/** The delivery a control arrived as: its id, and who sent it, as the wire names them. */
+export interface ControlDelivery {
+  readonly deliveryId: string;
+  readonly principal?: Principal;
+}
+
+/** What a channel's `deliver` hook makes of one payload: the input a turn receives. */
 export interface StepInput {
   /** Internal responder-bound input produced at the delivery boundary. */
   readonly attributedInputResponses?: readonly AttributedInputResponse[];
@@ -174,15 +183,24 @@ export interface StepInput {
    * produced by channels.
    */
   readonly runtimeActionResults?: readonly RuntimeActionResult[];
+}
+
+/**
+ * A turn step's input inside the session: what `deliver` made, plus the identities eve attaches
+ * at the delivery boundary. Never produced by channels.
+ */
+export interface HarnessStepInput extends StepInput {
+  /**
+   * Stable public response and delivery identities carried across policy and sign-in passes.
+   * Routing and auth stay private; lifecycle status belongs only to the public fold.
+   */
+  readonly responseBindings?: readonly ResponseSubmittedData[];
   /**
    * What the agents behind some of {@link runtimeActionResults} spent, by call id. Each call's
    * settlement records it, so the session counts a child's usage once.
    */
   readonly delegatedUsage?: Readonly<Record<string, TokenUsage>>;
-  /**
-   * The deliveries this input carries, each with what its person sent, which the turn consumes.
-   * Set at the delivery boundary; never produced by channels.
-   */
+  /** The deliveries this input carries, each with what its person sent, which the turn consumes. */
   readonly deliveries?: readonly ConsumedDelivery[];
 }
 
@@ -249,7 +267,7 @@ export type TurnHold =
  * A single step of AI work. Takes the current session and optional user input,
  * returns the updated session and an instruction for the runtime.
  */
-export type StepFn = (session: HarnessSession, input?: StepInput) => Promise<StepResult>;
+export type StepFn = (session: HarnessSession, input?: HarnessStepInput) => Promise<StepResult>;
 
 /**
  * Map from tool name to its harness-owned definition.
@@ -340,6 +358,8 @@ export interface ToolLoopHarnessConfig {
   readonly clearOnly?: boolean;
   /** Forces one context-compaction pass without running a model turn. */
   readonly compactOnly?: boolean;
+  /** The delivery a clear or compact control arrived as; its facts name it. */
+  readonly controlDelivery?: ControlDelivery;
   readonly handleEvent?: HandleEventFn;
   /** Projects raw durable history before it crosses a message-bearing boundary. */
   readonly historyProjector?: HistoryViewProjector;

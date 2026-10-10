@@ -117,23 +117,14 @@ export type {
 // ---------------------------------------------------------------------------
 
 export type {
-  AgentStartedStreamEvent,
   AuthorizationOutcome,
-  AuthorizationCompletedStreamEvent,
   ConnectionAuthorizationOutcome,
-  AuthorizationRequiredStreamEvent,
   InputResolution,
   InputResolutionOutcome,
-  InputResolvedStreamEvent,
-  InputRequestedStreamEvent,
   RuntimeTraceContext,
   SessionPredecessor,
-  TaskSettledStreamEvent,
-  TaskStartedStreamEvent,
-  WorkStreamEvent,
 } from "#protocol/message.js";
 export type {
-  ConversationFact,
   SessionEvent,
   SessionEventMeta,
   SessionStreamEvent,

@@ -71,7 +71,7 @@ describe("createChannelOperations", () => {
       successor: expect.objectContaining({ title: "Support thread" }),
     });
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
-      command: { kind: "clear" },
+      command: { deliveryId: expect.any(String), kind: "clear" },
       sessionId: "sess_1",
     });
   });
@@ -136,19 +136,19 @@ describe("createChannelOperations", () => {
     await source.reset({ reason: "fresh start" });
 
     expect(runtime.dispatchContinuation).toHaveBeenNthCalledWith(1, {
-      command: { kind: "cancel", turnId: "turn_1" },
+      command: { deliveryId: expect.any(String), kind: "cancel", turnId: "turn_1" },
       continuationToken: "slack:C1:T1",
     });
     expect(runtime.dispatchContinuation).toHaveBeenNthCalledWith(2, {
-      command: { kind: "compact" },
+      command: { deliveryId: expect.any(String), kind: "compact" },
       continuationToken: "slack:C1:T1",
     });
     expect(runtime.dispatchContinuation).toHaveBeenNthCalledWith(3, {
-      command: { kind: "clear" },
+      command: { deliveryId: expect.any(String), kind: "clear" },
       continuationToken: "slack:C1:T1",
     });
     expect(runtime.dispatchContinuation).toHaveBeenNthCalledWith(4, {
-      command: { kind: "reset", reason: "fresh start" },
+      command: { deliveryId: expect.any(String), kind: "reset", reason: "fresh start" },
       continuationToken: "slack:C1:T1",
     });
   });
@@ -167,7 +167,7 @@ describe("createChannelOperations", () => {
 
     expect(runtime.resolveContinuation).toHaveBeenCalledWith("slack:C1:T1");
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
-      command: { kind: "clear" },
+      command: { deliveryId: expect.any(String), kind: "clear" },
       sessionId: "sess_2",
     });
   });

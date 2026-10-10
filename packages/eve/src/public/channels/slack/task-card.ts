@@ -286,13 +286,10 @@ export interface SlackTaskCardState {
 
 const TRACKED_EVENTS = [
   "call.requested",
+  "call.started",
   "call.settled",
-  "task.started",
-  "task.settled",
-  "input.requested",
-  "input.resolved",
-  "authorization.required",
-  "authorization.completed",
+  "interaction.opened",
+  "interaction.settled",
   "turn.settled",
 ] as const;
 
@@ -300,7 +297,7 @@ type TrackedEvent = (typeof TRACKED_EVENTS)[number];
 type TrackedHandler = (
   data: Extract<SessionEvent, { readonly type: TrackedEvent }>["data"],
   channel: SlackEventContext,
-  ctx: Parameters<NonNullable<SlackChannelInternalEvents["task.started"]>>[2],
+  ctx: Parameters<NonNullable<SlackChannelInternalEvents["call.started"]>>[2],
 ) => Promise<void>;
 
 /**
@@ -318,11 +315,21 @@ export function withTaskCards(
     const handler = events[type] as TrackedHandler | undefined;
     wrapped[type] = async (data, channel, ctx) => {
       const event = { data, scope: ctx.scope, type } as SessionEvent;
-      if (event.type === "task.started") await closeSettledCard(channel, event.data, taskCard);
+      if (
+        event.type === "call.started" &&
+        event.data.taskId !== undefined &&
+        ctx.scope?.turnId !== undefined
+      )
+        await closeSettledCard(
+          channel,
+          { callId: event.data.callId, turnId: ctx.scope.turnId },
+          taskCard,
+        );
       const changed = trackTaskCardEvent(
         trackedTurns(channel.state),
         event,
         new Date().toISOString(),
+        ctx.view,
       );
       for (const [turnId, turn] of Object.entries(changed))
         rememberTurn(channel.state, turnId, turn);

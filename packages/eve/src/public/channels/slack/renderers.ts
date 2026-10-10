@@ -15,21 +15,19 @@ type EventData<T extends SessionEvent["type"]> =
 
 /** The session events a Slack renderer can handle, in no particular order. */
 const SLACK_RENDERED_EVENTS = [
-  "approval.candidate",
-  "approval.settled",
-  "authorization.completed",
-  "authorization.required",
   "call.progress",
   "call.requested",
+  "call.started",
   "call.settled",
   "content.completed",
   "content.delta",
   "delivery.settled",
-  "input.requested",
-  "input.resolved",
+  "interaction.opened",
+  "interaction.settled",
   "model.started",
+  "response.settled",
   "session.ended",
-  "task.settled",
+  "task.ended",
   "task.started",
   "turn.paused",
   "turn.settled",
@@ -37,7 +35,7 @@ const SLACK_RENDERED_EVENTS = [
 ] as const;
 
 export type SlackRenderedEvent = (typeof SLACK_RENDERED_EVENTS)[number];
-type SlackSessionEvent = Exclude<SlackRenderedEvent, "authorization.required">;
+type SlackSessionEvent = Exclude<SlackRenderedEvent, "interaction.opened">;
 
 /**
  * Runs the rest of the chain, ending with eve's default. Pass changed data to
@@ -55,19 +53,19 @@ export type SlackRenderHandler<T extends SlackSessionEvent> = (
 ) => void | Promise<void>;
 
 /**
- * Session event handlers of one {@link SlackRenderer}. `authorization.required`
- * receives the private delivery surface, because the challenge is a
- * credential; its `next` reaches eve's default, which posts the public,
- * link-free status.
+ * Session event handlers of one {@link SlackRenderer}. For a sign-in, `interaction.opened`
+ * receives only the private delivery surface, because the challenge is a credential; its
+ * `next` reaches eve's default, which posts the public, link-free status. Any other
+ * `interaction.opened` receives the full channel context.
  */
 export type SlackRendererEvents = {
   readonly [T in SlackSessionEvent]?: SlackRenderHandler<T>;
 } & {
-  readonly "authorization.required"?: (
-    data: EventData<"authorization.required">,
-    channel: SlackAuthorizationEventContext,
+  readonly "interaction.opened"?: (
+    data: EventData<"interaction.opened">,
+    channel: SlackEventContext | SlackAuthorizationEventContext,
     ctx: SessionContext,
-    next: SlackRenderNext<"authorization.required">,
+    next: SlackRenderNext<"interaction.opened">,
   ) => void | Promise<void>;
 };
 
@@ -153,7 +151,7 @@ function composeEvents(
         handlers,
         data,
         (handler, value, next) =>
-          handler(value, userChannel(type, channel as SlackEventContext), ctx, next),
+          handler(value, userChannel(type, channel as SlackEventContext, value), ctx, next),
         (value) => fallback?.(value, channel, ctx),
       );
   }
@@ -191,13 +189,20 @@ async function runChain(
 function userChannel(
   type: SlackRenderedEvent,
   channel: SlackEventContext,
+  data: unknown,
 ): SlackEventContext | SlackAuthorizationEventContext {
-  if (type !== "authorization.required") return channel;
+  if (type !== "interaction.opened" || !isSignIn(data)) return channel;
   return {
     postDirectMessage: (userId, message) => channel.thread.postDirectMessage(userId, message),
     postEphemeral: (userId, message) => channel.thread.postEphemeral(userId, message),
     state: channel.state,
   };
+}
+
+function isSignIn(data: unknown): boolean {
+  return (
+    (data as Partial<EventData<"interaction.opened">> | undefined)?.request?.kind === "sign-in"
+  );
 }
 
 async function composeReceived(

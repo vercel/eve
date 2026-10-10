@@ -478,11 +478,6 @@ function requestedTools(events: readonly SessionStreamEvent[]): readonly ToolReq
   for (const event of events) {
     if (event.type === "call.requested" && event.data.capability.kind === "tool") {
       append(event.data.callId, event.data.capability.name);
-    } else if (event.type === "input.requested") {
-      for (const request of event.data.requests) {
-        const { action } = request;
-        if (action.kind === "tool-call") append(action.callId, action.toolName);
-      }
     }
   }
   return entries;

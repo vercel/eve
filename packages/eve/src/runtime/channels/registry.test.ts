@@ -93,51 +93,6 @@ describe("createRuntimeAdapterRegistry", () => {
       expect(registry.adaptersByKind.get("http")).toEqual({ kind: "http" });
     });
 
-    it("rejects a route-declared subagent adapter that carries an input.requested handler", () => {
-      const offendingAdapter: ChannelAdapter = {
-        kind: SUBAGENT_ADAPTER_KIND,
-        "input.requested": async () => undefined,
-      };
-
-      expect(() =>
-        createRuntimeAdapterRegistry({
-          channels: [
-            makeChannelDefinition(offendingAdapter, {
-              logicalPath: "channels/sneaky.ts",
-              sourceId: "channels/sneaky",
-            }),
-          ],
-        }),
-      ).toThrow(RuntimeRegistryError);
-    });
-
-    it("surfaces the offending route's source location on the rejection", () => {
-      const offendingAdapter: ChannelAdapter = {
-        kind: SUBAGENT_ADAPTER_KIND,
-        "input.requested": async () => undefined,
-      };
-
-      try {
-        createRuntimeAdapterRegistry({
-          channels: [
-            makeChannelDefinition(offendingAdapter, {
-              logicalPath: "channels/sneaky.ts",
-              sourceId: "channels/sneaky",
-            }),
-          ],
-        });
-        throw new Error("expected createRuntimeAdapterRegistry to throw");
-      } catch (error) {
-        expect(error).toBeInstanceOf(RuntimeRegistryError);
-        const registryError = error as RuntimeRegistryError;
-        expect(registryError.registry).toBe("adapter");
-        expect(registryError.entryName).toBe(SUBAGENT_ADAPTER_KIND);
-        expect(registryError.logicalPath).toBe("channels/sneaky.ts");
-        expect(registryError.sourceId).toBe("channels/sneaky");
-        expect(registryError.message).toMatch(/framework|reserved|pass-through/);
-      }
-    });
-
     it("rejects a route-declared http adapter that adds a deliver hook", () => {
       const offendingAdapter: ChannelAdapter = {
         kind: "http",

@@ -1,4 +1,6 @@
 import type { SessionEvent } from "#protocol/session-event.js";
+import { callOutputSource, callTurn } from "#protocol/session-projection/selectors.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
 import type { TaskCancelReason } from "#protocol/message.js";
 import type { CallOutcome, Capability } from "#protocol/session-events/families/call.js";
 import { isTaskControlTool } from "#protocol/task-tools.js";
@@ -90,6 +92,7 @@ export interface TaskCardView {
 interface TrackedCall {
   readonly callId: string;
   readonly name: string;
+  readonly kind?: "agent" | "tool";
   readonly title: string;
   readonly status: TaskCardStatus;
   readonly startedAt: string;
@@ -122,44 +125,32 @@ export function trackTaskCardEvent(
   turns: Readonly<Record<string, TaskCardTurn>>,
   event: SessionEvent,
   at: string,
+  view?: SessionView,
 ): TurnChanges {
   switch (event.type) {
-    case "input.requested": {
-      const { requests, taskId } = event.data;
+    case "interaction.opened": {
+      // Only a task's requests block its card; the turn's own block the turn.
+      const taskId = event.scope?.taskId;
       if (taskId === undefined) return {};
-      const requested = requests.map((request) =>
-        blocker(
-          request.requestId,
-          request.kind === "question" ? "input" : "approval",
-          request.prompt,
-        ),
-      );
-      return updateBlockers(turns, taskId, (open) => [...open, ...requested]);
-    }
-    case "input.resolved": {
-      const resolved = new Set(event.data.resolutions.map((resolution) => resolution.requestId));
-      return updateBlockers(turns, undefined, (open) =>
-        open.filter((item) => !resolved.has(item.id)),
-      );
-    }
-    case "authorization.required": {
-      const { taskId } = event.data;
-      if (taskId === undefined) return {};
-      const id = authorizationId(event.data);
-      const label = event.data.authorization?.displayName ?? event.data.name;
+      const { interactionId, request } = event.data;
+      const signIn = request.kind === "sign-in";
+      const label = signIn
+        ? (request.signIn?.displayName ?? request.signIn?.name ?? request.prompt)
+        : request.prompt;
+      const kind = signIn ? "authorization" : request.kind === "question" ? "input" : "approval";
       return updateBlockers(turns, taskId, (open) => [
-        ...open.filter((item) => item.id !== id),
-        blocker(id, "authorization", label),
+        ...open.filter((item) => item.id !== interactionId),
+        blocker(interactionId, kind, label),
       ]);
     }
-    case "authorization.completed": {
-      const id = authorizationId(event.data);
-      return updateBlockers(turns, event.data.taskId, (open) =>
+    case "interaction.settled": {
+      const id = event.data.interactionId;
+      return updateBlockers(turns, event.scope?.taskId, (open) =>
         open.filter((item) => item.id !== id),
       );
     }
     default: {
-      const changed = trackTurnEvent(turns, event, at);
+      const changed = trackTurnEvent(turns, event, at, view);
       return changed === undefined ? {} : { [changed.turnId]: changed.turn };
     }
   }
@@ -170,14 +161,6 @@ type TrackedBlocker = NonNullable<NonNullable<TrackedCall["task"]>["blockers"]>[
 function blocker(id: string, kind: TaskCardBlocker["kind"], text: string): TrackedBlocker {
   const label = presentationText(text)?.slice(0, MAX_BLOCKER_LABEL_LENGTH);
   return label === undefined ? { id, kind } : { id, kind, label };
-}
-
-function authorizationId(data: {
-  readonly attemptId?: string;
-  readonly candidateId?: string;
-  readonly name: string;
-}): string {
-  return data.attemptId ?? data.candidateId ?? data.name;
 }
 
 /** Applies `update` to the open blockers of each working task call, or only `taskId`'s. */
@@ -207,6 +190,7 @@ function trackTurnEvent(
   turns: Readonly<Record<string, TaskCardTurn>>,
   event: SessionEvent,
   at: string,
+  view?: SessionView,
 ): { readonly turnId: string; readonly turn: TaskCardTurn } | undefined {
   switch (event.type) {
     case "call.requested": {
@@ -222,55 +206,67 @@ function trackTurnEvent(
       return { turn: { ...current, calls: bounded([...current.calls, call]) }, turnId };
     }
     case "call.settled": {
-      const { callId, outcome } = event.data;
+      const { callId, outcome, reason, outputOf } = event.data;
       for (const [turnId, current] of Object.entries(turns)) {
         const call = current.calls.find((candidate) => candidate.callId === callId);
         if (call === undefined) continue;
-        // A task call's result is its receipt; the task settles with `task.settled`.
-        if (call.task !== undefined) return undefined;
+        if (call.status !== "working") return undefined;
         const status = callStatus(outcome);
-        return { turn: replaceCall(current, { ...call, settledAt: at, status }), turnId };
+        const settled: { -readonly [K in keyof TrackedCall]: TrackedCall[K] } = {
+          ...call,
+          settledAt: at,
+          status,
+          title: event.data.title ?? call.title,
+        };
+        if (call.task !== undefined) {
+          const task: {
+            -readonly [K in keyof NonNullable<TrackedCall["task"]>]: NonNullable<
+              TrackedCall["task"]
+            >[K];
+          } = {
+            id: call.task.id,
+            kind: call.task.kind,
+          };
+          const source = view === undefined ? undefined : callOutputSource(view, callId);
+          const summary =
+            taskSummary({
+              status,
+              output: source?.output ?? event.data.output,
+              error: event.data.error,
+            }) ??
+            (outputOf === undefined
+              ? undefined
+              : Object.values(turns)
+                  .flatMap((turn) => turn.calls)
+                  .find((candidate) => candidate.callId === outputOf.callId)?.task?.summary);
+          if (summary !== undefined) task.summary = summary;
+          if (reason === "task_cancel" || reason === "turn_cancelled" || reason === "turn_ended")
+            task.cancelReason = reason;
+          settled.task = task;
+        }
+        return { turn: replaceCall(current, settled), turnId };
       }
       return undefined;
     }
-    case "task.started": {
-      const { callId, kind, name, taskId, turnId } = event.data;
+    case "call.started": {
+      const { callId, taskId } = event.data;
+      if (taskId === undefined) return undefined;
+      const row = view?.calls[callId];
+      const turnId =
+        event.scope?.turnId ??
+        (row === undefined || view === undefined ? undefined : callTurn(view, row));
+      if (turnId === undefined) return undefined;
       const current = turns[turnId] ?? { calls: [], ended: false };
-      const call = current.calls.find((candidate) => candidate.callId === callId) ?? {
-        callId,
-        name,
-        startedAt: at,
-        status: "working",
-        title: displayTitle(name),
+      const call = current.calls.find((candidate) => candidate.callId === callId);
+      if (call === undefined || call.task !== undefined) return undefined;
+      const kind = view?.tasks[taskId]?.kind ?? call.kind;
+      return {
+        turn: replaceCall(current, {
+          ...call,
+          task: { id: taskId, kind: kind === "agent" ? "agent" : "tool" },
+        }),
+        turnId,
       };
-      const started: TrackedCall = {
-        callId: call.callId,
-        name: call.name,
-        startedAt: call.startedAt,
-        status: "working",
-        task: { id: taskId, kind },
-        title: call.title,
-      };
-      return { turn: replaceCall(current, started), turnId };
-    }
-    case "task.settled": {
-      const { callId, status, turnId } = event.data;
-      const current = turns[turnId];
-      const call = current?.calls.find((candidate) => candidate.callId === callId);
-      if (current === undefined || call?.task === undefined) return undefined;
-      const task: {
-        -readonly [K in keyof NonNullable<TrackedCall["task"]>]: NonNullable<
-          TrackedCall["task"]
-        >[K];
-      } = {
-        id: call.task.id,
-        kind: call.task.kind,
-      };
-      const summary = taskSummary(event.data);
-      if (summary !== undefined) task.summary = summary;
-      const cancelReason = event.data.cancel?.reason;
-      if (cancelReason !== undefined) task.cancelReason = cancelReason;
-      return { turn: replaceCall(current, { ...call, settledAt: at, status, task }), turnId };
     }
     case "turn.settled": {
       const current = turns[event.data.turnId];
@@ -337,6 +333,7 @@ function requestedCall(
   const call: { -readonly [K in keyof TrackedCall]: TrackedCall[K] } = {
     callId,
     name: capability.name,
+    kind: capability.kind === "agent" ? "agent" : "tool",
     startedAt: at,
     status: "working",
     title: capability.title ?? displayTitle(capability.name),

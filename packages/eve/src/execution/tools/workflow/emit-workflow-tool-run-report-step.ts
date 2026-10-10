@@ -8,7 +8,14 @@ import type {
   WorkflowToolRunRef,
 } from "#execution/tools/workflow/messages.js";
 import { callProgress } from "#harness/call-facts.js";
-import { createAgentStartedEvent } from "#protocol/message.js";
+import { readDurableSession } from "#execution/durable-session-store.js";
+import { storedProjection } from "#harness/session-machine/view.js";
+import { recordRemoteChildBinding, type RemoteChildBinding } from "#execution/child-binding.js";
+import type { SessionEvent } from "#protocol/session-event.js";
+import {
+  createEveSessionStreamRoutePath,
+  createEveSubagentStreamRoutePath,
+} from "#protocol/routes.js";
 import type { JsonValue } from "#shared/json.js";
 
 /** Publishes a workflow tool run's `ctx.report()` update as the call's progress. */
@@ -20,11 +27,20 @@ export async function emitWorkflowToolRunReportStep(
 ): Promise<SessionStateTransition> {
   "use step";
 
-  const event = callProgress(input.from.callId, input.update);
-  return await withSessionStateDelta(input, (target) => publishSessionEvents(target, [event]));
+  // A run's last report can arrive after its call settled, as when its outcome came first or its
+  // turn ended: nobody reads progress for a settled call, so it's dropped.
+  const { view } = storedProjection(readDurableSession(input.sessionState).state);
+  const call = view?.calls[input.from.callId];
+  const settled = view !== undefined && (call === undefined || call.status === "settled");
+  const events = settled ? [] : [callProgress(input.from.callId, input.update)];
+  return await withSessionStateDelta(input, (target) => publishSessionEvents(target, events));
 }
 
-/** Publishes `agent.started`, in order, for sessions workflow tool runs opened. */
+/**
+ * Links the sessions workflow tool runs opened, in order: each `child.opened` names the call
+ * whose run opened it and the route that serves its stream. A remote child's binding, which
+ * names its deployment and credential resolver, goes to a private side stream first.
+ */
 export async function emitAgentStartedStep(
   input: SessionStepState & {
     readonly messages: readonly WorkflowToolRunAgentStartedMessage[];
@@ -32,22 +48,41 @@ export async function emitAgentStartedStep(
 ): Promise<SessionStateTransition> {
   "use step";
 
-  const events = input.messages.map(({ from, session }) =>
-    createAgentStartedEvent({
-      callId: from.callId,
-      name: session.name,
-      parentSessionId: input.sessionState.sessionId,
-      remote:
-        session.kind === "remote"
-          ? {
-              url: session.url,
-              ...(session.resolverId !== undefined && { resolverId: session.resolverId }),
-            }
-          : undefined,
-      sessionId: session.sessionId,
-      ...(from.taskId !== undefined && { taskId: from.taskId }),
-      turnId: from.turnId,
-    }),
-  );
+  const parentSessionId = input.sessionState.sessionId;
+  const events: SessionEvent[] = [];
+  for (const { from, session } of input.messages) {
+    const stream =
+      session.kind === "remote"
+        ? createEveSubagentStreamRoutePath({
+            callId: from.callId,
+            childSessionId: session.sessionId,
+            parentSessionId,
+          })
+        : createEveSessionStreamRoutePath(session.sessionId);
+    if (session.kind === "remote") {
+      const binding: { -readonly [K in keyof RemoteChildBinding]: RemoteChildBinding[K] } = {
+        callId: from.callId,
+        childSessionId: session.sessionId,
+        name: session.name,
+        streamPath: stream,
+        url: session.url,
+      };
+      if (session.resolverId !== undefined) binding.resolverId = session.resolverId;
+      if (session.earlierProtocol !== undefined) binding.earlierProtocol = session.earlierProtocol;
+      await recordRemoteChildBinding(parentSessionId, binding);
+    }
+    const scope: { turnId: string; taskId?: string } = { turnId: from.turnId };
+    if (from.taskId !== undefined) scope.taskId = from.taskId;
+    events.push({
+      data: {
+        name: session.name,
+        owner: { callId: from.callId },
+        sessionId: session.sessionId,
+        stream,
+      },
+      scope,
+      type: "child.opened",
+    });
+  }
   return await withSessionStateDelta(input, (target) => publishSessionEvents(target, events));
 }

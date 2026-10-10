@@ -153,13 +153,11 @@ export interface TelegramChannelEvents {
   readonly "call.settled"?: TelegramEventHandler<"call.settled">;
   readonly "content.completed"?: TelegramEventHandler<"content.completed">;
   readonly "content.delta"?: TelegramEventHandler<"content.delta">;
-  readonly "input.requested"?: TelegramEventHandler<"input.requested">;
-  readonly "input.resolved"?: TelegramEventHandler<"input.resolved">;
+  readonly "interaction.opened"?: TelegramEventHandler<"interaction.opened">;
+  readonly "interaction.settled"?: TelegramEventHandler<"interaction.settled">;
   readonly "turn.settled"?: TelegramEventHandler<"turn.settled">;
   readonly "session.ended"?: TelegramEventHandler<"session.ended">;
   readonly "delivery.settled"?: TelegramEventHandler<"delivery.settled">;
-  readonly "authorization.required"?: TelegramEventHandler<"authorization.required">;
-  readonly "authorization.completed"?: TelegramEventHandler<"authorization.completed">;
 }
 
 /** Configuration for {@link telegramChannel}. */

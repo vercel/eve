@@ -2,6 +2,7 @@ import { storedProjection } from "#harness/session-machine/view.js";
 import { openInputs } from "#protocol/session-projection.js";
 import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
 import type {
+  ControlOrigin,
   SessionControl,
   SessionInputQueue,
   TurnSelection,
@@ -13,7 +14,7 @@ import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.
 
 export type NextTurnInstruction =
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage }
-  | { readonly kind: SessionControl }
+  | { readonly kind: SessionControl; readonly origin?: ControlOrigin }
   | { readonly kind: "closed" }
   | { readonly kind: "cancel-turn" }
   /** `session.cancel()` while no turn runs, but tasks are working. */
@@ -38,7 +39,10 @@ export async function nextTurnDelivery(input: {
     const selected = queue.takeNext({
       freshSequence: inbox.hasPending() ? undefined : freshSequence,
     });
-    if (selected?.kind === "control") return { kind: selected.control };
+    if (selected?.kind === "control")
+      return selected.origin === undefined
+        ? { kind: selected.control }
+        : { kind: selected.control, origin: selected.origin };
     if (selected?.kind === "turn") {
       const routed = await routeSelectedDelivery(selected, cursor);
       if (routed.kind === "cancel-turn") return routed;

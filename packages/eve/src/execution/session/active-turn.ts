@@ -1,3 +1,4 @@
+import type { ControlOrigin } from "#execution/session/input-queue.js";
 import type { DeliverHookPayload, TurnCaller } from "#channel/types.js";
 import { mapHeldInputResponsesStep } from "#execution/proxied-deliver-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
@@ -47,6 +48,8 @@ export class ActiveTurn {
   private readonly mappedForHeldRequest = new Set<number>();
   private readonly runtimeResults: RuntimeEvent[] = [];
   private readonly controller: AbortController;
+  /** The cancel control that stopped this turn, when it named its delivery. */
+  #cancelledBy: ControlOrigin | undefined;
   private readonly expectedTurnId: string;
   private readonly input: SessionExecutionInput;
   /** Who alone steers the turn: its principal, or its delegated caller. */
@@ -253,7 +256,10 @@ export class ActiveTurn {
         this.runtimeResults.push({ kind: "workflow", message: admitted.message });
         return false;
       case "cancel":
-        if (this.cancelsThisTurn(value)) this.abort();
+        if (this.cancelsThisTurn(value)) {
+          this.#cancelledBy ??= admitted.origin;
+          this.abort();
+        }
         return false;
       case "consumed":
         return value.kind === "authorization-callback";
@@ -292,6 +298,11 @@ export class ActiveTurn {
       if (isSteeringMessage(routed.remainder, this.identity)) steered = true;
     }
     return steered;
+  }
+
+  /** The cancel control that stopped this turn, when it named its delivery. */
+  get cancelledBy(): ControlOrigin | undefined {
+    return this.#cancelledBy;
   }
 
   private abort(): void {

@@ -30,7 +30,11 @@ import {
   upsertMessage,
 } from "#client/message-reducer-primitives.js";
 import { messageRun } from "#client/message-run-parts.js";
-import type { AuthorizationCompletedStreamEvent } from "#protocol/message.js";
+import {
+  signInOutcomeOf,
+  signInPromptOf,
+  type SignInSettlement,
+} from "#channel/interaction-prompts.js";
 import { actionLabel } from "#shared/action-label.js";
 import {
   foldSession,
@@ -264,43 +268,50 @@ function reduceContent(
       );
     }
 
-    case "input.requested": {
-      let next = data;
-      for (const request of event.data.requests) {
-        const existing = findToolPart(next, request.action.callId);
-        if (
-          existing?.approval?.id === request.requestId ||
-          (existing !== undefined && isSettledToolPart(existing))
-        ) {
-          continue;
-        }
-        const descriptor = normalizeActionRequest(request.action);
-        next = updateAssistantMessage(next, event.data.turnId, (message) =>
-          upsertPart(ensureStepStartPart(message, event.data.stepIndex), {
-            ...existing,
-            approval: { id: request.requestId },
-            input: request.action.input,
-            state: "approval-requested",
-            stepIndex: existing?.stepIndex ?? event.data.stepIndex,
-            toolCallId: request.action.callId,
-            toolMetadata: createToolMetadata(descriptor, {
-              inputRequest: toMessageInputRequest(request),
-              label: existing?.toolMetadata?.eve?.label ?? actionLabel(request.action, undefined),
-            }),
-            toolName: descriptor.toolName,
-            type: "dynamic-tool",
-          } as EveDynamicToolPart),
+    case "interaction.opened": {
+      const { interactionId } = event.data;
+      if (event.data.request.kind === "sign-in") {
+        const prompt = signInPromptOf(event.data, event.scope);
+        const attempt = after.authorizations[interactionId];
+        if (prompt === undefined || attempt === undefined) return data;
+        return updateAssistantMessage(data, attempt.turnId, (message) =>
+          upsertPart(
+            ensureStepStartPart(message, attempt.stepIndex),
+            createAuthorizationRequiredPart(prompt, attempt),
+          ),
         );
       }
-      return next;
+      const opened = after.inputs[interactionId];
+      if (opened === undefined) return data;
+      const { request } = opened;
+      const existing = findToolPart(data, request.action.callId);
+      if (
+        existing?.approval?.id === request.requestId ||
+        (existing !== undefined && isSettledToolPart(existing))
+      ) {
+        return data;
+      }
+      const descriptor = normalizeActionRequest(request.action);
+      return updateAssistantMessage(data, opened.turnId, (message) =>
+        upsertPart(ensureStepStartPart(message, opened.stepIndex), {
+          ...existing,
+          approval: { id: request.requestId },
+          input: existing?.input ?? request.action.input,
+          state: "approval-requested",
+          stepIndex: existing?.stepIndex ?? opened.stepIndex,
+          toolCallId: request.action.callId,
+          toolMetadata: createToolMetadata(descriptor, {
+            inputRequest: toMessageInputRequest(request),
+            label: existing?.toolMetadata?.eve?.label ?? actionLabel(request.action, undefined),
+          }),
+          toolName: existing?.toolName ?? descriptor.toolName,
+          type: "dynamic-tool",
+        } as EveDynamicToolPart),
+      );
     }
 
     case "call.settled": {
       const { callId } = event.data;
-      // A task's call settles through its task; its own result was the start receipt.
-      if (before.calls[callId]?.taskId !== undefined && event.scope?.taskId === undefined) {
-        return data;
-      }
       // A retried model-call attempt's calls may never have run; the replacement re-requests them.
       if (event.data.outcome === "abandoned") {
         return removeToolPart(data, callId);
@@ -324,9 +335,15 @@ function reduceContent(
         toolName: existing?.toolName ?? call?.name ?? "unknown",
         type: "dynamic-tool" as const,
       };
+      const output =
+        event.data.output !== undefined
+          ? event.data.output
+          : event.data.outputOf === undefined
+            ? undefined
+            : findToolPart(data, event.data.outputOf.callId)?.output;
       const outcome =
         event.data.outcome === "completed"
-          ? { errorText: undefined, output: event.data.output }
+          ? { errorText: undefined, output }
           : {
               errorText: event.data.error?.message ?? stringifyUnknown(event.data.output),
               output: undefined,
@@ -356,45 +373,33 @@ function reduceContent(
       } as EveDynamicToolPart);
     }
 
-    case "input.resolved": {
-      let next = data;
-      for (const { requestId, response } of event.data.resolutions) {
-        const existing =
-          response === undefined ? undefined : findToolPartByApprovalId(next, requestId);
-        if (existing === undefined) continue;
-        next = replaceToolPart(next, {
-          ...existing,
-          toolMetadata: mergeToolMetadata(existing.toolMetadata, {
-            eve: {
-              inputResponse: response,
-              kind: existing.toolMetadata?.eve?.kind ?? "unknown",
-              name: existing.toolMetadata?.eve?.name ?? existing.toolName,
-            },
-          }),
-        });
+    case "interaction.settled": {
+      const { interactionId, outcome, reason } = event.data;
+      const attempt = before.authorizations[interactionId];
+      if (attempt !== undefined) {
+        const settled: { -readonly [K in keyof SignInSettlement]: SignInSettlement[K] } = {
+          attemptId: interactionId,
+          name: attempt.name,
+          outcome: signInOutcomeOf(outcome),
+        };
+        if (reason !== undefined) settled.reason = reason;
+        return completeAuthorization(data, settled, attempt);
       }
-      return next;
-    }
-
-    // A task's outcome is its call's: the call's `action.result` was only the start receipt.
-    case "task.settled": {
-      const existing = findToolPart(data, event.data.callId);
+      const response = after.inputs[interactionId]?.response;
+      const existing =
+        response === undefined ? undefined : findToolPartByApprovalId(data, interactionId);
       if (existing === undefined) return data;
-      const { error, output, status } = event.data;
-      const outcome = status === "completed" ? { output } : { errorText: error?.message };
-      return replaceToolPart(data, { ...existing, ...outcome } as EveDynamicToolPart);
+      return replaceToolPart(data, {
+        ...existing,
+        toolMetadata: mergeToolMetadata(existing.toolMetadata, {
+          eve: {
+            inputResponse: response,
+            kind: existing.toolMetadata?.eve?.kind ?? "unknown",
+            name: existing.toolMetadata?.eve?.name ?? existing.toolName,
+          },
+        }),
+      });
     }
-
-    case "authorization.required":
-      return updateAssistantMessage(data, event.data.turnId, (message) =>
-        upsertPart(
-          ensureStepStartPart(message, event.data.stepIndex),
-          createAuthorizationRequiredPart(event),
-        ),
-      );
-
-    case "authorization.completed":
-      return completeAuthorization(data, event);
 
     case "turn.settled": {
       // A failed turn that streamed nothing has no message to finalize. Otherwise finalize what
@@ -430,15 +435,10 @@ function toolCallIds(data: EveMessageData, event: EveAgentReducerEvent): readonl
     case "call.settled":
     case "call.progress":
       return [event.data.callId];
-    case "input.requested":
-      return event.data.requests.map((request) => request.action.callId);
-    case "task.started":
-    case "task.settled":
-      return [event.data.callId];
-    case "input.resolved":
-      return event.data.resolutions.flatMap((resolution) => byRequest(resolution.requestId));
-    case "approval.settled":
-      return [byRequest(event.data.requestId)].flat();
+    case "interaction.opened":
+      return "callId" in event.data.subject ? [event.data.subject.callId] : [];
+    case "interaction.settled":
+      return [byRequest(event.data.interactionId)].flat();
     default:
       return [];
   }
@@ -609,12 +609,13 @@ function replaceToolPart(data: EveMessageData, next: EveDynamicToolPart): EveMes
 
 function completeAuthorization(
   data: EveMessageData,
-  event: AuthorizationCompletedStreamEvent,
+  settled: SignInSettlement,
+  place: { readonly turnId: string; readonly stepIndex: number },
 ): EveMessageData {
-  const existing = findPendingAuthorizationPart(data, event.data.name, event.data.attemptId);
-  const next = createAuthorizationCompletedPart(event, existing);
+  const existing = findPendingAuthorizationPart(data, settled.name, settled.attemptId);
+  const next = createAuthorizationCompletedPart(settled, place, existing);
 
-  const turnId = existing?.turnId ?? event.data.turnId;
+  const turnId = existing?.turnId ?? place.turnId;
   return updateAssistantMessage(data, turnId, (message) =>
     upsertPart(ensureStepStartPart(message, next.stepIndex), next),
   );

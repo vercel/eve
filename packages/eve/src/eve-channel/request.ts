@@ -30,11 +30,8 @@ import {
   REMOTE_AGENT_PROTOCOL_MISMATCH,
   REMOTE_AGENT_PROTOCOL_VERSION,
   readRemoteAgentProtocolVersion,
+  servesRemoteAgentCaller,
 } from "#protocol/remote-agent-protocol.js";
-import {
-  LEGACY_REMOTE_AGENT_PROTOCOL_VERSION,
-  splitLegacyTaskFields,
-} from "#execution/legacy-remote-agent/protocol.js";
 import {
   collectUploadPolicyViolations,
   formatUploadPolicyViolation,
@@ -69,8 +66,7 @@ export async function deriveOperationContinuationToken(input: {
 }
 
 export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBody | Response {
-  const legacy = splitLegacyTaskFields(input);
-  const { payload } = legacy;
+  const payload = withoutLegacyTaskId(input);
   if (payload.inputResponses !== undefined) {
     return Response.json(
       { error: "'inputResponses' is only accepted for an existing session.", ok: false },
@@ -131,9 +127,6 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
   if (message !== undefined) result.message = message;
   if (typeof rawOperationId === "string") result.operationId = rawOperationId;
   if (protocolVersion !== undefined) result.protocolVersion = protocolVersion;
-  if (protocolVersion === LEGACY_REMOTE_AGENT_PROTOCOL_VERSION) {
-    result.legacyRemoteAgentCaller = legacy.taskId === undefined ? {} : { taskId: legacy.taskId };
-  }
   return result;
 }
 
@@ -149,7 +142,7 @@ interface ParsedSessionMessageBody {
 export function parseSessionMessageBody(
   input: Record<string, unknown>,
 ): ParsedSessionMessageBody | Response {
-  const { payload } = splitLegacyTaskFields(input);
+  const payload = input;
   if (Object.hasOwn(payload, "stubs")) {
     return Response.json(
       { ok: false, error: "Tool stubs are fixed at session creation." },
@@ -374,6 +367,17 @@ function parseCallbackField(value: unknown): SessionCallback | Response | undefi
   return Response.json({ error: parsed.message, ok: false }, { status: 400 });
 }
 
+/**
+ * An eve 0.66–0.68 caller names the background task it delegates from as `callback.taskId`. This
+ * deployment never relays to such a caller, so the task id has no reader and is dropped.
+ */
+function withoutLegacyTaskId(input: Record<string, unknown>): Record<string, unknown> {
+  const { callback } = input;
+  if (callback === null || typeof callback !== "object" || !("taskId" in callback)) return input;
+  const { taskId: _taskId, ...rest } = callback;
+  return { ...input, callback: rest };
+}
+
 /** Delegating callers must speak a remote agent protocol this deployment serves. */
 function parseProtocolVersionField(value: unknown): number | Response {
   // Only an absent version means protocol 1; 0.66–0.68 callers omit the field.
@@ -384,12 +388,7 @@ function parseProtocolVersionField(value: unknown): number | Response {
     );
   }
   const callerVersion = readRemoteAgentProtocolVersion(value);
-  if (
-    callerVersion === REMOTE_AGENT_PROTOCOL_VERSION ||
-    callerVersion === LEGACY_REMOTE_AGENT_PROTOCOL_VERSION
-  ) {
-    return callerVersion;
-  }
+  if (servesRemoteAgentCaller(callerVersion)) return callerVersion;
   return Response.json(
     {
       code: REMOTE_AGENT_PROTOCOL_MISMATCH,

@@ -36,7 +36,12 @@ import type {
   WebhookOptions,
 } from "#compiled/chat/index.js";
 import { Chat, Message, ThreadImpl } from "#compiled/chat/index.js";
-import { defaultAuthorizationEvents } from "#public/channels/chat-sdk/authorization.js";
+import { settleChatSdkSignIn, showChatSdkSignIn } from "#public/channels/chat-sdk/authorization.js";
+import {
+  requestSettlementOf,
+  signInPromptOf,
+  signInSettlementOf,
+} from "#channel/interaction-prompts.js";
 import { parseChatSdkFileRef } from "#public/channels/chat-sdk/attachment-refs.js";
 import { decodeInputAction, renderInputRequests } from "#public/channels/chat-sdk/input-actions.js";
 import { DEFAULT_UPLOAD_POLICY } from "#public/channels/upload-policy.js";
@@ -382,7 +387,7 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
   inputActionPrefix: string,
 ): ChatSdkChannelEvents<TAdapters> {
   type EventChannel = Parameters<
-    NonNullable<ChatSdkChannelEvents<TAdapters>["input.requested"]>
+    NonNullable<ChatSdkChannelEvents<TAdapters>["interaction.opened"]>
   >[1];
 
   async function showPrompt(channel: EventChannel, request: InputRequest) {
@@ -436,7 +441,6 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
 
   const prompts = promptQueueEvents(showPrompt);
   return {
-    ...defaultAuthorizationEvents(),
     async "turn.started"(_event, channel, _ctx) {
       channel.state.pendingToolCallMessage = null;
       clearStream(channel.state);
@@ -484,11 +488,19 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
     },
     // Some adapters show only text, where a reply can answer only the request
     // it sees, so cards post one at a time.
-    ...prompts,
+    async "interaction.opened"(data, channel, ctx) {
+      await prompts["interaction.opened"](data, channel, ctx);
+      const signIn = signInPromptOf(data, ctx.scope);
+      if (signIn !== undefined) await showChatSdkSignIn(signIn, channel);
+    },
     // Covers every way a request ends: a press, a typed answer, or a withdrawal.
-    async "input.resolved"(event, channel, _ctx) {
-      await clearAnsweredCards(event, channel);
-      await prompts["input.resolved"](event, channel);
+    async "interaction.settled"(data, channel, ctx) {
+      const signIn = signInSettlementOf(ctx.view, data);
+      if (signIn !== undefined) await settleChatSdkSignIn(signIn, channel);
+      const resolution = requestSettlementOf(ctx.view, data);
+      if (resolution !== undefined)
+        await clearAnsweredCards({ resolutions: [resolution] }, channel);
+      await prompts["interaction.settled"](data, channel, ctx);
     },
     async "content.completed"(event, channel, _ctx) {
       if (event.kind !== "text") return;

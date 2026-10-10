@@ -1,5 +1,6 @@
 import { errorHintOf, replyTextOf } from "#public/channels/reply.js";
 import { promptQueueEvents } from "#channel/prompt-queue.js";
+import { signInPromptOf, signInSettlementOf } from "#channel/interaction-prompts.js";
 import { renderTextInputRequest } from "#channel/resolve-text.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
@@ -74,6 +75,11 @@ export function defaultOnVoiceTranscription(
   };
 }
 
+// SMS has no buttons, so a reply can only answer the request it sees.
+const prompts = promptQueueEvents((channel: TwilioEventContext, request: InputRequest) =>
+  showPrompt(channel, request),
+);
+
 /** Built-in Twilio event handlers for text delivery, sign-ins, and terminal errors. */
 export const defaultEvents: TwilioChannelEvents = {
   async "content.completed"(event, channel, _ctx) {
@@ -82,12 +88,12 @@ export const defaultEvents: TwilioChannelEvents = {
     await channel.twilio.sendMessage(text);
   },
 
-  // SMS has no buttons, so a reply can only answer the request it sees.
-  ...promptQueueEvents(showPrompt),
-
   // An SMS thread is one person's, so the link and code can go in the message.
-  async "authorization.required"(event, channel, _ctx) {
-    if (event.candidateId !== undefined) return;
+  async "interaction.opened"(data, channel, ctx) {
+    await prompts["interaction.opened"](data, channel, ctx);
+    const event = signInPromptOf(data, ctx.scope);
+    if (event === undefined) return;
+    if (event.responseId !== undefined) return;
     const challenge = event.authorization;
     await channel.twilio.sendMessage(
       [
@@ -101,8 +107,11 @@ export const defaultEvents: TwilioChannelEvents = {
     );
   },
 
-  async "authorization.completed"(event, channel, _ctx) {
-    if (event.candidateId !== undefined) return;
+  async "interaction.settled"(data, channel, ctx) {
+    await prompts["interaction.settled"](data, channel, ctx);
+    const event = signInSettlementOf(ctx.view, data);
+    if (event === undefined) return;
+    if (event.responseId !== undefined) return;
     await channel.twilio.sendMessage(
       renderAuthorizationOutcome({
         displayName: event.authorization?.displayName ?? displayProperName(event.name),

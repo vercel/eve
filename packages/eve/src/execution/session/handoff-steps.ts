@@ -1,5 +1,5 @@
 import { queuedInput, storedProjection } from "#harness/session-machine/view.js";
-import { openInputs, openSignIns } from "#protocol/session-projection.js";
+import { openRequests, waitsOnSignIn } from "#protocol/session-projection.js";
 import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { holdsHitlRequests } from "#harness/hitl/index.js";
 import {
@@ -52,8 +52,8 @@ export function isSessionStateIdleForHandoff(input: {
   return (
     workflowToolRuns.length === 0 &&
     projection.activeTurnId === undefined &&
-    openInputs(projection).length === 0 &&
-    openSignIns(projection).length === 0 &&
+    openRequests(projection.view).length === 0 &&
+    !waitsOnSignIn(projection.view) &&
     queuedInput(state) === undefined
   );
 }

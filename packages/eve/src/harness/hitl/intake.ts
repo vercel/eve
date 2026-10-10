@@ -15,7 +15,7 @@ import { prepareTurnInput } from "#harness/step/intake.js";
 import { placeTurnInput } from "#harness/step/prompt.js";
 import { SessionLimitDeclinedError, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { bumpSessionRuntimeUsageLimits } from "#harness/turn-tag-state.js";
-import type { HarnessToolLookup, StepInput, StepResult } from "#harness/types.js";
+import type { HarnessToolLookup, HarnessStepInput, StepResult } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import {
   answer,
@@ -45,9 +45,9 @@ export type HumanInputIntake =
   | { readonly kind: "stop"; readonly result: StepResult }
   | {
       readonly kind: "run";
-      readonly input: StepInput | undefined;
+      readonly input: HarnessStepInput | undefined;
       /** The message the turn receives, as the stream shows it. */
-      readonly message?: StepInput["message"];
+      readonly message?: HarnessStepInput["message"];
       /** A plain-text answer consumed the message, so the model never reads it. */
       readonly consumedMessage: boolean;
       /** The delivery carries input for a turn. */
@@ -72,7 +72,7 @@ export interface ApprovedWork {
  */
 export async function acceptHumanInput(
   step: Step,
-  input: StepInput | undefined,
+  input: HarnessStepInput | undefined,
   options: { readonly takeQueued: boolean },
 ): Promise<HumanInputIntake> {
   const { config, ctx } = step;
@@ -144,6 +144,11 @@ export async function acceptHumanInput(
       challengesAtStart,
     },
     takeQueued: delivered.takeQueued,
+    // Every answer the delivery carried, typed or pressed, before any pass consumed it.
+    submitted: [
+      ...(steered?.responseBindings ?? []),
+      ...(coordinated.stepInput?.responseBindings ?? []),
+    ],
   });
   for (const batch of decision.resolved) {
     await step.instrumentation?.publishInputResolutions({
@@ -391,8 +396,8 @@ function held(step: Step): StepResult {
  */
 async function withdrawSteeredSignIns(
   step: Step,
-  input: StepInput | undefined,
-): Promise<StepInput | undefined> {
+  input: HarnessStepInput | undefined,
+): Promise<HarnessStepInput | undefined> {
   const names = [...new Set(step.view().signIns.map((challenge) => challenge.name))];
   step.session = {
     ...step.session,
@@ -413,7 +418,7 @@ async function withdrawSteeredSignIns(
 }
 
 /** Whether the input carries user-facing turn input. */
-function hasTurnInput(input: StepInput | undefined): boolean {
+function hasTurnInput(input: HarnessStepInput | undefined): boolean {
   if (input === undefined) return false;
   return input.message !== undefined || (input.inputResponses?.length ?? 0) > 0;
 }

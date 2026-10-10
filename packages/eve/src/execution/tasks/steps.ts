@@ -42,7 +42,12 @@ import type {
 import { workflowToolRunFailureOutput } from "#execution/tools/workflow/owner-inbox.js";
 import { readHitlState } from "#harness/hitl/index.js";
 import type { Transition } from "#harness/session-machine/commit.js";
-import { delegatedUsageFact, finishRun, settleTask } from "#harness/session-machine/transitions.js";
+import {
+  delegatedUsageFact,
+  endTask,
+  finishRun,
+  settleTask,
+} from "#harness/session-machine/transitions.js";
 import type { SessionView } from "#harness/session-machine/view.js";
 import { stopRuns, waitedCallRuns, type RunStopTarget } from "#execution/stop-runs.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
@@ -86,6 +91,7 @@ async function applyTaskRunMessage(
       break;
     }
     case "reply": {
+      if (findTask(table, taskId)?.run?.runId !== message.from.runId) break;
       ({ session, table, spend } = countTaskRunUsage(session, table, taskId, message));
       const outcome: TaskOutcome = { output: message.output, status: "completed" };
       const record = findTask(table, taskId);
@@ -98,22 +104,59 @@ async function applyTaskRunMessage(
       ({ session, table, spend } = countTaskRunUsage(session, table, taskId, message));
       break;
     case "outcome": {
+      if (findTask(table, taskId)?.run?.runId !== message.from.runId) break;
       ({ session, table, spend } = countTaskRunUsage(session, table, taskId, message));
       const outcome = toOutcome(message);
       const record = findTask(table, taskId);
       const settled = settleRemainingTaskCalls(table, taskId, outcome);
       settles.push(...taskSettled(record, settled.settled, outcome));
-      table = finishTaskRun(settled.table, taskId, message.from.runId);
-      // Nobody can answer what a finished run relayed, so channels stop offering it.
+      // The run's final spend lands while its task is still open, before `task.ended`.
+      if (spend !== undefined)
+        settles.push(spent([...settles], message.from.callId, spend, taskId));
+      spend = undefined;
+      // Nobody can answer what a finished run relayed, so channels stop offering it. The
+      // withdrawals commit first, so the task's own end leaves them alone.
       const requestIds = runRequestIds(session, message.from.runId);
       withdraws.push((view) => finishRun(view, { requestIds, taskId }));
+      const closedCallIds = settled.settled.map((call) => call.callId);
+      settles.push((view) => endTask(view, { closedCallIds, outcome, taskId }));
+      table = finishTaskRun(settled.table, taskId, message.from.runId);
       break;
     }
   }
   return await commitTaskDecisions(input, saveTable(input.sessionState, session, table), {
-    settles: spend === undefined ? settles : [...settles, spendOf(settles, spend, message, taskId)],
+    settles:
+      spend === undefined
+        ? settles
+        : [...settles, spent(settles, message.from.callId, spend, taskId)],
     withdraws,
   });
+}
+
+/**
+ * Delegated spend, owned by the call this commit settles. One reply may settle several calls
+ * with the same result; its spend belongs once to the latest served call (the message's
+ * source), never once per recipient. A serve body can keep spending after it replied or while
+ * cancellation unwinds: no open call owns that, and an immutable settlement can't be amended,
+ * so it is the task's own `delegated-late` usage.
+ */
+function spendFact(
+  events: readonly SessionEvent[],
+  sourceCallId: string | undefined,
+  spend: TokenUsage,
+  taskId: string,
+): SessionEvent {
+  const settled = events.filter((event) => event.type === "call.settled");
+  const call = settled.find((event) => event.data.callId === sourceCallId) ?? settled[0];
+  const turnId = call?.scope?.turnId;
+  if (call !== undefined && turnId !== undefined) {
+    return delegatedUsageFact(call.data.callId, spend, { turnId });
+  }
+  return {
+    type: "usage.recorded",
+    data: { kind: "delegated-late", usage: spend },
+    scope: { taskId },
+  };
 }
 
 /**
@@ -186,7 +229,17 @@ async function cancelTasks(
     (next, { runId, taskId }) => finishTaskRun(next, taskId, runId),
     readTaskTable(current.state),
   );
-  return { ...committed, sessionState: saveTable(committed.sessionState, current, finished) };
+  // A task whose run is forgotten ends now: nothing will report its outcome.
+  const ended = forgotten.map(
+    ({ taskId }): Decision =>
+      (view) =>
+        endTask(view, { outcome: { reason: input.reason, status: "cancelled" }, taskId }),
+  );
+  return await commitSessionStep(
+    { ...input, ...committed, sessionState: saveTable(committed.sessionState, current, finished) },
+    (view) => ended.map((decide) => decide(view)),
+    { origin: "own" },
+  );
 }
 
 /** A transition a task step decides against the session it commits to. */
@@ -213,35 +266,24 @@ async function commitTaskDecisions(
   );
 }
 
-/**
- * The spend a task run's message reports, as a fact after the calls it settles. One reply may
- * settle several calls with the same result: its spend belongs once to the latest served call
- * (the message's source), never once per recipient. A serve body can keep spending after it
- * replied or while cancellation unwinds; no open call owns that late spend, and an immutable
- * settlement can't be amended, so it is recorded on the task.
- */
-function spendOf(
+/** The spend a task run's message reports, as a fact after the calls `settles` settle. */
+function spent(
   settles: readonly Decision[],
+  sourceCallId: string | undefined,
   spend: TokenUsage,
-  message: TaskRunMessage,
   taskId: string,
 ): Decision {
-  return (view) => {
-    const settled = settles
-      .flatMap((decide) => decide(view).events)
-      .filter((event) => event.type === "call.settled");
-    const call = settled.find((event) => event.data.callId === message.from.callId) ?? settled[0];
-    const turnId = call?.scope?.turnId;
-    const fact: SessionEvent =
-      call !== undefined && turnId !== undefined
-        ? delegatedUsageFact(call.data.callId, spend, { turnId })
-        : {
-            data: { kind: "delegated-late", usage: spend },
-            scope: { taskId },
-            type: "usage.recorded",
-          };
-    return { events: [fact], turn: view.turn };
-  };
+  return (view) => ({
+    events: [
+      spendFact(
+        settles.flatMap((decide) => decide(view).events),
+        sourceCallId,
+        spend,
+        taskId,
+      ),
+    ],
+    turn: view.turn,
+  });
 }
 
 /** Settles a task's settled calls; calls only settle on a known task. */

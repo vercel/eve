@@ -172,14 +172,17 @@ describe("startRemoteAgentSession", () => {
   });
 
   it("carries a replay-stable operation id so the receiver can create once", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(
-        Response.json(
-          { ok: true, protocolVersion: 2, sessionId: "remote-session", status: "accepted" },
-          { status: 202 },
-        ),
-      );
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json(
+        {
+          ok: true,
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
+          sessionId: "remote-session",
+          status: "accepted",
+        },
+        { status: 202 },
+      ),
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     await startRemoteAgentSession({
@@ -195,7 +198,7 @@ describe("startRemoteAgentSession", () => {
     });
   });
 
-  it("accepts an unversioned (protocol 1) remote's create response", async () => {
+  it("accepts an unversioned (protocol 1) remote's create response and names its protocol", async () => {
     vi.stubGlobal(
       "fetch",
       vi
@@ -212,7 +215,7 @@ describe("startRemoteAgentSession", () => {
         remote: createRemoteAgent(),
         session: { continuationToken: "eve:parent-token" },
       }),
-    ).resolves.toEqual({ sessionId: "legacy-session" });
+    ).resolves.toEqual({ earlierProtocol: 1, sessionId: "legacy-session" });
   });
 
   it.each([true, false])(
@@ -222,7 +225,7 @@ describe("startRemoteAgentSession", () => {
         Response.json(
           {
             ok: true,
-            protocolVersion: 2,
+            protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
             sessionId: "accepted-child",
             status: "accepted",
           },
@@ -277,7 +280,7 @@ describe("startRemoteAgentSession", () => {
       new Response(
         JSON.stringify({
           ok: true,
-          protocolVersion: 2,
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
           sessionId: "remote-session",
           status: "accepted",
         }),
@@ -339,7 +342,7 @@ describe("startRemoteAgentSession", () => {
         "find the marker",
       ].join("\n"),
       capabilities: {},
-      protocolVersion: 2,
+      protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
     });
     expect(
       readForwardedParentSessionBaggage(
@@ -406,7 +409,7 @@ describe("startRemoteAgentSession", () => {
         Response.json(
           {
             code: "REMOTE_AGENT_PROTOCOL_MISMATCH",
-            protocolVersion: 3,
+            protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION + 1,
           },
           { status: 409 },
         ),
@@ -419,7 +422,7 @@ describe("startRemoteAgentSession", () => {
       session: { continuationToken: "eve:parent-token" },
     });
     await expect(result).rejects.toBeInstanceOf(FatalError);
-    await expect(result).rejects.toThrow("protocol 3");
+    await expect(result).rejects.toThrow(`protocol ${String(REMOTE_AGENT_PROTOCOL_VERSION + 1)}`);
     await expect(result).rejects.not.toThrow("may have completed");
   });
 
@@ -428,7 +431,7 @@ describe("startRemoteAgentSession", () => {
       new Response(
         JSON.stringify({
           ok: true,
-          protocolVersion: 2,
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
           sessionId: "remote-session",
           status: "accepted",
         }),
@@ -458,7 +461,7 @@ describe("startRemoteAgentSession", () => {
       new Response(
         JSON.stringify({
           ok: true,
-          protocolVersion: 2,
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
           sessionId: "remote-session",
           status: "accepted",
         }),
@@ -491,7 +494,7 @@ describe("startRemoteAgentSession", () => {
       new Response(
         JSON.stringify({
           ok: true,
-          protocolVersion: 2,
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
           sessionId: "remote-session",
           status: "accepted",
         }),
@@ -517,7 +520,7 @@ describe("startRemoteAgentSession", () => {
       new Response(
         JSON.stringify({
           ok: true,
-          protocolVersion: 2,
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
           sessionId: "remote-session",
           status: "accepted",
         }),
@@ -548,7 +551,7 @@ describe("startRemoteAgentSession", () => {
       new Response(
         JSON.stringify({
           ok: true,
-          protocolVersion: 2,
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
           sessionId: "remote-session",
           status: "accepted",
         }),
@@ -601,7 +604,7 @@ describe("startRemoteAgentSession — forwarded principal", () => {
     return new Response(
       JSON.stringify({
         ok: true,
-        protocolVersion: 2,
+        protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
         sessionId: "remote-session",
         status: "accepted",
       }),
@@ -781,7 +784,7 @@ describe("startRemoteAgentSession — forwarded principal", () => {
       new Response(
         JSON.stringify({
           ok: true,
-          protocolVersion: 2,
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
           sessionId: "remote-session",
           status: "accepted",
         }),
@@ -820,7 +823,7 @@ describe("startRemoteAgentSession — forwarded principal", () => {
       new Response(
         JSON.stringify({
           ok: true,
-          protocolVersion: 2,
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
           sessionId: "remote-session",
           status: "accepted",
         }),

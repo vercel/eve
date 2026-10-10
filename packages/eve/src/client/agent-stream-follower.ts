@@ -6,7 +6,7 @@ import {
 } from "#client/conversation-state.js";
 import type { ClientSession } from "#client/session.js";
 import type { StreamReconnectPolicy } from "#client/types.js";
-import type { AgentStartedStreamEvent } from "#protocol/message.js";
+import type { ChildOpened } from "#protocol/session-events/families/child.js";
 
 /**
  * The dev server can restart underneath a followed session, so only an abort, the stream's end,
@@ -34,7 +34,7 @@ export interface AgentStreamFollowerOptions {
  */
 export class AgentStreamFollower {
   readonly #options: AgentStreamFollowerOptions;
-  readonly #started = new Map<string, AgentStartedStreamEvent>();
+  readonly #started = new Map<string, ChildOpened>();
   readonly #controllers = new Map<string, AbortController>();
   /** Sessions whose stream failed stay unavailable until the owner follows again. */
   readonly #failed = new Set<string>();
@@ -45,7 +45,7 @@ export class AgentStreamFollower {
   }
 
   acceptParentEvent(event: SessionStreamEvent): void {
-    if (event.type === "agent.started") this.#started.set(event.data.sessionId, event);
+    if (event.type === "child.opened") this.#started.set(event.data.sessionId, event);
   }
 
   /** Starts, resumes, or pauses subscriptions to match the conversation. */

@@ -1,3 +1,4 @@
+import { withTypedBindings } from "#harness/response-bindings.js";
 import type { UserContent } from "ai";
 import { openInputs } from "#protocol/session-projection.js";
 
@@ -9,7 +10,7 @@ import {
 } from "#harness/hitl/stale-responses.js";
 import { isApprovalRequest } from "#harness/input-request-class.js";
 import { firstOpenInput } from "#harness/open-input-request.js";
-import type { StepInput } from "#harness/types.js";
+import type { HarnessStepInput } from "#harness/types.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { readAnswerText } from "#internal/input-text.js";
 import type { InputResponse } from "#shared/input.js";
@@ -28,10 +29,10 @@ import type { SessionView } from "#harness/session-machine/view.js";
  */
 export function deliver(
   view: SessionView,
-  input: StepInput | undefined,
+  input: HarnessStepInput | undefined,
   options: { readonly takeQueued: boolean },
 ): {
-  readonly input?: StepInput;
+  readonly input?: HarnessStepInput;
   readonly displayMessage?: string | UserContent;
   readonly takeQueued: boolean;
 } {
@@ -71,7 +72,7 @@ export function deliver(
     : { input: converted.stepInput, takeQueued: options.takeQueued };
 }
 
-export type ResolvedStepInput = StepInput & { readonly messageConsumed?: boolean };
+export type ResolvedStepInput = HarnessStepInput & { readonly messageConsumed?: boolean };
 
 /**
  * Plain text answers a budget prompt; `resolveTypedApproval` answers approvals. A channel
@@ -81,7 +82,7 @@ export type ResolvedStepInput = StepInput & { readonly messageConsumed?: boolean
  */
 export function resolveTextInput(
   batch: Pick<SuspendedStep, "requests">,
-  stepInput: StepInput | undefined,
+  stepInput: HarnessStepInput | undefined,
 ): ResolvedStepInput | undefined {
   const text = readAnswerText(stepInput);
   if (stepInput === undefined || text === undefined) return stepInput;
@@ -97,6 +98,7 @@ export function resolveTextInput(
     inputResponses: [...(stepInput.inputResponses ?? []), ...responses],
     message: undefined,
     messageConsumed: true,
+    responseBindings: withTypedBindings(stepInput, responses),
   });
 }
 
@@ -108,7 +110,7 @@ export function resolveTextInput(
  */
 export function resolveTypedApproval(
   view: Pick<SessionView, "projection" | "turn">,
-  stepInput: StepInput | undefined,
+  stepInput: HarnessStepInput | undefined,
 ): ResolvedStepInput | undefined {
   const text = readAnswerText(stepInput);
   if (stepInput === undefined || text === undefined) return stepInput;
@@ -131,6 +133,7 @@ export function resolveTypedApproval(
     inputResponses: [...(stepInput.inputResponses ?? []), response],
     message: undefined,
     messageConsumed: true,
+    responseBindings: withTypedBindings(stepInput, [response]),
   };
 }
 
@@ -140,19 +143,22 @@ export function canonicalize(responses: readonly InputResponse[]): readonly Inpu
   return [...byRequestId.values()];
 }
 
-export function hasInput(input: StepInput | undefined): boolean {
+export function hasInput(input: HarnessStepInput | undefined): boolean {
   return input?.message !== undefined || (input?.inputResponses?.length ?? 0) > 0;
 }
 
-export function isEmptyInput(input: StepInput): boolean {
+export function isEmptyInput(input: HarnessStepInput): boolean {
   return Object.keys(compactInput(input)).length === 0;
 }
 
-export function withoutResponses(input: ResolvedStepInput | undefined): StepInput | undefined {
+export function withoutResponses(
+  input: ResolvedStepInput | undefined,
+): HarnessStepInput | undefined {
   if (input === undefined) return undefined;
   const {
     attributedInputResponses: _attributed,
     inputResponses: _responses,
+    responseBindings: _bindings,
     messageConsumed: _consumed,
     ...rest
   } = input;
@@ -160,9 +166,10 @@ export function withoutResponses(input: ResolvedStepInput | undefined): StepInpu
 }
 
 /** The turn's own input: the message a plain-text answer didn't consume, and its context. */
-export function turnInputOnly(input: ResolvedStepInput | undefined): StepInput | undefined {
+export function turnInputOnly(input: ResolvedStepInput | undefined): HarnessStepInput | undefined {
   if (input === undefined) return undefined;
-  const result: { context?: StepInput["context"]; message?: StepInput["message"] } = {};
+  const result: { context?: HarnessStepInput["context"]; message?: HarnessStepInput["message"] } =
+    {};
   if ((input.context?.length ?? 0) > 0) result.context = input.context;
   if (input.message !== undefined && input.messageConsumed !== true) result.message = input.message;
   const turnInput = attachClientContext(result, readClientContext(input));
@@ -172,10 +179,17 @@ export function turnInputOnly(input: ResolvedStepInput | undefined): StepInput |
 /** What of the input isn't the turn's: answers, and the output the session asks for. */
 export function withoutTurnInput(input: ResolvedStepInput | undefined): ResolvedStepInput {
   const result: {
-    inputResponses?: StepInput["inputResponses"];
-    outputSchema?: StepInput["outputSchema"];
+    inputResponses?: HarnessStepInput["inputResponses"];
+    outputSchema?: HarnessStepInput["outputSchema"];
+    attributedInputResponses?: HarnessStepInput["attributedInputResponses"];
+    responseBindings?: HarnessStepInput["responseBindings"];
+    deliveries?: HarnessStepInput["deliveries"];
   } = {};
   if ((input?.inputResponses?.length ?? 0) > 0) result.inputResponses = input!.inputResponses;
+  if ((input?.attributedInputResponses?.length ?? 0) > 0)
+    result.attributedInputResponses = input!.attributedInputResponses;
+  if ((input?.responseBindings?.length ?? 0) > 0) result.responseBindings = input!.responseBindings;
+  if ((input?.deliveries?.length ?? 0) > 0) result.deliveries = input!.deliveries;
   if (input?.outputSchema !== undefined) result.outputSchema = input.outputSchema;
   return result;
 }
@@ -183,12 +197,21 @@ export function withoutTurnInput(input: ResolvedStepInput | undefined): Resolved
 export function compactInput(input: ResolvedStepInput | undefined): ResolvedStepInput {
   if (input === undefined) return {};
   const result: {
-    context?: StepInput["context"];
-    inputResponses?: StepInput["inputResponses"];
-    message?: StepInput["message"];
+    context?: HarnessStepInput["context"];
+    inputResponses?: HarnessStepInput["inputResponses"];
+    message?: HarnessStepInput["message"];
     messageConsumed?: boolean;
-    outputSchema?: StepInput["outputSchema"];
+    outputSchema?: HarnessStepInput["outputSchema"];
+    attributedInputResponses?: HarnessStepInput["attributedInputResponses"];
+    responseBindings?: HarnessStepInput["responseBindings"];
+    deliveries?: HarnessStepInput["deliveries"];
+    messageAuth?: HarnessStepInput["messageAuth"];
   } = {};
+  if ((input.attributedInputResponses?.length ?? 0) > 0)
+    result.attributedInputResponses = input.attributedInputResponses;
+  if ((input.responseBindings?.length ?? 0) > 0) result.responseBindings = input.responseBindings;
+  if ((input.deliveries?.length ?? 0) > 0) result.deliveries = input.deliveries;
+  if (input.messageAuth !== undefined) result.messageAuth = input.messageAuth;
   if ((input.context?.length ?? 0) > 0) result.context = input.context;
   if ((input.inputResponses?.length ?? 0) > 0) result.inputResponses = input.inputResponses;
   if (input.message !== undefined) result.message = input.message;

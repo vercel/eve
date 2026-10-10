@@ -5,68 +5,66 @@ import type {
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
 import { ContinuationTokenKey, SessionIdKey, SessionInboxKey } from "#context/keys.js";
-import { resolvedForParent } from "#harness/hitl/relays.js";
+import { openedBatch, relayedInteractionEvent } from "#harness/interaction-relay.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import { SUBAGENT_ADAPTER_KIND, isSubagentAdapterState } from "#subagents/adapter-state.js";
 import { createErrorId, createLogger } from "#internal/logging.js";
 
 const log = createLogger("execution.subagent-adapter");
 
 /**
- * Framework adapter that bridges a child subagent session to its
- * parent.
+ * Framework adapter that bridges a child subagent session to its parent.
  *
- * It proxies child `input.requested` events upward so the parent channel can
- * render HITL prompts and route responses back down to the child, and the
- * `input.resolved` of requests only the child can close.
+ * It relays each batch of requests the child opens, so the parent channel can render them and
+ * route answers back down, and the changes only the child decides: its sign-ins, how it settled
+ * an approval or ended a request early, and an answer it refused.
  */
 export const SUBAGENT_ADAPTER: ChannelAdapter = {
   kind: SUBAGENT_ADAPTER_KIND,
-  async "approval.candidate"(data, ctx) {
-    await forwardSubagentAuthorizationEvent({ data, type: "approval.candidate" }, ctx);
-  },
-  async "approval.settled"(data, ctx) {
-    await forwardSubagentAuthorizationEvent({ data, type: "approval.settled" }, ctx);
-  },
-  async "authorization.required"(data, ctx) {
-    await forwardSubagentAuthorizationEvent({ data, type: "authorization.required" }, ctx);
-  },
-  async "authorization.completed"(data, ctx) {
-    await forwardSubagentAuthorizationEvent({ data, type: "authorization.completed" }, ctx);
-  },
-  async "input.resolved"(data, ctx) {
-    const relayed = resolvedForParent(data);
-    if (relayed === undefined) return;
-    await forwardSubagentAuthorizationEvent({ data: relayed, type: "input.resolved" }, ctx);
-  },
-  async "input.requested"(data, ctx) {
+  async "interaction.opened"(data, ctx) {
     const state = ctx.state;
-
-    if (!isSubagentAdapterState(state)) {
+    if (!isSubagentAdapterState(state) || ctx.view === undefined) return;
+    if (data.request.kind === "sign-in") {
+      await forwardRelayed({ data, type: "interaction.opened" }, ctx);
       return;
     }
-
+    const event = openedBatch(ctx.view, data.interactionId);
+    if (event === undefined) return;
     const hookPayload: SubagentInputRequestHookPayload = {
       callId: state.callId,
       childContinuationToken: ctx.ctx.require(ContinuationTokenKey),
       childSessionId: ctx.ctx.require(SessionIdKey),
       childSessionInbox: ctx.ctx.get(SessionInboxKey),
       inputSource: ctx.inputSource,
-      event: {
-        requests: data.requests,
-        sequence: data.sequence,
-        stepIndex: data.stepIndex,
-        turnId: data.turnId,
-      },
+      event,
       kind: "subagent-input-request",
       subagentName: state.subagentName,
     };
-
     await forwardSubagentInputRequestStep({
       hookPayload,
       parentContinuationToken: state.parentContinuationToken,
     });
   },
+  async "interaction.settled"(data, ctx) {
+    await forwardFact({ data, type: "interaction.settled" }, ctx);
+  },
+  async "response.settled"(data, ctx) {
+    await forwardFact({ data, type: "response.settled" }, ctx);
+  },
 };
+
+async function forwardFact(event: SessionEvent, ctx: ChannelAdapterContext): Promise<void> {
+  if (ctx.view === undefined) return;
+  const relayed = relayedInteractionEvent(ctx.view, event);
+  if (relayed !== undefined) await forwardRelayed(relayed, ctx);
+}
+
+async function forwardRelayed(
+  event: SubagentAuthorizationEvent,
+  ctx: ChannelAdapterContext,
+): Promise<void> {
+  await forwardSubagentAuthorizationEvent(event, ctx);
+}
 
 async function forwardSubagentAuthorizationEvent(
   event: SubagentAuthorizationEvent,

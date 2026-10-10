@@ -18,8 +18,7 @@ import { sessionView } from "#harness/session-machine/commit.js";
 import { resolveTypedApproval } from "#harness/hitl/delivery.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
-import { parkedSteps, withParkedStep, withPublished } from "#internal/testing/session-machine.js";
-import { createApprovalSettledEvent } from "#protocol/message.js";
+import { parkedSteps, withParkedStep } from "#internal/testing/session-machine.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { InputRequest } from "#shared/input.js";
 
@@ -551,23 +550,6 @@ describe("text approval replay preparation", () => {
       })?.inputResponses,
     ).toEqual([
       { optionId: "approve", requestId: request.requestId },
-      { optionId: "cancel", requestId: second.requestId },
-    ]);
-  });
-
-  it("skips an approval that already settled on its own", () => {
-    const second = { ...request, requestId: "approval-2" };
-    const session = withPublished(sessionWithRequests([request, second]), [
-      createApprovalSettledEvent({
-        outcome: "approved",
-        requestId: request.requestId,
-        responderPrincipalId: responder.principalId,
-        sequence: 0,
-        stepIndex: 0,
-        turnId: "turn_0",
-      }),
-    ]);
-    expect(resolveTypedApproval(viewOf(session), { message: "cancel" })?.inputResponses).toEqual([
       { optionId: "cancel", requestId: second.requestId },
     ]);
   });

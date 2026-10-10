@@ -11,6 +11,7 @@ import type {
   DeliveryRow,
   InteractionRow,
   PartRow,
+  ResponseRow,
   RunRow,
   SessionView,
   TaskRow,
@@ -73,6 +74,18 @@ export function call(view: SessionView, callId: string): CallRow | undefined {
   return view.calls[callId];
 }
 
+/** The call carrying a shared result. A reply stores its value once, not once per recipient. */
+export function callOutputSource(view: SessionView, callId: string): CallRow | undefined {
+  const seen = new Set<string>();
+  let row = view.calls[callId];
+  while (row !== undefined && !seen.has(row.callId)) {
+    seen.add(row.callId);
+    if (row.outcome !== "completed" || row.outputOf === undefined) return row;
+    row = view.calls[row.outputOf.callId];
+  }
+  return undefined;
+}
+
 export function task(view: SessionView, taskId: string): TaskRow | undefined {
   return view.tasks[taskId];
 }
@@ -80,7 +93,9 @@ export function task(view: SessionView, taskId: string): TaskRow | undefined {
 /** True while any call the task serves is unsettled. Idle tasks don't hold the session open. */
 export function isWorking(view: SessionView, taskId: string): boolean {
   if (view.tasks[taskId]?.status !== "running") return false;
-  return Object.values(view.calls).some((row) => row.taskId === taskId && row.status !== "settled");
+  return Object.values(view.calls).some(
+    (row) => row.status !== "settled" && callTask(view, row) === taskId,
+  );
 }
 
 /** Tasks, optionally only the working or the idle ones. */
@@ -236,8 +251,8 @@ export function callTurn(view: SessionView, entry: CallRow): string | undefined 
   while (current !== undefined && !seen.has(current.callId)) {
     seen.add(current.callId);
     if ("runId" in current.owner) {
-      const owner = view.runs[current.owner.runId]?.owner;
-      return owner !== undefined && "turnId" in owner ? owner.turnId : undefined;
+      const run = view.runs[current.owner.runId];
+      return run === undefined ? undefined : runTurn(view, run);
     }
     current = view.calls[current.owner.callId];
   }
@@ -256,6 +271,18 @@ export function callRun(view: SessionView, entry: CallRow): string | undefined {
   return undefined;
 }
 
+/** The task serving a call, directly or through a call it was made inside. */
+export function callTask(view: SessionView, entry: CallRow): string | undefined {
+  const seen = new Set<string>();
+  let current: CallRow | undefined = entry;
+  while (current !== undefined && !seen.has(current.callId)) {
+    seen.add(current.callId);
+    if (current.taskId !== undefined) return current.taskId;
+    current = "callId" in current.owner ? view.calls[current.owner.callId] : undefined;
+  }
+  return undefined;
+}
+
 /** The turn a run belongs to: the turn that requested it, or the turn its context change is in. */
 export function runTurn(view: SessionView, entry: RunRow): string | undefined {
   const { owner } = entry;
@@ -268,6 +295,60 @@ export interface OpenWork {
   readonly runs: readonly RunRow[];
   readonly changes: readonly ChangeRow[];
   readonly deliveries: readonly DeliveryRow[];
+  readonly tasks: readonly TaskRow[];
+  readonly interactions: readonly InteractionRow[];
+  readonly responses: readonly ResponseRow[];
+}
+
+/** Nothing open. */
+export function noWork(): OpenWork {
+  return {
+    calls: [],
+    changes: [],
+    deliveries: [],
+    interactions: [],
+    responses: [],
+    runs: [],
+    tasks: [],
+  };
+}
+
+/** Where an interaction belongs: what its subject belongs to, through calls and responses. */
+export interface InteractionOwner {
+  readonly turnId?: string;
+  readonly taskId?: string;
+  readonly runId?: string;
+  readonly changeId?: string;
+}
+
+/** The owner an interaction closes with: its turn, its task, or the run that made its call. */
+export function interactionOwner(view: SessionView, entry: InteractionRow): InteractionOwner {
+  const seen = new Set<string>();
+  let current: InteractionRow | undefined = entry;
+  while (current !== undefined && !seen.has(current.interactionId)) {
+    seen.add(current.interactionId);
+    const subject: InteractionSubject = current.subject;
+    if ("turnId" in subject) return { turnId: subject.turnId };
+    if ("taskId" in subject) return { taskId: subject.taskId };
+    if ("callId" in subject) {
+      const callRow = view.calls[subject.callId];
+      if (callRow === undefined) return {};
+      const taskId = callTask(view, callRow);
+      if (taskId !== undefined) return { taskId };
+      const runId = callRun(view, callRow);
+      const run = runId === undefined ? undefined : view.runs[runId];
+      const owner: { -readonly [K in keyof InteractionOwner]: InteractionOwner[K] } = {};
+      if (runId !== undefined) owner.runId = runId;
+      const turnId = callTurn(view, callRow);
+      if (turnId !== undefined) owner.turnId = turnId;
+      if (run !== undefined && "changeId" in run.owner) owner.changeId = run.owner.changeId;
+      return owner;
+    }
+    // A responder's sign-in belongs where the interaction its response answers belongs.
+    const response: ResponseRow | undefined = view.responses[subject.responseId];
+    current = response === undefined ? undefined : view.interactions[response.interactionId];
+  }
+  return {};
 }
 
 /**
@@ -287,6 +368,7 @@ export function openWork(
     | { readonly runId: string }
     | { readonly changeId: string }
     | { readonly turnId: string }
+    | { readonly taskId: string }
     | { readonly session: true },
 ): OpenWork {
   const runs = Object.values(view.runs).filter((row) => {
@@ -295,19 +377,15 @@ export function openWork(
     if ("runId" in owner) return row.runId === owner.runId;
     if ("changeId" in owner)
       return "changeId" in row.owner && row.owner.changeId === owner.changeId;
-    return runTurn(view, row) === owner.turnId;
+    return "turnId" in owner && runTurn(view, row) === owner.turnId;
   });
   const runIds = new Set(runs.map((row) => row.runId));
   const calls = Object.values(view.calls).filter((row) => {
     if (row.status === "settled") return false;
     if ("session" in owner) return true;
-    const seen = new Set<string>();
-    let ancestor: CallRow | undefined = row;
-    while (ancestor !== undefined && !seen.has(ancestor.callId)) {
-      seen.add(ancestor.callId);
-      if (ancestor.taskId !== undefined) return false;
-      ancestor = "callId" in ancestor.owner ? view.calls[ancestor.owner.callId] : undefined;
-    }
+    const taskId = callTask(view, row);
+    if ("taskId" in owner) return taskId === owner.taskId;
+    if (taskId !== undefined) return false;
     const runId = callRun(view, row);
     if ("runId" in owner) return runId === owner.runId;
     if (runId !== undefined && runIds.has(runId)) return true;
@@ -329,7 +407,27 @@ export function openWork(
     if ("session" in owner) return true;
     return "turnId" in owner && row.status === "consumed" && row.turnId === owner.turnId;
   });
-  return { calls, changes, deliveries, runs };
+  const tasks = Object.values(view.tasks).filter(
+    (row) =>
+      row.status !== "ended" &&
+      ("session" in owner || ("taskId" in owner && row.taskId === owner.taskId)),
+  );
+  const interactions = Object.values(view.interactions).filter((row) => {
+    if (row.status === "settled") return false;
+    if ("session" in owner) return true;
+    const belongs = interactionOwner(view, row);
+    if ("taskId" in owner) return belongs.taskId === owner.taskId;
+    if (belongs.taskId !== undefined) return false;
+    if ("runId" in owner) return belongs.runId === owner.runId;
+    if ("changeId" in owner) return belongs.changeId === owner.changeId;
+    return belongs.turnId === owner.turnId;
+  });
+  const interactionIds = new Set(interactions.map((row) => row.interactionId));
+  const responses = Object.values(view.responses).filter(
+    (row) =>
+      row.status !== "settled" && ("session" in owner || interactionIds.has(row.interactionId)),
+  );
+  return { calls, changes, deliveries, interactions, responses, runs, tasks };
 }
 
 /** The turn an interaction is about, directly or through its call. */

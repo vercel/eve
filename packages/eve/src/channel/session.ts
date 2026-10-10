@@ -1,3 +1,4 @@
+import type { RemoteChildBinding } from "#execution/child-binding.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { ContextAccessor } from "#context/key.js";
 import {
@@ -18,7 +19,8 @@ import type {
   TurnPolicy,
   TurnCaller,
 } from "#channel/types.js";
-import { DEFAULT_TURN_POLICY } from "#channel/types.js";
+import { controlCommand, DEFAULT_TURN_POLICY } from "#channel/types.js";
+import type { SessionControlOptions } from "#channel/types.js";
 import { serializeUrlFilePartsInMessage } from "#channel/send-input.js";
 import type { SessionAuth } from "#context/keys.js";
 import {
@@ -55,13 +57,13 @@ export interface Session {
     options: SessionRespondOptions,
   ): Promise<SessionSendCommandResult>;
   /** Requests cancellation of this exact session's active turn. */
-  cancel(options?: { turnId?: string }): Promise<CancelTurnResult>;
+  cancel(options?: { turnId?: string } & SessionControlOptions): Promise<CancelTurnResult>;
   /** Queues compaction on this exact session ID. */
-  compact(): Promise<CompactSessionResult>;
+  compact(options?: SessionControlOptions): Promise<CompactSessionResult>;
   /** Queues a context clear on this exact session ID. */
-  clear(): Promise<ClearSessionResult>;
+  clear(options?: SessionControlOptions): Promise<ClearSessionResult>;
   /** Terminally retires this exact session ID. */
-  reset(options?: { reason?: string }): Promise<ResetSessionResult>;
+  reset(options?: { reason?: string } & SessionControlOptions): Promise<ResetSessionResult>;
   /**
    * Opens the recorded stream. Following it throws `SessionStrandedError`
    * while its owner is stranded; `follow: false` reads recorded history up to
@@ -70,6 +72,8 @@ export interface Session {
   getEventStream(options?: GetEventStreamOptions): Promise<ReadableStream<SessionStreamEvent>>;
   /** The session's stored lines from `startIndex`: one parsed record per line. Follows like `getEventStream`. */
   getLineStream(options?: GetEventStreamOptions): Promise<ReadableStream<unknown>>;
+  /** Where a remote child of this session runs; read only by the parent's stream proxy. */
+  getChildBinding?(childSessionId: string): Promise<RemoteChildBinding | undefined>;
   getStreamTailIndex(): Promise<number>;
 }
 
@@ -165,20 +169,29 @@ export function createSession(
         sessionId: id,
       });
     },
-    async cancel(options?: { turnId?: string }) {
+    async cancel(options) {
       const command: { kind: "cancel"; turnId?: string } = { kind: "cancel" };
       if (options?.turnId !== undefined) command.turnId = options.turnId;
-      return await runtime.dispatchSession({ command, sessionId: id });
+      return await runtime.dispatchSession({
+        command: controlCommand(command, options),
+        sessionId: id,
+      });
     },
-    async compact() {
-      return await runtime.dispatchSession({ command: { kind: "compact" }, sessionId: id });
+    async compact(options) {
+      return await runtime.dispatchSession({
+        command: controlCommand({ kind: "compact" }, options),
+        sessionId: id,
+      });
     },
-    async clear() {
-      return await runtime.dispatchSession({ command: { kind: "clear" }, sessionId: id });
+    async clear(options) {
+      return await runtime.dispatchSession({
+        command: controlCommand({ kind: "clear" }, options),
+        sessionId: id,
+      });
     },
     async reset(options) {
       return await runtime.dispatchSession({
-        command: { kind: "reset", reason: options?.reason },
+        command: controlCommand({ kind: "reset", reason: options?.reason }, options),
         sessionId: id,
       });
     },
@@ -190,6 +203,9 @@ export function createSession(
     },
     async getStreamTailIndex() {
       return runtime.getStreamTailIndex(id);
+    },
+    async getChildBinding(childSessionId: string) {
+      return await runtime.readChildBinding?.(id, childSessionId);
     },
   };
 }

@@ -2,18 +2,18 @@ import type { UserContent } from "ai";
 
 import { appendUserContent, normalizeUserContent } from "#harness/messages.js";
 import { isSessionLimitContinuationRequestId } from "#harness/hitl/budget-request.js";
-import type { StepInput } from "#harness/types.js";
+import type { HarnessStepInput } from "#harness/types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 
 type StaleResponseConversion =
   | {
       readonly kind: "unchanged";
-      readonly stepInput?: StepInput;
+      readonly stepInput?: HarnessStepInput;
     }
   | {
       readonly displayMessage: string | UserContent;
       readonly kind: "converted";
-      readonly stepInput: StepInput;
+      readonly stepInput: HarnessStepInput;
     };
 
 /**
@@ -29,8 +29,8 @@ type StaleResponseConversion =
  */
 export function dropStaleSessionLimitContinuationResponses(input: {
   readonly pendingRequestIds: ReadonlySet<string>;
-  readonly stepInput?: StepInput;
-}): StepInput | undefined {
+  readonly stepInput?: HarnessStepInput;
+}): HarnessStepInput | undefined {
   if (input.stepInput === undefined) return undefined;
   const responses = input.stepInput.inputResponses ?? [];
   const attributed = input.stepInput.attributedInputResponses ?? [];
@@ -47,7 +47,7 @@ export function dropStaleSessionLimitContinuationResponses(input: {
     inputResponses: _responses,
     ...remainingInput
   } = input.stepInput;
-  const result: { -readonly [K in keyof StepInput]: StepInput[K] } = remainingInput;
+  const result: { -readonly [K in keyof HarnessStepInput]: HarnessStepInput[K] } = remainingInput;
   if (retained.length > 0) result.inputResponses = retained;
   if (retainedAttributed.length > 0) result.attributedInputResponses = retainedAttributed;
   return result;
@@ -70,7 +70,7 @@ export function convertStaleResponsesToUserMessage(input: {
   readonly pendingRequestIds: ReadonlySet<string>;
   /** Requests the session still knows, by id, closed ones included. */
   readonly requests: ReadonlyMap<string, InputRequest>;
-  readonly stepInput?: StepInput;
+  readonly stepInput?: HarnessStepInput;
 }): StaleResponseConversion {
   if (input.stepInput === undefined) return { kind: "unchanged" };
   const responses = input.stepInput.inputResponses ?? [];
@@ -80,7 +80,7 @@ export function convertStaleResponsesToUserMessage(input: {
   }
 
   const currentResponses: InputResponse[] = [];
-  const currentAttributed: NonNullable<StepInput["attributedInputResponses"]>[number][] = [];
+  const currentAttributed: NonNullable<HarnessStepInput["attributedInputResponses"]>[number][] = [];
   const staleResponses: InputResponse[] = [];
   for (const response of responses) {
     (input.pendingRequestIds.has(response.requestId) ? currentResponses : staleResponses).push(
@@ -113,7 +113,7 @@ export function convertStaleResponsesToUserMessage(input: {
     inputResponses: _responses,
     ...remainingInput
   } = input.stepInput;
-  const stepInput: { -readonly [K in keyof StepInput]: StepInput[K] } = {
+  const stepInput: { -readonly [K in keyof HarnessStepInput]: HarnessStepInput[K] } = {
     ...remainingInput,
     message: modelMessage,
   };

@@ -115,8 +115,8 @@ export function dropClosedRecords<T extends HarnessSessionBase>(
   projection: SessionProjection,
 ): T {
   const closed = [...readHitlState(session.state).relays.keys()].filter((requestId) => {
-    const input = projection.inputs[requestId];
-    return input === undefined || input.status === "settled";
+    const row = projection.view?.interactions[requestId];
+    return row === undefined || row.status === "settled";
   });
   return writeHitlState(session, { relays: { retire: closed } });
 }

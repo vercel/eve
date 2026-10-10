@@ -4,7 +4,6 @@ import type { ModelMessage } from "ai";
 import type { getApprovalAuditState } from "#harness/hitl/candidates.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import { supersededChallenges, withSignIns } from "./sign-ins.js";
-import { authorizationEventFields } from "#harness/authorization-event-fields.js";
 import { renderPendingApprovalsSnippet } from "#harness/hitl/approval-prompt.js";
 import { isApprovalRequest } from "#harness/input-request-class.js";
 import {
@@ -17,26 +16,36 @@ import {
 } from "#harness/input-request-resolution.js";
 import { coalesceTurnInputs, createFrameworkUserMessage } from "#harness/messages.js";
 import { resolveSessionLimitContinuation } from "#harness/hitl/budget-request.js";
-import type { StepInput } from "#harness/types.js";
+import type { HarnessStepInput } from "#harness/types.js";
 import { readClientContext } from "#internal/client-context.js";
-import {
-  createApprovalCandidateEvent,
-  createApprovalSettledEvent,
-  createAuthorizationCompletedEvent,
-  createAuthorizationRequiredEvent,
-  createInputRequestedEvent,
-  createInputResolvedEvent,
-} from "#protocol/message.js";
 import { callSettledFrom } from "#harness/call-facts.js";
 import {
-  openInputs,
+  interactionOpened,
+  interactionSettled,
+  responseAdmitted,
+  responseSettled,
+  responseSubmitted,
+  signInInteractionId,
+  signInOpened,
+} from "#harness/interaction-facts.js";
+import { responseBindingFor } from "#harness/response-bindings.js";
+import { publicViewOf } from "#harness/session-machine/closure.js";
+import type { RefusedResponse } from "#harness/hitl/coordinator.js";
+import {
+  openRequests,
+  SUPERSEDED_BY_MESSAGE,
   turnCoordinates,
-  type SessionProjection,
+  turnCoordinatesOf,
 } from "#protocol/session-projection.js";
+import type { InteractionOutcome } from "#protocol/session-events/families/interaction.js";
+import type {
+  ResponseOutcome,
+  ResponseSubmittedData,
+} from "#protocol/session-events/families/response.js";
+import type { SessionView as PublicView } from "#protocol/session-projection/tables.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { Transition } from "#harness/session-machine/commit.js";
-import { signInWithdrawn } from "#harness/session-machine/events.js";
 import {
   canonicalize,
   compactInput,
@@ -107,7 +116,9 @@ export function parkOnApprovals(
     events:
       input.tasks.length > 0
         ? []
-        : [createInputRequestedEvent({ requests: input.requests, ...input.event })],
+        : input.requests.map((request) =>
+            interactionOpened(request, { scope: { turnId: input.event.turnId } }),
+          ),
     turn,
   };
 }
@@ -136,11 +147,11 @@ export function dispatch(
  * Approved calls run before the delivery's own input, as the AI SDK ran them: the model reads
  * their results first. The input waits in the queue, unreceived, for the step after.
  */
-export function deferInput(view: SessionView, input: StepInput): Transition {
+export function deferInput(view: SessionView, input: HarnessStepInput): Transition {
   return { events: [], turn: withQueued(view.turn, input) };
 }
 
-function withQueued(turn: TurnState, queued: StepInput | undefined): TurnState {
+function withQueued(turn: TurnState, queued: HarnessStepInput | undefined): TurnState {
   if (queued === undefined || isEmptyInput(queued)) return turn;
   return {
     ...turn,
@@ -163,10 +174,12 @@ export interface ResponsePolicyPass {
   readonly challenges: readonly AuthorizationChallenge[];
   readonly feedback: readonly string[];
   /** The delivery minus the answers the policies took, plus the settlements they reached. */
-  readonly stepInput?: StepInput;
+  readonly stepInput?: HarnessStepInput;
   readonly audit: ReturnType<typeof getApprovalAuditState>;
   /** Responder sign-ins pending when the pass began. */
   readonly challengesAtStart: readonly AuthorizationChallenge[];
+  /** Answers a check refused before any policy ran. */
+  readonly refused?: readonly RefusedResponse[];
 }
 
 /** What `answer` concluded, beyond the events and state it changed. */
@@ -179,20 +192,13 @@ export interface Answered extends Transition {
    */
   readonly next: "continue" | "park" | "repeat" | "sign-in" | "defer-message";
   /** The turn's input, without the answers `answer` consumed. */
-  readonly input?: StepInput;
+  readonly input?: HarnessStepInput;
   /** Whether a plain-text answer consumed the message. */
   readonly consumedMessage?: boolean;
   /** The batches the delivery resolved, in order. */
   readonly resolved: readonly ResolvedInputBatch[];
   /** A decision on the session-limit prompt. */
   readonly limit?: { readonly granted: boolean };
-  /**
-   * New answers to open requests that passed the response policies, in order, including those
-   * that wait: a partial answer, or one behind another policy pass or a sign-in. An unchanged answer is
-   * admitted once; merged back in from the queue, it isn't admitted again. A changed answer
-   * is admitted anew.
-   */
-  readonly admitted: readonly InputResponse[];
 }
 
 /**
@@ -209,6 +215,8 @@ export function answer(
     readonly policy: ResponsePolicyPass;
     /** The delivery merged the queue in, so the queue empties. */
     readonly takeQueued: boolean;
+    /** The answers the delivery carried, as admitted: each is submitted once. */
+    readonly submitted?: readonly ResponseSubmittedData[];
     readonly approvalKey: (request: InputRequest) => string | undefined;
     /**
      * Whether the request's restored step has `eve__search`, which a call whose
@@ -219,6 +227,8 @@ export function answer(
 ): Answered {
   const { policy } = input;
   const { projection } = view;
+  const tables = publicViewOf(projection);
+  const responses = responseLedger(tables, input.submitted ?? []);
   // What a responder may not do refuses their delivery, with why: a notice, not the model's.
   const refusal = policy.feedback.join("\n");
   const refused: SessionEvent[] =
@@ -228,53 +238,50 @@ export function answer(
           data: { deliveryId, outcome: "refused", reason: refusal },
           type: "delivery.settled",
         }));
-  const events: SessionEvent[] = [
-    ...refused,
-    ...reportApprovalProgress(projection, policy.audit, policy.challengesAtStart),
-  ];
+  for (const { reason, responseId } of policy.refused ?? []) {
+    responses.settle(responseId, "refused", reason);
+  }
+  reportResponderProgress(tables, responses, policy);
+  const events: SessionEvent[] = [...refused, ...signInProgress(tables, policy)];
   let turn: TurnState = input.takeQueued ? { ...view.turn, queued: undefined } : view.turn;
-  let admitted: readonly InputResponse[] = [];
-  const done = (
-    answered: Omit<Answered, "admitted" | "events" | "turn" | "resolved"> & Partial<Answered>,
-  ) => ({ admitted, events, resolved: [], turn, ...answered }) satisfies Answered;
-  const queue = (queued: StepInput | undefined) => {
+  const done = ({
+    events: decided = [],
+    ...answered
+  }: Omit<Answered, "events" | "turn" | "resolved"> & Partial<Answered>) =>
+    ({
+      events: [...responses.facts(), ...events, ...decided],
+      resolved: [],
+      turn,
+      ...answered,
+    }) satisfies Answered;
+  const queue = (queued: HarnessStepInput | undefined) => {
     turn = withQueued(turn, queued);
+  };
+  // Answers without a policy to pass are admitted as they arrive: they stand, revisable, until
+  // their batch has every answer.
+  const admitUnchecked = (delivery: HarnessStepInput | undefined) => {
+    const gated = new Set(
+      turn.suspended.flatMap((step) => step.responseAuthRequiredRequestIds ?? []),
+    );
+    for (const response of canonicalize(delivery?.inputResponses ?? [])) {
+      if (gated.has(response.requestId)) continue;
+      const binding = responseBindingFor(delivery, response);
+      if (binding !== undefined) responses.admit(binding.responseId);
+    }
   };
 
   if (policy.kind === "park") return done({ next: "park" });
   const delivery = input.delivery;
-  const limit = openInputs(projection).find(
+  const limit = openRequests(projection.view).find(
     (open) =>
       open.request.kind === "session-limit" && ownOpenRequestIds(view).has(open.request.requestId),
   );
   const answerable = turn.suspended.filter((step) => step.requests.length > 0);
-  // Every path below that queues an answer admits it first; only an unchanged answer is a replay.
-  const open = new Set(answerable.flatMap((step) => step.requests.map((r) => r.requestId)));
-  if (limit !== undefined) open.add(limit.request.requestId);
-  const replayed = new Map(
-    canonicalize([
-      ...(view.turn.queued?.inputResponses ?? []),
-      ...(view.turn.queued?.attributedInputResponses ?? []).map(({ response }) => response),
-    ]).map((response) => [response.requestId, response]),
-  );
-  const admit = (responses: readonly InputResponse[] | undefined) => {
-    admitted = canonicalize(responses ?? []).filter((response) => {
-      const queued = replayed.get(response.requestId);
-      return (
-        open.has(response.requestId) &&
-        (queued === undefined ||
-          queued.optionId !== response.optionId ||
-          queued.text !== response.text)
-      );
-    });
-  };
   if (policy.kind === "continue-coordination") {
-    admit(policy.stepInput?.inputResponses);
     queue(policy.stepInput);
     return done({ next: "repeat" });
   }
   if (policy.challenges.length > 0) {
-    admit(delivery?.inputResponses);
     return done({ next: "sign-in" });
   }
   if (limit === undefined && answerable.length === 0) {
@@ -284,30 +291,63 @@ export function answer(
   // The approval coordinator already answered a typed approval; see `resolveTypedApproval`.
   const resolved =
     limit === undefined ? delivery : resolveTextInput({ requests: [limit.request] }, delivery);
-  const responses = canonicalize(resolved?.inputResponses ?? []);
-  const byId = new Map(responses.map((response) => [response.requestId, response]));
-  admit(responses);
+  // A typed answer to the prompt is an answer like a press.
+  responses.submit(resolved?.responseBindings ?? []);
+  const answers = canonicalize(resolved?.inputResponses ?? []);
+  const byId = new Map(answers.map((response) => [response.requestId, response]));
   const answered = answerable.filter((step) =>
     step.requests.every((request) => byId.has(request.requestId)),
   );
   const leftoverFor = (steps: readonly SuspendedStep[]) =>
-    responses.filter((response) =>
+    answers.filter((response) =>
       steps.some((step) =>
         step.requests.some((request) => request.requestId === response.requestId),
       ),
     );
   // Nothing runs: the input waits, and the held turn stays held.
   const park = () => {
+    admitUnchecked(resolved);
     queue(compactInput(resolved));
     return done({ next: "park" });
   };
-  if (responses.length === 0 && resolved?.message === undefined) return park();
+  if (answers.length === 0 && resolved?.message === undefined) return park();
+  // The answer that decides a request: the latest one it was given.
+  const decider = (request: InputRequest, response: InputResponse | undefined) =>
+    response === undefined
+      ? undefined
+      : (responseBindingFor(resolved, response)?.responseId ??
+        policy.audit.settlements.find((entry) => entry.requestId === request.requestId)
+          ?.candidateId ??
+        responses.latest(request.requestId));
+  const decide = (
+    request: InputRequest,
+    response: InputResponse | undefined,
+    outcome: InteractionOutcome,
+    scope: { readonly turnId: string },
+    reason?: string,
+  ): SessionEvent[] => {
+    const candidate = decider(request, response);
+    const responseId =
+      candidate !== undefined && responses.known(candidate) ? candidate : undefined;
+    if (responseId !== undefined) responses.settle(responseId, "applied");
+    responses.closeOthers(request.requestId, responseId);
+    return [
+      interactionSettled(request.requestId, outcome, {
+        cause: responseId === undefined ? undefined : { responseId },
+        reason,
+        response,
+        scope,
+      }),
+    ];
+  };
 
   if (limit !== undefined) {
     const response = byId.get(limit.request.requestId);
+    // A message waits behind the prompt with everything else, unreceived, until it's answered.
     if (response === undefined) return park();
+    const at = turnCoordinatesOf(projection, limit.turnId ?? turnCoordinates(projection).turnId);
     const batch: ResolvedInputBatch = {
-      event: { sequence: limit.sequence, stepIndex: limit.stepIndex, turnId: limit.turnId },
+      event: at,
       inputs: [
         {
           outcome: resolveInputOutcome(limit.request.kind, response),
@@ -316,13 +356,23 @@ export function answer(
         },
       ],
     };
-    events.push(resolvedEvent(batch));
+    const granted = resolveSessionLimitContinuation({
+      requests: [limit.request],
+      responses: answers,
+    });
+    const settled = decide(
+      limit.request,
+      response,
+      granted === undefined ? "invalid" : granted.granted ? "accepted" : "declined",
+      { turnId: at.turnId },
+    );
     const leftover = leftoverFor(answerable);
     if (leftover.length > 0) queue({ inputResponses: leftover });
     return done({
       consumedMessage: resolved?.messageConsumed,
+      events: settled,
       input: withoutResponses(resolved),
-      limit: resolveSessionLimitContinuation({ requests: [limit.request], responses }),
+      limit: granted,
       next: "continue",
       resolved: [batch],
     });
@@ -330,7 +380,7 @@ export function answer(
 
   if (answered.length === 0 && resolved?.message === undefined) return park();
   // A message steers the held turn past its first pending batch: the answers it has stand, and
-  // the requests nobody answered are ignored. Later batches stay open.
+  // the requests nobody answered are withdrawn. Later batches stay open.
   if (answered.length === 0) answered.push(answerable[0]!);
   const leftover = leftoverFor(answerable.filter((step) => !answered.includes(step)));
   if (leftover.length > 0) queue({ inputResponses: leftover });
@@ -338,33 +388,43 @@ export function answer(
   const grants = new Set(turn.grants);
   const batches: ResolvedInputBatch[] = [];
   const results: SessionEvent[] = [];
-  const unavailable = new Set(
+  const unavailable = new Map(
     policy.audit.settlements
       .filter((settlement) => settlement.outcome === "unavailable")
-      .map((settlement) => settlement.requestId),
+      .map((settlement) => [settlement.requestId, settlement]),
   );
   const suspended = turn.suspended.map((step) => {
     if (!answered.includes(step)) return step;
     let messages = step.messages;
     const approvedRequests: InputRequest[] = [];
+    const scope = { turnId: step.event.turnId };
     for (const request of step.requests) {
       const { callId, toolName } = request.action;
+      const response = byId.get(request.requestId);
       if (unavailable.has(request.requestId)) {
-        const failed = failedCall({
-          callId,
-          message: unavailableToolMessage(toolName, input.searchable(request)),
-          toolName,
-        });
+        const message = unavailableToolMessage(toolName, input.searchable(request));
+        const failed = failedCall({ callId, message, toolName });
         messages = withResult(messages, failed.part);
-        results.push(callSettledFrom(failed.result, { scope: { turnId: step.event.turnId } }));
+        // Its tool is gone, so no answer can run the call: nobody needs the approval anymore.
+        responses.closeOthers(request.requestId, undefined);
+        results.push(
+          interactionSettled(request.requestId, "withdrawn", { reason: message, scope }),
+          callSettledFrom(failed.result, { scope }),
+        );
         continue;
       }
-      const { approved, reason, status } = resolveApprovalOutcome(byId.get(request.requestId));
+      const { approved, reason, status } = resolveApprovalOutcome(response);
       if (approved) {
         grants.add(input.approvalKey(request) ?? toolName);
         approvedRequests.push(request);
+        results.push(...decide(request, response, "accepted", scope));
         continue;
       }
+      results.push(
+        ...(status === "ignored"
+          ? decide(request, undefined, "withdrawn", scope, SUPERSEDED_BY_MESSAGE)
+          : decide(request, response, status === "invalid" ? "invalid" : "declined", scope)),
+      );
       messages = withResult(messages, {
         output: { reason, type: "execution-denied" },
         toolCallId: callId,
@@ -384,7 +444,7 @@ export function answer(
           },
           toolName,
         },
-        { rejected: true, scope: { turnId: step.event.turnId } },
+        { rejected: true, scope },
       );
       results.push({
         ...settled,
@@ -394,109 +454,156 @@ export function answer(
     batches.push({
       event: step.event,
       inputs: step.requests.map((request) => {
-        const response = byId.get(request.requestId);
-        return { outcome: resolveInputOutcome(request.kind, response), request, response };
+        const answer = byId.get(request.requestId);
+        return { outcome: resolveInputOutcome(request.kind, answer), request, response: answer };
       }),
     });
     const approved = [...(step.approved ?? []), ...approvedRequests];
     return { ...step, messages, requests: [], ...(approved.length > 0 && { approved }) };
   });
-  events.push(...batches.map(resolvedEvent), ...results);
+  // Answers to batches still waiting for more stand, admitted, until theirs completes.
+  admitUnchecked({ ...resolved, inputResponses: leftover });
   turn = { ...turn, grants: [...grants], suspended };
   return done({
     consumedMessage: resolved?.messageConsumed,
+    events: results,
     input: withoutResponses(resolved),
     next: "continue",
     resolved: batches,
   });
 }
 
-/** The `input.resolved` for a batch, at the coordinates of the step that asked. */
-function resolvedEvent(batch: ResolvedInputBatch): SessionEvent {
-  return createInputResolvedEvent({
-    resolutions: batch.inputs.map((resolved) => {
-      const resolution = {
-        kind: resolved.request.kind,
-        outcome: resolved.outcome,
-        requestId: resolved.request.requestId,
-      };
-      return resolved.response === undefined
-        ? resolution
-        : { ...resolution, response: resolved.response };
-    }),
-    ...batch.event,
-  });
+/**
+ * The responses a commit records: each answer submitted once, its checks, and how it settled.
+ * Revising an admitted answer abandons the one it replaces; an interaction that settles
+ * withdraws the open answers that didn't decide it.
+ */
+interface ResponseLedger {
+  /** Records answers not seen yet; one to a request nobody can answer anymore is dropped. */
+  submit(bindings: readonly ResponseSubmittedData[]): void;
+  /** Whether this commit or an earlier one recorded the answer. */
+  known(responseId: string): boolean;
+  admit(responseId: string): void;
+  settle(responseId: string, outcome: ResponseOutcome, reason?: string): void;
+  /** Settles every other open answer to an interaction that `decidedBy` settles. */
+  closeOthers(interactionId: string, decidedBy: string | undefined): void;
+  /** The latest open answer to an interaction. */
+  latest(interactionId: string): string | undefined;
+  facts(): SessionEvent[];
+}
+
+function responseLedger(
+  tables: PublicView,
+  submitted: readonly ResponseSubmittedData[],
+): ResponseLedger {
+  const facts: SessionEvent[] = [];
+  const fresh = new Map<string, ResponseSubmittedData>();
+  const status = new Map<string, "submitted" | "admitted" | "settled">();
+  for (const row of Object.values(tables.responses)) status.set(row.responseId, row.status);
+  const submit = (bindings: readonly ResponseSubmittedData[]) => {
+    for (const binding of bindings) {
+      if (status.has(binding.responseId)) continue;
+      // An answer to a request nobody can answer anymore introduces nothing: it was converted
+      // or dropped before it got here.
+      if (tables.interactions[binding.interactionId]?.status !== "open") continue;
+      fresh.set(binding.responseId, binding);
+      status.set(binding.responseId, "submitted");
+      facts.push(responseSubmitted(binding));
+    }
+  };
+  submit(submitted);
+  const interactionOf = (responseId: string) =>
+    fresh.get(responseId)?.interactionId ?? tables.responses[responseId]?.interactionId;
+  const order = (responseId: string) =>
+    tables.responses[responseId]?.introducedAt ?? Number.MAX_SAFE_INTEGER;
+  const openFor = (interactionId: string) =>
+    [...status]
+      .filter(([id, state]) => state !== "settled" && interactionOf(id) === interactionId)
+      .map(([id]) => id)
+      .sort((a, b) => order(a) - order(b));
+  const settle = (responseId: string, outcome: ResponseOutcome, reason?: string) => {
+    const current = status.get(responseId);
+    if (current === undefined || current === "settled") return;
+    status.set(responseId, "settled");
+    facts.push(responseSettled(responseId, outcome, reason));
+  };
+  return {
+    admit(responseId) {
+      if (status.get(responseId) !== "submitted") return;
+      const interactionId = interactionOf(responseId);
+      if (interactionId !== undefined) {
+        for (const other of openFor(interactionId)) {
+          if (other !== responseId && status.get(other) === "admitted")
+            settle(other, "abandoned", "revised");
+        }
+      }
+      status.set(responseId, "admitted");
+      facts.push(responseAdmitted(responseId));
+    },
+    closeOthers(interactionId, decidedBy) {
+      for (const other of openFor(interactionId)) {
+        if (other === decidedBy) continue;
+        settle(other, status.get(other) === "admitted" ? "abandoned" : "withdrawn");
+      }
+    },
+    facts: () => facts,
+    known: (responseId) => status.has(responseId),
+    submit,
+    latest(interactionId) {
+      return openFor(interactionId).at(-1);
+    },
+    settle,
+  };
 }
 
 /**
- * Responder progress on approvals: candidates that started or finished, approvals they settled,
- * and the sign-in of a candidate that expired. Each is reported once, when the projection hasn't
- * heard it, for requests the projection still holds.
+ * What the response policies concluded since the last pass, by response: a responder they
+ * refused, an answer that failed or expired, or one another responder's answer made moot. An
+ * answer a policy allowed stands, admitted, until its batch decides.
  */
-function reportApprovalProgress(
-  projection: SessionProjection,
-  audit: ReturnType<typeof getApprovalAuditState>,
-  challenges: readonly AuthorizationChallenge[],
-): readonly SessionEvent[] {
-  const at = turnCoordinates(projection);
-  const isOpen = (requestId: string) => {
-    const open = projection.inputs[requestId];
-    return open !== undefined && open.status !== "settled";
-  };
+function reportResponderProgress(
+  tables: PublicView,
+  responses: ResponseLedger,
+  policy: ResponsePolicyPass,
+): void {
+  for (const candidate of policy.audit.candidateHistory) {
+    if (tables.responses[candidate.candidateId] === undefined) continue;
+    switch (candidate.status) {
+      case "rejected":
+        responses.settle(candidate.candidateId, "refused", candidate.reason);
+        break;
+      case "failed":
+        responses.settle(candidate.candidateId, "failed", candidate.reason);
+        break;
+      case "timed-out":
+        responses.settle(candidate.candidateId, "expired", candidate.reason);
+        break;
+      case "stale":
+        responses.settle(candidate.candidateId, "withdrawn", candidate.reason);
+        break;
+      default:
+        break;
+    }
+  }
+  for (const settlement of policy.audit.settlements) {
+    if (settlement.candidateId !== undefined && settlement.outcome !== "unavailable")
+      responses.admit(settlement.candidateId);
+  }
+}
+
+/** A responder's sign-in whose candidate expired ends with it. */
+function signInProgress(tables: PublicView, policy: ResponsePolicyPass): SessionEvent[] {
   const events: SessionEvent[] = [];
-  for (const challenge of challenges) {
-    const expired = audit.candidateHistory.some(
+  for (const challenge of policy.challengesAtStart) {
+    const expired = policy.audit.candidateHistory.some(
       (candidate) =>
         candidate.candidateId === challenge.candidateId && candidate.status === "timed-out",
     );
-    const attempt = projection.authorizations[challenge.attemptId ?? challenge.name];
-    if (!expired || attempt?.status !== "required") continue;
+    const interactionId = signInInteractionId(challenge);
+    if (!expired || tables.interactions[interactionId]?.status !== "open") continue;
     events.push(
-      createAuthorizationCompletedEvent({
-        ...authorizationEventFields(challenge),
-        outcome: "failed",
+      interactionSettled(interactionId, "expired", {
         reason: "The approval response expired. Please submit a new response.",
-        ...at,
-      }),
-    );
-  }
-  for (const candidate of audit.activeCandidates) {
-    if (projection.candidates[candidate.candidateId] !== undefined) continue;
-    if (!isOpen(candidate.requestId)) continue;
-    events.push(
-      createApprovalCandidateEvent({
-        candidateId: candidate.candidateId,
-        outcome: "pending",
-        requestId: candidate.requestId,
-        responderPrincipalId: candidate.responder.principalId,
-        ...at,
-      }),
-    );
-  }
-  for (const candidate of audit.candidateHistory) {
-    if (candidate.status === "allowed" || candidate.status === "authorization-required") continue;
-    if (projection.inputs[candidate.requestId] === undefined) continue;
-    if (projection.candidates[candidate.candidateId]?.outcome === candidate.status) continue;
-    events.push(
-      createApprovalCandidateEvent({
-        candidateId: candidate.candidateId,
-        outcome: candidate.status,
-        requestId: candidate.requestId,
-        responderPrincipalId: candidate.responder.principalId,
-        reason: candidate.reason,
-        ...at,
-      }),
-    );
-  }
-  for (const settlement of audit.settlements) {
-    // An unavailable request's candidate reported it failed, with the reason.
-    if (!isOpen(settlement.requestId) || settlement.outcome === "unavailable") continue;
-    events.push(
-      createApprovalSettledEvent({
-        outcome: settlement.outcome === "allowed" ? "approved" : "cancelled",
-        requestId: settlement.requestId,
-        responderPrincipalId: settlement.actor.principalId,
-        ...at,
       }),
     );
   }
@@ -512,7 +619,10 @@ export function hasRunnableQueue(view: SessionView): boolean {
     ...(queued.attributedInputResponses ?? []).map(({ response }) => response),
   ];
   const answered = new Set(responses.map((response) => response.requestId));
-  const limit = openInputs(view.projection).find((open) => open.request.kind === "session-limit");
+  // A message waits for the session-limit answer too: the turn holds until the prompt is answered.
+  const limit = openRequests(view.projection.view).find(
+    (open) => open.request.kind === "session-limit",
+  );
   if (limit !== undefined) return answered.has(limit.request.requestId);
   if (
     queued.message !== undefined ||
@@ -551,7 +661,7 @@ export function grantedApprovalKeys(
  */
 export function approvingSteps(
   view: SessionView,
-  stepInput: StepInput | undefined,
+  stepInput: HarnessStepInput | undefined,
 ): readonly SuspendedStep[] {
   const pending = view.turn.suspended.filter((step) => step.requests.length > 0);
   const options = new Map(
@@ -574,14 +684,17 @@ export function stepForRequest(view: SessionView, requestId: string): SuspendedS
 }
 
 /**
- * The held turn moves on, steered or cancelled: the sign-ins it waits on end, declined, including
- * a responder's for one of its approvals.
+ * The held turn moves on, steered: the sign-ins it waits on are withdrawn, including a
+ * responder's for one of its approvals.
  */
 export function withdrawSignIns(view: SessionView, reason: string): Transition {
+  const tables = publicViewOf(view.projection);
   return {
     events: view.signIns.flatMap((challenge) => {
-      const attempt = view.projection.authorizations[challenge.attemptId ?? challenge.name];
-      return attempt?.status === "required" ? [signInWithdrawn(attempt, reason)] : [];
+      const interactionId = signInInteractionId(challenge);
+      return tables.interactions[interactionId]?.status === "open"
+        ? [interactionSettled(interactionId, "withdrawn", { reason })]
+        : [];
     }),
     signIns: [],
     turn: view.turn,
@@ -594,24 +707,16 @@ export function withdrawSignIns(view: SessionView, reason: string): Transition {
 
 /**
  * The session spent its budget: it asks whether to continue instead of calling the model, and
- * the turn holds for input. The prompt is the projection's open request; `answer` grants a
- * fresh budget or declines it.
+ * the turn pauses on the prompt. `answer` grants a fresh budget or declines it.
  */
 export function requestLimit(
   view: SessionView,
   input: { readonly request: InputRequest },
 ): Transition {
-  const position = turnPosition(view.projection);
+  const { turnId } = turnPosition(view.projection);
+  const opened = interactionOpened(input.request, { scope: { turnId } });
   return {
-    events: [
-      createInputRequestedEvent({
-        requests: [input.request],
-        sequence: position.sequence,
-        stepIndex: position.stepIndex,
-        turnId: position.turnId,
-      }),
-      ...hold(view, { on: "input" }).events,
-    ],
+    events: [opened, ...hold(view, { on: "input", opening: [input.request.requestId] }).events],
     turn: view.turn,
   };
 }
@@ -632,35 +737,44 @@ export function requireSignIn(
   input: {
     readonly challenges: readonly AuthorizationChallenge[];
     readonly callIdsByName?: ReadonlyMap<string, readonly string[]>;
-    readonly queued?: StepInput;
+    readonly queued?: HarnessStepInput;
   },
 ): Transition {
-  const position = turnPosition(view.projection);
-  const at = {
-    sequence: position.sequence,
-    stepIndex: position.stepIndex,
-    turnId: position.turnId,
-  };
+  const { turnId } = turnPosition(view.projection);
+  const tables = publicViewOf(view.projection);
+  const opening = input.challenges.filter(
+    (challenge) => tables.interactions[signInInteractionId(challenge)] === undefined,
+  );
   const events: SessionEvent[] = [
-    ...supersededChallenges(view.signIns, input.challenges).map((superseded) =>
-      createAuthorizationCompletedEvent({
-        ...authorizationEventFields(superseded),
-        outcome: "failed",
-        reason: "Superseded by a newer authorization attempt.",
-        ...at,
-      }),
-    ),
-    ...input.challenges.map((challenge) =>
-      createAuthorizationRequiredEvent({
-        ...authorizationEventFields(challenge),
-        description:
-          challenge.challenge.instructions ?? `Authorization required for ${challenge.name}`,
-        webhookUrl: challenge.hookUrl,
-        ...at,
+    // A newer attempt replaces the one it supersedes.
+    ...supersededChallenges(view.signIns, input.challenges).flatMap((superseded) => {
+      const interactionId = signInInteractionId(superseded);
+      return tables.interactions[interactionId]?.status === "open"
+        ? [
+            interactionSettled(interactionId, "abandoned", {
+              reason: "Superseded by a newer authorization attempt.",
+            }),
+          ]
+        : [];
+    }),
+    ...opening.map((challenge) =>
+      signInOpened(challenge, {
+        scope: { turnId },
+        // A responder's sign-in is about their answer; any other holds the turn.
+        subject:
+          challenge.candidateId !== undefined &&
+          tables.responses[challenge.candidateId] !== undefined
+            ? { responseId: challenge.candidateId }
+            : { turnId },
       }),
     ),
   ];
-  events.push(...hold(view, { on: "input" }).events);
+  events.push(
+    ...hold(view, {
+      on: "input",
+      opening: opening.map((challenge) => signInInteractionId(challenge)),
+    }).events,
+  );
   const queued =
     input.queued === undefined
       ? view.turn.queued

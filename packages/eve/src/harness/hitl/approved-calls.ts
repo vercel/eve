@@ -50,7 +50,11 @@ export async function runApprovedCalls(input: {
       const { callId, toolName } = request.action;
       const definition = input.tools.get(toolName);
       if (isRunnableTool(definition)) {
-        return await executeToolCall(request.action, { ...input, definition }, "recheck");
+        return await executeToolCall(
+          request.action,
+          { ...input, clearedBy: { interactionId: request.requestId }, definition },
+          "recheck",
+        );
       }
       // A connection or dynamic tool can go away while its call waits for approval.
       const searchable = input.tools.get(SEARCH_TOOL_NAME) !== undefined;

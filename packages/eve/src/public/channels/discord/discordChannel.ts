@@ -165,13 +165,11 @@ export interface DiscordChannelEvents {
   readonly "call.settled"?: DiscordEventHandler<"call.settled">;
   readonly "content.completed"?: DiscordEventHandler<"content.completed">;
   readonly "content.delta"?: DiscordEventHandler<"content.delta">;
-  readonly "input.requested"?: DiscordEventHandler<"input.requested">;
-  readonly "input.resolved"?: DiscordEventHandler<"input.resolved">;
+  readonly "interaction.opened"?: DiscordEventHandler<"interaction.opened">;
+  readonly "interaction.settled"?: DiscordEventHandler<"interaction.settled">;
   readonly "turn.settled"?: DiscordEventHandler<"turn.settled">;
   readonly "session.ended"?: DiscordEventHandler<"session.ended">;
   readonly "delivery.settled"?: DiscordEventHandler<"delivery.settled">;
-  readonly "authorization.required"?: DiscordEventHandler<"authorization.required">;
-  readonly "authorization.completed"?: DiscordEventHandler<"authorization.completed">;
 }
 
 /** Configuration for {@link discordChannel}. */

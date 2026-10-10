@@ -123,7 +123,8 @@ export async function enforceBudget(
   if (limit.kind === "ask") {
     step.session = { ...step.session, history: validateHarnessModelMessages([...messages]) };
     await step.apply(requestLimit(step.view(), { request: limit.request }), step.session.history);
-    return { next: null, session: step.session };
+    // The turn pauses on the prompt; the answer resumes it or cancels it.
+    return { held: { kind: "request" }, next: null, session: step.session };
   }
   await step.apply(
     fail(step.view(), {

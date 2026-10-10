@@ -1,11 +1,15 @@
 import type { DeliverHookPayload, DeliverPayload, SessionAuthContext } from "#channel/types.js";
 import type { ConsumedDelivery } from "#harness/session-machine/transitions.js";
-import type { StepInput } from "#harness/types.js";
+import type { HarnessStepInput } from "#harness/types.js";
 import { userPartsOf } from "#harness/user-parts.js";
 import { readClientContext } from "#internal/client-context.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { JsonValue, Principal } from "#protocol/session-events/envelope.js";
 import type { DeliverySource } from "#protocol/session-events/families/delivery.js";
+import type {
+  ResponseSubmittedData,
+  ResponseValue,
+} from "#protocol/session-events/families/response.js";
 
 // A delivery's facts at the step that admits it: every payload is admitted, a payload the
 // channel's `deliver` hook ignored settles `ignored` at once, and the rest go on to the turn,
@@ -15,6 +19,8 @@ import type { DeliverySource } from "#protocol/session-events/families/delivery.
 export interface DeliveryAdmission {
   readonly facts: readonly SessionEvent[];
   readonly consumed: readonly ConsumedDelivery[];
+  /** The identities of answers, before coalescing or asynchronous policy checks. */
+  readonly responseBindings: readonly ResponseSubmittedData[];
 }
 
 export function admitDeliveries(input: {
@@ -23,15 +29,18 @@ export function admitDeliveries(input: {
   /** The payloads left once sign-in callbacks were matched out, with what `deliver` made of each. */
   readonly payloads: readonly {
     readonly payload: DeliverPayload;
-    readonly input: StepInput | undefined;
+    readonly input: HarnessStepInput | undefined;
   }[];
   /** The position of the line the admission takes, for ids a delivery arrived without. */
   readonly position: number;
+  /** Whether the session already admitted a delivery, as when it forwarded part of it. */
+  readonly admitted?: (deliveryId: string) => boolean;
   readonly channelKind: string;
 }): DeliveryAdmission {
   const { delivery } = input;
   const facts: SessionEvent[] = [];
   const consumed: ConsumedDelivery[] = [];
+  const responseBindings: ResponseSubmittedData[] = [];
   const principal = principalOf(delivery.auth);
   for (const { input: stepInput, payload } of input.payloads) {
     const index = delivery.payloads.indexOf(payload);
@@ -61,7 +70,7 @@ export function admitDeliveries(input: {
     const clientContext = readClientContext(payload);
     if (clientContext !== undefined && clientContext.length > 0)
       data.clientContext = [...clientContext];
-    facts.push({ data, type: "delivery.admitted" });
+    if (input.admitted?.(deliveryId) !== true) facts.push({ data, type: "delivery.admitted" });
     if (stepInput === undefined) {
       facts.push({ data: { deliveryId, outcome: "ignored" }, type: "delivery.settled" });
       continue;
@@ -70,8 +79,19 @@ export function admitDeliveries(input: {
       deliveryId,
       parts: stepInput.message === undefined ? [] : userPartsOf(stepInput.message),
     });
+    for (const [answerIndex, answer] of (stepInput.inputResponses ?? []).entries()) {
+      const value: { -readonly [K in keyof ResponseValue]: ResponseValue[K] } = {};
+      if (answer.optionId !== undefined) value.optionId = answer.optionId;
+      if (answer.text !== undefined) value.text = answer.text;
+      responseBindings.push({
+        responseId: `response_${deliveryId}_${answerIndex}`,
+        interactionId: answer.requestId,
+        deliveryId,
+        value,
+      });
+    }
   }
-  return { consumed, facts };
+  return { consumed, facts, responseBindings };
 }
 
 /** Who sent a delivery, as the wire names them. */
