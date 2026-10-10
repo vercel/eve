@@ -5,6 +5,7 @@ import type {
 } from "#compiled/@standard-schema/spec/index.js";
 
 import type { Approval } from "#approval/definition.js";
+import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionContext } from "#context/session-context.js";
 import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
 import type { JsonObject } from "#shared/json.js";
@@ -23,7 +24,10 @@ type ApprovalContextInput<TInput> = unknown extends TInput ? Record<string, unkn
 export type { ToolAuthDefinition, ToolAuthOptions, ToolAuthProvider } from "#tools/auth.js";
 export type { ToolModelOutput, ToolModelOutputPart } from "#tools/model-output.js";
 
-export type ToolExecuteOptions = Omit<ToolExecutionOptions<unknown>, "context">;
+export type ToolExecuteOptions = Omit<ToolExecutionOptions<unknown>, "context"> & {
+  /** Who approved the call, when it runs after a person approved it. */
+  readonly approval?: { readonly responder: SessionAuthContext };
+};
 
 export type ToolExecuteFn<TInput = unknown, TOutput = unknown> = (
   input: TInput,
@@ -216,7 +220,29 @@ export type ToolContext = SessionContext & {
    * token returned by {@link getToken}.
    */
   requireAuth(provider: ToolAuthProvider, options?: ToolAuthOptions): never;
+  /**
+   * The person who approved this call. Present only when the call runs after a
+   * person approved it; absent for calls that needed no approval.
+   */
+  readonly approval?: ToolApproval;
 };
+
+/**
+ * The approval behind an approved tool call. The call still runs as the
+ * requester, `ctx.session.auth.current`; this only lets it read who approved
+ * it and act with their credentials where the tool chooses to.
+ */
+export interface ToolApproval {
+  /** Who approved the call: the same principal its response policy saw. */
+  readonly responder: SessionAuthContext;
+  /**
+   * Resolves the responder's token for an inline provider, as
+   * {@link ToolContext.getToken} does for the requester. It never starts a
+   * sign-in: when the responder has no token, the call fails with the
+   * provider's error.
+   */
+  getToken(provider: ToolAuthProvider, options?: ToolAuthOptions): Promise<TokenResult>;
+}
 
 /**
  * Public tool definition authored in `agent/tools/*.ts`.

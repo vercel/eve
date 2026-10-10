@@ -8,6 +8,7 @@ import {
 } from "ai";
 
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
+import type { SessionAuthContext } from "#channel/types.js";
 import { isInlineAuthorizationToolResult } from "#harness/inline-tool-authorization.js";
 import { toolCallModelOutput } from "#harness/tool-call-io.js";
 import { projectDeltaPresentation, projectResultPresentation } from "#harness/tool-presentation.js";
@@ -61,6 +62,8 @@ export async function runApprovedCalls(input: {
   readonly abortSignal: AbortSignal | undefined;
   /** The step attempt's telemetry, which hears each execution as the AI SDK reports it. */
   readonly telemetry?: TelemetryOptions;
+  /** Who approved each request, which the call reads as `ctx.approval`; it still runs as the requester. */
+  readonly responderOf?: (request: InputRequest) => SessionAuthContext | undefined;
 }): Promise<{
   readonly settled: readonly ApprovedCallResult[];
   readonly toolResults: readonly TypedToolResult<ToolSet>[];
@@ -145,7 +148,9 @@ export async function runApprovedCalls(input: {
             const startedAt = performance.now();
             try {
               started = true;
+              const responder = input.responderOf?.(request);
               const executed = execute(args, {
+                ...(responder !== undefined && { approval: { responder } }),
                 abortSignal: input.abortSignal,
                 messages: [...input.messages],
                 toolCallId: callId,
