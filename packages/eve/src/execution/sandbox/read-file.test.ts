@@ -58,7 +58,7 @@ describe("read_file images", () => {
       );
 
       // The raw output feeds action.result, so it carries metadata only.
-      expect(output.image).toEqual({
+      expect(output.file).toEqual({
         height: 32,
         mediaType: "image/png",
         size: png.byteLength,
@@ -97,7 +97,7 @@ describe("read_file images", () => {
 
     expect(path).toMatch(/^\/workspace\/\.eve\/attachments\/[0-9a-f]{16}\/file-[0-9a-f]{16}\.png$/);
     const output = await executeReadFileOnSandbox(sandbox.session, { filePath: path });
-    expect(output.image).toMatchObject({ mediaType: "image/png" });
+    expect(output.file).toMatchObject({ mediaType: "image/png" });
   });
 
   it.each([
@@ -111,7 +111,7 @@ describe("read_file images", () => {
     const output = await executeReadFileOnSandbox(sandbox.session, {
       filePath: "/workspace/image",
     });
-    expect(output.image).toMatchObject({ mediaType, size: bytes.byteLength });
+    expect(output.file).toMatchObject({ mediaType, size: bytes.byteLength });
   });
 
   it("reads text with an image suffix using normal pagination", async () => {
@@ -142,7 +142,7 @@ describe("read_file images", () => {
     const output = await contextStorage.run(sandboxContext(sandbox), () =>
       executeReadFileOnSandbox(sandbox.session, { filePath: "/workspace/file" }),
     );
-    expect(output.image).toBeUndefined();
+    expect(output.file).toBeUndefined();
     expect(output.totalLines).toBe(content === "" ? 0 : 1);
   });
 
@@ -170,8 +170,20 @@ describe("read_file images", () => {
 
     expect(modelOutput).toEqual({
       type: "text",
-      value: `${output.content} The image changed after it was read; read it again.`,
+      value: `${output.content} The file changed after it was read; read it again.`,
     });
+  });
+
+  it("rejects images wider than providers accept", async () => {
+    const sandbox = mockSandbox();
+    await sandbox.session.writeBinaryFile({
+      content: pngBytes(8001, 10),
+      path: "/workspace/wide.png",
+    });
+
+    await expect(
+      executeReadFileOnSandbox(sandbox.session, { filePath: "/workspace/wide.png" }),
+    ).rejects.toThrow("8001x10 pixels");
   });
 
   it.each(["photo.png", "photo"])("rejects oversized images named %s", async (filename) => {
@@ -184,5 +196,50 @@ describe("read_file images", () => {
     await expect(
       executeReadFileOnSandbox(sandbox.session, { filePath: `/workspace/${filename}` }),
     ).rejects.toThrow("read_file shows images up to 3 MiB");
+  });
+});
+
+describe("read_file PDFs", () => {
+  const pdf = Buffer.from(
+    "%PDF-1.4\n%\xe2\xe3\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n" +
+      "2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page>>endobj\n%%EOF\n",
+    "latin1",
+  );
+
+  it("shows a PDF to the model as a file, whatever its name", async () => {
+    const sandbox = mockSandbox();
+    const path = "/workspace/.eve/attachments/abc/report";
+    await sandbox.session.writeBinaryFile({ content: pdf, path });
+
+    const output = await executeReadFileOnSandbox(sandbox.session, { filePath: path });
+    const modelOutput = await contextStorage.run(sandboxContext(sandbox), async () =>
+      readFile.toModelOutput?.(output),
+    );
+
+    expect(output.file).toEqual({ mediaType: "application/pdf", pages: 1, size: pdf.byteLength });
+    expect(modelOutput).toEqual({
+      type: "content",
+      value: [
+        { text: `PDF ${path} (application/pdf, ${pdf.byteLength} bytes, 1 page).`, type: "text" },
+        {
+          data: { data: pdf.toString("base64"), type: "data" },
+          filename: "report",
+          mediaType: "application/pdf",
+          type: "file",
+        },
+      ],
+    });
+  });
+
+  it("rejects PDFs over 20 MiB", async () => {
+    const sandbox = mockSandbox();
+    await sandbox.session.writeBinaryFile({
+      content: Buffer.concat([pdf, Buffer.alloc(20 * 1024 * 1024)]),
+      path: "/workspace/big.pdf",
+    });
+
+    await expect(
+      executeReadFileOnSandbox(sandbox.session, { filePath: "/workspace/big.pdf" }),
+    ).rejects.toThrow("read_file shows PDFs up to 20 MiB");
   });
 });

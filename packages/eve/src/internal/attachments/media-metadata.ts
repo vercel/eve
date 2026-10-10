@@ -91,9 +91,12 @@ const VERIFIABLE_MEDIA_TYPES: ReadonlySet<string> = new Set([
   PDF_MEDIA_TYPE,
 ]);
 
-// The format allows leading bytes before the header, but providers expect it
-// at the start, and a header deeper in would mark text that mentions it.
-function hasPdfHeader(bytes: Uint8Array): boolean {
+/**
+ * Whether the bytes start with a PDF header. The format allows leading bytes,
+ * but providers expect the header first, and a match deeper in would mark text
+ * that only mentions it.
+ */
+export function hasPdfHeader(bytes: Uint8Array): boolean {
   return readAscii(bytes, 0, 5) === "%PDF-";
 }
 

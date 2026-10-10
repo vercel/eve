@@ -164,7 +164,7 @@ If a referenced file is missing, or its bytes no longer match what eve staged be
 
 A file that eve can't stage never enters session history. When a channel's `fetchFile` fails, or a file part's `data` is not bytes, base64, a `data:` URL, or a URL, the model receives a note that names the file instead.
 
-Each call sends the same bytes for the same file, so the model still sees attachments from earlier turns and the provider's prompt cache stays valid. Compaction replaces files in older tool results with their text reference. The `read_file` tool shows PNG, JPEG, GIF, and WebP files up to 3 MiB to the model as images, so the agent can look at an image again after compaction.
+Each call sends the same bytes for the same file, so the model still sees attachments from earlier turns and the provider's prompt cache stays valid. Compaction replaces files in older tool results with their text reference. The `read_file` tool shows the same images and PDFs to the model as files, so the agent can look at an attachment again after compaction, or open a PDF that a tool or `bash` wrote to the sandbox.
 
 ## Custom providers
 
