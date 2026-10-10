@@ -9,7 +9,6 @@ import semver from "#compiled/semver/index.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   headlessAsker,
-  InteractionRequired,
   interactiveAsker,
   InvalidAnswerError,
   withAnswers,
@@ -173,9 +172,10 @@ const WEB_CHAT_ITEMS: Readonly<Record<WebChatFramework, string>> = {
 };
 
 /**
- * Asks which framework Web Chat uses with the same answer rules as setup
- * questions. Returns `false` when cancelled and `undefined` after reporting a
- * headless blocker.
+ * Asks which framework Web Chat uses. Only an interactive terminal prompts;
+ * every other run takes the `web-framework` answer or the Next.js default.
+ * Returns `false` when cancelled and `undefined` after reporting an invalid
+ * headless answer.
  */
 async function askWebChatFramework(
   logger: RegistryCommandLogger,
@@ -190,27 +190,21 @@ async function askWebChatFramework(
     (
       dependencies.hasInteractiveTerminal ?? defaultAddCommandDependencies.hasInteractiveTerminal!
     )();
-  // Without a terminal, keep the recommended framework so scripted installs never stall.
-  const assume = options.yes === true || (!nonInteractive && !canPrompt);
-  const base =
-    nonInteractive || assume
-      ? headlessAsker()
+  // Headless and scripted installs keep working without an answer, as before frameworks existed.
+  const asker = withAnswers(options.answers ?? {})(
+    options.yes === true || nonInteractive || !canPrompt
+      ? withPolicy("assume")(headlessAsker())
       : interactiveAsker(
           options.prompter ??
             dependencies.createPrompter?.() ??
             defaultAddCommandDependencies.createPrompter!(),
-        );
-  const asker = withAnswers(options.answers ?? {})(assume ? withPolicy("assume")(base) : base);
+        ),
+  );
   try {
     return await resolveWebChatFramework(appRoot, asker, options.answers);
   } catch (error) {
     if (error instanceof WizardCancelledError) return false;
-    if (
-      !nonInteractive ||
-      !(error instanceof InteractionRequired || error instanceof InvalidAnswerError)
-    ) {
-      throw error;
-    }
+    if (!nonInteractive || !(error instanceof InvalidAnswerError)) throw error;
     const question = setupQuestionToWire(error.question);
     logger.error(
       serializeHeadlessSetupEvent({
@@ -221,9 +215,7 @@ async function askWebChatFramework(
         completedItems: [],
         status: "input_required",
         question,
-        ...(error instanceof InvalidAnswerError
-          ? { issue: { code: "invalid_answer" as const, message: error.message } }
-          : {}),
+        issue: { code: "invalid_answer", message: error.message },
         next: headlessSetupContinuation({
           item,
           installed: false,

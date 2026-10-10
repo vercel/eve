@@ -601,10 +601,38 @@ describe("registry commands", () => {
     expect(logger.errors).toEqual([]);
   });
 
-  it("asks for the Web Chat framework before writing anything in a headless install", async () => {
+  it("installs the Next.js files when a headless install leaves the framework unanswered", async () => {
+    const logger = createLogger();
+    const prepareWebRegistryProject = vi.fn(async () => {});
+    getRegistryItems.mockResolvedValue([{ name: "channel/web", type: "registry:item" }]);
+
+    await runAddCommand(
+      logger,
+      "/project",
+      "channel/web",
+      { nonInteractive: true, skipSetup: true },
+      {
+        loadSetupCommandRunner: async () =>
+          vi.fn(async () => ({ kind: "completed" as const, facts: [] })),
+        prepareWebRegistryProject,
+      },
+    );
+
+    expect(prepareWebRegistryProject).toHaveBeenCalledWith("/project", "next");
+    expect(addRegistryItems).toHaveBeenCalledWith(
+      ["https://eve.dev/r/channel/web.json"],
+      expect.objectContaining({ cwd: "/project" }),
+    );
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("reports an invalid headless framework answer before writing anything", async () => {
     const logger = createLogger();
 
-    await runAddCommand(logger, "/project", "channel/web", { nonInteractive: true });
+    await runAddCommand(logger, "/project", "channel/web", {
+      nonInteractive: true,
+      answers: { "web-framework": "nuxt" },
+    });
 
     expect(logger.errors.map((line) => JSON.parse(line))).toEqual([
       expect.objectContaining({
@@ -613,16 +641,7 @@ describe("registry commands", () => {
         installed: false,
         status: "input_required",
         question: expect.objectContaining({ key: "web-framework" }),
-        next: {
-          command: "eve",
-          args: [
-            "add",
-            "channel/web",
-            "--non-interactive",
-            "--answer",
-            "web-framework=<JSON value>",
-          ],
-        },
+        issue: expect.objectContaining({ code: "invalid_answer" }),
       }),
     ]);
     expect(writeFile).not.toHaveBeenCalled();
