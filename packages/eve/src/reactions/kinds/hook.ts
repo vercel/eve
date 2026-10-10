@@ -94,7 +94,6 @@ function hookResolveContext(ctx: InternalResolveContext): HookResolveContext {
     agent: base.agent,
     channel: { ...ctx.channel, ...base.channel },
     ...(ctx.conversation === undefined ? {} : { conversation: ctx.conversation }),
-    facts: ctx.facts,
     getSandbox: base.getSandbox,
     session: { ...base.session, auth: ctx.session.auth },
   };

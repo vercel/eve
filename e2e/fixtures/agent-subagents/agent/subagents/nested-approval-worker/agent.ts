@@ -27,5 +27,6 @@ const workerModel = mockModel({
 
 export default defineDynamic({
   description: "Collects Alice's or Bob's release checklist approvals or authorization.",
+  select: () => null,
   resolve: () => ({ model: workerModel, modelContextWindowTokens: 1_000_000 }),
 });

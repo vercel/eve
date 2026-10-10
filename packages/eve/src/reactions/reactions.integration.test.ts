@@ -104,6 +104,7 @@ describe("reactions", () => {
     const runtime = await createTestRuntime({
       agent: {
         definition: defineDynamic({
+          select: () => null,
           resolve: () => {
             log.push("resolve:model");
             return defineAgent({ model, modelContextWindowTokens: 200_000 });
@@ -157,6 +158,7 @@ describe("reactions", () => {
         {
           loadNamespace: async () => ({
             default: defineDynamic({
+              select: () => null,
               resolve: () => {
                 log.push("resolve:instructions");
                 return defineInstructions({ content: POLICY });

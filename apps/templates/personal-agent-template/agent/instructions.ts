@@ -20,6 +20,7 @@ function instructionsForChannel(kind: string | undefined, base: string) {
 }
 
 export default defineDynamic({
+  select: () => null,
   resolve: async (_event, ctx: ResolveContext) => {
     const userId = ctx.session.auth.current?.principalId;
     if (!userId || userId.startsWith("eve:")) {

@@ -113,5 +113,6 @@ export function publicationOperationId(ctx: Pick<ToolContext, "session">): strin
 }
 
 export default defineDynamic({
+  select: () => null,
   resolve: resolveTool,
 });

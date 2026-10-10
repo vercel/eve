@@ -8,6 +8,7 @@ import { CATALOG_TOOLS, referenceOf } from "../lib/catalog";
  * the same deferred entries as authored files would give it.
  */
 export default defineDynamic({
+  select: () => null,
   resolve: () =>
     Object.fromEntries(
       CATALOG_TOOLS.map(({ description, inputs = {}, name, result }) => [

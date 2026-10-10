@@ -4,6 +4,7 @@ import { SERVICE_TOKEN, previewBypassHeaders, selfMcpUrl } from "../../fixture";
 
 // Resolved per session so the URL is this deployment's, not the build host's.
 export default defineDynamic({
+  select: () => null,
   resolve: () =>
     defineMcpClientConnection({
       description: "The Maple Street kennel agent's own tools, reached over its MCP channel.",

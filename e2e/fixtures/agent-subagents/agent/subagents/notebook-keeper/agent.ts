@@ -11,5 +11,6 @@ export default defineDynamic({
     "Test fixture: keeps Alice's tide station notebook notes. Call it only for NOTEBOOK directives.",
   // Selected per step: in mock mode this fixture replaces static authored
   // models with eve's bootstrap mock, which would drop the keeper's script.
+  select: () => null,
   resolve: () => ({ model: keeperModel, modelContextWindowTokens: 1_000_000 }),
 });

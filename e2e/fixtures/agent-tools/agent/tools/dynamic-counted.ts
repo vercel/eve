@@ -9,6 +9,7 @@ async function simulateIo(): Promise<{ label: string }> {
 }
 
 export default defineDynamic({
+  select: () => null,
   resolve: async (_event, _ctx) => {
     const data = await simulateIo();
 

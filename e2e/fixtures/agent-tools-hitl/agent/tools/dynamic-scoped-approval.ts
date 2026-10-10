@@ -2,6 +2,7 @@ import { defineDynamic, defineTool } from "eve/tools";
 import { z } from "zod";
 
 export default defineDynamic({
+  select: () => null,
   resolve: () => ({
     dynamic_scoped_approval: defineTool({
       description:

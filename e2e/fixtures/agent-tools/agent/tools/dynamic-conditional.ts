@@ -4,6 +4,7 @@ import { defineState } from "eve/context";
 const invocationCount = defineState("dynamic-conditional.invocations", () => 0);
 
 export default defineDynamic({
+  select: () => null,
   resolve: async (_event, _ctx) => {
     // Increment on every invocation. If the resolver truly runs once
     // per session, this stays at 1 and the "first" tool is returned.

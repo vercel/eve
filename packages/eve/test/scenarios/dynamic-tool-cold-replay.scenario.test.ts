@@ -86,6 +86,7 @@ const guardedMarker = createDurableMarkerTool("guarded");
 const companionMarker = createDurableMarkerTool("companion");
 
 export default defineDynamic({
+  select: () => null,
   resolve: () => {
     appendFileSync(join(process.cwd(), ".dynamic-resolver-runs"), process.pid + "\\n");
     return {

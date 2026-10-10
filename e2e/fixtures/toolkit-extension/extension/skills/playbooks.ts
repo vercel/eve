@@ -5,6 +5,7 @@ import { defineDynamic, defineSkill } from "eve/skills";
 // `incident` — so it can't collide with the consumer's or another extension's
 // skills. The dynamic-skill eval loads it by the namespaced name to prove that.
 export default defineDynamic({
+  select: () => null,
   resolve: async () => ({
     incident: defineSkill({
       description:

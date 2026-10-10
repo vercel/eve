@@ -32,7 +32,7 @@ it.each([false, true])(
               {
                 logicalPath: "tools/dynamic.ts",
                 loadNamespace: async () => ({
-                  default: defineDynamic({ resolve: resolve }),
+                  default: defineDynamic({ select: () => null, resolve: resolve }),
                 }),
               },
             ]

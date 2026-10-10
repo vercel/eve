@@ -483,6 +483,7 @@ describe("compileAgentManifest source graph", () => {
         logicalPath: "instructions/dynamic.ts",
         loadNamespace: async () => ({
           default: defineDynamic({
+            select: () => null,
             resolve: () => ({ content: "Dynamic instructions." }),
           }),
         }),
@@ -497,6 +498,7 @@ describe("compileAgentManifest source graph", () => {
         logicalPath: "skills/dynamic.ts",
         loadNamespace: async () => ({
           default: defineDynamic({
+            select: () => null,
             resolve: () => defineSkill({ description: "Dynamic skill.", markdown: "# Dynamic\n" }),
           }),
         }),
@@ -523,6 +525,7 @@ describe("compileAgentManifest source graph", () => {
         logicalPath: "tools/dynamic.ts",
         loadNamespace: async () => ({
           default: defineDynamic({
+            select: () => null,
             resolve: () =>
               defineTool({ description: "Dynamic.", execute: () => null, inputSchema: {} }),
           }),
@@ -626,7 +629,7 @@ describe("compileAgentManifest source graph", () => {
       {
         logicalPath: "agent.ts",
         loadNamespace: async () => ({
-          default: defineDynamic({ resolve: () => "openai/gpt-5.4" }),
+          default: defineDynamic({ select: () => null, resolve: () => "openai/gpt-5.4" }),
         }),
       },
     ]);
@@ -1120,7 +1123,7 @@ describe("compileAgentManifest source graph", () => {
           audit: defineHook({
             events: {
               "session.started": async () => {},
-              "step.started": async () => {},
+              "model.requested": async () => {},
             },
           }),
         }),
@@ -1132,7 +1135,7 @@ describe("compileAgentManifest source graph", () => {
     });
 
     expect(compiled.hooks).toContainEqual({
-      eventNames: ["session.started", "step.started"],
+      eventNames: ["session.started", "model.requested"],
       exportName: "audit",
       logicalPath: "hooks/auth/guard.ts",
       slug: "auth/guard",

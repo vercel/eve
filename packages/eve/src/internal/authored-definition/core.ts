@@ -24,7 +24,7 @@ import {
   type AnthropicPromptCacheTtl,
   type PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
-import { isDynamicSentinel } from "#dynamic/definition.js";
+import { assertResolverForm, isDynamicSentinel } from "#dynamic/definition.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
@@ -46,6 +46,7 @@ export function normalizeAgentDefinition(
 ): Readonly<NormalizedAgentDefinition> {
   // A dynamic `agent.ts` resolves its model per session; its other fields are static.
   if (isDynamicSentinel(value)) {
+    assertResolverForm(value, `${message} The dynamic agent`, { events: false });
     const { kind, resolve, select, ...fields } = value as unknown as Record<string, unknown>;
     if (fields.model !== undefined) {
       throw new Error(
@@ -58,7 +59,7 @@ export function normalizeAgentDefinition(
       model: {
         kind,
         resolve: expectFunction(resolve, message),
-        ...(select === undefined ? {} : { select: expectFunction(select, message) }),
+        select: expectFunction(select, message),
       } as unknown as NormalizedAgentDefinition["model"],
     };
   }

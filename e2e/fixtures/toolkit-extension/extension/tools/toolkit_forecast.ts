@@ -6,6 +6,7 @@ import { stamp } from "../lib/brand";
 // Dynamic capability authored inside an extension: the resolver registers a tool
 // at session start that composes and runs once mounted.
 export default defineDynamic({
+  select: () => null,
   resolve: async () => ({
     toolkit_forecast: defineTool({
       description:

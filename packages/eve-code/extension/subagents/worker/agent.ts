@@ -4,6 +4,7 @@ import extension from "../../extension.ts";
 
 export default defineDynamic({
   defaultTools: false,
+  select: () => null,
   resolve: () => {
     const worker = extension.config.worker ?? {
       model: "openai/gpt-5.6-terra-fast",

@@ -162,6 +162,7 @@ if (userAuthEnabled) {
 }
 
 export default defineDynamic({
+  select: () => null,
   resolve: () => (userAuthEnabled ? defineMcpClientConnection(definition) : null),
 });
 

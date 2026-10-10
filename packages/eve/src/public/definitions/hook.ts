@@ -1,7 +1,12 @@
 import type { SessionEvent } from "../../protocol/session-event.js";
 import type { FactPosition } from "../../protocol/session-events/envelope.js";
 import type { SessionView } from "../../protocol/session-projection/tables.js";
-import type { ReactionSelect, ResolveContext } from "../../dynamic/definition.js";
+import {
+  defineResolver,
+  type ReactionSelect,
+  type ReactionView,
+  type ResolveContext,
+} from "../../dynamic/definition.js";
 import type { SessionContext } from "./callback-context.js";
 import type { ExactDefinition } from "./exact.js";
 
@@ -158,31 +163,44 @@ export type StreamEventHooks<TKey extends HookEventKey = HookEventKey> = {
 };
 
 /**
- * Public hook definition authored in `agent/hooks/*.ts`: a reaction to the session.
- *
- * Either `events`, handlers for the events a commit carries, or `select` and `resolve`: `select`
- * reads what the hook depends on from the session's view, and `resolve` runs right after each
- * commit that changes it. Both run after eve has durably recorded the commit, and both may return
- * intents such as {@link cancel}.
+ * What a hook's `select` reads. Hooks run before the session's capabilities each commit, so their
+ * view holds no capability state, such as the model; select that from a capability instead.
  */
-export interface HookDefinition<TKey extends HookEventKey = HookEventKey, TSelected = unknown> {
-  readonly events?: StreamEventHooks<TKey>;
-  readonly select?: ReactionSelect<TSelected>;
-  readonly resolve?: (
+export type HookView = Omit<ReactionView, "model">;
+
+/** A hook of `events` handlers: each runs once for each record a commit carries of its type. */
+export interface EventHookDefinition<TKey extends HookEventKey = HookEventKey> {
+  readonly events: StreamEventHooks<TKey>;
+  readonly select?: never;
+  readonly resolve?: never;
+}
+
+/**
+ * A hook of `select` and `resolve`: `resolve` runs after each commit that changes what `select`
+ * read, and returns the hook's intents. eve may run it again with the same selection, so keep
+ * effects in `events` handlers.
+ */
+export interface ResolverHookDefinition<TSelected = unknown> {
+  readonly select: ReactionSelect<TSelected, HookView>;
+  readonly resolve: (
     selected: TSelected,
     ctx: HookResolveContext,
   ) => HookResult | Promise<HookResult>;
+  readonly events?: never;
 }
 
-type DefinedHookEventKeys<TDefinition extends HookDefinition> = Extract<
-  keyof NonNullable<TDefinition["events"]>,
-  HookEventKey
->;
+/**
+ * Public hook definition authored in `agent/hooks/*.ts`: a reaction to the session, either
+ * `events` handlers or `select` and `resolve`. Both run after eve has durably recorded the commit,
+ * and both may return intents such as {@link cancel}.
+ */
+export type HookDefinition<TKey extends HookEventKey = HookEventKey, TSelected = unknown> =
+  | EventHookDefinition<TKey>
+  | ResolverHookDefinition<TSelected>;
 
 /**
- * Identity-with-types helper. Returns the passed definition unchanged at
- * runtime while preserving its authored event keys behind the public
- * {@link HookDefinition} boundary and rejecting any key outside the definition.
+ * Defines a hook and returns it with its authored event keys, rejecting any key outside the
+ * definition. Pass `events` handlers, or `select` and `resolve`, never both.
  *
  * ```ts
  * export default defineHook({
@@ -190,17 +208,12 @@ type DefinedHookEventKeys<TDefinition extends HookDefinition> = Extract<
  * });
  * ```
  */
-export function defineHook<const T extends HookDefinition<HookEventKey, any>>(
-  definition: ExactDefinition<T, HookDefinition<HookEventKey, any>>,
-): HookDefinition<
-  DefinedHookEventKeys<T>,
-  T extends HookDefinition<HookEventKey, infer S> ? S : unknown
-> {
-  if (definition.events !== undefined && definition.resolve !== undefined) {
-    throw new Error("defineHook() takes either events or select and resolve, not both.");
-  }
-  if (definition.select !== undefined && definition.resolve === undefined) {
-    throw new Error("defineHook() with select also needs resolve.");
-  }
-  return definition as never;
+export function defineHook<const T extends StreamEventHooks<HookEventKey>>(definition: {
+  readonly events: ExactDefinition<T, StreamEventHooks<HookEventKey>>;
+}): EventHookDefinition<Extract<keyof T, HookEventKey>>;
+export function defineHook<TSelected>(
+  definition: ResolverHookDefinition<TSelected>,
+): ResolverHookDefinition<TSelected>;
+export function defineHook(definition: HookDefinition<HookEventKey, unknown>): HookDefinition {
+  return defineResolver(definition as never, "defineHook") as unknown as HookDefinition;
 }

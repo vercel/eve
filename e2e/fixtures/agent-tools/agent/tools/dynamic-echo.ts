@@ -4,6 +4,7 @@ import { z } from "zod";
 export const DYNAMIC_ECHO_TOKEN = "dynamic-echo-ok-X7R2";
 
 export default defineDynamic({
+  select: () => null,
   resolve: async () => {
     return {
       echo_dynamic: defineTool({

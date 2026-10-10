@@ -1,5 +1,7 @@
 import type { ModelMessage } from "ai";
 
+import type { SessionEvent } from "#protocol/session-event.js";
+
 import type { ContextContainer } from "#context/container.js";
 import type { ReactionView, ResolveContext, SelectContext } from "#dynamic/definition.js";
 import type { WrittenEvent } from "#execution/publish-session-events.js";
@@ -43,6 +45,8 @@ export interface InternalResolveContext extends ResolveContext {
   readonly ctx: ContextContainer;
   /** The commit's records with their positions, empty when a restore rebuilds code. */
   readonly written: readonly WrittenEvent[];
+  /** The commit's events, for eve's own effects; authored `resolve` never sees them. */
+  readonly facts: readonly SessionEvent[];
   /** The conversation, for a reaction that declares it reads one. */
   readonly messages?: readonly ModelMessage[];
   /** The slot as it stood before this run. */

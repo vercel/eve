@@ -4,6 +4,7 @@ import { defineAgent, defineDynamic } from "eve";
 const mockMode = process.env.EVE_E2E_MODEL === "mock";
 
 export default defineDynamic({
+  select: () => null,
   resolve: () =>
     defineAgent({
       description: "Return the dynamic-subagent availability marker.",

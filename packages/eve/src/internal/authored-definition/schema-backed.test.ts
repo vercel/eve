@@ -345,6 +345,7 @@ describe("normalizeToolDefinition", () => {
 
   it("returns a dynamic-tool entry for a defineDynamic({ events }) export with a map", () => {
     const dynamicTools = defineDynamic({
+      select: () => null,
       resolve: async () => ({
         echo: defineTool({
           description: "Echo tool",
@@ -360,6 +361,7 @@ describe("normalizeToolDefinition", () => {
 
   it("returns a dynamic-tool entry for a defineDynamic({ events }) export with a single entry", () => {
     const dynamicTool = defineDynamic({
+      select: () => null,
       resolve: async () =>
         defineTool({
           description: "Dynamic echo",
@@ -375,6 +377,7 @@ describe("normalizeToolDefinition", () => {
   it("rejects a defineDynamic tool export carrying a fallback", () => {
     const dynamicTools = {
       ...defineDynamic({
+        select: () => null,
         resolve: async () => ({}),
       }),
       fallback: "not-supported-here",

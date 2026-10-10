@@ -409,7 +409,6 @@ function toolsContext(): MemoryToolsContext {
   return {
     abortSignal: signal,
     channel: { kind: "http" },
-    facts: [],
     memory: operationContext().memory,
     session: {
       auth: { current: null, initiator: null },

@@ -1,6 +1,7 @@
 import { defineDynamic, defineOpenAPIConnection } from "eve/connections";
 
 export default defineDynamic({
+  select: () => null,
   resolve: () => ({
     "dynamic-catalog": defineOpenAPIConnection({
       baseUrl: "https://catalog.example.com",

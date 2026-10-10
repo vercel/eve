@@ -50,7 +50,6 @@ function run(definition: ReturnType<typeof auto>, input: ReturnType<typeof conte
   return definition.resolve(selected, {
     abortSignal: input.abortSignal,
     channel: {},
-    facts: [],
     session: { id: "test", auth: { current: null, initiator: null } },
   });
 }

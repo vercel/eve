@@ -4,6 +4,7 @@ import { z } from "zod";
 export const DYNAMIC_GUARDED_ECHO_TOKEN = "dynamic-guarded-echo-ok-L8R6";
 
 export default defineDynamic({
+  select: () => null,
   resolve: async () => {
     return {
       dynamic_guarded_echo: defineTool({

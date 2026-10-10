@@ -4,6 +4,7 @@ import { createFakeAuthProvider } from "../lib/fake-auth-provider.ts";
 import { fixtureUrl } from "../lib/fake-service.ts";
 
 export default defineDynamic({
+  select: () => null,
   resolve: () =>
     defineMcpClientConnection({
       description: "Private catalog that requires sign-in before discovering its tools.",

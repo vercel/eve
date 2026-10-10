@@ -3,6 +3,7 @@ import { defineDynamic, defineOpenAPIConnection } from "eve/connections";
 import { petstoreBaseUrl, petstoreHeaders, petstoreSpecUrl } from "../../petstore";
 
 export default defineDynamic({
+  select: () => null,
   resolve: () => ({
     petstore: defineOpenAPIConnection({
       baseUrl: petstoreBaseUrl(),

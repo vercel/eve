@@ -6,6 +6,7 @@ export const OVERRIDE_TOKEN = "dynamic-override-ok-K2P7";
 // same name. A dynamic tool wins on conflict, so calls to `override-target`
 // must execute this version.
 export default defineDynamic({
+  select: () => null,
   resolve: async () => {
     return {
       "override-target": defineTool({

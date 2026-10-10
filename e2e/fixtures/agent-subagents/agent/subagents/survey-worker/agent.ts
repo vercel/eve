@@ -11,5 +11,6 @@ export default defineDynamic({
     "Test fixture: counts Alice's tide survey stations. Call it only for SURVEY-DELEGATE directives.",
   // Selected per step: in mock mode this fixture replaces static authored
   // models with eve's bootstrap mock, which would drop the worker's usage.
+  select: () => null,
   resolve: () => ({ model: workerModel, modelContextWindowTokens: 1_000_000 }),
 });

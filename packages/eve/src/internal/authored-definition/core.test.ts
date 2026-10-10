@@ -34,7 +34,7 @@ describe("normalizeAgentDefinition", () => {
   it("accepts a dynamic agent, with its static fields beside", () => {
     const resolve = () => ({ model: "openai/gpt-5.5-mini" });
     const definition = normalizeAgentDefinition(
-      defineDynamic({ defaultTools: false, resolve }),
+      defineDynamic({ defaultTools: false, resolve, select: () => null }),
       FAILURE_MESSAGE,
     );
 
@@ -45,7 +45,7 @@ describe("normalizeAgentDefinition", () => {
   it("rejects a dynamic model field", () => {
     expect(() =>
       normalizeAgentDefinition(
-        { model: defineDynamic({ resolve: () => "openai/gpt-5.5-mini" }) },
+        { model: defineDynamic({ select: () => null, resolve: () => "openai/gpt-5.5-mini" }) },
         FAILURE_MESSAGE,
       ),
     ).toThrow(/Make the whole agent.ts dynamic/);
@@ -57,6 +57,7 @@ describe("normalizeAgentDefinition", () => {
         {
           compaction: {
             model: defineDynamic({
+              select: () => null,
               resolve: () => "openai/gpt-5.5-mini",
             }),
           },

@@ -4,6 +4,7 @@ import { z } from "zod";
 export const MODEL_OUTPUT_TOKEN = "projected-X9K3";
 
 export default defineDynamic({
+  select: () => null,
   resolve: async () => {
     return {
       check_model_output: defineTool({

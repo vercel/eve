@@ -53,6 +53,7 @@ const EDITABLE_TOOLS_SOURCE = `import { defineDynamic } from "eve/tools";
 import { createEditableMarkerTool } from "../lib/editable-factory.ts";
 
 export default defineDynamic({
+  select: () => null,
   resolve: () => ({
     alpha_marker: createEditableMarkerTool("alpha", "v1"),
     beta_marker: createEditableMarkerTool("beta", "v1"),

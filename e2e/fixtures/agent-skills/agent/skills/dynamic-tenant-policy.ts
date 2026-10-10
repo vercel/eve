@@ -3,6 +3,7 @@ import { defineDynamic, defineSkill } from "eve/skills";
 export const DYNAMIC_SKILL_TOKEN = "dynamic-skill-ok-P4K9";
 
 export default defineDynamic({
+  select: () => null,
   resolve: async () => {
     return defineSkill({
       description:

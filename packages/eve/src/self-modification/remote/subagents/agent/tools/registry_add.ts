@@ -176,6 +176,7 @@ export function productionRegistryAddTool(deployed: ResolvedDeployedSelfModifica
 }
 
 export default defineDynamic({
+  select: () => null,
   resolve: () =>
     isDeployedRuntime()
       ? productionRegistryAddTool(resolveDeployedSelfModificationConfig(selfModification.config))

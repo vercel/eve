@@ -4,6 +4,7 @@ import { always } from "eve/tools/approval";
 import { petstoreBaseUrl, petstoreHeaders, petstoreSpecUrl } from "../../petstore";
 
 export default defineDynamic({
+  select: () => null,
   resolve: () => ({
     "petstore-approval": defineOpenAPIConnection({
       approval: always(),

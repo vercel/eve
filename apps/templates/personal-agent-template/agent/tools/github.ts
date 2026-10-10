@@ -4,6 +4,7 @@ import { defineDynamic } from "eve/tools";
 import { CONNECT_USER_ISSUER, GITHUB_CONNECTOR } from "../../lib/connect.js";
 
 export default defineDynamic({
+  select: () => null,
   resolve: async (_event, ctx) => {
     const auth = ctx.session.auth.current;
     const userId = auth?.principalId;

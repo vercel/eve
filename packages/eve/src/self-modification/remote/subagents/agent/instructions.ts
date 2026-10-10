@@ -27,6 +27,7 @@ For source-modification tasks, return a concise handoff to the caller. Use at mo
 For investigation tasks, report the findings and supporting evidence requested by the caller.`;
 
 export default defineDynamic({
+  select: () => null,
   resolve: () => {
     if (!isDeployedRuntime()) return null;
 

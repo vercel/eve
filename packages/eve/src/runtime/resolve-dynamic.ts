@@ -1,6 +1,5 @@
 import type { CompiledModuleMap } from "#compiler/module-map.js";
-import { isDynamicSentinel } from "#dynamic/definition.js";
-import { expectFunction } from "#internal/authored-module.js";
+import { assertResolverForm, isDynamicSentinel } from "#dynamic/definition.js";
 import { loadResolvedModuleExport, ResolveAgentError } from "#runtime/resolve-helpers.js";
 import type { ResolvedReactionSource } from "#runtime/types.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -25,15 +24,15 @@ export async function resolveDynamicDefinition<T extends ModuleSourceRef>(
       nodeId: input.nodeId,
     });
     if (!isDynamicSentinel(value)) throw new Error(describe("to be created by defineDynamic()"));
-    const resolve = expectFunction(value.resolve, describe("to provide resolve"));
-    const select =
-      value.select === undefined
-        ? undefined
-        : expectFunction(value.select, describe("to provide select as a function"));
+    assertResolverForm(
+      value,
+      `The ${input.kindLabel} export "${definition.exportName ?? "default"}" from "${definition.logicalPath}"`,
+      { events: false },
+    );
     return {
       ...definition,
-      resolve: resolve as ResolvedReactionSource["resolve"],
-      ...(select === undefined ? {} : { select: select as ResolvedReactionSource["select"] }),
+      resolve: value.resolve as ResolvedReactionSource["resolve"],
+      select: value.select as ResolvedReactionSource["select"],
     };
   } catch (error) {
     if (error instanceof ResolveAgentError) throw error;

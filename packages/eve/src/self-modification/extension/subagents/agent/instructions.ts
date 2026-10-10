@@ -36,6 +36,7 @@ Only when the requester explicitly names the self-modification subagent, edit wh
 ${renderLocalSelfModificationExtension()}\`\`\``;
 
 export default defineDynamic({
+  select: () => null,
   resolve: () => {
     if (!isLocalSelfModificationEnabled(resolveSelfModificationConfig(selfModification.config))) {
       return null;

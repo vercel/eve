@@ -16,5 +16,6 @@ const { experimental } = e2eAgentConfig();
 // Without a select, the dynamic agent resolves once, after the session's first commit.
 export default defineDynamic({
   experimental,
+  select: () => null,
   resolve: () => defineAgent({ model: selectedModel, modelContextWindowTokens: 1_000_000 }),
 });

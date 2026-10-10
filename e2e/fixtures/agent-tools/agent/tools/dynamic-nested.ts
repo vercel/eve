@@ -2,6 +2,7 @@ import { defineDynamic, defineTool } from "eve/tools";
 import { z } from "zod";
 
 export default defineDynamic({
+  select: () => null,
   resolve: async (event, ctx) => {
     const sessionId = ctx.session.id;
     const version = "v2";
