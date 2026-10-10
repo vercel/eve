@@ -14,7 +14,7 @@ import { isUnresolvedFileData, readFileData } from "#internal/attachments/data.j
 import { EveAttachmentError } from "#internal/attachments/errors.js";
 import { createLogger } from "#internal/logging.js";
 import { readMediaMetadata } from "#internal/attachments/media-metadata.js";
-import { fetchPublicAttachment } from "#internal/attachments/public-link.js";
+import { createPublicDownloads, type PublicDownloads } from "#internal/attachments/public-link.js";
 import { deserializeUrlFilePart, isSerializedUrlFilePart } from "#internal/attachments/url-refs.js";
 import {
   decodeSandboxRef,
@@ -71,11 +71,12 @@ export async function stageAttachmentsForAdapter(
   }
 
   const reconstituted = reconstitueFilePartUrls(content);
+  const downloads = createPublicDownloads();
 
   return Promise.all(
     reconstituted.map(async (part) => {
       if (part.type === "file") {
-        return stageFilePart(part, sandbox, adapterCtx);
+        return stageFilePart(part, sandbox, adapterCtx, downloads);
       }
       return part;
     }),
@@ -474,6 +475,7 @@ async function stageFilePart(
   part: FilePart,
   sandbox: SandboxSession,
   adapterCtx: ChannelAdapterContext,
+  downloads: PublicDownloads,
 ): Promise<FilePart | TextPart> {
   if (isSandboxRefUrl(part.data)) {
     return part;
@@ -497,7 +499,7 @@ async function stageFilePart(
 
   let resolved: FetchFileResult;
   try {
-    resolved = await resolveLink(data.url, adapterCtx);
+    resolved = await resolveLink(data.url, adapterCtx, downloads);
   } catch (error) {
     if (!(error instanceof EveAttachmentError)) throw error;
     log.warn("attachment resolver failed — degrading to text part", {
@@ -549,7 +551,11 @@ async function writeSandboxRef(
  * or returns `null`, eve downloads a public `https:` link itself; a provider
  * never fetches an attachment.
  */
-async function resolveLink(url: URL, adapterCtx: ChannelAdapterContext): Promise<FetchFileResult> {
+async function resolveLink(
+  url: URL,
+  adapterCtx: ChannelAdapterContext,
+  downloads: PublicDownloads,
+): Promise<FetchFileResult> {
   const adapter = adapterCtx.ctx.get(ChannelKey);
   const adapterKind = adapter === undefined ? "none" : getAdapterKind(adapter);
 
@@ -572,7 +578,7 @@ async function resolveLink(url: URL, adapterCtx: ChannelAdapterContext): Promise
       return Buffer.isBuffer(result) ? { bytes: result } : result;
     }
   }
-  return fetchPublicAttachment(url, adapterKind);
+  return downloads(url, adapterKind);
 }
 
 /**

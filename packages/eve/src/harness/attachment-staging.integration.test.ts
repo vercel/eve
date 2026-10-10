@@ -383,6 +383,43 @@ describe("stageAttachmentsToSandbox (integration)", () => {
     expect(sandbox.writes).toHaveLength(0);
   });
 
+  it("downloads at most 10 links per message, one at a time", async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    vi.mocked(requestPublicUrl).mockImplementation(async () => {
+      maxInFlight = Math.max(maxInFlight, ++inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      inFlight -= 1;
+      return new Response("bytes", { headers: { "content-type": "text/plain" } });
+    });
+    const sandbox = mockSandbox({ id: "sbx_download_budget" });
+    const runtime = await createTestRuntime();
+    const content: UserContent = Array.from({ length: 12 }, (_, index) => ({
+      data: `https://example.com/${index}.txt`,
+      filename: `${index}.txt`,
+      mediaType: "text/plain",
+      type: "file" as const,
+    }));
+
+    const staged = (await runtime.runAsSession({ sandbox }, async () =>
+      stageAttachmentsToSandbox(content),
+    )) as Exclude<UserContent, string>;
+    vi.mocked(requestPublicUrl).mockReset();
+
+    expect(staged.filter((part) => part.type === "file")).toHaveLength(10);
+    expect(staged.slice(10)).toEqual([
+      {
+        text: "Attachment 10.txt could not be retrieved: eve downloads at most 10 links per message.",
+        type: "text",
+      },
+      {
+        text: "Attachment 11.txt could not be retrieved: eve downloads at most 10 links per message.",
+        type: "text",
+      },
+    ]);
+    expect(maxInFlight).toBe(1);
+  });
+
   it("leaves a provider file reference for the provider to resolve", async () => {
     const sandbox = mockSandbox({ id: "sbx_reference" });
     const runtime = await createTestRuntime();

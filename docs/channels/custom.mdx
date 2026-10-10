@@ -554,7 +554,7 @@ If `fetchFile` throws, eve replaces that attachment with a model-visible error n
 
 The `URL` object survives the queue boundary as a string and is reconstituted inside the workflow step. A string with a URL scheme, such as `https://...` or `myapp-file:abc`, is handled the same way. The staging pipeline calls `fetchFile` with the URL serialized as a string (the URL's `href`), which is why the example matches on `url.startsWith(...)`.
 
-Return bytes to stage the file to the sandbox. Return `null` when the URL is not one your channel resolves: eve then downloads a public `https:` URL itself, with the 25 MB default size cap and a 30-second timeout, and refuses private or reserved addresses. Any other URL, or a download that fails, reaches the model as a note. The model provider never fetches an attachment, so a link that expires or needs credentials can't fail later model calls.
+Return bytes to stage the file to the sandbox. Return `null` when the URL is not one your channel resolves: eve then downloads a public `https:` URL itself, with the 25 MB default size cap and a 30-second timeout, and refuses private or reserved addresses. It downloads at most 10 URLs per message, one at a time. Any other URL, or a download that fails, reaches the model as a note. The model provider never fetches an attachment, so a link that expires or needs credentials can't fail later model calls.
 
 The framework handles staging bytes to the sandbox, enforcing upload policy, hydrating files for the model call, and reconstituting `URL` objects after queue serialization. See [Inbound attachments](../sandbox#inbound-attachments) for the shared storage, size, and provider-input behavior.
 

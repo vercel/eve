@@ -4,7 +4,29 @@ import { EveAttachmentError } from "#internal/attachments/errors.js";
 import { DEFAULT_UPLOAD_POLICY } from "#public/channels/upload-policy.js";
 
 const DOWNLOAD_TIMEOUT_MS = 30_000;
+/** Links eve downloads for one message. Each buffers up to the upload cap, so they run one at a time. */
+const MAX_DOWNLOADS_PER_MESSAGE = 10;
 const GENERIC_MEDIA_TYPES = new Set(["application/octet-stream", "binary/octet-stream"]);
+
+/** Downloads one message's unclaimed links: at most {@link MAX_DOWNLOADS_PER_MESSAGE}, one at a time. */
+export type PublicDownloads = (url: URL, adapterKind: string) => Promise<FetchFileResult>;
+
+/** Starts the download budget for one message's attachments. */
+export function createPublicDownloads(): PublicDownloads {
+  let started = 0;
+  let previous: Promise<unknown> = Promise.resolve();
+  return async (url, adapterKind) => {
+    if (url.protocol === "https:" && ++started > MAX_DOWNLOADS_PER_MESSAGE) {
+      throw refusal(
+        adapterKind,
+        `eve downloads at most ${MAX_DOWNLOADS_PER_MESSAGE} links per message.`,
+      );
+    }
+    const download = previous.then(() => fetchPublicAttachment(url, adapterKind));
+    previous = download.catch(() => undefined);
+    return await download;
+  };
+}
 
 /**
  * Downloads an attachment link that no channel resolver claimed, so a
@@ -12,10 +34,7 @@ const GENERIC_MEDIA_TYPES = new Set(["application/octet-stream", "binary/octet-s
  * of on every later model call. Only public `https:` destinations qualify;
  * private and reserved addresses are refused.
  */
-export async function fetchPublicAttachment(
-  url: URL,
-  adapterKind: string,
-): Promise<FetchFileResult> {
+async function fetchPublicAttachment(url: URL, adapterKind: string): Promise<FetchFileResult> {
   if (url.protocol !== "https:") {
     throw refusal(adapterKind, "eve downloads only public https:// links.");
   }
