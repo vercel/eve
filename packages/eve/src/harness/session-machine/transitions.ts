@@ -135,6 +135,16 @@ function answeringDeliveriesOf(projection: SessionProjection): readonly string[]
 // Turns
 // ---------------------------------------------------------------------------
 
+/** The deliveries the session admitted and nothing has consumed or settled yet. */
+function waitingDeliveries(
+  projection: SessionProjection,
+  deliveries: readonly ConsumedDelivery[],
+): readonly ConsumedDelivery[] {
+  return deliveries.filter(
+    ({ deliveryId }) => projection.view?.deliveries[deliveryId]?.status === "admitted",
+  );
+}
+
 /**
  * Deliveries arrive for a turn: the session starts once, a turn opens unless one is open, and
  * each delivery is consumed into it. A delivery that joins a paused turn resumes it.
@@ -153,7 +163,9 @@ export function receive(
   const { projection } = view;
   const position = turnPosition(projection);
   const turnId = activeTurnId(position);
-  const deliveries = input.deliveries ?? [];
+  // Only a delivery still waiting is consumed. One that settled, such as an answer the turn
+  // answered for now while it waited for the rest of its batch, or one a policy refused, is not.
+  const deliveries = waitingDeliveries(projection, input.deliveries ?? []);
   const first = deliveries[0];
   const cause: Cause =
     first === undefined ? (input.cause ?? { policy: "system" }) : { deliveryId: first.deliveryId };
@@ -202,9 +214,7 @@ export function join(
   input: { readonly deliveries: readonly ConsumedDelivery[] },
 ): Transition {
   const { projection } = view;
-  const open = input.deliveries.filter(
-    ({ deliveryId }) => projection.view?.deliveries[deliveryId]?.status !== "settled",
-  );
+  const open = waitingDeliveries(projection, input.deliveries);
   const turnId = projection.activeTurnId;
   if (turnId === undefined) {
     return unchanged(
