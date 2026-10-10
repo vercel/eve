@@ -365,11 +365,20 @@ function parseAuthor(event: SlackAppMentionEvent | SlackMessageEvent): SlackAuth
   };
 }
 
-function parseAttachments(
+/**
+ * Parses the `files` of a raw Slack message. A remote file, such as a Google
+ * Drive link, carries `mode: "external"` and a URL on the third party's host
+ * that the bot token can't open; its link stays in the message text.
+ */
+export function parseAttachments(
   files: readonly Record<string, unknown>[] | undefined,
 ): SlackAttachment[] {
   if (!Array.isArray(files)) return [];
-  return files.map(toAttachment);
+  return files.filter((file) => !isRemoteFile(file)).map(toAttachment);
+}
+
+function isRemoteFile(file: Readonly<Record<string, unknown>>): boolean {
+  return file.mode === "external" || file.is_external === true;
 }
 
 function toAttachment(file: Record<string, unknown>): SlackAttachment {
@@ -420,7 +429,7 @@ function parsePayloadAuthor(
 
 function parsePayloadAttachments(files: readonly SlackFile[] | undefined): SlackAttachment[] {
   if (!Array.isArray(files)) return [];
-  return files.map(toPayloadAttachment);
+  return files.filter((file) => !isRemoteFile(file.raw)).map(toPayloadAttachment);
 }
 
 /**

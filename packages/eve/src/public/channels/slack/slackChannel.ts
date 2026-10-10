@@ -1455,6 +1455,8 @@ async function deliverSlackMessage(input: {
         : await loadThreadContextMessages(thread, message, input.threadContext);
     const threadContext = formatSlackThreadContext(priorMessages);
     const fileParts = await collectInboundFileParts({
+      botUserId: input.botUserId,
+      isMentioned: input.isMentioned,
       mention: message,
       thread,
       policy: input.uploadPolicy,

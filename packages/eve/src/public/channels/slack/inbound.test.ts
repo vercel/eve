@@ -177,7 +177,7 @@ describe("parseAppMentionEvent", () => {
     expect(message?.author?.isBot).toBe(true);
   });
 
-  it("collects file attachments with inferred type", () => {
+  it("collects file attachments with inferred type, skipping remote files", () => {
     const message = parseAppMentionEvent({
       type: "event_callback",
       event: {
@@ -193,6 +193,14 @@ describe("parseAppMentionEvent", () => {
             mimetype: "image/png",
             url_private: "https://files.slack.com/a/chart.png",
             size: 1024,
+          },
+          // A Google Drive file shared through Slack's integration (#855).
+          {
+            id: "F2",
+            mode: "external",
+            name: "Plan",
+            mimetype: "application/vnd.google-apps.document",
+            url_private: "https://docs.google.com/document/d/1",
           },
         ],
       },

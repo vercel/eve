@@ -63,7 +63,7 @@ describe("collectSlackFileParts", () => {
     expect(parts[1]?.filename).toBe("cat.png");
   });
 
-  it("skips audio and video attachments", () => {
+  it("keeps audio and video attachments for the agent to open with tools", () => {
     const attachments = makeAttachments([
       { type: "audio", url: "https://files.slack.com/a/b/voice.m4a", mimeType: "audio/mp4" },
       { type: "video", url: "https://files.slack.com/a/b/clip.mp4", mimeType: "video/mp4" },
@@ -72,8 +72,7 @@ describe("collectSlackFileParts", () => {
 
     const parts = collectSlackFileParts(attachments, DEFAULT_UPLOAD_POLICY);
 
-    expect(parts).toHaveLength(1);
-    expect(parts[0]?.mediaType).toBe("image/png");
+    expect(parts.map((part) => part.mediaType)).toEqual(["audio/mp4", "video/mp4", "image/png"]);
   });
 
   it("drops attachments missing a url (nothing for fetchFile to fetch)", () => {
@@ -205,6 +204,7 @@ describe("createSlackFetchFile", () => {
 
     expect(fetchSpy).toHaveBeenCalledWith(url, {
       headers: { authorization: "Bearer xoxb-test-token" },
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -291,6 +291,7 @@ describe("createSlackFetchFile", () => {
     expect(result?.bytes.equals(Buffer.from([7]))).toBe(true);
     expect(apiFetch).toHaveBeenCalledWith("http://localhost:3000/files/F01/cat.png", {
       headers: { authorization: "Bearer xoxb-test-token" },
+      signal: expect.any(AbortSignal),
     });
     expect(globalSpy).not.toHaveBeenCalled();
   });
@@ -329,6 +330,7 @@ describe("createSlackFetchFile", () => {
     expect(result?.bytes.equals(Buffer.from([7]))).toBe(true);
     expect(globalFetch).toHaveBeenCalledWith("https://files.slack.com/files-pri/T01-F01/cat.png", {
       headers: { authorization: "Bearer xoxb-test-token" },
+      signal: expect.any(AbortSignal),
     });
     // A stand-in's api.fetch attaches that stand-in's credentials, and this URL
     // arrives in an inbound payload.
@@ -347,6 +349,7 @@ describe("createSlackFetchFile", () => {
     expect(result?.bytes.equals(Buffer.from([7]))).toBe(true);
     expect(apiFetch).toHaveBeenCalledWith("https://files.slack.com/files-pri/T01-F01/cat.png", {
       headers: { authorization: "Bearer xoxb-test-token" },
+      signal: expect.any(AbortSignal),
     });
     expect(globalSpy).not.toHaveBeenCalled();
   });
@@ -362,24 +365,86 @@ describe("collectInboundFileParts", () => {
         mimeType: "text/csv",
       },
     ]),
+    ts: "9.0",
   };
-  const emptyMention = { attachments: [] };
+  const emptyMention = { attachments: [], ts: "9.0" };
 
   function makeSlackThread(input: {
     refresh: () => Promise<void>;
-    recentMessages?: readonly { isMe: boolean; raw?: Record<string, unknown> }[];
+    recentMessages?: readonly {
+      isMe: boolean;
+      raw?: Record<string, unknown>;
+      text?: string;
+      ts?: string;
+    }[];
   }): never {
     return {
       refresh: input.refresh,
-      recentMessages: input.recentMessages ?? [],
+      recentMessages: (input.recentMessages ?? []).map((message, index) => ({
+        text: "",
+        ts: `${index + 1}.0`,
+        ...message,
+      })),
     } as never;
   }
+
+  function collect(
+    input: Omit<Parameters<typeof collectInboundFileParts>[0], "botUserId" | "isMentioned"> &
+      Partial<Parameters<typeof collectInboundFileParts>[0]>,
+  ) {
+    return collectInboundFileParts({ botUserId: "UBOT", isMentioned: true, ...input });
+  }
+
+  function slackFile(id: string, extra: Record<string, unknown> = {}) {
+    return {
+      id,
+      mimetype: "text/csv",
+      name: `${id}.csv`,
+      url_private: `https://files.slack.com/a/b/${id}.csv`,
+      ...extra,
+    };
+  }
+
+  it("collects files from every message since the previous mention, in thread order (#705)", async () => {
+    const thread = makeSlackThread({
+      refresh: vi.fn(),
+      recentMessages: [
+        { isMe: false, raw: { files: [slackFile("F1")] }, text: "<@UBOT> look at this" },
+        { isMe: false, raw: { files: [slackFile("F2")] } },
+        { isMe: false, raw: {}, text: "and here is the sheet" },
+        { isMe: false, raw: { files: [slackFile("DRIVE", { mode: "external" })] } },
+        { isMe: true, raw: { files: [slackFile("F3")] } },
+        { isMe: false, raw: { files: [slackFile("F4")] } },
+        { isMe: false, raw: {}, text: "<@UBOT> what do these say?", ts: "9.0" },
+      ],
+    });
+
+    const parts = await collect({ mention: emptyMention, thread, policy: DEFAULT_UPLOAD_POLICY });
+
+    expect(parts.map((part) => part.filename)).toEqual(["F2.csv", "F4.csv"]);
+  });
+
+  it("looks back only when the message mentions the app", async () => {
+    const thread = makeSlackThread({
+      refresh: vi.fn(),
+      recentMessages: [{ isMe: false, raw: { files: [slackFile("F1")] } }],
+    });
+
+    const parts = await collect({
+      isMentioned: false,
+      mention: emptyMention,
+      thread,
+      policy: DEFAULT_UPLOAD_POLICY,
+    });
+
+    expect(parts).toEqual([]);
+  });
 
   it("returns mention attachments without refreshing when present", async () => {
     const refresh = vi.fn().mockResolvedValue(undefined);
     const thread = makeSlackThread({ refresh });
 
-    const parts = await collectInboundFileParts({
+    const parts = await collect({
       mention: mentionWithFile,
       thread,
       policy: DEFAULT_UPLOAD_POLICY,
@@ -410,7 +475,7 @@ describe("collectInboundFileParts", () => {
       ],
     });
 
-    const parts = await collectInboundFileParts({
+    const parts = await collect({
       mention: emptyMention,
       thread,
       policy: DEFAULT_UPLOAD_POLICY,
@@ -453,7 +518,7 @@ describe("collectInboundFileParts", () => {
       ],
     });
 
-    const parts = await collectInboundFileParts({
+    const parts = await collect({
       mention: emptyMention,
       thread,
       policy: DEFAULT_UPLOAD_POLICY,
@@ -487,7 +552,7 @@ describe("collectInboundFileParts", () => {
       ],
     });
 
-    const parts = await collectInboundFileParts({
+    const parts = await collect({
       mention: emptyMention,
       thread,
       policy,
@@ -502,7 +567,7 @@ describe("collectInboundFileParts", () => {
     const refresh = vi.fn().mockResolvedValue(undefined);
     const thread = makeSlackThread({ refresh });
 
-    const parts = await collectInboundFileParts({
+    const parts = await collect({
       mention: mentionWithFile,
       thread,
       policy: DISABLED_POLICY,
@@ -523,7 +588,7 @@ describe("collectInboundFileParts", () => {
     const refresh = vi.fn().mockResolvedValue(undefined);
     const thread = makeSlackThread({ refresh });
 
-    const parts = await collectInboundFileParts({
+    const parts = await collect({
       mention: mentionWithFile,
       thread,
       policy: ZERO_BYTES_POLICY,
@@ -538,7 +603,7 @@ describe("collectInboundFileParts", () => {
     const refresh = vi.fn().mockRejectedValue(new Error("Slack 500"));
     const thread = makeSlackThread({ refresh });
 
-    const parts = await collectInboundFileParts({
+    const parts = await collect({
       mention: emptyMention,
       thread,
       policy: DEFAULT_UPLOAD_POLICY,
