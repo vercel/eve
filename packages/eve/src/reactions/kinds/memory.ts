@@ -198,11 +198,15 @@ function activeTurn(messages: readonly ModelMessage[]): MemoryTurnContext {
   const projection = currentProjection();
   const turnId = projection.activeTurnId ?? projection.latestTurn?.turnId ?? "";
   const sequence = projection.turns[turnId]?.sequence ?? 0;
-  let start = messages.length;
+  // The turn's input is the latest run of user messages: trailing while the turn is starting,
+  // followed by the turn's response once it has completed.
+  let end = messages.length;
+  while (end > 0 && messages[end - 1]!.role !== "user") end -= 1;
+  let start = end;
   while (start > 0 && messages[start - 1]!.role === "user") start -= 1;
   return Object.freeze({
     id: turnId,
-    input: Object.freeze(messages.slice(start)),
+    input: Object.freeze(messages.slice(start, end)),
     sequence,
   });
 }

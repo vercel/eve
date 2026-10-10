@@ -33,6 +33,13 @@ function isSummaryRequest(prompt: LanguageModelV4Prompt): boolean {
   return JSON.stringify(prompt).includes("CONTEXT CHECKPOINT COMPACTION");
 }
 
+function textOf(message: { readonly content: unknown }): string {
+  if (typeof message.content === "string") return message.content;
+  return (message.content as readonly { type: string; text?: string }[])
+    .map((part) => (part.type === "text" ? (part.text ?? "") : ""))
+    .join("");
+}
+
 function lastUserText(prompt: LanguageModelV4Prompt): string {
   for (const message of [...prompt].reverse()) {
     if (message.role !== "user") continue;
@@ -110,13 +117,15 @@ describe("reactions", () => {
             default: defineMemory({
               provider: {
                 capture: {
-                  "turn.completed": () => {
+                  "turn.completed": ({ turn }) => {
                     log.push("capture:turn");
+                    log.push(`capture:input:${JSON.stringify(turn.input.map(textOf))}`);
                   },
                 },
                 recall: {
-                  "turn.started": () => {
+                  "turn.started": ({ turn }) => {
                     log.push("resolve:recall");
+                    log.push(`recall:input:${JSON.stringify(turn.input.map(textOf))}`);
                     return { messages: [{ content: RECALLED }] };
                   },
                 },
@@ -229,6 +238,9 @@ describe("reactions", () => {
     expect(log.indexOf("resolve:tools")).toBeLessThan(log.indexOf("call:turn"));
     // Recall runs after each turn starts, and every model call reads it with the instructions.
     expect(log.filter((entry) => entry === "resolve:recall")).toHaveLength(3);
+    // Recall and capture both see the turn's own input.
+    expect(log).toContain(`recall:input:${JSON.stringify(["Look up the first thing."])}`);
+    expect(log).toContain(`capture:input:${JSON.stringify(["Look up the first thing."])}`);
     for (const prompt of prompts) {
       expect(JSON.stringify(prompt)).toContain(RECALLED);
       expect(JSON.stringify(prompt)).toContain(POLICY);

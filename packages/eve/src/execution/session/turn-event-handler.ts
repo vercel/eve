@@ -31,7 +31,10 @@ export function createTurnEventHandler(input: {
       abortSignal: input.abortSignal,
       conversation,
       ...(input.canCancelTurn && !ends
-        ? { cancelTurn: () => input.hookCancellation.abort(new TurnCancelledError()) }
+        ? {
+            cancelTurn: ({ reason }: { readonly reason?: string }) =>
+              input.hookCancellation.abort(new TurnCancelledError(reason)),
+          }
         : {}),
     });
     throwIfTurnAborted(input.hookCancellation.signal);

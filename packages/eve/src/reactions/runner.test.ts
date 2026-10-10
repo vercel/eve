@@ -98,10 +98,12 @@ describe("runReactions", () => {
     expect(dynamicTools(ctx).map((tool) => tool.description)).toEqual(["Count 2."]);
   });
 
-  it("withdraws the slot of a resolve that throws", async () => {
+  it("withdraws the slot of a resolve that throws, retrying when the selection changes", async () => {
     let fail = false;
+    let calls = 0;
     const ctx = session({
       resolve: (() => {
+        calls += 1;
         if (fail) throw new Error("listing failed");
         return defineTool({ description: "Listed.", execute: async () => null, inputSchema: {} });
       }) as never,
@@ -114,7 +116,13 @@ describe("runReactions", () => {
     fail = true;
     await runReactions(ctx, { written: written(2) });
 
-    expect(slotsOf(ctx, "tool")).toEqual([]);
+    expect(slotsOf(ctx, "tool").map(({ slot }) => slot.value)).toEqual([null]);
+    expect(slotsOf(ctx, "tool").every(({ live }) => live === undefined)).toBe(true);
+    // The failed selection waits for a new one rather than retrying on every commit.
+    await runReactions(ctx, { written: written(3, "step.started") });
+    expect(calls).toBe(2);
+    await runReactions(ctx, { written: written(4) });
+    expect(calls).toBe(3);
   });
 
   it("resolves again under a new runtime revision", async () => {

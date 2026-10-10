@@ -38,13 +38,15 @@ import {
   writeLive,
   writeReactionsState,
 } from "./state.js";
-import { hasIntent } from "./kinds/hook.js";
+import { cancelReason, hasIntent } from "./kinds/hook.js";
 
 const log = createLogger("reactions");
 const neverAborted = new AbortController().signal;
 
 /** Thrown by `view.messages` in a step without the conversation; the runner skips that reaction. */
 const CONVERSATION_UNAVAILABLE = Symbol("eve.reactions.conversation-unavailable");
+/** The digest a slot keeps when its `select` threw, so the failure logs once. */
+const SELECT_FAILED = "select-failed";
 
 export interface RunReactionsInput {
   readonly written: readonly WrittenEvent[];
@@ -52,7 +54,7 @@ export interface RunReactionsInput {
   /** The conversation as of this commit, or `undefined` in a step that doesn't hold it. */
   readonly conversation?: readonly ModelMessage[];
   /** Stops the running turn; absent when this commit can't stop one. */
-  readonly cancelTurn?: (hook: string) => void;
+  readonly cancelTurn?: (cancel: { readonly hook: string; readonly reason?: string }) => void;
 }
 
 /**
@@ -67,7 +69,7 @@ export async function runReactions(ctx: ContextContainer, input: RunReactionsInp
   const selectContext = selectContextOf(ctx);
   const revision = readReactionsState(ctx).revision;
   const changedKinds = new Set<ReactionKind>();
-  let cancelledBy: string | undefined;
+  let cancelledBy: { readonly hook: string; readonly reason?: string } | undefined;
 
   for (const reaction of reactions) {
     if (reaction.conversation === true && input.conversation === undefined) continue;
@@ -76,7 +78,8 @@ export async function runReactions(ctx: ContextContainer, input: RunReactionsInp
       selection = selectionOf(reaction, reactionView(ctx, input.conversation), selectContext);
     } catch (error) {
       if (error === CONVERSATION_UNAVAILABLE) continue;
-      if (withdraw(ctx, reaction, error)) changedKinds.add(reaction.kind);
+      const failed = { digest: SELECT_FAILED, line, revision };
+      if (withdraw(ctx, reaction, error, failed)) changedKinds.add(reaction.kind);
       continue;
     }
     const digest = digestOf(selection);
@@ -100,7 +103,8 @@ export async function runReactions(ctx: ContextContainer, input: RunReactionsInp
     if (!changed) continue;
     changedKinds.add(reaction.kind);
     if (reaction.kind === "hook" && hasIntent(readSlot(ctx, reaction.id), "cancel")) {
-      cancelledBy ??= reaction.label;
+      const reason = cancelReason(readSlot(ctx, reaction.id));
+      cancelledBy ??= { hook: reaction.label, ...(reason === undefined ? {} : { reason }) };
     }
   }
 
@@ -108,7 +112,7 @@ export async function runReactions(ctx: ContextContainer, input: RunReactionsInp
   if (cancelledBy !== undefined) {
     if (input.cancelTurn === undefined) {
       log.warn("A hook's cancel() was ignored: the commit cannot stop a running turn", {
-        hook: cancelledBy,
+        hook: cancelledBy.hook,
       });
     } else {
       input.cancelTurn(cancelledBy);
@@ -154,7 +158,11 @@ export async function restoreReactions(
       if (contribution.live !== undefined) writeLive(ctx, reaction.id, restored, contribution.live);
     } catch (error) {
       if (reaction.failure === "throw") throw error;
-      withdraw(ctx, reaction, error);
+      withdraw(ctx, reaction, error, {
+        digest: slot.digest,
+        line: slot.since,
+        revision: slot.revision,
+      });
     }
   }
 }
@@ -227,7 +235,7 @@ async function resolveInto(
     live = contribution.live;
   } catch (error) {
     if (reaction.failure === "throw") throw error;
-    return withdraw(ctx, reaction, error);
+    return withdraw(ctx, reaction, error, run);
   }
   const unchanged =
     previous !== undefined && canonicalJson(previous.value) === canonicalJson(value);
@@ -244,14 +252,31 @@ async function resolveInto(
   return !unchanged;
 }
 
-/** A throw withdraws the slot; the kind's readers then see nothing from it. */
-function withdraw(ctx: ContextContainer, reaction: Reaction, error: unknown): boolean {
-  log.error(`Reaction "${reaction.label}" failed; its contribution is withdrawn.`, {
-    error: toErrorMessage(error),
-    kind: reaction.kind,
+/**
+ * A throw withdraws the slot's contribution; the kind's readers then see nothing from it. The slot
+ * keeps the failed selection's digest, so the reaction retries when its selection or the runtime
+ * revision changes rather than on every commit.
+ */
+function withdraw(
+  ctx: ContextContainer,
+  reaction: Reaction,
+  error: unknown,
+  failed: { readonly digest: string; readonly line: number; readonly revision?: string },
+): boolean {
+  const previous = readSlot(ctx, reaction.id);
+  if (previous?.digest !== failed.digest || previous.value !== null) {
+    log.error(`Reaction "${reaction.label}" failed; its contribution is withdrawn.`, {
+      error: toErrorMessage(error),
+      kind: reaction.kind,
+    });
+  }
+  const had = previous !== undefined && previous.value !== null;
+  writeSlot(ctx, reaction.id, {
+    digest: failed.digest,
+    since: had ? failed.line : (previous?.since ?? failed.line),
+    value: null,
+    ...(failed.revision === undefined ? {} : { revision: failed.revision }),
   });
-  const had = readSlot(ctx, reaction.id) !== undefined;
-  writeSlot(ctx, reaction.id, undefined);
   clearLive(ctx, reaction.id);
   return had;
 }

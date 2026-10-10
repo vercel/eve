@@ -138,6 +138,16 @@ export function hasIntent(slot: Slot | undefined, type: HookIntent["type"]): boo
   );
 }
 
+/** The reason a slot's cancel intent gives, when it gives one. */
+export function cancelReason(slot: Slot | undefined): string | undefined {
+  if (!Array.isArray(slot?.value)) return undefined;
+  for (const intent of slot.value) {
+    const { reason, type } = intent as { readonly reason?: unknown; readonly type?: unknown };
+    if (type === "cancel" && typeof reason === "string") return reason;
+  }
+  return undefined;
+}
+
 /**
  * True while a hook's compact intent waits: no compaction has started since the slot asked for
  * one. The compaction that follows satisfies it, so a slot that keeps asking compacts once.
