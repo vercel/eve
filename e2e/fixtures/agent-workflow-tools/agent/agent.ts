@@ -32,7 +32,7 @@ const HOOK_SCENARIO_CALLS = {
 function respondToPublicCatalog(request: MockModelRequest): MockModelResponse | string {
   // The protected call is made again after its sign-in, under a new id.
   const call = (id: string, tool: string) => ({
-    id: scriptedCallId(id),
+    id: scriptedCallId(request, id),
     name: CALL_TOOL,
     input: { name: `public-catalog__${tool}`, input: {} },
   });
@@ -40,7 +40,7 @@ function respondToPublicCatalog(request: MockModelRequest): MockModelResponse | 
     return {
       toolCalls: [
         {
-          id: scriptedCallId("public-catalog-connect"),
+          id: scriptedCallId(request, "public-catalog-connect"),
           name: CALL_TOOL,
           input: { name: "public-catalog" },
         },

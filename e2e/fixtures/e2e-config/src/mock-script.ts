@@ -11,16 +11,18 @@ export interface ScriptedCall {
   readonly input?: (request: MockModelRequest) => unknown;
 }
 
-/** How often this process emitted each scripted id. */
+/** How often each conversation, keyed by its first message, emitted each scripted id. */
 const emitted = new Map<string, number>();
 
 /**
- * The id to emit for a scripted call. A session's call ids never repeat, so a call made again,
- * as after a sign-in drops the interrupted one from history, takes `<id>#<n>`.
+ * The id to emit for a scripted call. A session's call ids never repeat, so a call one
+ * conversation makes again, as after a sign-in drops the interrupted one from history, takes
+ * `<id>#<n>`. The first message tells conversations apart, since a responder sees no session id.
  */
-export function scriptedCallId(id: string): string {
-  const count = (emitted.get(id) ?? 0) + 1;
-  emitted.set(id, count);
+export function scriptedCallId(request: MockModelRequest, id: string): string {
+  const key = `${request.userMessages[0] ?? ""}\u0000${id}`;
+  const count = (emitted.get(key) ?? 0) + 1;
+  emitted.set(key, count);
   return count === 1 ? id : `${id}#${count}`;
 }
 
@@ -48,7 +50,7 @@ export function playScript(
   if (next === undefined) return finish(request);
   return {
     toolCalls: [
-      { id: scriptedCallId(next.id), input: next.input?.(request) ?? {}, name: next.name },
+      { id: scriptedCallId(request, next.id), input: next.input?.(request) ?? {}, name: next.name },
     ],
   };
 }

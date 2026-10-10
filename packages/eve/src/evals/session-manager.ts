@@ -6,7 +6,7 @@ import type { Client } from "#client/client.js";
 import { AssertionCollector } from "#evals/assertions/collector.js";
 import { EvalSessionDriver, type EvalSessionStartedEvent } from "#evals/session.js";
 import { cleanupEvalSessions } from "#evals/session-cleanup.js";
-import type { EveEvalLiveTurn, EveEvalSessionResult } from "#evals/types.js";
+import type { EveEvalLiveTurn, EveEvalSessionResult, EveEvalWatchOptions } from "#evals/types.js";
 import { createEveSessionStubsRoutePath } from "#protocol/routes.js";
 
 const log = createLogger("eve.evals");
@@ -101,7 +101,7 @@ export class EvalSessionManager {
     return session;
   }
 
-  watchTurn(sessionId: string, options?: { readonly startIndex?: number }): EveEvalLiveTurn {
+  watchTurn(sessionId: string, options?: EveEvalWatchOptions): EveEvalLiveTurn {
     return this.#createAttachedSession(sessionId, options).watchTurn(options);
   }
 

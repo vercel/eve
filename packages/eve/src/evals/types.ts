@@ -564,9 +564,19 @@ export interface EveEvalTargetHandle extends EveEvalTarget {
   /**
    * Observe one in-progress turn from a session created outside the eval.
    * The returned live-turn handle starts consuming immediately and owns the
-   * stream through its next turn boundary.
+   * stream through its next turn boundary, or, with `until`, through the line
+   * holding the first event `until` matches: a read that ends no turn, such as
+   * a context change between turns, ends at `context.settled`.
    */
-  watchTurn(sessionId: string, opts?: { readonly startIndex?: number }): EveEvalLiveTurn;
+  watchTurn(sessionId: string, opts?: EveEvalWatchOptions): EveEvalLiveTurn;
+}
+
+/** Where a watched read starts, and what ends it when no turn boundary does. */
+export interface EveEvalWatchOptions {
+  /** The stream line to start from. */
+  readonly startIndex?: number;
+  /** Ends the read with the line holding the first matching event, instead of a turn boundary. */
+  readonly until?: (event: SessionStreamEvent) => boolean;
 }
 
 // ---------------------------------------------------------------------------

@@ -11,6 +11,7 @@ import type {
   EveEvalSession,
   EveEvalTargetCapabilities,
   EveEvalTargetHandle,
+  EveEvalWatchOptions,
 } from "#evals/types.js";
 
 const HEALTH_POLL_INTERVAL_MS = 250;
@@ -134,7 +135,7 @@ function createHandle(input: {
       return await sessions.attachSession(sessionId, opts);
     },
 
-    watchTurn(sessionId: string, opts?: { readonly startIndex?: number }) {
+    watchTurn(sessionId: string, opts?: EveEvalWatchOptions) {
       if (input.sessions !== undefined) {
         return input.sessions.watchTurn(sessionId, opts);
       }

@@ -23,10 +23,20 @@ export async function correctKeeperWhileItWorks(t: EveEvalContext, tool: string)
 
   t.event("child.opened", { count: 1, data: { name: tool } });
   t.eventsSatisfy("the correction reaches the task the first call started", (events) => {
-    const calls = events.flatMap((event) =>
-      event.type === "task.started" && event.data.name === tool ? [event.data] : [],
+    // The first call starts the task; the correction's call reaches the same task.
+    const tasks = new Set(
+      events.flatMap((event) =>
+        event.type === "task.started" && event.data.name === tool ? [event.data.taskId] : [],
+      ),
     );
-    return calls.length === 2 && new Set(calls.map((call) => call.taskId)).size === 1;
+    const reached = events.flatMap((event) =>
+      event.type === "call.started" &&
+      event.data.taskId !== undefined &&
+      tasks.has(event.data.taskId)
+        ? [event.data.taskId]
+        : [],
+    );
+    return tasks.size === 1 && reached.length === 2;
   });
 
   const started = corrected.events.find(

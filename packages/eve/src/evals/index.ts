@@ -51,6 +51,7 @@ export type {
   EveEvalDefinition,
   EveEvalInput,
   EveEvalLiveTurn,
+  EveEvalWatchOptions,
   EveEvalResult,
   EveEvalTarget,
   EveEvalTargetCapabilities,

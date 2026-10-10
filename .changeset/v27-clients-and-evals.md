@@ -6,6 +6,8 @@ Clients, evals and templates read v27 session facts.
 
 - `eve/evals` adds `toolCallsOf(events)` and `turn.waitForToolCall(name, options)`, and
   event matchers can match a fact's `scope`. Eval tool calls always carry their `callId`.
+- `t.target.watchTurn(sessionId, { until })` ends a read that ends no turn, such as a context
+  change between turns, and `session.compact()` returns once its context change settles.
 - `toolResultFrom` also accepts a settled call row, such as `ctx.view.calls[callId]`.
 - A relayed request's `interaction.opened` carries `origin.call`, the asker's call, so readers
   name a child's approval by the child's tool rather than by the delegating call.

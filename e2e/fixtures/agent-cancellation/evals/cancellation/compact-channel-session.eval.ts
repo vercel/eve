@@ -11,6 +11,13 @@ interface CompactResponse {
   readonly status?: "accepted" | "no_active_session";
 }
 
+/** The line after the last event read: where the next read starts. */
+function nextLine(
+  events: readonly { readonly meta: { readonly position: { readonly line: number } } }[],
+) {
+  return (events.at(-1)?.meta.position.line ?? -1) + 1;
+}
+
 async function postJson<T>(target: EveEvalTargetHandle, path: string, body: unknown): Promise<T> {
   const response = await target.fetch(path, {
     body: JSON.stringify(body),
@@ -66,8 +73,10 @@ export default defineEval({
     initial.notEvent("turn.settled", { data: { outcome: "failed" } });
     initial.notEvent("session.ended", { data: { outcome: "failed" } });
 
+    // A context change between turns ends no turn: the read ends with its settlement.
     const liveCompaction = t.target.watchTurn(sessionId, {
-      startIndex: initial.events.length,
+      startIndex: nextLine(initial.events),
+      until: (event) => event.type === "context.settled",
     });
     await new Promise((resolve) => setTimeout(resolve, 250));
     const compactedResponse = await postJson<CompactResponse>(
@@ -98,7 +107,7 @@ export default defineEval({
     compacted.notEvent("session.ended", { data: { outcome: "failed" } });
 
     const followUpTurn = t.target.watchTurn(sessionId, {
-      startIndex: initial.events.length + compacted.events.length,
+      startIndex: nextLine(compacted.events),
     });
     await new Promise((resolve) => setTimeout(resolve, 250));
     const resumed = await postJson<MessageResponse>(t.target, `/threads/${threadId}/messages`, {
