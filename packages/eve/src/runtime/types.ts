@@ -384,7 +384,6 @@ export type ResolvedMemoryDefinition = Readonly<
   MemoryDefinition &
     ModuleSourceRef & {
       readonly slot: string;
-      readonly visibility: "scope" | "session";
     }
 >;
 

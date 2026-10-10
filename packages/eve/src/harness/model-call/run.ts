@@ -85,7 +85,7 @@ export async function runModelStep(
 
   const run = await requestRun(step, prompt);
   if ("failed" in run) return run.failed;
-  const projectedMessages = projectPrompt(step, prompt);
+  const projectedMessages = projectPrompt(prompt);
   // Dynamic tools and subagents resolved when the run was requested, so the step's calls resolve
   // once, against this catalog.
   const endsTurn = !step.hasDelegatedCaller && step.session.outputSchema === undefined;
@@ -176,7 +176,7 @@ async function requestRun(
   try {
     await step.apply(
       requestModel(step.view()),
-      validateHarnessModelMessages(step.projectHistory(withClientContext(prompt))),
+      validateHarnessModelMessages(withClientContext(prompt)),
     );
   } catch (error) {
     return { failed: await failBoundaryEvent(step, error) };

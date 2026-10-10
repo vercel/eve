@@ -5,6 +5,11 @@ import type { ContextContainer } from "#context/container.js";
 import type { ContextReader } from "#context/key.js";
 import type { SelectContext } from "#dynamic/definition.js";
 import { currentProjection } from "#harness/session-machine/current.js";
+import {
+  instrumentMemoryOperation,
+  type InstrumentationMemoryRecord,
+  type MemoryInstrumentation,
+} from "#instrumentation/memory.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger } from "#internal/logging.js";
 import {
@@ -19,6 +24,17 @@ import type { InternalResolveContext, Reaction } from "../reaction.js";
 import { slotsOf } from "../runner.js";
 
 const log = createLogger("memory");
+
+/** Memory operation instrumentation for a step's context, when the session installs it. */
+const instrumentations = new WeakMap<ContextContainer, MemoryInstrumentation>();
+
+export function bindMemoryInstrumentation(
+  ctx: ContextContainer,
+  instrumentation: MemoryInstrumentation | undefined,
+): void {
+  if (instrumentation === undefined) instrumentations.delete(ctx);
+  else instrumentations.set(ctx, instrumentation);
+}
 
 /**
  * A memory slot's reactions. Recall runs after each turn starts, and what it brings back is part
@@ -42,14 +58,34 @@ export function memoryReactions(memory: ResolvedMemoryDefinition): readonly Reac
       const scope = await resolveMemoryScope(memory, ctx);
       if (scope === null) return null;
       const turnContext = activeTurn(ctx.messages ?? []);
-      return await memory.provider.recall["turn.started"]({
-        ...buildCallbackContext(),
-        abortSignal: ctx.abortSignal,
-        memory: { scope, slot: memory.slot },
-        messages: ctx.messages ?? [],
-        operationId: operationId(ctx, memory.slot, "turn.started", turnContext),
-        turn: turnContext,
-      });
+      const id = operationId(ctx, memory.slot, "turn.started", turnContext);
+      return await instrumentMemoryOperation(
+        instrumentations.get(ctx.ctx),
+        {
+          idempotencyKey: id,
+          operationName: "search_memory",
+          phase: "turn.started",
+          slot: memory.slot,
+          storeId: scope.key,
+          turnId: turnContext.id,
+        },
+        async () => {
+          const result = await memory.provider.recall["turn.started"]({
+            ...buildCallbackContext(),
+            abortSignal: ctx.abortSignal,
+            memory: { scope, slot: memory.slot },
+            messages: ctx.messages ?? [],
+            operationId: id,
+            turn: turnContext,
+          });
+          const records: InstrumentationMemoryRecord[] = (result?.messages ?? []).map((message) =>
+            message.id === undefined
+              ? { content: message.content }
+              : { content: message.content, id: message.id },
+          );
+          return { outputRecords: records, recordCount: records.length, value: result };
+        },
+      );
     },
     select: (view, ctx) => ({
       principal: principalOf(ctx),
@@ -74,15 +110,30 @@ export function memoryReactions(memory: ResolvedMemoryDefinition): readonly Reac
         const scope = await resolveMemoryScope(memory, ctx);
         if (scope === null) return null;
         const turnContext = activeTurn(ctx.messages ?? []);
+        const id = operationId(ctx, memory.slot, "turn.completed", turnContext);
         try {
-          await capture({
-            ...buildCallbackContext(),
-            abortSignal: ctx.abortSignal,
-            memory: { scope, slot: memory.slot },
-            messages: ctx.messages ?? [],
-            operationId: operationId(ctx, memory.slot, "turn.completed", turnContext),
-            turn: turnContext,
-          });
+          await instrumentMemoryOperation(
+            instrumentations.get(ctx.ctx),
+            {
+              idempotencyKey: id,
+              operationName: "upsert_memory",
+              phase: "turn.completed",
+              slot: memory.slot,
+              storeId: scope.key,
+              turnId: turnContext.id,
+            },
+            async () => {
+              await capture({
+                ...buildCallbackContext(),
+                abortSignal: ctx.abortSignal,
+                memory: { scope, slot: memory.slot },
+                messages: ctx.messages ?? [],
+                operationId: id,
+                turn: turnContext,
+              });
+              return { value: undefined };
+            },
+          );
         } catch (error) {
           log.error("Completed-turn memory capture failed.", { error, slot: memory.slot });
         }
@@ -171,5 +222,3 @@ function operationId(
     slot,
   ].join(":");
 }
-
-export type { ContextContainer };

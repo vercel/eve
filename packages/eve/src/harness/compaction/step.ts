@@ -10,7 +10,6 @@ import {
   type ToolLoopHarnessConfig,
 } from "#harness/types.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
-import type { HistoryViewProjector } from "#shared/history-view.js";
 import type { Publish } from "#harness/session-machine/commit.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { Step } from "#harness/step/context.js";
@@ -79,7 +78,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
     });
     return { next: null, session: step.session };
   }
-  const messages = validateHarnessModelMessages(step.projectHistory(step.session.history));
+  const messages = validateHarnessModelMessages(step.session.history);
   await step.apply(
     {
       events: [
@@ -126,7 +125,6 @@ export async function compactHistory(step: Step): Promise<StepResult> {
       change: { announced: true, changeId, summaryRunId: runId },
       emissionState: step.position(),
       force: true,
-      historyProjector: config.historyProjector,
       messages: [...step.session.history],
       model: resolvedModel.model,
       publish: step.publish,
@@ -250,7 +248,6 @@ async function compactOnce(input: {
   };
   readonly emissionState: TurnPosition;
   readonly force?: boolean;
-  readonly historyProjector?: HistoryViewProjector;
   readonly messages: HarnessModelMessage[];
   readonly model: LanguageModel;
   readonly publish: Publish;
@@ -273,9 +270,7 @@ async function compactOnce(input: {
   let messages = input.messages;
   let session = input.session;
   const promptMessages = input.promptMessages ?? messages;
-  const projectedPromptMessages = validateHarnessModelMessages(
-    input.historyProjector?.({ messages: promptMessages, state: session.state }) ?? promptMessages,
-  );
+  const projectedPromptMessages = validateHarnessModelMessages(promptMessages);
   const needsSummary =
     input.force === true ||
     shouldCompact(
@@ -368,9 +363,7 @@ async function compactOnce(input: {
     }
   }
 
-  const ordinary = validateHarnessModelMessages(
-    input.historyProjector?.({ messages, state: session.state }) ?? messages,
-  );
+  const ordinary = validateHarnessModelMessages(messages);
   const requestEnvelopeTokens = input.requestEnvelopeTokens ?? 0;
   const historyCompaction: CompactionConfig = {
     ...session.compaction,
@@ -451,10 +444,7 @@ async function compactOnce(input: {
       scope: changeScope,
       type: "context.settled",
     });
-    await publish(
-      settled,
-      input.historyProjector?.({ messages, state: session.state }) ?? messages,
-    );
+    await publish(settled, messages);
   }
 
   return { compacted: true, messages, session: replaceSessionHistory(session, messages) };

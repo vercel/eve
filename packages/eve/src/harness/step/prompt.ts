@@ -32,7 +32,6 @@ export async function buildPrompt(step: Step, turn: TurnInput): Promise<Prompt> 
   if (!hasUnansweredToolCall(messages)) {
     const taskContext = await appendTaskContext({
       messages,
-      projectHistory: step.projectHistory,
       session: step.session,
       tools: step.config.tools,
     });
@@ -115,11 +114,9 @@ export function withClientContext(
   ];
 }
 
-/** The prompt as the model reads it: with the client's context, projected for its history view. */
-export function projectPrompt(step: Step, prompt: Prompt): HarnessModelMessage[] {
-  return validateHarnessModelMessages(
-    normalizeModelMessages(step.projectHistory(withClientContext(prompt))),
-  );
+/** The prompt as the model reads it: with the client's context. */
+export function projectPrompt(prompt: Prompt): HarnessModelMessage[] {
+  return validateHarnessModelMessages(normalizeModelMessages(withClientContext(prompt)));
 }
 
 /**

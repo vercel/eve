@@ -16,7 +16,6 @@ import {
 } from "#runtime/agent/resolve-model.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { ResolvedRuntimeAgentNode } from "#runtime/graph.js";
-import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-view.js";
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
 import { workflowIdForHandling } from "#runtime/subagents/workflow-reference.js";
 import { findRegisteredRuntimeTool } from "#runtime/tools/registry.js";
@@ -69,8 +68,6 @@ interface CreateExecutionNodeStepInput {
   readonly createRuntime: CreateRuntime;
   readonly handleEvent?: HandleEventFn;
   readonly signInCompletions?: ToolLoopHarnessConfig["signInCompletions"];
-  readonly historyProjector?: HistoryViewProjector;
-  readonly historyView?: PreparedHistoryView;
   readonly instrumentation: ExecutionInstrumentation | undefined;
   readonly titleAttributeWrite?: ToolLoopHarnessConfig["titleAttributeWrite"];
   readonly modelResolutionScope: RuntimeModelResolutionScope;
@@ -94,8 +91,6 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     compactOnly: input.compactOnly,
     controlDelivery: input.controlDelivery,
     handleEvent: input.handleEvent,
-    historyProjector: input.historyProjector,
-    historyView: input.historyView,
     instrumentation: sessionInstrumentation,
     signInCompletions: input.signInCompletions,
     resolveModel,

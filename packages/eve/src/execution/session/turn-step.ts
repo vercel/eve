@@ -71,6 +71,7 @@ import type { FactOf } from "#protocol/session-events/facts.js";
 import { eventsOf } from "#harness/publication.js";
 import { createTurnEventHandler } from "#execution/session/turn-event-handler.js";
 import { applyReactionEffects, restoreReactions } from "#reactions/runner.js";
+import { bindMemoryInstrumentation } from "#reactions/kinds/memory.js";
 import { CallbackBaseUrlKey, PendingAuthorizationResultKey } from "#harness/authorization.js";
 import { readHitlState } from "#harness/hitl/index.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
@@ -83,7 +84,6 @@ import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-s
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
-import { createExecutionHistoryView } from "#execution/history-view.js";
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { runModelCallBatch } from "#execution/model-call-batching.js";
@@ -220,13 +220,13 @@ async function runSessionStepBody(
     }),
     history: validateHarnessModelMessages(input.history),
   };
-  const history = createExecutionHistoryView(initialSession);
   const instrumentation = bindSessionInstrumentation({
     agentName: effectiveAgent.turnAgent.id,
     ctx,
     rootSessionId: initialSession.rootSessionId ?? initialSession.sessionId,
     sessionId: initialSession.sessionId,
   });
+  bindMemoryInstrumentation(ctx, instrumentation?.memory);
   const initialEmissionState = turnPosition(currentProjection(ctx));
   const startedBetweenTurns = isBetweenTurns(currentProjection(ctx));
   if (
@@ -296,7 +296,7 @@ async function runSessionStepBody(
     const emitTurnEvent = createTurnEventHandler({
       abortSignal,
       canCancelTurn: input.input?.control === undefined,
-      conversation: history.initial.messages,
+      conversation: initialSession.history,
       hookCancellation,
       publisher,
     });
@@ -539,8 +539,6 @@ async function runSessionStepBody(
         createRuntime: createWorkflowRuntime,
         handleEvent,
         signInCompletions,
-        historyProjector: history.projector,
-        historyView: history.prepare(modelSession),
         instrumentation,
         modelResolutionScope: {
           moduleMap: bundle.moduleMap,

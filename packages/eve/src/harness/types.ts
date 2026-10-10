@@ -18,7 +18,6 @@ import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import type { SessionInstrumentation } from "#instrumentation/runtime.js";
-import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-view.js";
 
 /**
  * Serializable tool definition stored on the session.
@@ -341,10 +340,6 @@ export interface ToolLoopHarnessConfig {
   /** The delivery a clear or compact control arrived as; its facts name it. */
   readonly controlDelivery?: ControlDelivery;
   readonly handleEvent?: HandleEventFn;
-  /** Projects raw durable history before it crosses a message-bearing boundary. */
-  readonly historyProjector?: HistoryViewProjector;
-  /** Execution-prepared view of the history supplied to the first harness step. */
-  readonly historyView?: PreparedHistoryView;
   /**
    * Internal lifecycle hooks injected into each actual model attempt.
    * Omitted in production until an instrumentation runtime opts in.

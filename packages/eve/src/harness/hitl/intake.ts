@@ -317,7 +317,7 @@ export async function runApprovedLocalCalls(
         approvedTools: grantedApprovalKeys(step.view(), (request) =>
           tools.get(request.action.toolName)?.approvalKey?.(request.action.input),
         ),
-        messages: step.projectHistory(step.session.history),
+        messages: step.session.history,
         position: step.position(),
         publish: step.publish,
         requests,

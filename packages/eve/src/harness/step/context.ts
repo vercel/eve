@@ -31,9 +31,6 @@ import type {
 import type { InstrumentationStepScope } from "#instrumentation/runtime.js";
 import { createErrorId, createLogger } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
-import type { createHistoryViewPreparer } from "#shared/history-view.js";
-
-type HistoryViewPreparer = ReturnType<typeof createHistoryViewPreparer>;
 
 const log = createLogger("harness.step");
 
@@ -58,11 +55,6 @@ export interface Step {
   view(): SessionView;
   position(): TurnPosition;
   apply(transition: Transition, messages?: readonly ModelMessage[]): Promise<void>;
-  /** History as the model and hooks see it, under `state`, the session's by default. */
-  projectHistory(
-    messages: readonly ModelMessage[],
-    state?: HarnessSession["state"],
-  ): readonly ModelMessage[];
 }
 
 export function createStep(input: {
@@ -71,7 +63,6 @@ export function createStep(input: {
   readonly emit: HarnessEmitFn | undefined;
   readonly instrumentation: InstrumentationStepScope<HarnessSession> | undefined;
   readonly live: StepProjection;
-  readonly prepareHistory: HistoryViewPreparer;
   readonly publish: Publish;
   readonly runStep: StepFn;
   readonly session: HarnessSession;
@@ -94,8 +85,6 @@ export function createStep(input: {
       step.session = await applyTransition(step.session, transition, input.publish, messages);
       if (ctx !== undefined) recordAppliedSession(ctx, step.session);
     },
-    projectHistory: (messages, state = step.session.state) =>
-      input.prepareHistory(messages, state).messages,
   };
   return step;
 }
@@ -131,7 +120,7 @@ export async function openTurn(
         runtime: config.runtimeIdentity,
         trace,
       }),
-      step.projectHistory([...step.session.history, ...opened.input]),
+      [...step.session.history, ...opened.input],
     );
   } catch (error) {
     failure = { error };

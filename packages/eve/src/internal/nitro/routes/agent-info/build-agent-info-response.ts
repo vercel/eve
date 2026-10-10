@@ -130,7 +130,6 @@ export function buildAgentInfoResponse(
       ...toModuleSource(manifest, memory),
       description: memory.description,
       slot: memory.slot,
-      visibility: memory.visibility,
     })),
     mode: input.mode,
     remoteAgents: {

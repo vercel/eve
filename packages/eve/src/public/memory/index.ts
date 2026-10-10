@@ -125,14 +125,11 @@ export interface MemoryProvider {
   readonly tools?: (context: MemoryToolsContext) => Promise<MemoryToolSet | null>;
 }
 
-export type MemoryVisibility = "scope" | "session";
-
 export interface MemoryDefinition {
   readonly description?: string;
   readonly namespace?: MemoryNamespaceDefinition;
   readonly provider: MemoryProvider;
   readonly scope: MemoryScopeDefinition;
-  readonly visibility?: MemoryVisibility;
 }
 
 export type DefinedMemory<T extends MemoryDefinition = MemoryDefinition> = T & {
