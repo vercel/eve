@@ -23,30 +23,29 @@ and [`agent-workflow-tools/evals/hitl`](../../../agent-workflow-tools/evals/hitl
 
 ## Coverage
 
-| Rule                                                                      | Eval                                                                                                                    |
-| ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| Approve runs the call in eve, result before the next step                 | [approve-runs-the-call](./approvals/approve-runs-the-call.eval.ts)                                                      |
-| Deny resolves `denied` and records a not-run result                       | [deny-records-not-run](./approvals/deny-records-not-run.eval.ts)                                                        |
-| A partial answer keeps the turn held, with no model call                  | [partial-answer-keeps-turn-held](./approvals/partial-answer-keeps-turn-held.eval.ts)                                    |
-| A typed reply naming an option answers                                    | [typed-approve-answers](./approvals/typed-approve-answers.eval.ts)                                                      |
-| A typed reply answers only what it matches                                | [typed-reply-answers-only-what-matches](./approvals/typed-reply-answers-only-what-matches.eval.ts)                      |
-| Steering ignores unanswered approvals and keeps given answers             | [steer-ignores-unanswered](./approvals/steer-ignores-unanswered.eval.ts)                                                |
-| Someone else's message waits for the held turn                            | [other-person-message-waits](./approvals/other-person-message-waits.eval.ts)                                            |
-| An answer to a request that is not open authorizes nothing                | [stale-answer-authorizes-nothing](./approvals/stale-answer-authorizes-nothing.eval.ts)                                  |
-| A `once()` grant is reused                                                | [once-grant-is-reused](./approvals/once-grant-is-reused.eval.ts)                                                        |
-| An approved call runs with the asking step's tools                        | [approved-call-uses-asking-step-tools](./approvals/approved-call-uses-asking-step-tools.eval.ts)                        |
-| A rejected responder leaves the approval open                             | [rejected-responder-leaves-approval-open](./response-policies/rejected-responder-leaves-approval-open.eval.ts)          |
-| An allowed responder settles the approval                                 | [allowed-responder-settles](./response-policies/allowed-responder-settles.eval.ts)                                      |
-| A responder's authorization, then settlement                              | [responder-authorization-then-settles](./response-policies/responder-authorization-then-settles.eval.ts)                |
-| Stop cancels the turn, resolving once                                     | [stop-cancels-once](./budget/stop-cancels-once.eval.ts)                                                                 |
-| No step starts behind the budget question                                 | [no-step-behind-budget](./budget/no-step-behind-budget.eval.ts)                                                         |
-| A late budget answer is dropped                                           | [stale-budget-answer-dropped](./budget/stale-budget-answer-dropped.eval.ts)                                             |
-| An authorization holds the turn; the callback resumes it as the requester | [authorization-holds-then-resumes-as-requester](./authorizations/authorization-holds-then-resumes-as-requester.eval.ts) |
-| Steering declines an authorization and tells the model                    | [steer-declines-authorization](./authorizations/steer-declines-authorization.eval.ts)                                   |
-| Cancel declines an authorization                                          | [cancel-declines-authorization](./authorizations/cancel-declines-authorization.eval.ts)                                 |
-| An approved call that needs an authorization                              | [approved-call-needs-authorization](./authorizations/approved-call-needs-authorization.eval.ts)                         |
-
-| A sibling sign-in is emitted beside an approval; newer attempts replace older ones | [newer-attempt-supersedes](./authorizations/newer-attempt-supersedes.eval.ts) |
+| Rule                                                                               | Eval                                                                                                                    |
+| ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Approve runs the call in eve, result before the next step                          | [approve-runs-the-call](./approvals/approve-runs-the-call.eval.ts)                                                      |
+| Deny resolves `denied` and records a not-run result                                | [deny-records-not-run](./approvals/deny-records-not-run.eval.ts)                                                        |
+| A partial answer keeps the turn held, with no model call                           | [partial-answer-keeps-turn-held](./approvals/partial-answer-keeps-turn-held.eval.ts)                                    |
+| A typed reply naming an option answers                                             | [typed-approve-answers](./approvals/typed-approve-answers.eval.ts)                                                      |
+| A typed reply answers only what it matches                                         | [typed-reply-answers-only-what-matches](./approvals/typed-reply-answers-only-what-matches.eval.ts)                      |
+| Steering ignores unanswered approvals and keeps given answers                      | [steer-ignores-unanswered](./approvals/steer-ignores-unanswered.eval.ts)                                                |
+| Someone else's message waits for the held turn                                     | [other-person-message-waits](./approvals/other-person-message-waits.eval.ts)                                            |
+| An answer to a request that is not open authorizes nothing                         | [stale-answer-authorizes-nothing](./approvals/stale-answer-authorizes-nothing.eval.ts)                                  |
+| A `once()` grant is reused                                                         | [once-grant-is-reused](./approvals/once-grant-is-reused.eval.ts)                                                        |
+| An approved call runs with the asking step's tools                                 | [approved-call-uses-asking-step-tools](./approvals/approved-call-uses-asking-step-tools.eval.ts)                        |
+| A rejected responder leaves the approval open                                      | [rejected-responder-leaves-approval-open](./response-policies/rejected-responder-leaves-approval-open.eval.ts)          |
+| An allowed responder settles the approval                                          | [allowed-responder-settles](./response-policies/allowed-responder-settles.eval.ts)                                      |
+| A responder's authorization, then settlement                                       | [responder-authorization-then-settles](./response-policies/responder-authorization-then-settles.eval.ts)                |
+| Stop cancels the turn, resolving once                                              | [stop-cancels-once](./budget/stop-cancels-once.eval.ts)                                                                 |
+| No step starts behind the budget question                                          | [no-step-behind-budget](./budget/no-step-behind-budget.eval.ts)                                                         |
+| A late budget answer is dropped                                                    | [stale-budget-answer-dropped](./budget/stale-budget-answer-dropped.eval.ts)                                             |
+| An authorization holds the turn; the callback resumes it as the requester          | [authorization-holds-then-resumes-as-requester](./authorizations/authorization-holds-then-resumes-as-requester.eval.ts) |
+| Steering declines an authorization and tells the model                             | [steer-declines-authorization](./authorizations/steer-declines-authorization.eval.ts)                                   |
+| Cancel declines an authorization                                                   | [cancel-declines-authorization](./authorizations/cancel-declines-authorization.eval.ts)                                 |
+| An approved call that needs an authorization                                       | [approved-call-needs-authorization](./authorizations/approved-call-needs-authorization.eval.ts)                         |
+| A sibling sign-in is emitted beside an approval; newer attempts replace older ones | [newer-attempt-supersedes](./authorizations/newer-attempt-supersedes.eval.ts)                                           |
 
 The rule that the model never runs while a request is open is checked inside
 the evals above by `expectNoModelCallWhileOpen` and
