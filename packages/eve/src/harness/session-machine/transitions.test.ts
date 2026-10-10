@@ -4,9 +4,13 @@ import { requireSignIn } from "#harness/hitl/approvals.js";
 import { sessionView } from "#harness/session-machine/commit.js";
 import {
   cancel,
+  clear,
+  completeSignIn,
+  controlled,
   discardAttempt,
   fail,
   hold,
+  routeAnswer,
   sessionEndedFacts,
 } from "#harness/session-machine/transitions.js";
 import { createStreamChecker } from "#protocol/session-events/checker.js";
@@ -254,5 +258,152 @@ describe("closing what a turn leaves open", () => {
         checker.check({ at: "2026-10-09T00:00:00.000Z", facts: events }, seed!.position),
       ).toEqual([]);
     }
+  });
+});
+
+/** The callback that completes the GitHub sign-in. */
+const GITHUB_CALLBACK = {
+  attemptId: "github-1",
+  challenge: {},
+  hookUrl: "https://example.test/cb",
+  name: "github",
+};
+
+/** A paused turn waiting on `approval-1` about its call, and on a GitHub sign-in. */
+function waitingTurn(): HarnessSession {
+  return withPublished(withOpenTurn(BASE, { sequence: 0, stepIndex: 0, turnId }), [
+    {
+      data: { callId: "tool", capability: { kind: "tool", name: "deploy" }, owner: { runId } },
+      scope: { runId, turnId },
+      type: "call.requested",
+    },
+    {
+      data: {
+        interactionId: "approval-1",
+        request: { kind: "approval", prompt: "Approve deploy?" },
+        subject: { callId: "tool" },
+      },
+      scope: { turnId },
+      type: "interaction.opened",
+    },
+    {
+      data: {
+        interactionId: "github-1",
+        request: {
+          kind: "sign-in",
+          prompt: "Sign in to GitHub",
+          signIn: { callbackUrl: "https://example.test/cb", name: "github" },
+        },
+        subject: { turnId },
+      },
+      scope: { turnId },
+      type: "interaction.opened",
+    },
+  ]);
+}
+
+/** Whether the contract accepts `events` as the next line after `session`'s. */
+function accepted(session: HarnessSession, events: readonly SessionEvent[]) {
+  const seed = storedProjection(session.state).view;
+  return createStreamChecker({ seed }).check(
+    { at: "2026-10-10T00:00:00.000Z", facts: events },
+    seed!.position,
+  );
+}
+
+describe("controls and callbacks as deliveries", () => {
+  it("admits a cancel, ends the turn naming it, and applies it, in one commit", () => {
+    const session = waitingTurn();
+    const delivery = { deliveryId: "cancel-1", principal: { id: "alice", type: "user" } };
+    const { events } = controlled(delivery, "cancel", (cause) =>
+      cancel(viewOf(session), { cause }),
+    );
+
+    expect(events[0]).toEqual({
+      data: {
+        deliveryId: "cancel-1",
+        principal: delivery.principal,
+        source: { control: "cancel" },
+      },
+      type: "delivery.admitted",
+    });
+    expect(events.find((event) => event.type === "turn.settled")).toMatchObject({
+      data: { cause: { deliveryId: "cancel-1" }, outcome: "cancelled" },
+    });
+    expect(events.at(-1)).toEqual({
+      data: { deliveryId: "cancel-1", outcome: "applied" },
+      type: "delivery.settled",
+    });
+    expect(accepted(session, events)).toEqual([]);
+  });
+
+  it("clears by closing the turn and withdrawing its requests before an empty selection", () => {
+    const session = waitingTurn();
+    const { events } = clear(viewOf(session), {
+      cause: { deliveryId: "clear-1" },
+      sessionId: "session-1",
+    });
+
+    expect(settledBy(events)).toMatchObject({
+      "interaction.settled:approval-1": "interrupted",
+      "interaction.settled:github-1": "interrupted",
+      "turn.settled:turn_0": "cancelled",
+    });
+    expect(events.at(-1)).toMatchObject({
+      data: { kind: "clear", outcome: "completed", selects: null },
+      type: "context.settled",
+    });
+    expect(accepted(session, events)).toEqual([]);
+  });
+
+  it("completes a sign-in from its callback without recording the provider's payload", () => {
+    const session = waitingTurn();
+    const { events } = completeSignIn(viewOf(session), {
+      completions: [GITHUB_CALLBACK],
+    });
+
+    expect(events.map((event) => event.type)).toEqual([
+      "delivery.admitted",
+      "response.submitted",
+      "response.settled",
+      "interaction.settled",
+      "delivery.settled",
+    ]);
+    expect(events[1]?.data).toEqual({
+      deliveryId: "callback_github-1",
+      interactionId: "github-1",
+      responseId: "response_callback_github-1",
+    });
+    expect(events[3]).toMatchObject({
+      data: { cause: { responseId: "response_callback_github-1" }, outcome: "accepted" },
+    });
+    expect(accepted(session, events)).toEqual([]);
+  });
+
+  it("ignores a callback for a sign-in that already ended", () => {
+    const { events } = completeSignIn(viewOf(BASE), {
+      completions: [GITHUB_CALLBACK],
+    });
+    expect(events).toEqual([]);
+  });
+});
+
+describe("routing answers", () => {
+  it("submits a forwarded answer only for an open request and a delivery it knows", () => {
+    const session = waitingTurn();
+    const { events } = routeAnswer(viewOf(session), {
+      decided: [],
+      deliveries: [{ deliveryId: "d-answer" }],
+      forwarded: [
+        { deliveryId: "d-answer", interactionId: "approval-1", responseId: "r-1" },
+        { deliveryId: "d-answer", interactionId: "gone", responseId: "r-2" },
+        { deliveryId: "d-unknown", interactionId: "approval-1", responseId: "r-3" },
+      ],
+    });
+
+    expect(
+      events.filter((event) => event.type === "response.submitted").map((event) => event.data),
+    ).toEqual([{ deliveryId: "d-answer", interactionId: "approval-1", responseId: "r-1" }]);
+    expect(accepted(session, events)).toEqual([]);
   });
 });
