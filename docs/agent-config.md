@@ -220,16 +220,24 @@ timeout. Expiration does not delete stored session data.
 Input tokens, output tokens, and model token cost are checked independently.
 The model call that crosses a limit is allowed to finish because exact usage
 arrives after the call completes. Before the next model call, eve pauses the
-session and sends a deterministic continuation prompt with two options:
-**Approve** grants a fresh window of each configured size, and **Stop**
+turn (`turn.waiting`) and sends a deterministic continuation prompt with two options:
+**Continue** grants a fresh window of each configured size and resumes the same
+turn, and **Stop**
 cancels the in-flight turn through the standard cancellation path
 (`turn.cancelled` → `session.waiting`) — a user decision, not an error. The session stays resumable; because it is
-still over budget, the next message re-raises the prompt. Declining a
+still over budget after Stop, the next message raises a new prompt. Declining a
 delegated child's prompt cancels the root turn, which cascades to the whole
 delegation tree — the delegating parent never receives an error result it
 could retry against a fresh quota share. A reply that answers neither option
 is queued while the existing prompt stays pending; eve does not raise another
-copy. The reply is processed once the budget is granted.
+copy or start another turn. The reply is received (`message.received`) and
+processed in the held turn once the budget is granted.
+
+For sessions already waiting on a continuation prompt from an older deployment,
+the previous turn has completed. A non-answer message still queues behind the
+existing prompt, but emits no event until Continue is chosen. Continue starts a
+new turn and receives the queued message once; it does not reopen the completed
+turn or duplicate the prompt.
 
 Sessions that cannot request input from a human, such as markdown schedules and
 delegated runs without input proxying, skip the prompt and fail the next model

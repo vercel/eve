@@ -61,7 +61,7 @@ import {
 import { applyTransition, sessionView } from "#harness/session-machine/commit.js";
 import { requireSignIn } from "#harness/hitl/approvals.js";
 import { createAuthorizationRequiredEvent } from "#protocol/message.js";
-import { ownOpenRequestIds } from "#harness/session-machine/transitions.js";
+import { finishTurn, ownOpenRequestIds } from "#harness/session-machine/transitions.js";
 import { runtimeWait, storedProjection } from "#harness/session-machine/view.js";
 import {
   foldingHandler,
@@ -2054,8 +2054,7 @@ describe("createToolLoopHarness", () => {
       "message.received",
       "step.started",
       "input.requested",
-      "turn.completed",
-      "session.waiting",
+      "turn.waiting",
     ]);
     const requested = events.find((event) => event.type === "input.requested");
     expect(requested?.data).toMatchObject({
@@ -2243,12 +2242,8 @@ describe("createToolLoopHarness", () => {
     const beforeQueued = events.length;
     const reparked = await runStep(parked.session, { message: "also do this other thing" });
 
-    // The message is received into a real turn, which holds for the prompt.
-    expect(events.slice(beforeQueued).map((event) => event.type)).toEqual([
-      "turn.started",
-      "message.received",
-      "turn.waiting",
-    ]);
+    // The message waits behind the question without starting another turn.
+    expect(events.slice(beforeQueued).map((event) => event.type)).toEqual(["turn.waiting"]);
     const waiting = events.at(-1);
     expect(waiting).toMatchObject({ data: { on: "input" }, type: "turn.waiting" });
     const turnId = waiting?.type === "turn.waiting" ? waiting.data.turnId : undefined;
@@ -2257,21 +2252,77 @@ describe("createToolLoopHarness", () => {
     expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
     expect(events.filter((event) => event.type === "input.requested")).toHaveLength(1);
     const asked = { content: "also do this other thing", kind: "user" as const, role: "user" };
-    expect(reparked.session.history).toContainEqual(asked);
+    expect(reparked.session.history).not.toContainEqual(asked);
 
     const beforeGrant = events.length;
     const resumed = await runStep(reparked.session, {
       inputResponses: [{ optionId: "continue", requestId: LIMIT_REQUEST_ID }],
     });
 
-    // The grant resumes that turn; the message was received once, and the model reads it once.
+    // The grant resumes that turn and receives the queued message once.
     const resumedEvents = events.slice(beforeGrant);
     expect(resumedEvents.some((event) => event.type === "turn.started")).toBe(false);
-    expect(resumedEvents.some((event) => event.type === "message.received")).toBe(false);
+    expect(resumedEvents.filter((event) => event.type === "message.received")).toHaveLength(1);
     expect(resumedEvents.find((event) => event.type === "step.started")?.data.turnId).toBe(turnId);
     expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(1);
     expect(
       resumed.session.history.filter((message) => message.content === asked.content),
+    ).toHaveLength(1);
+  });
+
+  it("continues a persisted pre-upgrade budget prompt after a new message", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+      usage: { inputTokens: 7, outputTokens: 3 },
+    });
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig(emit));
+    const parked = await runStep(createLimitReachedSession(), { message: "Hi again" });
+
+    // Before this change requestLimit published input.requested followed by
+    // finishTurn: turn.completed and session.waiting, retaining an open prompt.
+    const oldSession = withPublished(
+      parked.session,
+      finishTurn(sessionView(storedProjection(parked.session.state), parked.session.state)).events,
+    );
+    const restored: HarnessSession = JSON.parse(JSON.stringify(oldSession));
+    const projection = storedProjection(restored.state);
+    expect(projection.activeTurnId).toBeUndefined();
+    expect(projection.inputs[LIMIT_REQUEST_ID]?.status).toBe("open");
+
+    const beforeMessage = events.length;
+    const queued = await runStep(restored, { message: "also do this other thing" });
+    const messageEvents = events.slice(beforeMessage);
+    // The old turn is already closed: queuing emits no event until the grant.
+    expect(messageEvents.map((event) => event.type)).toEqual([]);
+    expect(queued.held).toBeUndefined();
+    expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
+    const turnId = storedProjection(queued.session.state).activeTurnId;
+    expect(turnId).toBeUndefined();
+
+    const beforeGrant = events.length;
+    const resumed = await runStep(queued.session, {
+      inputResponses: [{ optionId: "continue", requestId: LIMIT_REQUEST_ID }],
+    });
+    const resumedEvents = events.slice(beforeGrant);
+    expect(resumedEvents.filter((event) => event.type === "turn.started")).toHaveLength(1);
+    expect(resumedEvents.filter((event) => event.type === "message.received")).toHaveLength(1);
+    expect(resumedEvents.find((event) => event.type === "step.started")?.data.turnId).toBe(
+      resumedEvents.find((event) => event.type === "turn.started")?.data.turnId,
+    );
+    expect(events.filter((event) => event.type === "input.requested")).toHaveLength(1);
+    expect(storedProjection(resumed.session.state).inputs[LIMIT_REQUEST_ID]).toBeUndefined();
+    expect(resumedEvents.find((event) => event.type === "input.resolved")).toMatchObject({
+      data: { resolutions: [{ requestId: LIMIT_REQUEST_ID, outcome: "answered" }] },
+    });
+    expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(1);
+    expect(getSessionUsageLimitViolation(resumed.session)).toBeNull();
+    expect(
+      resumed.session.history.filter((message) => message.content === "also do this other thing"),
     ).toHaveLength(1);
   });
 

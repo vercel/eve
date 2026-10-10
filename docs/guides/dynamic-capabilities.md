@@ -377,7 +377,7 @@ A dynamic connection, tool, or skill whose name matches an **authored** one **ov
 
 At `turn.started`, model, tool, skill, and subagent resolvers receive the visible conversation history and incoming message in `ctx.messages`, oldest first. Request context is included, and history projection still applies. Read these messages from the handler's second argument; the event itself contains turn metadata. Instruction resolvers use the separate snapshot described under [Dynamic instructions](#dynamic-instructions).
 
-A message that steers a held turn joins it without another `turn.started`, as does a completed sign-in, so `turn.started` resolvers do not see it; `step.started` resolvers do. A message sent while a session-limit prompt waits starts its own turn, so `turn.started` resolvers see it, and that turn waits for the prompt's answer before the model runs. When memory recall runs, its results appear in the projected snapshot before incoming input.
+A message that steers a held turn joins it without another `turn.started`, as does a completed sign-in, so `turn.started` resolvers do not see it; `step.started` resolvers do. A message sent while a session-limit prompt waits queues in the held turn without another `turn.started`. After Continue grants the budget, `step.started` resolvers see the queued message before the model runs. When memory recall runs, its results appear in the projected snapshot before incoming input.
 
 ### Execution order
 
