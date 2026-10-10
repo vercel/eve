@@ -1,5 +1,6 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
-import { defineAgent, defineDynamic } from "eve";
+import { defineAgent } from "eve";
+import { defineDynamic } from "eve/models";
 import type { MockModelRequest, MockModelResponse } from "eve/evals";
 
 import { continuationModel } from "./lib/continuation/model.ts";
@@ -101,21 +102,19 @@ export default defineAgent({
   // Budget evals exhaust this with synthetic usage; ordinary HITL sessions do not.
   limits: { maxOutputTokensPerSession: 1_000_000 },
   model: defineDynamic({
-    events: {
-      "session.started": () => ({
-        model: typeof base.model === "string" ? base.model : "openai/gpt-6.1-sol",
-        modelContextWindowTokens: base.modelContextWindowTokens,
-      }),
-      "step.started": (_event, ctx) => {
-        switch (ctx.session.auth.initiator?.attributes?.model) {
-          case "continuation":
-            return { model: continuationModel(), modelContextWindowTokens: 1_000_000 };
-          case "hitl":
-            return { model: humanInputModel(), modelContextWindowTokens: 1_000_000 };
-          default:
-            return { model: base.model, modelContextWindowTokens: base.modelContextWindowTokens };
-        }
-      },
+    select: (_view, ctx) => {
+      const model = ctx.session.auth.initiator?.attributes?.model;
+      return typeof model === "string" ? model : null;
+    },
+    resolve: (scripted) => {
+      switch (scripted) {
+        case "continuation":
+          return { model: continuationModel(), modelContextWindowTokens: 1_000_000 };
+        case "hitl":
+          return { model: humanInputModel(), modelContextWindowTokens: 1_000_000 };
+        default:
+          return { model: base.model, modelContextWindowTokens: base.modelContextWindowTokens };
+      }
     },
   }),
 });

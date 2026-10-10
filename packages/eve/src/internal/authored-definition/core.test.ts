@@ -31,54 +31,47 @@ describe("normalizeAgentDefinition", () => {
     expect(definition.reasoning).toBe("high");
   });
 
-  it("accepts dynamic model definitions", () => {
-    const model = defineDynamic({
-      events: {
-        "session.started": () => "openai/gpt-5.5-mini",
-      },
-    });
-    const definition = normalizeAgentDefinition(
-      {
-        model,
-      },
-      FAILURE_MESSAGE,
-    );
+  it("accepts a dynamic model field beside static fields", () => {
+    const model = defineDynamic({ select: () => null, resolve: () => "openai/gpt-5.5-mini" });
+    const definition = normalizeAgentDefinition({ defaultTools: false, model }, FAILURE_MESSAGE);
 
-    expect(definition.model).toMatchObject({
-      kind: "eve:dynamic",
-    });
-    expect(typeof (definition.model as typeof model).events["session.started"]).toBe("function");
+    expect(definition.defaultTools).toBe(false);
+    expect(definition.model).toBe(model);
   });
 
-  it("rejects fallback-shaped dynamic models", () => {
+  it("rejects a dynamic agent.ts, pointing at the dynamic model field", () => {
     expect(() =>
       normalizeAgentDefinition(
-        {
-          model: {
-            events: { "session.started": () => "openai/gpt-5.5-mini" },
-            fallback: "openai/gpt-5.5",
-            kind: "eve:dynamic",
-          },
-        },
+        defineDynamic({ select: () => null, resolve: () => ({ model: "openai/gpt-5.5-mini" }) }),
         FAILURE_MESSAGE,
       ),
-    ).toThrow('Unknown key "fallback"');
+    ).toThrow(/make the model field dynamic/);
   });
 
-  it("rejects definition-level model metadata for dynamic models", () => {
+  it("rejects model settings beside a dynamic model", () => {
     expect(() =>
       normalizeAgentDefinition(
         {
-          model: defineDynamic({
-            events: {
-              "session.started": () => "openai/gpt-5.5-mini",
-            },
-          }),
+          model: defineDynamic({ select: () => null, resolve: () => "openai/gpt-5.5-mini" }),
           modelContextWindowTokens: 128_000,
         },
         FAILURE_MESSAGE,
       ),
-    ).toThrow(/Dynamic model.*modelContextWindowTokens/);
+    ).toThrow(/returns its "modelContextWindowTokens" and "modelOptions" from resolve/);
+  });
+
+  it("rejects keys beside a dynamic model's select and resolve", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: {
+            ...defineDynamic({ select: () => null, resolve: () => "openai/gpt-5.5-mini" }),
+            reasoning: "high",
+          },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(/takes only select and resolve. Unknown key\(s\): reasoning/);
   });
 
   it("rejects a dynamic compaction model", () => {
@@ -87,9 +80,8 @@ describe("normalizeAgentDefinition", () => {
         {
           compaction: {
             model: defineDynamic({
-              events: {
-                "session.started": () => "openai/gpt-5.5-mini",
-              },
+              select: () => null,
+              resolve: () => "openai/gpt-5.5-mini",
             }),
           },
           model: "openai/gpt-5.5",

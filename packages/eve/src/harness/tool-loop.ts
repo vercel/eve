@@ -33,9 +33,7 @@ import type {
 } from "#harness/types.js";
 import type { InstrumentationAttempt, InstrumentationStepScope } from "#instrumentation/runtime.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
-import { createHistoryViewPreparer } from "#shared/history-view.js";
 import { eventsOf } from "#harness/publication.js";
-import { clearMemorySessionState } from "#shared/memory-state.js";
 
 const environment = process.env.NODE_ENV ?? "unknown";
 const eveVersion = resolveInstalledPackageInfo().version;
@@ -85,11 +83,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     input: HarnessStepInput | undefined,
     instrumentation: InstrumentationStepScope<HarnessSession> | undefined,
   ): Promise<StepResult> {
-    const prepareHistory = createHistoryViewPreparer({
-      previous: config.historyView,
-      projector: config.historyProjector,
-    });
-    prepareHistory(initialSession.history, initialSession.state);
     const ctx = contextStorage.getStore();
     if (ctx !== undefined && !ctx.has(StaticModelReferenceKey)) {
       ctx.setVirtualContext(
@@ -121,7 +114,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       emit,
       instrumentation,
       live,
-      prepareHistory,
       publish,
       runStep,
       session: initialSession,
@@ -183,10 +175,7 @@ async function clearContext(step: Step): Promise<StepResult> {
       clear(step.view(), { cause, sessionId: step.session.sessionId }),
     ),
   );
-  const cleared = discardClearedHumanInput({
-    ...step.session,
-    state: clearMemorySessionState(step.session.state),
-  });
+  const cleared = discardClearedHumanInput(step.session);
   return { next: null, session: replaceSessionHistory(cleared, []) };
 }
 

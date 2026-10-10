@@ -1,6 +1,7 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
-import { defineAgent, defineDynamic } from "eve";
+import { defineAgent, type ReactionView } from "eve";
 import { mockModel } from "eve/evals";
+import { defineDynamic } from "eve/models";
 
 const DISABLED_AGENT_TOOL_REQUEST = "E2E_DISABLED_ROOT_AGENT_TOOL";
 const CHILD_REQUEST = 'Call eve__reply exactly once with {"answer":"client-recursion-ok"}.';
@@ -50,36 +51,33 @@ const config = e2eAgentConfig({
 });
 const { model, modelContextWindowTokens, ...agentConfig } = config;
 
+function hasUserText(messages: ReactionView["messages"], expected: string): boolean {
+  return messages.some((message) => {
+    if (message.role !== "user") return false;
+    const text =
+      typeof message.content === "string"
+        ? message.content
+        : message.content.map((part) => (part.type === "text" ? part.text : "")).join("");
+    return text === expected;
+  });
+}
+
 export default defineAgent({
   ...agentConfig,
+  // This child exercises traced HTTP cleanup; schema-following has separate model evals.
   model: defineDynamic({
-    events: {
-      "step.started": (_event, ctx) => {
-        // This child exercises traced HTTP cleanup; schema-following has separate model evals.
-        const isResultChild = ctx.messages.some((message) => {
-          if (message.role !== "user") return false;
-          const text =
-            typeof message.content === "string"
-              ? message.content
-              : message.content.map((part) => (part.type === "text" ? part.text : "")).join("");
-          return text === CHILD_REQUEST;
-        });
-        const isDisabledAgentToolProbe = ctx.messages.some((message) => {
-          if (message.role !== "user") return false;
-          const text =
-            typeof message.content === "string"
-              ? message.content
-              : message.content.map((part) => (part.type === "text" ? part.text : "")).join("");
-          return text === DISABLED_AGENT_TOOL_REQUEST;
-        });
-        if (isDisabledAgentToolProbe) {
-          return { model: disabledAgentToolModel, modelContextWindowTokens: 1_000_000 };
-        }
-        return isResultChild
+    select: (view) =>
+      hasUserText(view.messages, DISABLED_AGENT_TOOL_REQUEST)
+        ? "disabled-agent-tool"
+        : hasUserText(view.messages, CHILD_REQUEST)
+          ? "result-child"
+          : null,
+    resolve: (probe) =>
+      probe === "disabled-agent-tool"
+        ? { model: disabledAgentToolModel, modelContextWindowTokens: 1_000_000 }
+        : probe === "result-child"
           ? { model: childModel, modelContextWindowTokens: 1_000_000 }
-          : { model, modelContextWindowTokens };
-      },
-    },
+          : { model, modelContextWindowTokens },
   }),
   experimental: config.experimental,
   reasoning: "high",

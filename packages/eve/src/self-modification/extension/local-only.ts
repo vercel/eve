@@ -15,9 +15,8 @@ export function resolveLocalOnly<T>(
 /** Creates a dynamic definition that is present only during local development. */
 export function defineLocalOnlyDynamic<T>(definition: T) {
   return defineDynamic({
-    events: {
-      "session.started": () =>
-        resolveLocalOnly(resolveSelfModificationConfig(selfModification.config), definition),
-    },
+    select: () => null,
+    resolve: () =>
+      resolveLocalOnly(resolveSelfModificationConfig(selfModification.config), definition),
   });
 }

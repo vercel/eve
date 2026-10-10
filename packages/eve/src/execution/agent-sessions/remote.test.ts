@@ -8,7 +8,6 @@ import {
   cancelRemoteAgentTurn,
   continueRemoteAgentSession,
   resetRemoteAgentSession,
-  resolveRemoteAgentForAction,
   resolveRemoteAgentStreamHeaders,
   respondToRemoteAgentSession,
   startRemoteAgentSession,
@@ -16,67 +15,8 @@ import {
 import type { RuntimeRemoteAgentDispatchRequest } from "#shared/action-types.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 
-describe("resolveRemoteAgentForAction", () => {
-  it("overlays a selected dynamic remote config on the compiled delegation node", async () => {
-    const definition = {
-      dynamic: {
-        eventNames: ["session.started"],
-        events: { "session.started": () => null },
-        logicalPath: "subagents/research.ts",
-        sourceId: "subagents/research.ts",
-        sourceKind: "module",
-      },
-      kind: "subagent",
-      logicalPath: "subagents/research.ts",
-      name: "research",
-      nodeId: "subagents/research.ts",
-      sourceId: "subagents/research.ts",
-      sourceKind: "module",
-      workflowId: "workflow//./agent/subagents/research//execute",
-    } as const;
-
-    const credentialsStepId = "eve:dynamic-remote-agent//selected-research";
-    const registryKey = Symbol.for("@workflow/core//registeredSteps");
-    const globalRecord = globalThis as Record<symbol, Map<string, Function> | undefined>;
-    const stepRegistry = globalRecord[registryKey] ?? new Map<string, Function>();
-    globalRecord[registryKey] = stepRegistry;
-    stepRegistry.set(credentialsStepId, () => ({
-      auth: async () => ({ headers: { authorization: "Bearer selected" } }),
-      headers: { "x-selected": "yes" },
-    }));
-
-    const resolved = await resolveRemoteAgentForAction({
-      dynamicRemoteAgent: {
-        credentialsStepId,
-        description: "Selected remote research.",
-        path: "/custom/session",
-        url: "https://selected.example.com",
-      },
-      nodeId: definition.nodeId,
-      registry: new Map([[definition.nodeId, { definition }]]),
-      remoteAgentName: "research",
-    });
-
-    expect(resolved).toMatchObject({
-      description: "Selected remote research.",
-      headers: { "x-selected": "yes" },
-      kind: "remote",
-      logicalPath: "subagents/research.ts",
-      name: "research",
-      nodeId: "subagents/research.ts",
-      path: "/custom/session",
-      sourceId: "subagents/research.ts",
-      sourceKind: "module",
-      url: "https://selected.example.com",
-    });
-    await expect(resolved.auth?.()).resolves.toEqual({
-      headers: { authorization: "Bearer selected" },
-    });
-  });
-});
-
 describe("resolveRemoteAgentStreamHeaders", () => {
-  it("resolves static and dynamic authored credentials without storing them in events", async () => {
+  it("resolves static authored credentials without storing them in events", async () => {
     const staticRemote = {
       definition: {
         auth: async () => ({ headers: { authorization: "Bearer static" } }),
@@ -111,24 +51,6 @@ describe("resolveRemoteAgentStreamHeaders", () => {
         url: staticRemote.definition.url,
       }),
     ).resolves.toEqual({ authorization: "Bearer static", "x-static": "yes" });
-
-    const credentialsStepId = "eve:dynamic-remote-agent//stream-research";
-    const registryKey = Symbol.for("@workflow/core//registeredSteps");
-    const globalRecord = globalThis as Record<symbol, Map<string, Function> | undefined>;
-    const stepRegistry = globalRecord[registryKey] ?? new Map<string, Function>();
-    globalRecord[registryKey] = stepRegistry;
-    stepRegistry.set(credentialsStepId, () => ({
-      auth: async () => ({ headers: { authorization: "Bearer dynamic" } }),
-    }));
-
-    await expect(
-      resolveRemoteAgentStreamHeaders({
-        bundle,
-        name: "research",
-        resolverId: credentialsStepId,
-        url: "https://dynamic.example",
-      }),
-    ).resolves.toEqual({ authorization: "Bearer dynamic" });
   });
 
   it("rejects a static resolver whose authored URL does not match the event", async () => {

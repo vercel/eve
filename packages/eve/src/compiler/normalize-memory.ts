@@ -27,7 +27,6 @@ export async function compileMemoryDefinition(
     slot: deriveMemorySlot(source.logicalPath),
     sourceId: source.sourceId,
     sourceKind: "module",
-    visibility: definition.visibility ?? "scope",
   };
 }
 

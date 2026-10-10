@@ -94,9 +94,7 @@ export default (["direct", "waiting"] as const).map((mode) =>
       for (const [index, { context, event }] of observations.entries()) {
         const last = index === observations.length - 1;
         const label = `${event}[${index}]`;
-        const expected: Omit<typeof context, "messages"> = {
-          abortSignal: null,
-          model: { id: "eve-mock/model" },
+        const expected: typeof context = {
           session: {
             id: started.sessionId,
             schedule: null,
@@ -118,38 +116,8 @@ export default (["direct", "waiting"] as const).map((mode) =>
             principalType: "user",
           },
         };
-        const { messages, ...actual } = context;
         for (const key of Object.keys(expected) as (keyof typeof expected)[]) {
-          t.check(actual[key], equals(expected[key])).label(`${label}: ctx.${key}`);
-        }
-        if (event === "session.started") {
-          t.check(messages, equals([])).label(`${label}: ctx.messages precedes the first turn`);
-          continue;
-        }
-        const userMessages = messages.filter((message) => message.role === "user");
-        t.check(
-          userMessages.some((message) => message.content === firstMessage),
-          equals(true),
-        ).label(`${label}: ctx.messages contains the original request`);
-        t.check(
-          userMessages.some((message) => message.content === followUp),
-          equals(last),
-        ).label(`${label}: ctx.messages includes the follow-up only after delivery`);
-        if (last) {
-          const replies = messages
-            .filter((message) => message.role === "assistant")
-            .map((message) =>
-              typeof message.content === "string"
-                ? message.content
-                : message.content
-                    .filter((part) => part.type === "text")
-                    .map((part) => part.text)
-                    .join(""),
-            );
-          t.check(
-            replies.some((reply) => reply.includes(childOutput)),
-            equals(true),
-          ).label(`${label}: ctx.messages retains the delivered child result`);
+          t.check(context[key], equals(expected[key])).label(`${label}: ctx.${key}`);
         }
       }
       t.notEvent("session.ended", { data: { outcome: "failed" } });

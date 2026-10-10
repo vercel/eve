@@ -36,13 +36,7 @@ import {
   UNSPECIFIED_INPUT_SCHEMA,
 } from "#tools/schema.js";
 import { normalizeApproval } from "#internal/authored-definition/approval.js";
-import { shouldRebindDynamicCallbacks } from "#internal/dynamic-tool-rebind.js";
-import {
-  assertDynamicResolverEvents,
-  assertResolverOnlyDynamicSentinel,
-  isDynamicSentinel,
-  type DynamicToolEventName,
-} from "#dynamic/definition.js";
+import { assertDynamicSentinelKeys, isDynamicSentinel } from "#dynamic/definition.js";
 
 /**
  * Canonical normalized shape of one authored tool default export.
@@ -84,11 +78,7 @@ type NormalizedToolEntry =
   | { readonly kind: "tool"; readonly definition: NormalizedAuthoredTool }
   | { readonly kind: "disabled" }
   | { readonly kind: "web-search-tool"; readonly selection: WebSearchSelection }
-  | {
-      readonly kind: "dynamic-tool";
-      readonly eventNames: readonly DynamicToolEventName[];
-      readonly rebindMissingCallbacks: boolean;
-    };
+  | { readonly kind: "dynamic-tool" };
 
 /**
  * Normalizes one authored tool default export. Recognizes real tool
@@ -99,14 +89,8 @@ type NormalizedToolEntry =
  */
 export function normalizeToolDefinition(value: unknown, message: string): NormalizedToolEntry {
   if (isDynamicSentinel(value)) {
-    assertResolverOnlyDynamicSentinel(value, message);
-    const eventNames = Object.keys(value.events) as DynamicToolEventName[];
-    assertDynamicResolverEvents("tool", eventNames, message);
-    return {
-      kind: "dynamic-tool",
-      eventNames,
-      rebindMissingCallbacks: shouldRebindDynamicCallbacks(value),
-    };
+    assertDynamicSentinelKeys(value, message);
+    return { kind: "dynamic-tool" };
   }
   if (isDisabledToolSentinel(value)) {
     return { kind: "disabled" };

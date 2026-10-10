@@ -162,9 +162,8 @@ if (userAuthEnabled) {
 }
 
 export default defineDynamic({
-  events: {
-    "session.started": () => (userAuthEnabled ? defineMcpClientConnection(definition) : null),
-  },
+  select: () => null,
+  resolve: () => (userAuthEnabled ? defineMcpClientConnection(definition) : null),
 });
 
 async function exchangeAuthorizationCode(input: {

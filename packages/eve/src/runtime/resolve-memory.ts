@@ -29,7 +29,6 @@ export async function resolveMemoryDefinition(
       slot: compiled.slot,
       sourceId: compiled.sourceId,
       sourceKind: "module",
-      visibility: compiled.visibility,
     };
   } catch (error) {
     if (error instanceof ResolveAgentError) throw error;

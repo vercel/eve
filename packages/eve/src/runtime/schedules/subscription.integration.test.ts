@@ -12,8 +12,7 @@ import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { once } from "#tools/approval/policies.js";
 import { serializeInputSchema } from "#tools/schema.js";
-import { readDurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
-import type { DynamicToolEntry } from "#tools/dynamic.js";
+import type { ToolDefinition } from "#tools/definition.js";
 import type { ScheduleOccurrenceEvent, ScheduleRecord } from "#public/schedules/subscription.js";
 
 const alice = {
@@ -88,12 +87,20 @@ describe("schedule creation and invocation", () => {
       )!;
       const dynamic = app.moduleMap.nodes.__root__!.modules[wrapper.sourceId]!
         .default as ReturnType<typeof import("#dynamic/definition.js").defineDynamic>;
-      const tools = (await dynamic.events["turn.started"]!(undefined, {
-        model: null,
-        session: { id: "alice", auth: { current: alice, initiator: null } },
-        channel: {},
-        messages: [],
-      })) as Record<string, DynamicToolEntry>;
+      const tools = (await dynamic.resolve(
+        { schedule: null, turn: null } as never,
+        {
+          abortSignal: new AbortController().signal,
+          session: { id: "alice", auth: { current: alice, initiator: null } },
+          channel: {},
+        } as never,
+      )) as Record<
+        string,
+        ToolDefinition<never, unknown> & {
+          execute(input: unknown, ctx: never): Promise<unknown>;
+          label: { start(input: unknown): string };
+        }
+      >;
       expect(Object.keys(tools).sort()).toEqual(
         ["create", "delete", "disable", "enable", "get", "invoke", "list", "update"].map(
           (operation) => `schedule__requests__${operation}`,
@@ -133,13 +140,10 @@ describe("schedule creation and invocation", () => {
       );
       expect(write).not.toHaveBeenCalled();
       await expect(request(policyContext("accepted", input))).resolves.toBe("user-approval");
-      const callbacks = readDurableDynamicToolCallbacks(create)!;
-      expect(callbacks.label!.start!.callback({}, input as never)).toBe("Create schedule: joke");
-      const created = (await callbacks.execute!.callback(
-        {},
-        input as never,
-        { callId: "accepted" } as never,
-      )) as ScheduleRecord;
+      expect(create.label.start(input)).toBe("Create schedule: joke");
+      const created = (await create.execute(input, {
+        callId: "accepted",
+      } as never)) as ScheduleRecord;
       expect(write.mock.calls[0]![1].payload).toMatchObject({
         envelope: { payload: { task: "A joke", target: "C999" } },
       });

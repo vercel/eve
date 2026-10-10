@@ -1,3 +1,7 @@
+import {
+  defineDynamic as defineDynamicDefinition,
+  type DefineDynamic,
+} from "#dynamic/definition.js";
 import type {
   NamedSkillDefinition,
   SkillFileContent,
@@ -32,3 +36,12 @@ export function defineSkill<TSkill extends SkillDefinition>(
   Object.defineProperty(definition, SKILL_BRAND, { value: true });
   return definition;
 }
+
+/** What a dynamic skill resolver returns: one skill named after the file, a map, or `null`. */
+export type DynamicSkillResult =
+  | SkillPackageDefinition
+  | Readonly<Record<string, SkillPackageDefinition>>
+  | null;
+
+/** `defineDynamic()` for `agent/skills/`: `resolve` returns skills. */
+export const defineDynamic: DefineDynamic<DynamicSkillResult> = defineDynamicDefinition;

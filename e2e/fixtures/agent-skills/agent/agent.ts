@@ -1,6 +1,7 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
 import { loadSkills } from "@eve-e2e/config/mock-script";
-import { defineAgent, defineDynamic } from "eve";
+import { defineAgent } from "eve";
+import { defineDynamic } from "eve/models";
 import { PREFIX_REQUEST, prefixModel } from "./lib/prompt-prefix";
 import type { MockModelRequest, MockModelResponse } from "eve/evals";
 
@@ -25,14 +26,14 @@ const { model, modelContextWindowTokens, ...config } = e2eAgentConfig({ mock: re
 export default defineAgent({
   ...config,
   model: defineDynamic({
-    events: {
-      "step.started": (_event, ctx) =>
-        ctx.messages.some(
-          (message) => message.role === "user" && message.content === PREFIX_REQUEST,
-        )
-          ? { model: prefixModel, modelContextWindowTokens: 1_000_000 }
-          : { model, modelContextWindowTokens },
-    },
+    select: (view) =>
+      view.messages.some(
+        (message) => message.role === "user" && message.content === PREFIX_REQUEST,
+      ),
+    resolve: (prefixed) =>
+      prefixed
+        ? { model: prefixModel, modelContextWindowTokens: 1_000_000 }
+        : { model, modelContextWindowTokens },
   }),
   reasoning: "high",
 });

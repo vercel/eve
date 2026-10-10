@@ -8,21 +8,17 @@ import pr from "../../extension/skills/pr.ts";
 import gh from "../../extension/tools/gh.ts";
 
 const context = {
-  model: null,
+  abortSignal: new AbortController().signal,
   session: { id: "github-compat-test", auth: { current: null, initiator: null } },
   channel: {},
-  messages: [],
 };
 
+/** Resolves each definition once, as the runner does for a `select` of null. */
 async function resolve() {
-  const instructionHandler = instructions.events["session.started"];
-  const skillHandler = pr.events["session.started"];
-  const toolHandler = gh.events["session.started"];
-  assert.ok(instructionHandler && skillHandler && toolHandler);
   return {
-    guidance: await instructionHandler({}, context),
-    skill: (await skillHandler({}, context)) as SkillDefinition | null,
-    tool: await toolHandler({}, context),
+    guidance: await instructions.resolve(instructions.select({} as never, context), context),
+    skill: (await pr.resolve(pr.select({} as never, context), context)) as SkillDefinition | null,
+    tool: await gh.resolve(gh.select({} as never, context), context),
   };
 }
 

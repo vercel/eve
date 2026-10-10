@@ -2,9 +2,9 @@ import { Experimental_DecisionMockModelV4 } from "ai/test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
-import { deserializeContext, serializeContext } from "#context/serialize.js";
-import type { DynamicResolveContext } from "#dynamic/definition.js";
 import { anthropic } from "#public/models/anthropic/index.js";
+
+import { latestTurn } from "#reactions/turn.js";
 
 import { auto } from "./auto.js";
 
@@ -39,23 +39,39 @@ const options = {
 function context(
   text = "Alice requests a routine summary.",
   abortSignal = new AbortController().signal,
-): DynamicResolveContext {
-  return {
-    model: null,
-    channel: {},
-    session: { id: "test", auth: { current: null, initiator: null } },
-    messages: [{ role: "user", content: text }],
-    abortSignal,
-  };
+) {
+  return { abortSignal, text };
 }
 
-/** What a `step.started` handler receives: the turn's request for a model run. */
-function event(turnId = "turn_1") {
-  return {
-    data: { owner: { turnId }, runId: "run_0" },
-    scope: { runId: "run_0", turnId },
-    type: "model.requested",
-  };
+/** A session whose latest turn opened with `text`, as the projection records it. */
+function view(text: string) {
+  const tables = {
+    deliveries: {
+      d1: { deliveryId: "d1", introducedAt: 1, parts: [{ kind: "text", text }], turnId: "t1" },
+    },
+    parts: {},
+    session: { latestTurnId: "t1" },
+    turns: {
+      t1: {
+        cause: { deliveryId: "d1" },
+        follows: null,
+        introducedAt: 2,
+        status: "running",
+        turnId: "t1",
+      },
+    },
+  } as never;
+  return { ...(tables as object), turn: latestTurn(tables) } as never;
+}
+
+/** Runs the reaction as the runner does: `select` over the session's tables, then `resolve`. */
+function run(definition: ReturnType<typeof auto>, input: ReturnType<typeof context>) {
+  const selected = definition.select(view(input.text), {} as never);
+  return definition.resolve(selected, {
+    abortSignal: input.abortSignal,
+    channel: {},
+    session: { id: "test", auth: { current: null, initiator: null } },
+  });
 }
 
 function decisionModel(choice = "openai/small", modelId = "fixture-decider") {
@@ -84,8 +100,8 @@ describe("auto", () => {
     const previous = Reflect.get(globalThis, "AI_SDK_DEFAULT_PROVIDER");
     Reflect.set(globalThis, "AI_SDK_DEFAULT_PROVIDER", { decisionModel: decisionModelFactory });
     try {
-      const handler = auto({ options }).events["step.started"]!;
-      await expect(handler(event(), context())).resolves.toBe("openai/small");
+      const handler = auto({ options });
+      await expect(run(handler, context())).resolves.toBe("openai/small");
       expect(runtime.localDecisionModel).not.toHaveBeenCalled();
       expect(decisionModelFactory).toHaveBeenCalledWith("typesafe-ai/jev");
     } finally {
@@ -102,8 +118,8 @@ describe("auto", () => {
     const previous = Reflect.get(globalThis, "AI_SDK_DEFAULT_PROVIDER");
     Reflect.set(globalThis, "AI_SDK_DEFAULT_PROVIDER", { decisionModel: decisionModelFactory });
     try {
-      const handler = auto({ model: "internal-router", options }).events["step.started"]!;
-      await expect(handler(event(), context())).resolves.toBe("openai/small");
+      const handler = auto({ model: "internal-router", options });
+      await expect(run(handler, context())).resolves.toBe("openai/small");
       expect(decisionModelFactory).toHaveBeenCalledWith("internal-router");
       expect(decider.doDecide).toHaveBeenCalledOnce();
       expect(runtime.localDecisionModel).not.toHaveBeenCalled();
@@ -118,9 +134,9 @@ describe("auto", () => {
     const decider = decisionModel();
     runtime.localDecisionModel.mockReturnValue(decider.model);
 
-    const handler = auto({ options }).events["step.started"]!;
+    const handler = auto({ options });
 
-    await expect(handler(event(), context())).resolves.toBe("openai/small");
+    await expect(run(handler, context())).resolves.toBe("openai/small");
     expect(runtime.localDecisionModel).toHaveBeenCalledWith("typesafe-ai/jev");
     expect(decider.doDecide).toHaveBeenCalledOnce();
   });
@@ -138,9 +154,9 @@ describe("auto", () => {
           reasoning: "low",
         },
       },
-    }).events["step.started"]!;
+    });
 
-    await expect(handler(event(), context())).resolves.toEqual({
+    await expect(run(handler, context())).resolves.toEqual({
       model: languageModel,
       reasoning: "low",
     });
@@ -159,21 +175,6 @@ describe("auto", () => {
     );
   });
 
-  it("decides once per turn and restores the selection from durable context", async () => {
-    const decider = decisionModel();
-    const handler = auto({ model: decider.model, options }).events["step.started"]!;
-
-    await handler(event(), context());
-    runtime.state = await deserializeContext(serializeContext(runtime.state!));
-    await handler(event(), context());
-    await handler(event("turn_2"), context());
-
-    expect(decider.doDecide).toHaveBeenCalledTimes(2);
-    expect(Object.keys(serializeContext(runtime.state!))).toEqual([
-      expect.stringMatching(/^eve\.experimental\.decide\.model\./),
-    ]);
-  });
-
   it("uses and retains the fallback model when decision fails", async () => {
     const providerError = new Error("decision unavailable");
     const doDecide = vi.fn(async () => {
@@ -184,10 +185,9 @@ describe("auto", () => {
       model: failed,
       fallback: "anthropic/claude-sonnet-5",
       options,
-    }).events["step.started"]!;
+    });
 
-    await expect(handler(event(), context())).resolves.toBe("anthropic/claude-sonnet-5");
-    await expect(handler(event(), context())).resolves.toBe("anthropic/claude-sonnet-5");
+    await expect(run(handler, context())).resolves.toBe("anthropic/claude-sonnet-5");
     expect(doDecide).toHaveBeenCalledOnce();
     expect(runtime.logWarn).toHaveBeenCalledOnce();
     expect(runtime.logWarn).toHaveBeenCalledWith("model decision failed; using fallback", {
@@ -195,7 +195,6 @@ describe("auto", () => {
         message: expect.stringContaining("decision unavailable"),
       }),
       fallback: "anthropic/claude-sonnet-5",
-      turnId: "turn_1",
     });
   });
 
@@ -210,9 +209,9 @@ describe("auto", () => {
       model: failed,
       fallback: { model: fallback, reasoning: "low" },
       options,
-    }).events["step.started"]!;
+    });
 
-    await expect(handler(event(), context())).resolves.toEqual({
+    await expect(run(handler, context())).resolves.toEqual({
       model: fallback,
       reasoning: "low",
     });
@@ -229,8 +228,8 @@ describe("auto", () => {
         throw providerError;
       },
     });
-    const failedHandler = auto({ model: failed, options }).events["step.started"]!;
-    await expect(failedHandler(event(), context())).rejects.toBe(providerError);
+    const failedHandler = auto({ model: failed, options });
+    await expect(run(failedHandler, context())).rejects.toBe(providerError);
 
     runtime.state = new ContextContainer();
     const controller = new AbortController();
@@ -244,8 +243,8 @@ describe("auto", () => {
       model: pendingModel,
       fallback: "anthropic/claude-sonnet-5",
       options,
-    }).events["step.started"]!;
-    const pending = pendingHandler(event(), context("Alice needs help.", controller.signal));
+    });
+    const pending = run(pendingHandler, context("Alice needs help.", controller.signal));
     const reason = new Error("cancelled");
     controller.abort(reason);
     await expect(pending).rejects.toBe(reason);
@@ -269,7 +268,7 @@ describe("auto", () => {
       } as never),
     ).toThrow();
 
-    const handler = auto({ model: decider, options }).events["step.started"]!;
-    await expect(handler(event(), context(" "))).rejects.toThrow("requires user text");
+    const handler = auto({ model: decider, options });
+    await expect(run(handler, context(" "))).rejects.toThrow("requires user text");
   });
 });

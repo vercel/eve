@@ -74,14 +74,37 @@ describe("resolveHookDefinition", () => {
     );
   });
 
-  it("accepts a hook with an empty export (no events)", async () => {
+  it("rejects a hook that takes neither form", async () => {
     const definition = buildDefinition({ slug: "noop" });
     const moduleMap = buildModuleMap(definition.sourceId, {
       default: {},
     });
 
-    const resolved = await resolveHookDefinition(definition, moduleMap, undefined);
-    expect(Object.keys(resolved.events)).toEqual([]);
+    await expect(resolveHookDefinition(definition, moduleMap, undefined)).rejects.toThrow(
+      "requires events, or select and resolve",
+    );
+  });
+
+  it("rejects a hook with both events and select and resolve", async () => {
+    const definition = buildDefinition({ slug: "both" });
+    const moduleMap = buildModuleMap(definition.sourceId, {
+      default: { events: {}, resolve: () => null, select: () => null },
+    });
+
+    await expect(resolveHookDefinition(definition, moduleMap, undefined)).rejects.toThrow(
+      "either events or select and resolve, not both",
+    );
+  });
+
+  it("rejects a hook resolve without select", async () => {
+    const definition = buildDefinition({ slug: "unselected" });
+    const moduleMap = buildModuleMap(definition.sourceId, {
+      default: { resolve: () => null },
+    });
+
+    await expect(resolveHookDefinition(definition, moduleMap, undefined)).rejects.toThrow(
+      "Return null from select to resolve once per session",
+    );
   });
 
   it("rejects a non-function event handler with a typed error", async () => {

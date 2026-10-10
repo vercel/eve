@@ -28,6 +28,8 @@ export function createCurrentMessages(
   readonly nonSystemMessages: readonly HarnessModelMessage[];
   readonly systemMessages: readonly SystemModelMessage[];
   add(message: string, kind: FrameworkMessageKind, options?: AddCurrentMessageOptions): void;
+  /** Adds context this call reads ahead of the turn's input without keeping it in history. */
+  addContext(message: string, kind: FrameworkMessageKind): void;
   addAnnouncements(announcements: Readonly<Record<string, Announcement>>): void;
   addSystem(messages: SystemModelMessage | readonly SystemModelMessage[]): void;
 } {
@@ -75,6 +77,15 @@ export function createCurrentMessages(
 
   return {
     add,
+    addContext(message, kind) {
+      // Ahead of the person's latest message, so a continuation still ends with its tool results.
+      const index = nonSystemMessages.findLastIndex(
+        (entry) => entry.role === "user" && (entry.kind === undefined || entry.kind === "user"),
+      );
+      const at = index === -1 ? userInsertionIndex : index;
+      nonSystemMessages.splice(at, 0, createFrameworkUserMessage(kind, message));
+      if (at <= userInsertionIndex) userInsertionIndex += 1;
+    },
     addAnnouncements(announcements) {
       for (const key of Object.keys(announcements).sort()) {
         const announcement = announcements[key]!;

@@ -9,8 +9,8 @@
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import { connectionToolName } from "#connections/ownership.js";
-import { buildDynamicTools } from "#context/build-dynamic-tools.js";
-import { buildDynamicSubagentTools } from "#context/dynamic-subagent-lifecycle.js";
+import { buildDynamicSubagentTools } from "#reactions/kinds/subagent.js";
+import { dynamicTools } from "#reactions/kinds/tool.js";
 import type { ContextReader } from "#context/key.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { startsTasks } from "#execution/tasks/tool-entry-point.js";
@@ -255,14 +255,8 @@ function stepEntries(
   for (const subagent of buildDynamicSubagentTools(input.ctx).filter(visible)) {
     entries.set(subagent.name, subagent);
   }
-  // Dynamic tools override a same-named authored tool. The first definition of
-  // a name wins: step, then turn, then session.
-  const dynamicNames = new Set<string>();
-  for (const tool of buildDynamicTools(input.ctx).filter(visible)) {
-    if (dynamicNames.has(tool.name)) continue;
-    dynamicNames.add(tool.name);
-    entries.set(tool.name, tool);
-  }
+  // Dynamic tools override a same-named authored tool.
+  for (const tool of dynamicTools(input.ctx).filter(visible)) entries.set(tool.name, tool);
   return entries;
 }
 

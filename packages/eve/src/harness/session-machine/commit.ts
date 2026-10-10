@@ -31,8 +31,8 @@ export interface Transition {
 }
 
 /**
- * Publishes one event, or one transition's events as one commit; `messages` is the conversation
- * the participants of the events that read history see.
+ * Publishes one event, or one transition's events as one commit; `messages` is the conversation as
+ * of the commit, for the reactions that read it.
  */
 export type Publish = (
   publication: SessionEvent | readonly SessionEvent[],
@@ -51,21 +51,6 @@ export function sessionView(
     turn: readTurnState(state),
     usage: getSessionUsage({ state }),
   };
-}
-
-/**
- * The facts participants read the conversation at: a turn's start and end, and each model run's
- * request. The session starts before any history, so `session.started` never carries it.
- */
-const READS_HISTORY: ReadonlySet<string> = new Set([
-  "turn.started",
-  "model.requested",
-  "turn.settled",
-]);
-
-/** True for an event whose participants read the conversation. */
-export function readsHistory(type: string): boolean {
-  return READS_HISTORY.has(type);
 }
 
 /**

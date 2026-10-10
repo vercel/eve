@@ -1,6 +1,7 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
-import { defineAgent, defineDynamic } from "eve";
+import { defineAgent } from "eve";
 import { mockModel } from "eve/evals";
+import { defineDynamic } from "eve/models";
 
 import { WORKSPACE_FORWARDING_MARKER, WORKSPACE_LOOKUP_MESSAGE } from "../constants";
 import {
@@ -128,58 +129,72 @@ function findListedTaskId(
   return note?.text.match(pattern)?.[1];
 }
 
+const scriptedModels = {
+  hiddenSubagentProbe,
+  notebookKeeper,
+  notebookParent,
+  remoteDirectHitlModel,
+  remoteNestedModel,
+  remoteQuestionModel,
+  surveyParent,
+  surveyToolParent,
+  workspaceDispatcher,
+  workspaceReader,
+};
+
 export default defineAgent({
   ...agentConfig,
   model: defineDynamic({
-    events: {
-      "step.started": (_event, ctx) => {
-        const messages = ctx.messages.flatMap((message) => {
-          if (message.role !== "user") return [];
-          return [
-            typeof message.content === "string"
-              ? message.content
-              : message.content.map((part) => (part.type === "text" ? part.text : "")).join(""),
-          ];
-        });
-        if (
-          messages.some(
-            (message) =>
-              message.includes(TOOL_FALSE_PROBE) || message.includes(DISABLED_TOOL_PROBE),
-          )
-        ) {
-          return { model: hiddenSubagentProbe, modelContextWindowTokens: 1_000_000 };
-        }
-        // Both models must reach the real authorization boundary, including denied lookups.
-        if (messages.includes(WORKSPACE_LOOKUP_MESSAGE)) {
-          return { model: workspaceReader, modelContextWindowTokens: 1_000_000 };
-        }
-        if (messages.some((message) => message.includes(WORKSPACE_FORWARDING_MARKER))) {
-          return { model: workspaceDispatcher, modelContextWindowTokens: 1_000_000 };
-        }
-        if (messages.some((message) => message.includes(REMOTE_QUESTION_DIRECTIVE))) {
-          return { model: remoteQuestionModel, modelContextWindowTokens: 1_000_000 };
-        }
-        if (messages.some(isNestedDirective)) {
-          return { model: remoteNestedModel, modelContextWindowTokens: 1_000_000 };
-        }
-        if (messages.some(isDirectHitlDirective)) {
-          return { model: remoteDirectHitlModel, modelContextWindowTokens: 1_000_000 };
-        }
-        if (messages.some(isNotebookEntry)) {
-          return { model: notebookKeeper, modelContextWindowTokens: 1_000_000 };
-        }
-        if (messages.some(isNotebookDirective)) {
-          return { model: notebookParent, modelContextWindowTokens: 1_000_000 };
-        }
-        if (messages.some(isSurveyDirective)) {
-          return { model: surveyParent, modelContextWindowTokens: 1_000_000 };
-        }
-        if (messages.some(isSurveyToolDirective)) {
-          return { model: surveyToolParent, modelContextWindowTokens: 1_000_000 };
-        }
-        return { model: defaultModel, modelContextWindowTokens };
-      },
+    select: (view): keyof typeof scriptedModels | null => {
+      const messages = view.messages.flatMap((message) => {
+        if (message.role !== "user") return [];
+        return [
+          typeof message.content === "string"
+            ? message.content
+            : message.content.map((part) => (part.type === "text" ? part.text : "")).join(""),
+        ];
+      });
+      if (
+        messages.some(
+          (message) => message.includes(TOOL_FALSE_PROBE) || message.includes(DISABLED_TOOL_PROBE),
+        )
+      ) {
+        return "hiddenSubagentProbe";
+      }
+      // Both models must reach the real authorization boundary, including denied lookups.
+      if (messages.includes(WORKSPACE_LOOKUP_MESSAGE)) {
+        return "workspaceReader";
+      }
+      if (messages.some((message) => message.includes(WORKSPACE_FORWARDING_MARKER))) {
+        return "workspaceDispatcher";
+      }
+      if (messages.some((message) => message.includes(REMOTE_QUESTION_DIRECTIVE))) {
+        return "remoteQuestionModel";
+      }
+      if (messages.some(isNestedDirective)) {
+        return "remoteNestedModel";
+      }
+      if (messages.some(isDirectHitlDirective)) {
+        return "remoteDirectHitlModel";
+      }
+      if (messages.some(isNotebookEntry)) {
+        return "notebookKeeper";
+      }
+      if (messages.some(isNotebookDirective)) {
+        return "notebookParent";
+      }
+      if (messages.some(isSurveyDirective)) {
+        return "surveyParent";
+      }
+      if (messages.some(isSurveyToolDirective)) {
+        return "surveyToolParent";
+      }
+      return null;
     },
+    resolve: (scripted) =>
+      scripted === null
+        ? { model: defaultModel, modelContextWindowTokens }
+        : { model: scriptedModels[scripted], modelContextWindowTokens: 1_000_000 },
   }),
   reasoning: "high",
 });

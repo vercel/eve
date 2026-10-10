@@ -1,10 +1,7 @@
-import type { DynamicResolveContext } from "#dynamic/definition.js";
 import {
   defineDynamic,
   type AgentReasoningDefinition,
   type AgentStaticModelDefinition,
-  type DynamicSentinel,
-  type DynamicSubagentDefinition,
 } from "#public/index.js";
 
 /** Options retained for source compatibility with the retired scaffold. */
@@ -24,15 +21,13 @@ function warnRetiredScaffold(): void {
 }
 
 /** @deprecated Use the packaged `eve/self-modification` extension. */
-export function defineSelfModificationAgent(
-  _options: SelfModificationAgentOptions = {},
-): DynamicSentinel<DynamicSubagentDefinition | null> {
-  const resolve = async (_event: unknown, _ctx: DynamicResolveContext): Promise<null> => {
-    warnRetiredScaffold();
-    return null;
-  };
+export function defineSelfModificationAgent(_options: SelfModificationAgentOptions = {}) {
   return defineDynamic({
-    events: { "session.started": resolve, "turn.started": resolve },
+    select: () => null,
+    resolve: async (): Promise<null> => {
+      warnRetiredScaffold();
+      return null;
+    },
   });
 }
 

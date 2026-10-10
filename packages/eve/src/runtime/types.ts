@@ -216,6 +216,22 @@ export interface ResolvedHookDefinition extends ResolvedModuleSourceRef {
    * and ignored at dispatch time.
    */
   readonly events: Readonly<Record<string, StreamEventHook<SessionEvent>>>;
+  /** A hook authored as `select` and `resolve` instead of `events`. */
+  readonly select?: ReactionSelectFn;
+  readonly resolve?: ReactionResolveFn;
+}
+
+/** A reaction's `select`, loaded from its module. */
+export type ReactionSelectFn = (view: never, ctx: never) => unknown;
+/** A reaction's `resolve`, loaded from its module. */
+export type ReactionResolveFn = (selected: never, ctx: never) => unknown;
+
+/** A `defineDynamic()` export reattached from its compiled module. */
+export interface ResolvedReactionSource extends Readonly<ModuleSourceRef> {
+  /** eve generated it: its `resolve` runs in the session's context. */
+  readonly framework?: true;
+  readonly select: ReactionSelectFn;
+  readonly resolve: ReactionResolveFn;
 }
 
 /**
@@ -315,12 +331,7 @@ export type ResolvedRuntimeDelegationNode =
   | ResolvedRuntimeRemoteAgentNode
   | ResolvedRuntimeSubagentNode;
 
-export interface ResolvedDynamicSubagentDefinition extends Readonly<ModuleSourceRef> {
-  readonly eventNames: readonly string[];
-  readonly events: Readonly<
-    Record<string, (event: unknown, ctx: unknown) => unknown | Promise<unknown>>
-  >;
-}
+export type ResolvedDynamicSubagentDefinition = ResolvedReactionSource;
 
 /**
  * Runtime-owned additive agent configuration resolved from `agent.ts`.
@@ -353,16 +364,10 @@ interface ResolvedAgentMetadata {
 }
 
 /**
- * Runtime resolver for dynamic tools declared via `defineDynamic({ events })`.
- * Carries the live event handler functions loaded from the compiled module.
+ * Runtime resolver for dynamic tools declared via `defineDynamic({ select, resolve })`.
  */
-export interface ResolvedDynamicToolResolver extends Readonly<ModuleSourceRef> {
+export interface ResolvedDynamicToolResolver extends ResolvedReactionSource {
   readonly slug: string;
-  readonly eventNames: readonly string[];
-  readonly events: Readonly<
-    Record<string, (event: unknown, ctx: unknown) => unknown | Promise<unknown>>
-  >;
-  readonly rebindMissingCallbacks?: boolean;
   /**
    * Mount namespace when this resolver comes from an extension. Names of tools
    * the resolver produces are prefixed with `${extensionNamespace}__`.
@@ -371,12 +376,8 @@ export interface ResolvedDynamicToolResolver extends Readonly<ModuleSourceRef> {
 }
 
 /** Runtime resolver for dynamic connections declared in `agent/connections/`. */
-export interface ResolvedDynamicConnectionResolver extends Readonly<ModuleSourceRef> {
+export interface ResolvedDynamicConnectionResolver extends ResolvedReactionSource {
   readonly slug: string;
-  readonly eventNames: readonly string[];
-  readonly events: Readonly<
-    Record<string, (event: unknown, ctx: unknown) => unknown | Promise<unknown>>
-  >;
   /** Map results from extensions receive this mount namespace. */
   readonly extensionNamespace?: string;
 }
@@ -385,21 +386,16 @@ export type ResolvedMemoryDefinition = Readonly<
   MemoryDefinition &
     ModuleSourceRef & {
       readonly slot: string;
-      readonly visibility: "scope" | "session";
     }
 >;
 
 /**
- * Runtime resolver for dynamic skills declared via `defineDynamic({ events })`
+ * Runtime resolver for dynamic skills declared via `defineDynamic()`
  * in `agent/skills/`. Carries the live event handler functions loaded from the
  * compiled module.
  */
-export interface ResolvedDynamicSkillResolver extends Readonly<ModuleSourceRef> {
+export interface ResolvedDynamicSkillResolver extends ResolvedReactionSource {
   readonly slug: string;
-  readonly eventNames: readonly string[];
-  readonly events: Readonly<
-    Record<string, (event: unknown, ctx: unknown) => unknown | Promise<unknown>>
-  >;
   /**
    * Mount namespace when this resolver comes from an extension. Names of skills
    * a map resolver produces are prefixed with `${extensionNamespace}__`.
@@ -409,15 +405,11 @@ export interface ResolvedDynamicSkillResolver extends Readonly<ModuleSourceRef> 
 
 /**
  * Runtime resolver for dynamic instructions declared via
- * `defineDynamic({ events })` in `agent/instructions/`. Carries the live
+ * `defineDynamic()` in `agent/instructions/`. Carries the live
  * event handler functions loaded from the compiled module.
  */
-export interface ResolvedDynamicInstructionsResolver extends Readonly<ModuleSourceRef> {
+export interface ResolvedDynamicInstructionsResolver extends ResolvedReactionSource {
   readonly slug: string;
-  readonly eventNames: readonly string[];
-  readonly events: Readonly<
-    Record<string, (event: unknown, ctx: unknown) => unknown | Promise<unknown>>
-  >;
 }
 
 /**

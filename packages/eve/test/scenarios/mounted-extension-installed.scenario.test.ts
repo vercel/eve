@@ -394,7 +394,7 @@ describe("mounted extension installed under node_modules", () => {
     const dynamicTools = graph.root.agent.dynamicToolResolvers.find(
       (resolver) => resolver.slug === "crm__dynamic",
     );
-    const producedTools = (await dynamicTools?.events["session.started"]?.({}, {})) as {
+    const producedTools = (await dynamicTools?.resolve({} as never, {} as never)) as {
       quote: { execute(input: unknown, context: unknown): Promise<unknown> };
     };
     await expect(producedTools.quote.execute({}, {})).resolves.toEqual({ apiKey: "sk-installed" });
@@ -402,7 +402,7 @@ describe("mounted extension installed under node_modules", () => {
     const dynamicSkills = graph.root.agent.dynamicSkillResolvers.find(
       (resolver) => resolver.slug === "crm__oncall",
     );
-    const producedSkills = (await dynamicSkills?.events["session.started"]?.({}, {})) as {
+    const producedSkills = (await dynamicSkills?.resolve({} as never, {} as never)) as {
       escalation: { markdown: string };
     };
     expect(producedSkills.escalation.markdown).toContain("Page the on-call.");
@@ -410,10 +410,9 @@ describe("mounted extension installed under node_modules", () => {
     const dynamicInstructions = graph.root.agent.dynamicInstructionsResolvers.find(
       (resolver) => resolver.slug === "crm__dynamic",
     );
-    const producedInstructions = (await dynamicInstructions?.events["session.started"]?.(
-      {},
-      {},
-    )) as { markdown: string };
+    const producedInstructions = (await dynamicInstructions?.resolve({} as never, {} as never)) as {
+      markdown: string;
+    };
     expect(producedInstructions.markdown).toBe("Treat CRM results as authoritative.");
     expect(manifest.instructions.map((entry) => entry.content).join("\n")).toContain(
       "Prefer the CRM tools for account questions.",

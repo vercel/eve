@@ -7,11 +7,7 @@ import {
   expectString,
 } from "#internal/authored-module.js";
 import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
-import {
-  assertDynamicResolverEvents,
-  isDynamicSentinel,
-  type DynamicToolEventName,
-} from "#dynamic/definition.js";
+import { assertDynamicSentinelKeys, isDynamicSentinel } from "#dynamic/definition.js";
 import type { LocalSubagentSourceRef } from "#discover/manifest.js";
 import type { AgentToolExposure } from "#shared/agent-definition.js";
 
@@ -22,7 +18,7 @@ export type NormalizedSubagentConfig =
     }
   | {
       readonly build?: { readonly externalDependencies?: readonly string[] };
-      readonly eventNames: readonly DynamicToolEventName[];
+      readonly defaultTools?: boolean;
       readonly kind: "dynamic";
     }
   | {
@@ -34,18 +30,27 @@ export type NormalizedSubagentConfig =
     };
 
 export function normalizeSubagentConfig(value: unknown, message: string): NormalizedSubagentConfig {
+  // A dynamic subagent chooses the whole subagent: its description, or whether there is one. A
+  // subagent the parent always sees, with a model chosen per session, is a defineAgent() whose
+  // model field is dynamic.
+  if (isDynamicSentinel(value) && (value as { description?: unknown }).description !== undefined) {
+    throw new Error(
+      `${message} A dynamic subagent returns its description from resolve. To keep the description and choose the model per session, export defineAgent({ description, model: defineDynamic({ select, resolve }) }) with defineDynamic from "eve/models".`,
+    );
+  }
   if (isDynamicSentinel(value)) {
-    const record = expectObjectRecord(value, message);
-    expectOnlyKnownKeys(record, ["build", "events", "kind"], message);
-    const rawEvents = expectObjectRecord(record.events, message);
-    const eventNames = Object.keys(rawEvents) as DynamicToolEventName[];
-    assertDynamicResolverEvents("subagent", eventNames, message);
-    for (const handler of Object.values(rawEvents)) expectFunction(handler, message);
+    assertDynamicSentinelKeys(value, message, ["build", "defaultTools"]);
+    const record = value as unknown as Record<string, unknown>;
+    expectFunction(record.resolve, message);
     const build =
       record.build === undefined ? undefined : normalizeDynamicSubagentBuild(record.build, message);
-    return build === undefined
-      ? { eventNames, kind: "dynamic" }
-      : { build, eventNames, kind: "dynamic" };
+    return {
+      kind: "dynamic",
+      ...(build === undefined ? {} : { build }),
+      ...(record.defaultTools === undefined
+        ? {}
+        : { defaultTools: expectBoolean(record.defaultTools, message) }),
+    };
   }
 
   if (

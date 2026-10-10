@@ -1,7 +1,7 @@
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { ConsumedDelivery } from "#harness/session-machine/transitions.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
-import type { LanguageModel, ModelMessage, UserContent } from "ai";
+import type { LanguageModel, UserContent } from "ai";
 
 import type { SessionAuthContext, SessionCapabilities } from "#channel/types.js";
 import type { RuntimeIdentity } from "#protocol/message.js";
@@ -18,7 +18,6 @@ import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import type { SessionInstrumentation } from "#instrumentation/runtime.js";
-import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-view.js";
 
 /**
  * Serializable tool definition stored on the session.
@@ -311,29 +310,9 @@ export interface StepCoordinates {
   readonly turnId: string;
 }
 
-/** The session's participants, at the moments a step reaches without publishing an event. */
-export interface StepParticipants {
-  /** Chooses the model for the model call about to start, before its `step.started`. */
-  selectModel(input: {
-    readonly at: StepCoordinates;
-    readonly messages: readonly ModelMessage[];
-    readonly modelId: string;
-  }): Promise<void>;
-  /**
-   * Restores the tools a parked step offered, before an approval policy reads them. A parked
-   * step's own turn also gets its connections back.
-   */
-  restoreStep(input: {
-    readonly at: StepCoordinates;
-    readonly messages: readonly ModelMessage[];
-    readonly modelId: string;
-    readonly parked: boolean;
-  }): Promise<void>;
-}
-
 /**
- * Publishes one event or one commit to the session: the stream write, then the channel, hooks,
- * and participants. Composed by the runtime and injected into the harness, so the harness emits
+ * Publishes one event or one commit to the session: the stream write, then the channel and the
+ * session's reactions. Composed by the runtime and injected into the harness, so the harness emits
  * lifecycle without knowing about writables or handlers.
  */
 export type HandleEventFn = (
@@ -361,10 +340,6 @@ export interface ToolLoopHarnessConfig {
   /** The delivery a clear or compact control arrived as; its facts name it. */
   readonly controlDelivery?: ControlDelivery;
   readonly handleEvent?: HandleEventFn;
-  /** Projects raw durable history before it crosses a message-bearing boundary. */
-  readonly historyProjector?: HistoryViewProjector;
-  /** Execution-prepared view of the history supplied to the first harness step. */
-  readonly historyView?: PreparedHistoryView;
   /**
    * Internal lifecycle hooks injected into each actual model attempt.
    * Omitted in production until an instrumentation runtime opts in.
@@ -377,8 +352,6 @@ export interface ToolLoopHarnessConfig {
    * a connection's sign-in resumes the turn that asked for it.
    */
   readonly signInCompletions?: readonly AuthorizationChallenge[];
-  /** The session's participants, for the moments a step reaches without publishing an event. */
-  readonly participants?: StepParticipants;
   readonly resolveModel: (reference: RuntimeModelReference) => Promise<LanguageModel>;
   /**
    * Runtime identity metadata attached to the `session.started` event.

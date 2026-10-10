@@ -10,7 +10,6 @@ import {
   type ToolLoopHarnessConfig,
 } from "#harness/types.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
-import type { HistoryViewProjector } from "#shared/history-view.js";
 import type { Publish } from "#harness/session-machine/commit.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { Step } from "#harness/step/context.js";
@@ -19,7 +18,6 @@ import {
   buildGatewayAttributionHeaders,
   resolveEffectiveRuntimeModel,
 } from "#harness/model-call/model.js";
-import { canonicalizeMemoryRecords, shouldCanonicalizeMemory } from "#shared/memory-state.js";
 import {
   compactMessages,
   type CompactionSummarizer,
@@ -31,7 +29,6 @@ import type { SessionEvent } from "#protocol/session-event.js";
 import type { Cause, Usage } from "#protocol/session-events/envelope.js";
 import { nextChangeId, nextRunId } from "#protocol/session-projection.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { drainMemoryCommit, prepareMemoryCompaction } from "#context/memory-lifecycle.js";
 import { normalizeModelStreamError } from "#harness/model-call/errors.js";
 import { runModelCallWithRetries } from "#harness/model-call/retry.js";
 import {
@@ -66,8 +63,7 @@ const log = createLogger("harness.tool-loop");
 /** What a step needs from the machine after its model call. */
 /**
  * `session.compact()`: summarizes the history now, then the session waits. The control is a
- * delivery: it's admitted with the change, and applied once the change completes. Between turns,
- * the summary run's participants choose its model.
+ * delivery: it's admitted with the change, and applied once the change completes.
  */
 export async function compactHistory(step: Step): Promise<StepResult> {
   const { config } = step;
@@ -82,7 +78,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
     });
     return { next: null, session: step.session };
   }
-  const messages = validateHarnessModelMessages(step.projectHistory(step.session.history));
+  const messages = validateHarnessModelMessages(step.session.history);
   await step.apply(
     {
       events: [
@@ -129,7 +125,6 @@ export async function compactHistory(step: Step): Promise<StepResult> {
       change: { announced: true, changeId, summaryRunId: runId },
       emissionState: step.position(),
       force: true,
-      historyProjector: config.historyProjector,
       messages: [...step.session.history],
       model: resolvedModel.model,
       publish: step.publish,
@@ -253,7 +248,6 @@ async function compactOnce(input: {
   };
   readonly emissionState: TurnPosition;
   readonly force?: boolean;
-  readonly historyProjector?: HistoryViewProjector;
   readonly messages: HarnessModelMessage[];
   readonly model: LanguageModel;
   readonly publish: Publish;
@@ -276,9 +270,7 @@ async function compactOnce(input: {
   let messages = input.messages;
   let session = input.session;
   const promptMessages = input.promptMessages ?? messages;
-  const projectedPromptMessages = validateHarnessModelMessages(
-    input.historyProjector?.({ messages: promptMessages, state: session.state }) ?? promptMessages,
-  );
+  const projectedPromptMessages = validateHarnessModelMessages(promptMessages);
   const needsSummary =
     input.force === true ||
     shouldCompact(
@@ -287,9 +279,7 @@ async function compactOnce(input: {
       input.requestEnvelopeTokens,
       getRequestEnvelopeTokens(session),
     );
-  const needsMemoryCanonicalization = shouldCanonicalizeMemory(messages);
-
-  if (!needsSummary && !needsMemoryCanonicalization) {
+  if (!needsSummary) {
     return { compacted: false, messages, session };
   }
 
@@ -336,10 +326,6 @@ async function compactOnce(input: {
       : { changeId: change.changeId, turnId: change.turnId };
   const runScope = { ...changeScope, runId: change.summaryRunId };
   {
-    const ctx = contextStorage.getStore();
-    if (ctx !== undefined) {
-      prepareMemoryCompaction(ctx, { history: messages, state: session.state });
-    }
     if (change.announced !== true) {
       const inputTokens = getInputTokenCount(
         projectedPromptMessages,
@@ -357,7 +343,6 @@ async function compactOnce(input: {
         }),
         projectedPromptMessages,
       );
-      // A summary run inside a turn takes the run's model, with no participants of its own.
       if (needsSummary) {
         await publish([
           {
@@ -378,11 +363,7 @@ async function compactOnce(input: {
     }
   }
 
-  const canonical = canonicalizeMemoryRecords(messages);
-  const ordinary = validateHarnessModelMessages(
-    input.historyProjector?.({ messages: canonical.ordinary, state: session.state }) ??
-      canonical.ordinary,
-  );
+  const ordinary = validateHarnessModelMessages(messages);
   const requestEnvelopeTokens = input.requestEnvelopeTokens ?? 0;
   const historyCompaction: CompactionConfig = {
     ...session.compaction,
@@ -447,13 +428,9 @@ async function compactOnce(input: {
     ]);
     return { compacted: false, failure, messages: input.messages, session };
   }
-  messages = validateHarnessModelMessages([...canonical.memory, ...compactedOrdinary]);
+  messages = validateHarnessModelMessages(compactedOrdinary);
 
   {
-    const ctx = contextStorage.getStore();
-    if (ctx !== undefined) {
-      prepareMemoryCompaction(ctx, { history: messages, state: session.state });
-    }
     const settled: SessionEvent[] = [];
     if (needsSummary) {
       settled.push({
@@ -467,17 +444,7 @@ async function compactOnce(input: {
       scope: changeScope,
       type: "context.settled",
     });
-    await publish(
-      settled,
-      input.historyProjector?.({ messages, state: session.state }) ?? messages,
-    );
-    if (ctx !== undefined) {
-      const commit = drainMemoryCommit(ctx);
-      if (commit !== undefined) {
-        messages = validateHarnessModelMessages([...messages, ...commit.recalledMessages]);
-        session = { ...session, state: commit.state };
-      }
-    }
+    await publish(settled, messages);
   }
 
   return { compacted: true, messages, session: replaceSessionHistory(session, messages) };

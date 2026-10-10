@@ -12,7 +12,6 @@ import {
   type RuntimeCompiledArtifactsSource,
 } from "#runtime/compiled-artifacts-source.js";
 import { getResolvedRuntimeAgentNode, type ResolvedAgentGraphBundle } from "#runtime/graph.js";
-import type { RuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 import { loadCompiledModuleMap } from "#runtime/loaders/module-map.js";
 import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
@@ -25,7 +24,6 @@ export interface CompiledRuntimeAgentBundle {
   readonly adapterRegistry: RuntimeAdapterRegistry;
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly graph: ResolvedAgentGraphBundle;
-  readonly hookRegistry: RuntimeHookRegistry;
   readonly moduleMap: CompiledModuleMap;
   /**
    * Id of the active node in the graph. `undefined` for root bundles.
@@ -80,7 +78,6 @@ async function loadFullBundle(
     }),
     compiledArtifactsSource: normalizedCompiledArtifactsSource,
     graph,
-    hookRegistry: rootNode.hookRegistry,
     moduleMap,
     resolvedAgent: rootNode.agent,
     subagentRegistry: rootNode.subagentRegistry,
@@ -189,7 +186,6 @@ export async function getCompiledRuntimeAgentBundle(input: {
       nodesByNodeId: fullBundle.graph.nodesByNodeId,
       root: node,
     },
-    hookRegistry: node.hookRegistry,
     moduleMap: fullBundle.moduleMap,
     nodeId: input.nodeId,
     resolvedAgent: node.agent,

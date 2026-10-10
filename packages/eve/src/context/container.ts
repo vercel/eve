@@ -141,12 +141,34 @@ if (globalContextStorage[EVE_CONTEXT_STORAGE_KEY] === undefined) {
  */
 export const contextStorage = globalContextStorage[EVE_CONTEXT_STORAGE_KEY];
 
+const EVE_SELECTION_SCOPE_KEY = Symbol.for("eve.selection-scope");
+type SelectionScopeGlobal = typeof globalThis & {
+  [EVE_SELECTION_SCOPE_KEY]?: AsyncLocalStorage<string>;
+};
+const selectionScope = ((globalThis as SelectionScopeGlobal)[EVE_SELECTION_SCOPE_KEY] ??=
+  new AsyncLocalStorage<string>());
+
+/**
+ * Runs an authored `resolve` outside the session's context: it reads only its selection, so eve
+ * can call it again in another process with the same answer. `label` names it in the error a
+ * read of session state raises. Code it returns, such as a tool's `execute`, runs in context later.
+ */
+export function runOnSelection<T>(label: string, fn: () => T): T {
+  return contextStorage.exit(() => selectionScope.run(label, fn));
+}
+
 /**
  * Returns the active context, throwing when called outside a managed scope.
  */
 export function loadContext(): AlsContext {
   const ctx = contextStorage.getStore();
   if (ctx === undefined) {
+    const resolving = selectionScope.getStore();
+    if (resolving !== undefined) {
+      throw new Error(
+        `"${resolving}" read session state in resolve, which reads only its selection. Read the state in select, so a change to it resolves again, or in the execute of a tool resolve returns.`,
+      );
+    }
     throw new Error(
       "No active eve context. " +
         "Call this function only from authored runtime code such as tools, steps, and model callbacks.",

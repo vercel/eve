@@ -33,6 +33,7 @@ import { discardAttempt } from "#harness/session-machine/transitions.js";
 import { publicViewOf } from "#harness/session-machine/closure.js";
 import { activeTurnId } from "#harness/session-machine/view.js";
 import type { Step } from "#harness/step/context.js";
+import { hasPendingCompaction } from "#reactions/kinds/hook.js";
 import {
   compactPrompt,
   projectPrompt,
@@ -279,7 +280,8 @@ export class ModelCaller {
           turnId: step.position().turnId,
         },
         emissionState: step.position(),
-        historyProjector: config.historyProjector,
+        // A hook's compact intent compacts before this call, once.
+        force: hasPendingCompaction(step.ctx),
         messages: [...prompt.messages],
         model: this.input.model,
         promptMessages: withClientContext(prompt),
@@ -308,7 +310,7 @@ export class ModelCaller {
         thresholdPercent: settings.thresholdPercent,
       },
     };
-    this.projectedMessages = projectPrompt(step, prompt);
+    this.projectedMessages = projectPrompt(prompt);
     return await this.prepare(options);
   }
 

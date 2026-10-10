@@ -130,7 +130,6 @@ export function buildAgentInfoResponse(
       ...toModuleSource(manifest, memory),
       description: memory.description,
       slot: memory.slot,
-      visibility: memory.visibility,
     })),
     mode: input.mode,
     remoteAgents: {
@@ -299,7 +298,6 @@ function renderDynamicResolver(
     | CompiledDynamicSkillDefinition
     | CompiledDynamicToolDefinition
     | {
-        readonly eventNames: readonly string[];
         readonly exportName?: string;
         readonly logicalPath: string;
         readonly slug: string;
@@ -309,7 +307,6 @@ function renderDynamicResolver(
 ) {
   return {
     ...toModuleSource(node, resolver),
-    eventNames: [...resolver.eventNames],
     slug: resolver.slug,
   };
 }

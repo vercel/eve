@@ -1,1 +1,1 @@
-export { defineHook } from "../../src/public/hooks/index.ts";
+export { cancel, compact, defineHook } from "../../src/public/hooks/index.ts";

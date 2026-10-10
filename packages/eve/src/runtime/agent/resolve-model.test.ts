@@ -106,15 +106,14 @@ describe("dynamic runtime model resolution", () => {
     const moduleMap = createModuleMap({
       default: {
         model: defineDynamic({
-          events: {
-            "session.started": (_event, ctx) => ({
-              model: ctx.channel.kind === "slack" ? "openai/gpt-5.5-mini" : "openai/gpt-5.5",
-              modelContextWindowTokens: 128_000,
-              modelOptions: {
-                providerOptions: { gateway: { order: ["openai"] } },
-              },
-            }),
-          },
+          select: (_view, ctx) => ctx.channel.kind ?? null,
+          resolve: (kind) => ({
+            model: kind === "slack" ? "openai/gpt-5.5-mini" : "openai/gpt-5.5",
+            modelContextWindowTokens: 128_000,
+            modelOptions: {
+              providerOptions: { gateway: { order: ["openai"] } },
+            },
+          }),
         }),
       },
     });
@@ -123,15 +122,7 @@ describe("dynamic runtime model resolution", () => {
       dynamicModel: DYNAMIC_MODEL_SOURCE,
       scope: { moduleMap, nodeId: undefined },
     });
-    const result = await definition.events["session.started"]?.(
-      { type: "session.started" },
-      {
-        model: { id: "openai/gpt-5.5" },
-        channel: { kind: "slack" },
-        messages: [{ content: "Hi", role: "user" }],
-        session: { auth: { current: null, initiator: null }, id: "session-1" },
-      },
-    );
+    const result = await definition.resolve("slack" as never, {} as never);
 
     const resolved = await resolveRuntimeModelSelection({
       durability: "live",
@@ -290,7 +281,14 @@ describe("dynamic runtime model resolution", () => {
         } as never,
         state,
       }),
-    ).rejects.toThrow(/unknown key\(s\): contextWindowTokens/);
+    ).rejects.toThrow(/returned "contextWindowTokens", which can't vary per session/);
+    await expect(
+      resolveRuntimeModelSelection({
+        durability: "live",
+        selection: { build: {}, defaultTools: false, model: "openai/gpt-5.5-mini" } as never,
+        state,
+      }),
+    ).rejects.toThrow(/returned "build", "defaultTools".*declare them beside select and resolve/);
     await expect(
       resolveRuntimeModelSelection({
         catalog: createCatalog(null),

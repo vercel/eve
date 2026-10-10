@@ -3,7 +3,7 @@ import type { LanguageModel } from "ai";
 import type { CompactionConfig, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { contextStorage } from "#context/container.js";
-import { getEffectiveModelSelection } from "#context/effective-model.js";
+import { getEffectiveModelSelection } from "#reactions/kinds/model.js";
 import type { ModelProfile } from "#harness/model-profile.js";
 import { appendPackageUserAgent } from "#internal/user-agent.js";
 

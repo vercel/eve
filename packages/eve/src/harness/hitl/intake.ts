@@ -86,8 +86,7 @@ export async function acceptHumanInput(
     delivered.displayMessage !== undefined
       ? await withdrawSteeredSignIns(step, typed)
       : typed;
-  // Restoring a turn's tools runs its resolvers, so a step's tools are restored once, and again
-  // only after another step's.
+  // A step's catalog is built once, and again only after another step's.
   const restoredTools = new Map<string, HarnessToolLookup>();
   let restoredStep: string | undefined;
   const restoreTools = async (parked: SuspendedStep | undefined): Promise<HarnessToolLookup> => {
@@ -95,12 +94,6 @@ export async function acceptHumanInput(
     const key = `${at.turnId}:${at.stepIndex}`;
     const restored = restoredTools.get(key);
     if (restored !== undefined && restoredStep === key) return restored;
-    await config.participants?.restoreStep({
-      at: { sequence: at.sequence, stepIndex: at.stepIndex, turnId: at.turnId },
-      messages: step.projectHistory(step.session.history),
-      modelId: step.session.agent.modelReference?.id ?? "dynamic",
-      parked: parked !== undefined,
-    });
     const tools = buildStepCatalog({
       agentTools: config.tools,
       ctx,
@@ -324,7 +317,7 @@ export async function runApprovedLocalCalls(
         approvedTools: grantedApprovalKeys(step.view(), (request) =>
           tools.get(request.action.toolName)?.approvalKey?.(request.action.input),
         ),
-        messages: step.projectHistory(step.session.history),
+        messages: step.session.history,
         position: step.position(),
         publish: step.publish,
         requests,

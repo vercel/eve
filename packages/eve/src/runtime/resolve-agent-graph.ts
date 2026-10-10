@@ -13,9 +13,8 @@ import type { HeadersValue } from "#client/types.js";
 import { expectObjectRecord } from "#internal/authored-module.js";
 import { createResolvedRuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 import { type ResolvedAgentGraphBundle, ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
-import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import { resolveAgent } from "#runtime/resolve-agent.js";
-import { resolveDynamicSubagentDefinition } from "#runtime/resolve-dynamic-subagent.js";
+import { resolveDynamicDefinition } from "#runtime/resolve-dynamic.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
 import { createRuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import { createRuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
@@ -166,7 +165,6 @@ async function resolveRuntimeAgentNode(
   const node: ResolvedAgentGraphBundle["root"] = {
     agent,
     channels: agent.channels,
-    hookRegistry: createRuntimeHookRegistry(agent.hooks),
     nodeId,
     sandboxRegistry,
     sourceId: input.sourceId,
@@ -250,8 +248,8 @@ async function resolveRuntimeSubagent(input: {
     input.sourceRef.configResolver === undefined
       ? { description: input.sourceRef.description, tool: input.sourceRef.agent.config.tool }
       : {
-          dynamic: await resolveDynamicSubagentDefinition({
-            definition: input.sourceRef.configResolver,
+          dynamic: await resolveDynamicDefinition(input.sourceRef.configResolver, {
+            kindLabel: "dynamic subagent",
             moduleMap: input.moduleMap,
             nodeId: input.sourceRef.nodeId,
           }),
