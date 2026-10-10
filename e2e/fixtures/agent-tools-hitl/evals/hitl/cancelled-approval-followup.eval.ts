@@ -26,17 +26,16 @@ export default defineEval({
       ),
     );
     const cancelled = await cancellation.result();
-    cancelled.event("turn.cancelled", { count: 1 });
-    cancelled.eventOrder([{ type: "turn.cancelled" }, { type: "session.waiting" }]);
-    cancelled.notEvent("turn.failed");
+    cancelled.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
+    cancelled.notEvent("turn.settled", { data: { outcome: "failed" } });
 
     const followup = await session.send(`Reply with exactly ${FOLLOWUP}.`);
 
     followup.expectOk();
     followup.messageIncludes(FOLLOWUP);
-    followup.event("step.started", { count: 1 });
-    followup.event("message.completed", { count: 1 });
-    followup.notEvent("turn.failed");
+    followup.event("model.started", { count: 1 });
+    followup.event("content.completed", { count: 1, data: { kind: "text" } });
+    followup.notEvent("turn.settled", { data: { outcome: "failed" } });
     t.succeeded();
   },
 });

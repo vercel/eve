@@ -24,13 +24,18 @@ export default defineEval({
       input: { reviewId: REVIEW_REFERENCE },
       output: { completed: true, reportId: HANDOFF_REFERENCE, status: "completed" },
     });
-    t.event("compaction.completed", { count: (count) => count >= 2 });
+    t.event("context.settled", {
+      count: (count) => count >= 2,
+      data: { kind: "compaction", outcome: "completed" },
+    });
     t.messageIncludes(REVIEW_REFERENCE);
     t.messageIncludes(HANDOFF_REFERENCE);
     t.noFailedActions();
 
     t.calledTool("inspect-repository", { count: 1 }).soft().label("no repeated inspection");
     t.calledTool("prepare-handoff", { count: 1 }).soft().label("no repeated handoff");
-    t.event("compaction.completed", { count: 2 }).soft().label("compaction efficiency");
+    t.event("context.settled", { count: 2, data: { kind: "compaction", outcome: "completed" } })
+      .soft()
+      .label("compaction efficiency");
   },
 });

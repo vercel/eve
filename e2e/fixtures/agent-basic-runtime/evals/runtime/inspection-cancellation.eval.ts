@@ -22,6 +22,6 @@ export default defineEval({
     );
     turn.expectOk();
     t.usedNoTools();
-    turn.event("message.completed", { count: 1 });
+    turn.event("content.completed", { count: 1, data: { kind: "text", phase: "reply" } });
   },
 });

@@ -1,3 +1,4 @@
+import { readerInputs } from "#protocol/session-reader.js";
 import { withTypedBindings } from "#harness/response-bindings.js";
 import type { UserContent } from "ai";
 
@@ -44,8 +45,12 @@ export function deliver(
     ...ownOpenRequestIds(view),
     ...view.turn.suspended.flatMap((step) => step.requests.map((request) => request.requestId)),
   ]);
+  const tables = view.projection.view;
   const known = new Map(
-    Object.values(view.projection.inputs).map((entry) => [entry.request.requestId, entry.request]),
+    Object.values(tables === undefined ? {} : readerInputs(tables)).map((entry) => [
+      entry.request.requestId,
+      entry.request,
+    ]),
   );
   const converted = convertStaleResponsesToUserMessage({
     pendingRequestIds,

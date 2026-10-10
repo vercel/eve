@@ -10,57 +10,22 @@ import type {
   InteractionSettledData,
 } from "#protocol/session-events/families/interaction.js";
 import type { ResponseSettledData } from "#protocol/session-events/families/response.js";
-import { interactionOwner } from "#protocol/session-projection/selectors.js";
+import {
+  answeredInteractionIds,
+  interactionOwner,
+} from "#protocol/session-projection/selectors.js";
 import type { InteractionRow, SessionView } from "#protocol/session-projection/tables.js";
-import type { InputOption, InputRequest, InputResponse } from "#shared/input.js";
-import { isJsonObjectValue, type JsonObject } from "#shared/json.js";
-
-const BUDGET_TOOL_NAME = "session_limit_continuation";
+import { readerInput } from "#protocol/session-reader.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
-/** A request as the session that serves this one reads it: with the call it's about. */
+/**
+ * A request as the session that serves this one reads it: with the call it's about, or, for a
+ * request this session relays, the asker's call its origin names.
+ */
 export function inputRequestOf(view: SessionView, row: InteractionRow): InputRequest | undefined {
-  const { request, subject } = row;
-  const kind =
-    request.kind === "approval"
-      ? "tool-approval"
-      : request.kind === "budget"
-        ? "session-limit"
-        : request.kind === "question"
-          ? "question"
-          : undefined;
-  if (kind === undefined) return undefined;
-  const call = "callId" in subject ? view.calls[subject.callId] : undefined;
-  const input: JsonObject = isJsonObjectValue(call?.input) ? call.input : {};
-  const rebuilt: Mutable<InputRequest> = {
-    action: {
-      callId: call?.callId ?? row.interactionId,
-      input,
-      kind: "tool-call",
-      toolName: call?.capability.name ?? (kind === "session-limit" ? BUDGET_TOOL_NAME : kind),
-    },
-    kind,
-    prompt: request.prompt,
-    requestId: row.interactionId,
-  };
-  if (request.allowFreeform !== undefined) rebuilt.allowFreeform = request.allowFreeform;
-  if (
-    request.display === "confirmation" ||
-    request.display === "select" ||
-    request.display === "text"
-  )
-    rebuilt.display = request.display;
-  if (request.options !== undefined) {
-    rebuilt.options = request.options.map((option) => {
-      const entry: Mutable<InputOption> = { id: option.id, label: option.label };
-      if (option.description !== undefined) entry.description = option.description;
-      if (option.style === "primary" || option.style === "danger" || option.style === "default")
-        entry.style = option.style;
-      return entry;
-    });
-  }
-  return rebuilt;
+  return readerInput(view, row.interactionId)?.request;
 }
 
 /** One commit's requests: what a person is asked at once. */
@@ -152,8 +117,13 @@ export function requestBatchOf(
  * can only show text show this request alone, so a reply answers the request the person sees.
  */
 export function firstOpenRequest(view: SessionView): InputRequest | undefined {
+  // An answer that waits for the rest of its batch answered its request for now.
+  const answered = answeredInteractionIds(view);
   const open = Object.values(view.interactions)
-    .filter((row) => row.status === "open" && row.request.kind !== "sign-in")
+    .filter(
+      (row) =>
+        row.status === "open" && row.request.kind !== "sign-in" && !answered.has(row.interactionId),
+    )
     .sort((a, b) => a.introducedAt - b.introducedAt);
   const first = open.find((row) => row.request.kind === "budget") ?? open[0];
   return first === undefined ? undefined : inputRequestOf(view, first);

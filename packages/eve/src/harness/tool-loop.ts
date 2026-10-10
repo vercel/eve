@@ -1,5 +1,5 @@
 import { contextStorage } from "#context/container.js";
-import { ScheduleIdKey, StaticModelReferenceKey } from "#context/keys.js";
+import { StaticModelReferenceKey } from "#context/keys.js";
 import { GenerationSteering } from "#harness/generation-steering.js";
 import { compactHistory, replaceSessionHistory } from "#harness/compaction/step.js";
 import { runModelStep } from "#harness/model-call/run.js";
@@ -137,16 +137,24 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const turn = await prepareTurnInput(step, intake.input, {
       consumedMessage: intake.consumedMessage,
     });
+    // A delivery an earlier step queued, such as an answer that resolved approvals first, joins
+    // with the input the queue carried it in.
+    const deliveries = deliveriesOf(input, intake.input);
     if (intake.opensTurn) {
       const failed = await openTurn(step, {
-        deliveries: input?.deliveries,
+        deliveries,
         input: [...turn.ephemeral, ...turn.messages],
         message: intake.message,
       });
       if (failed !== undefined) return failed;
-    } else if (input?.deliveries !== undefined && input.deliveries.length > 0) {
+    } else if (deliveries !== undefined) {
       // An answer joins the turn it resumes; between turns, it has nothing to join.
-      await step.apply(join(step.view(), { deliveries: input.deliveries }));
+      await step.apply(join(step.view(), { deliveries }));
+    }
+    // Input that opened no turn and found none open, such as a stale answer eve dropped,
+    // settled above and leaves nothing to run.
+    if (!intake.opensTurn && step.view().projection.activeTurnId === undefined) {
+      return { next: null, session: step.session };
     }
     await admitApprovedWork(step, intake.approved);
 
@@ -154,9 +162,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       approved: intake.approved,
       onResponse: (response) => handleStepResult(step, response),
       generation,
-      // A child's caller and a schedule hear only the turn's real end, so a held turn's text
-      // isn't posted as their reply. A person reads a root session.
-      hidesHeldText: step.hasDelegatedCaller || ctx?.get(ScheduleIdKey) !== undefined,
       setAttemptScope: (scope) => {
         attemptScope = scope;
       },
@@ -183,6 +188,17 @@ async function clearContext(step: Step): Promise<StepResult> {
     state: clearMemorySessionState(step.session.state),
   });
   return { next: null, session: replaceSessionHistory(cleared, []) };
+}
+
+/** The deliveries a step's input and the queue it took in carry, each once. */
+function deliveriesOf(
+  ...inputs: readonly (HarnessStepInput | undefined)[]
+): HarnessStepInput["deliveries"] {
+  const byId = new Map<string, NonNullable<HarnessStepInput["deliveries"]>[number]>();
+  for (const delivery of inputs.flatMap((input) => input?.deliveries ?? [])) {
+    if (!byId.has(delivery.deliveryId)) byId.set(delivery.deliveryId, delivery);
+  }
+  return byId.size === 0 ? undefined : [...byId.values()];
 }
 
 /** Whether the input carries user-facing turn input. */

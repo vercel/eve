@@ -24,7 +24,7 @@ export default defineEval({
     // Then the text reply completes; the message cancelled A, which never runs.
     const reply = await expectReply(t, live, "Your changes are waiting for approval.");
     // The cancelled approval reports a not-run result; the reply itself calls no tools.
-    reply.notEvent("actions.requested");
+    reply.notEvent("call.requested");
     expectChangeStillUnexecuted(session);
     expectApprovalCancelled(session, approval);
   },

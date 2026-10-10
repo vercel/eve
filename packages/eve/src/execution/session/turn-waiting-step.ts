@@ -8,7 +8,7 @@ import { sessionView } from "#harness/session-machine/commit.js";
 import { hold } from "#harness/session-machine/transitions.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 
-/** Publishes `turn.waiting` for the open turn the session workflow just parked. */
+/** Publishes `turn.paused` for the open turn the session workflow just parked. */
 export async function publishTurnWaitingStep(
   target: SessionStepState,
 ): Promise<SessionStateTransition> {

@@ -24,8 +24,8 @@ export default defineEval({
       status: "completed",
     });
     resumed.messageIncludes("Question answered");
-    resumed.notEvent("step.failed");
-    resumed.notEvent("turn.failed");
+    resumed.notEvent("model.settled", { data: { outcome: "failed" } });
+    resumed.notEvent("turn.settled", { data: { outcome: "failed" } });
     t.noFailedActions();
   },
 });

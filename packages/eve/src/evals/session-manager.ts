@@ -1,11 +1,12 @@
 import { createLogger } from "#internal/logging.js";
 import type { ClientSession } from "#client/session.js";
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { CreateSessionOptions, SendTurnInput, SendTurnOptions } from "#client/types.js";
 import type { Client } from "#client/client.js";
 import { AssertionCollector } from "#evals/assertions/collector.js";
 import { EvalSessionDriver, type EvalSessionStartedEvent } from "#evals/session.js";
 import { cleanupEvalSessions } from "#evals/session-cleanup.js";
-import type { EveEvalLiveTurn, EveEvalSessionResult } from "#evals/types.js";
+import type { EveEvalLiveTurn, EveEvalSessionResult, EveEvalWatchOptions } from "#evals/types.js";
 import { createEveSessionStubsRoutePath } from "#protocol/routes.js";
 
 const log = createLogger("eve.evals");
@@ -100,7 +101,7 @@ export class EvalSessionManager {
     return session;
   }
 
-  watchTurn(sessionId: string, options?: { readonly startIndex?: number }): EveEvalLiveTurn {
+  watchTurn(sessionId: string, options?: EveEvalWatchOptions): EveEvalLiveTurn {
     return this.#createAttachedSession(sessionId, options).watchTurn(options);
   }
 
@@ -120,9 +121,10 @@ export class EvalSessionManager {
     return await cleanupEvalSessions(this.#sessions, signal);
   }
 
-  #register(session: ClientSession): EvalSessionDriver {
+  #register(session: ClientSession, history?: readonly SessionStreamEvent[]): EvalSessionDriver {
     const driver = new EvalSessionDriver({
       collector: this.#collector,
+      history,
       onSessionStart: this.#onSessionStart,
       onTurn: (completed) => {
         this.#lastTurnSession = completed;
@@ -139,8 +141,15 @@ export class EvalSessionManager {
     sessionId: string,
     options?: { readonly startIndex?: number },
   ): EvalSessionDriver {
+    const startIndex = options?.startIndex ?? 0;
+    // What this eval already read of the session names the calls a later read settles.
+    const history = this.#sessions
+      .filter((driver) => driver.sessionId === sessionId)
+      .flatMap((driver) => driver.events)
+      .filter((event) => event.meta.position.line < startIndex);
     return this.#register(
-      this.#client.sessions.attach(sessionId, { streamIndex: options?.startIndex ?? 0 }),
+      this.#client.sessions.attach(sessionId, { streamIndex: startIndex }),
+      history,
     );
   }
 }

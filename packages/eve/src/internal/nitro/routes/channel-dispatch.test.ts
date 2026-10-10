@@ -486,7 +486,8 @@ describe("dispatchChannelRequest", () => {
       status: "reset",
     });
     expect(runtimeForTest.dispatchContinuation).toHaveBeenCalledWith({
-      command: { kind: "reset", reason: "User requested /new" },
+      // A control is a delivery with its own id.
+      command: { deliveryId: expect.any(String), kind: "reset", reason: "User requested /new" },
       continuationToken: "imessage:direct:+15551234567:+15557654321",
     });
   });
@@ -527,7 +528,7 @@ describe("dispatchChannelRequest", () => {
       status: "accepted",
     });
     expect(runtimeForTest.dispatchContinuation).toHaveBeenCalledWith({
-      command: { kind: "clear" },
+      command: { deliveryId: expect.any(String), kind: "clear" },
       continuationToken: "imessage:direct:+15551234567:+15557654321",
     });
   });

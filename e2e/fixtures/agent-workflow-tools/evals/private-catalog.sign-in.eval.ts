@@ -37,14 +37,19 @@ export default defineEval({
         return first?.tool === CATALOG && first.description.startsWith("Sign in to use the");
       },
     });
-    started.event("authorization.required", { count: 1, data: { name: CATALOG } });
-    started.notEvent("authorization.completed");
+    started.event("interaction.opened", {
+      count: 1,
+      data: { request: { kind: "sign-in", signIn: { name: CATALOG } } },
+    });
+    started.notEvent("interaction.settled");
     // The sign-in holds the turn; the callback resumes it.
-    started.event("turn.waiting", { count: 1 });
-    started.notEvent("session.waiting");
+    started.event("turn.paused", { count: 1 });
+    started.notEvent("turn.settled");
 
-    const required = started.events.find((event) => event.type === "authorization.required");
-    if (required?.type !== "authorization.required") {
+    const required = started.events.find(
+      (event) => event.type === "interaction.opened" && event.data.request.kind === "sign-in",
+    );
+    if (required?.type !== "interaction.opened") {
       throw new Error("eve__tool did not produce an authorization challenge.");
     }
     if (session.sessionId === undefined || session.state === undefined) {
@@ -54,7 +59,7 @@ export default defineEval({
       startIndex: session.state.streamIndex,
     });
     const response = await fetch(
-      fixtureAuthorizationCallback(t.target.url, required.data.authorization?.url),
+      fixtureAuthorizationCallback(t.target.url, required.data.request.signIn?.url),
     );
     if (!response.ok) throw new Error(`Authorization callback failed (${response.status}).`);
 
@@ -62,10 +67,10 @@ export default defineEval({
     completed.expectOk();
     completed.notEvent("turn.started");
     completed.noFailedActions();
-    completed.notEvent("authorization.required");
-    completed.event("authorization.completed", {
+    completed.notEvent("interaction.opened");
+    completed.event("interaction.settled", {
       count: 1,
-      data: { candidateId: required.data.candidateId, outcome: "authorized" },
+      data: { interactionId: required.data.interactionId, outcome: "accepted" },
     });
     completed.calledTool(CATALOG, {
       count: 1,

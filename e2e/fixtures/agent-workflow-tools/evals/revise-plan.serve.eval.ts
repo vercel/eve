@@ -28,13 +28,16 @@ export default defineEval({
       count: 1,
       output: /^Stopped revise_plan-\w{6}'s current work;/u,
     });
-    revised.event("task.settled", { count: 1, data: { callId: "plan-hold", status: "cancelled" } });
-    revised.event("task.settled", {
+    revised.event("call.settled", {
+      count: 1,
+      data: { callId: "plan-hold", outcome: "interrupted" },
+    });
+    revised.event("call.settled", {
       count: 1,
       data: {
         callId: "plan-final",
         output: { revisions: ["draft", "final"] },
-        status: "completed",
+        outcome: "completed",
       },
     });
     revised.messageIncludes('WORKFLOW-PLAN-RESULT {"revisions":["draft","final"]}');

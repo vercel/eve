@@ -11,6 +11,13 @@ interface ClearResponse {
   readonly status?: "accepted" | "no_active_session";
 }
 
+/** The line after the last event read: where the next read starts. */
+function nextLine(
+  events: readonly { readonly meta: { readonly position: { readonly line: number } } }[],
+) {
+  return (events.at(-1)?.meta.position.line ?? -1) + 1;
+}
+
 async function postJson<T>(target: EveEvalTargetHandle, path: string, body: unknown): Promise<T> {
   const response = await target.fetch(path, {
     body: JSON.stringify(body),
@@ -57,10 +64,14 @@ export default defineEval({
     const sessionId = started.sessionId!;
 
     const initial = await t.target.watchTurn(sessionId).result();
-    initial.notEvent("turn.failed");
-    initial.notEvent("session.failed");
+    initial.notEvent("turn.settled", { data: { outcome: "failed" } });
+    initial.notEvent("session.ended", { data: { outcome: "failed" } });
 
-    const liveClear = t.target.watchTurn(sessionId, { startIndex: initial.events.length });
+    // A context change between turns ends no turn: the read ends with its settlement.
+    const liveClear = t.target.watchTurn(sessionId, {
+      startIndex: nextLine(initial.events),
+      until: (event) => event.type === "context.settled",
+    });
     await new Promise((resolve) => setTimeout(resolve, 250));
     const clearedResponse = await postJson<ClearResponse>(
       t.target,
@@ -76,14 +87,16 @@ export default defineEval({
     );
 
     const cleared = await liveClear.result();
-    cleared.event("context.cleared", { count: 1 });
-    cleared.eventOrder([{ type: "context.cleared" }, { type: "session.waiting" }]);
+    cleared.event("context.settled", { count: 1, data: { kind: "clear", outcome: "completed" } });
+    cleared.eventOrder([
+      { data: { kind: "clear", outcome: "completed" }, type: "context.settled" },
+    ]);
     cleared.notEvent("turn.started");
-    cleared.notEvent("turn.failed");
-    cleared.notEvent("session.failed");
+    cleared.notEvent("turn.settled", { data: { outcome: "failed" } });
+    cleared.notEvent("session.ended", { data: { outcome: "failed" } });
 
     const followUpTurn = t.target.watchTurn(sessionId, {
-      startIndex: initial.events.length + cleared.events.length,
+      startIndex: nextLine(cleared.events),
     });
     await new Promise((resolve) => setTimeout(resolve, 250));
     const resumed = await postJson<MessageResponse>(t.target, `/threads/${threadId}/messages`, {
@@ -98,8 +111,8 @@ export default defineEval({
     );
 
     const followUp = await followUpTurn.result();
-    followUp.notEvent("turn.failed");
-    followUp.notEvent("session.failed");
+    followUp.notEvent("turn.settled", { data: { outcome: "failed" } });
+    followUp.notEvent("session.ended", { data: { outcome: "failed" } });
     followUp.messageIncludes(/CLEAR-FOLLOW-UP-OK/i);
 
     t.succeeded();

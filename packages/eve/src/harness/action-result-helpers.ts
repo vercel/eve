@@ -40,7 +40,7 @@ function toJsonValue(value: unknown): JsonValue {
 /**
  * Builds a `RuntimeToolResultActionResult` from a raw tool output value.
  *
- * This is the single coercion point for `action.result` projection. Both
+ * This is the single coercion point for `call.settled` projection. Both
  * native tool execution (via {@link createRuntimeToolResultFromStepResult} /
  * {@link createRuntimeToolResultFromMessagePart}) and Workflow child calls
  * funnel through here, so the raw-output-vs-`toModelOutput` decision —

@@ -101,13 +101,13 @@ When a turn starts, the channel adds an `eyes` reaction to the triggering commen
 
 ### Human-in-the-loop (HITL)
 
-GitHub comments have no interactive button or card affordance. A human-in-the-loop (HITL) `input.requested` event is posted as a comment prompt, and the user's reply comment maps back to the pending input request. Declare an `events["input.requested"]` handler to customize the prompt.
+GitHub comments have no interactive button or card affordance. A human-in-the-loop (HITL) request, an `interaction.opened` fact, is posted as a comment prompt, and the user's reply comment maps back to the pending request. Declare an `events["interaction.opened"]` handler to customize the prompt.
 
 ### Proactive sessions
 
 Start a session without an inbound comment invocation through `to(github, target).send(message, { auth })` from a schedule `run` handler, or `ctx.to(github, target).send(message, { auth })` from another channel. The target requires `owner`, `repo`, and exactly one of `issueNumber` or `pullRequestNumber`. This sends turn input to the agent; it is not a direct GitHub comment.
 
-To post without invoking the model, use `channel.thread.post(...)` inside a GitHub event handler. For application-managed retries and deduplication across providers, see [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications).
+To post without invoking the model, use `ctx.channel.thread.post(...)` inside a GitHub event handler. For application-managed retries and deduplication across providers, see [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications).
 
 ### Attachments
 

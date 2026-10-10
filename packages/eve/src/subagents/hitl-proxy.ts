@@ -34,8 +34,8 @@ export interface RoutedChildDelivery {
 /**
  * The parent-visible requests one forwarded bucket resolves: those it answers,
  * plus the rest of a batch those answers complete. Each retires from the proxy
- * map, and the session announces them with one `input.resolved` at `event`,
- * the coordinates of the child batch's `input.requested`.
+ * map, and the session announces them with one `interaction.settled` at `event`,
+ * the coordinates of the child batch's `interaction.opened`.
  */
 export interface ProxiedInputResolutions {
   readonly event: PendingInputBatchEvent;

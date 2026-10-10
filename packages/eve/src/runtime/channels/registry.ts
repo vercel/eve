@@ -167,7 +167,7 @@ function carriesAdapterBehavior(adapter: ChannelAdapter): boolean {
   }
 
   // Remaining keys on a ChannelAdapter object correspond to stream
-  // event handlers (keyed by event type, e.g. "input.requested").
+  // event handlers (keyed by event type, e.g. "interaction.opened").
   for (const [key, value] of Object.entries(adapter)) {
     if (ADAPTER_NON_EVENT_FIELDS.has(key)) {
       continue;

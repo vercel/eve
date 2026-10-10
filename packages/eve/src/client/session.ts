@@ -245,8 +245,10 @@ export class ClientSession {
   ): AsyncGenerator<SessionStreamEvent> {
     // A caller's own source advances the cursor as it reads; only this read's own lines move it.
     let cursor = initialStreamIndex;
-    // The response starts when its delivery is admitted, and ends when it settles.
+    // The response starts with the line that admits its delivery, and ends when it settles. A
+    // prewarmed session starts in that same line, before the admission.
     let started = deliveryId === undefined;
+    let admittingLine: SessionStreamEvent[] = [];
     let reachedBoundary = false;
     const segment = new ResponseSegment({ deliveryId });
     const events: AsyncIterable<{ readonly event: SessionStreamEvent; readonly cursor?: number }> =
@@ -265,11 +267,20 @@ export class ClientSession {
           if (event.type === "session.ended") {
             throw new Error("The session ended before it admitted the accepted message.");
           }
+          if (admittingLine[0]?.meta.position.line !== event.meta.position.line) {
+            admittingLine = [];
+          }
+          admittingLine.push(event);
           if (event.type !== "delivery.admitted" || event.data.deliveryId !== deliveryId) continue;
           started = true;
         }
-        reachedBoundary = segment.observe(event);
-        yield event;
+        const ready = admittingLine.length > 0 ? admittingLine : [event];
+        admittingLine = [];
+        for (const next of ready) {
+          reachedBoundary = segment.observe(next);
+          yield next;
+          if (reachedBoundary) break;
+        }
         if (reachedBoundary) {
           break;
         }

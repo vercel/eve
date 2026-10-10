@@ -11,7 +11,7 @@ const TOOL_NAME = "dynamic_guarded_echo";
  * durable transcript containing the approval-parked call's `tool_use`,
  * approval request/response parts, and result; on Anthropic that replay is
  * where the reported `tool_use ids were found without tool_result blocks`
- * 400 lands, turning `session.waiting` into a terminal `session.failed`.
+ * 400 lands, failing the session instead of settling the turn.
  */
 export default defineEval({
   tags: ["real-model"],
@@ -27,15 +27,9 @@ export default defineEval({
 
     const approved = await session.respondAll("approve");
     approved.expectOk();
-    approved.event("action.result", {
-      data: {
-        result: {
-          kind: "tool-result",
-          output: new RegExp(DYNAMIC_GUARDED_ECHO_TOKEN),
-          toolName: TOOL_NAME,
-        },
-        status: "completed",
-      },
+    approved.calledTool(TOOL_NAME, {
+      output: new RegExp(DYNAMIC_GUARDED_ECHO_TOKEN),
+      status: "completed",
       count: 1,
     });
 

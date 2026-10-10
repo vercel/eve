@@ -19,7 +19,7 @@ export default defineEval({
     second.expectOk();
     second.messageIncludes("catalog two");
     second.eventsSatisfy("the model call is attributed to the selected model", (events) =>
-      events.some((event) => event.type === "step.started" && event.data.modelId === model),
+      events.some((event) => event.type === "model.started" && event.data.modelId === model),
     );
 
     t.succeeded();

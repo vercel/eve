@@ -27,26 +27,27 @@ export default defineEval({
     const sessionId = turn.sessionId;
 
     const fullLog = turn.events;
-    // Split at the first actions.requested so the replay tail spans tool
-    // execution and the final assistant message.
-    const cutoff = fullLog.findIndex((event) => event.type === "actions.requested");
+    // Split at the first call.requested's line so the replay tail spans tool
+    // execution and the final reply.
+    const cutoffEvent = fullLog.find((event) => event.type === "call.requested");
+    const cutoff = cutoffEvent?.meta.position.line ?? -1;
     await t.require(
       cutoff,
-      satisfies((value: number) => value > 0, "actions.requested appears after index 0"),
+      satisfies((value: number) => value > 0, "call.requested appears after line 0"),
     );
-    t.log(`full turn produced ${fullLog.length} events; replaying from index ${cutoff}`);
+    t.log(`full turn produced ${fullLog.length} events; replaying from line ${cutoff}`);
 
     // Reconnect at startIndex=cutoff through the authenticated client and
-    // assert the replayed tail matches the full log from that index on.
+    // assert the replayed tail matches the full log from that line on.
     const resumed = await t.target.attachSession(sessionId, { startIndex: cutoff });
     const replayed = resumed.events;
-    const expected = fullLog.slice(cutoff);
+    const expected = fullLog.filter((event) => event.meta.position.line >= cutoff);
 
     t.check(
       replayed.map((event) => event.type),
       equals(expected.map((event) => event.type)),
     );
-    t.log(`replayed ${replayed.length} events from index ${cutoff}; matches the durable log`);
+    t.log(`replayed ${replayed.length} events from line ${cutoff}; matches the durable log`);
     t.succeeded();
   },
 });

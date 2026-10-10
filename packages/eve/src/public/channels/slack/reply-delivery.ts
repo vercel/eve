@@ -162,7 +162,7 @@ function refusedPayloadError(error: unknown): string | undefined {
 }
 
 /**
- * Wraps a channel's composed `message.completed` chain, authored renderers
+ * Wraps a channel's composed `content.completed` chain, authored renderers
  * included, so a final reply that fails is never lost without a trace.
  *
  * When the chain throws on a final reply, eve logs the error at error level,

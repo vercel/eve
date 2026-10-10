@@ -47,8 +47,8 @@ export interface ProxyInputRequest {
   readonly childContinuationToken: string;
   readonly childSessionInbox?: SessionInboxAddress;
   /**
-   * Coordinates of the `input.requested` this session emitted for the request;
-   * the `input.resolved` it emits once it routes the answer repeats them.
+   * Coordinates of the `interaction.opened` this session emitted for the request;
+   * the `interaction.settled` it emits once it routes the answer repeats them.
    */
   readonly event: PendingInputBatchEvent;
   readonly kind: InputRequestKind;

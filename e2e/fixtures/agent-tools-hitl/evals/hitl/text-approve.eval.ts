@@ -19,9 +19,7 @@ export default defineEval({
       [{ optionId: "approve", requestId: approval.requestId }],
       { headers: { "x-eve-fixture-user": "unauthorized-responder" } },
     );
-    await rejectedTurn.waitForEvent("approval.candidate", {
-      data: { outcome: "rejected", requestId: approval.requestId },
-    });
+    await rejectedTurn.waitForEvent("response.settled", { data: { outcome: "refused" } });
 
     // Finish consuming the refusal boundary before opening the next response reader.
     (await rejectedTurn.result()).expectOk();
@@ -30,17 +28,11 @@ export default defineEval({
       { headers: { "x-eve-fixture-user": "e2e-approval-responder" } },
     );
     approved.expectOk();
-    approved.event("approval.settled", {
+    approved.event("interaction.settled", {
       count: 1,
-      data: { outcome: "approved", requestId: approval.requestId },
+      data: { interactionId: approval.requestId, outcome: "accepted" },
     });
-    approved.event("action.result", {
-      count: 1,
-      data: {
-        result: { kind: "tool-result", output: new RegExp(MARKER), toolName: TOOL_NAME },
-        status: "completed",
-      },
-    });
+    approved.calledTool(TOOL_NAME, { output: new RegExp(MARKER), status: "completed", count: 1 });
     t.succeeded();
   },
 });

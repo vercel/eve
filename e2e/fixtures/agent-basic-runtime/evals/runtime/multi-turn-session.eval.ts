@@ -39,8 +39,8 @@ export default defineEval({
     );
     await t.require(third.sessionId, equals(first.sessionId));
     third.notEvent("session.started");
-    third.notEvent("turn.cancelled");
-    third.notEvent("session.failed");
+    third.notEvent("turn.settled", { data: { outcome: "cancelled" } });
+    third.notEvent("session.ended");
     third.messageIncludes(/marigold/i);
 
     t.succeeded();

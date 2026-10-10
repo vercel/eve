@@ -155,7 +155,7 @@ class WorkflowServeCalls implements WorkflowBodyControl {
 
   /**
    * The call the body serves now: the latest call it received. Steps,
-   * questions, sign-ins, and `agent.started` belong to this call, so they
+   * questions, sign-ins, and `child.opened` belong to this call, so they
    * carry its `callId` and turn; `ctx.session` is its view of the session,
    * `ctx.agents` lists the agents it may open, a session opened now is its
    * child, and a message sent now carries its auth.

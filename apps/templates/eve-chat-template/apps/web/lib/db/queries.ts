@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, gte, lt, or, sql } from "drizzle-orm";
-import type { ClientSessionState, MessageStreamEvent } from "eve/client";
+import type { ClientSessionState, SessionStreamEvent } from "eve/client";
 import { isChatTurnSettledEvent } from "../chat/events";
 import type { ActiveChat, ChatListItem, ChatListPage } from "../chat/types";
 import { createFallbackTitle, DEFAULT_CHAT_TITLE } from "../chat/title";
@@ -227,7 +227,7 @@ export async function skipChatAuthorization({
   userId,
 }: {
   readonly chatId: string;
-  readonly events: readonly MessageStreamEvent[];
+  readonly events: readonly SessionStreamEvent[];
   readonly session: ClientSessionState | undefined;
   readonly userId: string;
 }) {
@@ -322,7 +322,7 @@ export async function appendChatEvent({
   userId,
 }: {
   readonly chatId: string;
-  readonly event: MessageStreamEvent;
+  readonly event: SessionStreamEvent;
   readonly eventIndex: number;
   readonly userId: string;
 }) {
@@ -357,7 +357,7 @@ export async function saveChatSnapshot({
   userId,
 }: {
   readonly chatId: string;
-  readonly events: readonly MessageStreamEvent[];
+  readonly events: readonly SessionStreamEvent[];
   readonly session: ClientSessionState | undefined;
   readonly userId: string;
 }) {

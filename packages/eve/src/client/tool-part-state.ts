@@ -1,6 +1,11 @@
-import { conversationProjection } from "#client/conversation-projection.js";
+import { conversationLedger } from "#client/conversation-projection.js";
 import type { EveDynamicToolPart, EveMessageData } from "#client/message-reducer-types.js";
-import { isSettledCallStatus, reportedCallStatus } from "#protocol/session-projection.js";
+import {
+  isSettledCallStatus,
+  readerInput,
+  readerTaskCall,
+  reportedCallStatus,
+} from "#protocol/session-reader.js";
 
 /** A tool part's content, whichever state it was written in. */
 interface ToolPartContent {
@@ -17,10 +22,17 @@ interface ToolPartContent {
  */
 export function toolPartState(data: EveMessageData, part: EveDynamicToolPart): EveDynamicToolPart {
   const content = part as ToolPartContent;
-  const projection = conversationProjection(data);
-  const call = projection.calls[part.toolCallId];
+  const { responded: sent, view } = conversationLedger(data);
+  const call = view.calls[part.toolCallId];
+  const status = reportedCallStatus(view, part.toolCallId);
   const requestId = content.approval?.id;
-  const input = requestId === undefined ? undefined : projection.inputs[requestId];
+  const shown = requestId === undefined ? undefined : readerInput(view, requestId);
+  // An answer this client sent shows until the stream settles it.
+  const answer = requestId === undefined ? undefined : sent[requestId];
+  const input =
+    shown !== undefined && answer !== undefined && shown.status === "open"
+      ? { ...shown, response: answer }
+      : shown;
   const base = {
     input: part.input,
     stepIndex: part.stepIndex,
@@ -57,20 +69,19 @@ export function toolPartState(data: EveMessageData, part: EveDynamicToolPart): E
     requested !== undefined &&
     input !== undefined &&
     input.status !== "settled" &&
-    (call === undefined || !isSettledCallStatus(reportedCallStatus(projection, call)))
+    (status === undefined || !isSettledCallStatus(status))
   ) {
     return { ...base, approval: requested, state: "approval-requested" };
   }
 
-  const task =
-    call?.taskId === undefined ? undefined : projection.tasks[call.taskId]?.calls[part.toolCallId];
-  if (call === undefined) {
+  const task = call?.taskId === undefined ? undefined : readerTaskCall(view, part.toolCallId);
+  if (call === undefined || status === undefined) {
     if (input === undefined) return part;
     return input.response === undefined
       ? { ...base, output: { status: input.outcome }, state: "output-available" }
       : responded(input.outcome === "approved", input.response.text);
   }
-  switch (reportedCallStatus(projection, call)) {
+  switch (status) {
     case "running":
     case "awaiting-input":
       if (content.partial === true) {

@@ -15,11 +15,14 @@ export default defineEval({
     await t.require(result.sessionId, equals(sessionId));
     result.event("session.started", { count: 1 });
     result.event("turn.started", { count: 1, data: { turnId: "turn_0" } });
-    result.event("message.received", { count: 1, data: { message, turnId: "turn_0" } });
-    result.event("step.started", { count: 1, data: { turnId: "turn_0" } });
+    result.event("delivery.consumed", {
+      count: 1,
+      data: { parts: [{ text: message }], turnId: "turn_0" },
+    });
+    result.event("model.started", { count: 1 });
     await t.require(
-      streamed.events.map((event) => event.meta.id),
-      equals(result.events.map((event) => event.meta.id)),
+      streamed.events.map((event) => event.meta.position),
+      equals(result.events.map((event) => event.meta.position)),
     );
   },
 });

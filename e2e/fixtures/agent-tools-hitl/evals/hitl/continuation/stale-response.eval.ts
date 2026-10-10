@@ -36,9 +36,7 @@ export default defineEval({
     await expectToolResult(t, repeated, "read-draft");
     await expectReply(t, repeated, "Draft status: ready.");
     expectChangeStillUnexecuted(session, "change-a");
-    session.notEvent("action.result", {
-      data: { status: "completed", result: { toolName: "change-b" } },
-    });
+    session.calledTool("change-b", { status: "completed", count: 0 });
     expectApprovalCancelled(session, approvalA);
   },
 });

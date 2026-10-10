@@ -10,7 +10,7 @@ import { toErrorMessage } from "#shared/errors.js";
 const log = createLogger("turn-step");
 
 /**
- * Parks the session with `step.failed` → `turn.failed` → `session.waiting`
+ * Fails the turn (`turn.settled` with `outcome: "failed"`) and leaves the session open
  * when a dynamic connection resolver throws during rehydration, so the next
  * message can retry once the dependency recovers. Returns `undefined` for any
  * other error so the caller rethrows it.

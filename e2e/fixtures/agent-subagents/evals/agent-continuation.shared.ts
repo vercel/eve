@@ -1,6 +1,7 @@
 import type { EveEvalContext, EveEvalTurn } from "eve/evals";
 
 import { NOTEBOOK_NAME } from "../constants";
+import { callsReachingTasks } from "./task-calls.shared";
 
 /**
  * Drives the notebook script against one keeper agent over three parent
@@ -21,32 +22,30 @@ export async function continueKeeperAcrossTurns(t: EveEvalContext, tool: string)
   );
   reviewed.expectOk();
   reviewed.calledTool("eve__task_cancel", { count: 1, output: /^Stopped \S+'s current work;/u });
-  reviewed.event("task.settled", {
+  reviewed.event("call.settled", {
     count: 1,
-    data: { callId: "notebook-review", status: "cancelled" },
+    data: { callId: "notebook-review", outcome: "interrupted" },
   });
   const cancelledChildTurn = await t.target
     .watchTurn(childSessionId, { startIndex: firstChildTurn.session.state.streamIndex })
     .result();
-  cancelledChildTurn.event("turn.cancelled", { count: 1 });
+  cancelledChildTurn.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
 
   const recalled = await reviewed.session.send(`NOTEBOOK-RECALL ${tool} Alice asks for the name.`);
   recalled.expectOk();
-  recalled.event("task.settled", {
+  recalled.event("call.settled", {
     count: 1,
     data: {
       callId: "notebook-recall",
       output: `NOTEBOOK-NAME=${NOTEBOOK_NAME}`,
-      status: "completed",
+      outcome: "completed",
     },
   });
   recalled.messageIncludes(`NOTEBOOK-REPLY NOTEBOOK-NAME=${NOTEBOOK_NAME}`);
 
-  t.event("agent.started", { count: 1, data: { name: tool } });
+  t.event("child.opened", { count: 1, data: { name: tool } });
   t.eventsSatisfy("each turn's call reaches the one task the first call started", (events) => {
-    const calls = events.flatMap((event) =>
-      event.type === "task.started" && event.data.name === tool ? [event.data] : [],
-    );
+    const calls = callsReachingTasks(events, tool);
     return (
       calls.length === 3 &&
       new Set(calls.map((call) => call.taskId)).size === 1 &&
@@ -57,8 +56,8 @@ export async function continueKeeperAcrossTurns(t: EveEvalContext, tool: string)
 
 function requireChildSession(turn: EveEvalTurn, tool: string): string {
   const started = turn.events.find(
-    (event) => event.type === "agent.started" && event.data.name === tool,
+    (event) => event.type === "child.opened" && event.data.name === tool,
   );
-  if (started?.type !== "agent.started") throw new Error(`${tool} never started a session.`);
+  if (started?.type !== "child.opened") throw new Error(`${tool} never started a session.`);
   return started.data.sessionId;
 }

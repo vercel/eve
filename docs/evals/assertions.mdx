@@ -85,11 +85,11 @@ Pick the cheapest builder that captures what "correct" means. When exact match i
 
 ## The matcher mini-language
 
-`t.calledTool` and `t.calledSubagent` take matcher objects. Tools accept `{ input, output, status, count }`; subagents accept `{ callId, childSessionId, remoteUrl, output, status, count }`. Calls match `status: "completed"` by default. Tool lifecycle checks also accept `"pending"`, `"failed"`, and `"rejected"`. Subagent checks accept `"working"`, `"completed"`, `"failed"`, and `"cancelled"`. A numeric `count` requires an exact number of calls matching every supplied constraint. Use a predicate for ranges or other custom count requirements; it receives the observed number of matching calls.
+`t.calledTool` and `t.calledSubagent` take matcher objects. Tools accept `{ input, output, status, count }`; subagents accept `{ callId, childSessionId, output, status, count }`. Calls match `status: "completed"` by default. Tool lifecycle checks also accept `"pending"`, `"failed"`, and `"rejected"`. Subagent checks accept `"working"`, `"completed"`, `"failed"`, and `"cancelled"`. A numeric `count` requires an exact number of calls matching every supplied constraint. Use a predicate for ranges or other custom count requirements; it receives the observed number of matching calls.
 
-A subagent call is a task call: it stays `working` until its `task.settled` event arrives, then takes that event's `status` (`completed`, `failed`, or `cancelled`) and, when completed, its `output`. A completed call leaves the child session available for later calls with the same `taskId`.
+A subagent call is a task call: it stays `working` until its `call.settled` arrives, then takes that call's outcome (`completed`, `failed`, or `cancelled` for an interrupted call) and, when completed, its `output`. A completed call leaves the child session available for later calls with the same `taskId`.
 
-The runner counts each `task.started` with `kind: "agent"` as a subagent call and takes its status from `task.settled`. `childSessionId` and `remoteUrl` come from the task's `agent.started`, so they are absent for a call that failed before its session opened. A proxied input request alone does not change the subagent call's status; assert that request with `requireInputRequest`.
+The runner counts each call that reaches an agent task (`call.started` whose task has `kind: "agent"`) as a subagent call and takes its status from its `call.settled`. `childSessionId` comes from the `child.opened` for the call or its task, so it is absent for a call that failed before its session opened. A proxied input request alone does not change the subagent call's status; assert that request with `requireInputRequest`.
 
 Matcher values accept a literal (objects partial-deep-match), a RegExp, or a predicate function that returns a boolean:
 
@@ -125,10 +125,10 @@ Beyond the raw `session.events` stream, the runner derives typed facts the asser
 Typed event matching covers presence, absence, numeric or predicate counts, partial event data, and ordering:
 
 ```ts
-turn.notEvent("result.completed");
+turn.notEvent("content.completed", { data: { kind: "result" } });
 turn.eventOrder([
   { type: "task.started", data: { name: "researcher" }, count: 2 },
-  { type: "task.settled", data: { status: "completed" }, count: 2 },
+  { type: "task.ended", data: { outcome: "completed" }, count: 2 },
 ]);
 ```
 
@@ -136,7 +136,13 @@ When a protocol invariant needs cross-event correlation, `eventsSatisfy` remains
 
 ```ts
 t.eventsSatisfy("assistant reply includes the marker", (events) =>
-  events.some((e) => e.type === "message.completed" && e.data.message?.includes(marker)),
+  events.some(
+    (e) =>
+      e.type === "content.completed" &&
+      e.data.phase === "reply" &&
+      typeof e.data.value === "string" &&
+      e.data.value.includes(marker),
+  ),
 );
 ```
 

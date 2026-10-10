@@ -31,7 +31,8 @@ export default defineEval({
       "the first researcher task is corrected by taskId or cancelled",
       (events) => {
         const corrected = taskStarts(events, "researcher").some(
-          (call) => call.taskId === first.data.taskId && call.callId !== first.data.callId,
+          (call) =>
+            call.taskId === first.data.taskId && call.callId !== first.data.startedBy.callId,
         );
         const cancelled = turn.toolCalls.some(
           (call) => call.name === "eve__task_cancel" && call.input.taskId === first.data.taskId,

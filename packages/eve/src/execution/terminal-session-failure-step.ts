@@ -7,7 +7,7 @@ import type { SessionProjection } from "#protocol/session-projection.js";
 
 const log = createLogger("execution.workflow-entry");
 
-/** Emits a terminal `session.failed` to the adapter and durable stream. */
+/** Emits a terminal `session.ended` to the adapter and durable stream. */
 export async function emitTerminalSessionFailureStep(input: {
   readonly error: unknown;
   readonly sessionWritable: WritableStream<Uint8Array>;

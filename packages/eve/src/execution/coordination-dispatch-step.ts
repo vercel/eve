@@ -25,7 +25,7 @@ import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { HarnessSessionBase } from "#harness/types.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { callSettledFrom } from "#harness/call-facts.js";
-import { cloneView, foldLine } from "#protocol/session-projection/fold.js";
+import { copyView, foldLine } from "#protocol/session-projection/fold.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 
 export async function dispatchCoordinationStep(
@@ -59,7 +59,7 @@ async function dispatchCoordination(
   // Prospective facts for this admission batch use the same fold as committed facts. This
   // shadow is never saved: limits count work actually started earlier in the batch without
   // introducing a private lifecycle counter or treating undispatched intents as queued work.
-  const admissionView = cloneView(publicViewOf(storedProjection(session.state)));
+  const admissionView = copyView(publicViewOf(storedProjection(session.state)));
 
   for (const task of prepared.plan) {
     const start = {

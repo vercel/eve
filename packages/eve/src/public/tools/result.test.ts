@@ -84,6 +84,32 @@ describe("toolResultFrom", () => {
     }
   });
 
+  it("matches a completed call's row from the session's tables", () => {
+    const row = {
+      callId: "call_3",
+      capability: { kind: "tool", name: "get_weather" },
+      outcome: "completed",
+      output: { city: "SF", tempF: 72 },
+    } as const;
+
+    expect(toolResultFrom(row, weatherTool)).toEqual({
+      callId: "call_3",
+      output: { city: "SF", tempF: 72 },
+      toolName: "get_weather",
+    });
+    expect(toolResultFrom({ ...row, outcome: "failed" }, weatherTool)).toBeUndefined();
+    expect(
+      toolResultFrom({ ...row, capability: { kind: "agent", name: "get_weather" } }, weatherTool),
+    ).toBeUndefined();
+    expect(toolResultFrom(undefined, weatherTool)).toBeUndefined();
+    expect(
+      toolResultFrom(
+        { ...row, capability: { kind: "tool", name: "linear__list_issues" } },
+        linearConnection,
+      ),
+    ).toMatchObject({ connectionToolName: "list_issues" });
+  });
+
   it("preserves structured output — not a JSON string", () => {
     const structured = { city: "SF", tempF: 72, nested: { wind: "calm" } };
     const result = toolResultFrom(toolResult("get_weather", structured), weatherTool);

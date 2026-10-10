@@ -27,9 +27,7 @@ export default defineEval({
     // Then B does not execute and the read gets a completed reply; the message cancelled A, which never runs.
     await expectToolResult(t, live, "read-draft");
     const reply = await expectResponseReply(t, live, "Draft status: ready.", current.requestId);
-    reply.notEvent("action.result", {
-      data: { status: "completed", result: { toolName: "change-b" } },
-    });
+    reply.calledTool("change-b", { status: "completed", count: 0 });
     expectChangeStillUnexecuted(session);
     expectApprovalCancelled(session, approvalA);
   },

@@ -174,8 +174,7 @@ function extractErrorMessage(error: unknown): string {
 }
 
 /**
- * Pulls the correlated `errorId` off a `step.failed` / `turn.failed`
- * / `session.failed` event's `details` payload (or any other shape
+ * Pulls the correlated `errorId` off a failure's `details` payload (or any other shape
  * produced by {@link formatError}). Returns `undefined` when the
  * sender did not attach one (older cascades, non-model-call error
  * paths that predate the shared format).

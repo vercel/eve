@@ -9,6 +9,8 @@ import { setEveAttributes } from "#runtime/attributes/emit.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
 import { contextStorage } from "#context/container.js";
 import { runStep } from "#context/run-step.js";
+import { sessionProvider } from "#context/providers/session.js";
+import { ConnectionRegistryKey, connectionProvider } from "#context/providers/connection.js";
 import {
   AuthKey,
   ScheduleIdKey,
@@ -17,6 +19,7 @@ import {
   InitiatorAuthKey,
   SessionTitleKey,
   ParentSessionKey,
+  SessionKey,
   CapabilitiesKey,
   ChannelDeliveryKey,
   HandleEventKey,
@@ -419,6 +422,14 @@ async function runSessionStepBody(
           type: "session.started",
         });
       }
+      // The admission commits before the step's framework context exists, and its hooks read
+      // the session (`ctx.session`) like every other commit's. The session's start resolves
+      // its dynamic connections into a registry, which the step's own scope rebuilds and
+      // rehydrates; the sandbox waits for the step.
+      const created = sessionProvider.create(ctx, initialSession);
+      ctx.setVirtualContext(SessionKey, created.value);
+      const registry = await connectionProvider.create(ctx, initialSession);
+      if (registry !== undefined) ctx.setVirtualContext(ConnectionRegistryKey, registry.value);
       await contextStorage.run(ctx, () => handleEvent([...facts, ...admission.facts]));
     };
 

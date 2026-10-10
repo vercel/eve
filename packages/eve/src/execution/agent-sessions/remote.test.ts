@@ -172,19 +172,17 @@ describe("startRemoteAgentSession", () => {
   });
 
   it("carries a replay-stable operation id so the receiver can create once", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(
-        Response.json(
-          {
-            ok: true,
-            protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
-            sessionId: "remote-session",
-            status: "accepted",
-          },
-          { status: 202 },
-        ),
-      );
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json(
+        {
+          ok: true,
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
+          sessionId: "remote-session",
+          status: "accepted",
+        },
+        { status: 202 },
+      ),
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     await startRemoteAgentSession({

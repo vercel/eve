@@ -79,7 +79,7 @@ export type EveMessagePart =
 
 /**
  * User-facing authorization challenge projected from an
- * `authorization.required` stream event. These fields are safe to render in a
+ * sign-in `interaction.opened` stream event. These fields are safe to render in a
  * browser UI; the model-facing tool output never receives the URL or code.
  */
 export interface EveAuthorizationChallenge {
@@ -97,8 +97,8 @@ export type EveAuthorizationOutcome = AuthorizationOutcome;
 
 /**
  * An authorization prompt or result. The default reducer projects
- * `authorization.required` into a `required` part so browser chat UIs can render a
- * sign-in affordance, then updates it when `authorization.completed` arrives.
+ * sign-in `interaction.opened` into a `required` part so browser chat UIs can render a
+ * sign-in affordance, then updates it when sign-in `interaction.settled` arrives.
  */
 export type EveAuthorizationPart = {
   readonly authorization?: EveAuthorizationChallenge;

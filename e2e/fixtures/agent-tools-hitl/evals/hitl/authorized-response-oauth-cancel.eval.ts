@@ -18,37 +18,33 @@ export default defineEval({
       [{ optionId: "approve", requestId: approval.requestId }],
       { headers: { "x-eve-fixture-user": "oauth-cancel-responder" } },
     );
-    const required = await approvalTurn.waitForEvent("authorization.required");
+    const required = await approvalTurn.waitForEvent("interaction.opened", {
+      data: { request: { kind: "sign-in" } },
+    });
     // The responder's sign-in holds the turn, so this read stops there.
     const held = await approvalTurn.result();
 
     const cancelled = await held.session.respond([
       { optionId: "cancel", requestId: approval.requestId },
     ]);
-    cancelled.event("approval.settled", {
+    cancelled.event("interaction.settled", {
       count: 1,
-      data: { outcome: "cancelled", requestId: approval.requestId },
+      data: { interactionId: approval.requestId, outcome: "declined" },
     });
-    cancelled.notEvent("action.result", {
-      data: { result: { kind: "tool-result", toolName: TOOL_NAME }, status: "completed" },
-    });
+    cancelled.calledTool(TOOL_NAME, { status: "completed", count: 0 });
 
-    if (
-      required.type !== "authorization.required" ||
-      required.data.authorization?.url === undefined
-    ) {
-      throw new Error("Expected candidate OAuth URL.");
-    }
-    const callbackUrl = new URL(required.data.authorization.url);
+    const url = required.data.request.signIn?.url;
+    if (url === undefined) throw new Error("Expected candidate OAuth URL.");
+    const callbackUrl = new URL(url);
     const callback = await fetch(callbackUrl);
     if (!callback.ok)
       throw new Error(`Late fixture OAuth callback failed (${String(callback.status)}).`);
 
     const late = await cancelled.session.send("Confirm the cancelled action did not execute.");
-    late.notEvent("approval.settled", { data: { outcome: "approved" } });
-    late.notEvent("action.result", {
-      data: { result: { kind: "tool-result", toolName: TOOL_NAME }, status: "completed" },
+    late.notEvent("interaction.settled", {
+      data: { interactionId: approval.requestId, outcome: "accepted" },
     });
+    late.calledTool(TOOL_NAME, { status: "completed", count: 0 });
     t.succeeded();
   },
 });

@@ -1,5 +1,5 @@
 import type { SessionAuthContext } from "#channel/types.js";
-import { openRequests } from "#protocol/session-projection.js";
+import { openRequests } from "#protocol/session-reader.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import type { SessionStateMap, HarnessStepInput } from "#harness/types.js";
 

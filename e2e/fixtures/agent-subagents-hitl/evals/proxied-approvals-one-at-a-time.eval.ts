@@ -25,18 +25,19 @@ export default defineEval({
     const approved = await blocked.send("approve");
     approved.noFailedActions();
     const settledInTurn = approved.events.some(
-      (event) => event.type === "approval.settled" && event.data.requestId === deployRequestId,
+      (event) =>
+        event.type === "interaction.settled" && event.data.interactionId === deployRequestId,
     );
     if (!settledInTurn) {
       await watchNextTurn(t, approved.session, "deploy approval settlement").waitForEvent(
-        "approval.settled",
-        { data: { outcome: "approved", requestId: deployRequestId } },
+        "interaction.settled",
+        { data: { interactionId: deployRequestId, outcome: "accepted" } },
       );
     }
     const resolved = approved.events.flatMap((event) =>
-      event.type === "input.resolved" ? event.data.resolutions : [],
+      event.type === "interaction.settled" ? [event.data.interactionId] : [],
     );
-    if (resolved.some((resolution) => resolution.requestId !== deployRequestId)) {
+    if (resolved.some((interactionId) => interactionId !== deployRequestId)) {
       throw new Error(`The first reply resolved ${JSON.stringify(resolved)}.`);
     }
 

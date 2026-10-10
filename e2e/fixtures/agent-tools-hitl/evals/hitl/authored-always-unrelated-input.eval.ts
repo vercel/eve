@@ -27,20 +27,12 @@ export default defineEval({
     );
 
     unrelated.expectOk();
-    unrelated.event("input.resolved", {
+    unrelated.event("interaction.settled", {
       count: 1,
-      data: {
-        resolutions: (resolutions) =>
-          resolutions.some(
-            (resolution) =>
-              resolution.requestId === approval.requestId && resolution.outcome === "ignored",
-          ),
-      },
+      data: { interactionId: approval.requestId, outcome: "withdrawn" },
     });
-    unrelated.notEvent("action.result", {
-      data: { result: { output: new RegExp(MARKER), toolName: TOOL_NAME } },
-    });
-    unrelated.event("session.waiting", { count: 1 });
+    unrelated.calledTool(TOOL_NAME, { output: new RegExp(MARKER), count: 0 });
+    unrelated.event("turn.settled", { count: 1, data: { outcome: "completed" } });
     t.succeeded();
   },
 });

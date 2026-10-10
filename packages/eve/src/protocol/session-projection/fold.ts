@@ -4,7 +4,7 @@
 // facts about entities it never saw introduced (or no longer retains), a second terminal, and
 // a terminal whose outcome is outside its closed set: the first terminal wins, and nothing is
 // inferred. It folds a line in place, replacing the rows the line changes, because a session can
-// run to many thousands of lines; take `cloneView` for a snapshot.
+// run to many thousands of lines; take `copyView` before a fold to keep the state before it.
 
 import { isFactType, isKnownOutcome, isProgressType } from "#protocol/session-events/catalog.js";
 import type { StoredLine, Usage } from "#protocol/session-events/envelope.js";
@@ -115,6 +115,98 @@ export function foldLines(
     foldLine(view, line, position, options);
     position += 1;
   }
+}
+
+/** One event as a reader received it back: the record, and where its line put it. */
+export interface ReceivedEvent {
+  readonly type: string;
+  readonly data?: unknown;
+  readonly scope?: unknown;
+  readonly meta: {
+    readonly position: { readonly line: number; readonly index: number };
+    readonly at: string;
+    readonly endOfLine?: boolean;
+  };
+}
+
+/**
+ * Folds events as a reader received them back, regrouped into their lines by position. A line
+ * folds whole, once its last record has arrived: the events of a line still arriving are
+ * returned unfolded, to pass again with the rest. Lines the view already folded are skipped, so
+ * replayed overlap folds once.
+ */
+export function foldEvents<TEvent extends ReceivedEvent>(
+  view: SessionView,
+  events: readonly TEvent[],
+  options: FoldOptions & { readonly previews?: SessionPreviews } = {},
+): readonly TEvent[] {
+  let start = 0;
+  while (start < events.length) {
+    const line = events[start]!.meta.position.line;
+    let end = start + 1;
+    while (end < events.length && events[end]!.meta.position.line === line) end += 1;
+    const group = events.slice(start, end);
+    const last = group.at(-1)!;
+    if (end === events.length && last.meta.endOfLine === false) return group;
+    const first = group[0]!;
+    const stored: StoredLine =
+      group.length === 1 && isProgressType(first.type)
+        ? { progress: first }
+        : { at: first.meta.at, facts: group };
+    foldLine(view, stored, line, options);
+    start = end;
+  }
+  return [];
+}
+
+/** The tables a complete read of `events` folds into, with each part's and call's previews. */
+export function viewOfEvents(events: readonly ReceivedEvent[]): {
+  readonly view: SessionView;
+  readonly previews: SessionPreviews;
+} {
+  const view = emptySessionView();
+  const previews = emptyPreviews();
+  foldEvents(view, events, { previews });
+  return { previews, view };
+}
+
+/**
+ * A copy of a view that folding can change without changing `view`. Rows are replaced, never
+ * edited, so copying the tables is enough: a reader that keeps every state, such as a UI's
+ * reducer, copies before each fold instead of cloning every row.
+ */
+export function copyView(view: SessionView): SessionView {
+  return {
+    ...view,
+    calls: { ...view.calls },
+    changes: { ...view.changes },
+    children: { ...view.children },
+    deliveries: { ...view.deliveries },
+    interactions: { ...view.interactions },
+    parts: { ...view.parts },
+    responses: { ...view.responses },
+    runs: { ...view.runs },
+    tasks: { ...view.tasks },
+    turns: { ...view.turns },
+  };
+}
+
+/**
+ * Folds one event as a reader received it, for a reader that updates on each event rather than
+ * on each line. Facts apply in order within a line, so folding a line event by event leaves the
+ * same tables; the view's position moves past the line with its last event. Events of a line
+ * the view already passed are skipped.
+ */
+export function foldReceivedEvent(
+  view: SessionView,
+  event: { readonly type: string; readonly meta?: Partial<ReceivedEvent["meta"]> },
+): void {
+  const state = view as MutableView;
+  const line = event.meta?.position?.line ?? state.position;
+  if (line < state.position) return;
+  if (isFactType(event.type))
+    foldFact(state, undefined, event, { at: event.meta?.at ?? "", position: line });
+  if (event.meta?.endOfLine !== false) state.position = line + 1;
 }
 
 /** Moves a view's position past lines a read skipped, as a position marker says. */
@@ -240,7 +332,15 @@ function foldFact(
     case "model.requested": {
       const { owner, runId } = fact.data;
       if (view.runs[runId] !== undefined) return;
-      view.runs[runId] = { ...introduced, owner, runId, status: "requested" };
+      const turn = "turnId" in owner ? view.turns[owner.turnId] : undefined;
+      if (turn === undefined) {
+        view.runs[runId] = { ...introduced, owner, runId, status: "requested" };
+        return;
+      }
+      // A turn's runs are its steps, in the order it requested them.
+      const step = turn.runs ?? 0;
+      view.turns[turn.turnId] = { ...turn, runs: step + 1 };
+      view.runs[runId] = { ...introduced, owner, runId, status: "requested", step };
       return;
     }
     case "model.started": {
@@ -535,7 +635,11 @@ function dropRunPreviews(view: SessionView, previews: MutablePreviews, runId: st
   }
 }
 
-/** Operational retention: drops what closed before the latest line, keeping what's open. */
+/**
+ * Operational retention: drops what closed before the latest line, keeping what's open. A task
+ * stays while it runs, but it pins only its open calls' paths, not the call that started it: an
+ * idle task can live as long as its session, and its first call's input and output with it.
+ */
 function prune(view: MutableView, keep: FoldOptions["keep"]): void {
   // Open descendants need their ownership path even after an ancestor settles. Otherwise a
   // call outliving its model run loses its turn, and a terminal closer cannot find it.
@@ -591,9 +695,6 @@ function prune(view: MutableView, keep: FoldOptions["keep"]): void {
   }
   for (const row of Object.values(view.changes)) {
     if (row.status !== "settled") pinChange(row.changeId);
-  }
-  for (const row of Object.values(view.tasks)) {
-    if (row.status === "running") pinCall(row.startedBy.callId);
   }
   for (const row of Object.values(view.deliveries)) {
     if (row.status !== "settled" && row.turnId !== undefined) pinTurn(row.turnId);

@@ -51,8 +51,7 @@ export interface LinearChannelState extends PromptQueueState {
   readonly issueUrl?: string | null;
   readonly organizationId?: string | null;
   /**
-   * Buffered text from a `message.completed` event whose `finishReason`
-   * was `"tool-calls"`. The default `actions.requested` handler uses this
+   * Buffered narration from a `content.completed` event (`phase: "narration"`). The default `call.requested` handler uses this
    * as the next ephemeral progress activity, matching Slack's typing status.
    */
   pendingToolCallMessage?: string | null;
@@ -137,6 +136,7 @@ export interface LinearChannelEvents {
   readonly "content.delta"?: LinearEventHandler<"content.delta">;
   readonly "interaction.opened"?: LinearEventHandler<"interaction.opened">;
   readonly "interaction.settled"?: LinearEventHandler<"interaction.settled">;
+  readonly "response.admitted"?: LinearEventHandler<"response.admitted">;
   readonly "turn.settled"?: LinearEventHandler<"turn.settled">;
   readonly "session.ended"?: LinearEventHandler<"session.ended">;
   readonly "delivery.settled"?: LinearEventHandler<"delivery.settled">;

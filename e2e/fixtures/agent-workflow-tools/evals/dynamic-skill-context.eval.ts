@@ -35,10 +35,17 @@ function readChildOutput(turn: EveEvalTurn, mode: "direct" | "waiting"): string 
     if (typeof output !== "string") throw new Error("The waiting tool's child reply is missing.");
     return output;
   }
-  const completion = turn.events.find((event) => event.type === "task.settled");
-  if (completion?.type !== "task.settled" || typeof completion.data.output !== "string")
-    throw new Error("The delegated child's completion event is missing.");
-  return completion.data.output;
+  // The agent tool's call is the one a task serves.
+  const served = new Set(
+    turn.events.flatMap((event) =>
+      event.type === "call.started" && event.data.taskId !== undefined ? [event.data.callId] : [],
+    ),
+  );
+  const output = turn.toolCalls.find(
+    (call) => served.has(call.callId) && call.status === "completed",
+  )?.output;
+  if (typeof output !== "string") throw new Error("The delegated child's reply is missing.");
+  return output;
 }
 
 export default (["direct", "waiting"] as const).map((mode) =>
@@ -139,7 +146,7 @@ export default (["direct", "waiting"] as const).map((mode) =>
           ).label(`${label}: ctx.messages retains the delivered child result`);
         }
       }
-      t.notEvent("session.failed");
+      t.notEvent("session.ended", { data: { outcome: "failed" } });
       t.noFailedActions();
       t.succeeded();
     },

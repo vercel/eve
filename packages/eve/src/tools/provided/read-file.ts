@@ -109,7 +109,7 @@ export const readFile: ToolDefinition<ReadFileToolInput, ReadFileToolOutput> = f
     outputSchema: READ_FILE_OUTPUT_SCHEMA,
     async toModelOutput(output) {
       if (output.image === undefined) return toolOutput.json(output);
-      // The bytes load here rather than in `execute`, so `action.result` never
+      // The bytes load here rather than in `execute`, so `call.settled` never
       // carries them. The harness then stages this file part under its own name
       // as a sandbox ref before it enters history.
       const sandbox = await contextStorage.getStore()?.get(SandboxKey)?.get();

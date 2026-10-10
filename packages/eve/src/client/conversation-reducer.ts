@@ -1,16 +1,27 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import {
-  conversationProjection,
-  withConversationProjection,
+  conversationLedger,
+  type ConversationLedger,
+  emptyConversationLedger,
+  withConversationLedger,
 } from "#client/conversation-projection.js";
 import type {
   AgentObservation,
   ConversationAgentSession,
+  ConversationInput,
   ConversationState,
 } from "#client/conversation-state.js";
 import { defaultMessageReducer } from "#client/message-reducer.js";
 import type { EveAgentReducer, EveAgentReducerEvent } from "#client/reducer.js";
-import { initialSessionProjection } from "#protocol/session-projection.js";
+import {
+  activeTurnId,
+  readerInput,
+  readerInputs,
+  readerTaskCall,
+  readerTaskRow,
+  readerTurn,
+} from "#protocol/session-reader.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
 
 /**
  * Transport facts about followed agent sessions. Only the canonical conversation receives them;
@@ -31,9 +42,9 @@ export type ConversationEvent = EveAgentReducerEvent | ClientAgentEvent;
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
 export function initialConversationState(): ConversationState {
-  return withConversationProjection(
+  return withConversationLedger(
     { turns: {}, inputs: {}, tasks: {}, messages: [], agents: {} },
-    initialSessionProjection(),
+    emptyConversationLedger(),
   );
 }
 
@@ -74,30 +85,21 @@ function reduceConversationLifecycle(
         observation: { status: "not-followed" },
       };
       if (taskId !== undefined) agent.taskId = taskId;
-      return withConversationProjection(
+      return withConversationLedger(
         { ...state, agents: { ...state.agents, [sessionId]: agent } },
-        conversationProjection(state),
+        conversationLedger(state),
       );
     }
     // An answer this client sent shows as responded until the stream settles it.
     case "client.input.responded": {
-      const inputs = { ...state.inputs };
+      const ledger = conversationLedger(state);
+      const responded = { ...ledger.responded };
       for (const response of event.data.responses) {
-        const current = inputs[response.requestId];
-        if (current?.status !== "open") continue;
-        inputs[response.requestId] = { ...current, response, status: "responded" };
+        if (state.inputs[response.requestId]?.status === "open")
+          responded[response.requestId] = response;
       }
-      const projection = conversationProjection(state);
-      const projectedInputs = { ...projection.inputs };
-      for (const response of event.data.responses) {
-        const current = projectedInputs[response.requestId];
-        if (current?.status === "open")
-          projectedInputs[response.requestId] = { ...current, response, status: "responded" };
-      }
-      return withConversationProjection(
-        { ...state, inputs },
-        { ...projection, inputs: projectedInputs },
-      );
+      const next = { ...ledger, responded };
+      return withConversationLedger({ ...state, inputs: inputsOf(next) }, next);
     }
     default:
       return state;
@@ -113,7 +115,7 @@ export function reduceConversation(
 ): ConversationState {
   const next = reduceConversationEvent(state, event);
   return event.type.startsWith("client.agent.")
-    ? withConversationProjection(next, conversationProjection(state))
+    ? withConversationLedger(next, conversationLedger(state))
     : next;
 }
 
@@ -155,35 +157,106 @@ function reduceConversationEvent(
       });
     default:
       const messages = messageReducer.reduce(state, event);
-      const projection = conversationProjection(messages);
+      const ledger = conversationLedger(messages);
       const { activeTurnId: _activeTurnId, ...rest } = state;
       const { activeTurnId: _messageTurnId, ...messageData } = messages as ConversationState;
+      // Only the records an event's fact touches change, so a long session's reload stays linear.
       const conversation: Mutable<ConversationState> = {
         ...rest,
         ...messageData,
-        turns: Object.fromEntries(
-          Object.entries(projection.turns).map(([id, turn]) => {
-            const { turnId, status, waiting } = turn;
-            const publicTurn: Mutable<ConversationState["turns"][string]> = { turnId, status };
-            if (waiting !== undefined) publicTurn.waiting = waiting;
-            return [id, publicTurn];
-          }),
-        ),
-        inputs: Object.fromEntries(
-          Object.entries(projection.inputs).map(([id, input]) => {
-            const { sequence: _sequence, callId: _callId, ...publicInput } = input;
-            return [id, publicInput];
-          }),
-        ),
-        tasks: projection.tasks,
+        inputs: nextInputs(state.inputs, ledger, event),
+        tasks: nextTasks(state.tasks, ledger.view, event),
+        turns: nextTurns(state.turns, ledger.view, event),
       };
-      if (projection.activeTurnId !== undefined)
-        conversation.activeTurnId = projection.activeTurnId;
-      return reduceConversationLifecycle(
-        withConversationProjection(conversation, projection),
-        event,
-      );
+      const active = activeTurnId(ledger.view);
+      if (active !== undefined) conversation.activeTurnId = active;
+      return reduceConversationLifecycle(withConversationLedger(conversation, ledger), event);
   }
+}
+
+/** A request as a client shows it: an answer this client sent reads as responded. */
+function inputOf(ledger: ConversationLedger, requestId: string): ConversationInput | undefined {
+  const input = readerInput(ledger.view, requestId);
+  if (input === undefined) return undefined;
+  const { callId: _callId, pendingResponseIds: _pending, ...shown } = input;
+  const response = ledger.responded[requestId];
+  return response !== undefined && input.status === "open"
+    ? { ...shown, response, status: "responded" }
+    : shown;
+}
+
+/** Every request as a client shows it. */
+function inputsOf(ledger: ConversationLedger): Readonly<Record<string, ConversationInput>> {
+  const inputs: Record<string, ConversationInput> = {};
+  for (const requestId of Object.keys(readerInputs(ledger.view))) {
+    const input = inputOf(ledger, requestId);
+    if (input !== undefined) inputs[requestId] = input;
+  }
+  return inputs;
+}
+
+type FactData = {
+  readonly callId?: string;
+  readonly interactionId?: string;
+  readonly responseId?: string;
+  readonly taskId?: string;
+  readonly turnId?: string;
+};
+
+function factData(event: ConversationEvent): FactData {
+  return "data" in event && event.data !== null && typeof event.data === "object"
+    ? (event.data as FactData)
+    : {};
+}
+
+function nextTurns(
+  turns: ConversationState["turns"],
+  view: SessionView,
+  event: ConversationEvent,
+): ConversationState["turns"] {
+  const { turnId } = factData(event);
+  if (!event.type.startsWith("turn.") || turnId === undefined) return turns;
+  const turn = readerTurn(view, turnId);
+  return turn === undefined ? turns : { ...turns, [turnId]: turn };
+}
+
+function nextInputs(
+  inputs: ConversationState["inputs"],
+  ledger: ConversationLedger,
+  event: ConversationEvent,
+): ConversationState["inputs"] {
+  const data = factData(event);
+  const requestId = event.type.startsWith("interaction.")
+    ? data.interactionId
+    : event.type.startsWith("response.")
+      ? (data.interactionId ??
+        (data.responseId === undefined
+          ? undefined
+          : ledger.view.responses[data.responseId]?.interactionId))
+      : undefined;
+  if (requestId === undefined) return inputs;
+  const input = inputOf(ledger, requestId);
+  return input === undefined ? inputs : { ...inputs, [requestId]: input };
+}
+
+function nextTasks(
+  tasks: ConversationState["tasks"],
+  view: SessionView,
+  event: ConversationEvent,
+): ConversationState["tasks"] {
+  const data = factData(event);
+  if (event.type === "task.started" && data.taskId !== undefined) {
+    if (tasks[data.taskId] !== undefined) return tasks;
+    const task = readerTaskRow(view, data.taskId);
+    return task === undefined ? tasks : { ...tasks, [data.taskId]: task };
+  }
+  if ((event.type !== "call.started" && event.type !== "call.settled") || !data.callId)
+    return tasks;
+  const taskId = view.calls[data.callId]?.taskId;
+  const task = taskId === undefined ? undefined : tasks[taskId];
+  const call = readerTaskCall(view, data.callId);
+  if (taskId === undefined || task === undefined || call === undefined) return tasks;
+  return { ...tasks, [taskId]: { ...task, calls: { ...task.calls, [data.callId]: call } } };
 }
 
 /** The canonical conversation's reducer, which also folds in followed agent sessions. */

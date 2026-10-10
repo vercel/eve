@@ -24,17 +24,23 @@ export default defineEval({
       const callIds = taskStarts(events, "compile_report").map((call) => call.callId);
       const settled = firstSettlementOf(events, callIds);
       const replied = events.findIndex(
-        (event) => event.type === "message.completed" && event.data.finishReason === "stop",
+        (event) => event.type === "content.completed" && event.data.phase === "reply",
       );
       return callIds.length === 1 && replied >= 0 && replied < settled;
     });
     turn.eventsSatisfy("the confirmation doesn't guess a report id", (events) => {
       const confirmation = events.find(
-        (event) => event.type === "message.completed" && event.data.finishReason === "stop",
+        (event) => event.type === "content.completed" && event.data.phase === "reply",
       );
-      return confirmation?.type === "message.completed" && !/RPT-/u.test(confirmation.data.message);
+      return (
+        confirmation?.type === "content.completed" && !/RPT-/u.test(String(confirmation.data.value))
+      );
     });
-    turn.event("task.settled", { count: 1, data: { status: "completed" } });
+    turn.event("call.settled", {
+      count: 1,
+      data: { outcome: "completed" },
+      scope: { taskId: /./u },
+    });
     turn.eventsSatisfy("the reply after the result reports the report id", (events) => {
       const callIds = taskStarts(events, "compile_report").map((call) => call.callId);
       const reportId = settlementsOf(events, callIds).flatMap(

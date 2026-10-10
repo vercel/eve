@@ -19,13 +19,11 @@ import {
 } from "#compiled/@agentclientprotocol/sdk/index.js";
 import { Client, ClientError } from "#client/index.js";
 import type { ClientOptions, SendTurnInput, SendTurnPayload } from "#client/types.js";
-import {
-  callStatus,
-  foldSession,
-  initialSessionProjection,
-  type SessionCallStatus,
-  type SessionProjection,
-} from "#protocol/session-projection.js";
+import { isFactType } from "#protocol/session-events/catalog.js";
+import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
+import { callStatus, readerInput, type SessionCallStatus } from "#protocol/session-reader.js";
+import { callOutputSource } from "#protocol/session-projection/selectors.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
 import { actionLabel } from "#shared/action-label.js";
 import { failureOf } from "#client/session-utils.js";
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
@@ -68,7 +66,7 @@ interface AcpSession {
   client?: AdapterClientSession;
   active?: ActivePrompt;
   /** The session's lifecycle, folded from every event it streams. */
-  projection: SessionProjection;
+  view: SessionView;
   readonly tools: Map<string, ToolCall>;
   readonly parts: Map<string, "text" | "reasoning">;
 }
@@ -165,7 +163,7 @@ export class EveAcpAdapter {
 
     const sessionId = randomUUID();
     this.#sessions.set(sessionId, {
-      projection: initialSessionProjection(),
+      view: emptySessionView(),
       tools: new Map(),
       parts: new Map(),
     });
@@ -251,7 +249,7 @@ export class EveAcpAdapter {
           await this.#projectEvent(params.sessionId, session, event, client);
           // The projection rebuilds the request with the call it's about.
           if (event.type === "interaction.opened") {
-            const request = session.projection.inputs[event.data.interactionId]?.request;
+            const request = readerInput(session.view, event.data.interactionId)?.request;
             if (request !== undefined) inputRequests.push(request);
           }
         }
@@ -365,38 +363,41 @@ export class EveAcpAdapter {
     event: SessionStreamEvent,
     client: AgentContext,
   ): Promise<void> {
-    const before = session.projection;
-    session.projection = foldSession(before, event);
+    const fact = isFactType(event.type);
+    const before = new Map<string, ReturnType<typeof callStatus>>();
+    if (fact) {
+      for (const callId of session.tools.keys())
+        before.set(callId, callStatus(session.view, callId));
+      foldReceivedEvent(session.view, event);
+    }
     await this.#projectContent(sessionId, session, event, client);
-    // A call's status is the projection's: a task call runs until its task settles, and a
+    // A call's status is the tables': a task call runs until its task settles, and a
     // stopped or denied call ends when the stream says so.
     // `tool_call` already announced the request. Only an announced call gets updates:
     // an approval reaches the client through its permission request.
     if (event.type === "call.requested") return;
     const updated = new Set<string>();
-    const { calls, tasks, turns } = session.projection;
-    if (calls !== before.calls || tasks !== before.tasks || turns !== before.turns) {
-      for (const callId of Object.keys(calls)) {
-        if (!session.tools.has(callId)) continue;
-        const status = callStatus(session.projection, callId);
-        if (status === undefined || status === callStatus(before, callId)) continue;
+    if (fact) {
+      for (const callId of session.tools.keys()) {
+        const status = callStatus(session.view, callId);
+        if (status === undefined || status === before.get(callId)) continue;
         updated.add(callId);
         await notifyUpdate(client, sessionId, {
           sessionUpdate: "tool_call_update",
           toolCallId: callId,
           status: ACP_TOOL_STATUS[status],
-          ...callOutput(event, callId, session.projection),
+          ...callOutput(event, callId, session.view),
           ...resultTitle(event, callId),
         });
       }
     }
     // A result reports its content even when its call had already settled, such as the reason
-    // for a denial that `input.resolved` decided first.
+    // for a denial that `interaction.settled` decided first.
     const resultCallId = event.type === "call.settled" ? event.data.callId : undefined;
     if (resultCallId === undefined || updated.has(resultCallId)) return;
     if (!session.tools.has(resultCallId)) return;
-    const output = callOutput(event, resultCallId, session.projection);
-    const status = callStatus(session.projection, resultCallId);
+    const output = callOutput(event, resultCallId, session.view);
+    const status = callStatus(session.view, resultCallId);
     if (!("content" in output) || status === undefined) return;
     await notifyUpdate(client, sessionId, {
       sessionUpdate: "tool_call_update",
@@ -417,7 +418,7 @@ export class EveAcpAdapter {
     client: AgentContext,
   ): Promise<void> {
     for (const callId of session.tools.keys()) {
-      if (callStatus(session.projection, callId) !== "running") continue;
+      if (callStatus(session.view, callId) !== "running") continue;
       await notifyUpdate(client, sessionId, {
         sessionUpdate: "tool_call_update",
         toolCallId: callId,
@@ -666,15 +667,11 @@ function resultTitle(event: SessionStreamEvent, callId: string): { title?: strin
 }
 
 /** The output an event carries for a call, if it reports one. */
-function callOutput(event: SessionStreamEvent, callId: string, projection: SessionProjection) {
+function callOutput(event: SessionStreamEvent, callId: string, view: SessionView) {
   if (event.type !== "call.settled" || event.data.callId !== callId) return {};
   const outputOf = event.data.outputOf;
   const shared =
-    outputOf === undefined
-      ? undefined
-      : Object.values(projection.tasks)
-          .flatMap((task) => Object.values(task.calls))
-          .find((call) => call.callId === outputOf.callId)?.output;
+    outputOf === undefined ? undefined : callOutputSource(view, outputOf.callId)?.output;
   const output =
     event.data.output !== undefined
       ? event.data.output

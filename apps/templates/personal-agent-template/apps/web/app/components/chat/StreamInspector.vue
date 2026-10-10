@@ -11,18 +11,10 @@ const isDev = import.meta.dev;
 const { streamLog, turnEventCounts } = useStreamLog();
 
 const counts = computed(() => [
-  { key: "message.appended", label: "msg", value: turnEventCounts.value["message.appended"] ?? 0 },
-  {
-    key: "reasoning.appended",
-    label: "reason",
-    value: turnEventCounts.value["reasoning.appended"] ?? 0,
-  },
-  {
-    key: "actions.requested",
-    label: "tool",
-    value: turnEventCounts.value["actions.requested"] ?? 0,
-  },
-  { key: "action.result", label: "result", value: turnEventCounts.value["action.result"] ?? 0 },
+  { key: "model.started", label: "model", value: turnEventCounts.value["model.started"] ?? 0 },
+  { key: "content.delta", label: "delta", value: turnEventCounts.value["content.delta"] ?? 0 },
+  { key: "call.requested", label: "tool", value: turnEventCounts.value["call.requested"] ?? 0 },
+  { key: "call.settled", label: "result", value: turnEventCounts.value["call.settled"] ?? 0 },
 ]);
 
 const statusColor = computed(() => {

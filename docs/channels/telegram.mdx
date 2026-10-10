@@ -45,7 +45,7 @@ To customize auth or filtering, override `onMessage`. Return `title` alongside `
 
 ### Delivery
 
-The default `message.completed` handler sends plain text via `sendMessage`. It passes no `parse_mode`, so any Markdown shows up literally. Replies longer than Telegram's 4096-char limit are split across messages. Custom handlers use `channel.telegram`.
+The default `content.completed` handler sends each reply part as plain text via `sendMessage`. It passes no `parse_mode`, so any Markdown shows up literally. Replies longer than Telegram's 4096-char limit are split across messages. Custom handlers use `ctx.channel.telegram`.
 
 ### Human-in-the-loop (HITL)
 

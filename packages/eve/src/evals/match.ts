@@ -1,4 +1,5 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
+import type { Scope } from "#protocol/session-events/envelope.js";
 import type { InputRequest } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { EveEvalSubagentCall, EveEvalToolCall } from "#evals/types.js";
@@ -95,6 +96,8 @@ export type EveEvalEventMatch<
       readonly data?: EveEvalDeepMatcher<
         Extract<SessionStreamEvent, { type: TType }> extends { data: infer TData } ? TData : never
       >;
+      /** Partial-deep matcher over the event scope: the turn, task, run, or change it belongs to. */
+      readonly scope?: EveEvalDeepMatcher<Scope>;
       /** Constraint over the matching event count. Defaults to "at least one". */
       readonly count?: EveEvalCountMatcher;
     }
@@ -197,7 +200,8 @@ export function eventMatches(event: SessionStreamEvent, matcher: EveEvalEventMat
   return (
     event.type === matcher.type &&
     (matcher.data === undefined ||
-      matchesValue(matcher.data, "data" in event ? event.data : undefined))
+      matchesValue(matcher.data, "data" in event ? event.data : undefined)) &&
+    (matcher.scope === undefined || matchesValue(matcher.scope, event.scope ?? {}))
   );
 }
 

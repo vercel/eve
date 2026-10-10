@@ -11,14 +11,18 @@ export default defineEval({
     const turn = await t.send("WORKFLOW-CANARY-CANCEL");
     turn.expectOk();
 
-    turn.event("task.started", { count: 1, data: { callId: "canary", name: "canary_deploy" } });
+    turn.event("task.started", {
+      count: 1,
+      data: { name: "canary_deploy", startedBy: { callId: "canary" } },
+    });
     turn.calledTool("eve__task_cancel", {
       count: 1,
       output: /^Stopped \S+; it won't report back\.$/u,
     });
-    turn.event("task.settled", { count: 1, data: { callId: "canary", status: "cancelled" } });
-    turn.notEvent("task.settled", { data: { status: "completed" } });
-    turn.event("turn.completed", { count: 1 });
+    turn.event("call.settled", { count: 1, data: { callId: "canary", outcome: "interrupted" } });
+    turn.event("task.ended", { count: 1, data: { outcome: "cancelled" } });
+    turn.calledTool("canary_deploy", { count: 0 });
+    turn.event("turn.settled", { count: 1, data: { outcome: "completed" } });
     turn.messageIncludes(
       /WORKFLOW-CANARY-RESULT Stopped canary_deploy-\w{6}; it won't report back\./u,
     );

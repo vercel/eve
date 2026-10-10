@@ -1,7 +1,7 @@
-import { conversationProjection } from "#client/conversation-projection.js";
+import { conversationView } from "#client/conversation-projection.js";
 import type { ConversationState } from "#client/conversation-state.js";
 import type { EveDynamicToolPart } from "#client/message-reducer-types.js";
-import { callStatus, type SessionCallStatus } from "#protocol/session-projection.js";
+import { callStatus, type SessionCallStatus } from "#protocol/session-reader.js";
 
 /**
  * Where a tool call stands. `interrupted` is a call still running when its turn ended without an
@@ -29,9 +29,9 @@ export function toolCallState(
   options: { readonly streaming?: boolean } = {},
 ): ToolCallState | undefined {
   const part = findToolPart(conversation, callId);
-  const projection = conversationProjection(conversation);
-  const call = projection.calls[callId];
-  const status = callStatus(projection, callId, options) ?? partStatus(part, options);
+  const view = conversationView(conversation);
+  const call = view.calls[callId];
+  const status = callStatus(view, callId, options) ?? partStatus(part, options);
   if (status === undefined) return undefined;
   const task = call?.taskId === undefined ? undefined : conversation.tasks[call.taskId];
   const taskCall = task?.calls[callId];

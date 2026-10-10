@@ -182,7 +182,7 @@ sessions. It defaults to 30 days and starts at creation. Each successful
 deployment handoff or legacy-session import restarts the original configured
 duration. Process restarts, ordinary messages, compaction handoffs, and failed
 or skipped handoffs keep the existing deadline. At the deadline, eve lets an active turn settle,
-then emits `session.completed` and releases every continuation address; the next
+then ends it (`session.ended` with `outcome: "completed"`) and releases every continuation address; the next
 qualifying channel message starts fresh. Set it to `false` to disable the
 timeout. Expiration does not delete stored session data.
 
@@ -192,7 +192,7 @@ arrives after the call completes. Before the next model call, eve pauses the
 session and sends a deterministic continuation prompt with two options:
 **Approve** grants a fresh window of each configured size, and **Stop**
 cancels the in-flight turn through the standard cancellation path
-(`turn.cancelled` → `session.waiting`) — a user decision, not an error. The session stays resumable; because it is
+(`turn.settled` with `outcome: "cancelled"`) — a user decision, not an error. The session stays resumable; because it is
 still over budget, the next message re-raises the prompt. Declining a
 delegated child's prompt cancels the root turn, which cascades to the whole
 delegation tree — the delegating parent never receives an error result it

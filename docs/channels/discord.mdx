@@ -61,7 +61,7 @@ Then configure the public `https://…/eve/v1/discord` route as the application'
 
 The model-visible `<discord_context>` includes `user_id` and the receiving application's `application_id`.
 
-Event handlers receive `(eventData, channel, ctx)`, with Discord platform handles on `channel.discord`:
+Event handlers receive `(event, ctx)`, with Discord platform handles on `ctx.channel.discord`:
 
 ```ts
 import { discordChannel } from "eve/channels/discord";
@@ -76,9 +76,9 @@ export default discordChannel({
     },
   }),
   events: {
-    "message.completed"(eventData, channel, ctx) {
-      if (eventData.finishReason === "tool-calls") return;
-      if (eventData.message) channel.discord.post(eventData.message);
+    "content.completed"(event, ctx) {
+      if (event.data.phase !== "reply" || typeof event.data.value !== "string") return;
+      return ctx.channel.discord.post(event.data.value);
     },
   },
 });
@@ -86,9 +86,9 @@ export default discordChannel({
 
 ### Delivery
 
-The default `message.completed` handler edits the deferred response for the first reply and sends followups after that. If the interaction token is rejected, it falls back to a bot-authenticated channel message. Long text is split to Discord's 2000-char limit, and generated messages default to `allowed_mentions: { parse: [] }`.
+The default `content.completed` handler edits the deferred response for the first reply part and sends followups after that. If the interaction token is rejected, it falls back to a bot-authenticated channel message. Long text is split to Discord's 2000-char limit, and generated messages default to `allowed_mentions: { parse: [] }`.
 
-Typing fires on `turn.started` and `actions.requested`, but only when a bot token is present. In custom hooks, call `channel.discord.startTyping()` yourself.
+Typing fires on `turn.started` and `call.requested`, but only when a bot token is present. In custom handlers, call `ctx.channel.discord.startTyping()` yourself.
 
 ### Human-in-the-loop (HITL)
 

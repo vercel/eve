@@ -109,6 +109,8 @@ export const defaultEvents: TwilioChannelEvents = {
     );
   },
 
+  "response.admitted": prompts["response.admitted"],
+
   async "interaction.settled"(fact, ctx) {
     const { data } = fact;
     const { channel } = ctx;

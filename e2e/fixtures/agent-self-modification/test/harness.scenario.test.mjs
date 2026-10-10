@@ -66,11 +66,18 @@ function completedTurn(sessionId, events = [], { input = {}, inputRequests = [] 
 /** The parent events of an agent call that starts task `taskId` and opens `childSessionId`. */
 function agentCallEvents(childSessionId, taskId = "agent-1") {
   const name = "self-modification__agent";
+  const callId = `call-${taskId}`;
   return [
-    { type: "task.started", data: { callId: `call-${taskId}`, name, taskId, turnId: "turn-1" } },
     {
-      type: "agent.started",
-      data: { callId: `call-${taskId}`, name, sessionId: childSessionId, taskId, turnId: "turn-1" },
+      type: "task.started",
+      scope: { turnId: "turn-1" },
+      data: { kind: "agent", name, startedBy: { callId }, taskId },
+    },
+    { type: "call.started", scope: { turnId: "turn-1" }, data: { callId, taskId } },
+    {
+      type: "child.opened",
+      scope: { taskId, turnId: "turn-1" },
+      data: { name, owner: { callId }, sessionId: childSessionId, stream: `/stream/${childSessionId}` },
     },
   ];
 }
@@ -402,14 +409,15 @@ test("request follows a continued agent task past stale child turns", async () =
   initialChild.session = { state: { streamIndex: 10 } };
   const message = "Repair the existing inventory tool.";
   const continuation = {
-    type: "task.started",
-    data: { callId: "call-2", name: "self-modification__agent", taskId: "agent-1" },
+    type: "call.started",
+    scope: { turnId: "turn-2" },
+    data: { callId: "call-2", taskId: "agent-1" },
   };
   const repairParent = liveTurn("parent", [continuation]);
   repairParent.result = async () =>
     completedTurn("parent", [continuation], { input: { taskId: "agent-1", message } });
   const diagnostic = liveTurn("child", [
-    { type: "message.received", data: { message: "Diagnose only." } },
+    { type: "delivery.consumed", data: { parts: [{ kind: "text", text: "Diagnose only." }] } },
   ]);
   diagnostic.session = { state: { streamIndex: 20 } };
   diagnostic.result = async () => ({
@@ -418,7 +426,7 @@ test("request follows a continued agent task past stale child turns", async () =
   });
   const repaired = liveTurn("child", [
     ...diagnostic.events,
-    { type: "message.received", data: { message } },
+    { type: "delivery.consumed", data: { parts: [{ kind: "text", text: message }] } },
   ]);
   repaired.session = { state: { streamIndex: 30 } };
   const observed = [];
