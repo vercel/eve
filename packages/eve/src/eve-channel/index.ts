@@ -60,7 +60,14 @@ import {
 import { sessionAuthFromResult } from "#channel/auth/result.js";
 import { routeAuth } from "#public/channels/auth.js";
 import { defaultEveAudience } from "#eve-channel/audience.js";
-import { mergeUploadPolicy } from "#public/channels/upload-policy.js";
+import { EveAttachmentError } from "#internal/attachments/errors.js";
+import { maxBytesOf } from "#internal/attachments/limited-read.js";
+import {
+  isMediaTypeAllowed,
+  mergeUploadPolicy,
+  type UploadPolicy,
+} from "#public/channels/upload-policy.js";
+import type { FetchFileFunction } from "#shared/channel-definition.js";
 import { defineChannel, DELETE, GET, HEAD, PATCH, POST, PUT } from "#public/definitions/channel.js";
 import {
   checkUploadPolicy,
@@ -744,5 +751,38 @@ export function eveChannel(input: EveChannelInput): EveChannel {
       }),
     ],
     events: input.events,
+    fetchFile:
+      input.fetchFile === undefined ? undefined : withUploadPolicy(input.fetchFile, uploadPolicy),
   });
+}
+
+/**
+ * A URL has no size when the request arrives, so the upload policy runs again
+ * on the bytes `fetchFile` returns.
+ */
+function withUploadPolicy(fetchFile: FetchFileFunction, policy: UploadPolicy): FetchFileFunction {
+  return async (url, context) => {
+    const result = await fetchFile(url, context);
+    if (result === null) return null;
+    const { bytes, mediaType } = Buffer.isBuffer(result)
+      ? { bytes: result, mediaType: undefined }
+      : result;
+    const limit = maxBytesOf(policy);
+    if (bytes.byteLength > limit) {
+      throw new EveAttachmentError({
+        kind: "resolver-threw",
+        message: `The file is ${bytes.byteLength} bytes, over the ${limit}-byte upload limit.`,
+      });
+    }
+    if (
+      mediaType !== undefined &&
+      !isMediaTypeAllowed(mediaType.split(";", 1)[0]!.trim(), policy)
+    ) {
+      throw new EveAttachmentError({
+        kind: "resolver-threw",
+        message: `The file's media type "${mediaType}" is not allowed by this channel.`,
+      });
+    }
+    return result;
+  };
 }

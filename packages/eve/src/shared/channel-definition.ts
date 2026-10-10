@@ -26,6 +26,8 @@ export interface FetchFileResult {
 /** Runtime context supplied while resolving a channel-owned file URL. */
 export interface FetchFileContext {
   readonly state: Readonly<Record<string, unknown>>;
+  /** The session the attachment arrived in, for checking it against the session's caller. */
+  readonly session: SessionHandle;
 }
 
 export type FetchFileFunction = (

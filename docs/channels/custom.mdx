@@ -550,7 +550,23 @@ defineChannel({
 });
 ```
 
-If `fetchFile` throws, eve replaces that attachment with a model-visible error note and continues the turn. Built-in channels include safe details such as the upstream HTTP status. Custom channel errors use a generic note, while eve keeps the original error in operator logs.
+If `fetchFile` throws, eve replaces that attachment with a model-visible note and continues the turn. To tell the model why, throw `attachmentError` from `eve/channels`:
+
+```ts
+import { attachmentError } from "eve/channels";
+
+async function fetchUpload(url: string) {
+  const response = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+  if (response.status === 413) {
+    throw attachmentError("The file is over 100 MB. Ask for a smaller file.");
+  }
+  return Buffer.from(await response.arrayBuffer());
+}
+```
+
+The model then reads `Attachment report.pdf could not be retrieved: The file is over 100 MB. Ask for a smaller file.` The message reaches the model as written, so keep it to details the person can act on, such as a size limit or a missing permission, and never include URLs, tokens, or upstream response text. Pass the original error as `attachmentError(message, { cause })` to keep it in operator logs. Any other error that `fetchFile` throws becomes a generic note, and eve keeps the original error in operator logs.
+
+`fetchFile` receives the channel's `state` and the `session` the attachment arrived in as its second argument, so a resolver can check a file against the session's caller in `session.auth`.
 
 The `URL` object survives the queue boundary as a string and is reconstituted inside the workflow step. A string with a URL scheme, such as `https://...` or `myapp-file:abc`, is handled the same way. The staging pipeline calls `fetchFile` with the URL serialized as a string (the URL's `href`), which is why the example matches on `url.startsWith(...)`.
 
