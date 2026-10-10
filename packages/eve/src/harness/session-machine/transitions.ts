@@ -13,8 +13,10 @@ import {
   callTurn,
   interactionOwner,
   noWork,
+  openInteractions,
   type OpenWork,
   openWork,
+  subjectTurn,
 } from "#protocol/session-projection/selectors.js";
 import type {
   InputResolution,
@@ -343,6 +345,11 @@ export function hold(
             ...openWork(publicViewOf(projection), { turnId }).interactions.map(
               (row) => row.interactionId,
             ),
+            // A request relayed from a task this turn's call started belongs to the task, but
+            // the turn still waits on the person it asks.
+            ...openInteractions(publicViewOf(projection))
+              .filter((row) => subjectTurn(publicViewOf(projection), row) === turnId)
+              .map((row) => row.interactionId),
             ...(input.opening ?? []),
           ]),
         ].map((interactionId) => ({ interactionId }));

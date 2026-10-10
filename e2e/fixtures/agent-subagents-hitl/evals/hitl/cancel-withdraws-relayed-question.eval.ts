@@ -20,7 +20,7 @@ export default defineEval({
     const cancelled = await following;
     cancelled.event("interaction.settled", {
       count: 1,
-      data: { interactionId: request.requestId, outcome: "withdrawn" },
+      data: { interactionId: request.requestId, outcome: "interrupted" },
     });
     cancelled.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
   },
