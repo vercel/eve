@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { conversationView } from "#client/conversation-projection.js";
 import { conversationReducer } from "#client/conversation-reducer.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { stampTestEvent } from "#internal/testing/events.js";
@@ -78,5 +79,37 @@ describe("conversationReducer", () => {
 
     expect(refused.inputs.approval_0?.status).toBe("open");
     expect(refused.inputs.approval_0?.response).toBeUndefined();
+  });
+
+  it("folds an event once when a reducer runs twice with it, as React's strict mode does", () => {
+    const usage = stampTestEvent(
+      {
+        data: {
+          kind: "model",
+          owner: { runId: "run_0" },
+          usage: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 10, outputTokens: 2 },
+        },
+        type: "usage.recorded",
+      },
+      3,
+    );
+    const before = fold(facts);
+    conversationReducer.reduce(before, usage);
+    const twice = conversationReducer.reduce(before, usage);
+
+    expect(twice.inputs.approval_0?.status).toBe("open");
+    expect(conversationView(twice).usage.total.inputTokens).toBe(10);
+  });
+
+  it("updates only the records a fact names", () => {
+    const state = fold(facts);
+    const next = conversationReducer.reduce(
+      state,
+      stampTestEvent({ data: { awaiting: [], turnId }, scope: { turnId }, type: "turn.paused" }, 3),
+    );
+
+    expect(next.turns[turnId]).toEqual({ status: "active", turnId, waiting: true });
+    expect(next.inputs).toBe(state.inputs);
+    expect(next.tasks).toBe(state.tasks);
   });
 });
