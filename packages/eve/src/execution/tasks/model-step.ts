@@ -3,7 +3,6 @@ import type { ModelMessage, SystemModelMessage } from "ai";
 
 import { TASK_CANCEL_TOOL_NAME, TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 import {
-  FINAL_REPLY_TASK_SYSTEM_BLOCK,
   renderModelOutputText,
   renderTaskResults,
   renderTasksNote,
@@ -56,18 +55,10 @@ export function withTaskTools(tools: HarnessToolMap): HarnessToolMap {
   ]);
 }
 
-/**
- * The task block, when the session offers tasks. `finalReplyOnly` is set for a
- * child or schedule session, which hides a held turn's text, so a reply before
- * a result would reach no one.
- */
-export function taskSystemMessages(
-  offers: boolean,
-  options: { readonly finalReplyOnly: boolean },
-): SystemModelMessage[] {
+/** The task block, when the session offers tasks. */
+export function taskSystemMessages(offers: boolean): SystemModelMessage[] {
   if (!offers) return [];
-  const content = options.finalReplyOnly ? FINAL_REPLY_TASK_SYSTEM_BLOCK : TASK_SYSTEM_BLOCK;
-  return [{ content, role: "system" }];
+  return [{ content: TASK_SYSTEM_BLOCK, role: "system" }];
 }
 
 /** A workflow tool call as the model made it, before the session knows what it enters. */

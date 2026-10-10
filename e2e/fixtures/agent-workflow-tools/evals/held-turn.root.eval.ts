@@ -6,9 +6,9 @@ import { staysInOneTurn } from "./held-turn.shared";
 
 /**
  * The model starts `stage_deploy`, then ends its step with text instead of
- * waiting. The turn rule holds the turn: the text completes as an ordinary
- * reply, the stream reports `turn.paused`, and the same turn resumes with
- * the result and completes once. `send()` reads through the wait, so the
+ * waiting. The turn rule holds the turn: the text completes as narration,
+ * which channels don't post, the stream reports `turn.paused`, and the same
+ * turn resumes with the result and completes once. `send()` reads through the wait, so the
  * turn's result is the final reply, not the text written before it.
  */
 export default defineEval({
@@ -19,7 +19,7 @@ export default defineEval({
 
     turn.event("content.completed", {
       count: 1,
-      data: { kind: "text", phase: "reply", value: STAGE_INTERIM_MESSAGE },
+      data: { kind: "text", phase: "narration", value: STAGE_INTERIM_MESSAGE },
     });
     turn.event("turn.paused", { count: 1 });
     turn.eventOrder([

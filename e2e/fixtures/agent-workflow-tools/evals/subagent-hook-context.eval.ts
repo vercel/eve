@@ -40,7 +40,7 @@ export default (["direct", "background"] as const).map((mode) =>
       if (mode === "background") {
         initial.event("content.completed", {
           count: 1,
-          data: { phase: "reply", value: RESEARCH_INTERIM_MESSAGE },
+          data: { phase: "narration", value: RESEARCH_INTERIM_MESSAGE },
         });
         initial.notCalledTool("eve__task_wait");
       }

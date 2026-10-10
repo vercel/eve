@@ -135,11 +135,10 @@ provided `sleep` tool races its timer against the signal.
 ## What the model sees
 
 eve adds `eve__task_wait`, `eve__task_cancel`, and a short system prompt block that explains tasks whenever
-the agent has an agent tool or a `task` or `serve` workflow tool. The block tells the model to call
-`eve__task_wait` when it has nothing to say until a result arrives, and to reply when the person should
-hear from it first, such as a confirmation that work is underway. In a child session or a
-schedule's session, where only the final reply reaches the caller, it tells the model to call
-`eve__task_wait` instead of replying while tasks work.
+the agent has an agent tool or a `task` or `serve` workflow tool. Only the turn's final reply is
+delivered, so the block tells the model to call `eve__task_wait` instead of replying while tasks work.
+Text the model writes while its turn holds for tasks is narration (`content.completed` with
+`phase: "narration"`): clients that render the stream show it, and channels don't post it.
 
 **Receipts.** A call that starts a task returns a receipt as its tool result. Task ids are the tool
 name and six characters. A resumable task's receipt tells the model how to reach it again, and a

@@ -1,5 +1,5 @@
 import { contextStorage } from "#context/container.js";
-import { ScheduleIdKey, StaticModelReferenceKey } from "#context/keys.js";
+import { StaticModelReferenceKey } from "#context/keys.js";
 import { GenerationSteering } from "#harness/generation-steering.js";
 import { compactHistory, replaceSessionHistory } from "#harness/compaction/step.js";
 import { runModelStep } from "#harness/model-call/run.js";
@@ -162,9 +162,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       approved: intake.approved,
       onResponse: (response) => handleStepResult(step, response),
       generation,
-      // A child's caller and a schedule hear only the turn's real end, so a held turn's text
-      // isn't posted as their reply. A person reads a root session.
-      hidesHeldText: step.hasDelegatedCaller || ctx?.get(ScheduleIdKey) !== undefined,
       setAttemptScope: (scope) => {
         attemptScope = scope;
       },

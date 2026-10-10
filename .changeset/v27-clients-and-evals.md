@@ -21,3 +21,6 @@ Clients, evals and templates read v27 session facts.
   `step` within its turn, and a turn row its `runs` count.
 - `eve/svelte` and `eve/vue` no longer export the `SessionAuthorization`, `SessionCall` and
   `SessionProjection` types. `SessionCallStatus` remains.
+- Text a model writes while its turn holds for tasks is narration in every session, not only in
+  child and schedule sessions, so it isn't part of `turn.settled.reply` and channels don't post
+  it. The task prompt tells the model to call `eve__task_wait` instead.
