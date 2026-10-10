@@ -60,6 +60,7 @@ export {
   type WebSocketUpgradeResult,
   isDisabledRouteSentinel,
 } from "#public/definitions/channel.js";
+export { attachmentError } from "#public/channels/attachment-error.js";
 export {
   createWebSocketUpgradeServer,
   type WebSocketUpgradeServerBridge,

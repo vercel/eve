@@ -578,7 +578,13 @@ async function resolveLink(
       result = await adapter.fetchFile(url.href, adapterCtx);
     } catch (cause) {
       if (cause instanceof EveAttachmentError) {
-        throw cause;
+        // Operator logs name the channel that ran the resolver, not one it claims.
+        throw new EveAttachmentError({
+          adapterKind,
+          cause: cause.cause,
+          kind: cause.kind,
+          message: cause.message,
+        });
       }
       throw new EveAttachmentError({
         adapterKind,

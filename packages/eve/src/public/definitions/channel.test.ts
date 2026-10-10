@@ -53,6 +53,22 @@ describe("defineChannel", () => {
     expect(channel.cors).toBeUndefined();
   });
 
+  it("projects the default input when an authored deliver hook returns nothing", async () => {
+    const seen: string[] = [];
+    const channel = defineChannel({
+      deliver(payload) {
+        seen.push(String(payload.message));
+      },
+      routes: [POST("/x", async () => new Response("ok"))],
+    });
+    const adapter = getAdapter(channel);
+
+    const input = await adapter.deliver!({ message: "hello" }, {} as never);
+
+    expect(seen).toEqual(["hello"]);
+    expect(input).toMatchObject({ message: "hello" });
+  });
+
   it("normalizes channel CORS options", () => {
     const channel = defineChannel({
       cors: {

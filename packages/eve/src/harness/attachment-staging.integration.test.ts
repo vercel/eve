@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ChannelAdapter, FetchFileResult } from "#channel/adapter.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
+import { attachmentError } from "#public/channels/attachment-error.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
@@ -161,6 +162,7 @@ describe("stageAttachmentsToSandbox (integration)", () => {
         // fetchFile receives the URL string from the FilePart.
         expect(url).toBe("https://example.com/file");
         expect(context?.state).toEqual({ installationTeamId: "T_INSTALLATION" });
+        expect(context?.session.id).toEqual(expect.any(String));
         return resolvedBytes;
       },
       kind: "custom-channel",
@@ -478,12 +480,10 @@ describe("stageAttachmentsToSandbox (integration)", () => {
     );
   });
 
-  it("exposes a channel-authored safe resolver error to the model", async () => {
+  it("exposes the reason a channel gives with attachmentError to the model", async () => {
     const logs = captureLogRecords();
-    const resolverError = new EveAttachmentError({
-      adapterKind: "custom-channel",
-      kind: "resolver-threw",
-      message: "Slack file fetch returned HTTP 403.",
+    const resolverError = attachmentError("The file is over 100 MB; send a smaller one.", {
+      cause: new Error("upstream body exceeded 104857600 bytes"),
     });
     const adapter: ChannelAdapter<any> = {
       async fetchFile() {
@@ -509,13 +509,15 @@ describe("stageAttachmentsToSandbox (integration)", () => {
 
     expect(staged).toEqual([
       {
-        text: "Attachment a.bin could not be retrieved: Slack file fetch returned HTTP 403.",
+        text: "Attachment a.bin could not be retrieved: The file is over 100 MB; send a smaller one.",
         type: "text",
       },
     ]);
     expect(sandbox.writes).toHaveLength(0);
+    // eve names the channel that ran the resolver in operator logs.
     expect(logs.records).toContainEqual(
       expect.objectContaining({
+        fields: expect.objectContaining({ adapterKind: "custom-channel" }),
         level: "warn",
         message: "attachment resolver failed — degrading to text part",
       }),

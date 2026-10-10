@@ -26,6 +26,8 @@ export interface FetchFileResult {
 /** Runtime context supplied while resolving a channel-owned file URL. */
 export interface FetchFileContext {
   readonly state: Readonly<Record<string, unknown>>;
+  /** The session the attachment arrived in, for checking it against the session's caller. */
+  readonly session: SessionHandle;
 }
 
 export type FetchFileFunction = (
@@ -64,6 +66,11 @@ export interface GenericChannelDefinition<
 > {
   /** Policy used by message sends that do not provide an explicit override. */
   readonly turnPolicy?: TurnPolicy;
+  /**
+   * Inbound hook that runs once per delivery before the harness starts. Return a
+   * {@link StepInput} to replace the input the harness sees, or nothing to use
+   * the default projection of `payload`.
+   */
   deliver?(payload: DeliverPayload, ctx: TCtx): StepInput | void | Promise<StepInput | void>;
   readonly state?: TState;
   /**
