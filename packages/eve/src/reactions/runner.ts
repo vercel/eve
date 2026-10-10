@@ -13,7 +13,7 @@ import {
 import { readSessionSchedule } from "#context/session-schedule.js";
 import type { ReactionView, SelectContext } from "#dynamic/definition.js";
 import type { WrittenEvent } from "#execution/publish-session-events.js";
-import { currentView } from "#harness/session-machine/current.js";
+import { currentProjection, currentView } from "#harness/session-machine/current.js";
 import { createLogger } from "#internal/logging.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
@@ -39,7 +39,7 @@ import {
   writeLive,
   writeReactionsState,
 } from "./state.js";
-import { cancelReason, hasIntent } from "./kinds/hook.js";
+import { pendingIntents, satisfyIntents } from "./kinds/hook.js";
 
 const log = createLogger("reactions");
 const neverAborted = new AbortController().signal;
@@ -65,12 +65,19 @@ export interface RunReactionsInput {
 export async function runReactions(ctx: ContextContainer, input: RunReactionsInput): Promise<void> {
   const { reactions, effects } = await bundleReactions(ctx);
   writeReactionsState(ctx, withLatest(readReactionsState(ctx), input.written));
+  // A compaction that starts satisfies every compact intent waiting for one.
+  if (startsCompaction(input.written)) {
+    writeReactionsState(
+      ctx,
+      satisfyIntents(readReactionsState(ctx), pendingIntents(ctx, "compact")),
+    );
+  }
   if (reactions.length === 0) return;
   const line = input.written.at(-1)?.position.line ?? readReactionsState(ctx).latest["*"] ?? 0;
   const selectContext = selectContextOf(ctx);
   const revision = readReactionsState(ctx).revision;
   const changedKinds = new Set<ReactionKind>();
-  let cancelledBy: { readonly hook: string; readonly reason?: string } | undefined;
+  const changedHooks = new Set<string>();
 
   for (const reaction of reactions) {
     if (reaction.conversation === true && input.conversation === undefined) continue;
@@ -101,22 +108,45 @@ export async function runReactions(ctx: ContextContainer, input: RunReactionsInp
     });
     if (!changed) continue;
     changedKinds.add(reaction.kind);
-    if (reaction.kind === "hook" && hasIntent(readSlot(ctx, reaction.id), "cancel")) {
-      const reason = cancelReason(readSlot(ctx, reaction.id));
-      cancelledBy ??= { hook: reaction.label, ...(reason === undefined ? {} : { reason }) };
-    }
+    if (reaction.kind === "hook") changedHooks.add(reaction.id);
   }
 
   for (const kind of changedKinds) await effects[kind]?.(ctx);
-  if (cancelledBy !== undefined) {
-    if (input.cancelTurn === undefined) {
-      log.warn("A hook's cancel() was ignored: the commit cannot stop a running turn", {
-        hook: cancelledBy.hook,
-      });
-    } else {
-      input.cancelTurn(cancelledBy);
+  actOnCancels(ctx, reactions, changedHooks, input.cancelTurn);
+}
+
+/**
+ * Stops the running turn for the first cancel intent that targets it. The intent is satisfied
+ * once the turn stops, so it acts once; one the commit can't act on waits for a commit that can,
+ * while its turn still runs.
+ */
+function actOnCancels(
+  ctx: ContextContainer,
+  reactions: readonly Reaction[],
+  changedHooks: ReadonlySet<string>,
+  cancelTurn: RunReactionsInput["cancelTurn"],
+): void {
+  const turnId = currentProjection(ctx).activeTurnId;
+  const pending = pendingIntents(ctx, "cancel").filter(({ intent }) => intent.turnId === turnId);
+  const [first] = pending;
+  if (first === undefined) return;
+  const hook = reactions.find(({ id }) => id === first.reactionId)?.label ?? first.reactionId;
+  if (cancelTurn === undefined) {
+    if (pending.some(({ reactionId }) => changedHooks.has(reactionId))) {
+      log.warn("A hook's cancel() waits: this commit cannot stop the running turn", { hook });
     }
+    return;
   }
+  writeReactionsState(ctx, satisfyIntents(readReactionsState(ctx), pending));
+  cancelTurn({ hook, ...(first.intent.reason === undefined ? {} : { reason: first.intent.reason }) });
+}
+
+function startsCompaction(written: readonly WrittenEvent[]): boolean {
+  return written.some(
+    ({ event }) =>
+      event.type === "context.started" &&
+      (event.data as { readonly kind?: string }).kind === "compaction",
+  );
 }
 
 /**

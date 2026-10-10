@@ -187,7 +187,7 @@ describe("reactions", () => {
               select: (view) => view.session.turnCount >= 2,
               resolve: (second) => {
                 log.push(`hook:compact:${String(second)}`);
-                return second ? compact("second-turn") : null;
+                return second ? { "second-turn": compact() } : null;
               },
             }),
           }),

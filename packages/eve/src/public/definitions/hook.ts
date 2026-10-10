@@ -66,26 +66,25 @@ export type HookEvent<TKey extends HookEventKey = HookEventType> = TKey extends 
 /** A hook's request that the session act: see {@link cancel} and {@link compact}. */
 export type HookIntent = CancelIntent | CompactIntent;
 
-/** Stops the running turn: it settles `cancelled` with `cause: {hook}`. */
+/** Stops the turn running when the hook resolves, once: it settles `cancelled`. */
 export interface CancelIntent {
   readonly kind: typeof INTENT_KIND;
   readonly type: "cancel";
   readonly reason?: string;
 }
 
-/** Compacts the conversation once per `key`, before the next model call. */
+/** Compacts the conversation before the next model call, once per entry. */
 export interface CompactIntent {
   readonly kind: typeof INTENT_KIND;
   readonly type: "compact";
-  readonly key: string;
+  readonly reason?: string;
 }
 
 export const INTENT_KIND = "eve:intent" as const;
 
 /**
- * Asks eve to stop the running turn. Return it from a hook: the turn settles `cancelled`, like
- * `session.cancel()`, with `cause: {hook}`. eve ignores it when the commit that ran the hook can't
- * stop a turn, such as one that settles it.
+ * Asks eve to stop the turn that is running when the hook resolves. The turn settles `cancelled`,
+ * like `session.cancel()`. The intent targets that turn: it stops it once, and never a later turn.
  */
 export function cancel(reason?: string): CancelIntent {
   return reason === undefined
@@ -94,16 +93,31 @@ export function cancel(reason?: string): CancelIntent {
 }
 
 /**
- * Asks eve to compact the conversation before the next model call. A key compacts once: the
- * compaction that follows satisfies it, so returning it again changes nothing. Use a new key, such
- * as one with a count in it, to compact again.
+ * Asks eve to compact the conversation before the next model call. Each entry compacts once: the
+ * compaction that follows satisfies it, and eve records that, so returning it again changes
+ * nothing. To compact again, return it under a new name in a map, such as one with a count:
+ *
+ * ```ts
+ * resolve: (imports) => ({ [`import-${imports}`]: compact({ reason: "A new import landed." }) })
+ * ```
  */
-export function compact(key = "hook"): CompactIntent {
-  return { key, kind: INTENT_KIND, type: "compact" };
+export function compact(options: { readonly reason?: string } = {}): CompactIntent {
+  return options.reason === undefined
+    ? { kind: INTENT_KIND, type: "compact" }
+    : { kind: INTENT_KIND, reason: options.reason, type: "compact" };
 }
 
-/** What a hook may return: nothing, one intent, or several. */
-export type HookResult = HookIntent | readonly HookIntent[] | null | undefined | void;
+/**
+ * What a hook may return: nothing, one intent, several, or a map of named intents. A compact is
+ * keyed by its name in the map (`default` outside one); a cancel by the turn it stops.
+ */
+export type HookResult =
+  | HookIntent
+  | readonly HookIntent[]
+  | Readonly<Record<string, HookIntent | null | undefined>>
+  | null
+  | undefined
+  | void;
 
 /**
  * Every hook handler receives this context.

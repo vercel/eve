@@ -35,6 +35,11 @@ export interface ReactionsState {
   readonly appended?: Readonly<Record<string, number>>;
   /** The runtime revision the latest turn step ran; a slot resolved under another is stale. */
   readonly revision?: string;
+  /**
+   * The intent keys the session has acted on, by reaction. An intent acts once per key, and this
+   * records that, rather than inferring it from facts a view may no longer hold.
+   */
+  readonly satisfied?: Readonly<Record<string, readonly string[]>>;
 }
 
 export const ReactionsStateKey = new ContextKey<ReactionsState>("eve.reactions");

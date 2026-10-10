@@ -1,22 +1,28 @@
 import type { ModelMessage } from "ai";
 import { describe, expect, it } from "vitest";
 
-import { ContextContainer } from "#context/container.js";
-import { SessionIdKey } from "#context/keys.js";
-import { enterSessionProjection } from "#harness/session-machine/current.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { SessionIdKey, SessionKey } from "#context/keys.js";
+import {
+  enterSessionProjection,
+  enterSessionProjectionAt,
+} from "#harness/session-machine/current.js";
+import { initialSessionProjection } from "#protocol/session-projection.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
 import { defineTool } from "#tools/definition.js";
 import { dynamicTools } from "./kinds/tool.js";
 import { restoreReactions, runReactions, slotsOf } from "./runner.js";
-import { forgetSessionLive, readReactionsState } from "./state.js";
+import { cancel, compact } from "#public/definitions/hook.js";
+import { hasPendingCompaction } from "./kinds/hook.js";
+import { forgetSessionLive, readReactionsState, writeReactionsState } from "./state.js";
 
 const user = (content: string): ModelMessage => ({ content, role: "user" });
 
-function written(line: number, type = "turn.started") {
+function written(line: number, type = "turn.started", data: object = {}) {
   return [
     {
-      event: { data: {}, meta: { position: { index: 0, line } }, type },
+      event: { data, meta: { position: { index: 0, line } }, type },
       position: { index: 0, line },
       progress: false,
       view: {},
@@ -51,6 +57,17 @@ function session(
   } as never);
   enterSessionProjection(ctx, undefined);
   return ctx;
+}
+
+/** Runs reactions inside the session's context, which hooks read. */
+async function inSession(ctx: ContextContainer, input: Parameters<typeof runReactions>[1]) {
+  if (ctx.get(SessionKey) === undefined) {
+    ctx.set(SessionKey, {
+      auth: { current: null, initiator: null },
+      sessionId: ctx.get(SessionIdKey),
+    } as never);
+  }
+  await contextStorage.run(ctx, async () => await runReactions(ctx, input));
 }
 
 const counted = (selections: unknown[]) => ({
@@ -175,6 +192,55 @@ describe("runReactions", () => {
     expect(slotsOf(ctx, "hook").map(({ slot }) => slot.error)).toEqual([
       expect.stringContaining("view.model isn't available to a hook reaction"),
     ]);
+  });
+
+  it("compacts once per entry, and records it rather than reading it from the view", async () => {
+    let imports = 1;
+    const ctx = session({ resolve: (() => null) as never, select: (() => null) as never }, [
+      {
+        events: {},
+        logicalPath: "hooks/imports.ts",
+        resolve: (count: number) => ({ [`import-${count}`]: compact() }),
+        select: () => imports,
+        slug: "imports",
+      },
+    ]);
+    await inSession(ctx, { written: written(1) });
+    expect(hasPendingCompaction(ctx)).toBe(true);
+
+    await inSession(ctx, { written: written(2, "context.started", { kind: "compaction" }) });
+    expect(hasPendingCompaction(ctx)).toBe(false);
+    // Losing what the view knew about that compaction doesn't make the intent pending again.
+    writeReactionsState(ctx, { ...readReactionsState(ctx), latest: {} });
+    await inSession(ctx, { written: written(3) });
+    expect(hasPendingCompaction(ctx)).toBe(false);
+
+    imports = 2;
+    await inSession(ctx, { written: written(4) });
+    expect(hasPendingCompaction(ctx)).toBe(true);
+  });
+
+  it("cancels the running turn once, and waits for a commit that can", async () => {
+    const ctx = session({ resolve: (() => null) as never, select: (() => null) as never }, [
+      {
+        events: {},
+        logicalPath: "hooks/stop.ts",
+        resolve: () => cancel("Asked to stop."),
+        select: () => null,
+        slug: "stop",
+      },
+    ]);
+    // A turn is running.
+    enterSessionProjectionAt(ctx, { ...initialSessionProjection(), activeTurnId: "turn-1" });
+    const stopped: unknown[] = [];
+
+    await inSession(ctx, { written: written(1) });
+    expect(stopped).toEqual([]);
+    const cancelTurn = (cancel: unknown) => void stopped.push(cancel);
+    await inSession(ctx, { cancelTurn, written: written(2) });
+    await inSession(ctx, { cancelTurn, written: written(3) });
+
+    expect(stopped).toEqual([{ hook: "hooks/stop.ts", reason: "Asked to stop." }]);
   });
 
   it("withdraws the slot of a resolve that throws, retrying when the selection changes", async () => {

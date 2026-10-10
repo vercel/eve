@@ -13,9 +13,9 @@ import {
 } from "#public/definitions/hook.js";
 import type { ResolvedHookDefinition } from "#runtime/types.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
-import type { JsonObject, JsonValue } from "#shared/json.js";
+import type { JsonValue } from "#shared/json.js";
 import type { InternalResolveContext, Reaction } from "../reaction.js";
-import { readReactionsState, type Slot } from "../state.js";
+import { readReactionsState, type ReactionsState, type Slot } from "../state.js";
 
 const log = createLogger("hooks");
 
@@ -99,62 +99,106 @@ function hookResolveContext(ctx: InternalResolveContext): HookResolveContext {
   };
 }
 
-/** A hook's result as the intents in its slot. A cancel names the turn it stops. */
+/** One intent as a slot records it: its key, which it acts once for, and what it asks. */
+interface RecordedIntent {
+  readonly key: string;
+  readonly type: HookIntent["type"];
+  readonly reason?: string;
+  readonly turnId?: string;
+}
+
+/**
+ * A hook's result as the intents in its slot. A cancel is keyed by the turn it stops, the one
+ * running when the hook resolved; a compact by its name in a result map, or `default`.
+ */
 function intentsOf(result: unknown, label: string): JsonValue {
-  const intents: JsonObject[] = [];
-  const visit = (value: unknown): void => {
-    if (value === null || value === undefined) return;
-    if (Array.isArray(value)) {
-      for (const entry of value) visit(entry);
-      return;
-    }
+  const intents = new Map<string, RecordedIntent>();
+  const record = (value: unknown, name: string): void => {
     const intent = value as Partial<HookIntent>;
-    if (typeof value !== "object" || intent.kind !== INTENT_KIND) {
-      throw new Error(
-        `Hook "${label}" returned something other than an intent. Return cancel(), compact(), or nothing.`,
-      );
-    }
     if (intent.type === "cancel") {
       const turnId = currentProjection().activeTurnId;
       if (turnId === undefined) return;
-      intents.push({
+      intents.set(`cancel:${turnId}`, {
+        key: `cancel:${turnId}`,
         turnId,
         type: "cancel",
         ...(intent.reason === undefined ? {} : { reason: intent.reason }),
       });
     } else if (intent.type === "compact") {
-      intents.push({ key: intent.key ?? "hook", type: "compact" });
+      intents.set(`compact:${name}`, {
+        key: `compact:${name}`,
+        type: "compact",
+        ...(intent.reason === undefined ? {} : { reason: intent.reason }),
+      });
     }
   };
-  visit(result);
-  return intents.length === 0 ? null : intents;
+  const visit = (value: unknown, name: string): void => {
+    if (value === null || value === undefined) return;
+    if (Array.isArray(value)) {
+      for (const entry of value) visit(entry, name);
+      return;
+    }
+    if (typeof value !== "object") throw notAnIntent(label);
+    if ((value as Partial<HookIntent>).kind === INTENT_KIND) {
+      record(value, name);
+      return;
+    }
+    if (name !== "default") throw notAnIntent(label);
+    for (const [entry, intent] of Object.entries(value)) {
+      if (intent === null || intent === undefined) continue;
+      if ((intent as Partial<HookIntent>).kind !== INTENT_KIND) throw notAnIntent(label);
+      record(intent, entry);
+    }
+  };
+  visit(result, "default");
+  return intents.size === 0 ? null : ([...intents.values()] as unknown as JsonValue);
 }
 
-export function hasIntent(slot: Slot | undefined, type: HookIntent["type"]): boolean {
-  return (
-    Array.isArray(slot?.value) &&
-    slot.value.some((intent) => (intent as { readonly type?: unknown }).type === type)
+function notAnIntent(label: string): Error {
+  return new Error(
+    `Hook "${label}" returned something other than intents. Return cancel(), compact(), a map of them, or nothing.`,
   );
 }
 
-/** The reason a slot's cancel intent gives, when it gives one. */
-export function cancelReason(slot: Slot | undefined): string | undefined {
-  if (!Array.isArray(slot?.value)) return undefined;
-  for (const intent of slot.value) {
-    const { reason, type } = intent as { readonly reason?: unknown; readonly type?: unknown };
-    if (type === "cancel" && typeof reason === "string") return reason;
-  }
-  return undefined;
+function recordedIntents(slot: Slot | undefined): readonly RecordedIntent[] {
+  return Array.isArray(slot?.value) ? (slot.value as unknown as readonly RecordedIntent[]) : [];
+}
+
+/** The hook intents of `type` the session hasn't acted on, with the reaction that asked. */
+export function pendingIntents(
+  ctx: Pick<ContextContainer, "get"> | undefined,
+  type: HookIntent["type"],
+): readonly { readonly reactionId: string; readonly intent: RecordedIntent }[] {
+  const state = readReactionsState(ctx);
+  return Object.entries(state.slots).flatMap(([reactionId, slot]) => {
+    if (!reactionId.startsWith("hook:")) return [];
+    const satisfied = new Set(state.satisfied?.[reactionId] ?? []);
+    return recordedIntents(slot)
+      .filter((intent) => intent.type === type && !satisfied.has(intent.key))
+      .map((intent) => ({ intent, reactionId }));
+  });
 }
 
 /**
- * True while a hook's compact intent waits: no compaction has started since the slot asked for
- * one. The compaction that follows satisfies it, so a slot that keeps asking compacts once.
+ * Records that the session acted on these intents. A reaction keeps one cancel key, its latest
+ * turn's, since a cancel never applies to a turn after its own.
  */
+export function satisfyIntents(
+  state: ReactionsState,
+  acted: readonly { readonly reactionId: string; readonly intent: RecordedIntent }[],
+): ReactionsState {
+  if (acted.length === 0) return state;
+  const satisfied = { ...state.satisfied };
+  for (const { intent, reactionId } of acted) {
+    const keys = (satisfied[reactionId] ?? []).filter(
+      (key) => !(intent.type === "cancel" && key.startsWith("cancel:")),
+    );
+    satisfied[reactionId] = keys.includes(intent.key) ? keys : [...keys, intent.key];
+  }
+  return { ...state, satisfied };
+}
+
+/** True while a hook's compact intent waits for a compaction to start. */
 export function hasPendingCompaction(ctx: Pick<ContextContainer, "get"> | undefined): boolean {
-  const state = readReactionsState(ctx);
-  const compacted = state.latest["context.started:compaction"] ?? -1;
-  return Object.entries(state.slots).some(
-    ([id, slot]) => id.startsWith("hook:") && hasIntent(slot, "compact") && compacted <= slot.since,
-  );
+  return pendingIntents(ctx, "compact").length > 0;
 }
