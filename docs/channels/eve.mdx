@@ -163,6 +163,40 @@ An existing workflow whose inbox is not yet available returns `409 session_not_r
 A session that another eve version built returns `409 session_stranded` with the `eveVersion`
 that built it.
 
+### Send files
+
+A message can mix text and file parts. A file part's `data` is base64, a `data:` URL, or a URL:
+
+```bash
+curl -X POST https://<deployment>/eve/v1/session/wrun_A \
+  -H "Content-Type: application/json" \
+  -d '{"message":[{"type":"text","text":"Summarize this report."},{"type":"file","mediaType":"application/pdf","filename":"report.pdf","data":"data:application/pdf;base64,JVBERi0xLjQK..."}]}'
+```
+
+`uploadPolicy` sets the size cap and allowed media types, 25 MB and every type by default. A request whose inline file breaks the policy returns `413` for size or `415` for type. Inline bytes also count toward the request body limit of the platform that serves the channel. On Vercel Functions that limit is 4.5 MB, so a base64 file stops at about 3.3 MB.
+
+For larger files, upload them from the browser to your own storage and send the URL in the file part. Add `fetchFile` to load the URLs you own inside the workflow step, so the bytes never pass through the request or the workflow start payload:
+
+```ts title="agent/channels/eve.ts"
+import { eveChannel } from "eve/channels/eve";
+import { localDev, vercelOidc } from "eve/channels/auth";
+
+export default eveChannel({
+  auth: [vercelOidc(), localDev()],
+  uploadPolicy: { maxBytes: 100 * 1024 * 1024 },
+  async fetchFile(url) {
+    if (!url.startsWith("https://uploads.example.com/")) return null;
+    const response = await fetch(url, {
+      headers: { authorization: `Bearer ${process.env.UPLOADS_TOKEN}` },
+    });
+    if (!response.ok) throw new Error(`Upload fetch returned HTTP ${response.status}`);
+    return Buffer.from(await response.arrayBuffer());
+  },
+});
+```
+
+`fetchFile` follows the [custom channel contract](./custom#file-uploads): return bytes to stage the file, or `null` for a URL that isn't yours. eve then downloads a public `https:` URL itself, and any other URL reaches the model as a note. The bytes `fetchFile` returns must pass `uploadPolicy`. A file over the cap, or with a disallowed media type, reaches the model as a note instead of failing the request. See [Inbound attachments](../sandbox#inbound-attachments) for how eve stores files and shows them to the model.
+
 ### Stream events
 
 Stream a session as newline-delimited JSON from `GET /eve/v1/session/:sessionId/stream`. The [session protocol](../concepts/sessions-runs-and-streaming#stream-a-session) defines the event set, envelopes, cursors, and reconnection behavior.
