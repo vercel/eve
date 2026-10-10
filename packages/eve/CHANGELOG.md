@@ -1,5 +1,19 @@
 # eve
 
+## 0.77.0
+
+### Minor Changes
+
+- 0248e69: eve now downloads attachment links itself instead of handing them to the model provider. When a channel's `fetchFile` returns `null`, or the channel has none, eve fetches a public `https:` link with the 25 MB upload cap and a 30-second timeout, at most 10 links per message and one at a time, and any other link or failed download reaches the model as a note. A private or expired link, such as a Google Drive file shared in Slack, no longer fails every later model call, and sessions that already hold such a link recover.
+- 0248e69: `read_file` now shows PDFs up to 20 MiB to the model as files, so the agent can reopen an attached PDF after compaction, or read one that a tool or `bash` wrote to the sandbox. Its output's `image` field is now `file` and carries `pages` for PDFs. `read_file` also refuses images over 8000 pixels per side, which providers reject.
+
+### Patch Changes
+
+- b6b353f: A custom channel's `fetchFile` can throw `attachmentError(message)` from `eve/channels` to tell the model why a file didn't arrive, such as a size limit, while the original error stays in operator logs. `fetchFile` now types the `session` it already receives, and `eve/channels` exports the `FetchFileFunction`, `FetchFileContext`, and `FetchFileResult` types for resolvers written in their own module.
+- 0248e69: Every attachment now reaches the model with a label that names its sandbox path, including images and PDFs that also arrive as bytes, so the agent can pass a visible file to `bash` or open it again. eve checks image and PDF media types against the file's bytes. Only PNG, JPEG, GIF, and WebP images up to 3 MiB and 8000 pixels per side, and PDFs up to 20 MiB, go to the model as bytes, and tool results follow the same rule. A HEIC photo, an oversized screenshot, or a mislabeled file renders as its label instead of failing the model call. Live sessions pay one prompt-cache rewrite after upgrading.
+- 0248e69: A turn cancelled before its first model call now stages its attachments, so a photo sent just before a follow-up message no longer breaks every later turn. File parts eve can't stage become a note instead of entering session history. Byte-valued file parts cross the queue as `data:` URLs, a string with any URL scheme reaches the channel's `fetchFile` instead of being decoded as base64, and `message.received` reports an inline file's size instead of echoing its `data:` URL.
+- b6b353f: `eveChannel()` accepts `fetchFile`, so a web client can upload a large file to its own storage and send only the URL. eve loads the file inside the workflow step, past the platform's request body limit. `defineChannel` and `eveChannel` take an `uploadPolicy` that eve now applies to every staged file, including URLs it downloads itself, on the final bytes and their verified media type. Slack, Telegram, and Teams apply their own `uploadPolicy` the same way. A file over the cap or of a disallowed type reaches the model as a note. An `eveChannel` with `uploadPolicy` or `fetchFile` reports its instrumentation kind as `channel:eve` instead of `http`, as one with `events` already does.
+
 ## 0.76.3
 
 ### Patch Changes
