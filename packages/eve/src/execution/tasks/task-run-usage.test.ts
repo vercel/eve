@@ -23,7 +23,7 @@ import { createTestSessionState } from "#internal/testing/session-state.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
 // The settled calls' stream events are not under test; the committed session is.
-vi.mock("#execution/session/commit-step.js", () => ({
+vi.mock("#execution/publish-session-events.js", () => ({
   commitSessionStep: async ({
     serializedContext,
     sessionState,

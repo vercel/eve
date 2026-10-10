@@ -13,7 +13,7 @@ import {
   registerWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
 
-import { readHitlState } from "#harness/hitl/session-state.js";
+import { readHitlState } from "#harness/hitl/requests.js";
 import { withRelays } from "#internal/testing/session-machine.js";
 
 import { toolOutput } from "#tools/model-output.js";

@@ -4,7 +4,7 @@ import { readDurableSession } from "#execution/durable-session-store.js";
 import { migrateSessionCheckpoint } from "#execution/session/checkpoint-migrations.js";
 import { SESSION_CHECKPOINT_VERSION } from "#execution/session/handoff.js";
 import { createApprovalCandidate, getApprovalAuditState } from "#harness/hitl/candidates.js";
-import { readHitlState } from "#harness/hitl/session-state.js";
+import { readHitlState } from "#harness/hitl/requests.js";
 import { readTurnState } from "#harness/session-machine/state.js";
 
 describe("migrateSessionCheckpoint", () => {

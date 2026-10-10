@@ -24,7 +24,7 @@ import { createTestSessionState } from "#internal/testing/session-state.js";
 // reach the session's own instrumentation.
 vi.mock("#internal/workflow/runtime.js", () => ({ resumeHook: vi.fn(async () => {}) }));
 const { published } = vi.hoisted(() => ({ published: [] as unknown[] }));
-vi.mock("#execution/session/commit-step.js", async () => {
+vi.mock("#execution/publish-session-events.js", async () => {
   const { readDurableSession } = await import("#execution/durable-session-store.js");
   const { sessionView } = await import("#harness/session-machine/commit.js");
   const { storedProjection } = await import("#harness/session-machine/view.js");
@@ -41,6 +41,16 @@ vi.mock("#execution/session/commit-step.js", async () => {
       for (const transition of decide(sessionView(storedProjection(state), state))) {
         published.push(...transition.events.map((event) => ({ event, origin: options.origin })));
       }
+      return { serializedContext: target.serializedContext, sessionState: target.sessionState };
+    },
+    publishSessionEvents: async (
+      target: {
+        readonly serializedContext: Record<string, unknown>;
+        readonly sessionState: unknown;
+      },
+      events: readonly unknown[],
+    ) => {
+      published.push(...events.map((event) => ({ event, origin: "own" })));
       return { serializedContext: target.serializedContext, sessionState: target.sessionState };
     },
   };

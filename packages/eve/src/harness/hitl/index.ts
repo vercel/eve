@@ -33,7 +33,7 @@ import { holdForInput } from "./intake.js";
 // meets it: a delivery's answers and sign-in callbacks before its turn runs (`acceptHumanInput`),
 // the work they approved once its model step starts (`runApprovedLocalCalls`), a model step's gated calls and
 // sign-ins, the budget gate before each model call, and what the model reads about pending
-// approvals. Nothing outside this directory reads its records.
+// approvals. Outside readers use only the read-only requests view exported here.
 
 export {
   acceptHumanInput,
@@ -46,7 +46,7 @@ export {
 } from "./intake.js";
 export { extractToolApprovalInputRequests } from "#harness/input-extraction.js";
 export { hasRunnableQueue } from "./approvals.js";
-export { discardClearedHitlState as discardClearedHumanInput } from "./session-state.js";
+export { discardClearedHitlState as discardClearedHumanInput } from "./requests.js";
 
 /**
  * A model step made calls that need a person's approval: the step parks on them beside any
@@ -205,3 +205,5 @@ export function takeDeferredMessage<T extends HarnessSessionBase>(
     session: writeTurnState(session, isEmptyInput(rest) ? turn : { ...turn, queued: rest }),
   };
 }
+
+export { readHitlState, holdsHitlRequests } from "./requests.js";

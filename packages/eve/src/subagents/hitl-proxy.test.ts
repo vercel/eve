@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { writeHitlState } from "#harness/hitl/session-state.js";
+import { writeHitlState } from "#harness/hitl/requests.js";
 
 import { toProxyInputRequestEntries } from "#harness/hitl/relays.js";
 import type { HarnessSession } from "#harness/types.js";

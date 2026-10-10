@@ -2,7 +2,7 @@ import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { ConnectionPrincipal } from "#shared/connection-types.js";
 
 // Which sign-in attempts replace which. Pure: the session state that holds them is
-// `session-state.ts`'s.
+// `requests.ts`'s.
 
 /** The pending sign-ins once `challenges` are asked for: each replaces the attempt it supersedes. */
 export function withSignIns(

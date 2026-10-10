@@ -19,7 +19,7 @@ import {
 import { CallbackBaseUrlKey } from "#harness/authorization.js";
 
 import { withSignIns } from "#harness/hitl/sign-ins.js";
-import { readHitlState, writeHitlState } from "#harness/hitl/session-state.js";
+import { readHitlState, writeHitlState } from "#harness/hitl/requests.js";
 
 import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import { defineInteractiveAuthorization } from "#shared/connection-types.js";

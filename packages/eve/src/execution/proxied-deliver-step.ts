@@ -31,8 +31,8 @@ import {
 import type { StepCoordinates as PendingInputBatchEvent } from "#harness/session-machine/view.js";
 import type { WorkflowAskRoute } from "#harness/hitl/relays.js";
 import { type InputResolution, type UnstampedMessageStreamEvent } from "#protocol/message.js";
-import { readHitlState } from "#harness/hitl/session-state.js";
-import { commitSessionStep } from "#execution/session/commit-step.js";
+import { readHitlState } from "#harness/hitl/index.js";
+import { commitSessionStep } from "#execution/publish-session-events.js";
 import type { InputResponse } from "#shared/input.js";
 
 export type RoutedDeliverResult =

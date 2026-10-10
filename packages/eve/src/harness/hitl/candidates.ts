@@ -2,7 +2,7 @@ import type { SessionAuthContext } from "#channel/types.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { SessionStateMap } from "#harness/types.js";
 
-import { readApprovalState, writeApprovalState } from "./session-state.js";
+import { readApprovalState, writeApprovalState } from "./requests.js";
 
 type ApprovalCandidateStatus =
   | "pending"

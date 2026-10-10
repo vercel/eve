@@ -12,8 +12,8 @@ import {
   withSessionStateDelta,
   type SessionStateTransition,
 } from "#execution/session/state-delta.js";
-import { commitSessionStep } from "#execution/session/commit-step.js";
-import { readHitlState } from "#harness/hitl/session-state.js";
+import { commitSessionStep } from "#execution/publish-session-events.js";
+import { readHitlState } from "#harness/hitl/index.js";
 import type { WorkflowAskRoute } from "#harness/hitl/relays.js";
 import { relay } from "#harness/session-machine/transitions.js";
 

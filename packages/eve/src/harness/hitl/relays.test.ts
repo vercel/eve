@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { withRelays } from "#internal/testing/session-machine.js";
 
-import { readHitlState } from "./session-state.js";
+import { readHitlState } from "./requests.js";
 
 import { parseProxyInputRequest, toProxyInputRequestEntries } from "./relays.js";
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";

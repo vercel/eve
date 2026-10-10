@@ -1,3 +1,4 @@
+import { readHitlState } from "./requests.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import { contextStorage } from "#context/container.js";
@@ -21,7 +22,9 @@ import {
   type ApprovalCandidateDecision,
   type ApprovalSettlementAuditRecord,
 } from "#harness/hitl/candidates.js";
-import { readHitlState, writeHitlState } from "./session-state.js";
+import { saveTransition, sessionView } from "#harness/session-machine/commit.js";
+import { matchSignIns } from "#harness/session-machine/transitions.js";
+import { storedProjection } from "#harness/session-machine/view.js";
 import { signInAttemptKey } from "./sign-ins.js";
 import {
   getAuthorizationResult,
@@ -95,11 +98,8 @@ export async function coordinateApprovalDelivery(input: {
   const expiredState = expireApprovalCandidates({ now, state: input.session.state });
   let session: HarnessSession = { ...input.session, state: expiredState };
   if (expiredChallengeIds.size > 0) {
-    session = writeHitlState(session, {
-      signIns: readHitlState(expiredState).signIns.filter(
-        (challenge) => !expiredChallengeIds.has(signInAttemptKey(challenge)),
-      ),
-    });
+    const view = sessionView(storedProjection(session.state), session.state);
+    session = saveTransition(session, matchSignIns(view, { attemptIds: [...expiredChallengeIds] }));
   }
   const audit = getApprovalAuditState(session.state);
   const batches = suspendedSteps(session.state).filter((step) => step.requests.length > 0);

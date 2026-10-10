@@ -27,7 +27,7 @@ import type {
   PublishedSessionEvents,
   SessionStepState,
 } from "#execution/publish-session-events.js";
-import { commitSessionStep } from "#execution/session/commit-step.js";
+import { commitSessionStep } from "#execution/publish-session-events.js";
 import {
   withSessionStateDelta,
   type SessionStateTransition,
@@ -38,7 +38,7 @@ import type {
   WorkflowToolRunOutcomeMessage,
 } from "#execution/tools/workflow/messages.js";
 import { workflowToolRunFailureOutput } from "#execution/tools/workflow/owner-inbox.js";
-import { readHitlState } from "#harness/hitl/session-state.js";
+import { readHitlState } from "#harness/hitl/index.js";
 import type { Transition } from "#harness/session-machine/commit.js";
 import { finishRun, settleTask } from "#harness/session-machine/transitions.js";
 import type { SessionView } from "#harness/session-machine/view.js";

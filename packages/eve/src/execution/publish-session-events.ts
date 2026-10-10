@@ -22,14 +22,25 @@ import {
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession } from "#execution/session.js";
-import { dropClosedRecords } from "#harness/session-machine/commit.js";
+import {
+  publishTransition,
+  saveTransition,
+  sessionView,
+  type Transition,
+  dropClosedRecords,
+} from "#harness/session-machine/commit.js";
 import {
   currentProjection,
   enterSessionProjection,
   recordPublishedEvent,
   saveSessionProjection,
 } from "#harness/session-machine/current.js";
-import { activeTurnId, turnPosition } from "#harness/session-machine/view.js";
+import {
+  storedProjection,
+  type SessionView,
+  activeTurnId,
+  turnPosition,
+} from "#harness/session-machine/view.js";
 import { validateHarnessModelMessages, type HarnessModelMessage } from "#harness/messages.js";
 import type { HandleEventFn, HarnessSession, HarnessSessionBase } from "#harness/types.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
@@ -87,14 +98,6 @@ export async function publishSessionEvents(
   events: readonly UnstampedMessageStreamEvent[],
 ): Promise<PublishedSessionEvents> {
   return await publishEventsFromStep(target, "own", events);
-}
-
-/** Publishes events of an exchange this session relays; see {@link SessionEventOrigin}. */
-export async function relaySessionEvents(
-  target: SessionStepState,
-  events: readonly UnstampedMessageStreamEvent[],
-): Promise<PublishedSessionEvents> {
-  return await publishEventsFromStep(target, "relayed", events);
 }
 
 async function publishEventsFromStep(
@@ -508,4 +511,67 @@ async function writeUnroutedSessionEvent(
   } finally {
     writer.release();
   }
+}
+
+/**
+ * The commit of a step that owns the session outside a turn: restore it, decide its transitions
+ * against what it restored, publish their events in order, and save what they change.
+ * Used by relay-changing steps outside a turn; other steps still publish or apply transitions
+ * directly. Batches keep the turn unchanged and contain at most one sign-in snapshot.
+ */
+export async function commitSessionStep(
+  target: SessionStepState | RestoredSessionStep,
+  decide: (view: SessionView) => readonly Transition[],
+  options: {
+    readonly origin: SessionEventOrigin;
+    /** Where a relayed input batch came from; see `SessionStepPublication.inputSource`. */
+    readonly inputSource?: string;
+  },
+): Promise<PublishedSessionEvents> {
+  const { state } =
+    "ctx" in target ? target.durableSession : readDurableSession(target.sessionState);
+  const view = sessionView(storedProjection(state), state);
+  const transitions = decide(view);
+  if (
+    (transitions.length > 1 && transitions.some((transition) => transition.turn !== view.turn)) ||
+    transitions.filter((transition) => transition.signIns !== undefined).length > 1
+  ) {
+    throw new Error("A transition batch must not overlap turn or sign-in snapshots.");
+  }
+  if ("ctx" in target) return await commit(target, transitions, options);
+  if (transitions.every((transition) => changesNothing(view, transition))) {
+    return { serializedContext: target.serializedContext, sessionState: target.sessionState };
+  }
+  return await commit(await restoreSessionStep(target), transitions, options);
+}
+
+async function commit(
+  restored: RestoredSessionStep,
+  transitions: readonly Transition[],
+  options: { readonly origin: SessionEventOrigin; readonly inputSource?: string },
+): Promise<PublishedSessionEvents> {
+  const { published } = await publishFromSessionStep(restored, {
+    inputSource: options.inputSource,
+    origin: options.origin,
+    async publish(emit) {
+      for (const transition of transitions) await publishTransition(transition, emit);
+    },
+    // Save onto the session the scope committed, which carries what its providers captured.
+    updateSession: (session) => ({
+      session: transitions.reduce((next, transition) => saveTransition(next, transition), session),
+    }),
+  });
+  return published;
+}
+
+/** A transition that reports nothing and changes no record, as the machine decides with no work. */
+function changesNothing(view: SessionView, transition: Transition): boolean {
+  return (
+    transition.turn === view.turn &&
+    transition.events.length === 0 &&
+    transition.signIns === undefined &&
+    transition.relays === undefined &&
+    transition.commit === undefined &&
+    transition.clearsHistory === undefined
+  );
 }

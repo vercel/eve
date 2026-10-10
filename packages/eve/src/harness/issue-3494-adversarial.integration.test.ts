@@ -8,7 +8,7 @@ import {
 } from "#harness/hitl/candidates.js";
 
 import { withSignIns } from "#harness/hitl/sign-ins.js";
-import { readHitlState, writeHitlState } from "#harness/hitl/session-state.js";
+import { readHitlState, writeHitlState } from "#harness/hitl/requests.js";
 
 import { z } from "zod";
 import { ContextContainer, contextStorage } from "#context/container.js";

@@ -47,11 +47,7 @@ import {
   enterSessionProjection,
   saveSessionProjection,
 } from "#harness/session-machine/current.js";
-import {
-  applyTransition,
-  dropClosedRecords,
-  sessionView,
-} from "#harness/session-machine/commit.js";
+import { saveTransition, dropClosedRecords, sessionView } from "#harness/session-machine/commit.js";
 import { matchSignIns } from "#harness/session-machine/transitions.js";
 import {
   sessionStartedForResolvers,
@@ -71,7 +67,7 @@ import { openSessionEventPublisher } from "#execution/publish-session-events.js"
 import { createTurnEventHandler } from "#execution/session/turn-event-handler.js";
 import { derivePendingState } from "#execution/session/pending-turn-state.js";
 import { CallbackBaseUrlKey, PendingAuthorizationResultKey } from "#harness/authorization.js";
-import { readHitlState } from "#harness/hitl/session-state.js";
+import { readHitlState } from "#harness/hitl/index.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { countRunUsage } from "#execution/agent-sessions/usage.js";
 import {
@@ -169,11 +165,9 @@ async function runSessionStepBody(
       ctx.set(PendingAuthorizationResultKey, authResults);
       // The session stops waiting on them; the turn they resume reports their completion.
       const view = sessionView(storedProjection(durableSession.state), durableSession.state);
-      durableSession = await applyTransition(
-        durableSession,
-        matchSignIns(view, { attemptIds: matchedAttemptIds }),
-        async () => {},
-      );
+      const transition = matchSignIns(view, { attemptIds: matchedAttemptIds });
+      if (transition.events.length !== 0) throw new Error("matchSignIns must not emit events.");
+      durableSession = saveTransition(durableSession, transition);
       completedAuths = matches;
       if (remainingPayloads.length === 0) delivery = undefined;
     }

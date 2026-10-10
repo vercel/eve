@@ -6,17 +6,17 @@ import { validateHarnessModelMessages } from "#harness/messages.js";
 import type { HarnessSession, HarnessSessionBase, SessionStateMap } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { SessionProjection } from "#protocol/session-projection.js";
-import { readHitlState, writeHitlState, type RelayChange } from "#harness/hitl/session-state.js";
+import { readHitlState, writeHitlState, type RelayChange } from "#harness/hitl/requests.js";
 import { readTurnState, writeTurnState, type TurnState } from "./state.js";
 import type { SessionView } from "./view.js";
 
 // The save side of the machine. A transition returns the events that report what changed and
 // the execution state that follows; `applyTransition` publishes the events in order (the publish
-// sink folds each into the projection) and writes the rest. Nothing else writes `TurnState`.
+// sink folds each into the projection) and writes the rest. The turn state also has direct lifecycle helpers.
 // A private record lives only while the projection shows its owner open, so closing an owner is
 // one event: a transition reports it, and the save drops the record here.
 
-/** What a transition returns. Nothing else changes session state. */
+/** What a machine transition returns; approval storage still has direct writers. */
 export interface Transition {
   readonly turn: TurnState;
   readonly events: readonly UnstampedMessageStreamEvent[];

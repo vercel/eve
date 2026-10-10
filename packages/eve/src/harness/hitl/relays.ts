@@ -265,7 +265,7 @@ function parseProxyInputRequestBatch(value: unknown): ProxyInputRequestBatch | u
   return { approvalRequestIds: value.approvalRequestIds, requestIds: value.requestIds };
 }
 
-// `inputOptionSchema`, checked by hand: the session-state module imports this one, and the
+// `inputOptionSchema`, checked by hand: the requests module imports this one, and the
 // workflow bundle reads session state without pulling in zod.
 const INPUT_OPTION_FIELDS: Readonly<Record<string, (value: unknown) => boolean>> = {
   description: (value) => value === undefined || typeof value === "string",
