@@ -1,4 +1,4 @@
-import type { ContextContainer } from "#context/container.js";
+import { runOnSelection, type ContextContainer } from "#context/container.js";
 import type { ContextReader } from "#context/key.js";
 import { StaticModelReferenceKey, type LiveDynamicModelSelection } from "#context/keys.js";
 import { isMockModel } from "#internal/mock-model-identity.js";
@@ -11,7 +11,7 @@ import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { PublicAgentDynamicModelResult } from "#shared/agent-definition.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { JsonValue } from "#shared/json.js";
-import type { Reaction } from "../reaction.js";
+import { publicResolveContext, type Reaction } from "../reaction.js";
 import { readLive, readReactionsState } from "../state.js";
 
 const MODEL_REACTION_ID = "model:agent";
@@ -70,7 +70,9 @@ export async function loadModelReaction(bundle: CompiledBundle): Promise<Reactio
     label: dynamicModel.logicalPath,
     resolve: async (selected, ctx) => {
       try {
-        return await definition.resolve(selected as never, ctx);
+        return await runOnSelection(dynamicModel.logicalPath, () =>
+          definition.resolve(selected as never, publicResolveContext(ctx)),
+        );
       } catch (error) {
         throw new DynamicModelSelectionError(error);
       }

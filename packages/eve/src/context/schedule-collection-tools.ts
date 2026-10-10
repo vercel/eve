@@ -2,9 +2,8 @@ import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js"
 import { z } from "#compiled/zod/index.js";
 import { isDeepStrictEqual } from "node:util";
 import type { Approval, ApprovalPolicy, ApprovalResponsePolicy } from "#approval/definition.js";
-import { loadContext, contextStorage } from "#context/container.js";
+import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
-import { readSessionSchedule } from "#context/session-schedule.js";
 import { defineDynamic } from "#dynamic/definition.js";
 import { isApprovalRecheck } from "#harness/approval-recheck.js";
 import { bindScheduleCollection, schedules } from "#public/experimental/schedules/client.js";
@@ -85,14 +84,9 @@ export function createScheduleCollectionToolDynamicDefinition<TInput, TPrepared 
       schedule: ctx.session.schedule ?? null,
       turn: view.latest["turn.started"] ?? null,
     }),
-    resolve: async (_selected, context) => {
-      const scope = contextStorage.getStore();
-      if (
-        definition.tool === false ||
-        context.session.schedule !== undefined ||
-        (scope !== undefined && readSessionSchedule(scope) !== undefined)
-      )
-        return null;
+    resolve: async (selected) => {
+      // A scheduled run doesn't schedule more: `select` read the session's schedule.
+      if (definition.tool === false || selected.schedule !== null) return null;
       const prefix = `${scheduleCollectionToolPrefix(identity.collection)}__`;
       const keyFor = (operation: "create" | "update", callId: string) =>
         `${prefix}${operation}:${callId}`;

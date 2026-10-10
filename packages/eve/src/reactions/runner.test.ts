@@ -10,6 +10,7 @@ import {
 import { initialSessionProjection } from "#protocol/session-projection.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
+import { defineState } from "#public/definitions/state.js";
 import { defineTool } from "#tools/definition.js";
 import { dynamicTools } from "./kinds/tool.js";
 import { restoreReactions, runReactions, slotsOf } from "./runner.js";
@@ -241,6 +242,28 @@ describe("runReactions", () => {
     await inSession(ctx, { cancelTurn, written: written(3) });
 
     expect(stopped).toEqual([{ hook: "hooks/stop.ts", reason: "Asked to stop." }]);
+  });
+
+  it("runs resolve outside the session's context, so it reads only its selection", async () => {
+    const counter = defineState("runner-test.counter", () => 7);
+    const read = session({
+      resolve: (() => counter.get()) as never,
+      select: (() => null) as never,
+    });
+    const selected = session({
+      resolve: ((count: number) =>
+        defineTool({ description: `Count ${count}.`, execute: async () => count, inputSchema: {} })) as never,
+      select: (() => counter.get()) as never,
+    });
+    await inSession(read, { written: written(1) });
+    await inSession(selected, { written: written(1) });
+
+    expect(slotsOf(read, "tool").map(({ slot }) => slot.error)).toEqual([
+      expect.stringContaining(
+        '"tools/count.ts" read session state in resolve, which reads only its selection',
+      ),
+    ]);
+    expect(dynamicTools(selected).map((tool) => tool.description)).toEqual(["Count 7."]);
   });
 
   it("withdraws the slot of a resolve that throws, retrying when the selection changes", async () => {

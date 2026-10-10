@@ -1,6 +1,6 @@
 import { getAdapterKind } from "#channel/adapter.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
-import type { ContextContainer } from "#context/container.js";
+import { runOnSelection, type ContextContainer } from "#context/container.js";
 import { ContinuationTokenKey } from "#context/keys.js";
 import type { ReactionView } from "#dynamic/definition.js";
 import { currentProjection } from "#harness/session-machine/current.js";
@@ -31,7 +31,10 @@ export function hookReaction(hook: ResolvedHookDefinition): Reaction {
     const resolve = hook.resolve as (selected: unknown, ctx: HookResolveContext) => unknown;
     return {
       ...base,
-      resolve: (selected, ctx) => resolve(selected, hookResolveContext(ctx)),
+      resolve: (selected, ctx) => {
+        const hookContext = hookResolveContext(ctx);
+        return runOnSelection(hook.logicalPath, () => resolve(selected, hookContext));
+      },
       ...(hook.select === undefined
         ? {}
         : { select: hook.select as (view: ReactionView, ctx: unknown) => unknown }),

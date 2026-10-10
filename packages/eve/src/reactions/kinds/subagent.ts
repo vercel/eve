@@ -15,7 +15,7 @@ import {
 } from "#runtime/subagents/registry.js";
 import type { AgentToolExposure } from "#shared/agent-definition.js";
 import { parseJsonValue } from "#shared/json.js";
-import type { Reaction } from "../reaction.js";
+import { authoredResolve, type Reaction } from "../reaction.js";
 import { slotsOf } from "../runner.js";
 
 type Selection = Exclude<DurableDynamicSubagentSelection, null>;
@@ -31,8 +31,8 @@ export function subagentReaction(resolver: ResolvedDynamicSubagentResolver): Rea
     id: `subagent:${resolver.nodeId}`,
     kind: "subagent",
     label: resolver.logicalPath,
-    resolve: resolver.resolve as Reaction["resolve"],
-    ...(resolver.select === undefined ? {} : { select: resolver.select as Reaction["select"] }),
+    resolve: authoredResolve(resolver.logicalPath, resolver.resolve),
+    select: resolver.select as Reaction["select"],
   };
 }
 

@@ -20,7 +20,7 @@ import {
   skillPackageRevision,
   writeSkillPackageToSandbox,
 } from "#shared/skill-package.js";
-import type { Reaction } from "../reaction.js";
+import { authoredResolve, type Reaction } from "../reaction.js";
 import { slotsOf } from "../runner.js";
 
 const log = createLogger("dynamic-skills");
@@ -45,8 +45,8 @@ export function skillReaction(resolver: ResolvedDynamicSkillResolver): Reaction 
     id: `skill:${resolver.extensionNamespace ?? ""}:${resolver.slug}`,
     kind: "skill",
     label: resolver.logicalPath,
-    resolve: resolver.resolve as Reaction["resolve"],
-    ...(resolver.select === undefined ? {} : { select: resolver.select as Reaction["select"] }),
+    resolve: authoredResolve(resolver.logicalPath, resolver.resolve),
+    select: resolver.select as Reaction["select"],
   };
 }
 

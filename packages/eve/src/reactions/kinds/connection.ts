@@ -11,7 +11,7 @@ import type {
   ResolvedConnectionDefinition,
   ResolvedDynamicConnectionResolver,
 } from "#runtime/types.js";
-import type { Reaction } from "../reaction.js";
+import { authoredResolve, type Reaction } from "../reaction.js";
 import { slotsOf } from "../runner.js";
 import { dynamicToolNames } from "./tool.js";
 
@@ -38,8 +38,8 @@ export function connectionReaction(resolver: ResolvedDynamicConnectionResolver):
     id: `connection:${resolver.extensionNamespace ?? ""}:${resolver.slug}`,
     kind: "connection",
     label: resolver.logicalPath,
-    resolve: resolver.resolve as Reaction["resolve"],
-    ...(resolver.select === undefined ? {} : { select: resolver.select as Reaction["select"] }),
+    resolve: authoredResolve(resolver.logicalPath, resolver.resolve),
+    select: resolver.select as Reaction["select"],
   };
 }
 

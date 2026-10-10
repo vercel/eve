@@ -1,8 +1,8 @@
 import { defineDynamic } from "eve";
 
-import { fixtureModel, routing } from "../../testing";
+import { fixtureModel } from "../../testing";
 
 export default defineDynamic({
   description: "Complete one assigned investigation.",
-  ...fixtureModel(() => `child-result:${routing.get().model}:${routing.get().requests}`),
+  ...fixtureModel((_request, routing) => `child-result:${routing.model}:${routing.requests}`),
 });

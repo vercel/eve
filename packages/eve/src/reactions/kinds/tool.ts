@@ -22,7 +22,7 @@ import {
   type ToolSchemaSource,
 } from "#tools/schema.js";
 import { isWorkflowToolDefinition } from "#tools/workflow-definition.js";
-import type { Reaction } from "../reaction.js";
+import { authoredResolve, type Reaction } from "../reaction.js";
 import { slotsOf } from "../runner.js";
 import { canonicalJson } from "../state.js";
 
@@ -43,8 +43,8 @@ export function toolReaction(resolver: ResolvedDynamicToolResolver): Reaction {
     kind: "tool",
     label: resolver.logicalPath,
     reconcile: (recorded, rebuilt) => reconcileTools(resolver, recorded, rebuilt),
-    resolve: resolver.resolve as Reaction["resolve"],
-    ...(resolver.select === undefined ? {} : { select: resolver.select as Reaction["select"] }),
+    resolve: authoredResolve(resolver.logicalPath, resolver.resolve),
+    select: resolver.select as Reaction["select"],
   };
 }
 

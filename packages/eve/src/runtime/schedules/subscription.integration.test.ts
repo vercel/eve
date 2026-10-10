@@ -88,12 +88,11 @@ describe("schedule creation and invocation", () => {
       const dynamic = app.moduleMap.nodes.__root__!.modules[wrapper.sourceId]!
         .default as ReturnType<typeof import("#dynamic/definition.js").defineDynamic>;
       const tools = (await dynamic.resolve(
-        null as never,
+        { schedule: null, turn: null } as never,
         {
           abortSignal: new AbortController().signal,
           session: { id: "alice", auth: { current: alice, initiator: null } },
           channel: {},
-          facts: [],
         } as never,
       )) as Record<
         string,

@@ -2,7 +2,7 @@ import type { ModelMessage } from "ai";
 
 import type { SessionEvent } from "#protocol/session-event.js";
 
-import type { ContextContainer } from "#context/container.js";
+import { runOnSelection, type ContextContainer } from "#context/container.js";
 import type { ReactionView, ResolveContext, SelectContext } from "#dynamic/definition.js";
 import type { WrittenEvent } from "#execution/publish-session-events.js";
 import type { JsonValue } from "#shared/json.js";
@@ -82,4 +82,25 @@ export interface Reaction {
 export interface BundleReactions {
   readonly reactions: readonly Reaction[];
   readonly effects: Partial<Record<ReactionKind, (ctx: ContextContainer) => Promise<void>>>;
+}
+
+/**
+ * An authored `resolve` as a reaction's: it runs outside the session's context and gets only the
+ * public {@link ResolveContext}, so its answer depends on its selection alone.
+ */
+export function authoredResolve(
+  label: string,
+  resolve: (selected: never, ctx: never) => unknown,
+): Reaction["resolve"] {
+  return (selected, ctx) =>
+    runOnSelection(label, () => resolve(selected as never, publicResolveContext(ctx) as never));
+}
+
+export function publicResolveContext(ctx: InternalResolveContext): ResolveContext {
+  return {
+    abortSignal: ctx.abortSignal,
+    channel: ctx.channel,
+    session: ctx.session,
+    ...(ctx.conversation === undefined ? {} : { conversation: ctx.conversation }),
+  };
 }

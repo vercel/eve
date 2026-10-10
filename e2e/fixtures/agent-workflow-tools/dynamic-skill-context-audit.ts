@@ -1,4 +1,3 @@
-import { defineState } from "eve/context";
 import type { ResolveContext } from "eve/skills";
 
 function snapshot(ctx: ResolveContext) {
@@ -23,17 +22,24 @@ export interface DynamicSkillContextObservation {
   readonly context: ReturnType<typeof snapshot>;
 }
 
-export const dynamicSkillContextAudit = defineState<DynamicSkillContextObservation[]>(
-  "workflow-fixture.dynamic-skill-context-audit",
-  () => [],
-);
+/**
+ * Observations by session. `resolve` runs outside the session's context, so it can't write
+ * session state; the fixture keeps them in the process, which a local run shares.
+ */
+const observations = new Map<string, DynamicSkillContextObservation[]>();
 
 export function recordDynamicSkillContext(
   event: DynamicSkillContextObservation["event"],
   ctx: ResolveContext,
 ): void {
-  dynamicSkillContextAudit.update((observations) => [
-    ...observations,
+  observations.set(ctx.session.id, [
+    ...(observations.get(ctx.session.id) ?? []),
     { event, context: snapshot(ctx) },
   ]);
+}
+
+export function dynamicSkillContextObservations(
+  sessionId: string,
+): readonly DynamicSkillContextObservation[] {
+  return observations.get(sessionId) ?? [];
 }
