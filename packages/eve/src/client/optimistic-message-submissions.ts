@@ -1,4 +1,4 @@
-import { EveAgentProjection } from "#client/eve-agent-projection.js";
+import type { EveAgentEventLog } from "#client/eve-agent-projection.js";
 import type { PendingMessageSubmission } from "#client/eve-agent-store-state.js";
 import { createSubmissionId, summarizeUserContent } from "#client/eve-agent-store-helpers.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
@@ -11,13 +11,13 @@ interface ReconciledSubmissions {
 }
 
 /** Owns optimistic message projection and server-delivery reconciliation. */
-export class OptimisticMessageSubmissions<TData> {
+export class OptimisticMessageSubmissions {
   readonly #optimistic: boolean;
-  readonly #projection: EveAgentProjection<TData>;
+  readonly #projections: readonly EveAgentEventLog[];
   #pending: readonly PendingMessageSubmission[] = [];
 
-  constructor(projection: EveAgentProjection<TData>, optimistic: boolean) {
-    this.#projection = projection;
+  constructor(projections: readonly EveAgentEventLog[], optimistic: boolean) {
+    this.#projections = projections;
     this.#optimistic = optimistic;
   }
 
@@ -25,37 +25,50 @@ export class OptimisticMessageSubmissions<TData> {
     this.#pending = [];
   }
 
-  submit(input: SendTurnPayload, eventStartIndex: number): string | undefined {
+  submit(input: SendTurnPayload, eventStartIndex: number, turnId?: string): string | undefined {
     if (input.message === undefined) return undefined;
     const pending = {
       createdAt: Date.now(),
       eventStartIndex,
       id: createSubmissionId(),
       message: summarizeUserContent(input.message),
+      turnId,
       requiresDeliveryId: true,
     };
     this.#pending = [...this.#pending, pending];
     if (this.#optimistic) {
-      this.#projection.append({
-        data: { createdAt: pending.createdAt, message: pending.message, submissionId: pending.id },
-        type: "client.message.submitted",
-      });
+      for (const projection of this.#projections) {
+        projection.append({
+          data: {
+            createdAt: pending.createdAt,
+            message: pending.message,
+            submissionId: pending.id,
+            turnId,
+          },
+          type: "client.message.submitted",
+        });
+      }
     }
     return pending.id;
   }
 
+  /** Re-echoes a submission whose payload `prepareSend` replaced, keeping its place in the stream. */
+  resubmit(submissionId: string | undefined, input: SendTurnPayload): string | undefined {
+    const pending = this.#pending.find((candidate) => candidate.id === submissionId);
+    const message = input.message === undefined ? undefined : summarizeUserContent(input.message);
+    if (pending?.message === message) return submissionId;
+    if (pending !== undefined) this.#withdraw([pending.id]);
+    return this.submit(input, pending?.eventStartIndex ?? 0, pending?.turnId);
+  }
+
   apply(event: MessageStreamEvent): ReconciledSubmissions | undefined {
     if (event.type !== "message.received") {
-      this.#projection.append(event);
-      return undefined;
-    }
-    if (event.data.kind === "execution.background_task") {
-      this.#projection.append(event);
+      for (const projection of this.#projections) projection.append(event);
       return undefined;
     }
     const matching = this.#matching(event);
     if (matching.length === 0) {
-      this.#projection.append(event);
+      for (const projection of this.#projections) projection.append(event);
       return undefined;
     }
     return this.#reconcile(matching, event, false);
@@ -75,9 +88,7 @@ export class OptimisticMessageSubmissions<TData> {
     const pending = this.#pending.find((candidate) => candidate.id === submissionId);
     if (pending === undefined) return undefined;
     for (const event of events.slice(pending.eventStartIndex)) {
-      if (event.type !== "message.received" || event.data.kind === "execution.background_task") {
-        continue;
-      }
+      if (event.type !== "message.received") continue;
       const matching = this.#matching(event);
       if (matching.some((candidate) => candidate.id === submissionId)) {
         return this.#reconcile(matching, event, true);
@@ -93,19 +104,22 @@ export class OptimisticMessageSubmissions<TData> {
         : this.#pending.find((candidate) => candidate.id === submissionId);
     if (pending === undefined) return;
     this.#pending = this.#pending.filter((candidate) => candidate.id !== pending.id);
-    this.#projection.replace(
-      (event) =>
-        event.type === "client.message.submitted" && event.data.submissionId === pending.id,
-      {
-        data: {
-          createdAt: pending.createdAt,
-          error: { message: error.message },
-          message: pending.message,
-          submissionId: pending.id,
+    for (const projection of this.#projections) {
+      projection.replace(
+        (event) =>
+          event.type === "client.message.submitted" && event.data.submissionId === pending.id,
+        {
+          data: {
+            createdAt: pending.createdAt,
+            error: { message: error.message },
+            message: pending.message,
+            submissionId: pending.id,
+            turnId: pending.turnId,
+          },
+          type: "client.message.failed",
         },
-        type: "client.message.failed",
-      },
-    );
+      );
+    }
   }
 
   failAll(error: Error): void {
@@ -126,24 +140,19 @@ export class OptimisticMessageSubmissions<TData> {
     alreadyProjected: boolean,
   ): ReconciledSubmissions {
     const ids = submissions.map((pending) => pending.id);
+    this.#withdraw(ids);
+    if (!alreadyProjected) for (const projection of this.#projections) projection.append(event);
+    return { alreadyProjected, event, ids };
+  }
+
+  #withdraw(ids: readonly string[]): void {
     const idSet = new Set(ids);
     this.#pending = this.#pending.filter((pending) => !idSet.has(pending.id));
-    if (alreadyProjected) {
-      this.#projection.remove(
-        (candidate) =>
-          candidate.type === "client.message.submitted" && idSet.has(candidate.data.submissionId),
-      );
-    } else {
-      this.#projection.replace(
-        (candidate) =>
-          candidate.type === "client.message.submitted" && candidate.data.submissionId === ids[0],
-        event,
-      );
-      this.#projection.remove(
+    for (const projection of this.#projections) {
+      projection.remove(
         (candidate) =>
           candidate.type === "client.message.submitted" && idSet.has(candidate.data.submissionId),
       );
     }
-    return { alreadyProjected, event, ids };
   }
 }

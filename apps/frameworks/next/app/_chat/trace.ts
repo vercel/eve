@@ -198,7 +198,7 @@ function getTraceActionNameFromRequest(action: Record<string, unknown>): string 
   const kind = getTraceActionKindFromRequest(action);
   switch (kind) {
     case "load-skill":
-      return "load_skill";
+      return readString(action.name);
     case "subagent-call":
       return readString(action.subagentName) ?? readString(action.name);
     case "tool-call":
@@ -214,7 +214,7 @@ function getTraceActionNameFromResult(result: Record<string, unknown>): string |
   const kind = getTraceActionKindFromResult(result);
   switch (kind) {
     case "load-skill":
-      return readString(result.name) ?? "load_skill";
+      return readString(result.name);
     case "subagent-call":
       return readString(result.subagentName);
     case "tool-call":
@@ -396,7 +396,7 @@ export function buildTraceTurnsFromTranscript(
 
     if (step !== undefined && eventStepIndex !== undefined) {
       step.events.push(event);
-    } else if (step !== undefined && event.type === "subagent.called") {
+    } else if (step !== undefined && event.type === "agent.started") {
       step.events.push(event);
     }
 
@@ -557,7 +557,7 @@ export function buildTraceTurnsFromTranscript(
       continue;
     }
 
-    if (event.type === "subagent.called") {
+    if (event.type === "agent.started") {
       turn.subagentCount += 1;
       if (step !== undefined) {
         step.subagentCount += 1;

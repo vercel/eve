@@ -19,7 +19,7 @@ The setup guides you through creating a Discord application and bot, then:
 - signs you in to Vercel and creates or links a project when needed;
 - validates the bot token;
 - creates a Vercel Connect client and attaches `/eve/v1/discord` as its trigger destination;
-- registers an application command with a required `message` option;
+- registers an application command with a required `message` option and an optional `file` attachment option;
 - configures the Discord application's Interactions Endpoint URL;
 - scaffolds the channel with Connect-managed credentials; and
 - prints the bot installation URL.
@@ -41,13 +41,14 @@ The route is `POST /eve/v1/discord` by default. Connect resolves the application
 
 ### Configure Discord manually
 
-If you do not use the guided Connect setup, register a command with Discord's API or the Developer Portal. A string option named `message` lines up with eve's default prompt extraction:
+If you do not use the guided Connect setup, register a command with Discord's API or the Developer Portal. A string option named `message` lines up with eve's default prompt extraction, and an attachment option lets people send a file with the command:
 
 ```bash
 curl -X PUT "https://discord.com/api/v10/applications/$DISCORD_APPLICATION_ID/commands" \
   -H "Authorization: Bot $DISCORD_BOT_TOKEN" -H "Content-Type: application/json" \
   -d '[{"name":"ask","description":"Ask the eve agent","type":1,
-    "options":[{"name":"message","description":"What should the agent do?","type":3,"required":true}]}]'
+    "options":[{"name":"message","description":"What should the agent do?","type":3,"required":true},
+      {"name":"file","description":"A file for the agent to read","type":11,"required":false}]}]'
 ```
 
 Then configure the public `https://…/eve/v1/discord` route as the application's Interactions Endpoint URL. Pass `credentials: { applicationId, botToken, publicKey }` to `discordChannel`, or set the corresponding `DISCORD_APPLICATION_ID`, `DISCORD_BOT_TOKEN`, and `DISCORD_PUBLIC_KEY` environment variables.
@@ -93,13 +94,35 @@ Typing fires on `turn.started` and `actions.requested`, but only when a bot toke
 
 HITL renders as Discord components. Confirmations and options become buttons, `display: "select"` becomes a string select, and freeform input becomes a button that opens a modal. When the user responds, the parked session (paused awaiting input) resumes.
 
+A press, select, or modal submission answers as the Discord user who made it, with the same `defaultDiscordAuth` principal a command from them gets by default. Approval response policies compare against that principal. Approvals are requester-only by default, so only the person whose command asked can approve. `onInputResponse(ctx, interaction)` decides the answer's `auth`: return `{ auth }` to accept it, or `null` (or throw) to drop it and keep the request pending. `ctx.defaultAuth` is the presser's `defaultDiscordAuth`; it identifies them but doesn't authorize them by itself.
+
+If you customize `onCommand`, eve drops every press and submission until you also set `onInputResponse`, and logs a warning saying so. The default Discord principal wouldn't match the principals your `onCommand` returns, so a requester-only approval would refuse the requester. It would also let someone your `onCommand` turns away answer open approvals. Give both hooks the same mapping and gating:
+
+```ts
+import { discordChannel } from "eve/channels/discord";
+
+const auth = (interaction: { user: { id: string } }) => ({
+  auth: {
+    principalId: `user:${interaction.user.id}`,
+    principalType: "user" as const,
+    authenticator: "discord",
+    attributes: {},
+  },
+});
+
+export default discordChannel({
+  onCommand: (_ctx, interaction) => auth(interaction),
+  onInputResponse: (_ctx, interaction) => auth(interaction),
+});
+```
+
 ### Proactive sessions
 
 Start a session without an inbound interaction through `to(discord, target).send(message, { auth })` from a schedule `run` handler, or `ctx.to(discord, target).send(message, { auth })` from another channel. The proactive target shape is `{ channelId, conversationId?, initialMessage? }`. Either path needs a bot token, supplied by Connect or `DISCORD_BOT_TOKEN`.
 
 ### Attachments
 
-Inbound file attachments are not supported on this channel today.
+Files attached through a command's attachment options (type `11`) reach the agent as file parts. eve downloads each one from Discord's signed CDN URL (`cdn.discordapp.com` or `media.discordapp.net`) without credentials. A file over 25 MB, or one whose download fails, reaches the agent as a short note instead. Each command starts its own session, so a file is available in the conversation that command starts.
 
 ## What to read next
 

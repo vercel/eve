@@ -33,8 +33,7 @@ const {
   rebindMissingCompiledDynamicToolCallbacks,
   validateDurableDynamicToolCallbacks,
 } = await import("#context/dynamic-tool-lifecycle.js");
-const { buildDynamicTools, buildResponseAuthorizationTools, replayDynamicTools } =
-  await import("#context/build-dynamic-tools.js");
+const { buildDynamicTools, replayDynamicTools } = await import("#context/build-dynamic-tools.js");
 
 import { ContextContainer } from "#context/container.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
@@ -58,67 +57,148 @@ import {
   createStepStartedEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
+import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
+import {
+  connectionRegistry,
+  fakeConnection,
+  EVE_NAMESPACE_NAMES,
+  EVE_NAMESPACE_RESERVATION,
+  NAMES_OUTSIDE_EVE_NAMESPACE,
+} from "#internal/testing/catalog-fixtures.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
-
-// Re-implement the naming logic here to test it independently
-// (the production function is unexported — testing via the public behavior)
-function qualifyDynamicToolNames(
-  slug: string,
-  isSingle: boolean,
-  entries: Readonly<Record<string, DynamicToolEntry>>,
-): Map<string, DynamicToolEntry> {
-  const keys = Object.keys(entries);
-  const result = new Map<string, DynamicToolEntry>();
-
-  if (keys.length === 0) return result;
-
-  // single entry: one tool, named after the file slug.
-  // map of entries: each named by its bare key.
-  if (isSingle) {
-    result.set(slug, entries[keys[0]!]!);
-    return result;
-  }
-
-  for (const key of keys) {
-    result.set(key, entries[key]!);
-  }
-  return result;
-}
+import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { createRuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 
 const executeOptions = { messages: [], toolCallId: "call_1" };
 
-const stubEntry = defineTool({
-  description: "test",
-  inputSchema: { type: "object" },
-  execute: async (): Promise<unknown> => ({}),
-});
+describe("dynamic tool names", () => {
+  const deployService = {
+    prepared: {
+      behavior: {
+        availability: [],
+        handling: {
+          kind: "dispatch",
+          target: {
+            entryPoint: "execute",
+            kind: "workflow-tool-call",
+            workflowId: "workflow//./agent/tools/deploy_service//execute",
+          },
+        },
+      },
+      name: "deploy_service",
+    },
+  };
 
-describe("dynamic tool naming", () => {
-  it("uses file slug for a single entry", () => {
-    const names = qualifyDynamicToolNames("analytics", true, {
-      run: stubEntry,
+  /**
+   * Resolves `entries` beside a `deploy_service` workflow tool, a `researcher`
+   * subagent with the given tool setting, and a `linear` connection.
+   */
+  async function resolveTools(
+    entries: Readonly<Record<string, DynamicToolEntry>>,
+    researcherTool?: boolean,
+  ) {
+    const logs = captureLogRecords();
+    const ctx = createCtx();
+    ctx.set(BundleKey, {
+      subagentRegistry: createRuntimeSubagentRegistry({
+        subagents: [
+          {
+            description: "Research the request.",
+            kind: "subagent",
+            logicalPath: "subagents/researcher",
+            name: "researcher",
+            nodeId: "subagents/researcher",
+            sourceId: "subagents/researcher",
+            sourceKind: "module",
+            tool: researcherTool,
+          },
+        ],
+      }),
+      toolRegistry: { toolsByName: new Map([["deploy_service", deployService]]) },
+    } as never);
+    ctx.set(
+      ConnectionRegistryKey,
+      connectionRegistry([fakeConnection({ name: "linear", tools: [] })]),
+    );
+    await dispatchDynamicToolEvent({
+      ctx,
+      event: makeEvent("session.started"),
+      messages: [],
+      resolvers: [createResolver("tenant", ["session.started"], () => entries)],
     });
-    expect([...names.keys()]).toEqual(["analytics"]);
+    return {
+      errors: logs.records.flatMap((record) =>
+        record.level === "error" ? [String(record.fields?.error)] : [],
+      ),
+      tools: buildDynamicTools(ctx).map((tool) => tool.name),
+    };
+  }
+
+  it("names map entries by their bare keys", async () => {
+    expect(
+      await resolveTools({
+        tenant__export: createReplayableTool(),
+        sync: createReplayableTool(),
+      }),
+    ).toEqual({ errors: [], tools: ["tenant__export", "sync"] });
   });
 
-  it("uses the bare key for a map entry", () => {
-    const names = qualifyDynamicToolNames("search", false, {
-      run: stubEntry,
-    });
-    expect([...names.keys()]).toEqual(["run"]);
+  it.each([
+    [
+      "linear__sync",
+      'Dynamic tool "linear__sync" starts with "linear__", which belongs to connection "linear". Rename the map key.',
+    ],
+    [
+      "linear",
+      'Dynamic tool "linear" has the same name as connection "linear". Rename the map key.',
+    ],
+    [
+      "deploy_service",
+      'Dynamic tool "deploy_service" from resolver "agent/tools/tenant.ts" collides with the workflow tool or agent "deploy_service". Rename the map key.',
+    ],
+    [
+      "researcher",
+      'Dynamic tool "researcher" from resolver "agent/tools/tenant.ts" collides with the workflow tool or agent "researcher". Rename the map key.',
+    ],
+    [
+      "sync now",
+      'Dynamic tool resolver "agent/tools/tenant.ts" returned illegal tool name "sync now".',
+    ],
+  ])("skips the whole result of a resolver that returns %s", async (name, error) => {
+    expect(
+      await resolveTools({ [name]: createReplayableTool(), sync: createReplayableTool() }),
+    ).toEqual({ errors: [expect.stringContaining(error)], tools: [] });
   });
 
-  it("uses bare keys for multiple map entries", () => {
-    const names = qualifyDynamicToolNames("tenant", false, {
-      export: stubEntry,
-      query: stubEntry,
-    });
-    expect([...names.keys()]).toEqual(["export", "query"]);
+  it.each(EVE_NAMESPACE_NAMES)(
+    "skips a resolver that returns %s, in eve's namespace",
+    async (name) => {
+      expect(
+        await resolveTools({ [name]: createReplayableTool(), sync: createReplayableTool() }),
+      ).toEqual({
+        errors: [
+          `Dynamic tool resolver "agent/tools/tenant.ts" returned the reserved tool name "${name}". ${EVE_NAMESPACE_RESERVATION}; rename the map key.`,
+        ],
+        tools: [],
+      });
+    },
+  );
+
+  it("keeps tools outside eve's namespace, including the built-in tools' former names", async () => {
+    expect(
+      await resolveTools(
+        Object.fromEntries(
+          NAMES_OUTSIDE_EVE_NAMESPACE.map((name) => [name, createReplayableTool()]),
+        ),
+      ),
+    ).toEqual({ errors: [], tools: NAMES_OUTSIDE_EVE_NAMESPACE });
   });
 
-  it("handles empty entries — no tools produced", () => {
-    const names = qualifyDynamicToolNames("empty", false, {});
-    expect([...names.keys()]).toEqual([]);
+  it("lets a dynamic tool wrap a subagent hidden with tool: false", async () => {
+    expect(await resolveTools({ researcher: createReplayableTool() }, false)).toEqual({
+      errors: [],
+      tools: ["researcher"],
+    });
   });
 });
 
@@ -759,6 +839,101 @@ describe("dispatchDynamicToolEvent", () => {
     }
   });
 
+  it("rebinds an authored turn resolver after a cold start", async () => {
+    const ctx = createCtx();
+    const captured = "turn-start-capture";
+    const handler = vi.fn(() => ({
+      tool: createReplayableTool("turn tool", () => ({ captured })),
+    }));
+    const resolver = createResolver("authored", ["turn.started"], handler);
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("turn.started"),
+    });
+    simulateColdStart(ctx);
+
+    await rebindMissingCompiledDynamicToolCallbacks({
+      ctx,
+      event: makeEvent("turn.started"),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    expect(handler).toHaveBeenCalledTimes(2);
+    expect(
+      lookupDurableDynamicCallback(
+        callbackOwner("tool", {
+          entryKey: "tool",
+          resolverSlug: "authored",
+          scope: "turn",
+          sessionId: ctx.require(SessionIdKey),
+        }),
+        "execute",
+      ),
+    ).toBeDefined();
+    const [tool] = buildDynamicTools(ctx);
+    await expect(tool!.execute!({}, executeOptions)).resolves.toEqual({ captured });
+  });
+
+  it("leaves an authored turn tool to fail when best-effort rebind cannot restore it", async () => {
+    const ctx = createCtx();
+    const handler = vi.fn(() => ({ tool: createReplayableTool() }));
+    const resolver = createResolver("authored", ["turn.started"], handler);
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("turn.started"),
+    });
+    simulateColdStart(ctx);
+    handler.mockReturnValue(null as never);
+
+    await expect(
+      rebindMissingCompiledDynamicToolCallbacks({
+        ctx,
+        event: makeEvent("turn.started"),
+        messages: [],
+        resolvers: [resolver],
+      }),
+    ).resolves.toBeUndefined();
+
+    const [tool] = buildDynamicTools(ctx);
+    await expect(tool!.execute!({}, executeOptions)).rejects.toThrow(
+      'Dynamic tool "tool" cannot replay its execute callback',
+    );
+  });
+
+  it("requires an opted-in turn resolver to restore its callback", async () => {
+    const ctx = createCtx();
+    const handler = vi.fn(() => ({ tool: createReplayableTool() }));
+    const resolver = {
+      ...createResolver("framework", ["turn.started"], handler),
+      rebindMissingCallbacks: true,
+    };
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("turn.started"),
+    });
+    simulateColdStart(ctx);
+    handler.mockReturnValue(null as never);
+
+    await expect(
+      rebindMissingCompiledDynamicToolCallbacks({
+        ctx,
+        event: makeEvent("turn.started"),
+        messages: [],
+        resolvers: [resolver],
+      }),
+    ).rejects.toThrow("Dynamic tool callback rebind did not restore: tool");
+  });
+
   it("replaces old step-function turn metadata without requiring cold-rebind opt-in", async () => {
     let ctx = createCtx();
     const serialized = serializeContext(ctx);
@@ -1336,6 +1511,42 @@ describe("dispatchDynamicToolEvent", () => {
     );
   });
 
+  it("keeps endsTurn: true on a replayed dynamic tool", async () => {
+    const ctx = createCtx();
+    const resolver = createResolver("react", ["session.started"], () =>
+      Object.assign(createReplayableTool(), { endsTurn: true }),
+    );
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("session.started"),
+    });
+
+    expect(buildDynamicTools(ctx)[0]?.endsTurn).toBe(true);
+  });
+
+  it("rejects an endsTurn function, which durable dynamic metadata cannot hold", async () => {
+    const logs = captureLogRecords();
+    const ctx = createCtx();
+    const resolver = createResolver("react", ["session.started"], () =>
+      Object.assign(createReplayableTool(), { endsTurn: () => true }),
+    );
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("session.started"),
+    });
+
+    expect(buildDynamicTools(ctx)).toHaveLength(0);
+    expect(JSON.stringify(logs.records)).toContain(
+      'Dynamic tool \\"react\\" sets endsTurn to a function, which dynamic tools do not support.',
+    );
+  });
+
   it("uses file slug when handler returns a single entry", async () => {
     const ctx = createCtx();
     const resolver = createResolver("analytics", ["session.started"], () => createReplayableTool());
@@ -1369,7 +1580,7 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
     const ctx = createCtx();
     const executeFn = vi.fn(() => ({ data: "from-programmatic" }));
     const resolver = createResolver("fwk", ["session.started"], () => ({
-      search: createProgrammaticTool("programmatic search", executeFn),
+      lookup: createProgrammaticTool("programmatic search", executeFn),
     }));
 
     await dispatchDynamicToolEvent({
@@ -1385,13 +1596,13 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
 
     const tools = buildDynamicTools(ctx);
     expect(tools).toHaveLength(1);
-    expect(tools[0]!.name).toBe("search");
+    expect(tools[0]!.name).toBe("lookup");
 
     // Simulate step boundary — virtual context cleared, durable survives
 
     const replayedTools = buildDynamicTools(ctx);
     expect(replayedTools).toHaveLength(1);
-    expect(replayedTools[0]!.name).toBe("search");
+    expect(replayedTools[0]!.name).toBe("lookup");
 
     // Execute the replayed tool — the original closure is invoked
     await replayedTools[0]!.execute!({ query: "test" }, executeOptions);
@@ -1428,7 +1639,7 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
   it("framework and authored tools coexist in session scope", async () => {
     const ctx = createCtx();
     const frameworkResolver = createResolver("fwk", ["session.started"], () => ({
-      search: createProgrammaticTool("programmatic search"),
+      lookup: createProgrammaticTool("programmatic search"),
     }));
     const authoredResolver = createResolver("authored", ["session.started"], () => ({
       query: createReplayableTool("authored query"),
@@ -1446,7 +1657,7 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
 
     const tools = buildDynamicTools(ctx);
     expect(tools).toHaveLength(2);
-    expect(tools.map((t) => t.name).sort()).toEqual(["query", "search"]);
+    expect(tools.map((t) => t.name).sort()).toEqual(["lookup", "query"]);
   });
 
   it("single-entry programmatic tool uses slug as name", async () => {
@@ -1779,53 +1990,6 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
     getDynamicCallbackRegistry().delete("guarded");
   });
 
-  it("uses the first dynamic definition for response authorization", () => {
-    const ctx = createCtx();
-    registerTestCallback("guarded", "execute", () => null);
-    registerTestCallback("guarded", "approvalRequest", () => "user-approval");
-    registerTestCallback(
-      "guarded",
-      "approvalResponse",
-      async () => ({ status: "allowed" }) as const,
-    );
-    ctx.set(StepDynamicToolMetadataKey, [
-      {
-        callbacks: {
-          approvalRequest: { closure: {} },
-          approvalResponse: { closure: {} },
-          execute: { closure: {} },
-        },
-        description: "step",
-        entryKey: "step:guarded",
-        inputSchema: { type: "object" },
-        name: "guarded",
-        resolverSlug: "step",
-      },
-    ]);
-    ctx.set(SessionDynamicToolMetadataKey, [
-      {
-        callbacks: {
-          approvalRequest: { closure: {} },
-          approvalResponse: { closure: {} },
-          execute: { closure: {} },
-        },
-        description: "session",
-        entryKey: "session:guarded",
-        inputSchema: { type: "object" },
-        name: "guarded",
-        resolverSlug: "session",
-      },
-    ]);
-
-    const tools = buildResponseAuthorizationTools({
-      authoredTools: new Map(),
-      context: ctx,
-    });
-
-    expect(tools.get("guarded")?.description).toBe("step");
-    getDynamicCallbackRegistry().delete("guarded");
-  });
-
   it("rejects an untransformed tool atomically without resolver hydration", async () => {
     const logs = captureLogRecords();
     const ctx = createCtx();
@@ -1990,7 +2154,7 @@ describe("dynamic callback binding isolation", () => {
       const resolver = createResolver("conditional", ["session.started"], (_event, rawContext) => {
         const context = rawContext as { session: { id: string } };
         return {
-          search: variantTool(
+          lookup: variantTool(
             context.session.id === first.require(SessionIdKey) ? "guarded" : "open",
             "original",
           ),
@@ -2009,7 +2173,7 @@ describe("dynamic callback binding isolation", () => {
       if (cold) {
         clearDurableDynamicCallbacks(first.require(SessionIdKey));
         const changedCapture = createResolver("conditional", ["session.started"], () => ({
-          search: variantTool("guarded", "recaptured"),
+          lookup: variantTool("guarded", "recaptured"),
         }));
         await refreshDynamicSessionToolsForRuntimeRevision({
           ctx: restored,
@@ -2026,7 +2190,7 @@ describe("dynamic callback binding isolation", () => {
       });
       expect(tool!.approvalKey!({})).toBe("guarded");
       await expect(
-        resolveApprovalPolicy(tool!.approval!)(createApprovalContext({ toolName: "search" })),
+        resolveApprovalPolicy(tool!.approval!)(createApprovalContext({ toolName: "lookup" })),
       ).resolves.toBe("user-approval");
       expect(await tool!.toModelOutput!({})).toEqual({ type: "text", value: "guarded" });
       const approval = tool!.approval!;
@@ -2050,7 +2214,7 @@ describe("dynamic callback binding isolation", () => {
         ctx,
         resolvers: [
           createResolver(slug, ["session.started"], () => ({
-            search: variantTool(implementation, slug),
+            lookup: variantTool(implementation, slug),
           })),
         ],
         event: makeEvent("session.started"),
@@ -2070,7 +2234,7 @@ describe("dynamic callback binding isolation", () => {
         ctx,
         resolvers: [
           createResolver("shared-owner", [eventName], () => ({
-            search: variantTool(scope, scope),
+            lookup: variantTool(scope, scope),
           })),
         ],
         event: makeEvent(eventName),
@@ -2088,7 +2252,7 @@ describe("dynamic callback binding isolation", () => {
     const first = createCtx();
     const second = createCtx();
     const resolver = createResolver("conditional", ["session.started"], () => ({
-      search: variantTool("guarded", "original"),
+      lookup: variantTool("guarded", "original"),
     }));
     for (const ctx of [first, second]) {
       await dispatchDynamicToolEvent({
@@ -2116,7 +2280,7 @@ describe("dynamic callback binding isolation", () => {
     const first = createCtx();
     const second = createCtx();
     const resolver = createResolver("conditional", ["session.started"], () => ({
-      search: variantTool("guarded", "original"),
+      lookup: variantTool("guarded", "original"),
     }));
     for (const ctx of [first, second]) {
       await dispatchDynamicToolEvent({
@@ -2200,7 +2364,7 @@ describe("dynamic callback cache recovery", () => {
       const ctx = createCtx();
       const eventName = `${scope}.started`;
       const resolver = createResolver("evicted", [eventName], () => ({
-        search: createReplayableTool(),
+        lookup: createReplayableTool(),
       }));
       await dispatchDynamicToolEvent({
         ctx,
@@ -2210,7 +2374,7 @@ describe("dynamic callback cache recovery", () => {
       });
       ctx.set(SessionDynamicToolRuntimeRevisionKey, "stable");
       for (let index = 0; index < 1_024; index++) {
-        registerTestCallback("search", "execute", () => ({ wrong: true }), {
+        registerTestCallback("lookup", "execute", () => ({ wrong: true }), {
           sessionId: `cache-pressure-${index}`,
           scope,
           resolverSlug: "evicted",

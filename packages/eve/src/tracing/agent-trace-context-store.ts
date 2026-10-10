@@ -7,15 +7,13 @@ import type { ContextAccessor } from "#context/key.js";
 import { SessionTraceSeedKey, type SessionTraceSeed } from "#context/keys.js";
 import type {
   AgentActionTraceState,
-  AgentInvocationTraceState,
   AgentSessionTraceState,
   AgentTraceStateStore,
   AgentTurnTraceState,
 } from "#tracing/agent-trace-state.js";
 import { actionIdempotencyKey } from "#instrumentation/lifecycle.js";
-import { deriveTaskId } from "#tasks/task-id.js";
 import type { SessionStateMap } from "#harness/types.js";
-import { getBlockingWorkflowToolRuns, getBackgroundTasks } from "#harness/workflow-tool-runs.js";
+import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 
 import { createLogger } from "#internal/logging.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
@@ -38,7 +36,7 @@ const AgentTraceContextKey = new ContextKey<AgentTraceContextState>(AGENT_TRACE_
   },
 });
 
-/** Run after task-provider commits, so a returned background receipt keeps its anchor. */
+/** Run after task-provider commits, so a pending workflow tool call keeps its anchor. */
 export function pruneAgentTraceState(
   context: ContextAccessor,
   sessionId: string,
@@ -62,40 +60,15 @@ function pruneTraceOwnership(
   const state = context.get(AgentTraceContextKey);
   if (state === undefined) return;
   const calls = new Set(getBlockingWorkflowToolRuns(sessionState).map((run) => run.callId));
-  const tasks = new Set(
-    getBackgroundTasks(sessionState)
-      .query({ state: "working" })
-      .map((task) => task.taskId),
-  );
   const actionAnchors = Object.fromEntries(
     Object.entries(state.actionAnchors).filter(
       ([key, action]) =>
         action.sessionId !== sessionId ||
         state.actions[key] !== undefined ||
-        calls.has(action.callId) ||
-        tasks.has(
-          deriveTaskId({
-            callId: action.callId,
-            parentSessionId: sessionId,
-            parentTurnId: action.turnId,
-          }),
-        ),
+        calls.has(action.callId),
     ),
   );
-  const retainedCalls = new Set(
-    Object.values(actionAnchors)
-      .filter((action) => action.sessionId === sessionId)
-      .map((action) => action.callId),
-  );
-  const invocations = Object.fromEntries(
-    Object.entries(state.invocations).filter(
-      ([, invocation]) =>
-        invocation.sessionId !== sessionId ||
-        invocation.terminal !== undefined ||
-        retainedCalls.has(invocation.parentActionCallId),
-    ),
-  );
-  context.set(AgentTraceContextKey, { ...state, actionAnchors, invocations });
+  context.set(AgentTraceContextKey, { ...state, actionAnchors });
 }
 
 export function readSessionTraceDecision(
@@ -142,7 +115,7 @@ export function readActionTraceContext(
   if (raw === undefined) return undefined;
   const state = deserializeAgentTraceContextState(raw);
   const key = actionIdempotencyKey(sessionId, turnId, callId);
-  const action = state.invocations[key] ?? state.actions[key] ?? state.actionAnchors[key];
+  const action = state.actions[key] ?? state.actionAnchors[key];
   if (action === undefined) return undefined;
   return withTraceDecision(
     serializedContext,
@@ -156,130 +129,6 @@ export function readActionTraceContext(
   );
 }
 
-/** Task IDs already bind the originating call and turn, including after that turn ends. */
-export function readTaskActionTrace(
-  serializedContext: Readonly<Record<string, unknown>>,
-  sessionId: string,
-  taskId: string,
-): AgentActionTraceState | undefined {
-  const state = deserializeAgentTraceContextState(serializedContext[AgentTraceContextKey.name]);
-  return Object.values(state.actionAnchors).find(
-    (action) =>
-      action.sessionId === sessionId &&
-      deriveTaskId({
-        callId: action.callId,
-        parentSessionId: sessionId,
-        parentTurnId: action.turnId,
-      }) === taskId,
-  );
-}
-
-export function recordNestedAgentInvocation(input: {
-  readonly callId: string;
-  readonly kind: "remote-agent-call" | "subagent-call";
-  readonly name: string;
-  readonly outerCallId: string;
-  readonly recordOutputs?: boolean;
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionId: string;
-  readonly spanId: string;
-  readonly startTimeMs: number;
-  readonly turnId: string;
-}): Record<string, unknown> {
-  const raw = input.serializedContext[AgentTraceContextKey.name];
-  if (raw === undefined) return input.serializedContext;
-  const state = deserializeAgentTraceContextState(raw);
-  const outerKey = actionIdempotencyKey(input.sessionId, input.turnId, input.outerCallId);
-  const outer = state.actions[outerKey] ?? state.actionAnchors[outerKey];
-  if (outer === undefined) return input.serializedContext;
-  const key = actionIdempotencyKey(input.sessionId, input.turnId, input.callId);
-  const promote = (action: AgentActionTraceState): AgentActionTraceState =>
-    action.isWorkflowTool === true && action.kind === "tool-call"
-      ? { ...action, workflowName: action.name }
-      : action;
-  const actions =
-    state.actions[outerKey] === undefined
-      ? state.actions
-      : { ...state.actions, [outerKey]: promote(state.actions[outerKey]) };
-  const actionAnchors =
-    state.actionAnchors[outerKey] === undefined
-      ? state.actionAnchors
-      : { ...state.actionAnchors, [outerKey]: promote(state.actionAnchors[outerKey]) };
-  if (state.invocations[key] !== undefined) {
-    return {
-      ...input.serializedContext,
-      [AgentTraceContextKey.name]: serializeAgentTraceContextState({
-        ...state,
-        actionAnchors,
-        actions,
-      }),
-    };
-  }
-  const invocation: AgentInvocationTraceState = {
-    attemptIndex: outer.attemptIndex,
-    callId: input.callId,
-    channelAudience: outer.channelAudience,
-    kind: input.kind,
-    name: input.name,
-    parent: {
-      spanId: outer.spanId,
-      traceFlags: outer.parent.traceFlags,
-      traceId: outer.parent.traceId,
-    },
-    parentActionCallId: input.outerCallId,
-    recordOutputs: input.recordOutputs === true,
-    rootSessionId: outer.rootSessionId,
-    sessionId: outer.sessionId,
-    spanId: input.spanId,
-    startTimeMs: input.startTimeMs,
-    stepIndex: outer.stepIndex,
-    turnId: outer.turnId,
-  };
-  return {
-    ...input.serializedContext,
-    [AgentTraceContextKey.name]: serializeAgentTraceContextState({
-      ...state,
-      actionAnchors,
-      actions,
-      invocations: { ...state.invocations, [key]: invocation },
-    }),
-  };
-}
-
-export function recordActionInvocationKind(input: {
-  readonly callId: string;
-  readonly kind: "remote-agent-call" | "subagent-call";
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionId: string;
-  readonly turnId: string;
-}): Record<string, unknown> {
-  const raw = input.serializedContext[AgentTraceContextKey.name];
-  if (raw === undefined) return input.serializedContext;
-  const state = deserializeAgentTraceContextState(raw);
-  const update = (action: AgentActionTraceState): AgentActionTraceState =>
-    action.sessionId === input.sessionId &&
-    action.turnId === input.turnId &&
-    action.callId === input.callId
-      ? {
-          ...action,
-          isWorkflowTool: undefined,
-          kind: input.kind,
-          workflowName: undefined,
-        }
-      : action;
-  return {
-    ...input.serializedContext,
-    [AgentTraceContextKey.name]: serializeAgentTraceContextState({
-      ...state,
-      actionAnchors: Object.fromEntries(
-        Object.entries(state.actionAnchors).map(([key, action]) => [key, update(action)]),
-      ),
-      actions: Object.fromEntries(
-        Object.entries(state.actions).map(([key, action]) => [key, update(action)]),
-      ),
-    }),
-  };
-}
 function withTraceDecision(
   serializedContext: Readonly<Record<string, unknown>>,
   context: SpanContext,
@@ -341,27 +190,6 @@ export class ContextAgentTraceStateStore implements AgentTraceStateStore {
     });
   }
 
-  deleteInvocation(idempotencyKey: string): void {
-    updateState((state) => {
-      const invocations = { ...state.invocations };
-      delete invocations[idempotencyKey];
-      return { ...state, invocations };
-    });
-  }
-
-  deleteInvocations(sessionId: string, turnId?: string): void {
-    updateState((state) => ({
-      ...state,
-      invocations: Object.fromEntries(
-        Object.entries(state.invocations).filter(
-          ([, invocation]) =>
-            invocation.sessionId !== sessionId ||
-            (turnId !== undefined && invocation.turnId !== turnId),
-        ),
-      ),
-    }));
-  }
-
   deleteSession(sessionId: string): void {
     updateState((state) => {
       const sessions = { ...state.sessions };
@@ -397,21 +225,6 @@ export class ContextAgentTraceStateStore implements AgentTraceStateStore {
     );
   }
 
-  findInvocations(
-    sessionId?: string,
-    turnId?: string,
-    parentActionCallId?: string,
-  ): readonly AgentInvocationTraceState[] {
-    return Object.values(
-      contextStorage.getStore()?.get(AgentTraceContextKey)?.invocations ?? {},
-    ).filter(
-      (invocation) =>
-        (sessionId === undefined || invocation.sessionId === sessionId) &&
-        (turnId === undefined || invocation.turnId === turnId) &&
-        (parentActionCallId === undefined || invocation.parentActionCallId === parentActionCallId),
-    );
-  }
-
   getAction(idempotencyKey: string): AgentActionTraceState | undefined {
     return contextStorage.getStore()?.get(AgentTraceContextKey)?.actions[idempotencyKey];
   }
@@ -435,13 +248,6 @@ export class ContextAgentTraceStateStore implements AgentTraceStateStore {
     updateState((state) => ({
       ...state,
       actionAnchors: { ...state.actionAnchors, [idempotencyKey]: value },
-    }));
-  }
-
-  setInvocation(idempotencyKey: string, value: AgentInvocationTraceState): void {
-    updateState((state) => ({
-      ...state,
-      invocations: { ...state.invocations, [idempotencyKey]: value },
     }));
   }
 

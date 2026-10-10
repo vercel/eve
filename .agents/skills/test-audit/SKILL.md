@@ -1,6 +1,8 @@
 ---
 name: test-audit
 description: "Invoke whenever writing, changing, reviewing, or sweeping tests in the eve repository. Authoring gate for new tests plus audit workflow for low-value, slow, implementation-coupled, or duplicative tests and the test-only production seams they demand."
+metadata:
+  internal: true
 ---
 
 # Test audit

@@ -1,33 +1,45 @@
+import { sessionView } from "#harness/session-machine/commit.js";
+import { routeAnswer, hold, receiveRelayedAnswer } from "#harness/session-machine/transitions.js";
+import { storedProjection } from "#harness/session-machine/view.js";
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
+import { buildAdapterContext } from "#channel/adapter-context.js";
 import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
+import { AuthKey, TurnDeliveryIdsKey } from "#context/keys.js";
+import { setChannelContext } from "#execution/channel-context.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
 import {
   type DurableSessionState,
   readDurableSession,
   replaceDurableSessionSnapshot,
 } from "#execution/durable-session-store.js";
+import {
+  publishSessionEvents,
+  relaySessionEvents,
+  type PublishedSessionEvents,
+  type SessionStepState,
+} from "#execution/publish-session-events.js";
+import {
+  withSessionStateDelta,
+  type WithSessionStateDelta,
+} from "#execution/session/state-delta.js";
+import { deserializeContext, serializeContext } from "#context/serialize.js";
+import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import {
+  resolveRemoteAgentStreamHeaders,
+  respondToRemoteAgentSession,
+} from "#execution/agent-sessions/remote.js";
 import { routeDeliverPayload } from "#subagents/hitl-proxy.js";
-import { sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import {
-  resumeWorkflowToolRunAnswers,
-  resumeWorkflowToolRunDismissal,
+  sendWorkflowAskAnswers,
+  toToolInputResponseResponder,
 } from "#execution/tools/workflow/answer.js";
-import { getPendingCoordinationBatch } from "#harness/coordination.js";
-import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
-import {
-  createInputResolvedEvent,
-  encodeMessageStreamEvent,
-  type InputResolution,
-  stampMessageStreamEvent,
-} from "#protocol/message.js";
+import type { StepCoordinates as PendingInputBatchEvent } from "#harness/session-machine/view.js";
+import type { WorkflowAskRoute } from "#harness/proxy-input-requests.js";
+import { type InputResolution, type UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { getProxyInputRequests, retireProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { InputResponse } from "#shared/input.js";
-import { getBackgroundTasks } from "#harness/workflow-tool-runs.js";
-import {
-  createTaskInputRequestId,
-  retireProxyInputRequests,
-} from "#harness/proxy-input-requests.js";
 
 export type RoutedDeliverResult =
   | {
@@ -43,47 +55,58 @@ export type RoutedDeliverResult =
     };
 
 interface ChildBucket {
-  readonly answerHook?: AnswerHookRoute;
+  readonly workflowAsk?: WorkflowAskRoute;
+  readonly remote?: NonNullable<
+    import("#harness/proxy-input-requests.js").ProxyInputRequest["remote"]
+  >;
   readonly childContinuationToken: string;
   readonly childSessionInbox?: SessionInboxAddress;
-  readonly childResponseUrl?: string;
-  readonly dismissedRequestIds: string[];
+  readonly event: PendingInputBatchEvent;
   readonly metadata: NonNullable<DeliverHookPayload["deliveryMetadata"]>[number][];
   readonly payloads: DeliverPayload[];
-  readonly retireRequestIds: string[];
-  readonly sourcePayloadIndexes: number[];
-  readonly taskId?: string;
+  /** Keyed by request id: a request resolves once however many payloads answer it. */
+  readonly resolutions: Map<string, InputResolution>;
 }
 
-/** Splits an envelope and validates task routes before forwarding descendant input. */
-export async function routeProxiedDeliverStep(input: {
-  readonly delivery: DeliverHookPayload;
-  readonly sessionWritable: WritableStream<Uint8Array>;
-  readonly serializedContext?: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-}): Promise<RoutedDeliverResult> {
+/**
+ * Splits an envelope and forwards descendant input to the child that asked for
+ * it. This session relayed each forwarded request's `input.requested`, so it
+ * also relays their `input.resolved` once the answers are on their way down.
+ */
+export async function routeProxiedDeliverStep(
+  input: SessionStepState & { readonly delivery: DeliverHookPayload },
+): Promise<WithSessionStateDelta<RoutedDeliverResult>> {
   "use step";
+  return await withSessionStateDelta(input, routeProxiedDeliver);
+}
+
+async function routeProxiedDeliver(
+  input: SessionStepState & { readonly delivery: DeliverHookPayload },
+): Promise<RoutedDeliverResult> {
+  const requests = getProxyInputRequests(readDurableSession(input.sessionState).state);
+  const { delivery: sourceDelivery, serializedContext } = await deliverChannelInputResponses({
+    ...input,
+    routable: (response) => requests.has(response.requestId),
+  });
   let durableSession = readDurableSession(input.sessionState);
-  const sourceDelivery = input.delivery;
   const parentPayloads = new Map<number, DeliverPayload>();
   const children = new Map<string, ChildBucket>();
   let parentAction: { readonly kind: "cancel-turn" } | undefined;
-  // Only a person's own message may answer or skip a pending question.
+  // Only a person's own message may answer a pending prompt by text.
   const resolveMessage =
-    !hasDelegatedSessionContext(input.serializedContext ?? {}) &&
-    sourceDelivery.caller === undefined &&
-    sourceDelivery.taskDeliveryId === undefined;
-  // Every payload routes against the same state, so an answer-hook request
-  // resolved by an earlier payload is hidden from later ones; its hook accepts
-  // one answer, and later messages must reach the parent instead.
-  const resolvedQuestions = new Set<string>();
+    !hasDelegatedSessionContext(serializedContext) && sourceDelivery.caller === undefined;
+  // Every payload routes against the same state, so a request a `ctx.ask()`
+  // answer or typed reply resolved in an earlier payload is hidden from later
+  // ones; it takes one answer, and later messages must reach the parent instead.
+  const resolvedRequests = new Set<string>();
+  // A message that answers a question is still the person's turn in the
+  // conversation, so the stream records it with its delivery ids.
+  const answerMessages: UnstampedMessageStreamEvent[] = [];
+  const answerDeliveryIds: string[] = [];
 
   for (const [sourcePayloadIndex, payload] of sourceDelivery.payloads.entries()) {
     const routed = routeDeliverPayload({
-      allowRoute: (requestId, route) =>
-        !resolvedQuestions.has(requestId) &&
-        (route.taskId === undefined ||
-          getBackgroundTasks(durableSession.state).get(route.taskId) !== undefined),
+      allowRoute: (requestId) => !resolvedRequests.has(requestId),
       payload,
       resolveMessage,
       state: durableSession.state,
@@ -92,32 +115,45 @@ export async function routeProxiedDeliverStep(input: {
     if (routed.forSelf !== undefined) parentPayloads.set(sourcePayloadIndex, routed.forSelf);
 
     for (const [childIndex, forChild] of routed.forChildren.entries()) {
-      if (forChild.answerHook !== undefined) {
-        for (const requestId of forChild.retireRequestIds) resolvedQuestions.add(requestId);
+      if (forChild.workflowAsk !== undefined || forChild.message !== undefined) {
+        for (const { requestId } of forChild.payload.inputResponses)
+          resolvedRequests.add(requestId);
       }
-      const key = [
+      if (forChild.message !== undefined) {
+        const { sequence, turnId } = forChild.resolved.event;
+        answerMessages.push(receiveRelayedAnswer({ message: forChild.message, sequence, turnId }));
+        for (const metadata of sourceDelivery.deliveryMetadata ?? []) {
+          if (metadata.payloadIndex === sourcePayloadIndex) {
+            answerDeliveryIds.push(metadata.deliveryId);
+          }
+        }
+      }
+      const key = JSON.stringify([
         forChild.childContinuationToken,
         forChild.childSessionInbox?.sessionId ?? "",
-        forChild.childResponseUrl ?? "",
-        forChild.taskId ?? "",
-      ].join("\0");
-      const child = children.get(key) ?? {
-        answerHook: forChild.answerHook,
+        forChild.remote?.sessionId ?? "",
+        forChild.resolved.event.sequence,
+        forChild.resolved.event.stepIndex,
+        forChild.resolved.event.turnId,
+        forChild.inputSource ?? null,
+      ]);
+      const child: ChildBucket = children.get(key) ?? {
+        workflowAsk: forChild.workflowAsk,
+        remote: forChild.remote,
         childContinuationToken: forChild.childContinuationToken,
         childSessionInbox: forChild.childSessionInbox,
-        childResponseUrl: forChild.childResponseUrl,
-        dismissedRequestIds: [],
+        event: forChild.resolved.event,
         metadata: [],
         payloads: [],
-        retireRequestIds: [],
-        sourcePayloadIndexes: [],
-        taskId: forChild.taskId,
+        resolutions: new Map(),
       };
       const childPayloadIndex = child.payloads.length;
       child.payloads.push(forChild.payload);
-      child.dismissedRequestIds.push(...(forChild.dismissedRequestIds ?? []));
-      child.retireRequestIds.push(...forChild.retireRequestIds);
-      child.sourcePayloadIndexes.push(sourcePayloadIndex);
+      for (const resolution of forChild.resolved.resolutions) {
+        if (!child.resolutions.has(resolution.requestId)) {
+          child.resolutions.set(resolution.requestId, resolution);
+        }
+      }
       if (routed.forSelf === undefined && childIndex === 0) {
         for (const metadata of sourceDelivery.deliveryMetadata ?? []) {
           if (metadata.payloadIndex === sourcePayloadIndex) {
@@ -130,78 +166,90 @@ export async function routeProxiedDeliverStep(input: {
   }
 
   let retired = false;
+  const answered: { event: PendingInputBatchEvent; resolutions: InputResolution[] }[] = [];
   for (const child of children.values()) {
-    // A task-owned executor is addressed through its task controller. The
-    // controller forwards the answer and clears `input_required` as one
-    // durable decision, so its view cannot claim the child resumed first.
-    const taskId = child.taskId;
-    if (taskId !== undefined) {
-      const entry = getBackgroundTasks(durableSession.state).get(taskId)?.run;
-      if (entry === undefined) {
-        mergeStrandedResponses(parentPayloads, child, taskId);
-        continue;
-      }
-      const delivery = await sendTaskInboundPayload({
-        taskInboxToken: entry.address.hookToken,
-        payload: {
-          auth: sourceDelivery.auth,
-          childContinuationToken: child.childContinuationToken,
-          childSessionInbox: child.childSessionInbox,
-          childResponseUrl: child.childResponseUrl,
-          inputResponses: coalesceDeliverPayloads(child.payloads).inputResponses ?? [],
-          kind: "input-response",
-          taskId,
-        },
-      });
-      if (delivery === "unreachable") {
-        mergeStrandedResponses(parentPayloads, child, taskId);
-        continue;
-      }
-      durableSession = retireProxyInputRequests(durableSession, child.retireRequestIds);
-      retired = true;
-      continue;
-    }
-
-    if (child.answerHook !== undefined) {
+    if (child.workflowAsk !== undefined) {
       const responses = coalesceDeliverPayloads(child.payloads).inputResponses ?? [];
-      await resumeWorkflowToolRunAnswers(child.childContinuationToken, responses);
-      if (child.dismissedRequestIds.length > 0) {
-        await resumeWorkflowToolRunDismissal(child.childContinuationToken);
-      }
-      if (child.answerHook.question !== undefined) {
-        await emitQuestionResolutions({
-          dismissedRequestIds: child.dismissedRequestIds,
-          responses,
-          sessionState: durableSession.state,
-          sessionWritable: input.sessionWritable,
+      await sendWorkflowAskAnswers(
+        child.workflowAsk,
+        responses,
+        toToolInputResponseResponder(sourceDelivery.auth),
+      );
+    } else {
+      const childDelivery: DeliverHookPayload = {
+        ...sourceDelivery,
+        deliveryMetadata: child.metadata.length === 0 ? undefined : child.metadata,
+        payloads: child.payloads,
+      };
+      const remote = child.remote;
+      if (remote !== undefined) {
+        const ctx = await deserializeContext(serializedContext);
+        const headers = await resolveRemoteAgentStreamHeaders({
+          bundle: ctx.require(BundleKey),
+          name: remote.name,
+          resolverId: remote.resolverId,
+          url: remote.url,
         });
+        await respondToRemoteAgentSession({
+          remote,
+          headers,
+          auth: sourceDelivery.auth,
+          responses: coalesceDeliverPayloads(child.payloads).inputResponses ?? [],
+        });
+      } else {
+        await resumeSessionInbox(
+          child.childSessionInbox ?? child.childContinuationToken,
+          childDelivery,
+        );
       }
-      durableSession = retireProxyInputRequests(durableSession, child.retireRequestIds);
-      retired = true;
-      continue;
     }
-
-    const childDelivery: DeliverHookPayload = {
-      ...sourceDelivery,
-      deliveryMetadata: child.metadata.length === 0 ? undefined : child.metadata,
-      payloads: child.payloads,
-    };
-    await resumeSessionInbox(
-      child.childSessionInbox ?? child.childContinuationToken,
-      childDelivery,
-    );
+    answered.push({ event: child.event, resolutions: [...child.resolutions.values()] });
     // Successfully forwarded request IDs are retired so later deliveries
     // cannot route through stale entries.
-    durableSession = retireProxyInputRequests(durableSession, child.retireRequestIds);
+    durableSession = retireProxyInputRequests(durableSession, [...child.resolutions.keys()]);
     retired = true;
   }
+  const view = sessionView(storedProjection(durableSession.state), durableSession.state);
+  const resolvedEvents = [...routeAnswer(view, { children: answered }).events];
+  // Answers that leave other requests pending, and nothing for the turn itself, keep the
+  // open turn held, so it parks again as after a partial approval answer. A forwarded approval
+  // stays open until its child settles it, but it no longer waits on the person.
+  const forwarded = new Set(
+    [...children.values()].flatMap((child) =>
+      child.payloads.flatMap((payload) => (payload.inputResponses ?? []).map((r) => r.requestId)),
+    ),
+  );
+  if (
+    children.size > 0 &&
+    parentPayloads.size === 0 &&
+    parentAction === undefined &&
+    [...getProxyInputRequests(durableSession.state).keys()].some((id) => !forwarded.has(id))
+  ) {
+    resolvedEvents.push(...hold(view, { on: "input" }).events);
+  }
 
-  const context = {
-    serializedContext: input.serializedContext ?? {},
+  let published: PublishedSessionEvents = {
+    serializedContext,
     sessionState: retired
       ? replaceDurableSessionSnapshot({ session: durableSession, state: input.sessionState })
       : input.sessionState,
   };
+  if (answerMessages.length > 0) {
+    // Like a steering message, the answer joins the open turn, so the turn's
+    // later events carry its delivery ids too.
+    published = await publishSessionEvents(
+      {
+        serializedContext: joinTurnDeliveryIds(published.serializedContext, answerDeliveryIds),
+        sessionState: published.sessionState,
+        sessionWritable: input.sessionWritable,
+      },
+      answerMessages,
+    );
+  }
+  const context = await relaySessionEvents(
+    { ...published, sessionWritable: input.sessionWritable },
+    resolvedEvents,
+  );
   if (parentAction !== undefined) return { ...context, ...parentAction };
   const orderedParentPayloads = [...parentPayloads].sort(([a], [b]) => a - b);
   const parentMetadata = orderedParentPayloads.flatMap(([sourcePayloadIndex], payloadIndex) =>
@@ -220,63 +268,110 @@ export async function routeProxiedDeliverStep(input: {
   return { ...context, kind: "continue", remainder };
 }
 
-// A `ctx.ask()` question is resolved by its workflow, not the harness, so the
-// parent announces the resolution. A blocking run starts from the pending
-// coordination batch, which carries the coordinates of its request.
-async function emitQuestionResolutions(input: {
-  readonly dismissedRequestIds: readonly string[];
-  readonly responses: readonly InputResponse[];
-  readonly sessionState: Parameters<typeof getPendingCoordinationBatch>[0];
-  readonly sessionWritable: WritableStream<Uint8Array>;
-}): Promise<void> {
-  const event = getPendingCoordinationBatch(input.sessionState)?.event;
-  if (event === undefined) return;
-  const resolutions: InputResolution[] = [
-    ...input.responses.map((response) => ({
-      kind: "question" as const,
-      outcome: "answered" as const,
-      requestId: response.requestId,
-      response,
-    })),
-    ...input.dismissedRequestIds.map((requestId) => ({
-      kind: "question" as const,
-      outcome: "ignored" as const,
-      requestId,
-    })),
-  ];
-  if (resolutions.length === 0) return;
-  const writer = input.sessionWritable.getWriter();
-  try {
-    await writer.write(
-      encodeMessageStreamEvent(
-        stampMessageStreamEvent(createInputResolvedEvent({ resolutions, ...event })),
-      ),
-    );
-  } finally {
-    writer.releaseLock();
-  }
+function joinTurnDeliveryIds(
+  serializedContext: Record<string, unknown>,
+  deliveryIds: readonly string[],
+): Record<string, unknown> {
+  if (deliveryIds.length === 0) return serializedContext;
+  const current =
+    (serializedContext[TurnDeliveryIdsKey.name] as readonly string[] | undefined) ?? [];
+  return {
+    ...serializedContext,
+    [TurnDeliveryIdsKey.name]: [...new Set([...current, ...deliveryIds])],
+  };
 }
 
-// Answers to a task that finished mid-flight rejoin the parent-local
-// remainder, where the model sees them as stale rather than silently
-// vanishing.
-function mergeStrandedResponses(
-  parentPayloads: Map<number, DeliverPayload>,
-  child: ChildBucket,
-  taskId: string,
-): void {
-  for (const [childPayloadIndex, payload] of child.payloads.entries()) {
-    const sourcePayloadIndex = child.sourcePayloadIndexes[childPayloadIndex];
-    if (sourcePayloadIndex === undefined) continue;
-    const strandedResponses: InputResponse[] = (payload.inputResponses ?? []).map((response) => ({
-      ...response,
-      requestId: createTaskInputRequestId(taskId, response.requestId),
-    }));
-    if (strandedResponses.length === 0) continue;
-    const forSelf = parentPayloads.get(sourcePayloadIndex);
-    parentPayloads.set(sourcePayloadIndex, {
-      ...forSelf,
-      inputResponses: [...(forSelf?.inputResponses ?? []), ...strandedResponses],
+/**
+ * Maps a delivery's channel-specific answers to the requests a held turn waits
+ * on, so the turn can tell they answer it. Returns the mapped delivery, or
+ * `undefined` when the channel maps none of them to one of `requestIds`.
+ */
+export async function mapHeldInputResponsesStep(
+  input: SessionStepState & {
+    readonly delivery: DeliverHookPayload;
+    readonly requestIds: readonly string[];
+  },
+): Promise<WithSessionStateDelta<{ readonly delivery: DeliverHookPayload | undefined }>> {
+  "use step";
+  return await withSessionStateDelta(input, async () => {
+    const requestIds = new Set(input.requestIds);
+    const mapped = await deliverChannelInputResponses({
+      ...input,
+      routable: (response) => requestIds.has(response.requestId),
     });
+    return mapped.delivery === input.delivery
+      ? { delivery: undefined }
+      : { delivery: mapped.delivery, serializedContext: mapped.serializedContext };
+  });
+}
+
+/**
+ * Maps each input response this session cannot route as sent through the
+ * channel's `deliver` hook, and routes what it maps to a `routable` request.
+ * Telegram buttons, for example, carry compact callback ids that only its hook
+ * resolves against channel state. Every other response stays as sent for the
+ * turn's own `deliver` call.
+ */
+async function deliverChannelInputResponses(
+  input: SessionStepState & {
+    readonly delivery: DeliverHookPayload;
+    readonly routable: (response: InputResponse) => boolean;
+  },
+): Promise<{
+  readonly delivery: DeliverHookPayload;
+  readonly serializedContext: Record<string, unknown>;
+}> {
+  const { routable } = input;
+  const unrouted = input.delivery.payloads.some(
+    (payload) => payload.inputResponses?.some((response) => !routable(response)) === true,
+  );
+  if (!unrouted) return input;
+  const ctx = await deserializeContext(input.serializedContext);
+  const adapter = ctx.require(ChannelKey);
+  if (adapter.deliver === undefined) return input;
+
+  // The hook sees this delivery's caller, as it does in the turn.
+  if (input.delivery.auth !== undefined) ctx.set(AuthKey, input.delivery.auth ?? null);
+  // Each hook call edits its own copy of channel state, kept only when it maps
+  // to a routable request; a response put back as sent must stay resolvable.
+  let state = adapter.state ?? {};
+  let mapped = false;
+  const payloads: DeliverPayload[] = [];
+  for (const payload of input.delivery.payloads) {
+    if (payload.inputResponses === undefined) {
+      payloads.push(payload);
+      continue;
+    }
+    const responses: InputResponse[] = [];
+    for (const response of payload.inputResponses) {
+      if (routable(response)) {
+        responses.push(response);
+        continue;
+      }
+      const adapterCtx = buildAdapterContext({ ...adapter, state: structuredClone(state) }, ctx);
+      const result = await adapter.deliver(
+        { ...payload, inputResponses: [response], message: undefined },
+        adapterCtx,
+      );
+      const routed = result?.inputResponses?.filter(routable) ?? [];
+      if (routed.length === 0) {
+        responses.push(response);
+        continue;
+      }
+      mapped = true;
+      state = adapterCtx.state;
+      responses.push(...routed);
+    }
+    payloads.push({ ...payload, inputResponses: responses });
   }
+  if (!mapped) return input;
+
+  // Only the channel state the mapping consumed carries over; the turn applies
+  // the rest of this delivery, such as its caller, itself.
+  const session = await deserializeContext(input.serializedContext);
+  setChannelContext(session, { ...adapter, state });
+  return {
+    delivery: { ...input.delivery, payloads },
+    serializedContext: serializeContext(session),
+  };
 }

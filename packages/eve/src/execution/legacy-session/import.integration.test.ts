@@ -2,11 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { legacySessionDriverWorkflow } from "#internal/testing/legacy-session-driver-workflow.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
-import { waitForParkedTurnStep } from "#internal/testing/session-test-helpers.js";
+import {
+  readTurnStepStates,
+  waitForParkedTurnStep,
+} from "#internal/testing/session-test-helpers.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
-import { hydrateStepReturnValue } from "#compiled/@workflow/core/serialization.js";
-import type { DurableStepResult } from "#execution/session/turn-step-types.js";
-import { getWorld, getHookByToken, start } from "#internal/workflow/runtime.js";
+import { getHookByToken, start } from "#internal/workflow/runtime.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { resumeSessionInbox, resolveSessionInbox } from "#execution/session-inbox/resume.js";
@@ -37,6 +38,7 @@ describe("legacy session import", () => {
               serializedContext: {
                 "eve.auth": null,
                 "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
+                "eve.stateLayout": 1,
                 "eve.channel": { kind: "http", state: {} },
               },
             },
@@ -76,31 +78,18 @@ describe("legacy session import", () => {
             ).toBe(owner.runId);
             await vi.waitFor(
               async () => {
-                const steps = await (
-                  await getWorld()
-                ).steps.list({
-                  runId: owner.runId,
-                  resolveData: "all",
-                  pagination: { limit: 1000 },
-                });
-                const checkpoints: DurableStepResult[] = [];
-                for (const step of steps.data) {
-                  if (step.stepName.endsWith("//turnStep") && step.output !== undefined) {
-                    checkpoints.push(
-                      await hydrateStepReturnValue(step.output, owner.runId, undefined),
-                    );
-                  }
-                }
+                const checkpoints = await readTurnStepStates(owner.runId);
                 const saved = checkpoints.find((result) =>
-                  result.sessionState.snapshot.session.history.some(
+                  result.history.some(
                     (message) =>
                       message.role === "user" &&
                       JSON.stringify(message.content).includes("Bob asks for the next update."),
                   ),
-                )?.sessionState.snapshot.session;
+                );
                 expect(saved).toBeDefined();
-                expect(saved!.agent.system).not.toBe("previous deployment");
-                expect(saved!.state?.["app.color"]).toBe("blue");
+                const session = saved!.sessionState.snapshot.session;
+                expect(session.agent.system).not.toBe("previous deployment");
+                expect(session.state?.["app.color"]).toBe("blue");
                 expect(
                   saved!.history.filter(
                     (message) =>
@@ -262,6 +251,7 @@ function legacyContext() {
   return {
     "eve.auth": null,
     "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
+    "eve.stateLayout": 1,
     "eve.channel": { kind: "http", state: {} },
   };
 }

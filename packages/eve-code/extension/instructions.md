@@ -49,19 +49,9 @@ Required steps, in order:
 
 # Repository work
 
-GitHub credentials are not available to ordinary `bash`. Use the `gh` tool for every authenticated GitHub operation. The full `gh` CLI surface is available. Declare exactly one repository in the configured organization with write-capable access. Authenticated commands run without an approval prompt; describe the intended GitHub-side result accurately in `description`. Connect mints the real token for only the declared repository. The sandbox process receives only a placeholder `GH_TOKEN`, and the firewall exchanges it on matching GitHub requests. GitHub rejects access outside the token's server-side repository scope. Never put credentials in URLs or commands. If access is denied, report it plainly and stop.
-
-Pass commands as simple argv with ordinary quoting. Do not use environment assignments, pipes, redirects, substitutions, or other shell syntax. Commands without an explicit repository may use normal `gh` context, but their token remains scoped to the declared repository. An explicit `-R`, `--repo`, `--repo=`, or repository argument to `gh repo clone`, `view`, or `fork` must match the declaration.
-
-Determine the repositories needed to complete the task through source discovery and investigation, even when the requester does not name them. Do not ask the requester to enumerate repositories that can be discovered, and never default to the current agent's repository. The agent may select additional repositories as the work reveals them. Each authenticated command declares exactly one target repository and mints a credential lease for that repository at the moment it is needed, so cross-repository work uses separate scoped commands and leases.
-
-Clone with `gh repo clone owner/name`. Use authenticated `git fetch`, `git pull`, `git push`, and `git ls-remote` through the `gh` tool too. Local `git status`, `diff`, `add`, `commit`, and `rebase` remain ordinary `bash` commands because they need no GitHub credential. Immediately after entering a checkout and before planning or editing, read its root `AGENTS.md`; use root `CLAUDE.md` only when `AGENTS.md` is absent. Before touching any path, read the nearest nested `AGENTS.md`, falling back to `CLAUDE.md` only when that directory has no `AGENTS.md`.
+Immediately after entering a checkout and before planning or editing, read its root `AGENTS.md`; use root `CLAUDE.md` only when `AGENTS.md` is absent. Before touching any path, read the nearest nested `AGENTS.md`, falling back to `CLAUDE.md` only when that directory has no `AGENTS.md`.
 
 Do not rebase before work by default. Rebase only when the requester explicitly asks for it or when an explicitly requested publication or delivery outcome requires a current base. Inspect the worktree first and preserve pre-existing changes.
-
-Use GitHub CLI commands through the `gh` tool for issues, pull requests, reviews, Actions, CI, authentication status, configuration, aliases, extensions, and API requests. Common commands include `gh pr create --draft`, `gh pr checks`, `gh run rerun --failed`, and `gh pr review`, but they are not restrictions.
-
-Repositories that require verified signatures reject ordinary sandbox commits. Stage the intended changes explicitly, run `gh-signed-commit --repo owner/name --branch <branch> -m <headline>` through the `gh` tool, then create the draft pull request through the same tool.
 
 Use apply_patch for authored edits. Formatters and generators may write their own output. Never rewrite files through shell or Python when a focused patch is sufficient. Write small hunks against current file contents. If a hunk misses, re-read that file and rewrite only the failed hunk.
 
@@ -72,8 +62,6 @@ Assume pre-existing modifications belong to the requester. Preserve unrelated ch
 Make the smallest coherent change. Run focused validation first, then broader checks in proportion to the blast radius. Treat failures as evidence.
 
 Be mindful of loading large files into your context window.
-
-Load the pr skill before publishing. Create one pull request per request unless the requester asks otherwise.
 
 ## Destructive actions
 

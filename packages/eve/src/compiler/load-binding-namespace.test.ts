@@ -48,6 +48,7 @@ describe("compiled binding namespace loader", () => {
       },
     };
     const loadNamespace = createCompiledBindingNamespaceLoader({
+      appRoot: undefined,
       bindings,
       registries: [registry],
     });
@@ -85,6 +86,7 @@ describe("compiled binding namespace loader", () => {
       owner: { feature: "test", kind: "framework" },
     });
     const loadNamespace = createCompiledBindingNamespaceLoader({
+      appRoot: undefined,
       bindings: { first: programmatic("second"), second: programmatic("first") },
       registries: [registry],
     });

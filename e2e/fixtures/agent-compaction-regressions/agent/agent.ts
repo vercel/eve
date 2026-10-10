@@ -16,9 +16,16 @@ import { assistantHasReport } from "../report-evidence";
 import { HANDOFF_REFERENCE, REVIEW_REFERENCE } from "../release-reports";
 
 const TEST_CONTEXT_WINDOW_TOKENS = 32_000;
-// The compiled fixture's instructions and 11 advertised tools occupy ~2,371
-// tokens. Reserve them in addition to the summarizer's history budget.
-const TEST_REQUEST_ENVELOPE_TOKENS = 2_371;
+// eve estimates this fixture's request envelope (instructions, task system
+// block, and 10 advertised tools; with nothing deferred and no skills or
+// connections, the agent has no catalog tools) at 2,273
+// tokens. This allowance sits 230.25 tokens below that estimate, the offset the
+// cases have always run with, so the threshold leaves them a ~670-token history
+// budget. When eve's fixed instructions or tools change, re-measure: log what
+// `estimateRequestEnvelope` (packages/eve/src/harness/request-envelope.ts)
+// returns while `EVE_E2E_MODEL=mock pnpm exec eve eval --strict
+// content-output-file-stub` runs in this fixture, subtract 230.25, and round up.
+const TEST_REQUEST_ENVELOPE_TOKENS = 2_043;
 // Fit the capped file-output exchange, while forcing the larger review and
 // handoff reports into the assistant checkpoint consumed by the script.
 const TEST_HISTORY_BUDGET_TOKENS = 900;
@@ -101,7 +108,9 @@ const taskModel = mockModel({
         const diagnostics = [
           toolText.includes(CONTENT_OUTPUT_TAIL_MARKER) ? "TAIL_PRESERVED" : "TAIL_LOST",
           toolText.includes(CONTENT_OUTPUT_LEAD_MARKER) ? "LEAD_PRESERVED" : "LEAD_LOST",
-          toolText.includes(`Attached file ${CONTENT_OUTPUT_FILENAME}`)
+          // The stub names the file's sandbox path, which ends in its filename.
+          toolText.includes("Attached file ") &&
+          toolText.includes(`${CONTENT_OUTPUT_FILENAME} (application/octet-stream)`)
             ? "FILE_STUB_RENDERED"
             : "FILE_STUB_LOST",
           request.userMessages.some((text) => text.includes("[case: content-output-file-stub]"))

@@ -52,7 +52,7 @@ Run evals from the fixture directory:
 
 ```sh
 cd e2e/fixtures/agent-basic-runtime
-EVE_E2E_MODEL="openai/gpt-6-sol" pnpm exec eve eval --strict
+EVE_E2E_MODEL="openai/gpt-6.1-sol" pnpm exec eve eval --strict
 ```
 
 Mock-model runs work anywhere with no provider credentials, which makes them
@@ -94,10 +94,10 @@ One-time project setup:
 - Provide `VERCEL_TOKEN`, `VERCEL_ORG_ID`, and `VERCEL_PROJECT_ID` in CI.
 
 The repository does not install the Vercel CLI. Locally, any global `vercel`
-install works. CI installs the latest native binary:
+install works. CI installs it with pnpm:
 
 ```sh
-npm install --global --force --allow-scripts=@vercel/vc-native @vercel/vc-native
+pnpm add --global vercel@latest
 ```
 
 Run a fixture against Vercel from its directory:
@@ -135,8 +135,8 @@ evals as a second `eve eval` invocation after the main suite. Without the
 alias env (local matrix, plain `eve eval --strict`) the eval skips.
 
 Most fixture agents resolve `EVE_E2E_MODEL`
-through `@eve-e2e/config`, defaulting to `openai/gpt-6-sol` for local runs.
-Fixture eval configs use the shared `e2eJudgeModel()` helper, which returns an OpenAI evaluation-model instance for `openai/gpt-5.6-luna` until CI has access to Jev. The adapter uses Gateway's Responses endpoint and `AI_GATEWAY_API_KEY`, independently of the agent matrix. A bare Luna string targets Gateway's native evaluation API and is not supported. Deterministic judge coverage in `agent-evaluate` passes a fixture evaluation model explicitly.
+through `@eve-e2e/config`, defaulting to `openai/gpt-6.1-sol` for local runs.
+Fixture eval configs use the shared `e2eJudgeModel()` helper, which returns an OpenAI decision-model instance for `openai/gpt-5.6-luna` until CI has access to Jev. The adapter uses Gateway's Responses endpoint and `AI_GATEWAY_API_KEY`, independently of the agent matrix. A bare Luna string targets Gateway's native decision API and is not supported. Deterministic judge coverage in `agent-decide` passes a fixture decision model explicitly.
 
 `agent-workflow-stress` uses eve's `mockModel` fixture helper so its 100-turn
 runs stay fast and deterministic. Its concurrent and sequential evals cover
@@ -152,6 +152,27 @@ fixture contains source-generation and repair examples using `eve eval`. It
 checks generated tools through real calls in fresh sessions and restores source
 after retiring the parent and child sessions. Routing-only self-modification
 coverage stays in `agent-subagents`.
+
+`agent-tasks` is the real-model gate for how models plan around tasks: waiting
+for a needed result, fanning out, keeping or correcting tasks after a new
+message, and ordering a side effect after the result it depends on. Every eval
+in it is tagged `real-model`. Deterministic task coverage lives with the
+surfaces it exercises, in `agent-workflow-tools` and `agent-subagents`.
+
+`agent-deferred-tools` owns the catalog: about 40 deferred tools (20 of them
+under the `ledger` namespace), agents, skills, and a connection, reached only
+through `search` and `execute`. Its mock-model evals cover dispatch through
+`execute`; its `real-model` evals gate prompt-cache reuse after discovery and
+that web questions go to `web_search`.
+
+`agent-tool-discovery` is the real-model gate for how models use the catalog
+tools: a catalog of 70 deferred tools (60 in the `sre`, `d0`, `index`, and
+`support` namespaces), a deferred skill, and a deferred agent, with no
+connections, beside the default `web_search` and `bash`. Its evals check that
+models find deferred tools with `eve__search` and run them with `eve__tool`,
+send web and shell requests to `web_search` and `bash` instead, and leave the
+catalog alone for questions they can answer themselves. Every eval in it is
+tagged `real-model`.
 
 E2E fixtures live under `e2e/fixtures/*`. Fixture discovery also accepts
 `apps/fixtures/*` apps with an `evals/` directory, but shared development apps

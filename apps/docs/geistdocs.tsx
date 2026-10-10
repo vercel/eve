@@ -1,9 +1,9 @@
-import { LogoEve } from "@vercel/geistdocs/assets/logos/logo-eve";
-import type { GeistdocsGithubConfig } from "@vercel/geistdocs/config";
+import { LogoEveSvg } from "@vercel/geistdocs/assets/logos/logo-eve-svg";
+import type { GeistdocsEveAgentConfig, GeistdocsGithubConfig } from "@vercel/geistdocs/config";
 
 export { translations } from "@/lib/geistdocs/languages";
 
-export const Logo = () => <LogoEve />;
+export const Logo = () => <LogoEveSvg aria-label="eve" height={18} role="img" />;
 
 export const github: GeistdocsGithubConfig = {
   owner: "vercel",
@@ -77,7 +77,9 @@ export const prompt =
 // The deployment keeps the framework's pre-rename "ash" domain.
 export const eveAgent = {
   url: "https://help-ash.vercel.sh",
-};
+  // Starts the eve session when Ask AI loads. Needs GEISTDOCS_CHAT_SECRET.
+  prewarm: true,
+} satisfies GeistdocsEveAgentConfig;
 
 export const basePath: string | undefined = undefined;
 

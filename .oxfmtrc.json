@@ -2,7 +2,9 @@
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
   "ignorePatterns": [
     "packages/eve/CHANGELOG.md",
+    "packages/eve/src/internal/testing/channel-conformance/MATRIX.md",
     "apps/docs/registry.json",
-    "packages/eve/src/setup/scaffold/create/web-template.ts"
+    "packages/eve/src/setup/scaffold/create/web-template.ts",
+    "e2e/fixtures/agent-mcp/agent/skills/kennel-handbook/references/latin1.md"
   ]
 }

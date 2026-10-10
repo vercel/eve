@@ -2,6 +2,7 @@ import { runUntilAborted } from "#evals/abort.js";
 import type { Client } from "#client/client.js";
 import type { MessageStreamEvent, RuntimeIdentity } from "#protocol/message.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { addTokenUsage, type TokenUsage } from "#shared/token-usage.js";
 import type {
   AssertionResult,
   EveEval,
@@ -16,7 +17,7 @@ import { createEmptyDerivedFacts } from "#evals/runner/derive-run-facts.js";
 import { EvalSessionManager } from "#evals/session-manager.js";
 import type { EvalSessionStartedEvent } from "#evals/session.js";
 import { createEvalContext } from "#evals/context.js";
-import { scopeEvalTargetHandle } from "#evals/target.js";
+import { scopeEvalTargetHandle, targetTools } from "#evals/target.js";
 import { AssertionCollector } from "#evals/assertions/collector.js";
 import { EvalRequirementFailed, EvalSkipped } from "#evals/control-flow.js";
 
@@ -58,7 +59,7 @@ interface ExecuteTaskResult {
 export async function executeTask(options: ExecuteTaskOptions): Promise<ExecuteTaskResult> {
   const { client, evaluation, target, timeoutMs } = options;
   const signal = timeoutMs !== undefined ? AbortSignal.timeout(timeoutMs) : neverAbortSignal();
-  const collector = new AssertionCollector();
+  const collector = new AssertionCollector(targetTools(target));
   const manager = new EvalSessionManager({
     client,
     collector,
@@ -87,6 +88,7 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<ExecuteT
   let skipReason: string | undefined;
   try {
     await runUntilAborted(evaluation.test(context), signal);
+    await runUntilAborted(manager.verifyStubs(), signal);
   } catch (err) {
     if (err instanceof EvalSkipped) {
       skipReason = err.reason;
@@ -157,6 +159,7 @@ function combineDerivedFacts(sessions: readonly EveEvalSessionResult[]): EveEval
   if (sessions.length === 0) return createEmptyDerivedFacts();
 
   const toolCalls = sessions.flatMap((session) => session.derived.toolCalls);
+  const skillLoads = sessions.flatMap((session) => session.derived.skillLoads);
   const subagentCalls = sessions.flatMap((session) => session.derived.subagentCalls);
   const inputRequests = sessions.flatMap((session) => session.derived.inputRequests);
   const failureCode = sessions.find((session) => session.derived.failureCode !== undefined)?.derived
@@ -165,14 +168,38 @@ function combineDerivedFacts(sessions: readonly EveEvalSessionResult[]): EveEval
   return {
     toolCalls,
     toolCallCount: toolCalls.length,
+    skillLoads,
     subagentCalls,
     subagentCallCount: subagentCalls.length,
     inputRequests,
     parked: sessions.some((session) => session.derived.parked),
     messageCount: sum(sessions, (session) => session.derived.messageCount),
     reasoningBlockCount: sum(sessions, (session) => session.derived.reasoningBlockCount),
+    models: [...new Set(sessions.flatMap((session) => session.derived.models))],
+    usage: evalUsage(sessions),
     failureCode,
   };
+}
+
+/**
+ * The eval's usage: each captured session's latest usage, counted once however often the eval
+ * captured it, less the sessions another captured session opened, whose spend that session already
+ * counts. No usage when a counted session reported none.
+ */
+function evalUsage(sessions: readonly EveEvalSessionResult[]): TokenUsage | undefined {
+  const opened = new Set(
+    sessions.flatMap((session) =>
+      session.events.flatMap((event) =>
+        event.type === "agent.started" ? [event.data.sessionId] : [],
+      ),
+    ),
+  );
+  const latestById = new Map(sessions.map((session) => [session.sessionId, session.derived.usage]));
+  const counted = [...latestById].flatMap(([id, usage]) =>
+    id !== undefined && opened.has(id) ? [] : [usage],
+  );
+  if (!counted.every((usage): usage is TokenUsage => usage !== undefined)) return undefined;
+  return counted.reduce(addTokenUsage);
 }
 
 function selectPrimarySessionId(sessions: readonly EveEvalSessionResult[]): string | undefined {

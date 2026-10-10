@@ -1,3 +1,4 @@
+import { captureLogRecords } from "#internal/testing/log-records.js";
 import { readFile } from "node:fs/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -10,10 +11,10 @@ import { EvalSessionManager } from "#evals/session-manager.js";
 import { createEvalTargetHandle } from "#evals/target.js";
 import { stampTestEvents } from "#internal/testing/events.js";
 
-const mocks = vi.hoisted(() => ({ evaluate: vi.fn() }));
+const mocks = vi.hoisted(() => ({ decide: vi.fn() }));
 
 vi.mock("node:fs/promises", () => ({ readFile: vi.fn() }));
-vi.mock("#ai/evaluate.js", () => ({ evaluate: mocks.evaluate }));
+vi.mock("#ai/decide.js", () => ({ decide: mocks.decide }));
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -38,7 +39,7 @@ describe("eval judge input", () => {
       }
 
       context.judge("answers the user's request");
-      expect(mocks.evaluate).toHaveBeenCalledWith(
+      expect(mocks.decide).toHaveBeenCalledWith(
         expect.objectContaining({
           state: expect.objectContaining({ input: "Find Bob's order status instead." }),
         }),
@@ -53,7 +54,7 @@ describe("eval judge input", () => {
     await session.sendFile("Summarize Alice's invoice.", "/invoice.txt", "text/plain");
     context.judge("summarizes the invoice");
 
-    expect(mocks.evaluate).toHaveBeenCalledWith(
+    expect(mocks.decide).toHaveBeenCalledWith(
       expect.objectContaining({
         state: expect.objectContaining({ input: "Summarize Alice's invoice." }),
       }),
@@ -74,7 +75,7 @@ describe("eval judge input", () => {
       { type: "text", text: "List the line items." },
     ]);
     context.judge("lists the line items");
-    expect(mocks.evaluate).toHaveBeenLastCalledWith(
+    expect(mocks.decide).toHaveBeenLastCalledWith(
       expect.objectContaining({
         state: expect.objectContaining({ input: "Review Alice's invoice.\nList the line items." }),
       }),
@@ -82,14 +83,44 @@ describe("eval judge input", () => {
 
     await session.send([file]);
     context.judge("describes the attachment");
-    expect(mocks.evaluate).toHaveBeenLastCalledWith(
+    expect(mocks.decide).toHaveBeenLastCalledWith(
       expect.objectContaining({ state: expect.objectContaining({ input: "" }) }),
     );
   });
 });
 
+describe("eval session compact", () => {
+  it("returns the compaction events through session.waiting", async () => {
+    const { session } = await setup();
+    await session.send("Plan Alice's trip.");
+    const compact = vi
+      .spyOn(ClientSession.prototype, "compact")
+      .mockResolvedValue({ sessionId: "session_1", status: "accepted" });
+    vi.mocked(ClientSession.prototype.stream).mockImplementation(compactionEvents);
+
+    const compacted = await session.compact();
+
+    expect(compact).toHaveBeenCalledOnce();
+    expect(compacted.events.map((event) => event.type)).toEqual([
+      "compaction.requested",
+      "compaction.completed",
+      "session.waiting",
+    ]);
+  });
+
+  it("throws instead of waiting when the session is no longer active", async () => {
+    const { session } = await setup();
+    vi.spyOn(ClientSession.prototype, "compact").mockResolvedValue({
+      status: "no_active_session",
+    });
+
+    await expect(session.compact()).rejects.toThrow(/no active session/);
+    expect(ClientSession.prototype.stream).not.toHaveBeenCalled();
+  });
+});
+
 async function setup() {
-  mocks.evaluate.mockResolvedValue({
+  mocks.decide.mockResolvedValue({
     answers: { judgment: { type: "boolean", probability: 1 } },
     response: { modelId: "test" },
   });
@@ -126,6 +157,24 @@ function response() {
   });
 }
 
+async function* compactionEvents() {
+  const compaction = {
+    modelId: "test",
+    sequence: 2,
+    sessionId: "session_1",
+    stepIndex: 0,
+    turnId: "turn_1",
+  };
+  yield* stampTestEvents([
+    { type: "compaction.requested", data: { ...compaction, usageInputTokens: 100 } },
+    { type: "compaction.completed", data: compaction },
+    {
+      type: "session.waiting",
+      data: { continuationToken: "session_1", wait: "next-user-message" },
+    },
+  ]);
+}
+
 async function* events() {
   yield* stampTestEvents([
     {
@@ -138,3 +187,25 @@ async function* events() {
     },
   ]);
 }
+
+it("warns about unused stubs without failing verification", async () => {
+  const { records } = captureLogRecords();
+  const client = new Client({ host: "https://eve.test" });
+  vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(Response.json({ sessionId: "session_1" }, { status: 202 }))
+    .mockResolvedValueOnce(Response.json({ error: null, matchedRuleIds: ["used"] }));
+  const manager = new EvalSessionManager({ client });
+  await manager.session({
+    stubs: [
+      { id: "used", tool: "dynamic_tool", outcome: { response: true } },
+      { id: "unused", tool: "connection__operation", outcome: { response: true } },
+    ],
+  });
+  await expect(manager.verifyStubs()).resolves.toBeUndefined();
+  expect(records).toContainEqual(
+    expect.objectContaining({
+      level: "warn",
+      message: "Tool stubs did not match any calls: unused.",
+    }),
+  );
+});

@@ -4,11 +4,9 @@
  * `#runtime/sessions/runtime-context-keys.ts`.
  */
 
-import { TASK_DELIVERY_POLICY_CONTEXT_KEY_NAME } from "#context/key-names.js";
 import type { LanguageModel, ModelMessage, SystemModelMessage } from "ai";
 
 import type {
-  ActivityObserverConfig,
   ChannelDeliveryMetadata,
   ChannelInstrumentationProjection,
   SessionAuthContext,
@@ -16,29 +14,38 @@ import type {
   SessionCapabilities,
   SessionParent,
   SessionTraceContext,
+  SessionTraceRoot,
   SessionTurn,
-  TaskDeliveryPolicy,
 } from "#channel/types.js";
 import { ContextKey } from "#context/key.js";
+import { STUB_CONTEXT_KEY, type StubScope } from "#tool-stubs/types.js";
 import {
   SESSION_INBOX_CONTEXT_KEY,
   type SessionInboxAddress,
 } from "#execution/session-inbox/address.js";
 import { SESSION_CALLBACK_CONTEXT_KEY_NAME } from "#context/key-names.js";
+import type { LegacyRemoteAgentCaller } from "#execution/legacy-remote-agent/protocol.js";
 import type { InstrumentationChannelDeliveryRef } from "#instrumentation/lifecycle.js";
 import type { UserModelMessage } from "#harness/messages.js";
 import type { HandleEventFn } from "#harness/types.js";
 import type { PersistedDynamicToolMetadata } from "#context/dynamic-tool-metadata.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
-import type { SandboxAccess } from "#sandbox/state.js";
+import type { SandboxAccess, SandboxSessionEndReason } from "#sandbox/state.js";
 import type { HistoryViewProjector } from "#shared/history-view.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
 import type { MemoryScope, MemoryTurnContext } from "#public/memory/index.js";
+import type { SessionPredecessor } from "#protocol/message.js";
 
 // Re-export so consumers don't need a direct channel/ import.
-export type { SessionAuthContext, SessionParent, SessionTurn } from "#channel/types.js";
+export type {
+  SessionAuthContext,
+  SessionParent,
+  SessionTraceRoot,
+  SessionTurn,
+} from "#channel/types.js";
+export type { SessionPredecessor } from "#protocol/message.js";
 
 // ---------------------------------------------------------------------------
 // Session types (public API surface)
@@ -66,6 +73,7 @@ export interface SessionAuth {
 export interface Session {
   readonly auth: SessionAuth;
   readonly parent?: SessionParent;
+  readonly predecessor?: SessionPredecessor;
   readonly sessionId: string;
   readonly turn: SessionTurn;
 }
@@ -75,6 +83,7 @@ export interface Session {
 // ---------------------------------------------------------------------------
 
 export const AuthKey = new ContextKey<SessionAuthContext | null>("eve.auth");
+export const ToolStubsKey = new ContextKey<StubScope>(STUB_CONTEXT_KEY);
 export const InitiatorAuthKey = new ContextKey<SessionAuthContext | null>("eve.initiatorAuth");
 export const SessionIdKey = new ContextKey<string>("eve.sessionId");
 export const ConversationIdKey = new ContextKey<string>("eve.conversationId");
@@ -97,29 +106,23 @@ export interface LocalDevRequestProvenance {
 export const LocalDevRequestKey = new ContextKey<LocalDevRequestProvenance>(
   "eve.internal.localDevRequest",
 );
+export const OccurrenceIdKey = new ContextKey<string>("eve.scheduleOccurrenceId");
 /** Authored schedule whose dispatch created this session. */
 export const ScheduleIdKey = new ContextKey<string>("eve.scheduleId");
+export const ScheduleInstanceKey = new ContextKey<string>("eve.scheduleInstance");
 /** Display title derived from the session's initial input. */
 export const SessionTitleKey = new ContextKey<string>("eve.sessionTitle");
 export const ChannelDeliveryKey = new ContextKey<ChannelDeliveryMetadata>("eve.channelDelivery");
 /** Accepted messages whose response owns the current turn's durable stream events. */
 export const TurnDeliveryIdsKey = new ContextKey<readonly string[]>("eve.turnDeliveryIds");
-/** Resolved task delivery policy, also read by the workflow inbox. */
-export const TaskDeliveryPolicyKey = new ContextKey<TaskDeliveryPolicy>(
-  TASK_DELIVERY_POLICY_CONTEXT_KEY_NAME,
-);
-/** Task-reporting phase for the active root turn. */
-export const TurnTaskDeliveryKey = new ContextKey<"none" | "initiating" | "pending" | "settled">(
-  "eve.turnTaskDelivery",
-);
 /** Last framework announcements recorded in the retained session history. */
 export interface HistoryState {
-  readonly availableSkills?: string;
-  readonly taskState?: string;
-  readonly deliveryInstruction?: string;
+  /** Last announced value per keyed announcement (see `#harness/announcements.js`). */
+  readonly announcements?: Readonly<Record<string, string>>;
 }
 export const HistoryStateKey = new ContextKey<HistoryState>("eve.historyState");
 export interface ActiveChannelDelivery {
+  readonly traceSessionId: string;
   readonly agentName?: string;
   readonly channelType?: string;
   readonly delivery: InstrumentationChannelDeliveryRef;
@@ -136,6 +139,10 @@ export const ChannelInstrumentationKey = new ContextKey<ChannelInstrumentationPr
   "eve.channelInstrumentation",
 );
 export const ParentSessionKey = new ContextKey<SessionParent>("eve.parentSession");
+/** Set only on a session eve started in place of one that could no longer run. */
+export const SessionPredecessorKey = new ContextKey<SessionPredecessor>("eve.sessionPredecessor");
+/** Set only when the trace root differs from `ParentSessionKey`'s root; see {@link SessionTraceRoot}. */
+export const TraceRootKey = new ContextKey<SessionTraceRoot>("eve.traceRoot");
 /** Separate from {@link ParentSessionKey} so it stays out of what extensions read. */
 export const ParentTraceContextKey = new ContextKey<SessionTraceContext>("eve.parentTraceContext");
 
@@ -149,13 +156,6 @@ export const OtelTraceEnabledKey = new ContextKey<boolean>("eve.otelTraceEnabled
  * dispatch so HITL readiness flows through a conversation chain.
  */
 export const CapabilitiesKey = new ContextKey<SessionCapabilities>("eve.capabilities");
-export const ActivityObserverKey = new ContextKey<ActivityObserverConfig>("eve.activityObserver");
-/** Originating root turn that owns the current user-visible activity artifact. */
-export const ActivityRootTurnIdKey = new ContextKey<string>("eve.activityRootTurnId");
-/** Pending HITL request identities that keep the current activity artifact open. */
-export const ActivityPendingBlockersKey = new ContextKey<readonly string[]>(
-  "eve.activityPendingBlockers",
-);
 
 /**
  * Optional framework-owned caller callback captured when the session is created.
@@ -164,12 +164,20 @@ export const SessionCallbackKey = new ContextKey<SessionCallback>(
   SESSION_CALLBACK_CONTEXT_KEY_NAME,
 );
 
+/** Present when a remote agent protocol 1 caller created the session. */
+export const LegacyRemoteAgentCallerKey = new ContextKey<LegacyRemoteAgentCaller>(
+  "eve.legacyRemoteAgentCaller",
+);
+
 // ---------------------------------------------------------------------------
 // Derived keys — reconstructed by providers each step, never serialized.
 // ---------------------------------------------------------------------------
 
 export const SessionKey = new ContextKey<Session>("eve.session");
 export const SandboxKey = new ContextKey<SandboxAccess>("eve.sandbox");
+export const SandboxTerminalCleanupKey = new ContextKey<
+  (reason: SandboxSessionEndReason) => Promise<void>
+>("eve.internal.sandboxTerminalCleanup");
 export const HandleEventKey = new ContextKey<HandleEventFn>("eve.internal.handleEvent");
 
 // ---------------------------------------------------------------------------
@@ -261,8 +269,8 @@ export interface PreparedMemoryPreamble {
 }
 
 export interface PendingMemoryCommit {
-  readonly history: readonly ModelMessage[];
-  readonly projectedMessages: readonly ModelMessage[];
+  /** Records recalled by this operation, to append after the prepared history. */
+  readonly recalledMessages: readonly ModelMessage[];
   readonly state: Readonly<Record<string, unknown>>;
 }
 
@@ -327,8 +335,10 @@ export const DynamicSubagentAgentConfigKey = new ContextKey<DynamicSubagentAgent
  */
 export interface DurableDynamicSkillMetadata {
   readonly name: string;
+  /** Listed in the catalog instead of the dynamic skill announcement. */
+  readonly deferred?: true;
   readonly description: string;
-  /** `SKILL.md` content as authored; `load_skill` strips any frontmatter. */
+  /** `SKILL.md` content as authored; loading strips any frontmatter. */
   readonly markdown: string;
   /**
    * Content hash of the package files. Present only for packages with
@@ -341,8 +351,8 @@ export type DynamicSkillManifest = Readonly<Record<string, readonly DurableDynam
 
 /**
  * Durable map from resolver slug to the qualified skills it last produced.
- * Used to diff on re-resolution, serve `load_skill`, and rebuild the
- * model-visible announcement across turns without a sandbox.
+ * Used to diff on re-resolution, load skills, and rebuild the model-visible
+ * announcement across turns without a sandbox.
  */
 export const DynamicSkillManifestKey = new ContextKey<DynamicSkillManifest>(
   "eve.dynamicSkillManifest",

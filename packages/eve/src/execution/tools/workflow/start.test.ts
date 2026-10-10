@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { startWorkflowToolRun } from "./start.js";
 import type { WorkflowToolRunInput } from "./types.js";
+import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import {
   startWorkflowOnCurrentDeployment,
   workflowToolRunWorkflowReference,
@@ -13,8 +14,9 @@ vi.mock("#execution/workflow-runtime.js", () => ({
 }));
 
 const input: Omit<WorkflowToolRunInput, "hookToken"> = {
-  agents: { reviewer: { description: "Review deployments." } },
+  agentContext: {} as AgentSessionContext,
   callId: "call-1",
+  entry: { entryPoint: "execute" },
   input: { service: "api" },
   owner: { inbox: "owner-inbox" },
   session: {

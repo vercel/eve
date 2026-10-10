@@ -87,16 +87,18 @@ export {
   type BrokeredCredentialOptions,
 } from "./credentials.ts";
 
+/** @deprecated Import from `eve/computer-use/sandbox` and mount `eve/computer-use`. */
 export {
   COMPUTER_USE_REVALIDATION_KEY,
   installComputerUse,
   startComputerUse,
-} from "./computer-use-sandbox.ts";
+} from "eve/computer-use/sandbox";
 
+/** @deprecated Import from `eve/extensions/git/sandbox`. */
 export {
   executeGitHubShell,
   githubShellApproval,
   type GitHubLeaseRule,
   type GitHubShellInput,
   type GitHubShellOutput,
-} from "./github-shell.ts";
+} from "eve/extensions/git/sandbox";

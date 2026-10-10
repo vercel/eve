@@ -1,11 +1,13 @@
-import type { Experimental_EvaluationModel as EvaluationModel } from "ai";
+import type { TokenUsage } from "#shared/token-usage.js";
+import type { Experimental_DecisionModel as DecisionModel } from "ai";
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
+import type { ClientAgentSession } from "#client/agent-session.js";
 import type {
   RuntimeIdentity,
   RuntimeTraceContext,
   MessageStreamEvent,
-  SubagentCalledStreamEvent,
+  AgentStartedStreamEvent,
 } from "#protocol/message.js";
 import type {
   CancelSessionResult,
@@ -13,11 +15,9 @@ import type {
   CreateSessionOptions,
   SendTurnInput,
   SendTurnOptions,
-  StreamOptions,
 } from "#client/types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
-import type { TaskStatus } from "#tasks/types.js";
 import type { AgentModelOptionsDefinition } from "#shared/agent-definition.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 import type {
@@ -51,22 +51,39 @@ export interface EveEvalToolCall {
 }
 
 /**
- * One subagent delegation extracted from the captured stream
- * (`subagent.called` / `subagent.started`, joined with `subagent.completed`).
+ * One skill load extracted from the captured stream, pairing the `load-skill`
+ * request with its matching `load-skill-result`.
+ */
+export interface EveEvalSkillLoad {
+  /** The loaded skill's name. */
+  readonly skill: string;
+  /** The skill's instructions; `undefined` when the load never resolved. */
+  readonly output: JsonValue | undefined;
+  readonly status: EveEvalActionStatus;
+  /** Zero-based index of the turn the load happened in. */
+  readonly turnIndex: number;
+  /** Owning session id, when the runner knows it. */
+  readonly sessionId?: string;
+}
+
+/**
+ * One call to an agent task extracted from the captured stream: its
+ * `task.started`, joined with its `task.settled` and the task's
+ * `agent.started`.
  */
 export interface EveEvalSubagentCall {
-  /** Runtime-action call id joining this delegation's lifecycle events, when observed. */
+  /** The agent tool call's id, as on its task events. */
   readonly callId?: string;
-  /** Durable child session id for local and remote workflow delegations. */
+  /** The agent's session id, shared by every call to one task; absent if it never opened. */
   readonly childSessionId?: string;
   /** Subagent name. */
   readonly name: string;
-  /** Remote agent URL for remote delegations (`subagent.called` remote metadata). */
+  /** Remote agent URL for remote delegations (`agent.started` remote metadata). */
   readonly remoteUrl?: string;
-  /** Output from the matching `subagent.completed` event; `undefined` when the call never completed. */
+  /** Output from the call's `task.settled`; `undefined` until the call completes. */
   readonly output?: JsonValue;
-  /** Task lifecycle status inferred from the captured delegation events. */
-  readonly status: TaskStatus;
+  /** The call's task status: `working` until its `task.settled` arrives. */
+  readonly status: "working" | "completed" | "failed" | "cancelled";
   /** Zero-based index of the turn the delegation happened in. */
   readonly turnIndex: number;
   /** Owning session id, when the runner knows it. */
@@ -79,6 +96,7 @@ export interface EveEvalSubagentCall {
 export interface EveEvalDerivedFacts {
   readonly toolCalls: readonly EveEvalToolCall[];
   readonly toolCallCount: number;
+  readonly skillLoads: readonly EveEvalSkillLoad[];
   readonly subagentCalls: readonly EveEvalSubagentCall[];
   readonly subagentCallCount: number;
   /** Every HITL input request raised during the run (`input.requested`). */
@@ -87,6 +105,21 @@ export interface EveEvalDerivedFacts {
   readonly parked: boolean;
   readonly messageCount: number;
   readonly reasoningBlockCount: number;
+  /**
+   * Distinct ids of the models the steps started with (`step.started`): in first-use order for one
+   * session, and in session order for an eval. Covers only the sessions the eval created or
+   * attached: a delegated subagent runs in its own session, so its models appear only when the eval
+   * attaches that session. Compaction and `auto` routing calls are not included.
+   */
+  readonly models: readonly string[];
+  /**
+   * Token usage from the latest `session.waiting`, `turn.waiting`, `session.failed`, or
+   * `session.completed`: the
+   * session's own model calls plus what the agents it delegated to spent, so on a turn it is the
+   * session's total so far. For an eval, each captured session counts once, by its latest usage,
+   * except sessions another captured session opened. Absent when a counted session reported none.
+   */
+  readonly usage?: TokenUsage;
   readonly failureCode?: string;
 }
 
@@ -228,7 +261,7 @@ export interface EveEvalAssertions {
   parked(): AssertionHandle;
   messageIncludes(token: string | RegExp): AssertionHandle;
   calledTool(name: string, options?: EveEvalToolCallMatchOptions): AssertionHandle;
-  /** Sugar for `calledTool("load_skill", { input: { skill }, ... })`. */
+  /** Asserts a completed load of `skill`, constrained like `calledTool`. */
   loadedSkill(skill: string, options?: EveEvalSkillLoadMatchOptions): AssertionHandle;
   notCalledTool(name: string): AssertionHandle;
   /** Asserts that tool requests appeared in order, allowing unrelated requests between them. */
@@ -310,6 +343,12 @@ interface EveEvalSessionDriver {
   readonly sessionId: string;
   /** Request cooperative cancellation of this session's active turn. */
   cancel(): Promise<CancelSessionResult>;
+  /**
+   * Compact this session's history between turns and wait for it to finish.
+   * Returns the compaction events through `session.waiting`; throws when the
+   * session is no longer active.
+   */
+  compact(): Promise<EveEvalTurn>;
   /** Require exactly one pending input request matching `filter`, or abort dependent control flow. */
   requireInputRequest(filter?: EveEvalInputRequestMatchOptions): InputRequest;
   /** Resolve specific pending requests and run the resumed turn. */
@@ -328,15 +367,18 @@ interface EveEvalSessionDriver {
   /** Send one text turn with a local file attached as a data URL. */
   sendFile(text: string, filePath: string, mediaType?: string): Promise<EveEvalTurn>;
   /**
-   * Follow one delegated child's stream through this parent session, with the
-   * eval client's credentials. Local children use their own stream route; remote
-   * children use the parent-origin proxy.
+   * The session an agent run opened, as this session's stream announced it with
+   * `agent.started`. Its `stream()` follows the child through this parent session
+   * with the eval client's credentials, and stops with the eval unless given a `signal`.
    */
-  streamSubagent(
-    called: SubagentCalledStreamEvent,
-    options?: StreamOptions,
-  ): AsyncIterable<MessageStreamEvent>;
+  agent(started: AgentStartedStreamEvent): EveEvalAgentSession;
 }
+
+/** A session an agent run opened, reached through the parent eval session. */
+export type EveEvalAgentSession = Pick<
+  ClientAgentSession,
+  "name" | "sessionId" | "stream" | "taskId"
+>;
 
 /** One accepted session, exposed by `t.session()`, turns, and target attachment helpers. */
 export interface EveEvalSession
@@ -367,14 +409,15 @@ export interface EveEvalTurn extends EveEvalAssertions, EveEvalOutputAssertions 
 // Judge (LLM-as-judge)
 // ---------------------------------------------------------------------------
 
-/** Evaluation settings used only for scoring, independently of the agent under test. */
+/** Decision settings used only for scoring, independently of the agent under test. */
 export interface EveEvalJudgeConfig {
-  /** Evaluation model ID or instance. Defaults to the model used by `eve/ai` evaluate. */
-  readonly model?: EvaluationModel;
-  readonly modelOptions?: AgentModelOptionsDefinition;
+  /** Decision model ID or instance. Defaults to the model used by `eve/ai` decide. */
+  readonly model?: DecisionModel;
+  /** Judge calls carry provider options only; eve places no prompt-cache breakpoints on them. */
+  readonly modelOptions?: Pick<AgentModelOptionsDefinition, "providerOptions">;
 }
 
-/** JSON content accepted as evaluation state, instructions, or rubric descriptions. */
+/** JSON content accepted as decision state, instructions, or rubric descriptions. */
 export type JudgeInput = string | JsonObject | readonly JsonValue[];
 
 /** A boolean judgment, ordered rubric, or categorical judgment with an expected option. */
@@ -401,7 +444,7 @@ export type JudgeQuestionConstraint<Q extends JudgeQuestion> = Q extends { type:
   ? { readonly expected: NoInfer<Extract<keyof Q["criteria"], string>> }
   : unknown;
 
-/** Named judgments evaluated together against one shared state. */
+/** Named judgments decided together against one shared state. */
 export interface JudgeBatch<Questions extends Record<string, JudgeQuestion>> {
   /** Replaces the default `{ input, output }` state when supplied. */
   readonly state?: JudgeInput;
@@ -532,7 +575,7 @@ interface EveEvalBase {
   /**
    * Judge model for this eval's `t.judge(...)` assertions. Optional: when
    * omitted, judge assertions fall back to the `judge` declared in
-   * `evals.config.ts`, then the shared evaluation default. Only used for
+   * `evals.config.ts`, then the shared decision default. Only used for
    * scoring; never changes the agent under test.
    */
   readonly judge?: EveEvalJudgeConfig;
@@ -659,7 +702,7 @@ export interface EveEvalConfigInput<TContext = unknown> {
   teardown?(context: TContext | undefined): void | Promise<void>;
   /**
    * Default judge model for `t.judge(...)` assertions across every eval.
-   * Optional: omission uses the shared evaluation default. Individual evals
+   * Optional: omission uses the shared decision default. Individual evals
    * may override it with their own `judge`. Only ever used for scoring.
    */
   readonly judge?: EveEvalJudgeConfig;

@@ -115,7 +115,7 @@ export interface ThemeGlyphs {
   arrowUp: string;
   /** `↓` — output (response) tokens in the token-flow segment. */
   arrowDown: string;
-  /** `↯` — Fast mode (Gateway priority tier) marker beside a model id. */
+  /** `↯` — intrinsic speed or Fast mode (Gateway priority tier) marker. */
   fast: string;
   /** `↵` — the Enter affordance inside a selection badge. */
   enter: string;
@@ -152,6 +152,7 @@ const UNICODE_GLYPHS: ThemeGlyphs = {
   ellipsis: "…",
   arrowUp: "↑",
   arrowDown: "↓",
+  // Emoji-width glyphs can wrap full-width build status lines in tmux.
   fast: "↯",
   enter: "↵",
   validating: "▪",

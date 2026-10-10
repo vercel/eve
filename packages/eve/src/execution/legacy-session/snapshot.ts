@@ -1,13 +1,20 @@
 import type { ModelMessage } from "ai";
-import { getHarnessEmissionState } from "#harness/emission.js";
+import { SESSION_PROJECTION_STATE_KEY } from "#harness/session-machine/view.js";
+import { initialSessionProjection, type SessionProjection } from "#protocol/session-projection.js";
 import { isUserMessageKind, validateHarnessModelMessages } from "#harness/messages.js";
-import type { DurableSession, DurableSessionState } from "#execution/durable-session-store.js";
+import {
+  DURABLE_SESSION_VERSION,
+  type DurableSession,
+  type DurableSessionState,
+} from "#execution/durable-session-store.js";
+import type { HarnessModelMessage } from "#harness/messages.js";
 import { isObject } from "#shared/guards.js";
 
-export type LegacySession = Omit<DurableSession, "history"> & { readonly history: ModelMessage[] };
+export type LegacySession = DurableSession & { readonly history: ModelMessage[] };
+
+const LEGACY_EMISSION_KEY = "eve.harness.emission";
 
 const PRESERVED_FRAMEWORK_STATE = new Set([
-  "eve.harness.emission",
   "eve.harness.turnUsage",
   "eve.harness.reportedSessionUsage",
   "eve.harness.sessionRuntimeTokenLimit",
@@ -31,22 +38,56 @@ export function readLegacySnapshot(
 }
 
 /** Keep committed conversation data, but no pre-cutover execution registries. */
-export function importConversation(session: LegacySession): DurableSessionState {
+export function importConversation(session: LegacySession): {
+  readonly history: HarnessModelMessage[];
+  readonly sessionState: DurableSessionState;
+} {
+  const { history, ...durable } = session;
   const state = Object.fromEntries(
     Object.entries(session.state ?? {}).filter(
       ([key]) => !key.startsWith("eve.") || PRESERVED_FRAMEWORK_STATE.has(key),
     ),
   );
-  const history = normalizeHistory(session.history);
-  const emissionState = getHarnessEmissionState(state);
-  const imported = { ...session, history, state };
   return {
-    version: 1,
-    sessionId: session.sessionId,
-    continuationToken: session.continuationToken,
-    hasProxyInputRequests: false,
-    emissionState,
-    snapshot: { session: imported },
+    history: normalizeHistory(history),
+    sessionState: {
+      version: DURABLE_SESSION_VERSION,
+      sessionId: session.sessionId,
+      continuationToken: session.continuationToken,
+      hasProxyInputRequests: false,
+      snapshot: {
+        session: {
+          ...durable,
+          state: { ...state, [SESSION_PROJECTION_STATE_KEY]: importProjection(session) },
+        },
+      },
+    },
+  };
+}
+
+/** The turn position a legacy driver persisted, as the projection that replaces it. */
+export function importProjection(session: LegacySession): SessionProjection {
+  const raw = session.state?.[LEGACY_EMISSION_KEY];
+  const projection = initialSessionProjection();
+  if (!isObject(raw) || typeof raw.sequence !== "number") return projection;
+  const started = raw.sessionStarted === true ? { started: true as const } : {};
+  const turnId = typeof raw.turnId === "string" ? raw.turnId : "";
+  if (turnId === "") return { ...projection, ...started, nextSequence: raw.sequence };
+  // A legacy driver kept the index its next step takes; the projection keeps the last started.
+  const next = typeof raw.stepIndex === "number" ? raw.stepIndex : 0;
+  return {
+    ...projection,
+    ...started,
+    activeTurnId: turnId,
+    nextSequence: raw.sequence + 1,
+    turns: {
+      [turnId]: {
+        turnId,
+        sequence: raw.sequence,
+        status: "active",
+        ...(next > 0 && { stepIndex: next - 1 }),
+      },
+    },
   };
 }
 

@@ -1,8 +1,9 @@
 import { getRequestEnvelopeTokens } from "#harness/request-envelope.js";
-import { generateText, jsonSchema, type LanguageModel, ToolLoopAgent } from "ai";
+import { getTurnUsageState } from "#harness/turn-tag-state.js";
+import { jsonSchema, type LanguageModel, streamText, ToolLoopAgent } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { appendPendingInputBatch } from "#harness/input-requests.js";
+import { withParkedStep } from "#internal/testing/session-machine.js";
 import { validateHarnessModelMessages } from "#harness/messages.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession, StepFn, StepNext, ToolLoopHarnessConfig } from "#harness/types.js";
@@ -17,10 +18,10 @@ import {
 // be written; the attribute contract is covered by emit.test.ts.
 vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
 
-vi.mock("ai", () => ({
-  generateText: vi.fn(),
+vi.mock("ai", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("ai")>()),
+  streamText: vi.fn(),
   ToolLoopAgent: vi.fn(),
-  jsonSchema: vi.fn((schema: unknown) => schema),
   isStepCount: vi.fn((value: number) => value),
   tool: vi.fn((definition: unknown) => definition),
 }));
@@ -28,6 +29,19 @@ vi.mock("ai", () => ({
 afterEach(() => {
   vi.clearAllMocks();
 });
+
+function mockSummary(text: string): void {
+  vi.mocked(streamText).mockImplementation(
+    () =>
+      ({
+        finishReason: Promise.resolve("stop"),
+        fullStream: (async function* () {})(),
+        providerMetadata: Promise.resolve(undefined),
+        text: Promise.resolve(text),
+        usage: Promise.resolve({ inputTokens: 10, outputTokens: 2 }),
+      }) as never,
+  );
+}
 
 function createTestSession(overrides?: Partial<HarnessSession>): HarnessSession {
   return {
@@ -95,7 +109,7 @@ function setupMockAgentSequence(results: readonly Record<string, unknown>[]): vo
   ) {
     const { onStepEnd, onStepStart, prepareStep } = settings;
 
-    const generate = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
+    const callModel = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
       const result = queue.shift();
       if (result === undefined) {
         throw new Error("No mock ToolLoopAgent result available.");
@@ -129,9 +143,8 @@ function setupMockAgentSequence(results: readonly Record<string, unknown>[]): vo
       return { ...result, responseMessages: getMockResponseMessages(result) };
     });
 
-    this.generate = generate;
     this.stream = vi.fn(async (options: { messages: unknown[] }) => {
-      const result = await generate(options);
+      const result = await callModel(options);
       return {
         fullStream: new ReadableStream({
           start(controller) {
@@ -156,9 +169,7 @@ function expectStepFn(value: StepNext): StepFn {
 
 describe("tool-loop structured compaction accounting", () => {
   it("keeps private memory out of the summary while retaining its attributed record", async () => {
-    vi.mocked(generateText).mockResolvedValue({
-      text: "ordinary summary",
-    } as Awaited<ReturnType<typeof generateText>>);
+    mockSummary("ordinary summary");
     setupMockAgentSequence([
       {
         finishReason: "stop",
@@ -210,8 +221,8 @@ describe("tool-loop structured compaction accounting", () => {
       { message: "continue" },
     );
 
-    expect(vi.mocked(generateText)).toHaveBeenCalledOnce();
-    const prompt = vi.mocked(generateText).mock.calls[0]?.[0].messages?.[0]?.content;
+    expect(vi.mocked(streamText)).toHaveBeenCalledOnce();
+    const prompt = vi.mocked(streamText).mock.calls[0]?.[0].messages?.[0]?.content;
     if (typeof prompt !== "string") throw new Error("Expected the compaction prompt text.");
     expect(prompt).not.toContain("PRIVATE_MEMORY_SENTINEL");
     expect(JSON.stringify(result.session.history)).toContain("PRIVATE_MEMORY_SENTINEL");
@@ -219,9 +230,7 @@ describe("tool-loop structured compaction accounting", () => {
   });
 
   it("compacts before the continuation step when structured tool results were appended", async () => {
-    vi.mocked(generateText).mockResolvedValue({
-      text: "summary",
-    } as Awaited<ReturnType<typeof generateText>>);
+    mockSummary("summary");
 
     setupMockAgentSequence([
       {
@@ -278,7 +287,7 @@ describe("tool-loop structured compaction accounting", () => {
           },
         ],
         usage: {
-          inputTokens: 100,
+          inputTokens: 600,
         },
       },
       {
@@ -304,7 +313,7 @@ describe("tool-loop structured compaction accounting", () => {
       createTestSession({
         compaction: {
           recentWindowSize: 10,
-          threshold: 500,
+          threshold: 1000,
         },
       }),
       { message: "Compute something" },
@@ -312,13 +321,13 @@ describe("tool-loop structured compaction accounting", () => {
 
     expect(first.next).toBe(runStep);
     expect(first.session.compaction).toMatchObject({
-      lastKnownInputTokens: 100,
+      lastKnownInputTokens: 600,
       lastKnownPromptMessageCount: 1,
     });
 
     const second = await expectStepFn(first.next)(first.session);
 
-    expect(vi.mocked(generateText)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(streamText)).toHaveBeenCalledTimes(1);
     expect(second.session.history[0]).toEqual({
       content: "Summary of our conversation so far:",
       kind: "context.compaction",
@@ -330,10 +339,8 @@ describe("tool-loop structured compaction accounting", () => {
     });
   });
 
-  it("counts synthesized pending-input tool responses when checking for compaction", async () => {
-    vi.mocked(generateText).mockResolvedValue({
-      text: "summary",
-    } as Awaited<ReturnType<typeof generateText>>);
+  it("counts an approved call's committed step when checking for compaction", async () => {
+    mockSummary("summary");
 
     setupMockAgentSequence([
       {
@@ -347,29 +354,23 @@ describe("tool-loop structured compaction accounting", () => {
       },
     ]);
 
-    const runStep = createToolLoopHarness(createTestConfig());
-    const session = appendPendingInputBatch({
-      requests: [
-        {
-          action: {
-            callId: "call-1",
-            input: { command: "pwd" },
-            kind: "tool-call",
-            toolName: "bash",
-          },
-          allowFreeform: false,
-          display: "confirmation",
-          kind: "tool-approval",
-          options: [
-            { id: "approve", label: "Yes" },
-            { id: "cancel", label: "No" },
+    const runStep = createToolLoopHarness(
+      createTestConfig({
+        tools: new Map([
+          [
+            "bash",
+            {
+              description: "Run shell commands",
+              execute: vi.fn().mockResolvedValue("/workspace"),
+              inputSchema: jsonSchema({ type: "object" }),
+              name: "bash",
+            },
           ],
-          prompt: "Approve tool call: bash",
-          requestId: "approval-1",
-        },
-      ],
-      responseMessages: [],
-      session: createTestSession({
+        ]),
+      }),
+    );
+    const session = withParkedStep(
+      createTestSession({
         compaction: {
           lastKnownInputTokens: 100,
           lastKnownPromptMessageCount: 1,
@@ -378,7 +379,41 @@ describe("tool-loop structured compaction accounting", () => {
         },
         history: [{ content: "Previous exact prompt", kind: "user", role: "user" }],
       }),
-    });
+      {
+        messages: [
+          {
+            content: [
+              {
+                input: { command: "pwd" },
+                toolCallId: "call-1",
+                toolName: "bash",
+                type: "tool-call",
+              },
+            ],
+            role: "assistant",
+          },
+        ],
+        requests: [
+          {
+            action: {
+              callId: "call-1",
+              input: { command: "pwd" },
+              kind: "tool-call",
+              toolName: "bash",
+            },
+            allowFreeform: false,
+            display: "confirmation",
+            kind: "tool-approval",
+            options: [
+              { id: "approve", label: "Yes" },
+              { id: "cancel", label: "No" },
+            ],
+            prompt: "Approve tool call: bash",
+            requestId: "approval-1",
+          },
+        ],
+      },
+    );
 
     const result = await runStep(session, {
       inputResponses: [
@@ -389,7 +424,7 @@ describe("tool-loop structured compaction accounting", () => {
       ],
     });
 
-    expect(vi.mocked(generateText)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(streamText)).toHaveBeenCalledTimes(1);
     expect(result.session.history[0]).toEqual({
       content: "Summary of our conversation so far:",
       kind: "context.compaction",
@@ -473,9 +508,7 @@ describe("tool-loop structured compaction accounting", () => {
 it("compacts history when dynamic instructions grow the request envelope", async () => {
   const { ContextContainer, contextStorage } = await import("#context/container.js");
   const { SessionDynamicInstructionsKey } = await import("#context/keys.js");
-  vi.mocked(generateText).mockResolvedValue({ text: "summary" } as Awaited<
-    ReturnType<typeof generateText>
-  >);
+  mockSummary("summary");
   setupMockAgentSequence([
     {
       finishReason: "stop",
@@ -491,7 +524,7 @@ it("compacts history when dynamic instructions grow the request envelope", async
     tenant: [{ role: "system", content: dynamicInstructions }],
   });
   const runStep = createToolLoopHarness(createTestConfig());
-  await contextStorage.run(ctx, () =>
+  const result = await contextStorage.run(ctx, () =>
     runStep(
       createTestSession({
         compaction: {
@@ -508,7 +541,13 @@ it("compacts history when dynamic instructions grow the request envelope", async
   expect(JSON.stringify(vi.mocked(ToolLoopAgent).mock.calls[0]?.[0].instructions)).toContain(
     dynamicInstructions,
   );
-  expect(generateText).toHaveBeenCalledOnce();
+  expect(streamText).toHaveBeenCalledOnce();
+  // The summary call is part of the turn it compacted for.
+  expect(getTurnUsageState(result.session.state)).toMatchObject({
+    inputTokens: 10,
+    outputTokens: 2,
+    turnId: "turn_0",
+  });
 });
 
 describe("final request envelope compaction", () => {
@@ -529,9 +568,7 @@ describe("final request envelope compaction", () => {
       tenant: [{ role: "system", content: "tenant policy ".repeat(1_000) }],
     });
     setupMockAgentSequence([completed(), completed(), completed()]);
-    vi.mocked(generateText).mockResolvedValue({ text: "summary" } as Awaited<
-      ReturnType<typeof generateText>
-    >);
+    mockSummary("summary");
     const runStep = createToolLoopHarness(createTestConfig());
     const first = await contextStorage.run(ctx, () =>
       runStep(
@@ -545,13 +582,13 @@ describe("final request envelope compaction", () => {
     const second = await contextStorage.run(ctx, () =>
       runStep(first.session, { message: "Second" }),
     );
-    expect(generateText).not.toHaveBeenCalled();
+    expect(streamText).not.toHaveBeenCalled();
     expect(getRequestEnvelopeTokens(second.session)).toBe(getRequestEnvelopeTokens(first.session));
     ctx.set(SessionDynamicInstructionsKey, {
       tenant: [{ role: "system", content: "tenant policy ".repeat(2_000) }],
     });
     await contextStorage.run(ctx, () => runStep(second.session, { message: "Third" }));
-    expect(generateText).toHaveBeenCalledOnce();
+    expect(streamText).toHaveBeenCalledOnce();
   });
 
   it("counts dynamic schemas resolved by step.started before calling the model", async () => {
@@ -562,9 +599,7 @@ describe("final request envelope compaction", () => {
     const schemaDescription = "connector catalog field ".repeat(1_000);
     const events: string[] = [];
     setupMockAgentSequence([completed()]);
-    vi.mocked(generateText).mockResolvedValue({ text: "summary" } as Awaited<
-      ReturnType<typeof generateText>
-    >);
+    mockSummary("summary");
     const runStep = createToolLoopHarness(
       createTestConfig({
         resolveModel: vi
@@ -600,7 +635,7 @@ describe("final request envelope compaction", () => {
         { message: "continue" },
       ),
     );
-    expect(generateText).toHaveBeenCalledOnce();
+    expect(streamText).toHaveBeenCalledOnce();
     expect(events.indexOf("compaction.requested")).toBeGreaterThan(events.indexOf("step.started"));
     expect(vi.mocked(ToolLoopAgent).mock.calls[0]?.[0].tools).toHaveProperty("catalog");
   });

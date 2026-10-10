@@ -2,6 +2,7 @@ import type { FilePart, TextPart, UserContent } from "ai";
 
 import type { FetchFileResult } from "#channel/adapter.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
+import { maxBytesOf, readLimitedBytes } from "#internal/attachments/limited-read.js";
 import { createLogger } from "#internal/logging.js";
 import {
   resolveTeamsAccessToken,
@@ -26,17 +27,32 @@ const BOT_CONNECTOR_HOSTS = new Set([
   "smba.infra.gov.teams.microsoft.us",
   "smba.infra.dod.teams.microsoft.us",
 ]);
+// Files a person uploads to a bot download from a pre-authenticated SharePoint URL.
+const SHAREPOINT_HOST_SUFFIXES = [".sharepoint.com", ".sharepoint.us"];
+// `fileType` on a Teams file upload is the file's extension.
+const FILE_TYPE_MEDIA_TYPES: Readonly<Record<string, string>> = {
+  csv: "text/csv",
+  gif: "image/gif",
+  jpeg: "image/jpeg",
+  jpg: "image/jpeg",
+  json: "application/json",
+  md: "text/markdown",
+  pdf: "application/pdf",
+  png: "image/png",
+  txt: "text/plain",
+  webp: "image/webp",
+};
 const MAX_FILE_REDIRECTS = 5;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 /** File handling options for the native Teams channel. */
 export interface TeamsFilesConfig {
   /**
-   * Hosts whose file URLs may be fetched, or `"*"` for any host. Defaults to
-   * `[]` (no hosts), so attachments are dropped until you allowlist their host.
+   * Hosts whose file URLs may be fetched besides Microsoft's Bot Connector and
+   * SharePoint hosts, which are always allowed, or `"*"` for any host.
    */
   readonly allowedHosts?: readonly string[] | "*";
-  /** Enable inbound attachment ingestion. Off unless explicitly `true`. */
+  /** Set to `false` to drop inbound attachments. On by default. */
   readonly enabled?: boolean;
   /** Size and type limits applied to accepted attachments. */
   readonly uploadPolicy?: UploadPolicyInput;
@@ -53,12 +69,12 @@ export interface TeamsFilesPolicy {
 export function normalizeTeamsFilesPolicy(config: TeamsFilesConfig | undefined): TeamsFilesPolicy {
   return {
     allowedHosts: config?.allowedHosts ?? [],
-    enabled: config?.enabled === true,
+    enabled: config?.enabled !== false,
     uploadPolicy: mergeUploadPolicy(config?.uploadPolicy),
   };
 }
 
-/** Collects Teams attachment file parts when file support is explicitly enabled. */
+/** Collects Teams attachment file parts unless file support is disabled. */
 export function collectTeamsFileParts(
   attachments: readonly TeamsAttachment[],
   policy: TeamsFilesPolicy,
@@ -111,7 +127,7 @@ export function createTeamsFetchFile(
       );
     }
     return {
-      bytes: Buffer.from(await response.arrayBuffer()),
+      bytes: await readLimitedBytes(response, maxBytesOf(policy.uploadPolicy), "teams"),
       mediaType: response.headers.get("content-type") ?? undefined,
     };
   };
@@ -205,7 +221,9 @@ function inferMediaType(attachment: TeamsAttachment): string {
       isObject(attachment.content) && typeof attachment.content.fileType === "string"
         ? attachment.content.fileType
         : undefined;
-    if (fileType === "txt") return "text/plain";
+    const mediaType =
+      fileType === undefined ? undefined : FILE_TYPE_MEDIA_TYPES[fileType.toLowerCase()];
+    return mediaType ?? "application/octet-stream";
   }
   return attachment.contentType || "application/octet-stream";
 }
@@ -219,7 +237,15 @@ function isAllowedUrl(url: string, allowedHosts: readonly string[] | "*"): boole
   }
   if (parsed.protocol !== "https:") return false;
   if (allowedHosts === "*") return true;
+  if (parsed.port === "" && isMicrosoftFileHost(parsed.hostname)) return true;
   return allowedHosts.some((host) =>
     host.includes(":") ? parsed.host === host : parsed.port === "" && parsed.hostname === host,
+  );
+}
+
+function isMicrosoftFileHost(hostname: string): boolean {
+  return (
+    BOT_CONNECTOR_HOSTS.has(hostname) ||
+    SHAREPOINT_HOST_SUFFIXES.some((suffix) => hostname.endsWith(suffix))
   );
 }

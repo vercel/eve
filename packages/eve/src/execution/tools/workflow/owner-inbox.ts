@@ -72,10 +72,14 @@ export function workflowToolRunRequestToInputRequestPayload(
     callId: from.callId,
     childContinuationToken: replyTo,
     childSessionId: from.runId,
+    childSessionInbox: message.childSessionInbox,
+    remote: message.remote,
+    inputSource: message.inputSource,
     event: {
       requests: workflowToolRunInputRequests(message),
       sequence: requestCoordinates?.sequence ?? from.sequence,
       stepIndex: requestCoordinates?.stepIndex ?? from.stepIndex,
+      taskId: from.taskId,
       turnId: requestCoordinates?.turnId ?? from.turnId,
     },
     kind: "subagent-input-request",
@@ -97,9 +101,6 @@ function normalizeInputRequest(
   requestId: string,
 ): InputRequest {
   switch (request.kind) {
-    case "agent-invoke":
-    case "agent-settled":
-      throw new TypeError("A workflow agent request cannot be normalized as human input.");
     case "authorization-request":
       throw new TypeError("A workflow authorization event cannot be normalized as human input.");
     case "ask":

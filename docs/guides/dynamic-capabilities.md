@@ -55,7 +55,7 @@ export default defineAgent({
 });
 ```
 
-eve stages byte-backed `file` parts under `/workspace/attachments` before
+eve stages byte-backed `file` parts under `/workspace/.eve/attachments` before
 `step.started`, but keeps their media type in `ctx.messages`. When an image
 reaches the provider, vision models can process it and non-vision models reject
 it. eve does not reroute automatically. See [Inbound
@@ -139,7 +139,8 @@ failure and omits the subagent.
 The resolved set applies to local and remote direct delegation. An authored workflow tool can
 also call a selected subagent through `ctx.agent`. A generated program can call it through the
 provided `workflow` tool. eve checks availability again before starting the child, so a stale or
-manually constructed call fails with `SUBAGENT_UNAVAILABLE`. Treat conditional
+manually constructed call fails: a subagent tool call with `SUBAGENT_UNAVAILABLE`, and a
+`ctx.agent` session's first `send()` with an error saying the subagent is not available. Treat conditional
 availability as capability composition, not as the only authorization
 boundary: sensitive child tools still need their own authorization and
 approval checks.
@@ -192,8 +193,9 @@ export default defineDynamic({
 The returned definitions use the same auth, headers, filtering, provided
 arguments, and approval options as static [MCP](../connections/mcp) and
 [OpenAPI](../connections/openapi) connections. Each resolved connection joins
-the per-step connection registry, appears in `connection_search`, and exposes
-discovered tools as `<connection>__<tool>`.
+the per-step connection registry. eve announces it to the model in an
+append-only context message, and the model reaches its tools through
+`eve__search` and `eve__tool`, so the tool list never changes.
 
 Set `instanceKey` on every authenticated dynamic connection. Use a stable,
 non-secret account or tenant identifier, and change it whenever the endpoint,
@@ -215,13 +217,26 @@ eve does not prefix them with the file slug. A dynamic connection overrides a
 same-named static connection. Two effective dynamic resolvers cannot emit the
 same name; namespace one map key to remove the ambiguity.
 
+A connection owns its name and every name that starts with `<name>__`. When a
+dynamic connection resolves, eve rejects it if its name is, or is the `__`
+prefix of, one of the agent's tools, subagents, current dynamic tools, or
+other connections. Dynamic tools and dynamic subagents get the same check when
+they resolve. The error names both sides.
+
 ### Events and recovery
 
 Dynamic connections support `session.started` and `turn.started`. A turn result
 replaces that file's session result for the turn, including when the turn
-handler returns `null`. A throwing or invalid handler fails the lifecycle
-without rebuilding the registry, so a static connection shadowed by the
-dynamic result cannot reappear as a fallback.
+handler returns `null`. A throwing or invalid handler fails the current turn
+and parks the session, so a later message can retry after the dependency
+recovers. The failed lifecycle does not rebuild the registry, so a static
+connection shadowed by the dynamic result cannot reappear as a fallback.
+
+Recovery needs another message. eve does not keep the input from the failed
+turn or replay it, so the caller must send it again once the dependency is
+back. This applies to the first message of a session too. A scheduled run
+whose resolver fails is not retried; the session stays idle until the next
+scheduled run or message arrives.
 
 eve may run the active session and turn handlers again when a parked turn
 resumes or a durable step retries. This rebuilds live auth, header, approval,
@@ -330,7 +345,10 @@ A parked call binds to its callback within its session, lifecycle scope, and res
 
 - Editing a callback body while keeping its resolver entry and tool names is safe: replaying a parked call runs the latest deployed code with the closure values snapshotted when the call was made.
 - If a persisted session-scoped callback has no registered implementation (a fresh process, a redeploy, or an expired in-process binding), eve re-runs `session.started` resolvers once to rebind it, then replays.
-- If the owning resolver no longer returns that tool, replay fails closed with an explicit error instead of invoking something else. Ordinary turn-scoped and step-scoped tools are not rebound; a parked call to a missing one errors. Framework-provided resolvers such as memory provider-tool wrappers opt into the same generic missing-callback rebind while preserving their locked scope.
+- If an active turn resumes without a registered turn-scoped callback, eve re-runs the owning `turn.started` resolver to restore the callback while preserving the tool set and closure captured earlier in that turn. If an authored resolver no longer returns the tool, the turn can continue, but calling that tool fails closed. Framework-provided resolvers such as memory provider-tool wrappers require all of their callbacks to be restored and fail the continuation if their locked tool set changed.
+- Step-scoped callbacks are restored from the persisted step immediately before eve replays that step.
+
+A recovery rebind is not a new lifecycle event, but it can run resolver code again. Keep `session.started` and `turn.started` resolvers idempotent and return the same tool identities for the same persisted scope.
 
 ### Naming
 
@@ -341,23 +359,25 @@ A parked call binds to its callback within its session, lifecycle scope, and res
 
 A single return produces one tool named after the file slug, identical to a static tool. A map names each entry by its **bare key** — there is no automatic slug prefix. If a bare name might collide, namespace the key yourself by including the prefix in the key (e.g. return `{ "tenant__export": … }` to get `tenant__export`).
 
+A map key must be a legal tool name: ASCII letters, digits, underscores, and dashes, starting with a letter, up to 64 characters. A key cannot be `eve` or start with `eve__`, which eve [reserves](../concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) for its built-in tools, and cannot be a connection's name or start with its `<name>__` prefix. eve rejects such a key when the resolver returns it.
+
 ### Conflicts
 
-A dynamic connection, tool, or skill whose name matches an **authored** one **overrides** it — a per-caller resolver can replace a static capability by name. Two **dynamic** resolvers of the same capability type emitting the same name is a genuine ambiguity and throws; namespace one of the keys manually to resolve it.
+A dynamic connection, tool, or skill whose name matches an **authored** one **overrides** it — a per-caller resolver can replace a static capability by name. Workflow tools and subagents are the exception: a dynamic tool can't take one of their names, and eve logs the error and skips that resolver's result. Two **dynamic** resolvers of the same capability type emitting the same name is a genuine ambiguity and throws; namespace one of the keys manually to resolve it.
 
 ### Events
 
-| Event             | Resolver runs                                         | Tools available for             |
-| ----------------- | ----------------------------------------------------- | ------------------------------- |
-| `session.started` | At session start; may be redelivered during recovery¹ | Every model call in the session |
-| `turn.started`    | Once per turn                                         | Every model call in the turn    |
-| `step.started`    | Before each model call                                | That model call                 |
+| Event             | Resolver runs                                            | Tools available for             |
+| ----------------- | -------------------------------------------------------- | ------------------------------- |
+| `session.started` | At session start; may be redelivered during recovery¹    | Every model call in the session |
+| `turn.started`    | Once per turn; may re-run to restore a missing callback¹ | Every model call in the turn    |
+| `step.started`    | Before each model call                                   | That model call                 |
 
-¹ Workflow recovery can redeliver a resolver event, so keep resolvers idempotent. Replaying a parked callback does not depend on running the resolver again — except for the one-shot rebind described under [Identity and redeploys](#identity-and-redeploys).
+¹ Workflow recovery can redeliver an event or re-run a resolver to restore a missing callback, so keep resolvers idempotent. Rebinding restores the persisted tool set; it does not make newly returned tools available in the active turn.
 
 At `turn.started`, model, tool, skill, and subagent resolvers receive the visible conversation history and incoming message in `ctx.messages`, oldest first. Request context is included, and history projection still applies. Read these messages from the handler's second argument; the event itself contains turn metadata. Instruction resolvers use the separate snapshot described under [Dynamic instructions](#dynamic-instructions).
 
-This also applies while a session-limit prompt keeps the incoming message queued and when authorization completes. Authorization callbacks without new or queued input receive the visible history. When memory recall runs, its results appear in the projected snapshot before incoming input.
+A message that steers a held turn joins it without another `turn.started`, as does a completed sign-in, so `turn.started` resolvers do not see it; `step.started` resolvers do. A message sent while a session-limit prompt waits starts its own turn, so `turn.started` resolvers see it, and that turn waits for the prompt's answer before the model runs. When memory recall runs, its results appear in the projected snapshot before incoming input.
 
 ### Execution order
 
@@ -420,9 +440,11 @@ export default defineDynamic({
 
 The caller's team gets its own playbook advertised as a loadable skill; everyone else gets nothing.
 
-Skills follow the same naming rule as tools: a single `defineSkill(...)` is named after the file slug, while a map names each entry by its bare key (namespace the key yourself if it might collide). A dynamic skill overrides a same-named authored one; two dynamic resolvers emitting the same name throws.
+Skills follow the same naming rule as tools: a single `defineSkill(...)` is named after the file slug, while a map names each entry by its bare key (namespace the key yourself if it might collide). Every name must use only ASCII letters, digits, underscores, and dashes, start with a letter, and have at most 64 characters; eve logs a resolver that returns another name and skips its result. A dynamic skill overrides a same-named authored one; two dynamic resolvers emitting the same name throws.
 
-A dynamic skill that returns only `markdown` never starts a sandbox: eve keeps its instructions in session state and serves them from `load_skill`. When the skill also returns `files`, eve writes the package to the sandbox skill root when the resolver first returns it, and again only when its contents change or the session gets a new sandbox. A changed package replaces the previous directory, so files omitted from the new result are removed.
+A dynamic skill with `deferred: true` is left out of the dynamic skill announcement and isn't named in context. The model finds it with `eve__search` and loads it with `eve__skill({ name })`, like a static deferred skill. When it overrides a static skill that isn't deferred, the system prompt still lists the static skill's description, and loading returns the dynamic body.
+
+A dynamic skill that returns only `markdown` never starts a sandbox: eve keeps its instructions in session state and returns them when the model loads the skill. When the skill also returns `files`, eve writes the package to the sandbox skill root when the resolver first returns it, and again only when its contents change or the session gets a new sandbox. A changed package replaces the previous directory, so files omitted from the new result are removed.
 
 ## Dynamic instructions
 

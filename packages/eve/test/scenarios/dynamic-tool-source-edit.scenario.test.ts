@@ -133,7 +133,7 @@ describe("dynamic tool source edits across a restart", () => {
             return error instanceof Error && "code" in error && error.code === "ENOENT";
           }
         }, "The crashed development server did not release its state record.");
-        server = await startEveDev(app.appRoot, { env: pinnedEnv });
+        server = await startEveDev(app.appRoot, { env: pinnedEnv, resume: true });
 
         const resumedSession = new Client({ host: server.url }).sessions.attach(
           sessionState.sessionId,

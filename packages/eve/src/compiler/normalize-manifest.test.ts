@@ -22,7 +22,15 @@ import { defineMcpClientConnection } from "#public/definitions/connections/mcp.j
 import { defineHook } from "#public/definitions/hook.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
+import { defineDynamicSchedules } from "#public/schedules/subscription.js";
+import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
+import { z } from "#compiled/zod/index.js";
 import { defineSkill } from "#public/definitions/skill.js";
+import {
+  EVE_NAMESPACE_NAMES,
+  EVE_NAMESPACE_RESERVATION,
+  NAMES_OUTSIDE_EVE_NAMESPACE,
+} from "#internal/testing/catalog-fixtures.js";
 import { resolveAgent } from "#runtime/resolve-agent.js";
 import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
 import { compiledAgentManifestSchema } from "#compiler/manifest.js";
@@ -30,7 +38,7 @@ import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { defineTool, disableTool } from "#tools/definition.js";
 import { defineMemory } from "#public/memory/index.js";
 import { defineDynamic } from "#dynamic/definition.js";
-import { webSearch } from "#tools/provided/web-search.js";
+import { webSearch, type WebSearchToolInput } from "#tools/provided/web-search.js";
 import { agent as agentTool } from "#tools/framework/agent.js";
 
 function manifest() {
@@ -214,7 +222,6 @@ describe("compileAgentManifest source graph", () => {
 
     expect(compiled.config.defaultTools).toBe(false);
     expect(compiled.tools.map((tool) => tool.name).sort()).toEqual(["bash", "weather"]);
-    expect(compiled.dynamicTools.map((tool) => tool.slug)).toEqual(["connection_search"]);
     expect(compiled.tools.find((tool) => tool.name === "bash")?.description).toBe(
       "Application-owned shell replacement.",
     );
@@ -227,21 +234,6 @@ describe("compileAgentManifest source graph", () => {
         )
         .map((entry) => entry.source.logicalPath),
     ).toEqual(["tools/bash.ts"]);
-  });
-
-  it("rejects disabling required connection search", async () => {
-    const sourceRegistry = registry([
-      {
-        logicalPath: "tools/connection_search.ts",
-        loadNamespace: async () => ({ default: disableTool() }),
-      },
-    ]);
-
-    await expect(
-      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
-    ).rejects.toThrow(
-      'The required "connection_search" tool cannot be disabled. Remove "agent/tools/connection_search.ts" or export a replacement tool from it.',
-    );
   });
 
   it("allows disableTool for the root agent tool", async () => {
@@ -262,16 +254,6 @@ describe("compileAgentManifest source graph", () => {
         kind: "disabled",
         source: expect.objectContaining({ logicalPath: "tools/agent.ts" }),
       }),
-    );
-  });
-
-  it("does not install task_update from the framework registry", async () => {
-    const compiled = await compileAgentManifest(manifest());
-
-    expect(compiled.tools.map((tool) => tool.name)).toContain("task_cancel");
-    expect(compiled.tools.map((tool) => tool.name)).not.toContain("task_update");
-    expect(Object.values(compiled.bindings).map((binding) => binding.logicalPath)).not.toContain(
-      "tools/task_update.ts",
     );
   });
 
@@ -304,29 +286,7 @@ describe("compileAgentManifest source graph", () => {
       availableInSubagents: false,
       behavior: { availability: [] },
       description: "Route delegated work.",
-      execution: undefined,
     });
-  });
-
-  it.each(["task_cancel"])("rejects overriding closed framework tool %s", async (toolName) => {
-    const sourceRegistry = registry([
-      {
-        logicalPath: `tools/${toolName}.ts`,
-        loadNamespace: async () => ({
-          default: defineTool({
-            description: "Replacement tool.",
-            execute: async () => null,
-            inputSchema: {},
-          }),
-        }),
-      },
-    ]);
-
-    await expect(
-      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
-    ).rejects.toThrow(
-      `The framework "${toolName}" tool cannot be overridden. Re-export it from "eve/tools/${toolName}" or disable it with disableTool().`,
-    );
   });
 
   it("compiles a workflow tool with programmatic executor metadata", async () => {
@@ -352,53 +312,60 @@ describe("compileAgentManifest source graph", () => {
     expect(compiled.tools.find((tool) => tool.name === "durable")?.behavior).toEqual({
       availability: [],
       handling: {
+        entryPoint: "execute",
         kind: "workflow-tool",
         workflowId: "workflow//example/tool//execute",
       },
-      shape: { lifetime: "step", suspend: "workflow" },
+      shape: { suspend: "workflow" },
     });
   });
 
-  it("preserves selected native behavior through serialization and runtime preparation", async () => {
-    const sourceRegistry = registry([
-      {
-        logicalPath: "tools/web_search.ts",
-        loadNamespace: async () => ({ default: webSearch({ provider: "parallel" }) }),
-      },
-    ]);
-    const compiled = await compileAgentManifest(manifest(), {
-      sourceRegistries: [sourceRegistry],
-    });
-    const serialized = compiledAgentManifestSchema.parse(JSON.parse(JSON.stringify(compiled)));
-    const moduleMap = await createProgrammaticCompiledModuleMap(serialized, [
-      frameworkAgentSourceRegistry,
-      sourceRegistry,
-    ]);
-    const graph = await resolveRuntimeAgentGraph({ manifest: serialized, moduleMap });
+  it.each<WebSearchToolInput>([
+    { provider: "parallel" },
+    { provider: "browserbase" },
+    { fallback: "exa", provider: "native" },
+  ])(
+    "preserves the %o search selection through serialization and runtime preparation",
+    async (selection) => {
+      const sourceRegistry = registry([
+        {
+          logicalPath: "tools/web_search.ts",
+          loadNamespace: async () => ({ default: webSearch(selection) }),
+        },
+      ]);
+      const compiled = await compileAgentManifest(manifest(), {
+        sourceRegistries: [sourceRegistry],
+      });
+      const serialized = compiledAgentManifestSchema.parse(JSON.parse(JSON.stringify(compiled)));
+      const moduleMap = await createProgrammaticCompiledModuleMap(serialized, [
+        frameworkAgentSourceRegistry,
+        sourceRegistry,
+      ]);
+      const graph = await resolveRuntimeAgentGraph({ manifest: serialized, moduleMap });
 
-    expect(serialized.tools.find((tool) => tool.name === "agent")).toMatchObject({
-      hasExecute: true,
-    });
-    expect(serialized.tools.find((tool) => tool.name === "web_search")).toMatchObject({
-      behavior: {
-        availability: [],
-        handling: { kind: "provider-tool", provider: "parallel" },
-      },
-      hasExecute: false,
-    });
-    expect(graph.root.turnAgent.tools.find((tool) => tool.name === "agent")).toMatchObject({
-      rootOnly: true,
-      task: {
-        nodeId: "__root__",
-        workflowId: expect.stringContaining("subagentToolExecuteWorkflow"),
-      },
-    });
-    expect(graph.root.turnAgent.tools.find((tool) => tool.name === "web_search")).toMatchObject({
-      behavior: {
-        handling: { kind: "provider-tool", provider: "parallel" },
-      },
-    });
-  });
+      expect(serialized.tools.find((tool) => tool.name === "agent")).toMatchObject({
+        hasExecute: true,
+      });
+      expect(serialized.tools.find((tool) => tool.name === "web_search")).toMatchObject({
+        behavior: {
+          availability: [],
+          handling: { kind: "provider-tool", ...selection },
+        },
+        hasExecute: false,
+      });
+      expect(graph.root.turnAgent.tools.find((tool) => tool.name === "agent")).toMatchObject({
+        behavior: {
+          handling: { kind: "dispatch", target: { kind: "self-agent-call", nodeId: "__root__" } },
+        },
+        rootOnly: true,
+      });
+      expect(graph.root.turnAgent.tools.find((tool) => tool.name === "web_search")).toMatchObject({
+        behavior: {
+          handling: { kind: "provider-tool", ...selection },
+        },
+      });
+    },
+  );
 
   it("loads the selected config before any non-config definition", async () => {
     const order: string[] = [];
@@ -425,6 +392,76 @@ describe("compileAgentManifest source graph", () => {
 
     expect(order[0]).toBe("config");
     expect(order).toContain("tool");
+  });
+
+  it("materializes schedule factories once per compile", async () => {
+    const staticFactory = vi.fn(() =>
+      defineSchedule({ cron: "0 9 * * *", markdown: "Run the report." }),
+    );
+    const sourceRegistry = registry([
+      {
+        logicalPath: "agent.ts",
+        loadNamespace: async () => ({ default: defineAgent({ model: "openai/gpt-5.4" }) }),
+      },
+      {
+        logicalPath: "schedules/daily.ts",
+        loadNamespace: async () => ({ default: staticFactory }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] });
+    expect(compiled.schedules).toHaveLength(1);
+    expect(staticFactory).toHaveBeenCalledOnce();
+  });
+
+  it("keeps nested collection identity but flattens generated management tool names", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "schedules/billing/requests.ts",
+        loadNamespace: async () => ({
+          default: defineDynamicSchedules({
+            provider: inMemoryScheduleProvider(),
+            inputSchema: z.object({ task: z.string() }),
+            auth: () => null,
+            run: async () => {},
+          }),
+        }),
+      },
+    ]);
+    const compiled = await compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] });
+    expect(compiled.scheduleCollections).toContainEqual(
+      expect.objectContaining({ name: "billing/requests" }),
+    );
+    const wrapper = compiled.dynamicTools.find(
+      (tool) => tool.logicalPath === "tools/schedule__billing-requests.ts",
+    )!;
+    expect(wrapper).toMatchObject({ slug: "schedule__billing-requests" });
+    const moduleMap = await createProgrammaticCompiledModuleMap(compiled, [
+      frameworkAgentSourceRegistry,
+      sourceRegistry,
+    ]);
+    const namespace = moduleMap.nodes.__root__!.modules[wrapper.sourceId]!;
+    const tools = await (namespace.default as ReturnType<typeof defineDynamic>).events[
+      "turn.started"
+    ]!(undefined, {
+      model: null,
+      session: { id: "session", auth: { current: null, initiator: null } },
+      channel: {},
+      messages: [],
+    });
+    expect(Object.keys(tools as object).sort()).toEqual(
+      ["create", "delete", "disable", "enable", "get", "invoke", "list", "update"].map(
+        (operation) => `schedule__billing-requests__${operation}`,
+      ),
+    );
+    const entries = tools as Record<string, import("#tools/dynamic.js").DynamicToolEntry>;
+    expect(
+      entries["schedule__billing-requests__create"]!.label?.start({ name: "daily-digest" }),
+    ).toBe("Create schedule: daily-digest");
+    expect(entries["schedule__billing-requests__list"]!.label?.start({})).toBe("List schedules");
+    expect(
+      entries["schedule__billing-requests__delete"]!.label?.start({ name: "daily-digest" }),
+    ).toBe("Delete schedule: daily-digest");
   });
 
   it("classifies compile and runtime usage from normalized authored semantics", async () => {
@@ -552,7 +589,7 @@ describe("compileAgentManifest source graph", () => {
       "instructions/dynamic.ts": { compile: true, runtimeEntry: true },
       "instructions/static.ts": { compile: true, runtimeEntry: false },
       "schedules/handler.ts": { compile: true, runtimeEntry: true },
-      "schedules/prompt.ts": { compile: true, runtimeEntry: false },
+      "schedules/prompt.ts": { compile: true, runtimeEntry: true },
       "skills/dynamic.ts": { compile: true, runtimeEntry: true },
       "skills/static.ts": { compile: true, runtimeEntry: false },
       "tools/dynamic.ts": { compile: true, runtimeEntry: true },
@@ -667,6 +704,62 @@ describe("compileAgentManifest source graph", () => {
     });
   });
 
+  it("carries a direct model's prompt cache options to the resolved agent", async () => {
+    const bedrockProfile = {
+      doGenerate: async () => ({}),
+      doStream: async () => ({}),
+      modelId: "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc",
+      provider: "amazon-bedrock",
+      specificationVersion: "v3",
+    } as never;
+    const sourceRegistry = registry([
+      {
+        logicalPath: "agent.ts",
+        loadNamespace: async () => ({
+          default: defineAgent({
+            model: bedrockProfile,
+            modelContextWindowTokens: 200_000,
+            modelOptions: { promptCache: { anthropic: { ttl: "1h" } } },
+          }),
+        }),
+      },
+    ]);
+    const compiled = await compileAgentManifest(manifest(), {
+      sourceRegistries: [sourceRegistry],
+    });
+    const moduleMap = await createProgrammaticCompiledModuleMap(compiled, [
+      frameworkAgentSourceRegistry,
+      sourceRegistry,
+    ]);
+
+    const resolved = await resolveAgent({
+      manifest: compiledAgentManifestSchema.parse(compiled),
+      moduleMap,
+    });
+
+    expect(resolved.config?.model?.promptCache).toEqual({ anthropic: { ttl: "1h" } });
+  });
+
+  it("rejects prompt cache options on an AI Gateway model", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "agent.ts",
+        loadNamespace: async () => ({
+          default: defineAgent({
+            model: "anthropic/claude-opus-5",
+            modelOptions: { promptCache: { anthropic: { ttl: "1h" } } },
+          }),
+        }),
+      },
+    ]);
+
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow(
+      'modelOptions.promptCache applies only to models eve calls directly, but "anthropic/claude-opus-5" routes through AI Gateway',
+    );
+  });
+
   it("classifies extension mount initialization as runtime-only", async () => {
     const discovered = manifest();
     const extensionManifest = createAgentSourceManifest({
@@ -697,6 +790,14 @@ describe("compileAgentManifest source graph", () => {
       sourceRegistries: [sourceRegistry],
     });
     const mount = compiled.extensionMounts[0]!;
+    expect(mount.mountId).toBe("extensions/crm");
+    expect(compiledAgentManifestSchema.safeParse(compiled).success).toBe(true);
+    expect(
+      compiledAgentManifestSchema.safeParse({
+        ...compiled,
+        extensionMounts: [{ ...mount, mountId: "" }],
+      }).success,
+    ).toBe(false);
 
     expect(compiled.bindings[mount.mountSourceId]?.usage).toEqual({
       compile: false,
@@ -726,6 +827,144 @@ describe("compileAgentManifest source graph", () => {
     ).rejects.toThrow(
       'Subagent "subagents/agent" uses the reserved name "agent". Rename its path; eve reserves "agent" for the built-in root-copy target.',
     );
+  });
+
+  describe("eve's namespace", () => {
+    const authoredTool = (name: string) => ({
+      logicalPath: `tools/${name}.ts`,
+      loadNamespace: async () => ({
+        default: defineTool({ description: name, execute: () => null, inputSchema: {} }),
+      }),
+    });
+    const authoredSkill = (name: string) => ({
+      logicalPath: `skills/${name}.ts`,
+      loadNamespace: async () => ({
+        default: defineSkill({ description: name, markdown: `# ${name}\n` }),
+      }),
+    });
+    const compile = (sources: Parameters<typeof registry>[0]) =>
+      compileAgentManifest(manifest(), { sourceRegistries: [registry(sources)] });
+
+    it.each(EVE_NAMESPACE_NAMES)("rejects an authored tool named %s", async (name) => {
+      await expect(compile([authoredTool(name)])).rejects.toThrow(
+        `Tool "tools/${name}.ts" uses the reserved name "${name}". Rename its path; ${EVE_NAMESPACE_RESERVATION}.`,
+      );
+    });
+
+    it("rejects disabling a built-in tool, whose name is in eve's namespace", async () => {
+      await expect(
+        compile([
+          {
+            logicalPath: "tools/eve__search.ts",
+            loadNamespace: async () => ({ default: disableTool() }),
+          },
+        ]),
+      ).rejects.toThrow(EVE_NAMESPACE_RESERVATION);
+    });
+
+    it.each(EVE_NAMESPACE_NAMES)("rejects an authored skill named %s", async (name) => {
+      await expect(compile([authoredSkill(name)])).rejects.toThrow(
+        `uses the reserved name "${name}". Rename its path; ${EVE_NAMESPACE_RESERVATION}.`,
+      );
+    });
+
+    it("accepts tools and skills outside it, including the built-in tools' former names", async () => {
+      const compiled = await compile([
+        ...NAMES_OUTSIDE_EVE_NAMESPACE.map(authoredTool),
+        ...NAMES_OUTSIDE_EVE_NAMESPACE.map(authoredSkill),
+      ]);
+
+      expect(compiled.tools.map((entry) => entry.name)).toEqual(
+        expect.arrayContaining(NAMES_OUTSIDE_EVE_NAMESPACE),
+      );
+      expect(compiled.skills.map((entry) => entry.name).toSorted()).toEqual(
+        NAMES_OUTSIDE_EVE_NAMESPACE.toSorted(),
+      );
+    });
+  });
+
+  it("rejects a deferred provider tool, which the provider has to see", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "tools/web_search.ts",
+        loadNamespace: async () => ({
+          default: { ...webSearch({ provider: "exa" }), deferred: true },
+        }),
+      },
+    ]);
+
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow("Provider tools can't be deferred");
+  });
+
+  describe("connection name ownership", () => {
+    const linear = {
+      logicalPath: "connections/linear.ts",
+      loadNamespace: async () => ({
+        default: defineMcpClientConnection({
+          description: "Linear.",
+          url: "https://mcp.linear.example",
+        }),
+      }),
+    };
+    const tool = (name: string) => ({
+      logicalPath: `tools/${name}.ts`,
+      loadNamespace: async () => ({
+        default: defineTool({ description: name, execute: () => null, inputSchema: {} }),
+      }),
+    });
+
+    it.each([
+      [
+        "linear__sync",
+        'Tool "linear__sync" starts with "linear__", which belongs to connection "linear". Rename the tool file.',
+      ],
+      ["linear", 'Tool "linear" has the same name as connection "linear". Rename the tool file.'],
+    ])("rejects a tool named %s beside connection linear", async (name, message) => {
+      const sourceRegistry = registry([linear, tool(name)]);
+
+      await expect(
+        compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+      ).rejects.toThrow(message);
+    });
+
+    it("rejects a connection named eve, which would own eve's namespace", async () => {
+      const sourceRegistry = registry([{ ...linear, logicalPath: "connections/eve.ts" }]);
+
+      await expect(
+        compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+      ).rejects.toThrow(
+        `Connection "connections/eve.ts" uses the reserved name "eve". Rename its path; ${EVE_NAMESPACE_RESERVATION}.`,
+      );
+    });
+
+    it("accepts connections outside eve's namespace, including the catalog tools' former names", async () => {
+      const names = ["search", "execute", "steve", "eve-tools"];
+      const sourceRegistry = registry(
+        names.map((name) => ({ ...linear, logicalPath: `connections/${name}.ts` })),
+      );
+
+      const compiled = await compileAgentManifest(manifest(), {
+        sourceRegistries: [sourceRegistry],
+      });
+
+      expect(compiled.connections.map((entry) => entry.connectionName).toSorted()).toEqual(
+        names.toSorted(),
+      );
+    });
+
+    it("allows a convention prefix that no connection owns", async () => {
+      const sourceRegistry = registry([linear, tool("linearize"), tool("tenant__export")]);
+
+      const compiled = await compileAgentManifest(manifest(), {
+        sourceRegistries: [sourceRegistry],
+      });
+
+      expect(compiled.tools.map((entry) => entry.name)).toEqual(
+        expect.arrayContaining(["linearize", "tenant__export"]),
+      );
+    });
   });
 
   it("projects a local subagent node once", async () => {

@@ -143,6 +143,35 @@ export async function* confirmDeployWorkflow(
   return { approved, service: input.service };
 }
 
+export async function answerWithResponderWorkflow(
+  _input: DeployInput,
+  ctx: WorkflowToolContext,
+): Promise<string> {
+  "use workflow";
+
+  const answer = await ctx.ask({
+    display: "confirmation",
+    options: [{ id: "approve", label: "Approve" }],
+    prompt: "Apply this change?",
+  });
+  return JSON.stringify({ answer, runStartPrincipal: ctx.session.auth.current?.principalId });
+}
+
+/** Asks two questions at once, so answering one leaves the other pending. */
+export async function confirmTwoStepsWorkflow(
+  input: DeployInput,
+  ctx: WorkflowToolContext,
+): Promise<{ readonly migrate: string; readonly rollout: string }> {
+  "use workflow";
+
+  const options = [{ id: "approve", label: "Approve" }];
+  const [migrate, rollout] = await Promise.all([
+    ctx.ask({ display: "confirmation", options, prompt: `Migrate ${input.service}?` }),
+    ctx.ask({ display: "confirmation", options, prompt: `Roll out ${input.service}?` }),
+  ]);
+  return { migrate: migrate.status, rollout: rollout.status };
+}
+
 export async function failingDeployWorkflow(input: DeployInput): Promise<never> {
   "use workflow";
 
@@ -157,18 +186,6 @@ export async function* reportingDeployWorkflow(
 
   const plan = await planDeployStep(input.service);
   yield `planned ${input.service}`;
-  return { plan };
-}
-
-export async function* backgroundDeployWorkflow(
-  input: DeployInput,
-  _ctx: WorkflowToolContext,
-): AsyncGenerator<string, { readonly plan: string }> {
-  "use workflow";
-
-  const plan = await planDeployStep(input.service);
-  yield `planned ${input.service}`;
-  yield `review ${plan}`;
   return { plan };
 }
 
@@ -240,4 +257,14 @@ export async function receiveDelegatedResultWorkflow(token: string): Promise<unk
   "use workflow";
   using result = createHook<unknown>({ token });
   return await result;
+}
+
+export async function reportCallerWorkflow(_input: unknown, ctx: WorkflowToolContext) {
+  "use workflow";
+  return { caller: ctx.session.auth.current?.principalId ?? null };
+}
+
+export async function failingServeWorkflow(): Promise<never> {
+  "use workflow";
+  throw new Error("Live serve workflow must not execute.");
 }

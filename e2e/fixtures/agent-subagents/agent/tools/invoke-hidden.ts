@@ -8,7 +8,7 @@ import { z } from "zod";
 type Input = { target: "tool-hidden" | "disabled-hidden" };
 type Output = {
   description: string;
-  result: Awaited<ReturnType<WorkflowToolContext["agent"]>>;
+  result: string | null;
 };
 
 async function execute({ target }: Input, ctx: WorkflowToolContext) {
@@ -18,8 +18,9 @@ async function execute({ target }: Input, ctx: WorkflowToolContext) {
   if (description === undefined) {
     throw new Error(`Missing workflow metadata for internal subagent ${target}.`);
   }
-  const result = await ctx.agent(target, { message: "Return your fixed marker." });
-  return { description, result };
+  const response = await ctx.agent(target).send("Return your fixed marker.");
+  const { message } = await response.result();
+  return { description, result: message ?? null };
 }
 
 const tool: WorkflowToolDefinition<Input, Output> = defineWorkflowTool({

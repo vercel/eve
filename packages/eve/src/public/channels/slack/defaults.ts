@@ -1,50 +1,95 @@
+import { workingTaskNames } from "#channel/task-card.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
-import { createLogger, extractErrorId, formatErrorHint, logError } from "#internal/logging.js";
-import { describeActionRequests } from "#public/channels/slack/action-status.js";
-import { buildSlackAuthContext, slackUserIdFromAuthContext } from "#public/channels/slack/auth.js";
+import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
+import {
+  reviewingResults,
+  waitingOnTasks,
+  withMoreCalls,
+} from "#public/channels/slack/action-status.js";
+import { actionLabel, visibleActions } from "#shared/action-label.js";
+import { buildSlackAuthContext, slackUserIdForPrincipal } from "#public/channels/slack/auth.js";
 import {
   buildAuthCompletedText,
   buildAuthEphemeralBlocks,
+  buildAuthEphemeralText,
   buildAuthRequiredPublicText,
   formatConnectionDisplayName,
   type ConnectionAuthorizationOutcome,
 } from "#public/channels/slack/connections.js";
-import {
-  buildAnsweredBlocks,
-  decodeHitlActionId,
-  renderInputRequestPostParts,
-  type SlackInputRequestPostPart,
-} from "#public/channels/slack/hitl.js";
 import type { SlackMessage } from "#public/channels/slack/inbound.js";
-import { deliverPrivateInputRequest } from "#public/channels/slack/private-approval-delivery.js";
-import {
-  SLACK_MARKDOWN_TEXT_MAX_LENGTH,
-  SLACK_MAX_BLOCKS_PER_MESSAGE,
-  truncateMessageText,
-  truncateTypingStatus,
-} from "#public/channels/slack/limits.js";
+import { approvalEvents } from "#public/channels/slack/approval-cards.js";
+import { deliverCompletedSlackReply } from "#public/channels/slack/reply-delivery.js";
+import { truncateTypingStatus } from "#public/channels/slack/limits.js";
 import type {
-  SlackApprovalChannelResolver,
-  SlackChannelEvents,
   SlackChannelInternalEvents,
   SlackChannelState,
   SlackContext,
+  SlackEventContext,
   SlackMentionResult,
 } from "#public/channels/slack/slackChannel.js";
-import type { InputRequest } from "#shared/input.js";
+import {
+  clearStatus,
+  hideStatus,
+  reasoningStatus,
+  showStatus,
+} from "#public/channels/slack/thread-status.js";
 
 const log = createLogger("slack.defaults");
-const REASONING_TYPING_REFRESH_INTERVAL_MS = 5_000;
-const REASONING_TYPING_MIN_PROGRESS_CHARS = 4;
-const LONG_RESPONSE_FILENAME = "eve-response.md";
-const LONG_RESPONSE_NOTICE = "Here's a snippet with the full response.";
-interface ReasoningAccumulator {
+/** Each piece of reasoning, or a tool's progress, stays up at least this long so it can be read. */
+const STATUS_HOLD_MS = 3_000;
+/** Narration before tool calls rarely runs this long, so longer text is the reply being written. */
+const WRITING_REPLY_MIN_CHARS = 280;
+
+/**
+ * What the current model step has streamed so far. One workflow step runs a
+ * model call and delivers its events to the same state object, so this never
+ * needs to survive serialization, and a new step starts empty.
+ */
+interface StepStream {
+  /** The step's tool calls: the first call's label, or the model's narration, and how many. */
+  calls: { readonly count: number; readonly label: string; readonly narrated: boolean } | null;
+  /** The current reasoning block, and when a piece of it last showed. */
+  reasoning: string;
+  reasoningShownAtMs: number | null;
+  replyChars: number;
   readonly stepIndex: number;
-  readonly text: string;
   readonly turnId: string;
 }
-const reasoningByState = new WeakMap<SlackChannelState, ReasoningAccumulator>();
+const streamByState = new WeakMap<SlackChannelState, StepStream>();
+
+function stepStream(state: SlackChannelState, turnId: string, stepIndex: number): StepStream {
+  const current = streamByState.get(state);
+  if (current?.turnId === turnId && current.stepIndex === stepIndex) return current;
+  const fresh: StepStream = {
+    calls: null,
+    reasoning: "",
+    reasoningShownAtMs: null,
+    replyChars: 0,
+    stepIndex,
+    turnId,
+  };
+  streamByState.set(state, fresh);
+  return fresh;
+}
+
+function heldWithin(atMs: number | null | undefined, now: number): boolean {
+  return atMs != null && now - atMs >= 0 && now - atMs < STATUS_HOLD_MS;
+}
+
+async function showReasoning(
+  channel: SlackEventContext,
+  stream: StepStream,
+  options?: { readonly complete?: boolean },
+): Promise<void> {
+  const piece = reasoningStatus(stream.reasoning, options);
+  if (piece === undefined) return;
+  if (truncateTypingStatus(piece) === channel.state.threadStatus?.text) return;
+  const now = Date.now();
+  if (heldWithin(stream.reasoningShownAtMs, now)) return;
+  await showStatus(channel, piece);
+  stream.reasoningShownAtMs = now;
+}
 
 interface SlackSemanticErrorSummary {
   readonly hint?: string;
@@ -120,26 +165,10 @@ function formatSemanticErrorReply(input: {
   ].join("\n");
 }
 
-function blockContainsRequestAction(block: unknown, requestId: string): boolean {
-  if (typeof block !== "object" || block === null) return false;
-  const candidate = block as { actions?: unknown; elements?: unknown };
-  return [candidate.actions, candidate.elements].some(
-    (entries) =>
-      Array.isArray(entries) &&
-      entries.some((entry) => {
-        if (typeof entry !== "object" || entry === null) return false;
-        const actionId = (entry as { action_id?: unknown }).action_id;
-        return (
-          typeof actionId === "string" && decodeHitlActionId(actionId)?.requestId === requestId
-        );
-      }),
-  );
-}
-
 /**
  * Workspace-scoped projection of the Slack actor that produced
  * `message`, derived into a {@link SessionAuthContext}. Used by both
- * {@link defaultOnAppMention} and {@link defaultOnDirectMessage} when
+ * {@link defaultOnMessage} when
  * the customer hasn't supplied their own `onAppMention` /
  * `onDirectMessage`. Returns `null` when the message has no author.
  */
@@ -153,6 +182,7 @@ export function defaultSlackAuth(
   return buildSlackAuthContext({
     channelId: ctx.slack.channelId,
     fullName: author.fullName,
+    installationTeamId: message.installationTeamId,
     isBot: author.isBot,
     teamId: message.teamId,
     threadTs: ctx.slack.threadTs,
@@ -162,29 +192,17 @@ export function defaultSlackAuth(
 }
 
 /**
- * Default `onAppMention` — derives auth from the Slack actor and posts
- * a `"Thinking…"` typing indicator before the workflow runtime starts.
+ * Default `onAppMention` and `onDirectMessage`: dispatches with auth derived
+ * from the Slack actor. Acknowledging the message is the renderer chain's
+ * `received`, so replacing a message hook never drops it.
  */
-export async function defaultOnAppMention(
-  ctx: SlackContext,
-  message: SlackMessage,
-): Promise<SlackMentionResult> {
-  await ctx.thread.startTyping("Thinking...");
+export function defaultOnMessage(ctx: SlackContext, message: SlackMessage): SlackMentionResult {
   return { auth: defaultSlackAuth(message, ctx) };
 }
 
-/**
- * Default `onDirectMessage` — derives auth from the Slack actor and
- * posts a `"Thinking…"` typing indicator before the workflow runtime
- * starts. Matches the default mention behavior; replace the option to
- * customize gating, auth derivation, or pre-dispatch side effects.
- */
-export async function defaultOnDirectMessage(
-  ctx: SlackContext,
-  message: SlackMessage,
-): Promise<SlackMentionResult> {
+/** eve's default `received`: the `Thinking...` status, set the moment a message arrives. */
+export async function defaultReceived(_message: SlackMessage, ctx: SlackContext): Promise<void> {
   await ctx.thread.startTyping("Thinking...");
-  return { auth: defaultSlackAuth(message, ctx) };
 }
 
 /**
@@ -201,279 +219,121 @@ function firstNonEmptyLine(text: string): string | undefined {
 }
 
 /**
- * Default `input.requested` handler — renders each pending HITL
- * request as Slack `block_actions`. Buttons by default; radio for
- * ≤6-option select requests; static_select for >6-option select
- * requests. Batches split into multiple posts when they would exceed
- * Slack's 50-block message cap. Override by declaring
- * `events["input.requested"]`.
- */
-export function defaultInputRequestedHandler(
-  approvalChannel?: SlackApprovalChannelResolver,
-): NonNullable<SlackChannelInternalEvents["input.requested"]> {
-  return async (data, channel, ctx) => {
-    const directMessageRequests: InputRequest[] = [];
-    const threadRequests: InputRequest[] = [];
-    for (const request of data.requests) {
-      const destination =
-        approvalChannel === undefined ? "thread" : await approvalChannel(request, ctx);
-      (destination === "direct-message" ? directMessageRequests : threadRequests).push(request);
-    }
-
-    await postPublicInputRequests(threadRequests, channel);
-    for (const request of directMessageRequests) {
-      const reviewer =
-        slackUserIdFromAuthContext(ctx.session.auth.current) ?? channel.state.triggeringUserId;
-      if (!reviewer) {
-        log.warn("direct-message input request not delivered because no reviewer was resolved", {
-          requestId: request.requestId,
-          sessionId: ctx.session.id,
-        });
-        continue;
-      }
-      const card = await deliverPrivateInputRequest({
-        previewMessageTs: channel.state.triggeringMessageTs ?? channel.slack.threadTs,
-        request,
-        reviewer,
-        slack: channel.slack,
-      });
-      recordApprovalCards(channel.state, [request], card);
-      try {
-        await channel.thread.post(
-          `Waiting on ${request.kind === "tool-approval" ? "approval" : "a response"} from <@${reviewer}>…`,
-        );
-      } catch (error) {
-        logError(log, "failed to announce private input request", error, {
-          requestId: request.requestId,
-          sessionId: ctx.session.id,
-        });
-      }
-    }
-  };
-}
-
-async function postPublicInputRequests(
-  requests: readonly InputRequest[],
-  channel: Parameters<NonNullable<SlackChannelEvents["input.requested"]>>[1],
-): Promise<void> {
-  for (const post of buildInputRequestPosts(requests)) {
-    const message = await channel.thread.post({ blocks: post.blocks, text: post.text });
-    recordApprovalCards(channel.state, post.requests, {
-      messageBlocks: post.blocks,
-      messageTs: message.id,
-    });
-  }
-}
-
-function recordApprovalCards(
-  state: SlackChannelState,
-  requests: readonly InputRequest[],
-  card: NonNullable<SlackChannelState["pendingApprovalCards"]>[string],
-): void {
-  if (!card.messageTs) return;
-  const cards = { ...state.pendingApprovalCards };
-  for (const request of requests) {
-    if (request.kind === "tool-approval") cards[request.requestId] = card;
-  }
-  state.pendingApprovalCards = cards;
-}
-
-/**
- * Groups HITL requests into `chat.postMessage` payloads that stay under
- * Slack's block-count cap. Tool input details are posted before interactive
- * approval controls so Slack's callback body cannot grow with the input.
- */
-function buildInputRequestPosts(
-  requests: readonly InputRequest[],
-): Array<{ blocks: unknown[]; requests: InputRequest[]; text: string }> {
-  const details: Array<SlackInputRequestPostPart & { readonly request: InputRequest }> = [];
-  const controls: Array<SlackInputRequestPostPart & { readonly request: InputRequest }> = [];
-  for (const request of requests) {
-    const parts = renderInputRequestPostParts(request);
-    if (parts.details) details.push({ ...parts.details, request });
-    controls.push({ ...parts.controls, request });
-  }
-
-  return [...groupInputRequestPostParts(details), ...groupInputRequestPostParts(controls)];
-}
-
-function groupInputRequestPostParts(
-  parts: readonly (SlackInputRequestPostPart & { readonly request: InputRequest })[],
-): Array<{ blocks: unknown[]; requests: InputRequest[]; text: string }> {
-  const groups: Array<{ blocks: unknown[]; fallbacks: string[]; requests: InputRequest[] }> = [];
-  for (const part of parts) {
-    const current = groups.at(-1);
-    if (current && current.blocks.length + part.blocks.length <= SLACK_MAX_BLOCKS_PER_MESSAGE) {
-      current.blocks.push(...part.blocks);
-      current.fallbacks.push(part.text);
-      current.requests.push(part.request);
-    } else {
-      groups.push({ blocks: [...part.blocks], fallbacks: [part.text], requests: [part.request] });
-    }
-  }
-  return groups.map((group) => ({
-    blocks: group.blocks,
-    requests: group.requests,
-    text: truncateMessageText(group.fallbacks.join("\n")),
-  }));
-}
-
-/**
- * Delivers a completed default Slack reply without sending content that
- * exceeds Slack's native Markdown limit. Long replies stay intact as one
- * Markdown snippet instead of being truncated or split across messages.
- */
-export async function postCompletedSlackReply(
-  channel: SlackContext,
-  message: string,
-): Promise<void> {
-  if (message.length <= SLACK_MARKDOWN_TEXT_MAX_LENGTH) {
-    await channel.thread.post(message);
-    return;
-  }
-
-  const file = {
-    data: new Blob([message], { type: "text/markdown" }),
-    filename: LONG_RESPONSE_FILENAME,
-    mimeType: "text/markdown",
-  };
-
-  const hasThread = channel.slack.threadTs.length > 0;
-  if (!hasThread) {
-    // Uploads cannot anchor proactive sessions; post the notice first.
-    const anchor = await channel.thread.post(LONG_RESPONSE_NOTICE);
-    if (!anchor.id || channel.slack.threadTs.length === 0) {
-      throw new Error("Slack did not return a thread timestamp for the long response notice.");
-    }
-  }
-  await channel.slack.uploadFiles([file], {
-    initialComment: hasThread ? LONG_RESPONSE_NOTICE : undefined,
-    snippetType: "markdown",
-  });
-}
-
-/**
- * Built-in Slack event handlers — typing indicators, error replies,
- * and the connection-authorization status flow. Each is overridable
- * per-event by passing the same key under `slackChannel({ events })`.
- * Typed as the internal full-context map because the default
- * `authorization.required` handler owns the public link-free status,
- * which user overrides cannot express.
+ * eve's default Slack event rendering: status lines, replies, errors, and the
+ * connection-authorization flow. It is the innermost link of every channel's
+ * renderer chain. Typed as the internal full-context map because the default
+ * `authorization.required` handler owns the public link-free status, which
+ * authored renderers cannot express.
  */
 export const defaultEvents: SlackChannelInternalEvents = {
-  async "approval.candidate"(event, channel, _ctx) {
-    const userId = channel.state.pendingApprovalCandidateUsers?.[event.candidateId];
-    if (event.outcome === "pending" && userId !== undefined) {
-      await channel.thread.postEphemeral(userId, "Checking whether you can approve this action…");
+  ...approvalEvents,
+  // A turn held on a person's approval, answer, or sign-in isn't working, and
+  // the prompt asking them says so. Its status comes back when it resumes.
+  async "turn.waiting"(event, channel, _ctx) {
+    if (event.on === "input") {
+      await hideStatus(channel);
       return;
     }
-    if (userId === undefined) return;
-    if (event.outcome === "rejected" || event.outcome === "failed") {
-      await channel.thread.postEphemeral(
-        userId,
-        event.reason ?? "We couldn’t verify your approval. Please try again.",
-      );
-    }
+    const working = workingTaskNames(channel.state.taskCards?.[event.turnId]?.turn);
+    if (working.length > 0) await showStatus(channel, waitingOnTasks(working));
   },
 
-  async "approval.settled"(event, channel, _ctx) {
-    const cards = channel.state.pendingApprovalCards ?? {};
-    const card = cards[event.requestId];
-    if (card === undefined) return;
-    const messageChannelId = card.messageChannelId ?? channel.state.channelId;
-    if (messageChannelId === null) return;
-    const answerLabel = event.outcome === "approved" ? "Approve" : "Cancel";
-    const userId = channel.state.approvalResponderUsers?.[event.responderPrincipalId];
-    const blocks = card.messageBlocks.flatMap((block) => {
-      if (!blockContainsRequestAction(block, event.requestId)) return [block];
-      if (typeof block !== "object" || block === null) return [];
-      const candidate = block as Record<string, unknown>;
-      if (candidate.type !== "card") {
-        return buildAnsweredBlocks({ answerLabel, promptBlocks: [], userId });
-      }
-      const { actions: _actions, ...withoutActions } = candidate;
-      return buildAnsweredBlocks({
-        answerLabel,
-        promptBlocks: [withoutActions],
-        userId,
-      });
-    });
-    await channel.slack.request("chat.update", {
-      blocks,
-      channel: messageChannelId,
-      text: `Answered: ${answerLabel}`,
-      ts: card.messageTs,
-    });
-    const next = { ...cards };
-    delete next[event.requestId];
-    for (const [requestId, pendingCard] of Object.entries(next)) {
-      if (pendingCard.messageTs === card.messageTs) {
-        next[requestId] = { ...pendingCard, messageBlocks: blocks };
-      }
-    }
-    channel.state.pendingApprovalCards = next;
+  // The turn's next model step reads the results, so `step.started` can say so.
+  async "task.settled"(event, channel, _ctx) {
+    if (event.cancel !== undefined) return;
+    const pending = channel.state.pendingTaskResults;
+    const names = pending?.turnId === event.turnId ? pending.names : [];
+    const name = event.kind === "agent" && event.name !== undefined ? event.name : null;
+    channel.state.pendingTaskResults = { names: [...names, name], turnId: event.turnId };
+  },
+
+  // A model step means nothing to someone reading the thread, so the status
+  // keeps naming the work, such as the call that just finished, and is written
+  // again so Slack doesn't time it out. Only task results the step is about to
+  // read change it. `turn.started` covers step 0.
+  async "step.started"(event, channel, _ctx) {
+    if (event.stepIndex === 0) return;
+    const pending = channel.state.pendingTaskResults;
+    channel.state.pendingTaskResults = null;
+    const status =
+      pending?.turnId === event.turnId
+        ? reviewingResults(pending.names)
+        : (channel.state.threadStatus?.text ?? "Thinking...");
+    await showStatus(channel, status, { force: true });
   },
 
   async "turn.started"(_event, channel, _ctx) {
+    channel.state.pendingTaskResults = null;
     channel.state.pendingToolCallMessage = null;
-    channel.state.lastReasoningTypingAtMs = null;
-    channel.state.lastReasoningTypingStatus = null;
-    reasoningByState.delete(channel.state);
-    await channel.thread.startTyping("Working...");
+    streamByState.delete(channel.state);
+    await showStatus(channel, "Thinking...", { force: true });
   },
 
+  // A reply clears the status, but a turn ended by an `endsTurn` tool posts
+  // none, and Slack would otherwise show the status until it times out.
+  async "turn.completed"(_event, channel, _ctx) {
+    await clearStatus(channel);
+  },
+
+  // Shows the newest heading or sentence, each for at least a few seconds, so
+  // a long reasoning block reads as progress instead of its opening words.
   async "reasoning.appended"(event, channel, _ctx) {
-    const current = reasoningByState.get(channel.state);
-    const continuesCurrentBlock =
-      current?.turnId === event.turnId && current.stepIndex === event.stepIndex;
-    if (!continuesCurrentBlock) {
-      channel.state.lastReasoningTypingAtMs = null;
-      channel.state.lastReasoningTypingStatus = null;
-    }
-    const reasoning = (continuesCurrentBlock ? current.text : "") + event.reasoningDelta;
-    reasoningByState.set(channel.state, {
-      stepIndex: event.stepIndex,
-      text: reasoning,
-      turnId: event.turnId,
-    });
-    const line = firstNonEmptyLine(reasoning);
-    if (line === undefined) return;
-
-    const status = truncateTypingStatus(line);
-    const lastStatus = channel.state.lastReasoningTypingStatus;
-    const isProgressiveExtension =
-      lastStatus !== null &&
-      lastStatus !== undefined &&
-      status.startsWith(lastStatus) &&
-      status.length >= lastStatus.length + REASONING_TYPING_MIN_PROGRESS_CHARS;
-    const now = Date.now();
-    const lastAt = channel.state.lastReasoningTypingAtMs;
-    if (!isProgressiveExtension && lastAt !== null && lastAt !== undefined) {
-      const elapsed = now - lastAt;
-      if (elapsed >= 0 && elapsed < REASONING_TYPING_REFRESH_INTERVAL_MS) return;
-    }
-
-    await channel.thread.startTyping(status);
-    channel.state.lastReasoningTypingAtMs = now;
-    channel.state.lastReasoningTypingStatus = status;
+    const stream = stepStream(channel.state, event.turnId, event.stepIndex);
+    if (stream.reasoning === "") stream.reasoningShownAtMs = null;
+    stream.reasoning += event.reasoningDelta;
+    await showReasoning(channel, stream);
   },
 
+  // The block's last sentence never shows while it streams unless it fills
+  // the status, so a short one only shows once the block ends.
   async "reasoning.completed"(event, channel, _ctx) {
-    const current = reasoningByState.get(channel.state);
-    if (current?.turnId !== event.turnId || current.stepIndex !== event.stepIndex) return;
-    reasoningByState.delete(channel.state);
-    channel.state.lastReasoningTypingAtMs = null;
-    channel.state.lastReasoningTypingStatus = null;
+    const stream = stepStream(channel.state, event.turnId, event.stepIndex);
+    stream.reasoning = event.reasoning;
+    await showReasoning(channel, stream, { complete: true });
+    stream.reasoning = "";
   },
 
-  async "actions.requested"(event, channel, _ctx) {
-    const buffered = channel.state.pendingToolCallMessage;
-    channel.state.pendingToolCallMessage = null;
-    if (buffered) {
-      await channel.thread.startTyping(truncateTypingStatus(buffered));
-      return;
+  async "message.appended"(event, channel, _ctx) {
+    const stream = stepStream(channel.state, event.turnId, event.stepIndex);
+    const before = stream.replyChars;
+    stream.replyChars += event.messageDelta.length;
+    if (before < WRITING_REPLY_MIN_CHARS && stream.replyChars >= WRITING_REPLY_MIN_CHARS) {
+      await showStatus(channel, "Writing a reply...");
     }
-    await channel.thread.startTyping(truncateTypingStatus(describeActionRequests(event.actions)));
+  },
+
+  // Calls in one step stream in one at a time, so the step keeps its first
+  // label, or the model's narration, and counts the rest.
+  async "actions.requested"(event, channel, _ctx) {
+    const narration = channel.state.pendingToolCallMessage;
+    channel.state.pendingToolCallMessage = null;
+    const actions = visibleActions(event.actions);
+    if (!narration && actions.length === 0) return;
+    const stream = stepStream(channel.state, event.turnId, event.stepIndex);
+    const calls =
+      !narration && stream.calls
+        ? { ...stream.calls, count: stream.calls.count + actions.length }
+        : {
+            count: actions.length,
+            label: narration ?? actionLabel(actions[0]!, event.presentation),
+            narrated: narration != null,
+          };
+    stream.calls = calls;
+    await showStatus(
+      channel,
+      calls.narrated ? calls.label : withMoreCalls(calls.label, calls.count),
+    );
+  },
+
+  async "action.partial"(event, channel, _ctx) {
+    const label = event.presentation?.[event.result.callId]?.label;
+    if (!label || heldWithin(channel.state.threadStatus?.atMs, Date.now())) return;
+    await showStatus(channel, label);
+  },
+
+  async "action.result"(event, channel, _ctx) {
+    const label = event.presentation?.[event.result.callId]?.label;
+    if (label) await showStatus(channel, label);
   },
 
   async "message.completed"(event, channel, _ctx) {
@@ -485,10 +345,12 @@ export const defaultEvents: SlackChannelInternalEvents = {
     }
     channel.state.pendingToolCallMessage = null;
     if (!event.message) {
-      await channel.thread.startTyping();
+      await clearStatus(channel);
       return;
     }
-    await postCompletedSlackReply(channel, event.message);
+    // Slack clears the status when the reply posts.
+    channel.state.threadStatus = null;
+    await deliverCompletedSlackReply(channel, event.message, { turnId: event.turnId });
   },
 
   async "turn.failed"(event, channel, _ctx) {
@@ -544,14 +406,9 @@ export const defaultEvents: SlackChannelInternalEvents = {
     );
   },
 
-  async "authorization.required"(event, channel, ctx) {
+  async "authorization.required"(event, channel, _ctx) {
     const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
-    const triggeringUserId =
-      event.candidateId === undefined
-        ? (slackUserIdFromAuthContext(ctx.session.auth.current) ??
-          channel.state.triggeringUserId ??
-          null)
-        : (channel.state.pendingApprovalCandidateUsers?.[event.candidateId] ?? null);
+    const recipientUserId = slackUserIdForPrincipal(channel.state, event.principalId) ?? null;
     const challengeUrl = event.authorization?.url;
 
     // Post a public, link-free status so everyone in the thread can see
@@ -559,10 +416,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
     // itself remains private.
     const pending = channel.state.pendingAuthMessageTs ?? {};
     if (event.candidateId === undefined && pending[event.name] === undefined) {
-      const publicText = buildAuthRequiredPublicText({
-        displayName,
-        hasUser: triggeringUserId !== null,
-      });
+      const publicText = buildAuthRequiredPublicText({ displayName, recipientUserId });
       try {
         const sent = await channel.thread.post(publicText);
         if (sent.id) {
@@ -580,22 +434,27 @@ export const defaultEvents: SlackChannelInternalEvents = {
     }
 
     // The challenge is user-specific: the sign-in link (and device code)
-    // must only ever be visible to the triggering user, never posted into
+    // must only ever be visible to the person who started the sign-in, never posted into
     // the shared thread.
-    if (triggeringUserId && challengeUrl) {
-      const userCode = event.authorization?.userCode;
+    const instructions = event.authorization?.instructions;
+    if (recipientUserId && (challengeUrl || instructions)) {
+      const { channelId, threadTs } = channel.state;
+      // The turn's own sign-in holds it, so the prompt can cancel that turn.
+      const cancel =
+        event.candidateId === undefined && channelId && threadTs && event.turnId
+          ? { channelId, threadTs, turnId: event.turnId }
+          : undefined;
+      const prompt = {
+        cancel,
+        displayName,
+        instructions,
+        url: challengeUrl,
+        userCode: event.authorization?.userCode,
+      };
       try {
-        await channel.thread.postEphemeral(triggeringUserId, {
-          blocks: buildAuthEphemeralBlocks({
-            displayName,
-            url: challengeUrl,
-            userCode,
-          }),
-          // Fallback text mirrors the blocks: clients that render only the
-          // notification text still get everything needed to complete the flow.
-          text: userCode
-            ? `Sign in with ${displayName}: ${challengeUrl} (code: ${userCode})`
-            : `Sign in with ${displayName}: ${challengeUrl}`,
+        await channel.thread.postEphemeral(recipientUserId, {
+          blocks: buildAuthEphemeralBlocks(prompt),
+          text: buildAuthEphemeralText(prompt),
         });
       } catch (error) {
         log.error("Slack auth ephemeral delivery failed", {
@@ -609,7 +468,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
   async "authorization.completed"(event, channel, _ctx) {
     const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
     if (event.outcome === "authorized" && event.candidateId === undefined) {
-      await channel.thread.startTyping(`Connected to ${displayName}. Resuming...`);
+      await showStatus(channel, `Connected to ${displayName}. Resuming...`, { force: true });
     }
 
     const pending = channel.state.pendingAuthMessageTs ?? {};

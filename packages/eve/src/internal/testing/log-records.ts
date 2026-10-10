@@ -26,10 +26,6 @@ export const workflowSdkNotice = {
     "[workflow-sdk] Queue message was delivered to a deployment it was not pinned to",
 } as const;
 
-/** Logged when a background task reports back after its parent session ended. */
-export const taskParentEndedNotice =
-  "[eve:execution.tasks.run] task notification target is gone; the parent session already ended";
-
 // The workflow SDK reports a duplicate in-process delivery of the same step
 // whenever redelivery races a slow step, so its presence depends on load.
 const WORKFLOW_STEP_SINGLE_FLIGHT_NOTICE =

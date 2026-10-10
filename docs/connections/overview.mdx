@@ -6,7 +6,9 @@ url: /connections
 
 A connection wires an agent into an external server you don't author, either an MCP server (Linear, GitHub, a warehouse) or any HTTP API with an OpenAPI document. eve handles the parts you'd otherwise hand-roll, discovering the remote tools, surfacing them to the model, and brokering auth. To instead let eve communicate with users through an external service, use a [channel](/docs/channels/overview).
 
-Connections live under `agent/connections/`. A static connection's runtime name comes from the filename, so `agent/connections/linear.ts` registers as `"linear"`. A dynamic connection file can instead resolve a caller-specific connection set at session or turn boundaries. The model never sees a connection's URL or credentials. It discovers tools through the built-in `connection_search` and calls them by their qualified name, `<connection>__<tool>` (e.g. `linear__list_issues`).
+Connections live under `agent/connections/`. A static connection's runtime name comes from the filename, so `agent/connections/linear.ts` registers as `"linear"`. A dynamic connection file can instead resolve a caller-specific connection set at session or turn boundaries. The model never sees a connection's URL or credentials. It finds tools with the built-in [`eve__search`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill), where a query such as `linear__` searches one connection's tools, and calls them with `eve__tool`. Stream events, approval policies, and hooks name each call by its qualified name, `<connection>__<tool>` (e.g. `linear__list_issues`).
+
+A connection owns its name and every name that starts with `<name>__`, so `linear__list_issues` always means the `linear` connection's `list_issues` tool. The compiler rejects a tool, subagent, or connection whose name is a static connection's name or starts with its `<name>__` prefix. eve applies the same rule to dynamic connections, tools, and subagents when they resolve. Both errors name the two sides of the conflict; rename either one.
 
 ## MCP connections
 
@@ -194,7 +196,7 @@ export default defineMcpClientConnection({
 });
 ```
 
-`never()` lets every call through, `once()` asks for approval the first time in a session, `always()` asks every time, and `auto()` uses an evaluation model to allow routine calls and ask about dangerous or unclear effects. The pause and resume is the same human-in-the-loop flow covered in [Tools](/docs/tools).
+`never()` lets every call through, `once()` asks for approval the first time in a session, `always()` asks every time, and `auto()` uses a decision model to allow routine calls and ask about dangerous or unclear effects. The pause and resume is the same human-in-the-loop flow covered in [Tools](/docs/tools).
 
 For connection tools that can create, modify, delete, transmit, purchase, message, or access sensitive data, use approval, allow-lists, or other safeguards appropriate to the action.
 
@@ -227,7 +229,11 @@ export default defineMcpClientConnection({
 
 Use the connector UID returned by `vercel connect create`; the display name passed to `--name` is not the UID. `connect("linear/myagent")` is shorthand for a user-scoped interactive OAuth connection: eve resolves a token for the active user before each tool call, emits `authorization.required` when that user has not authorized yet, and resumes the parked turn after the callback completes.
 
-When a local subagent needs interactive authorization, eve surfaces the authorization lifecycle on the root session's channel, including through nested subagent chains. The challenge still points to the child session's callback, so completing it resumes the child directly while the parent continues waiting for its result.
+Discovering tools never posts a sign-in prompt for a service the answer does not need: `eve__search` never asks for sign-in. Before the user signs in, eve connects to an MCP server without a token, so a server that lists its tools anonymously is searched like any other connection, and sign-in starts only when one of its tools asks for it (see [When eve asks for sign-in](/docs/connections/mcp#when-eve-asks-for-sign-in)). Most OAuth MCP servers reject even tool listing without the user's token, so `search` lists such a connection as one result named after the connection, such as `linear`. The model asks for sign-in explicitly, one connection at a time, by calling that name with `eve__tool({ name: "linear" })`; once the user signs in, `eve__search({ query: "linear__" })` returns the connection's tools. Calling a tool with `eve__tool` on such a connection also asks for sign-in.
+
+A sign-in holds the turn open until the user connects, the turn is cancelled, or the user sends another message. That message steers the turn: eve cancels the sign-in, reports `authorization.completed` with `outcome: "declined"`, and the model reads the message next. Messages from other people in a shared thread wait until the turn ends, and the completed sign-in resumes the turn as the person who started it.
+
+When a local subagent needs interactive authorization, eve surfaces the authorization lifecycle on the root session's channel, including through nested subagent chains. The challenge still points to the child session's callback, so completing it resumes the child directly while the parent continues waiting for its result. The parent's turn stays open: it emits `turn.waiting` after the proxied `authorization.required` and resumes under the same `turnId` once the subagent returns.
 
 That means the channel that creates or continues the session must authenticate a real user. For a web app, configure `agent/channels/eve.ts` so your app session maps to `principalType: "user"`; for platform channels, use the built-in channel auth that maps the sender to a user principal. If no authenticated user is attached to the session, the first user-scoped connection call fails with `reason: "principal_required"`.
 
@@ -273,7 +279,7 @@ export default defineMcpClientConnection({
     // Probed before every tool call. Return a token to run the tool;
     // throw `Required` to start the consent flow.
     getToken: async ({ principal }) => {
-      const token = await lookupCachedToken(principal);
+      const token = await loadStoredToken(principal);
       if (!token) throw new ConnectionAuthorizationRequiredError("linear");
       return { token };
     },
@@ -289,15 +295,17 @@ export default defineMcpClientConnection({
     // Runs when the provider redirects to the callback URL. `resume` is
     // typed as `{ verifier: string } | undefined`; `callback.params`
     // holds the IdP's returned query/body params.
-    completeAuthorization: async ({ resume, callback }) => {
+    // Persist the token here so `getToken` finds it on later tool calls.
+    completeAuthorization: async ({ principal, resume, callback }) => {
       const token = await exchangeCode(resume!.verifier, callback.params.code!);
+      await saveStoredToken(principal, token);
       return { token };
     },
   }),
 });
 ```
 
-`getToken` runs before every tool call. `startAuthorization` and `completeAuthorization` are both-or-neither: provide one without the other and you get a definition error. The `challenge` rides along verbatim on the `authorization.required` event. Its fields:
+`getToken` runs before every tool call. eve does not store tokens for you: the token returned from `completeAuthorization` is reused only within the current workflow step, so it never lands in durable session state. Save it in `completeAuthorization` (or let your OAuth provider keep it) and read it back in `getToken`. If `getToken` cannot find the token on a later call, eve asks the user to sign in again. `startAuthorization` and `completeAuthorization` are both-or-neither: provide one without the other and you get a definition error. The `challenge` rides along verbatim on the `authorization.required` event. Its fields:
 
 | Field          | Purpose                                                                                   |
 | -------------- | ----------------------------------------------------------------------------------------- |

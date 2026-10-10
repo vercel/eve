@@ -8,6 +8,7 @@ const ATTRIBUTES = {
   "agent.trace.content.input": true,
   "agent.trace.content.output": true,
   "gen_ai.input.messages": "what the user said",
+  "gen_ai.system_instructions": '[{"content":"private instructions","type":"text"}]',
   "ai.response.finish_reason": "stop",
   "ai.response.text": "what the model said",
   "gen_ai.request.model": "test-model",
@@ -55,11 +56,21 @@ describe("withoutDeclinedContent", () => {
       "agent.trace.content.input": true,
       "agent.trace.content.output": false,
       "gen_ai.input.messages": "what the user said",
+      "gen_ai.system_instructions": '[{"content":"private instructions","type":"text"}]',
       "ai.response.finish_reason": "stop",
       "gen_ai.request.model": "test-model",
       "gen_ai.tool.call.arguments": "{}",
       "gen_ai.tool.name": "weather",
     });
+  });
+
+  it("drops system instructions when the destination declined inputs", () => {
+    expect(
+      withoutDeclinedContent(
+        { "gen_ai.system_instructions": '[{"content":"private","type":"text"}]' },
+        { recordInputs: false, recordOutputs: true },
+      ),
+    ).toEqual({});
   });
 
   // The prefixes are shared: `ai.response.finish_reason` and `gen_ai.tool.name`

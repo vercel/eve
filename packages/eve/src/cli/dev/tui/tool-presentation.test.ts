@@ -8,13 +8,13 @@ describe("presentPreparingTool", () => {
     expect(presentPreparingTool("bash").title).toBe("Run …");
     expect(presentPreparingTool("write_file").title).toBe("Write …");
     expect(presentPreparingTool("eve.web_search").title).toBe("Search …");
-    expect(presentPreparingTool("final_output").title).toBe("Return final output");
+    expect(presentPreparingTool("eve__reply").title).toBe("Reply");
   });
 
-  it("keeps unknown tools on their name with a quiet hint", () => {
+  it("leads unknown tools with their name", () => {
     const presentation = presentPreparingTool("linear__list_issues");
-    expect(presentation.title).toBe("linear__list_issues");
-    expect(presentation.subtitle).toBe("preparing…");
+    expect(presentation.title).toBe("List issues …");
+    expect(presentation.subtitle).toBe("");
   });
 });
 
@@ -60,7 +60,6 @@ describe("presentTool", () => {
     expect(presentTool("bash", { command: "pnpm test" }).title).toBe("Run pnpm test");
     expect(presentTool("glob", { pattern: "**/*.ts" }).title).toBe("Glob **/*.ts");
     expect(presentTool("grep", { pattern: "useEve" }).title).toBe("Grep useEve");
-    expect(presentTool("load_skill", { skill: "commit" }).title).toBe("Load commit");
     expect(presentTool("read_file", { filePath: "/workspace/agent.ts" })).toMatchObject({
       title: "Read /workspace/agent.ts",
       group: { verb: "Read", singularNoun: "file", pluralNoun: "files" },
@@ -146,10 +145,7 @@ describe("presentTool", () => {
     expect(presentTool("agent", { message: "Audit the auth flow.\nDetails…" }).title).toBe(
       "Delegate Audit the auth flow.",
     );
-    expect(presentTool("connection_search", { keywords: "linear issues" }).title).toBe(
-      "Discover linear issues",
-    );
-    expect(presentTool("final_output", { anything: true }).title).toBe("Return final output");
+    expect(presentTool("eve__reply", { anything: true }).title).toBe("Reply");
   });
 
   it("covers the builtin presentation table with semantic copy", () => {
@@ -159,9 +155,7 @@ describe("presentTool", () => {
       bash: { command: "ls" },
       glob: { pattern: "**/*.ts" },
       grep: { pattern: "useEve" },
-      load_skill: { skill: "commit" },
       read_file: { filePath: "/workspace/a.ts" },
-      task_cancel: { taskIds: ["task_abc"] },
       web_fetch: { url: "https://example.com" },
       web_search: { query: "eve framework" },
       write_file: { filePath: "/workspace/a.ts", content: "x" },
@@ -175,24 +169,31 @@ describe("presentTool", () => {
   it("falls back to the generic formatter for malformed input", () => {
     const presentation = presentTool("web_fetch", { format: "markdown" });
 
-    expect(presentation.title).toBe("web_fetch");
+    expect(presentation.title).toBe("Web fetch");
     expect(presentation.subtitle).toContain('format="markdown"');
   });
 
   it("does not retain semantic copy for the removed task_sleep tool", () => {
-    expect(presentTool("task_sleep", { seconds: 30 }).title).toBe("task_sleep");
+    expect(presentTool("task_sleep", { seconds: 30 }).title).toBe("Task sleep");
   });
 
   it("does not retain semantic copy for the removed task_update tool", () => {
     const presentation = presentTool("task_update", { message: "Checking the next region." });
-    expect(presentation.title).toBe("task_update");
+    expect(presentation.title).toBe("Task update");
     expect(presentation.subtitle).toContain('message="Checking the next region."');
     expect(presentation.group).toBeUndefined();
     expect(presentation.doneTitle).toBeUndefined();
     expect(presentPreparingTool("task_update")).toMatchObject({
-      title: "task_update",
-      subtitle: "preparing…",
+      title: "Task update …",
+      subtitle: "",
     });
+  });
+
+  it("keeps eve's own copy for builtin tools over their provided labels", () => {
+    // Provided tools define labels too; eve's copy keeps them groupable.
+    const presentation = presentTool("bash", { command: "ls" }, { label: "bash ls" });
+    expect(presentation.title).toBe("Run ls");
+    expect(presentation.group?.verb).toBe("Run");
   });
 
   it("presents a named subagent dispatch as a delegation", () => {
@@ -201,22 +202,43 @@ describe("presentTool", () => {
       { message: "Look up GOOG.\nDetails…" },
       { isSubagent: true },
     );
-    expect(parsed.title).toBe("Delegate stock-price");
-    expect(parsed.doneTitle).toBe("Delegated stock-price");
+    expect(parsed.title).toBe("Delegate subagent(stock price)");
+    expect(parsed.doneTitle).toBe("Delegated subagent(stock price)");
     expect(parsed.subtitle).toBe("Look up GOOG.");
 
     // The tool's name carries the target, so it shows before args parse.
     expect(presentPreparingTool("stock-price", { isSubagent: true }).title).toBe(
-      "Delegate stock-price …",
+      "Delegate subagent(stock price) …",
     );
+    // An extension's subagents go by their own name, and its `agent` by the extension's.
+    expect(presentTool("code__worker", {}, { isSubagent: true }).title).toBe(
+      "Delegate subagent(worker)",
+    );
+    expect(presentTool("code_review__agent", {}, { isSubagent: true }).title).toBe(
+      "Delegate subagent(code review)",
+    );
+    const selfModification = presentTool(
+      "self-modification__agent",
+      { message: "Edit Alice's agent" },
+      { isSubagent: true },
+    );
+    expect(selfModification.title).toBe("Delegate agent editor");
+    expect(selfModification.doneTitle).toBe("Delegated agent editor");
     // Without roster knowledge the generic formatter keeps its shape.
-    expect(presentTool("stock-price", { message: "x" }).title).toBe("stock-price");
+    expect(presentTool("stock-price", { message: "x" }).title).toBe("Stock price");
+  });
+
+  it("names the self-modification subagent without its extension namespace", () => {
+    expect(
+      presentTool("self-modification__agent", { message: "Add a tool." }, { isSubagent: true })
+        .title,
+    ).toBe("Delegate agent editor");
   });
 
   it("keeps unknown tools on the generic formatter", () => {
     const presentation = presentTool("linear__list_issues", { teamId: "T1" });
 
-    expect(presentation.title).toBe("linear__list_issues");
+    expect(presentation.title).toBe("List issues");
     expect(presentation.subtitle).toContain('teamId="T1"');
     expect(presentation.group).toBeUndefined();
   });

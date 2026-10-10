@@ -175,6 +175,7 @@ describe("dynamic tool cold replay", () => {
           }
         }, "The crashed development server did not release its state record.");
         server = await startEveDev(app.appRoot, {
+          resume: true,
           env: { ...pinnedEnv, EVE_SCHEMA_TEST_SUFFIX: ":changed" },
         });
 

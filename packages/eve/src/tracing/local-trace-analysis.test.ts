@@ -87,7 +87,7 @@ describe("analyzeLocalTrace", () => {
       attributes: {
         "agent.action.kind": "tool-call",
         "agent.action.name": "read_file",
-        "agent.action.call_id": "call-1",
+        "gen_ai.tool.call.id": "call-1",
         "agent.session.id": "target",
         "agent.turn.id": "turn-1",
       },
@@ -144,7 +144,7 @@ describe("analyzeLocalTrace", () => {
     expect(analysis.records[0]).toMatchObject({ category: "tool", toolName: "web_search" });
   });
 
-  it("preserves a background action lifetime without adding it to tool work", () => {
+  it("preserves a subagent action lifetime without adding it to tool work", () => {
     const analysis = analyzeLocalTrace(traceId, [
       span({
         attributes: { "agent.action.kind": "subagent-call", "agent.action.name": "worker" },
@@ -168,14 +168,14 @@ describe("analyzeLocalTrace", () => {
     ]);
   });
 
-  it("reports per-model token usage without inventing missing metrics", () => {
+  it("reports standard per-model token usage without inventing missing metrics", () => {
     const model = span({
       attributes: {
         "gen_ai.operation.name": "chat",
-        "agent.usage.input_tokens": 100,
-        "agent.usage.output_tokens": 10,
-        "agent.usage.cache_read_tokens": 80,
-        "agent.usage.cache_write_tokens": 0,
+        "gen_ai.usage.input_tokens": 100,
+        "gen_ai.usage.output_tokens": 10,
+        "gen_ai.usage.cache_read.input_tokens": 80,
+        "gen_ai.usage.cache_write.input_tokens": 0,
       },
       endMs: 10,
       name: "chat test-model",
@@ -187,15 +187,15 @@ describe("analyzeLocalTrace", () => {
       {
         ...model,
         name: "invoke_agent",
-        attributes: { "agent.usage.input_tokens": 100 },
+        attributes: { "gen_ai.usage.input_tokens": 100 },
         spanId: "b".repeat(16),
       },
       {
         ...model,
         attributes: {
           "gen_ai.operation.name": "chat",
-          "agent.usage.input_tokens": -1,
-          "agent.usage.output_tokens": Infinity,
+          "gen_ai.usage.input_tokens": -1,
+          "gen_ai.usage.output_tokens": Infinity,
         },
         spanId: "c".repeat(16),
       },

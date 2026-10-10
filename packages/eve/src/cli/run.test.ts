@@ -383,6 +383,7 @@ describe("bare eve command", () => {
 
     expect(findApplicationRoot).toHaveBeenCalledWith(resolve(process.cwd()));
     expect(startHost).toHaveBeenCalledWith("/resolved/app", {
+      resume: undefined,
       existing: "attach-if-unconfigured",
       host: undefined,
       onBootProgress: expect.any(Function),
@@ -620,6 +621,22 @@ describe("eve dev --input", () => {
     expect(startHost).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({ developmentExtensions: { enabled: [] } }),
+    );
+  });
+
+  it("passes explicit recovery to the local host", async () => {
+    const startHost = vi.fn(() => ({
+      start: async () => ({
+        kind: "started" as const,
+        appRoot: "/canonical/app",
+        url: "http://127.0.0.1:4321/",
+      }),
+      close: async () => {},
+    }));
+    await runInteractiveDev(["dev", "--resume"], { startHost });
+    expect(startHost).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ resume: true }),
     );
   });
 
@@ -871,19 +888,19 @@ describe("eve remote connect", () => {
 });
 
 describe("eve dev --logs", () => {
-  it("accepts sandbox as the initial TUI log mode", async () => {
+  it("accepts warn as the initial TUI log mode", async () => {
     const runDevelopmentTui = await runInteractiveDev([
       "remote",
       "connect",
       "--url",
       "https://example.com",
       "--logs",
-      "sandbox",
+      "warn",
     ]);
 
     expect(runDevelopmentTui).toHaveBeenCalledWith(
       expect.objectContaining({
-        logs: "sandbox",
+        logs: "warn",
         target: {
           kind: "remote",
           serverUrl: "https://example.com/",
@@ -1075,6 +1092,7 @@ describe("eve dev local server ownership", () => {
     const runDevelopmentTui = await runInteractiveDev(["dev"], { startHost });
 
     expect(startHost).toHaveBeenCalledWith(expect.any(String), {
+      resume: undefined,
       existing: "attach-if-unconfigured",
       host: undefined,
       onBootProgress: expect.any(Function),
@@ -1216,7 +1234,7 @@ describe("resolveDevUiMode", () => {
 describe("resolveTuiDisplayOptions", () => {
   it("defaults tools and reasoning to auto-collapsed with stderr logs visible", () => {
     expect(resolveTuiDisplayOptions({})).toEqual({
-      logs: "stderr",
+      logs: "error",
       // Collapsed reasoning is the fixed thinking line; `--reasoning full`
       // restores the streaming transcript trace.
       reasoning: "auto-collapsed",
@@ -1229,20 +1247,20 @@ describe("resolveTuiDisplayOptions", () => {
       resolveTuiDisplayOptions({
         tools: "hidden",
         reasoning: "collapsed",
-        subagents: "auto-collapsed",
+        subagents: "collapsed",
         connectionAuth: "full",
         assistantResponseStats: "tokens",
         contextSize: 200_000,
-        logs: "stderr",
+        logs: "error",
       }),
     ).toEqual({
       tools: "hidden",
       reasoning: "collapsed",
-      subagents: "auto-collapsed",
+      subagents: "collapsed",
       connectionAuth: "full",
       assistantResponseStats: "tokens",
       contextSize: 200_000,
-      logs: "stderr",
+      logs: "error",
     });
   });
 
@@ -1250,6 +1268,6 @@ describe("resolveTuiDisplayOptions", () => {
     const resolved = resolveTuiDisplayOptions({ tools: "full" });
     expect(resolved).not.toHaveProperty("subagents");
     expect(resolved).not.toHaveProperty("contextSize");
-    expect(resolved.logs).toBe("stderr");
+    expect(resolved.logs).toBe("error");
   });
 });

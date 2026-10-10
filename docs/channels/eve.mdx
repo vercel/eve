@@ -18,6 +18,71 @@ export default eveChannel({
 });
 ```
 
+## Web Chat with Sign in with Vercel
+
+Run `eve add channel/web`, or select **Web Chat** from the terminal UI's channel
+picker. Choose a hosting layout, then **Sign in with Vercel**. Setup uses a
+linked Vercel project and creates a Vercel App that only members of that
+project's team can sign in to.
+
+For a new agent, initialize it first, then link a project and add Web Chat:
+
+```bash
+eve init my-agent --non-interactive
+cd my-agent
+eve link
+eve add channel/web
+```
+
+`eve init --channel-web-nextjs` keeps its existing scaffolding behavior and does
+not provision authentication. Sign-in setup runs through `eve add channel/web`
+or the terminal UI's channel picker.
+
+The generated Next.js app uses Better Auth sessions. The selected agent's HTTP
+channel verifies the same session, while retaining Vercel OIDC and local
+development access. In an agent workspace, setup configures only the selected
+agent. Other agents keep their own authentication policies.
+
+Setup registers `/api/auth/callback/vercel` as a project redirect URI, so Vercel
+validates callbacks against the project's deployment domains. The app uses the
+`authorization_code` grant, `client_secret_post` authentication, and the
+`openid`, `email`, and `profile` scopes. Setup writes `VERCEL_APP_CLIENT_ID`,
+`VERCEL_APP_CLIENT_SECRET`, and `BETTER_AUTH_SECRET` to production and preview;
+secret values are marked sensitive and are never printed or written to source.
+Run `eve deploy` after setup to publish the app. Local development continues
+without browser sign-in.
+
+For automation, supply the setup answers explicitly:
+
+```bash
+eve add channel/web --non-interactive \
+  --answer 'web-hosting="vercel"' \
+  --answer 'web-authentication="vercel"'
+```
+
+Use a linked project with permission to manage Vercel Apps and project
+environment variables. A team owner can complete setup if your role cannot
+create apps. The searchable team picker lists eligible teams first. Disabled
+teams show `needs permission` or `couldn't verify`, with shared recovery guidance
+below the list. If permissions cannot be verified, that team stays
+disabled until you sign in or retry. Linked projects are checked before
+interactive auth setup.
+If setup reports a missing prerequisite, complete it and resume with
+`eve add channel/web --skip-install`. Compatible existing apps
+and credentials are reused; conflicting app settings or credentials stop setup
+with an error. Authored channel or UI files are preserved unless you explicitly
+pass `--overwrite`.
+
+If the team has reached its Vercel App limit, remove an unused app in team
+settings and retry. If a generated app name or slug is taken by an incompatible
+app, rename the Vercel project in its settings and retry. Compatible apps from a
+concurrent setup are reused. A client-secret limit requires removing an unused
+secret from the app's settings; setup never removes an existing secret for you.
+
+Choose **Configure authentication myself** (`web-authentication=custom`) to
+keep the current channel policy. The default placeholder rejects production
+browser requests until you configure your own authentication.
+
 ## Routes
 
 The default eve channel inspects the agent, creates sessions, accepts callbacks and task input, controls sessions, and streams events. Its public routes include:
@@ -94,22 +159,24 @@ Set `turnPolicy: "queue"` on `eveChannel(...)` when follow-ups should wait for a
 Sending a message to an unknown or terminal session ID returns `409` with
 `{"code":"session_not_active","error":"The session is no longer active.","ok":false}`.
 An existing workflow whose inbox is not yet available returns `409 session_not_ready` instead.
-TypeScript clients expose the stable code as `ClientError.code`. The route never
-creates or follows a replacement session.
+A session that another eve version built returns `409 session_stranded` with the `eveVersion`
+that built it.
 
 ### Stream events
 
 Stream a session as newline-delimited JSON from `GET /eve/v1/session/:sessionId/stream`. The [session protocol](../concepts/sessions-runs-and-streaming#stream-a-session) defines the event set, envelopes, cursors, and reconnection behavior.
 
+Following a stranded session's stream returns `409 session_stranded`, just like a send. The TypeScript client reports `ClientSessionStrandedError` without retrying. Pass `follow=false` to read the recorded history instead: the response ends at the durable tail, carries the `x-eve-stream-tail-index` header, and never inspects or changes the session, so it works before a reset. A reset attempts to append `session.failed` with code `session_stranded` and close the stream. Existing readers finish when they receive that terminal event.
+
 ### Cancel a turn
 
-Post to `/eve/v1/session/:sessionId/cancel` to request cancellation of the active turn. You can include the observed `turnId` to keep a late request from cancelling a newer turn. Include `tasks: true` to also cancel every background task owned by the session, including while the session is parked. Cancellation is asynchronous; confirm the turn boundary on the stream as `turn.cancelled` followed by `session.waiting`, and inspect task state in a later turn to confirm task cancellation.
+Post to `/eve/v1/session/:sessionId/cancel` to request cancellation of the active turn. You can include the observed `turnId` to keep a late request from cancelling a newer turn. Cancellation is asynchronous; confirm the turn boundary on the stream as `turn.cancelled` followed by `session.waiting`.
 
 See [Cancel the in-flight turn](../concepts/sessions-runs-and-streaming#cancel-the-in-flight-turn) for response statuses, HTTP status codes, subagent cancellation, and race behavior.
 
 ### Clear context
 
-Post to `/eve/v1/session/:sessionId/clear` to remove model-message history while preserving the session ID, system prompt, tools, skills, durable state, limits, and sandbox. See [Compact, clear, and reset](../concepts/sessions-runs-and-streaming#compact-clear-and-reset).
+Post to `/eve/v1/session/:sessionId/clear` to remove model-message history while preserving the session ID, system prompt, tools, skills, durable state, limits, and sandbox. A stranded session cannot run the clear, so the route returns `409 session_stranded` and changes nothing; post to the `reset` route to end it instead. See [Compact, clear, and reset](../concepts/sessions-runs-and-streaming#compact-clear-and-reset).
 
 ### Compact context
 
@@ -117,7 +184,7 @@ Post to `/eve/v1/session/:sessionId/compact` to summarize context without sendin
 
 ### Reset a session
 
-Post to `/eve/v1/session/:sessionId/reset` to terminally retire that session. Reset never replaces the ID automatically; create a new session explicitly for a fresh conversation. See [Compact, clear, and reset](../concepts/sessions-runs-and-streaming#compact-clear-and-reset).
+Post to `/eve/v1/session/:sessionId/reset` to terminally retire that session. Reset never replaces the ID automatically; create a new session explicitly for a fresh conversation. Reset also works on a stranded session: eve cancels the stranded workflow run directly instead of delivering the command to it. See [Compact, clear, and reset](../concepts/sessions-runs-and-streaming#compact-clear-and-reset).
 
 ## Replace or disable the defaults
 

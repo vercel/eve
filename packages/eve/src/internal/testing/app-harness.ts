@@ -8,6 +8,7 @@ import type { CompiledModuleMap } from "#compiler/module-map.js";
 import type { ProgrammaticAgentModule } from "#compiler/source-graph.js";
 import type { SessionParent, SessionTurn } from "#context/keys.js";
 import { installBundledCompiledArtifacts } from "#runtime/loaders/bundled-artifacts.js";
+import { createSandboxPreparedArtifactsManifest } from "#shared/sandbox-prepared-artifacts.js";
 import type { SandboxAccess } from "#sandbox/state.js";
 import {
   createRuntimeSession,
@@ -41,6 +42,8 @@ import { mockSandbox, type MockSandbox } from "#internal/testing/mocks/mock-sand
  */
 interface TestAppDescriptor {
   readonly agent?: {
+    /** Full agent definition; overrides `model` and `limits`. */
+    readonly definition?: import("#public/definitions/agent.js").AgentDefinition;
     readonly limits?: {
       readonly maxInputTokensPerSession?: number | false;
       readonly maxOutputTokensPerSession?: number | false;
@@ -118,7 +121,7 @@ export interface TestRuntime {
     input: unknown,
   ): Promise<unknown>;
   /**
-   * Clears the compiled-artifact snapshot and bundle cache on this session.
+   * Clears the compiled-artifact snapshot, bundle cache, and sessions' sandboxes.
    * Tests that re-use a runtime across multiple assertions can call this to
    * return the session to its initial state.
    */
@@ -137,42 +140,62 @@ const DEFAULT_AGENT_NAME = "test-agent";
  */
 export const TEST_DEFAULT_MODEL_ID = "openai/gpt-5.4";
 
-const TEST_SANDBOX_PROVIDER = defineSandboxProvider({
-  name: "eve-test-memory",
-  environment: () => ({
-    async prepare() {
-      return null;
-    },
-    async resume(context) {
-      return createHandle(context.session.id);
-    },
-    async start(context) {
-      return { handle: createHandle(context.session.id), state: null };
-    },
-  }),
-});
+const TEST_SANDBOX_PROVIDER_NAME = "eve-test-memory";
 
-function createHandle(sessionId: string) {
-  const sandbox = mockSandbox({ id: sessionId });
-  return {
-    sandbox: sandbox.session,
-    async onSessionDelete(options?: import("#shared/sandbox-provider.js").SandboxDeleteOptions) {
-      await sandbox.access.delete?.(options);
-    },
-    async onSessionStop() {},
-    async onRuntimeShutdown() {},
-  };
+/**
+ * An in-memory sandbox provider that keeps each session's sandbox, so a step
+ * that resumes it sees what earlier steps wrote, as with a real provider. A
+ * staged attachment, say, is read back on the next model call.
+ */
+function createTestSandboxProvider() {
+  const sessionSandboxes = new Map<string, MockSandbox>();
+
+  function createHandle(sessionId: string) {
+    let sandbox = sessionSandboxes.get(sessionId);
+    if (sandbox === undefined) {
+      sandbox = mockSandbox({ id: sessionId });
+      sessionSandboxes.set(sessionId, sandbox);
+    }
+    const opened = sandbox;
+    return {
+      sandbox: opened.session,
+      async onSandboxDelete(options?: import("#shared/sandbox-provider.js").SandboxDeleteOptions) {
+        sessionSandboxes.delete(sessionId);
+        await opened.access.delete?.(options);
+      },
+      async onSandboxStop() {},
+      async onRuntimeShutdown() {},
+    };
+  }
+
+  const provider = defineSandboxProvider({
+    name: TEST_SANDBOX_PROVIDER_NAME,
+    environment: () => ({
+      async prepare() {
+        return null;
+      },
+      async resume(context) {
+        return createHandle(context.session.id);
+      },
+      async start(context) {
+        return { handle: createHandle(context.session.id), state: null };
+      },
+    }),
+  });
+  return { clear: () => sessionSandboxes.clear(), provider };
 }
 
 export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Promise<TestRuntime> {
+  const sandboxes = createTestSandboxProvider();
   const compileInput: CompileFromMemoryInput = {
     name: descriptor.agent?.name ?? DEFAULT_AGENT_NAME,
     model: descriptor.agent?.model ?? TEST_DEFAULT_MODEL_ID,
     limits: descriptor.agent?.limits,
+    agent: descriptor.agent?.definition,
     modules: [
       {
         loadNamespace: async () => {
-          const environment = TEST_SANDBOX_PROVIDER.environment();
+          const environment = sandboxes.provider.environment();
           return { environment, default: defineSandbox(() => environment.open()) };
         },
         logicalPath: "sandbox.ts",
@@ -202,7 +225,15 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
   const tools = descriptor.tools ?? [];
 
   function install(): void {
-    installBundledCompiledArtifacts({ manifest, moduleMap });
+    installBundledCompiledArtifacts({
+      manifest,
+      moduleMap,
+      // What `eve build` would record for the root sandbox, so a session that opens it (to
+      // stage an attachment, say) finds a provisioned template.
+      sandboxPreparedArtifacts: createSandboxPreparedArtifactsManifest([
+        { artifact: null, nodeId: "__root__", providerName: TEST_SANDBOX_PROVIDER_NAME },
+      ]),
+    });
   }
 
   async function run<T>(fn: () => Promise<T> | T): Promise<T> {
@@ -233,6 +264,8 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
     session.compiledArtifacts = null;
     session.bundleCache.clear();
     session.bundleCacheKeyBySourceKey.clear();
+    sandboxes.clear();
+    session.describedAgents.clear();
   }
 
   async function executeTool(

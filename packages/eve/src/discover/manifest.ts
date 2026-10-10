@@ -1,4 +1,5 @@
 import { basename, relative, resolve } from "node:path";
+import type { JsonObject } from "#shared/json.js";
 import type {
   MarkdownSourceRef,
   ModuleSourceRef,
@@ -151,6 +152,9 @@ export interface ResolvedExtensionMount {
   readonly programmaticDeclaration?: {
     readonly logicalPath: string;
     readonly sourceId: string;
+    readonly importSpecifier: string;
+    readonly entryPath: string;
+    readonly config: JsonObject;
   };
   /** Mount namespace derived from the mount filename (e.g. `crm`). */
   readonly namespace: string;
@@ -281,6 +285,7 @@ export interface CreateAgentSourceManifestInput {
  */
 interface CreateSkillPackageSourceRefInput {
   assetsPath?: string;
+  deferred?: boolean;
   description: string;
   license?: string;
   logicalPath: string;
@@ -441,6 +446,7 @@ export function createSkillPackageSourceRef(
 ): NamedSkillDefinition & SkillPackageSourceRef {
   const skillSourceRef: NamedSkillDefinition & SkillPackageSourceRef = {
     assetsPath: input.assetsPath,
+    deferred: input.deferred,
     description: input.description,
     license: input.license,
     logicalPath: normalizeLogicalPath(input.logicalPath),

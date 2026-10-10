@@ -1,28 +1,28 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { agentRouter } from "#tools/provided/agent-router.js";
-import { executeAgentRouterTool } from "#execution/tools/agent-router.js";
-import { evaluate } from "#ai/evaluate.js";
+import { runAgentRouterTask } from "#execution/tools/agent-router.js";
+import { decide } from "#ai/decide.js";
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 
-vi.mock("#ai/evaluate.js", () => ({ evaluate: vi.fn() }));
+vi.mock("#ai/decide.js", () => ({ decide: vi.fn() }));
 
 describe("agentRouter", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("defines a workflow tool", () => {
+  it("defines a task tool", () => {
     const definition = agentRouter();
 
     expect(definition.availableInSubagents).toBe(false);
     expect(definition.description).toContain("best available subagent");
-    expect(definition.execute).toBe(executeAgentRouterTool);
+    expect(definition.task).toBe(runAgentRouterTask);
   });
 
   it("routes through all workflow agent descriptions", async () => {
-    vi.mocked(evaluate).mockResolvedValue({
+    vi.mocked(decide).mockResolvedValue({
       answers: { route: { choice: "operator", type: "choice" } },
     } as never);
-    const agent = vi.fn().mockResolvedValue("operated");
+    const { agent, send } = replyingAgent("operated");
     const abortSignal = new AbortController().signal;
     const ctx = workflowContext({
       abortSignal,
@@ -33,10 +33,10 @@ describe("agentRouter", () => {
       },
     });
 
-    await expect(executeAgentRouterTool({ message: "Deploy the service" }, ctx)).resolves.toBe(
+    await expect(runAgentRouterTask({ message: "Deploy the service" }, ctx)).resolves.toBe(
       "operated",
     );
-    expect(evaluate).toHaveBeenCalledWith({
+    expect(decide).toHaveBeenCalledWith({
       abortSignal,
       state: { message: "Deploy the service" },
       questions: {
@@ -50,11 +50,12 @@ describe("agentRouter", () => {
         },
       },
     });
-    expect(agent).toHaveBeenCalledWith("operator", { message: "Deploy the service" });
+    expect(agent).toHaveBeenCalledWith("operator");
+    expect(send).toHaveBeenCalledWith("Deploy the service", { signal: abortSignal });
   });
 
   it("ignores agents without descriptions", async () => {
-    const agent = vi.fn().mockResolvedValue("researched");
+    const { agent, send } = replyingAgent("researched");
     const ctx = workflowContext({
       agent,
       agents: {
@@ -63,39 +64,45 @@ describe("agentRouter", () => {
       },
     });
 
-    await expect(executeAgentRouterTool({ message: "Investigate" }, ctx)).resolves.toBe(
-      "researched",
-    );
-    expect(evaluate).not.toHaveBeenCalled();
-    expect(agent).toHaveBeenCalledWith("researcher", { message: "Investigate" });
+    await expect(runAgentRouterTask({ message: "Investigate" }, ctx)).resolves.toBe("researched");
+    expect(decide).not.toHaveBeenCalled();
+    expect(agent).toHaveBeenCalledWith("researcher");
+    expect(send).toHaveBeenCalledWith("Investigate", { signal: expect.any(AbortSignal) });
   });
 
-  it("invokes the only available described agent without evaluation", async () => {
-    const agent = vi.fn().mockResolvedValue("researched");
+  it("invokes the only available described agent without decision", async () => {
+    const { agent, send } = replyingAgent("researched");
     const ctx = workflowContext({
       agent,
       agents: { researcher: { description: "Investigate and explain." } },
     });
 
-    await expect(executeAgentRouterTool({ message: "Investigate" }, ctx)).resolves.toBe(
-      "researched",
-    );
-    expect(evaluate).not.toHaveBeenCalled();
-    expect(agent).toHaveBeenCalledWith("researcher", { message: "Investigate" });
+    await expect(runAgentRouterTask({ message: "Investigate" }, ctx)).resolves.toBe("researched");
+    expect(decide).not.toHaveBeenCalled();
+    expect(agent).toHaveBeenCalledWith("researcher");
+    expect(send).toHaveBeenCalledWith("Investigate", { signal: expect.any(AbortSignal) });
   });
 
-  it("rejects an agent map without descriptions before evaluation", async () => {
+  it("rejects an agent map without descriptions before decision", async () => {
     const ctx = workflowContext({
       agent: vi.fn(),
       agents: { agent: { description: "  " } },
     });
 
-    await expect(executeAgentRouterTool({ message: "Route me" }, ctx)).rejects.toThrow(
+    await expect(runAgentRouterTask({ message: "Route me" }, ctx)).rejects.toThrow(
       "agentRouter requires at least one available agent with a description.",
     );
-    expect(evaluate).not.toHaveBeenCalled();
+    expect(decide).not.toHaveBeenCalled();
   });
 });
+
+/** An agent whose session replies to every message with `message`. */
+function replyingAgent(message: string) {
+  const send = vi.fn(async () => ({
+    result: async () => ({ data: undefined, message, status: "waiting" as const }),
+  }));
+  return { agent: vi.fn(() => ({ send })), send };
+}
 
 function workflowContext(
   input: Pick<WorkflowToolContext, "agent" | "agents"> &

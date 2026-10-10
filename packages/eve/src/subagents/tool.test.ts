@@ -51,11 +51,17 @@ function makeParent(
   };
 }
 
+const NO_LIMITS = { maxInputTokensPerSession: false, maxOutputTokensPerSession: false } as const;
+
 function buildRuntimeSubagentRunInput(
-  input: Omit<BuildSubagentRunInput, "selfAgent" | "source"> & { readonly selfAgent?: boolean },
+  input: Omit<BuildSubagentRunInput, "continuationKey" | "limits" | "selfAgent" | "source"> & {
+    readonly selfAgent?: boolean;
+  },
 ): ReturnType<typeof buildSubagentRunInput> {
   return buildSubagentRunInput({
     ...input,
+    continuationKey: `${input.session.sessionId}:${input.action.callId}`,
+    limits: NO_LIMITS,
     selfAgent: input.selfAgent ?? false,
     source: { type: "runtime" },
   });
@@ -139,27 +145,6 @@ describe("buildSubagentRunInput", () => {
     });
   });
 
-  it("retains a background task identity beside an opaque parent reply hook", () => {
-    const { runInput } = buildRuntimeSubagentRunInput({
-      action: makeAction(),
-      auth: null,
-      initiatorAuth: null,
-      session: makeSession(),
-      taskId: "task-1",
-      parent: makeParent(
-        makeSession(),
-        { id: "turn-0", sequence: 0 },
-        { continuationToken: "invocation-reply-hook" },
-      ),
-    });
-
-    expect(runInput.adapter.state).toMatchObject({
-      parentContinuationToken: "invocation-reply-hook",
-      taskId: "task-1",
-    });
-    expect(runInput.taskId).toBe("task-1");
-  });
-
   it("forwards channelMetadata to the child run input", () => {
     const projection = {
       kind: "channel:slack",
@@ -237,28 +222,6 @@ describe("buildSubagentRunInput", () => {
     });
   });
 
-  it("threads inherited limits through the child run input", () => {
-    const { runInput } = buildRuntimeSubagentRunInput({
-      action: makeAction(),
-      auth: null,
-      initiatorAuth: null,
-      session: {
-        ...makeSession(),
-      },
-      parent: makeParent(
-        {
-          ...makeSession(),
-        },
-        { id: "turn-0", sequence: 0 },
-      ),
-    });
-
-    expect(runInput.limits).toEqual({
-      maxInputTokensPerSession: false,
-      maxOutputTokensPerSession: false,
-    });
-  });
-
   it("threads outputSchema from action input to RunInput", () => {
     const schema = { type: "object", properties: { result: { type: "string" } } };
     const action: RuntimeSubagentDispatchRequest = {
@@ -276,20 +239,18 @@ describe("buildSubagentRunInput", () => {
     expect(runInput.input.outputSchema).toEqual(schema);
   });
 
-  it("hands the parent's trace window down to the child, and omits it when absent", () => {
+  it("hands the parent's trace window and trace root down to the child, and omits them when absent", () => {
     const traceContext = { spanId: "2".repeat(16), traceFlags: 1, traceId: "1".repeat(32) };
+    const traceRoot = { kind: "inherited", sessionId: "remote-root" } as const;
     const { runInput } = buildRuntimeSubagentRunInput({
       action: makeAction(),
       auth: null,
       initiatorAuth: null,
       session: makeSession(),
-      parent: makeParent(
-        makeSession(),
-        { id: "turn-0", sequence: 0 },
-        { traceContext: traceContext },
-      ),
+      parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }, { traceContext, traceRoot }),
     });
     expect(runInput.parentTraceContext).toEqual(traceContext);
+    expect(runInput.traceRoot).toEqual(traceRoot);
 
     const untraced = buildRuntimeSubagentRunInput({
       action: makeAction(),
@@ -299,6 +260,7 @@ describe("buildSubagentRunInput", () => {
       parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }),
     });
     expect(untraced.runInput.parentTraceContext).toBeUndefined();
+    expect(untraced.runInput.traceRoot).toBeUndefined();
   });
 
   it("passes a resolved local subagent description into the child message", () => {
@@ -308,7 +270,9 @@ describe("buildSubagentRunInput", () => {
         description: "Runtime action event description.",
       },
       auth: null,
+      continuationKey: "parent-session:call-1",
       initiatorAuth: null,
+      limits: NO_LIMITS,
       selfAgent: false,
       session: makeSession(),
       source: { description: "Local delegate subagent description.", type: "local" },
@@ -361,22 +325,6 @@ describe("buildSubagentRunInput", () => {
   it("leaves outputSchema undefined when not provided", () => {
     const { runInput } = buildRuntimeSubagentRunInput({
       action: makeAction(),
-      auth: null,
-      initiatorAuth: null,
-      session: makeSession(),
-      parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }),
-    });
-
-    expect(runInput.input.outputSchema).toBeUndefined();
-  });
-
-  it("treats an empty outputSchema as absent", () => {
-    const action: RuntimeSubagentDispatchRequest = {
-      ...makeAction(),
-      input: { message: "do something", outputSchema: {} },
-    };
-    const { runInput } = buildRuntimeSubagentRunInput({
-      action,
       auth: null,
       initiatorAuth: null,
       session: makeSession(),

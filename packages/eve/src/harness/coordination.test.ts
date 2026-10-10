@@ -1,76 +1,68 @@
-import {
-  isInboxSubagentResultFromRunningHandle,
-  isResultBoundToRunningHandle,
-} from "#subagents/handles/query.js";
 import { describe, expect, it } from "vitest";
 import { createPresentedRuntimeActionRequestFromToolCall } from "#harness/action-presentation.js";
 import {
+  assertUniqueCoordinationCallIds,
   createCoordinationRequestFromToolCall,
   createRuntimeActionRequestFromToolCall,
-  getPendingCoordinationBatch,
-  resolvePendingCoordination,
+  forgetFinishedRuns,
   resolveToolCallInputObject,
-  setPendingCoordinationBatch,
+  runtimeResultCalls,
 } from "#harness/coordination.js";
-import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
-import { deriveAgentId, getAgentHandleStore } from "#subagents/handles/store.js";
-import { confirmAgentStarted, prepareAgentStart } from "#subagents/handles/transitions.js";
-import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import {
   getBlockingWorkflowToolRuns,
   registerWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
 
 import { toolOutput } from "#tools/model-output.js";
-import { getSessionTokenUsage, setTurnUsageState } from "#harness/turn-tag-state.js";
+import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { isRuntimeWorkflowToolAction } from "#shared/action-types.js";
+import { createPreparedWorkflowToolHarnessDefinition } from "#execution/tools/workflow/harness-definition.js";
+import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
 
-const CHILD_SESSION_ID = "local-child-123456789012";
+const REQUEST_EVENT = { sequence: 0, stepIndex: 0, turnId: "turn_0" };
+
 const CHILD_CONTINUATION_TOKEN = "subagent:private-token";
-const ZERO_USAGE = {
-  cacheReadTokens: 0,
-  cacheWriteTokens: 0,
-  inputTokens: 0,
-  outputTokens: 0,
-} as const;
-const OPERATION_ID = deriveAgentOperationId({
-  callId: "call-1",
-  parentSessionId: "test-session",
-  parentTurnId: "turn_0",
-});
 
 describe("createRuntimeActionRequestFromToolCall", () => {
-  const loadSkillCall = {
-    input: { skill: "research" },
-    toolCallId: "call-skill",
-    toolName: "load_skill",
-    type: "tool-call" as const,
-  };
-
-  it("classifies the framework load_skill tool as a skill action", () => {
-    expect(
-      createRuntimeActionRequestFromToolCall({
-        toolCall: loadSkillCall,
-        tools: new Map([
-          [
-            "load_skill",
-            {
-              description: "Load a skill.",
-              frameworkAction: "load-skill" as const,
-              inputSchema: jsonSchema({ type: "object" }),
-              name: "load_skill",
-            },
-          ],
-        ]),
-      }),
-    ).toEqual({
-      callId: "call-skill",
-      input: { skill: "research" },
-      kind: "load-skill",
-    });
-  });
+  it.each(["subagent", "remote"] as const)(
+    "retains %s dispatch identity for a background agent tool",
+    (kind) => {
+      const target =
+        kind === "remote"
+          ? {
+              kind: "remote-agent-call" as const,
+              remoteAgentName: "reviewer",
+              nodeId: "reviewer-node",
+            }
+          : { kind: "subagent-call" as const, subagentName: "reviewer", nodeId: "reviewer-node" };
+      const prepared: PreparedRuntimeDelegationTool = {
+        kind,
+        name: "reviewer",
+        nodeId: "reviewer-node",
+        logicalPath: "subagents/reviewer",
+        sourceId: "reviewer",
+        description: "Review a draft.",
+        inputSchema: { type: "object" },
+        behavior: { availability: [], handling: { kind: "dispatch", target } },
+      };
+      const tool = createPreparedWorkflowToolHarnessDefinition(prepared);
+      const action = createRuntimeActionRequestFromToolCall({
+        toolCall: {
+          input: { message: "Review Alice's draft." },
+          toolCallId: "review",
+          toolName: "reviewer",
+        },
+        tools: new Map([["reviewer", tool]]),
+      });
+      expect(action).toMatchObject({
+        kind: target.kind,
+        nodeId: "reviewer-node",
+        name: "reviewer",
+      });
+    },
+  );
 
   it("preserves workflow identity without changing observable action data", () => {
     const action = createRuntimeActionRequestFromToolCall({
@@ -78,7 +70,6 @@ describe("createRuntimeActionRequestFromToolCall", () => {
         input: { service: "api" },
         toolCallId: "call-deploy",
         toolName: "deploy",
-        type: "tool-call",
       },
       tools: new Map([
         [
@@ -204,21 +195,12 @@ describe("createRuntimeActionRequestFromToolCall", () => {
         ]),
       }),
     ).toEqual({
-      action: { callId: "call-deploy", input: {}, kind: "tool-call", toolName: "deploy" },
-    });
-  });
-
-  it("keeps an authored load_skill override as an ordinary tool action", () => {
-    expect(
-      createRuntimeActionRequestFromToolCall({
-        toolCall: loadSkillCall,
-        tools: new Map(),
-      }),
-    ).toEqual({
-      callId: "call-skill",
-      input: { skill: "research" },
-      kind: "tool-call",
-      toolName: "load_skill",
+      action: {
+        callId: "call-deploy",
+        input: {},
+        kind: "tool-call",
+        toolName: "deploy",
+      },
     });
   });
 });
@@ -234,6 +216,8 @@ describe("createCoordinationRequestFromToolCall", () => {
   it("lowers blocking workflow tools to workflow tasks", () => {
     expect(
       createCoordinationRequestFromToolCall({
+        entry: { entryPoint: "execute" },
+        input: toolCall.input,
         toolCall,
         tools: new Map([
           [
@@ -248,42 +232,13 @@ describe("createCoordinationRequestFromToolCall", () => {
         ]),
       }),
     ).toEqual({
-      kind: "task",
-      request: {
-        callId: "call-1",
-        executeInput: undefined,
-        input: { message: "research this" },
-        kind: "workflow-task",
-        toolName: "researcher",
-        workflowId: "workflow://subagent-tool",
-      },
-    });
-  });
-
-  it("reserves runtime actions for task controls", () => {
-    expect(
-      createCoordinationRequestFromToolCall({
-        toolCall: { ...toolCall, input: { taskIds: ["task-1"] }, toolName: "task_cancel" },
-        tools: new Map([
-          [
-            "task_cancel",
-            {
-              description: "Cancel tasks.",
-              inputSchema: jsonSchema({ type: "object" }),
-              name: "task_cancel",
-              runtimeAction: { kind: "task-control" as const },
-            },
-          ],
-        ]),
-      }),
-    ).toEqual({
-      kind: "runtime-action",
-      request: {
-        callId: "call-1",
-        input: { taskIds: ["task-1"] },
-        kind: "tool-call",
-        toolName: "task_cancel",
-      },
+      callId: "call-1",
+      executeInput: undefined,
+      input: { message: "research this" },
+      entry: { entryPoint: "execute" },
+      kind: "workflow-task",
+      toolName: "researcher",
+      workflowId: "workflow://subagent-tool",
     });
   });
 });
@@ -311,28 +266,14 @@ function createParkedSession(): HarnessSession {
     turnId: "turn_0",
   });
 
-  return setPendingCoordinationBatch({
-    runtimeActions: [],
-    tasks: [
-      {
-        callId: "call-1",
-        executeInput: { message: "go", target: "researcher" },
-        input: { description: "Research the topic", message: "go" },
-        kind: "workflow-task",
-        toolName: "researcher",
-        workflowId: "workflow://subagent-tool",
-      },
-    ],
-    event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
-    responseMessages: [],
-    session: withUsage,
-  });
+  return withUsage;
 }
 
 describe("coordination batch identity", () => {
   it("rejects duplicate call ids before persisting the batch", () => {
     const task = {
       callId: "duplicate-call",
+      entry: { entryPoint: "execute" as const },
       executeInput: { message: "go", target: "researcher" },
       input: { message: "go" },
       kind: "workflow-task" as const,
@@ -340,224 +281,31 @@ describe("coordination batch identity", () => {
       workflowId: "workflow://subagent-tool",
     };
 
-    expect(() =>
-      setPendingCoordinationBatch({
-        runtimeActions: [],
-        tasks: [task, { ...task, toolName: "other" }],
-        event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
-        responseMessages: [],
-        session: createParkedSession(),
-      }),
-    ).toThrow('duplicate callId "duplicate-call"');
+    expect(() => assertUniqueCoordinationCallIds([task, { ...task, toolName: "other" }])).toThrow(
+      'duplicate callId "duplicate-call"',
+    );
   });
 });
 
-/** Parked session whose call-1 child is owned by a running agent handle. */
-function createSessionWithRunningChild(): HarnessSession {
-  const prepared = prepareAgentStart(createParkedSession(), {
-    identity: {
-      id: deriveAgentId("researcher", OPERATION_ID),
-      name: "researcher",
-      nodeId: "subagents/researcher",
-    },
-    operation: {
-      callId: "call-1",
-      id: OPERATION_ID,
-      kind: "start",
-      parentTurnId: "turn_0",
-    },
-    target: { continuationToken: CHILD_CONTINUATION_TOKEN, kind: "agent/local" },
-  });
-  return confirmAgentStarted(prepared, {
-    address: {
-      continuationToken: CHILD_CONTINUATION_TOKEN,
-      kind: "agent/local",
-      sessionId: CHILD_SESSION_ID,
-    },
-    operationId: OPERATION_ID,
-  });
-}
-
-describe("resolvePendingCoordination", () => {
-  it("does not emit subagent completion for a working task receipt", async () => {
-    const events: UnstampedMessageStreamEvent[] = [];
-    const taskId = "task_0123456789abcdef";
-
-    const resolved = await resolvePendingCoordination({
-      emit: async (event) => {
-        events.push(event);
-      },
-      session: createParkedSession(),
-      stepInput: {
-        runtimeActionResults: [
-          {
-            backgroundTask: { status: "working", taskId },
-            callId: "call-1",
-            kind: "subagent-result",
-            origin: "child",
-            outcome: {
-              kind: "parked",
-              result: { kind: "succeeded", output: "delegated" },
-              usageDelta: ZERO_USAGE,
-            },
-            output: {
-              agentId: deriveAgentId("researcher", OPERATION_ID),
-              status: "working",
-              taskId,
-            },
-            subagentName: "researcher",
-          },
-        ],
-      },
-    });
-
-    expect(events.some((event) => event.type === "subagent.completed")).toBe(false);
-    expect(events).toContainEqual(expect.objectContaining({ type: "action.result" }));
-    expect(getAgentHandleStore(resolved.session.state)).toBeUndefined();
-  });
-
-  it("settles the running handle terminally and deletes it with the batch", async () => {
-    const session = createSessionWithRunningChild();
-
-    const resolved = await resolvePendingCoordination({
-      session,
-      stepInput: {
-        runtimeActionResults: [
-          {
-            callId: "call-1",
-            kind: "subagent-result",
-            origin: "child",
-            outcome: {
-              kind: "terminal",
-              result: { kind: "succeeded", output: "done" },
-              usageDelta: ZERO_USAGE,
-            },
-            output: "done",
-            subagentName: "researcher",
-          },
-        ],
-      },
-    });
-
-    expect(resolved.outcome).toBe("resolved");
-    expect(getPendingCoordinationBatch(resolved.session.state)).toBeUndefined();
-    expect(getAgentHandleStore(resolved.session.state)).toEqual({ handles: [] });
-  });
-
-  it("settles a failed child result terminally as well", async () => {
-    const session = createSessionWithRunningChild();
-
-    const resolved = await resolvePendingCoordination({
-      session,
-      stepInput: {
-        runtimeActionResults: [
-          {
-            callId: "call-1",
-            isError: true,
-            kind: "subagent-result",
-            origin: "child",
-            outcome: {
-              kind: "terminal",
-              result: {
-                error: { code: "SESSION_FAILED", message: "child failed" },
-                kind: "failed",
-              },
-              usageDelta: ZERO_USAGE,
-            },
-            output: { code: "SESSION_FAILED", message: "child failed" },
-            subagentName: "researcher",
-          },
-        ],
-      },
-    });
-
-    expect(resolved.outcome).toBe("resolved");
-    expect(getAgentHandleStore(resolved.session.state)).toEqual({ handles: [] });
-  });
-
-  it("does not report a cancelled child outcome as successful completion", async () => {
-    const events: UnstampedMessageStreamEvent[] = [];
-    await resolvePendingCoordination({
-      emit: async (event) => {
-        events.push(event);
-      },
-      session: createSessionWithRunningChild(),
-      stepInput: {
-        runtimeActionResults: [
-          {
-            callId: "call-1",
-            kind: "subagent-result",
-            origin: "child",
-            subagentName: "researcher",
-            output: "cancelled",
-            outcome: { kind: "parked", result: { kind: "cancelled" }, usageDelta: ZERO_USAGE },
-          },
-        ],
-      },
-    });
-    expect(events.some((event) => event.type === "subagent.completed")).toBe(false);
-  });
-
-  it("clears the child's proxy-input entries before settling its handle", async () => {
-    const session = upsertProxyInputRequests({
-      entries: [
-        ["request-1", { childContinuationToken: CHILD_CONTINUATION_TOKEN, kind: "question" }],
-      ],
-      forChildContinuationToken: CHILD_CONTINUATION_TOKEN,
-      session: createSessionWithRunningChild(),
-    });
-
-    const resolved = await resolvePendingCoordination({
-      session,
-      stepInput: {
-        runtimeActionResults: [
-          {
-            callId: "call-1",
-            kind: "subagent-result",
-            origin: "child",
-            outcome: {
-              kind: "terminal",
-              result: { kind: "succeeded", output: "done" },
-              usageDelta: ZERO_USAGE,
-            },
-            output: "done",
-            subagentName: "researcher",
-          },
-        ],
-      },
-    });
-
-    expect(resolved.outcome).toBe("resolved");
-    expect(getProxyInputRequests(resolved.session.state).size).toBe(0);
-  });
-
-  it("forgets a finished workflow tool run and withdraws only its unanswered requests", async () => {
-    const parked = setPendingCoordinationBatch({
-      event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
-      responseMessages: [],
-      runtimeActions: [],
-      session: createParkedSession(),
-      tasks: [
-        {
-          callId: "call-1",
-          input: { service: "api" },
-          kind: "workflow-task",
-          toolName: "deploy",
-          workflowId: "workflow//./agent/tools/deploy//execute",
-        },
-      ],
-    });
-    const withRun = registerWorkflowToolRun(parked, {
+describe("runtime results", () => {
+  it("forgets a finished workflow tool run and names only its requests for withdrawal", () => {
+    const withRun = registerWorkflowToolRun(createParkedSession(), {
       callId: "call-1",
       toolName: "deploy",
-      lifetime: "turn" as const,
       origin: { turnId: "turn_0", stepIndex: 0 },
       address: { runId: "run-1", hookToken: "eve:workflow-tool-run:op-1" },
     });
     const answerToken = "eve:workflow-tool-run-answer:run-1:0";
     const session = upsertProxyInputRequests({
       entries: [
-        ["other-request", { childContinuationToken: CHILD_CONTINUATION_TOKEN, kind: "question" }],
+        [
+          "other-request",
+          {
+            childContinuationToken: CHILD_CONTINUATION_TOKEN,
+            event: REQUEST_EVENT,
+            kind: "question",
+          },
+        ],
       ],
       forChildContinuationToken: CHILD_CONTINUATION_TOKEN,
       session: upsertProxyInputRequests({
@@ -565,8 +313,11 @@ describe("resolvePendingCoordination", () => {
           [
             answerToken,
             {
-              answerHook: { runId: "run-1" },
+              runId: "run-1",
+              workflowAsk: { control: "control" },
+              reply: {},
               childContinuationToken: answerToken,
+              event: REQUEST_EVENT,
               kind: "question",
             },
           ],
@@ -576,36 +327,18 @@ describe("resolvePendingCoordination", () => {
       }),
     });
 
-    const resolved = await resolvePendingCoordination({
+    const finished = forgetFinishedRuns(
       session,
-      stepInput: {
-        runtimeActionResults: [
-          { callId: "call-1", kind: "tool-result", output: { deployed: true }, toolName: "deploy" },
-        ],
-      },
-    });
+      [{ callId: "call-1", kind: "tool-result", output: { deployed: true }, toolName: "deploy" }],
+      "turn_0",
+    );
 
-    expect(resolved.outcome).toBe("resolved");
-    expect(getBlockingWorkflowToolRuns(resolved.session.state)).toEqual([]);
-    expect([...getProxyInputRequests(resolved.session.state).keys()]).toEqual(["other-request"]);
+    expect(getBlockingWorkflowToolRuns(finished.session.state)).toEqual([]);
+    expect(finished.requestIds).toEqual([answerToken]);
+    expect([...getProxyInputRequests(finished.session.state).keys()]).toContain("other-request");
   });
 
   it("projects a workflow tool's result through its toModelOutput", async () => {
-    const parked = setPendingCoordinationBatch({
-      event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
-      responseMessages: [],
-      runtimeActions: [],
-      session: createParkedSession(),
-      tasks: [
-        {
-          callId: "call-1",
-          input: { service: "api" },
-          kind: "workflow-task",
-          toolName: "deploy",
-          workflowId: "workflow//./agent/tools/deploy//execute",
-        },
-      ],
-    });
     const tools = new Map([
       [
         "deploy",
@@ -619,419 +352,20 @@ describe("resolvePendingCoordination", () => {
       ],
     ]);
 
-    const resolved = await resolvePendingCoordination({
-      session: parked,
-      stepInput: {
-        runtimeActionResults: [
-          {
-            callId: "call-1",
-            kind: "tool-result",
-            output: { deployed: true, url: "https://api.example" },
-            toolName: "deploy",
-          },
-        ],
-      },
+    const [settled] = await runtimeResultCalls(
+      [
+        {
+          callId: "call-1",
+          kind: "tool-result",
+          output: { deployed: true, url: "https://api.example" },
+          toolName: "deploy",
+        },
+      ],
       tools,
-    });
+    );
 
-    const toolMessage = resolved.messages.at(-1);
-    expect(toolMessage?.role).toBe("tool");
-    expect(JSON.stringify(toolMessage?.content)).toContain("deployed to https://api.example");
-    expect(JSON.stringify(toolMessage?.content)).not.toContain('"deployed":true');
-  });
-
-  it("accepts a dispatch-origin failure result by callId", async () => {
-    const resolved = await resolvePendingCoordination({
-      session: createParkedSession(),
-      stepInput: {
-        runtimeActionResults: [
-          {
-            callId: "call-1",
-            isError: true,
-            kind: "subagent-result",
-            origin: "dispatch",
-            output: { code: "SUBAGENT_START_FAILED", message: "boom" },
-            subagentName: "researcher",
-          },
-        ],
-      },
-    });
-
-    expect(resolved.outcome).toBe("resolved");
-    expect(getPendingCoordinationBatch(resolved.session.state)).toBeUndefined();
-  });
-
-  it("draws completed child usage down against the parent's session totals", async () => {
-    const session = createSessionWithRunningChild();
-
-    const resolved = await resolvePendingCoordination({
-      session,
-      stepInput: {
-        runtimeActionResults: [
-          {
-            callId: "call-1",
-            kind: "subagent-result",
-            origin: "child",
-            outcome: {
-              kind: "terminal",
-              result: { kind: "succeeded", output: "done" },
-              usageDelta: {
-                cacheReadTokens: 10,
-                cacheWriteTokens: 5,
-                inputTokens: 4_000,
-                outputTokens: 400,
-              },
-            },
-            output: "done",
-            subagentName: "researcher",
-            usage: {
-              cacheReadTokens: 10,
-              cacheWriteTokens: 5,
-              inputTokens: 4_000,
-              outputTokens: 400,
-            },
-          },
-        ],
-      },
-    });
-
-    expect(resolved.outcome).toBe("resolved");
-    expect(getSessionTokenUsage(resolved.session)).toMatchObject({
-      inputTokens: 5_000,
-      outputTokens: 500,
-    });
-  });
-
-  it("keeps a parked handle resumable — even for a failed turn — and deletes a terminal one", async () => {
-    const session = createSessionWithRunningChild();
-    const agentId = deriveAgentId("researcher", OPERATION_ID);
-
-    const parkedResolve = await resolvePendingCoordination({
-      session,
-      stepInput: {
-        runtimeActionResults: [
-          {
-            callId: "call-1",
-            isError: true,
-            kind: "subagent-result",
-            origin: "child",
-            outcome: {
-              kind: "parked",
-              result: {
-                error: { code: "SUBAGENT_EXECUTION_FAILED", message: "schema not fulfilled" },
-                kind: "failed",
-              },
-              usageDelta: {
-                cacheReadTokens: 0,
-                cacheWriteTokens: 0,
-                inputTokens: 0,
-                outputTokens: 0,
-              },
-            },
-            output: { code: "SUBAGENT_EXECUTION_FAILED", message: "schema not fulfilled" },
-            subagentName: "researcher",
-          },
-        ],
-      },
-    });
-
-    expect(parkedResolve.outcome).toBe("resolved");
-    expect(getAgentHandleStore(parkedResolve.session.state)?.handles).toEqual([
-      expect.objectContaining({ phase: "parked" }),
-    ]);
-
-    // The parked handle stays resumable through the owner-scoped store.
-    const continueOperationId = deriveAgentOperationId({
-      callId: "call-2",
-      parentSessionId: "test-session",
-      parentTurnId: "turn_1",
-    });
-    const parkedHandle = getAgentHandleStore(parkedResolve.session.state)?.handles[0];
-    if (parkedHandle?.phase !== "parked") throw new Error("expected parked handle");
-    const continuedSession = {
-      ...parkedResolve.session,
-      state: {
-        ...parkedResolve.session.state,
-        "eve.agent.handles": {
-          handles: [
-            {
-              address: parkedHandle.address,
-              identity: parkedHandle.identity,
-              operation: {
-                callId: "call-2",
-                id: continueOperationId,
-                kind: "continue",
-                parentTurnId: "turn_1",
-                previousStatus: parkedHandle.lastStatus,
-              },
-              phase: "running",
-            },
-          ],
-        },
-      },
-    } as HarnessSession;
-
-    // A terminal failure on the follow-up turn deletes the handle.
-    const secondBatch = setPendingCoordinationBatch({
-      runtimeActions: [],
-      tasks: [
-        {
-          callId: "call-2",
-          executeInput: { agentId, message: "continue", target: "researcher" },
-          input: { agentId, message: "continue" },
-          kind: "workflow-task",
-          toolName: "researcher",
-          workflowId: "workflow://subagent-tool",
-        },
-      ],
-      event: { sequence: 1, stepIndex: 0, turnId: "turn_1" },
-      responseMessages: [],
-      session: continuedSession,
-    });
-    const terminalResolve = await resolvePendingCoordination({
-      session: secondBatch,
-      stepInput: {
-        runtimeActionResults: [
-          {
-            callId: "call-2",
-            isError: true,
-            kind: "subagent-result",
-            origin: "child",
-            outcome: {
-              kind: "terminal",
-              result: {
-                error: { code: "SUBAGENT_EXECUTION_FAILED", message: "child crashed" },
-                kind: "failed",
-              },
-              usageDelta: {
-                cacheReadTokens: 0,
-                cacheWriteTokens: 0,
-                inputTokens: 0,
-                outputTokens: 0,
-              },
-            },
-            output: { code: "SUBAGENT_EXECUTION_FAILED", message: "child crashed" },
-            subagentName: "researcher",
-          },
-        ],
-      },
-    });
-
-    expect(terminalResolve.outcome).toBe("resolved");
-    expect(getAgentHandleStore(terminalResolve.session.state)).toEqual({ handles: [] });
-  });
-
-  it("folds each turn's usage delta once so a two-turn child never double-counts", async () => {
-    // Turn 1: the child spent 4000/400 and parked.
-    const session = createSessionWithRunningChild();
-    const agentId = deriveAgentId("researcher", OPERATION_ID);
-    const firstResolve = await resolvePendingCoordination({
-      session,
-      stepInput: {
-        runtimeActionResults: [
-          {
-            callId: "call-1",
-            kind: "subagent-result",
-            origin: "child",
-            outcome: {
-              kind: "parked",
-              result: { kind: "succeeded", output: "first answer" },
-              usageDelta: {
-                cacheReadTokens: 0,
-                cacheWriteTokens: 0,
-                inputTokens: 4_000,
-                outputTokens: 400,
-              },
-            },
-            output: "first answer",
-            subagentName: "researcher",
-            // Cumulative child-session totals: folding these instead of the
-            // delta would double-count turn 1 on the next settlement.
-            usage: {
-              cacheReadTokens: 0,
-              cacheWriteTokens: 0,
-              inputTokens: 4_000,
-              outputTokens: 400,
-            },
-          },
-        ],
-      },
-    });
-    expect(getSessionTokenUsage(firstResolve.session)).toMatchObject({
-      inputTokens: 5_000,
-      outputTokens: 500,
-    });
-
-    // Turn 2: the child spent another 1000/100 (cumulative 5000/500).
-    const parkedHandle = getAgentHandleStore(firstResolve.session.state)?.handles[0];
-    if (parkedHandle?.phase !== "parked") throw new Error("expected parked handle");
-    const continuedSession = {
-      ...firstResolve.session,
-      state: {
-        ...firstResolve.session.state,
-        "eve.agent.handles": {
-          handles: [
-            {
-              address: parkedHandle.address,
-              identity: parkedHandle.identity,
-              operation: {
-                callId: "call-2",
-                id: deriveAgentOperationId({
-                  callId: "call-2",
-                  parentSessionId: "test-session",
-                  parentTurnId: "turn_1",
-                }),
-                kind: "continue",
-                parentTurnId: "turn_1",
-                previousStatus: parkedHandle.lastStatus,
-              },
-              phase: "running",
-            },
-          ],
-        },
-      },
-    } as HarnessSession;
-    const secondBatch = setPendingCoordinationBatch({
-      runtimeActions: [],
-      tasks: [
-        {
-          callId: "call-2",
-          executeInput: { agentId, message: "continue", target: "researcher" },
-          input: { agentId, message: "continue" },
-          kind: "workflow-task",
-          toolName: "researcher",
-          workflowId: "workflow://subagent-tool",
-        },
-      ],
-      event: { sequence: 1, stepIndex: 0, turnId: "turn_1" },
-      responseMessages: [],
-      session: continuedSession,
-    });
-    const secondResolve = await resolvePendingCoordination({
-      session: secondBatch,
-      stepInput: {
-        runtimeActionResults: [
-          {
-            callId: "call-2",
-            kind: "subagent-result",
-            origin: "child",
-            outcome: {
-              kind: "parked",
-              result: { kind: "succeeded", output: "second answer" },
-              usageDelta: {
-                cacheReadTokens: 0,
-                cacheWriteTokens: 0,
-                inputTokens: 1_000,
-                outputTokens: 100,
-              },
-            },
-            output: "second answer",
-            subagentName: "researcher",
-            usage: {
-              cacheReadTokens: 0,
-              cacheWriteTokens: 0,
-              inputTokens: 5_000,
-              outputTokens: 500,
-            },
-          },
-        ],
-      },
-    });
-
-    // Own 1000/100 + turn deltas (4000+1000)/(400+100) — never the child's
-    // cumulative 5000/500 twice.
-    expect(getSessionTokenUsage(secondResolve.session)).toMatchObject({
-      inputTokens: 6_000,
-      outputTokens: 600,
-    });
-  });
-
-  it("leaves the parent's totals untouched when the child reports a zero usage delta", async () => {
-    const session = createSessionWithRunningChild();
-
-    const resolved = await resolvePendingCoordination({
-      session,
-      stepInput: {
-        runtimeActionResults: [
-          {
-            callId: "call-1",
-            kind: "subagent-result",
-            origin: "child",
-            outcome: {
-              kind: "terminal",
-              result: { kind: "succeeded", output: "done" },
-              usageDelta: ZERO_USAGE,
-            },
-            output: "done",
-            subagentName: "researcher",
-          },
-        ],
-      },
-    });
-
-    expect(resolved.outcome).toBe("resolved");
-    expect(getSessionTokenUsage(resolved.session)).toMatchObject({
-      inputTokens: 1_000,
-      outputTokens: 100,
-    });
-  });
-});
-
-describe("result-to-handle binding", () => {
-  const boundResult = {
-    callId: "call-1",
-    kind: "subagent-result",
-    origin: "child",
-    outcome: {
-      kind: "terminal",
-      result: { kind: "succeeded", output: "done" },
-      usageDelta: ZERO_USAGE,
-    },
-    output: "done",
-    subagentName: "researcher",
-  } as const;
-
-  it("accepts only results a running handle binds by callId", () => {
-    // Possession of the callback token authorizes settlement; binding is by
-    // callId alone. A callId with no running handle — one whose dispatch
-    // already failed — finds nothing and cannot overwrite the
-    // dispatch-produced error result.
-    const state = createSessionWithRunningChild().state;
-
-    for (const bound of [isResultBoundToRunningHandle, isInboxSubagentResultFromRunningHandle]) {
-      expect(bound(state, boundResult)).toBe(true);
-      expect(bound(state, { ...boundResult, callId: "call-other" })).toBe(false);
-    }
-    expect(
-      isResultBoundToRunningHandle(state, {
-        callId: "call-1",
-        kind: "tool-result",
-        output: "",
-        toolName: "x",
-      }),
-    ).toBe(true);
-    expect(
-      isInboxSubagentResultFromRunningHandle(state, {
-        ...boundResult,
-        callId: "call-unknown",
-      }),
-    ).toBe(false);
-  });
-
-  it("trusts dispatch-origin results on the parent step path", () => {
-    // The subagent-only inbox type cannot represent dispatch failures. These
-    // parent-synthesized results enter through the trusted step-result path.
-    const dispatchFailure = {
-      callId: "call-1",
-      isError: true,
-      kind: "subagent-result",
-      origin: "dispatch",
-      output: { code: "SUBAGENT_START_FAILED", message: "boom" },
-      subagentName: "researcher",
-    } as const;
-    const state = createSessionWithRunningChild().state;
-
-    expect(isResultBoundToRunningHandle(state, dispatchFailure)).toBe(true);
+    expect(JSON.stringify(settled?.part.output)).toContain("deployed to https://api.example");
+    expect(JSON.stringify(settled?.part.output)).not.toContain('"deployed":true');
   });
 });
 

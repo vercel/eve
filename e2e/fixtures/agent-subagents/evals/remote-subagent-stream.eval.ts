@@ -1,7 +1,7 @@
 import {
   isCurrentTurnBoundaryEvent,
+  type AgentStartedStreamEvent,
   type MessageStreamEvent,
-  type SubagentCalledStreamEvent,
 } from "eve/client";
 import { defineEval, type EveEvalContext, type EveEvalTurn } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
@@ -22,10 +22,19 @@ export default defineEval({
   async test(t) {
     const turn = await t.send(CREATE_CHILD_MESSAGE);
     turn.expectOk();
-    const called = await requireRemoteCall(t, turn);
+    turn.eventsSatisfy("remote agent calls preserve dispatch kind", (events) =>
+      events.some(
+        (event) =>
+          event.type === "actions.requested" &&
+          event.data.actions.some(
+            (action) => action.kind === "remote-agent-call" && action.name === "remote-loopback",
+          ),
+      ),
+    );
+    const started = await requireRemoteSession(t, turn);
 
     const childEvents: MessageStreamEvent[] = [];
-    for await (const event of turn.session.streamSubagent(called)) {
+    for await (const event of turn.session.agent(started).stream()) {
       childEvents.push(event);
       if (isCurrentTurnBoundaryEvent(event)) break;
     }
@@ -44,19 +53,29 @@ export default defineEval({
         "the proxied child stream carries the child's completed workspace lookup",
       ),
     );
+    const parentTrace = turn.events.find((event) => event.type === "turn.started")?.data.trace;
+    const childTrace = childEvents.find((event) => event.type === "turn.started")?.data.trace;
+    turn.eventsSatisfy(
+      "remote dispatch starts a distinct child trace",
+      () =>
+        parentTrace !== undefined &&
+        childTrace !== undefined &&
+        childTrace.traceId !== parentTrace.traceId &&
+        childTrace.spanId !== parentTrace.spanId,
+    );
     t.succeeded();
   },
 });
 
-/** The parent may finish its turn before recording the dispatch; wait for it on the stream if so. */
-async function requireRemoteCall(
+/** The parent may finish its turn before recording the session; wait for it on the stream if so. */
+async function requireRemoteSession(
   t: EveEvalContext,
   turn: EveEvalTurn,
-): Promise<SubagentCalledStreamEvent> {
+): Promise<AgentStartedStreamEvent> {
   for (const event of turn.events) {
-    if (event.type === "subagent.called" && event.data.name === "remote-loopback") return event;
+    if (event.type === "agent.started" && event.data.name === "remote-loopback") return event;
   }
   return await t.target
     .watchTurn(turn.sessionId, { startIndex: turn.session.state.streamIndex })
-    .waitForEvent("subagent.called", { data: { name: "remote-loopback" } });
+    .waitForEvent("agent.started", { data: { name: "remote-loopback" } });
 }

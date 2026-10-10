@@ -26,8 +26,8 @@ export type OpenAPISpecSource = string | Record<string, unknown>;
  * `"vercel"`.
  *
  * Each operation in the document becomes a connection tool the model can
- * discover via `connection_search` and call by its qualified name (e.g.
- * `vercel__getProjects`). The tool name is the operation's
+ * find with `eve__search` and call with `eve__tool` as `vercel__getProjects`, the
+ * name events report the call under. The tool name is the operation's
  * `operationId`; operations without one get a deterministic synthesized
  * name (`<method>_<sanitized-path>`).
  *
@@ -55,9 +55,8 @@ export interface OpenAPIConnectionDefinition {
   /**
    * Human-readable summary of the connection and its operations.
    *
-   * The system prompt layer uses it to describe the connection to the
-   * model, and `connection_search` results use it so the model can
-   * choose which connection to query.
+   * The model sees it in the catalog listing eve announces, so it can
+   * choose which connection to search.
    */
   readonly description: string;
   /**
@@ -90,7 +89,7 @@ export interface OpenAPIConnectionDefinition {
    * - `never()`: allow all tool calls without approval
    * - `once()`: require approval only the first time per session
    * - `always()`: require approval for every tool call
-   * - `auto()`: use an evaluation model to ask about dangerous or unclear effects
+   * - `auto()`: use a decision model to ask about dangerous or unclear effects
    */
   approval?: Approval;
   /**
@@ -110,9 +109,8 @@ export interface OpenAPIConnectionDefinition {
    */
   toolCall?: ConnectionToolCallDefinition;
   /**
-   * Operation filter keyed on `operationId`. When set, the model sees
-   * only operations whose id passes the filter; `connection_search`
-   * drops all others.
+   * Operation filter keyed on `operationId`. When set, the model can find
+   * and call only operations whose id passes the filter.
    *
    * Specify exactly one of `allow` or `block`. Mirrors `tools` on MCP
    * connections, but names operations rather than tools.

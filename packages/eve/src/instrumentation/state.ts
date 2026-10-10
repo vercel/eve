@@ -29,16 +29,16 @@ export interface InstrumentationStateOwner {
 
 type InstrumentationStateMap = Readonly<Record<string, InstrumentationStateRecord>>;
 interface InstrumentationActionState {
+  readonly toolCall?: import("#instrumentation/lifecycle.js").InstrumentationToolCallStartedEvent;
   readonly scope: InstrumentationAttemptScope;
-  readonly taskId?: string;
 }
 type InstrumentationActionStateMap = Readonly<Record<string, InstrumentationActionState>>;
 type InstrumentationScopeMap = Readonly<Record<string, InstrumentationAttemptScope>>;
 
 /**
  * Provider state lives in serialized Workflow context, not in the harness, so a
- * value staged by `action.started` in one process is still there when
- * `action.completed` runs in another.
+ * value staged by `tool.call.started` in one process is still there when
+ * `tool.call.completed` runs in another.
  */
 const InstrumentationStateKey = new ContextKey<InstrumentationStateMap>(
   SERIALIZED_INSTRUMENTATION_STATE_KEYS.providerState,
@@ -163,13 +163,9 @@ export function releaseAllInstrumentationAttemptState(attemptId: string): void {
 }
 
 export function releaseAllInstrumentationTurnState(sessionId: string, turnId?: string): void {
-  const protectedActions =
-    turnId === undefined ? new Set<string>() : backgroundActionKeys(sessionId, turnId);
   releaseMatchingInstrumentationState(
-    (key, record) =>
-      record.sessionId === sessionId &&
-      (turnId === undefined || record.turnId === turnId) &&
-      !protectedActions.has(instrumentationStateOperationId(key)),
+    (_key, record) =>
+      record.sessionId === sessionId && (turnId === undefined || record.turnId === turnId),
   );
 }
 
@@ -196,14 +192,12 @@ function releaseMatchingInstrumentationState(
 export function rememberInstrumentationActionScope(
   idempotencyKey: string,
   scope: InstrumentationAttemptScope,
+  toolCall?: InstrumentationActionState["toolCall"],
 ): void {
-  writeContextKey(InstrumentationActionStateKey, (state) => {
-    const taskId = state[idempotencyKey]?.taskId;
-    return {
-      ...state,
-      [idempotencyKey]: taskId === undefined ? { scope } : { scope, taskId },
-    };
-  });
+  writeContextKey(InstrumentationActionStateKey, (state) => ({
+    ...state,
+    [idempotencyKey]: { scope, toolCall },
+  }));
 }
 
 /** Remembers where a durable input request originated. */
@@ -232,32 +226,9 @@ export function takeInstrumentationInputScope(
 }
 
 interface InstrumentationActionCorrelation {
+  readonly toolCall?: InstrumentationActionState["toolCall"];
   readonly idempotencyKey: string;
   readonly scope: InstrumentationAttemptScope;
-}
-
-/** Binds an admitted background task to the action that started it. */
-export function rememberInstrumentationBackgroundTask(
-  taskId: string,
-  correlation: InstrumentationActionCorrelation,
-): void {
-  writeContextKey(InstrumentationActionStateKey, (state) => ({
-    ...state,
-    [correlation.idempotencyKey]: {
-      scope: state[correlation.idempotencyKey]?.scope ?? correlation.scope,
-      taskId,
-    },
-  }));
-}
-
-/** Binds a background task when its executor admits the originating call. */
-export function rememberInstrumentationBackgroundTaskForCall(
-  sessionId: string,
-  callId: string,
-  taskId: string,
-): void {
-  const correlation = findInstrumentationActionScopeForCall(sessionId, callId);
-  if (correlation !== undefined) rememberInstrumentationBackgroundTask(taskId, correlation);
 }
 
 export function findInstrumentationActionScopeForCall(
@@ -269,7 +240,8 @@ export function findInstrumentationActionScopeForCall(
   for (const candidate of Object.values(actions)) {
     const idempotencyKey = `action:${sessionId}:${candidate.scope.turnId}:${callId}`;
     const action = actions[idempotencyKey];
-    if (action !== undefined) return { idempotencyKey, scope: action.scope };
+    if (action !== undefined)
+      return { idempotencyKey, scope: action.scope, toolCall: action.toolCall };
   }
   return undefined;
 }
@@ -285,20 +257,6 @@ export function takeInstrumentationActionScopeForCall(
   return correlation;
 }
 
-/** Reads and releases the action correlation owned by a terminal background task. */
-export function takeInstrumentationActionScopeForTask(
-  taskId: string,
-): InstrumentationActionCorrelation | undefined {
-  const actions = contextStorage.getStore()?.get(InstrumentationActionStateKey);
-  if (actions === undefined) return undefined;
-  for (const [idempotencyKey, action] of Object.entries(actions)) {
-    if (action.taskId !== taskId) continue;
-    releaseInstrumentationActionCorrelation(idempotencyKey);
-    return { idempotencyKey, scope: action.scope };
-  }
-  return undefined;
-}
-
 /** Takes every still-open action owned by one session or turn. */
 export function takeInstrumentationActionScopes(
   sessionId: string,
@@ -310,10 +268,13 @@ export function takeInstrumentationActionScopes(
     .filter(
       ([, action]) =>
         action.scope.sessionId === sessionId &&
-        (turnId === undefined || action.scope.turnId === turnId) &&
-        (turnId === undefined || action.taskId === undefined),
+        (turnId === undefined || action.scope.turnId === turnId),
     )
-    .map(([idempotencyKey, action]) => ({ idempotencyKey, scope: action.scope }));
+    .map(([idempotencyKey, action]) => ({
+      idempotencyKey,
+      scope: action.scope,
+      toolCall: action.toolCall,
+    }));
   if (correlations.length === 0) return [];
   const keys = new Set(correlations.map((correlation) => correlation.idempotencyKey));
   writeContextKey(InstrumentationActionStateKey, (state) => {
@@ -330,20 +291,6 @@ function releaseInstrumentationActionCorrelation(idempotencyKey: string): void {
     delete next[idempotencyKey];
     return next;
   });
-}
-
-function backgroundActionKeys(sessionId: string, turnId: string): ReadonlySet<string> {
-  const actions = contextStorage.getStore()?.get(InstrumentationActionStateKey);
-  if (actions === undefined) return new Set();
-  return new Set(
-    Object.entries(actions).flatMap(([idempotencyKey, action]) =>
-      action.taskId !== undefined &&
-      action.scope.sessionId === sessionId &&
-      action.scope.turnId === turnId
-        ? [idempotencyKey]
-        : [],
-    ),
-  );
 }
 
 function writeSlot(
@@ -382,10 +329,6 @@ function writeContextKey<T extends Readonly<Record<string, unknown>>>(
 /** A provider name cannot contain NUL, so the pair cannot be ambiguous. */
 function stateKey(provider: string, idempotencyKey: string): string {
   return `${provider}\0${idempotencyKey}`;
-}
-
-function instrumentationStateOperationId(key: string): string {
-  return key.slice(key.indexOf("\0") + 1);
 }
 
 function deserializeState(data: unknown): InstrumentationStateMap {
@@ -440,8 +383,10 @@ function deserializeActionStates(data: unknown): InstrumentationActionStateMap {
       !Array.isArray(record["scope"])
         ? (record["scope"] as InstrumentationAttemptScope)
         : (value as InstrumentationAttemptScope);
-    const taskId = typeof record["taskId"] === "string" ? record["taskId"] : undefined;
-    actions[idempotencyKey] = taskId === undefined ? { scope } : { scope, taskId };
+    actions[idempotencyKey] = {
+      scope,
+      toolCall: record.toolCall as InstrumentationActionState["toolCall"],
+    };
   }
   return actions;
 }

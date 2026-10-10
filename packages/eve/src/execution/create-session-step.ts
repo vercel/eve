@@ -4,9 +4,10 @@ import {
   resolveDurableCompiledArtifactsSource,
 } from "#runtime/durable-compiled-artifacts-source.js";
 import {
-  createDurableSessionState,
+  createDurableSessionValues,
   type DurableSessionState,
 } from "#execution/durable-session-store.js";
+import type { HarnessModelMessage } from "#harness/messages.js";
 import { createSession } from "#execution/session.js";
 import { resolveInheritedTokenLimit } from "#execution/run-session-limits.js";
 import type { RunSessionLimits } from "#channel/types.js";
@@ -17,10 +18,11 @@ import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agen
 /**
  * Result returned by {@link createSessionStep}.
  *
- * Exposes the projected {@link DurableSessionState} the owner needs to
- * drive the turn loop.
+ * Exposes the projected {@link DurableSessionState} and the history the
+ * owner needs to drive the turn loop.
  */
 export interface CreateSessionStepResult {
+  readonly history: HarnessModelMessage[];
   readonly state: DurableSessionState;
 }
 
@@ -39,7 +41,6 @@ export async function createSessionStep(input: {
   readonly nodeId?: string;
   readonly rootSessionId?: string;
   readonly sessionId: string;
-  readonly taskId?: string;
 }): Promise<CreateSessionStepResult> {
   "use step";
 
@@ -80,9 +81,9 @@ export async function createSessionStep(input: {
     outputSchema: input.outputSchema,
     rootSessionId: input.rootSessionId,
     sessionId: input.sessionId,
-    taskId: input.taskId,
     turnAgent: effectiveAgent.turnAgent,
   });
 
-  return { state: createDurableSessionState({ session }) };
+  const { history, sessionState } = createDurableSessionValues(session);
+  return { history, state: sessionState };
 }

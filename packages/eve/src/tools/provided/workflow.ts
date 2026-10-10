@@ -2,12 +2,9 @@ import {
   DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
   parseWorkflowProgramOptions,
 } from "#execution/dynamic-workflow/schema.js";
-import { executeWorkflowProgram } from "#execution/dynamic-workflow/tool.js";
+import { runWorkflowProgramTask } from "#execution/dynamic-workflow/tool.js";
 import type { JsonValue } from "#shared/json.js";
-import {
-  defineWorkflowTool,
-  type BlockingWorkflowToolDefinition,
-} from "#tools/workflow-definition.js";
+import { defineWorkflowTool, type WorkflowTaskToolDefinition } from "#tools/workflow-definition.js";
 import { attachWorkflowProgramOptions } from "#tools/workflow-program-input.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
@@ -20,10 +17,10 @@ export interface WorkflowToolInput {
   readonly js: string;
 }
 
-export type WorkflowTool = BlockingWorkflowToolDefinition<WorkflowToolInput, JsonValue>;
+export type WorkflowTool = WorkflowTaskToolDefinition<WorkflowToolInput, JsonValue>;
 
 const workflowProgramAgentContract =
-  "Call ctx.agent(name, { message: string, agentId?: string, outputSchema?: object }). It resolves directly to the child's JSON-serializable output; when outputSchema is provided, the output matches that schema. It does not return an agent metadata wrapper. Use an agentId from the conversation's <agents> block to continue that child. The owning agent resolves the target and applies its existing availability and authorization checks.";
+  "Call ctx.agent(name, { message: string, outputSchema?: object }). Each call starts a new agent that does not see this conversation, so put everything it needs in message. It resolves directly to the agent's reply; when outputSchema is provided, the reply matches that schema. It does not return an agent metadata wrapper. The owning agent resolves the target and applies its existing availability and authorization checks.";
 
 const workflowInputSchema = defineJsonSchema<WorkflowToolInput>({
   type: "object",
@@ -47,11 +44,13 @@ export function workflow(options: WorkflowToolOptions = {}): WorkflowTool {
     `The program may invoke at most ${String(normalized.maxSubagents)} agents.`,
   ].join(" ");
   return attachWorkflowProgramOptions(
-    defineWorkflowTool({
-      description,
-      execute: executeWorkflowProgram,
-      inputSchema: workflowInputSchema,
-    }),
+    frameworkTool(
+      defineWorkflowTool({
+        description,
+        inputSchema: workflowInputSchema,
+        task: runWorkflowProgramTask,
+      }),
+    ),
     normalized,
   );
 }
@@ -66,3 +65,4 @@ function normalizeWorkflowToolOptions(options: WorkflowToolOptions): {
     maxSubagents: options.maxSubagents ?? DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
   });
 }
+import { frameworkTool } from "./framework-tool.js";

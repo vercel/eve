@@ -32,6 +32,11 @@ boundary. See [Overlapping messages](./overview#overlapping-messages).
 
 Set `turnPolicy: "queue"` when every response should finish before Photon starts the next message.
 
+Images and other files people send reach the agent as file parts. Photon's
+webhook lists each file without its bytes, so eve downloads it from Photon by
+its attachment id with the project's credentials. A failed download, or a file
+over 25 MB, reaches the agent as a short note.
+
 Customize inbound dispatch with `onMessage`. Return `null` to ignore a message, or return `title` alongside `auth` to set the title when the dispatch starts a run:
 
 ```ts

@@ -48,9 +48,9 @@ export interface EveEvalToolCallMatchOptions {
 }
 
 /**
- * Constraints applied to a `load_skill` call by `t.loadedSkill`. Identical to
- * {@link EveEvalToolCallMatchOptions} without `input`, which the helper fixes to
- * the loaded skill id.
+ * Constraints applied to a skill load by `t.loadedSkill`. Identical to
+ * {@link EveEvalToolCallMatchOptions} without `input`, since the skill name is
+ * the whole input.
  */
 export type EveEvalSkillLoadMatchOptions = Omit<EveEvalToolCallMatchOptions, "input">;
 
@@ -58,13 +58,13 @@ export type EveEvalSkillLoadMatchOptions = Omit<EveEvalToolCallMatchOptions, "in
  * Constraints applied to subagent calls by `t.calledSubagent`.
  */
 export interface EveEvalSubagentCallMatchOptions {
-  /** Matcher over the runtime-action call id. */
+  /** Matcher over the agent tool call id. */
   readonly callId?: EveEvalValueMatcher<string | undefined>;
-  /** Matcher over the durable child session id, when delegation started. */
+  /** Matcher over the id of the agent's session. */
   readonly childSessionId?: EveEvalValueMatcher<string | undefined>;
-  /** Matcher over the `subagent.called` remote URL. */
+  /** Matcher over the `agent.started` remote URL. */
   readonly remoteUrl?: EveEvalValueMatcher<string | undefined>;
-  /** Matcher over the `subagent.completed` output. */
+  /** Matcher over the output of the call's `task.settled`. */
   readonly output?: EveEvalValueMatcher;
   /** Required lifecycle outcome. Defaults to `"completed"`. */
   readonly status?: EveEvalSubagentCall["status"];
@@ -129,11 +129,12 @@ export function matchesValue(matcher: unknown, value: unknown): boolean {
 }
 
 /**
- * Returns true when one derived tool call satisfies the `input`/`output`/
- * lifecycle constraints (the `count` option is the caller's concern).
+ * Returns true when one derived tool call or skill load satisfies the
+ * `input`/`output`/lifecycle constraints (the `count` option is the caller's
+ * concern).
  */
 export function toolCallMatches(
-  call: EveEvalToolCall,
+  call: Pick<EveEvalToolCall, "output" | "status"> & { readonly input?: JsonObject },
   options: EveEvalToolCallMatchOptions,
 ): boolean {
   if (options.input !== undefined && !matchesValue(options.input, call.input)) return false;

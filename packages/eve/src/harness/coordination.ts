@@ -1,151 +1,28 @@
-import type { ModelMessage, ToolSet, TypedToolCall } from "ai";
+import { observeToolOutput } from "#tool-stubs/execute.js";
+import type { ModelMessage } from "ai";
 
-import { createActionResultEvent, type UnstampedMessageStreamEvent } from "#protocol/message.js";
-import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type {
   RuntimeActionRequest,
   RuntimeActionResult,
-  RuntimeToolCallActionRequest,
   RuntimeWorkflowTaskRequest,
+  WorkflowToolCallEntry,
 } from "#shared/action-types.js";
+import { SKILL_ENTRY_NAME, SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { markRuntimeWorkflowToolAction } from "#shared/action-types.js";
+import { skillTarget } from "#shared/action-request-name.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
-import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
-import { findRunningAgentHandle, isResultBoundToRunningHandle } from "#subagents/handles/query.js";
-import { settleAgentTurn } from "#subagents/handles/transitions.js";
-import {
-  clearProxyInputRequestsForChild,
-  clearProxyInputRequestsWhere,
-} from "#harness/proxy-input-requests.js";
+import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
 import {
   findBlockingWorkflowToolRun,
   removeBlockingWorkflowToolRuns,
 } from "#harness/workflow-tool-runs.js";
 import { normalizeToolModelOutput } from "#harness/tool-model-output.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import {
-  accumulateSessionUsage,
-  getTurnUsageState,
-  setTurnUsageState,
-} from "#harness/turn-tag-state.js";
-import type {
-  HarnessEmitFn,
-  HarnessSession,
-  HarnessToolMap,
-  SessionStateMap,
-  StepInput,
-} from "#harness/types.js";
-
-const PENDING_COORDINATION_BATCH_KEY = "eve.runtime.pendingCoordinationBatch";
+import { commitCallEntry, isTaskTool } from "#execution/tasks/model-step.js";
+import { startsTasks } from "#execution/tasks/tool-entry-point.js";
+import type { HarnessSession, HarnessToolLookup } from "#harness/types.js";
 type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
 type ToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
-
-/**
- * Lifecycle outcome from a subagent result. Only `child`-origin results
- * carry one; parent-synthesized dispatch failures never do, and their type
- * omits the field entirely.
- */
-function readSubagentResultOutcome(
-  result: Extract<RuntimeActionResult, { kind: "subagent-result" }>,
-): AgentTurnOutcome | undefined {
-  return result.origin === "child" ? result.outcome : undefined;
-}
-
-/**
- * Serializable event coordinates for one pending coordination batch.
- *
- * Runtime action results are projected back onto the parent stream using the
- * same turn and step identity as the originating `actions.requested` batch.
- */
-interface PendingCoordinationEventMetadata {
-  readonly sequence: number;
-  readonly stepIndex: number;
-  readonly turnId: string;
-}
-
-/**
- * Serializable pending coordination batch stored on `session.state`.
- *
- * Child ownership does not live here: the agent handle store records every
- * dispatched child (from before its start side effect) and is the sole
- * authority for continuing, settling, and cancelling children.
- */
-export interface PendingCoordinationBatch {
-  /** Framework task controls deferred to the turn owner. */
-  readonly runtimeActions: readonly RuntimeToolCallActionRequest[];
-  /** Authored-tool and subagent workflow tasks pending coordination. */
-  readonly tasks: readonly RuntimeWorkflowTaskRequest[];
-  readonly event: PendingCoordinationEventMetadata;
-  readonly localFanoutSize?: number;
-  readonly responseMessages: readonly ModelMessage[];
-}
-
-/**
- * Outcome of resolving a pending coordination batch.
- */
-interface ResolvePendingCoordinationResult {
-  readonly messages: ModelMessage[];
-  readonly outcome: "continue" | "resolved" | "unresolved";
-  readonly session: HarnessSession;
-}
-
-/** Returns the pending coordination batch stored on the session, if any. */
-export function getPendingCoordinationBatch(
-  state: SessionStateMap | undefined,
-): PendingCoordinationBatch | undefined {
-  const value = state?.[PENDING_COORDINATION_BATCH_KEY];
-
-  if (typeof value !== "object" || value === null) {
-    return undefined;
-  }
-
-  const batch = value as PendingCoordinationBatch;
-
-  if (
-    !Array.isArray(batch.runtimeActions) ||
-    !Array.isArray(batch.tasks) ||
-    !Array.isArray(batch.responseMessages) ||
-    typeof batch.event !== "object" ||
-    batch.event === null
-  ) {
-    return undefined;
-  }
-
-  return batch;
-}
-
-export function clearPendingCoordinationBatch(session: HarnessSession): HarnessSession {
-  if (session.state?.[PENDING_COORDINATION_BATCH_KEY] === undefined) {
-    return session;
-  }
-  const state = { ...session.state };
-  delete state[PENDING_COORDINATION_BATCH_KEY];
-  return { ...session, state: Object.keys(state).length > 0 ? state : undefined };
-}
-
-/**
- * Stores one pending coordination batch on the session.
- */
-export function setPendingCoordinationBatch(input: {
-  readonly runtimeActions: readonly RuntimeToolCallActionRequest[];
-  readonly tasks: readonly RuntimeWorkflowTaskRequest[];
-  readonly event: PendingCoordinationEventMetadata;
-  readonly localFanoutSize?: number;
-  readonly responseMessages: readonly ModelMessage[];
-  readonly session: HarnessSession;
-}): HarnessSession {
-  assertUniqueCoordinationCallIds([...input.runtimeActions, ...input.tasks]);
-  const state = { ...input.session.state };
-  state[PENDING_COORDINATION_BATCH_KEY] = {
-    runtimeActions: [...input.runtimeActions],
-    tasks: [...input.tasks],
-    event: input.event,
-    localFanoutSize: input.localFanoutSize,
-    responseMessages: [...input.responseMessages],
-  } satisfies PendingCoordinationBatch;
-
-  return { ...input.session, state };
-}
 
 /** Rejects a batch before any result or side effect can bind ambiguously by call id. */
 export function assertUniqueCoordinationCallIds(
@@ -161,263 +38,155 @@ export function assertUniqueCoordinationCallIds(
 }
 
 /**
- * Returns the ordered results for the current pending coordination batch when
- * every request has a matching result. Unknown and duplicate results
- * are ignored.
+ * Forgets the workflow runs whose results arrived. Nobody can answer what a finished run asked,
+ * so its relayed requests are returned for the machine to withdraw.
  */
-function resolveReadyCoordinationResults(input: {
-  readonly results: readonly RuntimeActionResult[];
-  readonly session: HarnessSession;
-}): RuntimeActionResult[] | undefined {
-  const batch = getPendingCoordinationBatch(input.session.state);
-
-  if (batch === undefined) {
-    return undefined;
-  }
-
-  return resolveResultsForCoordinationBatch({
-    batch,
-    results: input.results,
-    state: input.session.state,
-  });
-}
-
-function resolveResultsForCoordinationBatch(input: {
-  readonly batch: PendingCoordinationBatch;
-  readonly results: readonly RuntimeActionResult[];
-  readonly state: SessionStateMap | undefined;
-}): RuntimeActionResult[] | undefined {
-  return resolveRuntimeActionResultsForCallIds({
-    pendingCallIds: [...input.batch.runtimeActions, ...input.batch.tasks].map(
-      (request) => request.callId,
-    ),
-    results: input.results.filter((result) => isResultBoundToRunningHandle(input.state, result)),
-  });
-}
-
-/**
- * Resolves one pending coordination batch back into model history.
- *
- * When all expected runtime action results are present, this appends the
- * stored assistant tool-call messages plus synthesized tool-result messages to
- * history, clears the pending batch, and emits `subagent.completed` and
- * `action.result` events back onto the parent stream.
- */
-export async function resolvePendingCoordination(input: {
-  readonly emit?: HarnessEmitFn;
-  readonly session: HarnessSession;
-  readonly stepInput?: StepInput;
-  /** Definitions whose `toModelOutput` projects a workflow tool's result for the model. */
-  readonly tools?: HarnessToolMap;
-}): Promise<ResolvePendingCoordinationResult> {
-  const batch = getPendingCoordinationBatch(input.session.state);
-
-  if (batch === undefined) {
-    return {
-      messages: [...input.session.history],
-      outcome: "continue",
-      session: input.session,
-    };
-  }
-
-  const readyResults = resolveReadyCoordinationResults({
-    results: input.stepInput?.runtimeActionResults ?? [],
-    session: input.session,
-  });
-
-  if (readyResults === undefined) {
-    return {
-      messages: [...input.session.history],
-      outcome: "unresolved",
-      session: input.session,
-    };
-  }
-
-  // Settle each bound child result against its running handle from the
-  // outcome the child engine reported: `parked` keeps the handle (the child
-  // is idle and resumable), `terminal` deletes it. Before a terminal
-  // deletion the proxy-input entry keyed by the child's continuation token
-  // is cleared (the handle is the only record of that token) so future
-  // deliveries don't route responses to a dead child.
-  let nextSession: HarnessSession = input.session;
-  for (const result of readyResults) {
-    // Dispatch failures never settle handles: the dispatch step already
-    // rejected (deleted) the handle when it synthesized the failure.
-    if (result.kind !== "subagent-result" || result.origin !== "child") {
-      continue;
-    }
-    // A background receipt confirms task admission, not child-turn settlement.
-    // The task snapshot later carries the actual parked/terminal outcome.
-    if (readBackgroundTaskReceipt(result) !== undefined) {
-      continue;
-    }
-    const handle = findRunningAgentHandle(nextSession.state, { callId: result.callId });
-    if (handle === undefined) {
-      continue;
-    }
-    const outcome = readSubagentResultOutcome(result);
-    if (outcome === undefined) {
-      continue;
-    }
-    if (outcome.kind === "terminal" && "continuationToken" in handle.address) {
-      nextSession = clearProxyInputRequestsForChild(nextSession, handle.address.continuationToken);
-    }
-    const settled = settleAgentTurn(nextSession, {
-      operationId: handle.operation.id,
-      outcome,
-    });
-    if (settled.kind === "settled") {
-      nextSession = settled.session;
-    }
-  }
-
-  // Drop a finished run's unanswered requests so a late click cannot reach it.
-  for (const result of readyResults) {
+export function forgetFinishedRuns(
+  session: HarnessSession,
+  results: readonly RuntimeActionResult[],
+  turnId: string,
+): { readonly requestIds: readonly string[]; readonly session: HarnessSession } {
+  let next = session;
+  const requestIds: string[] = [];
+  for (const result of results) {
     if (result.kind !== "tool-result") continue;
-    const record = findBlockingWorkflowToolRun(
-      nextSession.state,
-      result.callId,
-      batch.event.turnId,
-    );
+    const record = findBlockingWorkflowToolRun(next.state, result.callId, turnId);
     if (record === undefined) continue;
-    nextSession = removeBlockingWorkflowToolRuns(
-      clearProxyInputRequestsWhere(
-        nextSession,
-        (route) => route.answerHook?.runId === record.address.runId,
-      ),
-      batch.event.turnId,
-      record.callId,
-    );
-  }
-
-  const state = { ...nextSession.state };
-  delete state[PENDING_COORDINATION_BATCH_KEY];
-  nextSession = {
-    ...nextSession,
-    state: Object.keys(state).length > 0 ? state : undefined,
-  };
-
-  // Draw settled child spend down against the parent's session totals so
-  // the session token limits and the remaining-quota budget granted to later
-  // delegations account for what the tree has already spent. Every outcome
-  // carries the child turn's `usageDelta`, folded exactly once per settled
-  // result (each batch resolves once), so repeated turns of a persistent
-  // child never double-count earlier turns. Only child-produced results
-  // carry an outcome; parent-side dispatch failures never do.
-  for (const result of readyResults) {
-    if (result.kind !== "subagent-result") {
-      continue;
+    for (const [requestId, route] of getProxyInputRequests(next.state)) {
+      if (route.runId === record.address.runId) requestIds.push(requestId);
     }
-    const outcome = readSubagentResultOutcome(result);
-    if (outcome === undefined) {
-      continue;
-    }
-    nextSession = setTurnUsageState(
-      nextSession,
-      accumulateSessionUsage({
-        previous: getTurnUsageState(nextSession.state),
-        usage: outcome.usageDelta,
-      }),
-    );
+    next = removeBlockingWorkflowToolRuns(next, turnId, record.callId);
   }
+  return { requestIds, session: next };
+}
 
-  if (input.emit !== undefined) {
-    for (const result of readyResults) {
-      if (
-        result.kind === "subagent-result" &&
-        result.origin === "child" &&
-        result.outcome.result.kind === "succeeded" &&
-        readBackgroundTaskReceipt(result) === undefined
-      ) {
-        const data = {
-          callId: result.callId,
-          output: typeof result.output === "string" ? result.output : JSON.stringify(result.output),
-          subagentName: result.subagentName,
-        };
-        await input.emit({
-          data,
-          type: "subagent.completed",
-        } satisfies Extract<UnstampedMessageStreamEvent, { type: "subagent.completed" }>);
-      }
-
-      await input.emit(
-        createActionResultEvent({
-          result,
-          sequence: batch.event.sequence,
-          stepIndex: batch.event.stepIndex,
-          turnId: batch.event.turnId,
-        }),
-      );
-    }
-  }
-
-  const toolResults: ToolResultPart[] = [];
-  for (const result of readyResults) {
+/** Each runtime result as the model reads it, beside the result the stream reports. */
+export async function runtimeResultCalls(
+  results: readonly RuntimeActionResult[],
+  tools: HarnessToolLookup | undefined,
+): Promise<{ readonly part: ToolResultPart; readonly result: RuntimeActionResult }[]> {
+  const settled: { part: ToolResultPart; result: RuntimeActionResult }[] = [];
+  for (const result of results) {
     switch (result.kind) {
+      // A skill load is always an `eve__skill` call in history.
       case "load-skill-result":
-        toolResults.push({
-          output: toToolResultOutput(result),
-          toolCallId: result.callId,
-          toolName: "load_skill",
-          type: "tool-result",
+        settled.push({
+          part: toolResult(result, SKILL_TOOL_NAME, toToolResultOutput(result)),
+          result,
         });
         continue;
       case "subagent-result":
-        toolResults.push({
-          output: toToolResultOutput(result),
-          toolCallId: result.callId,
-          toolName: result.subagentName,
-          type: "tool-result",
+        settled.push({
+          part: toolResult(result, result.subagentName, toToolResultOutput(result)),
+          result,
         });
         continue;
       case "tool-result":
-        toolResults.push({
-          output: await projectToolResultOutput(result, input.tools?.get(result.toolName)),
-          toolCallId: result.callId,
-          toolName: result.toolName,
-          type: "tool-result",
+        settled.push({
+          part: toolResult(
+            result,
+            result.toolName,
+            await projectToolResultOutput(result, tools?.get(result.toolName)),
+          ),
+          result,
         });
         continue;
     }
-
     throw new Error(`Unsupported runtime action result kind "${String(result)}".`);
   }
-
-  const messages = [...nextSession.history, ...batch.responseMessages];
-
-  if (toolResults.length > 0) {
-    messages.push({
-      content: toolResults,
-      role: "tool",
-    });
-  }
-  return {
-    messages,
-    outcome: "resolved",
-    session: nextSession,
-  };
+  return settled;
 }
 
-function readBackgroundTaskReceipt(
-  result: Extract<RuntimeActionResult, { kind: "subagent-result" }>,
-): { readonly status: "working"; readonly taskId: string } | undefined {
-  return "backgroundTask" in result ? result.backgroundTask : undefined;
+function toolResult(
+  result: RuntimeActionResult,
+  toolName: string,
+  output: ToolResultPart["output"],
+): ToolResultPart {
+  return { output, toolCallId: result.callId, toolName, type: "tool-result" };
+}
+
+/**
+ * Turns a step's workflow tool calls into workflow runs, committing a task
+ * record for each call that starts a task. Task tool calls stay in the
+ * response alone: the session reads them from there.
+ */
+export function collectWorkflowCalls(input: {
+  readonly session: HarnessSession;
+  readonly toolCalls: readonly CoordinationToolCall[];
+  readonly tools: HarnessToolLookup;
+  readonly turnId: string;
+}): {
+  readonly session: HarnessSession;
+  readonly workflowRequests: readonly RuntimeWorkflowTaskRequest[];
+} {
+  let { session } = input;
+  const workflowRequests: RuntimeWorkflowTaskRequest[] = [];
+  for (const toolCall of input.toolCalls) {
+    const definition = input.tools.get(toolCall.toolName);
+    if (isTaskTool(definition)) continue;
+    const committed = commitCallEntry(session, {
+      callId: toolCall.toolCallId,
+      definition,
+      input: resolveToolCallInputObject(toolCall.input, {
+        callId: toolCall.toolCallId,
+        toolName: toolCall.toolName,
+      }),
+      toolName: toolCall.toolName,
+      turnId: input.turnId,
+    });
+    session = committed.session;
+    workflowRequests.push(
+      createCoordinationRequestFromToolCall({
+        entry: committed.entry,
+        input: committed.input,
+        toolCall,
+        tools: input.tools,
+      }),
+    );
+  }
+  return { session, workflowRequests };
+}
+
+/** The parts of a model tool call that coordination turns into a runtime request. */
+export interface CoordinationToolCall {
+  readonly input: unknown;
+  readonly toolCallId: string;
+  readonly toolName: string;
 }
 
 /**
  * Projects one AI SDK tool call into the eve runtime-action contract.
  */
 export function createRuntimeActionRequestFromToolCall(input: {
-  readonly toolCall: TypedToolCall<ToolSet>;
-  readonly tools: HarnessToolMap;
+  readonly toolCall: CoordinationToolCall;
+  readonly tools: HarnessToolLookup;
 }): RuntimeActionRequest {
   const definition = input.tools.get(input.toolCall.toolName);
   const toolInput = resolveToolCallInputObject(input.toolCall.input, {
     callId: input.toolCall.toolCallId,
     toolName: input.toolCall.toolName,
   });
-  if (definition?.frameworkAction === "load-skill") {
-    return { callId: input.toolCall.toolCallId, input: toolInput, kind: "load-skill" };
+  const skill = input.toolCall.toolName === SKILL_ENTRY_NAME ? skillTarget(toolInput) : undefined;
+  if (skill !== undefined) {
+    return { callId: input.toolCall.toolCallId, input: toolInput, kind: "load-skill", name: skill };
+  }
+  const handling = definition?.behavior?.handling;
+  if (
+    definition !== undefined &&
+    handling?.kind === "dispatch" &&
+    handling.target.kind !== "workflow-tool-call"
+  ) {
+    const target = handling.target;
+    const common = {
+      callId: input.toolCall.toolCallId,
+      description: definition.description,
+      input: toolInput,
+      name: input.toolCall.toolName,
+      nodeId: target.nodeId,
+    };
+    return target.kind === "remote-agent-call"
+      ? { ...common, kind: "remote-agent-call", remoteAgentName: target.remoteAgentName }
+      : { ...common, kind: "subagent-call", subagentName: target.subagentName };
   }
   const action: RuntimeActionRequest = {
     callId: input.toolCall.toolCallId,
@@ -428,43 +197,29 @@ export function createRuntimeActionRequestFromToolCall(input: {
   return definition?.workflowId === undefined ? action : markRuntimeWorkflowToolAction(action);
 }
 
-/** Projects one deferred harness tool call into task/control coordination. */
+/**
+ * Projects one workflow tool call into a workflow run request. The input is
+ * the tool's own, without anything eve added to its model input.
+ */
 export function createCoordinationRequestFromToolCall(input: {
-  readonly toolCall: TypedToolCall<ToolSet>;
-  readonly tools: HarnessToolMap;
-}):
-  | { readonly kind: "runtime-action"; readonly request: RuntimeToolCallActionRequest }
-  | { readonly kind: "task"; readonly request: RuntimeWorkflowTaskRequest } {
+  readonly entry: WorkflowToolCallEntry;
+  readonly input: JsonObject;
+  readonly toolCall: CoordinationToolCall;
+  readonly tools: HarnessToolLookup;
+}): RuntimeWorkflowTaskRequest {
   const definition = input.tools.get(input.toolCall.toolName);
-  const inputObject = resolveToolCallInputObject(input.toolCall.input, {
+  if (definition?.workflowId === undefined) {
+    throw new Error(`Workflow tool "${input.toolCall.toolName}" has no workflow.`);
+  }
+  return {
     callId: input.toolCall.toolCallId,
+    entry: input.entry,
+    executeInput: definition.executeInput?.(input.input),
+    input: input.input,
+    kind: "workflow-task",
     toolName: input.toolCall.toolName,
-  });
-  if (definition?.runtimeAction?.kind === "task-control") {
-    return {
-      kind: "runtime-action",
-      request: {
-        callId: input.toolCall.toolCallId,
-        input: inputObject,
-        kind: "tool-call",
-        toolName: input.toolCall.toolName,
-      },
-    };
-  }
-  if (definition?.workflowId !== undefined) {
-    return {
-      kind: "task",
-      request: {
-        callId: input.toolCall.toolCallId,
-        executeInput: definition.executeInput?.(inputObject),
-        input: inputObject,
-        kind: "workflow-task",
-        toolName: input.toolCall.toolName,
-        workflowId: definition.workflowId,
-      },
-    };
-  }
-  throw new Error(`Deferred tool "${input.toolCall.toolName}" has no task or runtime action.`);
+    workflowId: definition.workflowId,
+  };
 }
 
 /**
@@ -511,14 +266,21 @@ async function projectToolResultOutput(
   result: Extract<RuntimeActionResult, { kind: "tool-result" }>,
   definition: HarnessToolDefinition | undefined,
 ): Promise<ToolResultPart["output"]> {
-  if (result.isError === true || definition?.toModelOutput === undefined) {
+  // A task tool's call result is its receipt; `toModelOutput` projects the task's result.
+  if (
+    result.isError === true ||
+    definition?.toModelOutput === undefined ||
+    startsTasks(definition)
+  ) {
     return toToolResultOutput(result);
   }
-  return normalizeToolModelOutput({
-    output: await definition.toModelOutput(result.output),
-    toolCallId: result.callId,
-    toolName: result.toolName,
-  });
+  return await observeToolOutput(result.toolName, [{ callId: result.callId }], async () =>
+    normalizeToolModelOutput({
+      output: await definition.toModelOutput!(result.output),
+      toolCallId: result.callId,
+      toolName: result.toolName,
+    }),
+  );
 }
 
 function toToolResultOutput(result: RuntimeActionResult): ToolResultPart["output"] {

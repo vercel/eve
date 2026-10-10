@@ -2,22 +2,25 @@ import { StringDecoder } from "node:string_decoder";
 import type { DevDiagnostics } from "../diagnostics.js";
 
 import type {
+  AgentTUIInput,
+  AgentTUIInputContext,
   AgentTUIInputOption,
   AgentTUIInputQuestion,
   AgentTUIInputQuestionResponse,
   AgentTUIRenderer,
   AgentTUISessionOptions,
-  AgentTUIStreamEvent,
-  AgentTUIStreamUsage,
-  AgentTUIStreamResult,
   AgentTUIToolApprovalRequest,
   AgentTUIToolApprovalResponse,
   CommandPresentation,
-  ConnectionAuthUpdate,
-  SubagentStepUpdate,
-  SubagentView,
-  SubagentToolUpdate,
 } from "./runner.js";
+import type { AgentTUIConversationView, TokenUsage } from "./conversation-view.js";
+import {
+  ConversationTranscript,
+  TASK_END_GRACE_MS,
+  turnActivity,
+  type TranscriptOptions,
+} from "./transcript.js";
+import { renderTaskPanelRows } from "./task-activity.js";
 import { interruptedError } from "./errors.js";
 import {
   argumentTypeaheadCompletion,
@@ -83,11 +86,12 @@ import {
 import type {
   AssistantResponseStatsMode,
   LogDisplayMode,
+  SubagentDisplayMode,
   TerminalPartDisplayMode,
 } from "./types.js";
 import type { AgentInfoResult } from "#client/index.js";
-import { summarizeKnownError } from "#harness/semantic-errors/index.js";
-import { inspectError, type LogRecord } from "#internal/logging.js";
+import { initialPromptPlaceholder } from "./prompt-placeholder.js";
+import type { LogRecord } from "#internal/logging.js";
 import {
   parseDevRebuildLogLine,
   type DevRebuildLogUpdate,
@@ -97,7 +101,6 @@ import {
   type Block,
   type DisplayBlock,
   type BlockKind,
-  type ToolStatus,
   renderAttentionRows,
   renderBlockLines,
 } from "./blocks.js";
@@ -127,7 +130,10 @@ import { copyTextToClipboard } from "./clipboard.js";
 import type { TraceViewerOpenOptions, TraceViewerRenderer } from "./traces/trace-viewer-session.js";
 import { TraceViewerSession } from "./traces/trace-viewer-session.js";
 import { buildStatusLine, type DevBuildStatus } from "./status-line.js";
-import { nextLogDisplayMode } from "./log-display-mode.js";
+import { isLogVisible, nextLogDisplayMode } from "./log-display-mode.js";
+import { setConsoleRecordSubscriber, type ConsoleRecord } from "../console-records.js";
+import type { LogLevel } from "#internal/logging.js";
+import { format } from "node:util";
 import { createTheme, detectUnicode, type Theme } from "./theme.js";
 import {
   clipVisible,
@@ -139,17 +145,8 @@ import {
 } from "#cli/ui/terminal-text.js";
 import type { VercelStatusSnapshot } from "./vercel-status.js";
 import type { RemoteConnectionSnapshot } from "./remote-connection.js";
-import {
-  isPanelRoutedTool,
-  presentPreparingTool,
-  presentTool,
-  readWriteFileInput,
-  toolBaseName,
-  type ToolPresentationContext,
-} from "./tool-presentation.js";
-import { FileContentCache } from "./file-content-cache.js";
 import { groupToolBlocksForDisplay } from "./tool-block-groups.js";
-import { renderQuestionChoices, renderQuestionPanel } from "./question-panel.js";
+import { inputContextLabel, renderQuestionChoices, renderQuestionPanel } from "./question-panel.js";
 import { TurnClock } from "./turn-clock.js";
 import { MessageQueue, renderMessageQueueRows } from "./message-queue.js";
 import { formatStoredDiagnostic, presentDiagnostic } from "./diagnostic-presentation.js";
@@ -171,7 +168,6 @@ import {
   sanitizePastedText,
   stripPasteStart,
   stripPromptControlCharacters,
-  takeUntil,
   type TerminalKey,
 } from "./stream-format.js";
 import {
@@ -223,20 +219,7 @@ function moveActionCursor(
   return (cursor + delta + actionCount) % actionCount;
 }
 
-function completedTurnStatus(input: {
-  interrupted: boolean;
-  cancelled: boolean;
-  continueSession: boolean;
-}): string {
-  if (input.interrupted) return "Interrupted";
-  if (input.cancelled) return "Cancelled";
-  if (input.continueSession) return "Ready";
-  return "Done";
-}
-
 type SetupFlowStatusState = { text: string; startedAtMs: number };
-
-type TurnIndicatorState = { kind: "idle" } | { kind: "waiting"; startedAtMs: number };
 
 type SetupFlowState = {
   title: string;
@@ -279,7 +262,7 @@ type TerminalRendererOptions = {
   output?: TerminalOutput;
   tools?: TerminalPartDisplayMode;
   reasoning?: TerminalPartDisplayMode;
-  subagents?: TerminalPartDisplayMode;
+  subagents?: SubagentDisplayMode;
   connectionAuth?: TerminalPartDisplayMode;
   assistantResponseStats?: AssistantResponseStatsMode;
   contextSize?: number;
@@ -303,64 +286,7 @@ type AgentHeaderOptions = {
   name: string;
   serverUrl: string;
   info?: AgentInfoResult;
-};
-
-type DisplayModes = {
-  tools: TerminalPartDisplayMode;
-  reasoning: TerminalPartDisplayMode;
-  assistantResponseStats: AssistantResponseStatsMode;
-};
-
-type RenderTurnState = {
-  text: Map<string, string>;
-  reasoning: Map<string, string>;
-  tools: Map<string, NativeToolState>;
-  modelActivity: "Thinking" | "Generating";
-  runningTools: Set<string>;
-  cancelled: boolean;
-  restoreCancelledPrompt: boolean;
-};
-
-function turnActivityLabel(state: RenderTurnState | undefined): string {
-  if (state === undefined) return "Thinking";
-  return state.runningTools.size > 0 ? "Running" : state.modelActivity;
-}
-
-function updateTurnActivity(state: RenderTurnState, event: AgentTUIStreamEvent): void {
-  switch (event.type) {
-    case "turn-start":
-    case "step-start":
-    case "reasoning-delta":
-      state.modelActivity = "Thinking";
-      break;
-    case "assistant-delta":
-    case "tool-call-preparing":
-      state.modelActivity = "Generating";
-      break;
-    case "assistant-complete":
-      if (event.text?.trim()) state.modelActivity = "Generating";
-      break;
-    case "tool-call":
-      state.runningTools.add(event.toolCallId);
-      state.modelActivity = "Thinking";
-      break;
-    case "tool-result":
-    case "tool-error":
-    case "tool-rejected":
-      state.runningTools.delete(event.toolCallId);
-      break;
-  }
-}
-
-type NativeToolState = {
-  toolCallId: string;
-  toolName: string;
-  input: unknown;
-  status: ToolStatus;
-  /** True while the model is still streaming this call's input. */
-  preparing?: boolean;
-  output?: unknown;
-  errorText?: string;
+  localDevelopment?: boolean;
 };
 
 const caretBlinkMs = 500;
@@ -380,11 +306,6 @@ const logLevelHintMs = 5_000;
 const devBuildProgressDelayMs = 250;
 const devBuildLoadedStatusMs = 4_000;
 
-const STATUS = {
-  processing: "Thinking",
-  connectionAuth: "Waiting for connection authorization…",
-} as const;
-
 /**
  * The end-of-turn stats coda renders only for turns that were long or
  * expensive: past this wall-clock duration, or past this many input tokens
@@ -402,7 +323,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   readonly #renderMarkdown: boolean;
   readonly #tools: TerminalPartDisplayMode;
   readonly #reasoning: TerminalPartDisplayMode;
-  readonly #subagents: TerminalPartDisplayMode;
+  readonly #subagents: SubagentDisplayMode;
   readonly #connectionAuth: TerminalPartDisplayMode;
   readonly #assistantResponseStats: AssistantResponseStatsMode;
   readonly #captureForeignOutput: boolean;
@@ -427,20 +348,20 @@ export class TerminalRenderer implements AgentTUIRenderer {
    */
   readonly #transcriptBlocks: Block[] = [];
 
-  readonly #childToolCallIds = new Set<string>();
-  readonly #parentToolBlockIds = new Map<string, string>();
   /** Monotonic counter behind every block's `updateSeq` activity stamp. */
   #updateSequence = 0;
-  /** Call ids per subagent name, for the sections' ordinal subtitles. */
-  readonly #subagentCallsByName = new Map<string, string[]>();
-  /** Background sections kept at the live edge until their child boundary. */
-  readonly #backgroundSubagentCallIds = new Set<string>();
-  /** Parent-completed sections retained as mutable until the child boundary. */
-  readonly #provisionalSubagentCallIds = new Set<string>();
-  /** Session-local file contents, so write blocks can render real diffs. */
-  readonly #fileContents = new FileContentCache();
-  readonly #subagentHeaders = new Set<string>();
+  /** Projects the current session's conversation; reset at every context cut. */
+  readonly #transcript = new ConversationTranscript();
+  #taskEndGraceTimer?: ReturnType<typeof setTimeout>;
+  #view?: AgentTUIConversationView;
+  /** Live blocks whose content the conversation projection owns. */
+  #conversationBlockIds = new Set<string>();
+  /** Texts submitted while a turn ran, so their echoes use the steering gutter. */
+  readonly #steeredMessages: string[] = [];
   #agentHeader?: AgentHeaderOptions;
+  #initialPromptPlaceholder = "Send a message…";
+  /** The agent's local subagents, whose tools render as delegations. */
+  #subagentNames?: readonly string[];
   #startupPhase?: "starting" | "connecting" | "updating";
   #startupEditor?: LineState;
   #startupConsumer?: (key: TerminalKey) => void;
@@ -464,7 +385,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
    */
   #lastCommitted?: PreviousBlock;
 
-  #connectionAuthPendingCount = 0;
   /** Vercel segment of the bottom status line; pushed by the runner. */
   #vercelStatus?: VercelStatusSnapshot;
   /** Remote target and connection/authentication state; pushed by the runner. */
@@ -475,7 +395,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   readonly #killRing = new KillRing();
   #inputActive = false;
   /**
-   * Command suggestions for the prompt draft. Only `readPrompt` sets this —
+   * Command suggestions for the prompt draft. Only `readInput` sets this —
    * `readInputQuestion` shares `#inputActive` and the footer's input row, and
    * a `/`-prefixed freeform answer must never sprout suggestions.
    */
@@ -499,26 +419,17 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #promptPlaceholderActive = false;
   /** Placeholder retires for good once the user has sent a first message. */
   #hasUserMessage = false;
-  /** Armed by a chat submit; the end-of-turn stats line consumes it. */
+  /** Armed when work starts; the end-of-turn stats line consumes it. */
   readonly #turnClock = new TurnClock();
-  #activeTurnState?: RenderTurnState;
-  /**
-   * Draft typed while a turn streams. The prompt row stays in place with
-   * Enter inert (no mid-turn submits yet); the draft seeds the next prompt.
-   */
-  #streamDraft: LineState = EMPTY_LINE;
-  /** True while renderStream owns the keyboard — gates the inert prompt row. */
-  #streamDraftActive = false;
-  /**
-   * Token usage summed across the turn's steps — what this message actually
-   * cost, unlike the last step's report (whose input restates the whole
-   * context). Accumulated on `step-finish` only: the `finish` event repeats
-   * the final step's usage and would double-count it.
-   */
-  #turnIndicator: TurnIndicatorState = { kind: "idle" };
+  #lastTurnStats?: { elapsedMs: number } & TokenUsage;
+  /** The composer's draft, kept while other input surfaces own the keyboard. */
+  #draft: LineState = EMPTY_LINE;
+  /** Replaces the open composer's line; set while {@link readInput} reads. */
+  #applyDraft?: (next: LineState) => void;
+  /** Set by a cancel key while work runs; a second Ctrl+C stops following. */
+  #cancelRequested = false;
   /** Rejects the reader currently awaiting keys, so #stop never strands it. */
   #rejectActiveReader?: (error: Error) => void;
-  #status: string = STATUS.processing;
   /**
    * A flowless setup spinner's text ("Checking the project…"). Rendered as
    * its own status row — the text is the information — instead of the live
@@ -534,7 +445,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
    */
   #everInteractive = false;
   #partingLinePrinted = false;
-  #interrupted = false;
   #exitRequested = false;
   /** True after the first consecutive Ctrl+C at the idle chat prompt. */
   #exitArmed = false;
@@ -556,18 +466,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #inputDecoder = new StringDecoder("utf8");
   #keyFlushTimer?: ReturnType<typeof setTimeout>;
   #onResize?: () => void;
-  #resolveStreamInterrupt?: () => void;
   #painting = false;
   #paintAgain = false;
-
-  #totalTokens?: number;
-  /** Input (prompt) tokens from the latest usage report — the ↑ side. */
-  #promptTokens?: number;
   #contextSize?: number;
-  #assistantOutputTokens?: number;
-  #assistantTokensPerSecond?: number;
-  /** Wall-clock start of the current stream, for the tok/s status stat. */
-  #streamStartedAt?: number;
 
   #restoreLogCapture?: () => void;
   #stdoutLogBuffer = "";
@@ -587,7 +488,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #devBuildStatusTimer?: ReturnType<typeof setTimeout>;
   /** Monotonic id source — committed cycle ids must never be reused. */
   #devRebuildSequence = 0;
-  #pendingEchoedPrompt?: string;
   /** The open HITL drawer, painted above the input area. */
   #hitlDrawer?: (width: number) => ReturnType<typeof renderTransientDrawer>;
   #transientPanel?: (width: number) => ReturnType<typeof renderTransientDrawer>;
@@ -596,33 +496,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #setupFlow?: SetupFlowState;
   /** The clearable setup attention line (`⚠ … · /deploy`), rendered in the live footer. */
   #setupAttention?: string;
-  #resolvedModelId?: string;
-  #modelTurnId?: string;
-  /**
-   * Messages submitted while a turn streams, pinned in a panel directly
-   * above the input when steering is unavailable. `/cancel` cancels directly, and Esc or
-   * Ctrl+C pops-to-steer or cancels immediately when empty; the runner drains
-   * via {@link takeQueuedPrompt} at a clean turn boundary and
-   * {@link readPrompt} restores any leftovers as a draft.
-   */
-  readonly #messageQueue = new MessageQueue();
-  /** The streaming result's cooperative cancel, available to Esc and Ctrl+C. */
-  #requestTurnCancel?: () => void;
-  #sendSteering?: (message: string) => Promise<void>;
-  /** Set by the `turn-cancelled` stream event: settle in-flight tool blocks. */
-  #turnCancelled = false;
+  /** Messages submitted while the agent starts, delivered once it is ready. */
+  readonly #startupQueue = new MessageQueue();
   /** Server session id backing the conversation; named in the parting line. */
   #sessionId?: string;
-  /**
-   * Provenance of the next runner-submitted prompt, remembered between
-   * {@link takeQueuedPrompt} and the echo in {@link #addSubmittedPrompt} so
-   * the user block can use the steering gutter color.
-   */
-  #nextSubmittedPromptOrigin?: "steer" | "queue";
-  /** True once this stream's prompt requested cancellation. */
-  #cancelRequestedByUser = false;
-  /** The prompt submitted for the streaming turn, for external-cancel recovery. */
-  #currentSubmittedPrompt?: string;
   /** Armed by {@link SetupFlowRenderer.waitForInterrupt}; fired by the idle key trap. */
   #flowInterrupt?: (interrupt: SetupFlowInterrupt) => void;
   /** The installed working-state key consumer, so re-arming and disposal can recognize it. */
@@ -675,7 +552,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#renderMarkdown = options?.renderMarkdown ?? detectMarkdownRendering();
     this.#tools = options?.tools ?? "auto-collapsed";
     this.#reasoning = options?.reasoning ?? "auto-collapsed";
-    this.#subagents = options?.subagents ?? "auto-collapsed";
+    this.#subagents = options?.subagents ?? "collapsed";
     this.#connectionAuth = options?.connectionAuth ?? "full";
     this.#assistantResponseStats = options?.assistantResponseStats ?? defaultAssistantResponseStats;
     this.#contextSize = options?.contextSize;
@@ -683,7 +560,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#diagnostics = options?.diagnostics;
     this.#onExitRequest = options?.onExitRequest;
     this.#argumentSuggestions = options?.argumentSuggestions;
-    this.#logs = options?.logs ?? "none";
+    this.#logs = options?.logs ?? "error";
     this.#availablePromptCommands = options?.availablePromptCommands ?? PROMPT_COMMANDS;
   }
 
@@ -746,11 +623,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (this.#argumentTypeahead !== undefined) {
       return renderArgumentSuggestions(this.#argumentTypeahead, this.#theme, width);
     }
-    const inlineHint =
-      this.#typeahead === undefined ? undefined : inlineCommandHint(this.#typeahead);
-    return inlineHint === undefined &&
-      this.#typeahead !== undefined &&
-      isTypeaheadOpen(this.#typeahead)
+    return this.#typeahead !== undefined && isTypeaheadOpen(this.#typeahead)
       ? renderCommandSuggestions(this.#typeahead, this.#theme, width)
       : [];
   }
@@ -773,13 +646,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
   renderAgentHeader(options: AgentHeaderOptions): void {
     this.#startupHeader = undefined;
     this.#title = options.name;
-    if (
-      this.#agentHeader?.info?.agent.model.routing.kind !== "dynamic" ||
-      options.info?.agent.model.routing.kind !== "dynamic"
-    ) {
-      this.#resolvedModelId = undefined;
-    }
     this.#agentHeader = options;
+    this.#subagentNames = options.info?.subagents.local.map((subagent) => subagent.name);
+    this.#initialPromptPlaceholder = initialPromptPlaceholder(
+      options.info,
+      options.localDevelopment === true,
+    );
     this.#start();
     const body = this.#renderAgentHeaderRows().join("\n");
     if (this.#agentHeaderRendered) {
@@ -834,7 +706,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         return;
       }
       if (key.type === "enter" && editor.text.trim().length > 0) {
-        if (this.#messageQueue.enqueue(editor.text)) apply(EMPTY_LINE);
+        if (this.#startupQueue.enqueue(editor.text)) apply(EMPTY_LINE);
         return;
       }
       if (key.type === "ctrl-c") this.#onExitRequest?.();
@@ -854,7 +726,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   finishStartupDraft(): { draft: string; queuedPrompt: string | undefined } {
     const result = {
       draft: this.#startupEditor?.text ?? this.#inputText,
-      queuedPrompt: this.#messageQueue.takePrompt(),
+      queuedPrompt: this.#startupQueue.takePrompt(),
     };
     this.#startupEditor = undefined;
     this.#startupConsumer = undefined;
@@ -865,37 +737,23 @@ export class TerminalRenderer implements AgentTUIRenderer {
     return result;
   }
 
-  async readPrompt(options?: AgentTUISessionOptions): Promise<string> {
+  /**
+   * Opens the composer until the user submits, cancels work, or leaves. The
+   * composer stays usable while work runs: `Enter` submits (the runner steers),
+   * and `Esc` or `Ctrl+C` asks to cancel. Aborting `signal` keeps the draft for
+   * the next read, so other input surfaces can briefly take the keyboard.
+   */
+  async readInput(options?: AgentTUISessionOptions): Promise<AgentTUIInput | undefined> {
     this.#start(options);
-    this.#syncBackgroundActivityTicker();
-    this.#commitTurnStats();
+    if (this.#view?.working !== true) this.#commitTurnStats();
     this.#inputActive = true;
     this.#promptPlaceholderActive = true;
-    this.#turnIndicator = { kind: "idle" };
-    this.#status = "";
     this.#exitArmed = this.#armExitOnNextPrompt;
     this.#armExitOnNextPrompt = false;
-    // A draft typed during the turn carries into the prompt; an explicit
-    // initial draft (`eve dev --input`) wins over it. Queued messages the
-    // runner never drained (an interrupted or failed turn) fold back in
-    // ahead of the draft instead of vanishing — sanitized per line so the
-    // blank-line seams between restored messages survive.
-    const undelivered = this.#messageQueue
-      .restoreDraft()
-      ?.split("\n")
-      .map(stripPromptControlCharacters)
-      .join("\n");
-    const carriedDraft = stripPromptControlCharacters(
-      options?.initialDraft ?? this.#streamDraft.text,
-    );
-    const seededDraft =
-      undelivered === undefined
-        ? carriedDraft
-        : carriedDraft.length === 0
-          ? undelivered
-          : `${undelivered}\n\n${carriedDraft}`;
-    let editor: LineState = lineOf(seededDraft);
-    this.#streamDraft = EMPTY_LINE;
+    let editor: LineState =
+      options?.initialDraft === undefined
+        ? this.#draft
+        : lineOf(stripPromptControlCharacters(options.initialDraft));
     this.#promptHistory.begin(editor.text);
     this.#syncInput(editor);
     this.#syncTypeahead(editor.text);
@@ -903,14 +761,40 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#paint();
 
     return await new Promise((resolve, reject) => {
-      this.#rejectActiveReader = reject;
+      const signal = options?.signal;
+      const release = () => {
+        this.#applyDraft = undefined;
+        signal?.removeEventListener("abort", onAbort);
+        this.#typeahead = undefined;
+        this.#argumentTypeahead = undefined;
+        this.#inputActive = false;
+        this.#stopCaretBlink();
+        this.#detachInput();
+        this.#paint();
+      };
+      const finish = (input: AgentTUIInput | undefined) => {
+        release();
+        resolve(input);
+      };
+      const onAbort = () => finish(undefined);
+      signal?.addEventListener("abort", onAbort, { once: true });
+      if (signal?.aborted) {
+        onAbort();
+        return;
+      }
+      this.#rejectActiveReader = (error) => {
+        signal?.removeEventListener("abort", onAbort);
+        reject(error);
+      };
       const apply = (next: LineState) => {
         editor = next;
+        this.#draft = next;
         this.#showCaret();
         this.#syncInput(editor);
         this.#syncTypeahead(next.text);
         this.#paint();
       };
+      this.#applyDraft = apply;
       const recall = (entry: string | undefined) => {
         if (entry !== undefined) apply(lineOf(entry));
       };
@@ -919,6 +803,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#stopCaretBlink();
         this.#stop();
         reject(interruptedError());
+      };
+      const cancel = () => {
+        this.#cancelRequested = true;
+        finish({ type: "cancel" });
       };
       const suggestions = () =>
         this.#typeahead !== undefined && isTypeaheadOpen(this.#typeahead)
@@ -943,6 +831,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
           apply(edited);
           return;
         }
+        const working = this.#view?.working === true;
         switch (key.type) {
           case "up":
           case "ctrl-p": {
@@ -1006,7 +895,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
             if (open !== undefined) {
               this.#typeahead = dismissTypeahead(open);
               this.#paint();
+              break;
             }
+            if (working && !this.#cancelRequested) cancel();
             break;
           }
           case "enter": {
@@ -1047,27 +938,23 @@ export class TerminalRenderer implements AgentTUIRenderer {
                   : editor.text;
             // An empty (or whitespace-only) buffer never submits.
             if (prompt.trim().length === 0) break;
-            this.#typeahead = undefined;
-            this.#argumentTypeahead = undefined;
             if (promptCommandSpec(prompt)?.spec.history !== "omit") this.#promptHistory.add(prompt);
-            this.#inputActive = false;
-            this.#stopCaretBlink();
-            this.#status = STATUS.processing;
+            this.#draft = EMPTY_LINE;
+            this.#syncInput(EMPTY_LINE);
             if (isPromptControlCommand(prompt)) {
               // Commands echo as their own line so the elbow-connected
               // outcome has an invocation to hang under — never as a user
               // chat message.
               this.#pushCommandEcho(stripTerminalControls(prompt.trim()));
+              if (working && parsePromptCommand(prompt)?.type === "cancel") {
+                this.#cancelRequested = true;
+              }
             } else {
-              this.#startWorking();
-              this.#addUserBlock(prompt);
-              this.#pendingEchoedPrompt = prompt;
-              this.#turnClock.arm();
+              this.#hasUserMessage = true;
+              this.#diagnostics?.recordPrompt();
+              if (working) this.#steeredMessages.push(prompt);
             }
-            this.#syncInput(EMPTY_LINE);
-            this.#paint();
-            this.#detachInput();
-            resolve(prompt);
+            finish({ type: "submit", text: prompt });
             break;
           }
           case "ctrl-d":
@@ -1086,6 +973,17 @@ export class TerminalRenderer implements AgentTUIRenderer {
             this.#paint();
             break;
           case "ctrl-c":
+            if (working) {
+              // Once cancellation is pending, Ctrl+C is the hard escape hatch.
+              if (!this.#cancelRequested) {
+                cancel();
+                break;
+              }
+              this.#cancelRequested = false;
+              this.#armExitOnNextPrompt = true;
+              finish({ type: "interrupt" });
+              break;
+            }
             if (this.#exitArmed) {
               this.#requestExit();
               interrupt();
@@ -1103,182 +1001,103 @@ export class TerminalRenderer implements AgentTUIRenderer {
     });
   }
 
+  /**
+   * Reconciles the session's transcript with one conversation snapshot. Blocks
+   * keep their position once shown; a block leaves the live region when its
+   * part can no longer change.
+   */
+  renderConversation(view: AgentTUIConversationView): void {
+    const wasWorking = this.#view?.working === true;
+    this.#view = view;
+    // A message queued during startup reaches the conversation without passing the prompt.
+    if (view.conversation.messages.some((message) => message.role === "user")) {
+      this.#hasUserMessage = true;
+    }
+    const projected = this.#transcript.project(view, this.#transcriptOptions());
+    this.#scheduleTaskEndGrace();
+    const ids = new Set<string>();
+    for (const [index, block] of projected.entries()) {
+      const id = block.id!;
+      if (this.#committedIds.has(id)) continue;
+      ids.add(id);
+      const existing = this.#blockById.get(id);
+      if (existing === block) continue;
+      block.updateSeq = ++this.#updateSequence;
+      if (existing !== undefined) {
+        this.#blocks[this.#blocks.indexOf(existing)] = block;
+        this.#blockById.set(id, block);
+        continue;
+      }
+      if (block.kind === "user") {
+        const steered = this.#steeredMessages.indexOf(block.body ?? "");
+        if (steered !== -1) {
+          this.#steeredMessages.splice(steered, 1);
+          block.promptOrigin = "steer";
+        }
+      }
+      this.#insertConversationBlock(block, projected.slice(index + 1));
+    }
+    for (const id of this.#conversationBlockIds) {
+      if (!ids.has(id)) this.#removeBlock(id);
+    }
+    this.#conversationBlockIds = ids;
+    if (view.working && !wasWorking) {
+      if (!this.#turnClock.armed) this.#turnClock.arm(view.data.usage);
+    } else if (!view.working && wasWorking) {
+      this.#cancelRequested = false;
+      if (this.#inputActive) this.#commitTurnStats();
+    }
+    this.#syncActivityTicker();
+    this.#paint();
+  }
+
+  /**
+   * New conversation blocks go before the next transcript block still on screen, or join the
+   * live edge.
+   */
+  #insertConversationBlock(block: Block, following: readonly Block[]): void {
+    const next = following.find((candidate) => this.#blockById.has(candidate.id!));
+    const index = next === undefined ? -1 : this.#blocks.indexOf(this.#blockById.get(next.id!)!);
+    if (index === -1) {
+      this.#pushBlock(block);
+      return;
+    }
+    if (block.id !== this.#devRebuild?.id) this.#settleDevRebuildStatus();
+    this.#blocks.splice(index, 0, block);
+    this.#blockById.set(block.id!, block);
+  }
+
+  #transcriptOptions(): TranscriptOptions {
+    return {
+      tools: this.#tools,
+      reasoning: this.#reasoning,
+      subagents: this.#subagents,
+      connectionAuth: this.#connectionAuth,
+      subagentNames: this.#subagentNames,
+      diagnosticsPath: this.#diagnostics?.displayPath,
+      dot: this.#theme.glyph.dot,
+    };
+  }
+
+  /** Names the task that asked as its task lines do. */
+  #inputContextLabel(context: AgentTUIInputContext | undefined): string | undefined {
+    if (
+      context?.taskId === undefined ||
+      context.requester !== undefined ||
+      this.#view === undefined
+    ) {
+      return inputContextLabel(context, this.#theme);
+    }
+    const requester = this.#transcript.taskLabel(this.#view.conversation, context.taskId);
+    return inputContextLabel(
+      requester === undefined ? context : { ...context, requester },
+      this.#theme,
+    );
+  }
+
   #syncInput(state: LineState): void {
     this.#inputText = state.text;
     this.#inputCursor = state.cursor;
-  }
-
-  /**
-   * Consumes the next prompt produced by mid-turn input — the staged Esc
-   * steer message, or the whole queue coalesced into one. The runner calls
-   * this at a clean turn boundary and submits the result directly; the
-   * remembered origin determines the echoed user block's gutter color.
-   */
-  takeQueuedPrompt(): string | undefined {
-    const steering = this.#messageQueue.view().steering;
-    const prompt = this.#messageQueue.takePrompt();
-    if (prompt !== undefined) {
-      this.#nextSubmittedPromptOrigin = steering ? "steer" : "queue";
-    }
-    return prompt;
-  }
-
-  async renderStream(
-    result: AgentTUIStreamResult,
-    options?: AgentTUISessionOptions,
-  ): Promise<void> {
-    this.#start(options);
-    // Stream event ids are stable only within one streamed turn. Fresh
-    // sessions in tests and dev can reuse tool call / turn ids, so committed
-    // ids from prior turns must not suppress the next prompt's blocks.
-    this.#committedIds.clear();
-    this.#inputActive = false;
-    if (this.#turnIndicator.kind !== "waiting") {
-      this.#turnIndicator = { kind: "waiting", startedAtMs: Date.now() };
-    }
-    this.#status = this.#connectionAuthPendingCount > 0 ? STATUS.connectionAuth : STATUS.processing;
-    this.#addSubmittedPrompt(options?.submittedPrompt);
-    if (options?.submittedPrompt !== undefined) this.#diagnostics?.recordPrompt();
-    // A turn not born at the prompt (`eve dev --input`) arms its own clock;
-    // continuation passes (no submitted prompt) keep the original.
-    if (options?.submittedPrompt !== undefined && !this.#turnClock.armed) {
-      this.#turnClock.arm();
-    }
-    this.#interrupted = false;
-    this.#turnCancelled = false;
-    this.#cancelRequestedByUser = false;
-    this.#currentSubmittedPrompt = options?.submittedPrompt;
-    this.#messageQueue.beginTurn();
-    this.#requestTurnCancel = result.cancel;
-    this.#sendSteering = result.steer;
-    this.#totalTokens = undefined;
-    this.#promptTokens = undefined;
-    this.#assistantOutputTokens = undefined;
-    this.#assistantTokensPerSecond = undefined;
-    this.#streamStartedAt = Date.now();
-    const turnState: RenderTurnState = {
-      text: new Map(),
-      reasoning: new Map(),
-      tools: new Map(),
-      modelActivity: "Thinking",
-      runningTools: new Set(),
-      cancelled: false,
-      restoreCancelledPrompt: true,
-    };
-    this.#activeTurnState = turnState;
-    const displayModes: DisplayModes = {
-      tools: options?.tools ?? this.#tools,
-      reasoning: options?.reasoning ?? this.#reasoning,
-      assistantResponseStats: options?.assistantResponseStats ?? this.#assistantResponseStats,
-    };
-    this.#startTicker();
-    this.#streamDraftActive = true;
-    this.#paint();
-
-    const streamInterrupted = new Promise<void>((resolve) => {
-      this.#resolveStreamInterrupt = resolve;
-    });
-    this.#consumeKey = (key) => this.#handleStreamingKey(key);
-    this.#attachInput();
-    try {
-      for await (const event of takeUntil(iterateTUIStream(result.events), streamInterrupted)) {
-        if (this.#interrupted) break;
-        this.#applyStreamEvent(event, displayModes, turnState);
-      }
-    } catch (error) {
-      // Cataloged failures render their curated headline; either way the
-      // raw inspection travels as detail so the diagnostic log keeps the
-      // evidence and the transcript shows only the pointer.
-      const summary = summarizeKnownError(error);
-      if (summary === null) {
-        this.#addErrorBlock("Error", toErrorMessage(error), { detail: inspectError(error) });
-      } else {
-        this.#addErrorBlock(summary.name, summary.message, {
-          detail: inspectError(error),
-          hint: summary.hint,
-        });
-      }
-    } finally {
-      this.#resolveStreamInterrupt = undefined;
-      if (this.#interrupted) result.abort?.();
-      this.#requestTurnCancel = undefined;
-      this.#sendSteering = undefined;
-      this.#detachInput();
-      this.#streamDraftActive = false;
-      this.#activeTurnState = undefined;
-      if (this.#turnIndicator.kind === "waiting") {
-        this.#turnIndicator = { kind: "idle" };
-      }
-      this.#syncBackgroundActivityTicker();
-      this.#status = completedTurnStatus({
-        interrupted: this.#interrupted,
-        cancelled: this.#turnCancelled,
-        continueSession: options?.continueSession === true,
-      });
-      // Placeholders whose call never materialized (interrupted mid-input)
-      // must vanish rather than commit.
-      this.#sweepPreparingToolBlocks(turnState);
-      // An interrupted or cancelled turn gets no terminal updates for its
-      // in-flight calls; a block left `running` would keep the settled
-      // prefix wedged and freeze scrollback for the rest of the session.
-      if (this.#interrupted || turnState.cancelled) this.#settleCurrentTurnToolBlocks(turnState);
-      this.#finalizeAllBlocks();
-      this.#syncBackgroundActivityTicker();
-      this.#diagnostics?.reportStats();
-      this.#paint();
-
-      if (!options?.continueSession) {
-        this.#stop();
-      }
-    }
-  }
-
-  /**
-   * Applies a wake-initiated turn without taking input ownership from the
-   * prompt. Paints use the same live region, so the editor redraws around
-   * incoming tool and assistant blocks exactly as it does for subagent pumps.
-   */
-  async renderIdleStream(
-    result: AgentTUIStreamResult,
-    options?: AgentTUISessionOptions,
-  ): Promise<void> {
-    const displayModes: DisplayModes = {
-      tools: options?.tools ?? this.#tools,
-      reasoning: options?.reasoning ?? this.#reasoning,
-      assistantResponseStats: options?.assistantResponseStats ?? this.#assistantResponseStats,
-    };
-    const turnState: RenderTurnState = {
-      text: new Map(),
-      reasoning: new Map(),
-      tools: new Map(),
-      modelActivity: "Thinking",
-      runningTools: new Set(),
-      cancelled: false,
-      restoreCancelledPrompt: false,
-    };
-
-    try {
-      for await (const event of iterateTUIStream(result.events)) {
-        this.#applyStreamEvent(event, displayModes, turnState);
-      }
-    } catch (error) {
-      const summary = summarizeKnownError(error);
-      if (summary === null) {
-        this.#addErrorBlock("Error", toErrorMessage(error), { detail: inspectError(error) });
-      } else {
-        this.#addErrorBlock(summary.name, summary.message, {
-          detail: inspectError(error),
-          hint: summary.hint,
-        });
-      }
-    } finally {
-      this.#sweepPreparingToolBlocks(turnState);
-      if (turnState.cancelled) this.#settleCurrentTurnToolBlocks(turnState);
-      this.#finalizeAllBlocks();
-      this.#syncBackgroundActivityTicker();
-      this.#diagnostics?.reportStats();
-      this.#paint();
-    }
   }
 
   async readToolApproval(
@@ -1286,15 +1105,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
     options?: AgentTUISessionOptions,
   ): Promise<AgentTUIToolApprovalResponse> {
     this.#start(options);
-    this.#stopTicker();
     this.#inputActive = false;
-    this.#turnIndicator = { kind: "idle" };
-    this.#interrupted = false;
     let approvalCursor = 0;
     this.#hitlDrawer = (width) =>
       renderTransientDrawer(
         [
-          `  ${this.#theme.colors.bold(`Approve ${formatToolApprovalTitle(request)}?`)}`,
+          `  ${this.#theme.colors.bold(stripTerminalControls(request.prompt))}`,
           "",
           ...renderQuestionChoices(
             [
@@ -1308,23 +1124,21 @@ export class TerminalRenderer implements AgentTUIRenderer {
         ["y yes · n no · Ctrl-C cancel"],
         this.#theme,
         width,
+        this.#inputContextLabel(request.context),
+        false,
+        "left",
       );
     this.#paint();
 
     return await new Promise((resolve, reject) => {
       const approve = () => {
         this.#hitlDrawer = undefined;
-        this.#startWorking();
-        this.#status = STATUS.processing;
         this.#detachInput();
         this.#paint();
         resolve({ approved: true });
       };
       const deny = () => {
         this.#hitlDrawer = undefined;
-        this.#startWorking();
-        this.#status = STATUS.processing;
-        this.#markToolDenied(request.toolCallId);
         this.#detachInput();
         this.#paint();
         resolve({ approved: false, reason: "Denied by user." });
@@ -1359,7 +1173,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
             this.#paint();
             break;
           case "ctrl-c":
-            this.#interrupted = true;
             this.#hitlDrawer = undefined;
             this.#stop();
             reject(interruptedError());
@@ -1378,11 +1191,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     options?: AgentTUISessionOptions,
   ): Promise<AgentTUIInputQuestionResponse | undefined> {
     this.#start(options);
-    this.#stopTicker();
     this.#inputActive = false;
     this.#promptPlaceholderActive = false;
-    this.#turnIndicator = { kind: "idle" };
-    this.#interrupted = false;
 
     const optionList = question.options ?? [];
     const hasOptions = optionList.length > 0;
@@ -1405,21 +1215,26 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // so key handlers only update it and repaint.
     const selectDrawer = (width: number) =>
       renderTransientDrawer(
-        renderQuestionPanel(
-          {
-            prompt: stripTerminalControls(question.prompt),
-            options: optionList,
-            cursor: cursorIndex,
-            allowFreeform: hasFreeformRow,
-            editor,
-            caretVisible: this.#caretVisible,
-          },
-          this.#theme,
-          width,
-        ),
+        [
+          ...renderQuestionPanel(
+            {
+              prompt: stripTerminalControls(question.prompt),
+              options: optionList,
+              cursor: cursorIndex,
+              allowFreeform: hasFreeformRow,
+              editor,
+              caretVisible: this.#caretVisible,
+            },
+            this.#theme,
+            width,
+          ),
+        ],
         ["↑/↓ move · enter to select · esc to dismiss"],
         this.#theme,
         width,
+        this.#inputContextLabel(question.context),
+        false,
+        "left",
       );
 
     const textPanel = (width: number) => {
@@ -1442,6 +1257,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
         ["Enter submit · Esc dismiss"],
         this.#theme,
         width,
+        this.#inputContextLabel(question.context),
+        false,
+        "left",
       );
     };
 
@@ -1459,7 +1277,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#inputActive = false;
       this.#removeBlock(sectionKey);
       this.#hitlDrawer = selectDrawer;
-      this.#status = "";
       syncFreeformCaret();
       this.#paint();
     };
@@ -1469,7 +1286,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#hitlDrawer = textPanel;
       this.#inputActive = true;
       this.#syncInput(editor);
-      this.#status = "";
       this.#startCaretBlink();
       this.#paint();
     };
@@ -1492,8 +1308,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
         live: false,
       });
       this.#inputActive = false;
-      this.#startWorking();
-      this.#status = STATUS.processing;
       this.#stopCaretBlink();
       this.#detachInput();
       this.#paint();
@@ -1516,7 +1330,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
         live: false,
       });
       this.#inputActive = false;
-      this.#status = "";
       this.#stopCaretBlink();
       this.#detachInput();
       this.#paint();
@@ -1550,7 +1363,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
             this.#paint();
             return;
           }
-          this.#interrupted = true;
           this.#hitlDrawer = undefined;
           this.#stopCaretBlink();
           this.#stop();
@@ -1660,244 +1472,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     });
   }
 
-  upsertSubagentStep(update: SubagentStepUpdate): void {
-    this.#diagnostics?.recordSubagentDispatch(update.callId);
-    if (this.#subagents === "hidden") return;
-    const reasoningText = stripTerminalControls(update.reasoning ?? "").trim();
-    const messageText = stripTerminalControls(update.message ?? "").trim();
-    if (reasoningText.length === 0 && messageText.length === 0) return;
-
-    this.#ensureSubagentHeader(update.callId, update.subagentName);
-    if (this.#subagents === "collapsed") {
-      this.#paint();
-      return;
-    }
-
-    this.#upsertSubagentBlock({
-      id: subagentStepSectionId(update.callId, update.sectionKey),
-      kind: "subagent-step",
-      subagentCallId: update.callId,
-      depth: 1,
-      reasoning: reasoningText,
-      body: messageText,
-      // Child prose collapses to one activity row; the parent's reply is
-      // the conclusion. `--subagents full` keeps the verbatim text.
-      collapsed: this.#subagents !== "full",
-      live: !update.finalized,
-    });
-    this.#paint();
-  }
-
-  upsertSubagentTool(update: SubagentToolUpdate): void {
-    this.#diagnostics?.recordSubagentDispatch(update.callId);
-    if (update.status === "failed" && update.errorText !== undefined) {
-      // Captured before the display guards: hidden or collapsed subagent
-      // views must not keep tool failures out of the diagnostic log.
-      this.#diagnostics?.append({
-        source: "tool",
-        summary: `${update.toolName} failed (subagent ${update.subagentName})`,
-        detail: update.errorText,
-      });
-    }
-    if (this.#subagents === "hidden") return;
-    this.#ensureSubagentHeader(update.callId, update.subagentName);
-    if (this.#subagents === "collapsed") {
-      this.#paint();
-      return;
-    }
-
-    const status = subagentToolStatus(update.status);
-    // Subagents reuse the session's sandbox, so their reads and writes feed
-    // the same file-content cache and their write blocks diff the same way.
-    const presentation =
-      update.status === "preparing"
-        ? presentPreparingTool(update.toolName)
-        : presentTool(
-            update.toolName,
-            update.input,
-            this.#toolPresentationContext({
-              input: update.input,
-              output: update.output,
-              toolCallId: update.childCallId,
-              toolName: update.toolName,
-            }),
-          );
-    const block: Block = {
-      id: subagentToolSectionId(update.callId, update.childCallId),
-      kind: "subagent-tool",
-      subagentCallId: update.callId,
-      depth: 1,
-      title: stripTerminalControls(presentation.title),
-      subtitle: stripTerminalControls(presentation.subtitle),
-      status,
-      live: status === "running" || status === "approval",
-      expanded: this.#subagents === "full",
-      toolName: update.toolName,
-      toolGroup: presentation.group,
-      toolInput: update.input,
-    };
-    if (presentation.doneTitle !== undefined) {
-      block.doneTitle = stripTerminalControls(presentation.doneTitle);
-    }
-    if (presentation.detail !== undefined) {
-      block.detailLines = presentation.detail;
-      block.keepDetailWhenDone = presentation.keepDetailWhenDone === true;
-    }
-    if (update.output !== undefined) {
-      block.result = presentation.summarizeResult(update.output);
-      block.toolOutput = update.output;
-    } else if (update.errorText !== undefined) {
-      block.result = stripTerminalControls(update.errorText);
-    }
-    this.#upsertSubagentBlock(block);
-    this.#syncSubagentChildLiveness(update.callId);
-    this.#paint();
-  }
-
-  /**
-   * Cohort liveness for one section's child tools, mirroring the top-level
-   * `#syncNativeToolBlockLiveness`: while any of a call's children still
-   * runs, settled siblings stay live so an in-flight batch accumulates as
-   * one group instead of fragmenting on every status flip.
-   */
-  #syncSubagentChildLiveness(callId: string): void {
-    applyCohortLiveness(
-      this.#blocks
-        .filter((block) => block.kind === "subagent-tool" && block.subagentCallId === callId)
-        .map((block) => ({ block, active: isActiveToolStatus(block.status) })),
-    );
-  }
-
-  removeSubagentTool(update: { callId: string; childCallId: string }): void {
-    this.#removeBlock(subagentToolSectionId(update.callId, update.childCallId));
-    this.#paint();
-  }
-
-  /**
-   * The runner-facing subagent surface (see {@link SubagentView}); the
-   * public methods below are its implementation and the unit tests' seam.
-   */
-  readonly subagents: SubagentView = {
-    begin: (update) => this.beginSubagent(update),
-    background: (update) => this.backgroundSubagent(update),
-    upsertStep: (update) => this.upsertSubagentStep(update),
-    upsertTool: (update) => this.upsertSubagentTool(update),
-    removeTool: (update) => this.removeSubagentTool(update),
-    complete: (update) => this.completeSubagent(update),
-    markChildToolCallId: (callId) => this.markChildToolCallId(callId),
-  };
-
-  /**
-   * Opens a subagent's section as soon as the dispatch is announced, so the
-   * transcript flows from the `Delegate …` placeholder straight into the
-   * `※ subagent(<name>)` header instead of going blank until the child's
-   * first content streams in. Re-opening a completed section (a HITL-parked
-   * child resuming) clears its Done mark.
-   */
-  beginSubagent(update: { callId: string; name: string }): void {
-    if (this.#subagents === "hidden") return;
-    this.#ensureSubagentHeader(update.callId, update.name);
-    const header = this.#blockById.get(subagentHeaderId(update.callId));
-    if (header !== undefined) {
-      if (header.status === "done") delete header.status;
-      header.live = true;
-    }
-    this.#provisionalSubagentCallIds.delete(update.callId);
-    this.#paint();
-  }
-
-  /**
-   * A background receipt closes the model tool call, not the child. Mark the
-   * header running so turn finalization cannot commit immutable scrollback
-   * before the child pump has folded in its later events.
-   */
-  backgroundSubagent(update: { callId: string }): void {
-    const header = this.#blockById.get(subagentHeaderId(update.callId));
-    if (header === undefined || this.#committedIds.has(subagentHeaderId(update.callId))) return;
-    header.status = "running";
-    header.live = true;
-    header.updateSeq = ++this.#updateSequence;
-    const wasBackground = this.#backgroundSubagentCallIds.has(update.callId);
-    this.#backgroundSubagentCallIds.add(update.callId);
-    if (!wasBackground) this.#moveSubagentCohortToBackgroundTail(update.callId);
-    this.#syncBackgroundActivityTicker();
-    this.#paint();
-  }
-
-  /**
-   * Marks a subagent call complete — its final message has arrived — so the
-   * section's closing corner reports `Done`. The header stays live until the
-   * turn finalizes (committing mid-turn would freeze its child window).
-   */
-  completeSubagent(update: { authoritative: boolean; callId: string }): void {
-    const header = this.#blockById.get(subagentHeaderId(update.callId));
-    if (header === undefined) return;
-    header.status = "done";
-    if (update.authoritative) {
-      this.#backgroundSubagentCallIds.delete(update.callId);
-      this.#provisionalSubagentCallIds.delete(update.callId);
-      for (const block of this.#blocks) {
-        if (block.subagentCallId === update.callId) block.live = false;
-      }
-    } else {
-      this.#provisionalSubagentCallIds.add(update.callId);
-      for (const block of this.#blocks) {
-        if (block.subagentCallId === update.callId) block.live = true;
-      }
-    }
-    this.#syncBackgroundActivityTicker();
-    this.#paint();
-  }
-
-  markChildToolCallId(callId: string): void {
-    this.#childToolCallIds.add(callId);
-    const staleId = this.#parentToolBlockIds.get(callId);
-    if (staleId === undefined) return;
-    this.#removeBlock(staleId);
-    this.#parentToolBlockIds.delete(callId);
-    this.#paint();
-  }
-
-  /**
-   * Flips the tool block for a denied approval to its terminal `denied`
-   * state. Called at the moment the user answers `n` — the server never
-   * executes the call, so no `action.result` will arrive to settle it.
-   */
-  #markToolDenied(toolCallId: string): void {
-    const block = this.#blockById.get(toolSectionId(toolCallId));
-    if (block === undefined) return;
-    block.status = "denied";
-    block.live = false;
-  }
-
-  upsertConnectionAuth(update: ConnectionAuthUpdate): void {
-    if (this.#connectionAuth === "hidden") return;
-    const terminalMessage = connectionAuthTerminalMessage(update.state);
-    this.#upsertBlock({
-      id: connectionAuthSectionId(update.name),
-      kind: "connection-auth",
-      title: `${stripTerminalControls(update.name)} · authorization · ${update.state}`,
-      body: formatConnectionAuthContent(update, terminalMessage),
-      preformatted: true,
-      live: terminalMessage === undefined,
-    });
-    this.#paint();
-  }
-
-  setConnectionAuthPendingCount(count: number): void {
-    const next = Math.max(0, count);
-    if (next === this.#connectionAuthPendingCount) return;
-    const wasPending = this.#connectionAuthPendingCount > 0;
-    this.#connectionAuthPendingCount = next;
-    if (next > 0) {
-      this.#status = STATUS.connectionAuth;
-      this.#paint();
-    } else if (wasPending) {
-      this.#status = STATUS.processing;
-      this.#paint();
-    }
-  }
-
   setVercelStatus(status: VercelStatusSnapshot): void {
     this.#vercelStatus = status;
     // #paint self-guards on #isInteractive, so a probe resolving after
@@ -1917,7 +1491,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#lastCommitted = undefined;
     this.#committedTranscriptRows.length = 0;
     this.#transcriptBlocks.length = 0;
-    // `/reset` resets the conversation, not the workspace: keep #agentHeader
+    // `/new` resets the conversation, not the workspace: keep #agentHeader
     // (the status line's model segment reads it — the header is not re-sent
     // after a reset) and #vercelStatus (link + pending-deploy outlive the
     // conversation). The header *block* still leaves the transcript because
@@ -1927,14 +1501,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#clearConversationState();
     // A fresh conversation gets the invitation back.
     this.#hasUserMessage = false;
-    this.#pendingEchoedPrompt = undefined;
     this.#devRebuild = undefined;
-    this.#connectionAuthPendingCount = 0;
-    this.#totalTokens = undefined;
-    this.#promptTokens = undefined;
-    this.#assistantOutputTokens = undefined;
-    this.#assistantTokensPerSecond = undefined;
-    this.#streamStartedAt = undefined;
     if (this.#isInteractive) {
       this.#live.clearAll();
       this.#paint();
@@ -1949,6 +1516,20 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // The dying turn's stats coda closes before the boundary — it belongs
     // to the session that ended, not the fresh one.
     this.#commitTurnStats();
+    // Tasks die with the session; close their lines before the boundary.
+    const stopped = this.#transcript.stopWorking(this.#transcriptOptions());
+    // The old conversation's blocks settle as they are; a fresh session may
+    // reuse their ids, so they leave the projection anonymously.
+    for (const id of this.#conversationBlockIds) {
+      const block = this.#blockById.get(id);
+      if (block === undefined) continue;
+      this.#blockById.delete(id);
+      const index = this.#blocks.indexOf(block);
+      const { id: _id, ...settled } = block;
+      this.#blocks[index] = { ...settled, live: false };
+    }
+    for (const { id: _id, ...line } of stopped) this.#pushBlock(line);
+    this.#committedIds.clear();
     this.#clearConversationState();
 
     const c = this.#theme.colors;
@@ -1960,7 +1541,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   /**
    * THE one authority for state scoped to a server-side conversation
-   * context. Called by both context cuts — `/reset` and the
+   * context. Called by both context cuts — `/new` and the
    * mid-conversation session replacement (`renderSessionBoundary`) — so the
    * two can never drift on what dies with the old context: write-diff
    * bases (a fresh session may run a fresh sandbox, where stale bases
@@ -1968,19 +1549,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * not count across a cut), tool-call ownership maps, and the turn clock.
    */
   #clearConversationState(): void {
-    this.#resolvedModelId = undefined;
-    this.#modelTurnId = undefined;
-    this.#childToolCallIds.clear();
-    this.#parentToolBlockIds.clear();
-    this.#subagentHeaders.clear();
-    this.#backgroundSubagentCallIds.clear();
-    this.#provisionalSubagentCallIds.clear();
-    this.#subagentCallsByName.clear();
-    this.#messageQueue.reset();
-    this.#nextSubmittedPromptOrigin = undefined;
-    this.#fileContents.clear();
+    this.#transcript.reset();
+    this.#clearTaskEndGrace();
+    this.#view = undefined;
+    this.#conversationBlockIds = new Set();
+    this.#steeredMessages.length = 0;
+    this.#cancelRequested = false;
     this.#turnClock.reset();
-    this.#syncBackgroundActivityTicker();
+    this.#syncActivityTicker();
   }
 
   /**
@@ -1994,6 +1570,18 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#start();
     this.#pushBlock({ kind: "notice", body: content, live: false });
     this.#paint();
+  }
+
+  /** Puts a cancelled turn's message back into an empty composer, with a notice. */
+  restoreDraft(text: string): void {
+    const apply = this.#inputActive ? this.#applyDraft : undefined;
+    if ((apply === undefined ? this.#draft.text : this.#inputText).length > 0) return;
+    const line = lineOf(stripPromptControlCharacters(text));
+    if (apply === undefined) this.#draft = line;
+    else apply(line);
+    this.renderNotice(
+      "The turn was cancelled from outside this prompt, so its message is back in the input.",
+    );
   }
 
   /**
@@ -2050,7 +1638,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
         width,
       );
     };
-    this.#status = "";
     this.#paint();
     return await new Promise((resolve) => {
       this.#transientPanelClose = () => resolve(undefined);
@@ -2097,7 +1684,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
         width,
       );
     };
-    this.#status = "";
     this.#paint();
     await new Promise<void>((resolve) => {
       this.#transientPanelClose = resolve;
@@ -2141,7 +1727,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
       return;
     }
     this.#start();
-    this.#pushBlock({ kind: "result", body: content, live: false });
+    const result: Block = { kind: "result", body: content, live: false };
+    this.#pushBlock(result);
+    // Work that streamed in while the command ran must not come between it and its result.
+    const echoIndex = echo === undefined ? -1 : this.#blocks.indexOf(echo);
+    if (echoIndex !== -1) {
+      this.#blocks.pop();
+      this.#blocks.splice(echoIndex + 1, 0, result);
+    }
     this.#paint();
   }
 
@@ -2181,8 +1774,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #beginSetupFlow(title: string): void {
     this.#start();
     if (this.#startupEditor === undefined) this.#inputActive = false;
-    this.#turnIndicator = { kind: "idle" };
-    this.#status = "";
     this.#setupFlow = {
       title: stripTerminalControls(title),
       startedAtMs: Date.now(),
@@ -2856,8 +2447,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #beginSetupQuestion(title: string): SetupFlowState {
     this.#start();
     this.#inputActive = false;
-    this.#turnIndicator = { kind: "idle" };
-    this.#status = "";
     const flow = this.#requireSetupFlow();
     flow.questionTitle = stripTerminalControls(title);
     // A standard question means the preceding background operation settled.
@@ -3032,20 +2621,20 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#paint();
       return;
     }
-    if (this.#inputActive || this.#streamDraftActive) {
-      // The prompt or a streaming turn owns the footer; a flowless spinner
+    if (this.#inputActive || this.#view?.working === true) {
+      // The prompt or a running turn owns the footer; a flowless spinner
       // must not steal its ticker or indicator.
       return;
     }
     if (content === undefined) {
-      this.#turnIndicator = { kind: "idle" };
       this.#flowlessStatus = undefined;
       this.#stopTicker();
       this.#paint();
       return;
     }
     this.#start();
-    this.#startWorking();
+    this.#activityPulseStartedAtMs = Date.now();
+    this.#startTicker();
     this.#flowlessStatus = content.text;
     this.#paint();
   }
@@ -3153,7 +2742,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#startTicker();
         this.#armFlowIdleTrap();
       } else {
-        this.#syncBackgroundActivityTicker();
+        this.#syncActivityTicker();
       }
       this.#live.reset();
       this.#paint();
@@ -3183,15 +2772,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
   }
 
-  suspendPromptForInput(): void {
-    this.#streamDraft = { cursor: this.#inputCursor, text: this.#inputText };
-    this.#stop();
-  }
-
   requestInterrupt(): void {
-    this.#interrupted = true;
     if (this.#setupFlow !== undefined) this.#consumeKey?.({ type: "ctrl-c" });
-    this.#resolveStreamInterrupt?.();
     this.#stop();
   }
 
@@ -3268,7 +2850,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   #start(options?: AgentTUISessionOptions) {
     this.#title = options?.title ?? this.#title;
-    if (options?.contextSize !== undefined) this.#contextSize = options.contextSize;
 
     if (this.#isInteractive) return;
 
@@ -3501,91 +3082,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
   }
 
-  #handleStreamingKey(key: TerminalKey) {
-    switch (key.type) {
-      case "ctrl-l":
-      case "ctrl-r":
-        this.#paint();
-        break;
-      case "enter": {
-        const message = this.#streamDraft.text;
-        if (message.trim().length === 0) break;
-        if (
-          parsePromptCommand(message)?.type === "cancel" &&
-          this.#requestTurnCancel !== undefined
-        ) {
-          this.#streamDraft = EMPTY_LINE;
-          this.#messageQueue.requestCancellation();
-          this.#cancelRequestedByUser = true;
-          this.renderCommandInvocation(message.trim());
-          this.finishCommand({ kind: "result", summary: "Cancellation requested" });
-          this.#requestTurnCancel();
-          this.#paint();
-          break;
-        }
-        const send = this.#sendSteering;
-        if (send !== undefined && parsePromptCommand(message) === null) {
-          this.#streamDraft = EMPTY_LINE;
-          this.#submitSteering(message, send);
-        } else if (this.#messageQueue.enqueue(message)) {
-          this.#streamDraft = EMPTY_LINE;
-        }
-        this.#paint();
-        break;
-      }
-      case "ctrl-c":
-      case "escape": {
-        // Once a direct cancellation is pending, Ctrl+C is the hard escape
-        // hatch. Esc remains cooperative and repeated Ctrl+C presses can still
-        // pop queued messages into a steer payload.
-        if (key.type === "ctrl-c" && this.#messageQueue.view().cancelling) {
-          this.#interrupted = true;
-          this.#armExitOnNextPrompt = true;
-          this.#turnIndicator = { kind: "idle" };
-          this.#status = "Interrupted";
-          this.#resolveStreamInterrupt?.();
-          this.#paint();
-          break;
-        }
-        // Send queued input through the active session. With nothing queued,
-        // the same keys request explicit cancellation.
-        // Without a cancel capability an empty queue leaves either key inert.
-        if (this.#messageQueue.idle && this.#requestTurnCancel === undefined) break;
-        const outcome = this.#messageQueue.handleEscape();
-        if (outcome === "steer") {
-          const send = this.#sendSteering;
-          if (send !== undefined) {
-            const message = this.#messageQueue.takeSteering()!;
-            this.#submitSteering(message, send);
-          }
-        } else {
-          this.#cancelRequestedByUser = true;
-          this.#requestTurnCancel?.();
-        }
-        this.#paint();
-        break;
-      }
-      default: {
-        const edited = this.#killRing.apply(this.#streamDraft, key, { multiline: true });
-        if (edited !== undefined) {
-          this.#streamDraft = edited;
-          this.#paint();
-        }
-        break;
-      }
-    }
-  }
-
-  #submitSteering(message: string, send: (message: string) => Promise<void>): void {
-    this.#nextSubmittedPromptOrigin = "steer";
-    this.#addSubmittedPrompt(message);
-    void send(message).catch((error) => {
-      this.#messageQueue.restoreSteering(message);
-      this.#addErrorBlock("Steering failed", toErrorMessage(error));
-      this.#paint();
-    });
-  }
-
   #startCaretBlink() {
     this.#stopCaretBlink();
     this.#showCaret();
@@ -3617,15 +3113,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#tickTimer.unref?.();
   }
 
-  #startWorking(): void {
-    const startedAtMs = Date.now();
-    this.#activityPulseStartedAtMs = startedAtMs;
-    this.#turnIndicator = { kind: "waiting", startedAtMs };
-    this.#startTicker();
-  }
-
   #stopTicker() {
-    if (this.#hasLiveBackgroundActivity()) return;
+    if (this.#hasLiveSessionActivity()) return;
     this.#clearTicker();
   }
 
@@ -3636,21 +3125,58 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
   }
 
-  #hasLiveBackgroundActivity(): boolean {
-    return this.#blocks.some(
-      (block) =>
-        block.live &&
-        block.subagentCallId !== undefined &&
-        (this.#backgroundSubagentCallIds.has(block.subagentCallId) ||
-          this.#provisionalSubagentCallIds.has(block.subagentCallId)),
-    );
+  /** Running work, or tasks still working after their turn ended; the task panel ticks. */
+  #hasLiveSessionActivity(): boolean {
+    return this.#view?.working === true || this.#transcript.tasks.length > 0;
   }
 
-  /** Keeps mutable subagent sections visibly active after their parent turn settles. */
-  #syncBackgroundActivityTicker(): void {
-    if (this.#hasLiveBackgroundActivity()) {
-      this.#startTicker();
-    } else if (!this.#streamDraftActive && this.#turnIndicator.kind === "idle") {
+  /**
+   * A settled agent task waits for its own last events before writing its end line, but not past
+   * a short grace period; the next projection after it writes the line.
+   */
+  #scheduleTaskEndGrace(): void {
+    if (!this.#transcript.finishing || this.#taskEndGraceTimer !== undefined) return;
+    this.#taskEndGraceTimer = setTimeout(() => {
+      this.#taskEndGraceTimer = undefined;
+      if (this.#view !== undefined) this.renderConversation(this.#view);
+    }, TASK_END_GRACE_MS);
+    this.#taskEndGraceTimer.unref?.();
+  }
+
+  #clearTaskEndGrace(): void {
+    if (this.#taskEndGraceTimer === undefined) return;
+    clearTimeout(this.#taskEndGraceTimer);
+    this.#taskEndGraceTimer = undefined;
+  }
+
+  #taskPanelRows(width: number, maxRows = Math.max(8, Math.floor(this.#height() / 2))): string[] {
+    const tasks = this.#transcript.tasks;
+    if (tasks.length === 0) return [];
+    const working = this.#view?.working === true && this.#flowlessStatus === undefined;
+    const now = Date.now();
+    const activity =
+      working && this.#view !== undefined ? turnActivity(this.#view, tasks) : "Working";
+    return renderTaskPanelRows(tasks, {
+      width,
+      theme: this.#theme,
+      nowMs: now,
+      maxRows,
+      activity: activity.startsWith("Waiting for ") ? "Waiting" : activity,
+      turnElapsedMs: working ? Math.max(0, now - (this.#turnClock.startedAtMs ?? now)) : undefined,
+    });
+  }
+
+  #syncActivityTicker(): void {
+    if (this.#hasLiveSessionActivity()) {
+      if (this.#tickTimer === undefined) {
+        this.#activityPulseStartedAtMs = Date.now();
+        this.#startTicker();
+      }
+    } else if (
+      this.#setupFlow === undefined &&
+      this.#startupPhase === undefined &&
+      this.#flowlessStatus === undefined
+    ) {
       this.#clearTicker();
     }
   }
@@ -3667,37 +3193,20 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #pushBlock(block: Block) {
     if (block.id !== this.#devRebuild?.id) this.#settleDevRebuildStatus();
     block.updateSeq = ++this.#updateSequence;
-    const isBackgroundChild =
-      block.subagentCallId !== undefined &&
-      this.#backgroundSubagentCallIds.has(block.subagentCallId);
-    const backgroundIndex = isBackgroundChild
-      ? -1
-      : this.#blocks.findIndex(
-          (candidate) =>
-            candidate.subagentCallId !== undefined &&
-            this.#backgroundSubagentCallIds.has(candidate.subagentCallId),
-        );
-    if (backgroundIndex < 0) this.#blocks.push(block);
-    else this.#blocks.splice(backgroundIndex, 0, block);
+    this.#blocks.push(block);
     if (block.id) this.#blockById.set(block.id, block);
-  }
-
-  #addUserBlock(prompt: string) {
-    this.#hasUserMessage = true;
-    this.#pushBlock({ kind: "user", body: stripTerminalControls(prompt), live: false });
-    this.#paint();
   }
 
   /**
    * Commits the end-of-turn coda — wall-clock duration plus token flow —
-   * when control returns to the prompt after a chat turn. Consuming the
-   * armed timestamp here (not at stream end) spans multi-pass turns:
-   * question answers and connection authorizations re-stream without
-   * re-arming, so one turn gets one line.
+   * when control returns to the composer. Approvals and questions answered
+   * mid-turn do not return to the composer, so one turn gets one line.
    */
   #commitTurnStats(): void {
-    const settled = this.#turnClock.settle();
+    const settled = this.#turnClock.settle(this.#usage());
     if (settled === undefined) return;
+    this.#lastTurnStats = settled;
+    this.#diagnostics?.reportStats();
 
     // Quick, cheap turns close silently — the coda earns its row only when
     // the turn was long or expensive.
@@ -3708,10 +3217,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
       return;
     }
 
-    let body = `Done in ${this.#turnStatsBody(settled.elapsedMs)}`;
+    let body = `Done in ${this.#turnStatsBody(settled)}`;
     // Context fill is a different measurement than the turn's summed flow —
     // it reads off the last step's absolute input — so it rides separately.
-    const contextTokens = this.#promptTokens ?? 0;
+    const contextTokens = this.#view?.data.lastStepUsage?.inputTokens ?? 0;
     if (this.#contextSize !== undefined && this.#contextSize > 0 && contextTokens > 0) {
       const fill = Math.round((contextTokens / this.#contextSize) * 100);
       body += ` ${this.#theme.glyph.dot} ${fill}% context`;
@@ -3719,17 +3228,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#pushBlock({ kind: "turn-stats", body, live: false });
   }
 
-  #addSubmittedPrompt(prompt: string | undefined) {
-    if (prompt == null) return;
-    const origin = this.#nextSubmittedPromptOrigin;
-    this.#nextSubmittedPromptOrigin = undefined;
-    if (this.#pendingEchoedPrompt === prompt) {
-      this.#pendingEchoedPrompt = undefined;
-      return;
-    }
-    const block: Block = { kind: "user", body: stripTerminalControls(prompt), live: false };
-    if (origin !== undefined) block.promptOrigin = origin;
-    this.#pushBlock(block);
+  #usage(): TokenUsage {
+    return this.#view?.data.usage ?? { inputTokens: 0, outputTokens: 0 };
+  }
+
+  /** Commits one error block, such as a message the session did not accept. */
+  renderError(title: string, message: string): void {
+    this.#start();
+    this.#addErrorBlock(title, message);
   }
 
   #addErrorBlock(
@@ -3766,35 +3272,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#paint();
   }
 
-  #ensureSubagentHeader(callId: string, name: string) {
-    if (this.#subagentHeaders.has(callId)) return;
-    this.#subagentHeaders.add(callId);
-
-    // Parallel calls to the same subagent are individual sections; ordinal
-    // subtitles (`#1`, `#2`) tell them apart. The first call gains its `#1`
-    // retroactively the moment a sibling appears.
-    const cleanName = stripTerminalControls(name);
-    const siblings = this.#subagentCallsByName.get(cleanName) ?? [];
-    siblings.push(callId);
-    this.#subagentCallsByName.set(cleanName, siblings);
-    if (siblings.length === 2) {
-      const firstHeader = this.#blockById.get(subagentHeaderId(siblings[0]!));
-      if (firstHeader !== undefined) firstHeader.subtitle = "#1";
-    }
-
-    const block: Block = {
-      id: subagentHeaderId(callId),
-      kind: "subagent",
-      subagentCallId: callId,
-      title: cleanName,
-      // Live until the turn's #finalizeAllBlocks: committing a section
-      // mid-turn would freeze its child window in scrollback.
-      live: true,
-    };
-    if (siblings.length > 1) block.subtitle = `#${siblings.length}`;
-    this.#pushBlock(block);
-  }
-
   #upsertBlock(block: Block) {
     if (block.id && this.#committedIds.has(block.id)) {
       return;
@@ -3810,439 +3287,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#pushBlock(block);
   }
 
-  /**
-   * Inserts a new child beside the rest of its call's cohort instead of at
-   * the transcript's live edge. Background children can emit after parent
-   * and user blocks from later turns; arrival order must not split their
-   * section.
-   */
-  #upsertSubagentBlock(block: Block) {
-    if (block.id && this.#committedIds.has(block.id)) return;
-    const existing = block.id ? this.#blockById.get(block.id) : undefined;
-    if (existing !== undefined) {
-      Object.assign(existing, block);
-      existing.updateSeq = ++this.#updateSequence;
-      return;
-    }
-
-    const callId = block.subagentCallId;
-    if (callId === undefined) {
-      this.#pushBlock(block);
-      return;
-    }
-    if (block.id !== this.#devRebuild?.id) this.#settleDevRebuildStatus();
-    block.updateSeq = ++this.#updateSequence;
-    let anchor = -1;
-    for (let index = 0; index < this.#blocks.length; index += 1) {
-      if (this.#blocks[index]?.subagentCallId === callId) anchor = index;
-    }
-    this.#blocks.splice(anchor < 0 ? this.#blocks.length : anchor + 1, 0, block);
-    if (block.id !== undefined) this.#blockById.set(block.id, block);
-  }
-
   #removeBlock(id: string) {
     this.#blocks = this.#blocks.filter((candidate) => candidate.id !== id);
     this.#blockById.delete(id);
-  }
-
-  /**
-   * Background children may outlive several foreground turns. Keep their
-   * mutable cohort at the live edge so it cannot hold those settled turns in
-   * the renderer's leading-prefix commit queue.
-   */
-  #moveSubagentCohortToBackgroundTail(callId: string): void {
-    const cohort = this.#blocks.filter((block) => block.subagentCallId === callId);
-    if (cohort.length === 0) return;
-    this.#blocks = this.#blocks.filter((block) => block.subagentCallId !== callId);
-    this.#blocks.push(...cohort);
-  }
-
-  #finalizeAllBlocks() {
-    for (const block of this.#blocks) {
-      // Blocks awaiting an approval decision, action.result, or OAuth callback
-      // stay live past this stream boundary so their later terminal update can
-      // replace the same transcript block.
-      if (
-        (block.subagentCallId !== undefined &&
-          this.#provisionalSubagentCallIds.has(block.subagentCallId)) ||
-        block.status === "approval" ||
-        block.status === "running" ||
-        (block.kind === "connection-auth" && block.live) ||
-        // A command's echo settles only with its own outcome.
-        block === this.#pendingCommandEcho
-      ) {
-        continue;
-      }
-      block.live = false;
-    }
-  }
-
-  #applyStreamEvent(
-    event: AgentTUIStreamEvent,
-    displayModes: DisplayModes,
-    turnState: RenderTurnState,
-  ): void {
-    const previousActivity = turnActivityLabel(turnState);
-    updateTurnActivity(turnState, event);
-    switch (event.type) {
-      case "turn-start":
-        if (event.turnId !== this.#modelTurnId) {
-          this.#modelTurnId = event.turnId;
-          this.#resolvedModelId = undefined;
-          this.#paint();
-        }
-        break;
-
-      case "step-start":
-        this.#resolvedModelId =
-          typeof event.modelId === "string"
-            ? stripTerminalControls(event.modelId.slice(0, 256)).replace(/\s+/gu, " ").trim() ||
-              undefined
-            : undefined;
-        this.#paint();
-        break;
-
-      case "step-finish":
-        // Step usage reports are per-step deltas (extractStepUsage in the
-        // harness), so summing them yields true session totals. The
-        // `finish` event replays the last step's usage — don't sum there.
-        this.#diagnostics?.recordStepUsage(event.usage);
-        if (event.usage !== undefined) {
-          this.#turnClock.addUsage(event.usage);
-        }
-        // A valid call upgrades from its `preparing` placeholder within its
-        // own step; one still preparing at the boundary never parsed (the
-        // model emitted bad JSON and will retry under a fresh call id) and
-        // must not linger as a `Search …` ghost.
-        this.#sweepPreparingToolBlocks(turnState);
-        this.#applyUsage(event.usage);
-        this.#paint();
-        break;
-
-      case "assistant-delta": {
-        const text = (turnState.text.get(event.id) ?? "") + stripTerminalControls(event.delta);
-        turnState.text.set(event.id, text);
-        this.#upsertAssistantBlock(event.id, text, true);
-        break;
-      }
-
-      case "assistant-complete": {
-        const existing = turnState.text.get(event.id) ?? "";
-        const text = typeof event.text === "string" ? stripTerminalControls(event.text) : existing;
-        turnState.text.set(event.id, text);
-        this.#upsertAssistantBlock(event.id, text, false);
-        break;
-      }
-
-      case "reasoning-delta": {
-        if (displayModes.reasoning === "hidden") break;
-        const text = (turnState.reasoning.get(event.id) ?? "") + stripTerminalControls(event.delta);
-        turnState.reasoning.set(event.id, text);
-        if (displayModes.reasoning === "full") {
-          this.#upsertReasoningBlock(event.id, text, true, displayModes);
-          break;
-        }
-        // Collapsed modes: the trace never reaches the transcript — the live
-        // turn bar and the end-of-turn coda carry the turn's progress.
-        break;
-      }
-
-      case "reasoning-complete": {
-        if (displayModes.reasoning === "hidden") break;
-        const text = turnState.reasoning.get(event.id) ?? "";
-        if (displayModes.reasoning === "full") {
-          this.#upsertReasoningBlock(event.id, text, false, displayModes);
-          break;
-        }
-        break;
-      }
-
-      case "tool-call-preparing":
-        if (displayModes.tools === "hidden") break;
-        // Panel-routed tools render from the real input, never a placeholder.
-        if (isPanelRoutedTool(event.toolName)) break;
-        this.#upsertNativeTool(
-          {
-            input: undefined,
-            preparing: true,
-            status: "running",
-            toolCallId: event.toolCallId,
-            toolName: event.toolName,
-          },
-          displayModes,
-          turnState,
-        );
-        break;
-
-      case "tool-call":
-        this.#diagnostics?.recordToolCall(event.toolName);
-        if (displayModes.tools === "hidden") break;
-        this.#upsertNativeTool(
-          {
-            input: event.input,
-            status: "running",
-            toolCallId: event.toolCallId,
-            toolName: event.toolName,
-          },
-          displayModes,
-          turnState,
-        );
-        break;
-
-      case "tool-approval-request": {
-        if (displayModes.tools === "hidden") break;
-        const existing = turnState.tools.get(event.toolCallId);
-        if (existing === undefined) break;
-        this.#upsertNativeTool({ ...existing, status: "approval" }, displayModes, turnState);
-        break;
-      }
-
-      case "tool-result": {
-        if (displayModes.tools === "hidden") break;
-        const existing = this.#resolveNativeToolState(event.toolCallId, turnState);
-        if (existing === undefined) break;
-        this.#upsertNativeTool(
-          { ...existing, output: event.output, status: "done" },
-          displayModes,
-          turnState,
-        );
-        break;
-      }
-
-      case "tool-error": {
-        const existing = this.#resolveNativeToolState(event.toolCallId, turnState);
-        // Tool failures reach the log even when tool display is hidden.
-        this.#diagnostics?.append({
-          source: "tool",
-          summary: `${existing?.toolName ?? event.toolCallId} failed`,
-          detail: event.errorText,
-        });
-        if (displayModes.tools === "hidden") break;
-        if (existing === undefined) break;
-        this.#upsertNativeTool(
-          { ...existing, errorText: event.errorText, status: "error" },
-          displayModes,
-          turnState,
-        );
-        break;
-      }
-
-      case "tool-rejected": {
-        if (displayModes.tools === "hidden") break;
-        const existing = this.#resolveNativeToolState(event.toolCallId, turnState);
-        if (existing === undefined) break;
-        this.#upsertNativeTool(
-          { ...existing, errorText: event.reason, status: "denied" },
-          displayModes,
-          turnState,
-        );
-        break;
-      }
-
-      case "error":
-        this.#addErrorBlock("Error", event.errorText, { detail: event.detail, hint: event.hint });
-        break;
-
-      case "turn-cancelled":
-        // The server settled the turn cooperatively (a key-driven steer or an
-        // empty-queue cancel); its in-flight tool calls get no further updates.
-        // The current pass's top-level-tool sweep settles them at stream end.
-        turnState.cancelled = true;
-        if (!turnState.restoreCancelledPrompt) break;
-        this.#turnCancelled = true;
-        // A cancellation nobody asked for through THIS prompt — a stale
-        // cancel from the previous turn landing late (the unguarded
-        // dispatch-window race), or `/cancel` from another client — must
-        // not eat the submitted message: hand it back as the next draft.
-        if (
-          !this.#cancelRequestedByUser &&
-          this.#currentSubmittedPrompt !== undefined &&
-          this.#streamDraft.text.length === 0
-        ) {
-          this.#streamDraft = lineOf(this.#currentSubmittedPrompt);
-          this.renderNotice(
-            "The turn was cancelled from outside this prompt — the message was restored to the input.",
-          );
-        }
-        break;
-
-      case "finish":
-        this.#applyUsage(event.usage);
-        this.#paint();
-        break;
-    }
-    // Activity is independent of transcript visibility and idle/background streams.
-    if (turnState === this.#activeTurnState && turnActivityLabel(turnState) !== previousActivity) {
-      this.#paint();
-    }
-  }
-
-  #upsertAssistantBlock(id: string, text: string, live: boolean): void {
-    const content = stripTerminalControls(text).trim();
-    if (content.length === 0) return;
-    this.#upsertBlock({ id, kind: "assistant", body: content, live });
-    this.#paint();
-  }
-
-  #upsertReasoningBlock(id: string, text: string, live: boolean, displayModes: DisplayModes): void {
-    const content = stripTerminalControls(text).trim();
-    if (content.length === 0) return;
-    this.#upsertBlock({
-      id,
-      kind: "reasoning",
-      body: content,
-      collapsed: collapseReasoning(displayModes.reasoning, live),
-      live,
-    });
-    this.#paint();
-  }
-
-  #upsertNativeTool(
-    tool: NativeToolState,
-    displayModes: DisplayModes,
-    turnState: RenderTurnState,
-  ): void {
-    turnState.tools.set(tool.toolCallId, tool);
-    if (this.#childToolCallIds.has(tool.toolCallId)) return;
-    // The question surface — overlay while open, `? … ⎿ …` once answered —
-    // is the whole story of an ask_question call; a tool block beside it
-    // would narrate the same thing twice.
-    if (isPanelRoutedTool(tool.toolName)) return;
-
-    const id = toolSectionId(tool.toolCallId);
-    this.#parentToolBlockIds.set(tool.toolCallId, id);
-    const context = this.#toolPresentationContext(tool);
-    this.#upsertBlock(renderNativeToolBlock(tool, id, displayModes.tools === "full", context));
-    this.#syncNativeToolBlockLiveness(turnState);
-    this.#paint();
-  }
-
-  /**
-   * Feeds the file-content cache from the call and derives the presentation
-   * context a write needs for its diff. Read results (full-file only) and
-   * write inputs are the two exact sources the session has.
-   */
-  #toolPresentationContext(tool: {
-    readonly input?: unknown;
-    readonly output?: unknown;
-    readonly toolCallId: string;
-    readonly toolName: string;
-  }): ToolPresentationContext | undefined {
-    if (tool.output !== undefined) this.#fileContents.observeRead(tool.output);
-
-    const context: { previousContent?: string; existed?: boolean; isSubagent?: boolean } = {};
-    if (this.#isSubagentToolName(tool.toolName)) context.isSubagent = true;
-
-    const write = readWriteFileInput(tool.toolName, tool.input);
-    if (write === undefined) {
-      return context.isSubagent === true ? context : undefined;
-    }
-    const previous = this.#fileContents.observeWrite({
-      path: write.path,
-      content: write.content,
-      callId: tool.toolCallId,
-    });
-    if (previous !== undefined) context.previousContent = previous;
-    const existed = writeExistedFlag(tool.output);
-    if (existed !== undefined) context.existed = existed;
-    return context;
-  }
-
-  /** True when a tool name matches a subagent from the agent's roster. */
-  #isSubagentToolName(toolName: string): boolean {
-    const local = this.#agentHeader?.info?.subagents.local;
-    if (local === undefined || local.length === 0) return false;
-    const baseName = toolBaseName(toolName);
-    return local.some((subagent) => subagent.name === baseName);
-  }
-
-  /**
-   * Flips this pass's still-running top-level tool blocks to a terminal state.
-   * Approval-parked and out-of-band subagent blocks remain mutable.
-   */
-  #settleCurrentTurnToolBlocks(turnState: RenderTurnState): void {
-    for (const toolCallId of turnState.tools.keys()) {
-      if (this.#childToolCallIds.has(toolCallId)) continue;
-      const id = this.#parentToolBlockIds.get(toolCallId) ?? toolSectionId(toolCallId);
-      const block = this.#blockById.get(id);
-      if (block?.kind !== "tool") continue;
-      if (block.status !== "running") continue;
-      block.status = "error";
-      block.result = "interrupted";
-      block.live = false;
-    }
-  }
-
-  /**
-   * Removes tool blocks that never left their `preparing` placeholder. Runs
-   * at step boundaries and at stream teardown: an announced call whose input
-   * never parsed (invalid JSON, an interrupted generation) has no
-   * `actions.requested` coming and would otherwise commit as a `… ` ghost.
-   */
-  #sweepPreparingToolBlocks(turnState: RenderTurnState): void {
-    for (const [toolCallId, tool] of turnState.tools) {
-      if (tool.preparing !== true) continue;
-      turnState.tools.delete(toolCallId);
-      const id = this.#parentToolBlockIds.get(toolCallId) ?? toolSectionId(toolCallId);
-      this.#removeBlock(id);
-      this.#parentToolBlockIds.delete(toolCallId);
-    }
-  }
-
-  /** Keeps one parallel tool cohort mutable until every independent call settles. */
-  #syncNativeToolBlockLiveness(turnState: RenderTurnState): void {
-    const entries: Array<{ block: Block; active: boolean }> = [];
-    for (const tool of turnState.tools.values()) {
-      if (this.#childToolCallIds.has(tool.toolCallId)) continue;
-      const id = this.#parentToolBlockIds.get(tool.toolCallId) ?? toolSectionId(tool.toolCallId);
-      const block = this.#blockById.get(id);
-      if (block?.kind !== "tool") continue;
-      entries.push({ block, active: isActiveToolStatus(tool.status) });
-    }
-    applyCohortLiveness(entries);
-  }
-
-  #resolveNativeToolState(
-    toolCallId: string,
-    turnState: RenderTurnState,
-  ): NativeToolState | undefined {
-    const active = turnState.tools.get(toolCallId);
-    if (active !== undefined) {
-      return active;
-    }
-
-    const id = this.#parentToolBlockIds.get(toolCallId) ?? toolSectionId(toolCallId);
-    const block = this.#blockById.get(id);
-    if (block === undefined || block.kind !== "tool") {
-      return undefined;
-    }
-
-    return {
-      errorText:
-        block.status === "error" && typeof block.result === "string" ? block.result : undefined,
-      input: block.toolInput,
-      output: block.toolOutput,
-      status: block.status ?? "running",
-      toolCallId,
-      toolName: block.toolName ?? block.title ?? "tool",
-    };
-  }
-
-  #applyUsage(usage: AgentTUIStreamUsage | undefined): void {
-    if (usage === undefined) return;
-    const { inputTokens, outputTokens } = usage;
-    if (inputTokens != null || outputTokens != null) {
-      this.#totalTokens = (inputTokens ?? 0) + (outputTokens ?? 0);
-    }
-    this.#promptTokens = inputTokens ?? this.#promptTokens;
-    this.#assistantOutputTokens = outputTokens ?? this.#assistantOutputTokens;
-
-    if (this.#assistantOutputTokens != null && this.#streamStartedAt !== undefined) {
-      const elapsedSeconds = (Date.now() - this.#streamStartedAt) / 1000;
-      if (elapsedSeconds > 0) {
-        this.#assistantTokensPerSecond = this.#assistantOutputTokens / elapsedSeconds;
-      }
-    }
   }
 
   // ---------------------------------------------------------------------------
@@ -4397,7 +3444,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const body = this.#delayedDevBuildError;
     if (body === undefined) return;
     this.#delayedDevBuildError = undefined;
-    this.#pushBlock({ kind: "log", title: "stderr", body, live: true });
+    this.#pushBlock({ kind: "log", title: "stderr", logLevel: "error", body, live: false });
     this.#paint();
   }
 
@@ -4499,11 +3546,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
       return [...drawer.rows, ...drawer.controls];
     }
 
-    // The HITL drawer opens one row below the transcript, then owns the
-    // footer down to its controls with no status line beneath it.
+    // The request keeps priority; activity uses the remaining height and shares its top rule.
     if (this.#hitlDrawer !== undefined) {
       const drawer = this.#hitlDrawer(width);
-      return [...rows, ...drawer.rows, ...drawer.controls];
+      const available = this.#height() - drawer.rows.length - drawer.controls.length - 1;
+      const activity = available >= 4 ? this.#taskPanelRows(width, available + 1) : [];
+      return [...activity.slice(0, -1), ...drawer.rows, ...drawer.controls];
     }
 
     const flow = this.#setupFlow;
@@ -4586,21 +3634,41 @@ export class TerminalRenderer implements AgentTUIRenderer {
       rows.push(...renderAttentionRows(this.#setupAttention, width, this.#theme), "");
     }
 
-    // The message-queue panel takes the slot directly above the input
-    // because it holds the user's own undelivered words and carries the
-    // steering/cancel affordance.
+    // The task panel is the one region that redraws in place while tasks
+    // work, so it sits in the footer rather than the transcript.
+    const working = this.#view?.working === true && this.#flowlessStatus === undefined;
+    const taskRows = this.#taskPanelRows(width);
+    if (taskRows.length > 0) {
+      rows.push(...taskRows);
+    }
+
+    // Messages typed while the agent starts wait in a panel directly above
+    // the input because they hold the user's own undelivered words.
     const queueRows = renderMessageQueueRows({
-      view: this.#messageQueue.view(),
+      view: this.#startupQueue.view(),
       width,
       theme: this.#theme,
-      working: this.#streamDraftActive,
     });
     if (queueRows.length > 0) rows.push(...queueRows, "");
 
+    // While work runs, the one live turn bar rides above the composer. The
+    // `Done in … (↑ … ↓ …)` coda is this bar's settled form.
+    if (working) {
+      if (taskRows.length === 0) rows.push(this.#streamingTurnBar(width));
+      if (this.#cancelRequested) {
+        rows.push(
+          clip(
+            `${c.yellow(this.#theme.glyph.dotActive)} ${c.dim("Cancelling turn… · Ctrl+C to stop waiting, then again to exit")}`,
+            width,
+          ),
+        );
+      }
+      if (taskRows.length === 0 || this.#cancelRequested) rows.push("");
+    }
+
     if (this.#inputActive) {
-      // A complete command name with a single match collapses the dropdown into
-      // a dim argument hint trailing the prompt; partial or ambiguous drafts
-      // still open the list above the input.
+      // A complete command can show its argument hint beside the caret while
+      // its matching suggestion remains visible beneath the prompt.
       const inlineHint =
         this.#typeahead !== undefined ? inlineCommandHint(this.#typeahead) : undefined;
       const typeaheadRows = this.#typeaheadDrawerRows(width);
@@ -4638,9 +3706,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
         promptRows.placeholder =
           this.#startupEditor !== undefined
             ? "Message · Enter to queue"
-            : this.#hasUserMessage
+            : this.#hasUserMessage || working
               ? ""
-              : "Send a message…";
+              : this.#initialPromptPlaceholder;
       }
       const renderedPromptRows = promptInputRows(promptRows);
       // The prompt helper ends with a footer spacer; a drawer owns that gap.
@@ -4656,35 +3724,17 @@ export class TerminalRenderer implements AgentTUIRenderer {
       return rows;
     }
 
-    const turnIndicator = this.#turnIndicator;
-    // Every waiting state — a streaming turn, a just-submitted prompt, a
-    // question answer or approval resuming — shows the one live turn bar,
-    // with the inert prompt anchored beneath it while a stream owns the
-    // turn. The `Done in … (↑ … ↓ …)` coda is this bar's settled form.
-    const waitingOnStream = turnIndicator.kind === "waiting" && this.#flowlessStatus === undefined;
-    if (this.#streamDraftActive || waitingOnStream) {
-      rows.push(this.#streamingTurnBar(width));
-      this.#pushStreamingPrompt(rows, width);
-      const statusRows: string[] = [];
-      this.#pushStatusLine(statusRows, width);
-      if (!this.#streamDraftActive && statusRows.length > 0) rows.push("");
-      rows.push(...statusRows);
-      return rows;
-    }
-
-    // A draft carried out of a finished turn renders ACTIVE immediately —
-    // the dim inert mark must not linger once the agent has returned. Keys
-    // pressed in this gap buffer and replay into the next prompt, so the
-    // cyan mark is honest.
-    if (this.#streamDraft.text.length > 0) {
-      this.#pushDraftPrompt(rows, width, { inert: false });
+    // The composer is closed while a command or other surface runs. A kept
+    // draft stays visible so keys typed in this gap have somewhere to land.
+    if (working || this.#draft.text.length > 0) {
+      this.#pushDraftPrompt(rows, width, { inert: working, adjacent: taskRows.length > 0 });
       this.#pushStatusLine(rows, width);
       return rows;
     }
 
-    // Interactive prompts (approvals, connection auth), the flowless setup
-    // spinner, and transitional states render as a quiet dot-led status row.
-    const statusText = this.#flowlessStatus ?? (this.#status.length > 0 ? this.#status : "Ready");
+    // Interactive prompts, the flowless setup spinner, and transitional states
+    // render as a quiet dot-led status row.
+    const statusText = this.#flowlessStatus ?? "Ready";
     const meta = this.#statusMeta();
     const icon = c.dim(this.#theme.glyph.dot);
     const line = meta
@@ -4697,19 +3747,15 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   #streamingTurnBar(width: number): string {
     const c = this.#theme.colors;
-    // A waiting state without an armed turn clock (a /command flash, an
-    // isolated approval) still gets a ticking duration from its own start.
-    const turnIndicator = this.#turnIndicator;
-    const startedAtMs =
-      this.#turnClock.startedAtMs ??
-      this.#streamStartedAt ??
-      (turnIndicator.kind === "waiting" ? turnIndicator.startedAtMs : Date.now());
+    const startedAtMs = this.#turnClock.startedAtMs ?? Date.now();
     const elapsedMs = Math.max(0, Date.now() - startedAtMs);
     const marker = elapsedMs % 1000 < 500 ? (this.#theme.unicode ? "•" : "*") : " ";
     const elapsed =
       elapsedMs < 1000 ? "0s" : formatTurnDuration(Math.floor(elapsedMs / 1000) * 1000);
-    const label = `${turnActivityLabel(this.#activeTurnState)} (${elapsed})`;
-    const { inputTokens, outputTokens } = this.#turnClock.usage;
+    const activity =
+      this.#view === undefined ? "Thinking" : turnActivity(this.#view, this.#transcript.tasks);
+    const label = `${activity} (${elapsed})`;
+    const { inputTokens, outputTokens } = this.#turnClock.usage(this.#usage());
     const tokens =
       inputTokens > 0 || outputTokens > 0
         ? c.dim(` (${formatTokenFlow({ inputTokens, outputTokens }, this.#theme.glyph)})`)
@@ -4718,36 +3764,25 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   /** The settled coda's duration and optional token flow. */
-  #turnStatsBody(elapsedMs: number): string {
-    const { inputTokens, outputTokens } = this.#turnClock.usage;
+  #turnStatsBody(settled: { elapsedMs: number } & TokenUsage): string {
+    const { inputTokens, outputTokens } = settled;
     const flow =
       inputTokens === 0 && outputTokens === 0
         ? ""
         : ` (${formatTokenFlow({ inputTokens, outputTokens }, this.#theme.glyph)})`;
-    return `${formatTurnDuration(elapsedMs)}${flow}`;
+    return `${formatTurnDuration(settled.elapsedMs)}${flow}`;
   }
 
-  /**
-   * The prompt row held in place while a turn streams: the draft under a
-   * live caret, Enter inert. Keeps the input anchored instead of vanishing
-   * for the duration of the turn.
-   */
-  #pushStreamingPrompt(rows: string[], width: number): void {
-    if (!this.#streamDraftActive) return;
-    // An empty pending prompt wears the same `❯` as the idle one; a
-    // typed draft dims the `❯` (inert — Enter does nothing yet).
-    // Readiness is therefore NOT detectable from the glyph — MockScreen's
-    // `waitForIdlePrompt` discriminates by the live turn bar's absence.
-    this.#pushDraftPrompt(rows, width, { inert: true });
-  }
-
-  /** The `#streamDraft` rendered as a prompt row — inert mid-turn, active in
-   * the gap between the turn ending and the next prompt arming. */
-  #pushDraftPrompt(rows: string[], width: number, options: { inert: boolean }): void {
-    rows.push("");
+  /** The kept draft as a prompt row, inert while work runs without the composer. */
+  #pushDraftPrompt(
+    rows: string[],
+    width: number,
+    options: { inert: boolean; adjacent?: boolean },
+  ): void {
+    if (!options.adjacent && rows.at(-1) !== "") rows.push("");
     const prompt: Parameters<typeof promptInputRows>[0] = {
-      text: this.#streamDraft.text,
-      cursor: this.#streamDraft.cursor,
+      text: this.#draft.text,
+      cursor: this.#draft.cursor,
       width,
       theme: this.#theme,
       caretVisible: true,
@@ -4755,7 +3790,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       maxRows: 4,
       inert: options.inert,
     };
-    if (options.inert && this.#streamDraft.text.length === 0) prompt.placeholder = "";
+    if (options.inert && this.#draft.text.length === 0) prompt.placeholder = "";
     rows.push(...promptInputRows(prompt));
   }
 
@@ -4787,10 +3822,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (this.#logLevelHintActive) input.logLevel = this.#logs;
     const agentModel = this.#agentHeader?.info?.agent.model;
     if (agentModel?.routing.kind === "dynamic") {
-      input.model =
-        this.#resolvedModelId === undefined
-          ? "dynamic model"
-          : `dynamic model · ${this.#resolvedModelId}`;
+      const modelId = this.#view?.data.modelId;
+      input.dynamicModel = true;
+      if (modelId !== undefined) input.model = modelId;
     } else if (agentModel?.id !== undefined) input.model = agentModel.id;
     // "provider-default" is the absent-setting sentinel, not a level worth showing.
     if (agentModel?.reasoning !== undefined && agentModel.reasoning !== "provider-default") {
@@ -4829,14 +3863,19 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const parts: string[] = [];
     // The running token total lives on the persistent status line below;
     // this row keeps only the turn-scoped stats.
-    const stats = formatAssistantResponseStats(
-      {
-        totalTokens: this.#totalTokens,
-        outputTokens: this.#assistantOutputTokens,
-        tokensPerSecond: this.#assistantTokensPerSecond,
-      },
-      this.#assistantResponseStats,
-    );
+    const turn = this.#lastTurnStats;
+    const stats =
+      turn === undefined
+        ? undefined
+        : formatAssistantResponseStats(
+            {
+              totalTokens: turn.inputTokens + turn.outputTokens,
+              outputTokens: turn.outputTokens,
+              tokensPerSecond:
+                turn.elapsedMs > 0 ? turn.outputTokens / (turn.elapsedMs / 1000) : undefined,
+            },
+            this.#assistantResponseStats,
+          );
     if (stats) parts.push(stats);
     return parts.length > 0 ? c.dim(parts.join(`  ${this.#theme.glyph.dot}  `)) : "";
   }
@@ -4879,6 +3918,16 @@ export class TerminalRenderer implements AgentTUIRenderer {
       };
     };
 
+    const consoleMethods = ["error", "warn", "log", "info", "debug"] as const;
+    const originals = consoleMethods.map((method) => [method, console[method]] as const);
+    for (const method of consoleMethods) {
+      console[method] = (...args: unknown[]) =>
+        this.#displayConsoleRecord({
+          level: method === "log" ? "info" : method,
+          text: format(...args),
+        });
+    }
+    setConsoleRecordSubscriber((record) => this.#displayConsoleRecord(record));
     const restoreStdout = capture(process.stdout, "stdout");
     const restoreStderr = capture(process.stderr, "stderr");
     // The recorder takes ownership of eve's own structured log records for
@@ -4889,6 +3938,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#diagnostics?.subscribeLogRecords((record) => this.#displayLogRecord(record));
     this.#restoreLogCapture = () => {
       this.#diagnostics?.unsubscribeLogRecords();
+      setConsoleRecordSubscriber(undefined);
+      for (const [method, original] of originals) console[method] = original;
       restoreStdout();
       restoreStderr();
     };
@@ -4902,12 +3953,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     if (this.#stdoutLogBuffer.length > 0) {
       this.#diagnostics?.append({ source: "stdout", detail: this.#stdoutLogBuffer });
-      if (this.#shouldRenderLog("stdout")) process.stdout.write(`${this.#stdoutLogBuffer}\n`);
+      if (this.#shouldRenderLog()) process.stdout.write(`${this.#stdoutLogBuffer}\n`);
       this.#stdoutLogBuffer = "";
     }
     if (this.#stderrLogBuffer.length > 0) {
       this.#diagnostics?.append({ source: "stderr", detail: this.#stderrLogBuffer });
-      if (this.#shouldRenderLog("stderr")) process.stderr.write(`${this.#stderrLogBuffer}\n`);
+      if (this.#shouldRenderLog()) process.stderr.write(`${this.#stderrLogBuffer}\n`);
       this.#stderrLogBuffer = "";
     }
   }
@@ -4920,7 +3971,18 @@ export class TerminalRenderer implements AgentTUIRenderer {
    */
   #displayLogRecord(record: LogRecord): void {
     const fieldsText = record.fields === undefined ? "" : ` ${JSON.stringify(record.fields)}`;
-    this.#handleCapturedStderr(`[eve:${record.namespace}] ${record.message}${fieldsText}`);
+    this.#handleCapturedStderr(
+      `[eve:${record.namespace}] ${record.message}${fieldsText}`,
+      record.level,
+    );
+    this.#paint();
+  }
+
+  #displayConsoleRecord(record: ConsoleRecord): void {
+    const source = record.level === "error" || record.level === "warn" ? "stderr" : "stdout";
+    this.#diagnostics?.append({ source, level: record.level, detail: record.text });
+    if (source === "stderr") this.#handleCapturedStderr(stripAnsi(record.text), record.level);
+    else this.#handleCapturedStdout(stripAnsi(record.text), record.level);
     this.#paint();
   }
 
@@ -4970,21 +4032,21 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * Contiguous ordinary lines within one write stay one block, preserving the
    * single-block-per-write shape for plain output.
    */
-  #handleCapturedStdout(content: string): void {
+  #handleCapturedStdout(content: string, logLevel?: LogLevel): void {
     let pending: string[] = [];
     const flushPending = () => {
       if (pending.length === 0) return;
       const body = pending.join("\n");
       pending = [];
       if (body.trim().length === 0) return;
-      this.#pushBlock({ kind: "log", title: "stdout", body, live: true });
+      this.#pushBlock({ kind: "log", title: "stdout", logLevel, body, live: false });
     };
 
     for (const line of content.split("\n")) {
       const sandboxMessage = parseSandboxLogLine(line.trimEnd());
       if (sandboxMessage !== undefined) {
         flushPending();
-        this.#pushBlock({ kind: "sandbox", body: sandboxMessage, live: false });
+        this.#pushBlock({ kind: "sandbox", logLevel, body: sandboxMessage, live: false });
         continue;
       }
 
@@ -4999,41 +4061,49 @@ export class TerminalRenderer implements AgentTUIRenderer {
     flushPending();
   }
 
-  #handleCapturedStderr(content: string): void {
+  #handleCapturedStderr(content: string, logLevel?: LogLevel): void {
     const lines = content.split("\n");
     const failedIndex = lines.findIndex((line) => {
       return parseDevRebuildLogLine(line.trimEnd())?.kind === "failed";
     });
     if (failedIndex === -1) {
       if (this.#diagnostics === undefined) {
-        this.#pushBlock({ kind: "log", title: "stderr", body: content, live: true });
+        this.#pushBlock({ kind: "log", title: "stderr", logLevel, body: content, live: false });
         return;
       }
       const presentation = presentDiagnostic(content, this.#diagnostics.displayPath);
       if (presentation.kind === "inline") {
-        this.#pushBlock({ kind: "log", title: "stderr", body: presentation.text, live: true });
+        this.#pushBlock({
+          kind: "log",
+          title: "stderr",
+          logLevel,
+          body: presentation.text,
+          live: false,
+        });
         return;
       }
       this.#pushBlock({
         kind: "log",
         title: "stderr",
         body: formatStoredDiagnostic(presentation),
-        logVisibility: "stderr-only",
-        live: true,
+        logVisibility: "summary",
+        logLevel,
+        live: false,
       });
       this.#pushBlock({
         kind: "log",
         title: "stderr",
         body: content,
         logVisibility: "all-only",
-        live: true,
+        logLevel,
+        live: false,
       });
       return;
     }
 
     const previous = lines.slice(0, failedIndex).join("\n");
     if (previous.trim().length > 0) {
-      this.#pushBlock({ kind: "log", title: "stderr", body: previous, live: true });
+      this.#pushBlock({ kind: "log", title: "stderr", logLevel, body: previous, live: false });
     }
     const failedBody = lines.slice(failedIndex).join("\n");
     this.#handleDevRebuildFailure(failedBody);
@@ -5043,7 +4113,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#clearDevBuildStatus();
     if (this.#logs === "all") {
       if (body.trim().length === 0) return;
-      this.#pushBlock({ kind: "log", title: "stderr", body, live: true });
+      this.#pushBlock({ kind: "log", title: "stderr", logLevel: "error", body, live: false });
       return;
     }
     this.#delayedDevBuildError = body;
@@ -5094,7 +4164,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       return;
     }
     if (update.kind === "rebuilt") this.#delayedDevBuildError = undefined;
-    this.#pushBlock({ kind: "log", title: "stdout", body: line, live: true });
+    this.#pushBlock({ kind: "log", title: "stdout", body: line, live: false });
   }
 
   #setDevBuildStatus(status: DevBuildStatus): void {
@@ -5144,26 +4214,17 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (block !== undefined) block.live = false;
   }
 
-  #shouldRenderLog(source: "stdout" | "stderr" | "sandbox"): boolean {
-    switch (this.#logs) {
-      case "none":
-        return false;
-      case "stderr":
-        return source === "stderr";
-      case "sandbox":
-        return source === "sandbox";
-      case "all":
-        return true;
-    }
+  #shouldRenderLog(level?: LogLevel): boolean {
+    return isLogVisible(this.#logs, level);
   }
 
   /** True for a buffered log or sandbox block the current display mode filters out. */
   #isHiddenLog(block: Block): boolean {
-    if (block.kind === "sandbox") return !this.#shouldRenderLog("sandbox");
+    if (block.kind === "sandbox") return !this.#shouldRenderLog(block.logLevel);
     if (block.kind !== "log") return false;
-    if (block.logVisibility === "stderr-only") return this.#logs !== "stderr";
+    if (block.logVisibility === "summary" && this.#logs === "all") return true;
     if (block.logVisibility === "all-only") return this.#logs !== "all";
-    return !this.#shouldRenderLog(block.title === "stderr" ? "stderr" : "stdout");
+    return !this.#shouldRenderLog(block.logLevel);
   }
 }
 
@@ -5173,26 +4234,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
 function chunkToString(chunk: string | Uint8Array, encoding?: BufferEncoding): string {
   return typeof chunk === "string" ? chunk : Buffer.from(chunk).toString(encoding);
-}
-
-async function* iterateTUIStream(
-  stream: AsyncIterable<AgentTUIStreamEvent> | ReadableStream<AgentTUIStreamEvent>,
-): AsyncIterable<AgentTUIStreamEvent> {
-  if (stream instanceof ReadableStream) {
-    const reader = stream.getReader();
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) return;
-        yield value;
-      }
-    } finally {
-      reader.releaseLock();
-    }
-    return;
-  }
-
-  yield* stream;
 }
 
 function clip(line: string, width: number): string {
@@ -5309,11 +4350,12 @@ function promptInputRows({
 }
 
 /** Kind + title of the previously rendered block, for gap / run decisions. */
-type PreviousBlock = { kind: BlockKind; title?: string };
+type PreviousBlock = { kind: BlockKind; title?: string; subagentCallId?: string };
 
 function previousBlockOf(block: Block): PreviousBlock {
   const previous: PreviousBlock = { kind: block.kind };
   if (block.title !== undefined) previous.title = block.title;
+  if (block.subagentCallId !== undefined) previous.subagentCallId = block.subagentCallId;
   return previous;
 }
 
@@ -5325,29 +4367,11 @@ function previousBlockOf(block: Block): PreviousBlock {
  * closed `○ <source> … └` section, so consecutive writes get air between
  * their corners and headers.
  */
-/** A call still holding the cohort open: executing, or parked on approval. */
-function isActiveToolStatus(status: ToolStatus | undefined): boolean {
-  return status === "running" || status === "approval";
-}
-
-/**
- * One parallel cohort stays mutable until every independent call settles:
- * while any member is active, settled siblings stay live so an in-flight
- * batch accumulates as one group instead of fragmenting per status flip.
- * Shared by the top-level tool cohort and each subagent section's children.
- */
-function applyCohortLiveness(entries: ReadonlyArray<{ block: Block; active: boolean }>): void {
-  const cohortActive = entries.some((entry) => entry.active);
-  for (const entry of entries) {
-    entry.block.live = cohortActive || entry.active;
-  }
-}
-
 function leadsWithGap(block: Block, previous: PreviousBlock | undefined): boolean {
   // A tool run breathes after whoever spoke last — the prompt, the agent's
   // own prose, or an answered question — and stays tight within the run.
   if (
-    block.kind === "tool" &&
+    (block.kind === "tool" || block.kind === "task") &&
     (previous?.kind === "user" || previous?.kind === "assistant" || previous?.kind === "question")
   ) {
     return true;
@@ -5361,7 +4385,6 @@ function leadsWithGap(block: Block, previous: PreviousBlock | undefined): boolea
     case "user":
     case "assistant":
     case "reasoning":
-    case "subagent":
     case "error":
     case "notice":
     case "question":
@@ -5432,146 +4455,8 @@ function hiddenRowsMarker(hidden: number, theme: Theme): string {
   );
 }
 
-function collapseReasoning(mode: TerminalPartDisplayMode, isLastPart: boolean): boolean {
-  switch (mode) {
-    case "collapsed":
-      return true;
-    case "auto-collapsed":
-      return !isLastPart;
-    default:
-      return false;
-  }
-}
-
-function renderNativeToolBlock(
-  tool: NativeToolState,
-  id: string,
-  expanded: boolean,
-  context?: ToolPresentationContext,
-): Block {
-  const presentation =
-    tool.preparing === true
-      ? presentPreparingTool(tool.toolName, context)
-      : presentTool(tool.toolName, tool.input, context);
-  const block: Block = {
-    id,
-    kind: "tool",
-    title: stripTerminalControls(presentation.title),
-    subtitle: stripTerminalControls(presentation.subtitle),
-    status: tool.status,
-    live: tool.status === "running" || tool.status === "approval",
-    expanded,
-    toolInput: tool.input,
-    toolName: tool.toolName,
-    toolGroup: presentation.group,
-  };
-  if (presentation.doneTitle !== undefined) {
-    block.doneTitle = stripTerminalControls(presentation.doneTitle);
-  }
-  if (presentation.detail !== undefined) {
-    block.detailLines = presentation.detail;
-    block.keepDetailWhenDone = presentation.keepDetailWhenDone === true;
-  }
-
-  if (tool.output !== undefined) {
-    block.result = presentation.summarizeResult(tool.output);
-    block.toolOutput = tool.output;
-  } else if (tool.errorText !== undefined) {
-    block.result = stripTerminalControls(tool.errorText);
-  }
-
-  return block;
-}
-
-/** Reads the shared write-file result's `existed` flag, whatever the tool. */
-function writeExistedFlag(output: unknown): boolean | undefined {
-  if (output === null || typeof output !== "object" || Array.isArray(output)) return undefined;
-  const existed = (output as Record<string, unknown>)["existed"];
-  return typeof existed === "boolean" ? existed : undefined;
-}
-
-function subagentToolStatus(status: SubagentToolUpdate["status"]): ToolStatus {
-  switch (status) {
-    case "preparing":
-      return "running";
-    case "approval-requested":
-      return "approval";
-    case "executing":
-      return "running";
-    case "done":
-      return "done";
-    case "failed":
-      return "error";
-    case "rejected":
-      return "denied";
-  }
-}
-
-function formatToolApprovalTitle(request: AgentTUIToolApprovalRequest): string {
-  return stripTerminalControls(request.title ?? request.toolName);
-}
-
-function toolSectionId(toolCallId: string): string {
-  return `tool:${toolCallId}`;
-}
-
 function questionSectionId(requestId: string): string {
   return `question:${requestId}`;
-}
-
-function subagentHeaderId(callId: string): string {
-  return `subagent:${callId}:header`;
-}
-
-function subagentStepSectionId(callId: string, sectionKey: number): string {
-  return `subagent:${callId}:step:${sectionKey}`;
-}
-
-function subagentToolSectionId(callId: string, childCallId: string): string {
-  return `subagent:${callId}:tool:${childCallId}`;
-}
-
-function connectionAuthSectionId(connectionName: string): string {
-  return `connection-auth:${connectionName}`;
-}
-
-function connectionAuthTerminalMessage(state: ConnectionAuthUpdate["state"]): string | undefined {
-  switch (state) {
-    case "authorized":
-      return "Authorization complete";
-    case "declined":
-      return "Authorization declined";
-    case "failed":
-      return "Authorization failed";
-    case "timed-out":
-      return "Authorization timed out";
-    case "required":
-    case "pending":
-      return undefined;
-  }
-}
-
-function formatConnectionAuthContent(
-  update: ConnectionAuthUpdate,
-  terminalMessage: string | undefined,
-): string {
-  const lines: string[] = [];
-  if (terminalMessage !== undefined) {
-    lines.push(terminalMessage);
-  } else {
-    const description = stripTerminalControls(update.description);
-    if (description.length > 0) lines.push(description);
-    const challenge = update.challenge;
-    if (challenge?.url) lines.push(`URL: ${stripTerminalControls(challenge.url)}`);
-    if (challenge?.userCode) lines.push(`Code: ${stripTerminalControls(challenge.userCode)}`);
-    if (challenge?.expiresAt) lines.push(`Expires: ${stripTerminalControls(challenge.expiresAt)}`);
-    if (challenge?.instructions) lines.push(stripTerminalControls(challenge.instructions));
-  }
-  if (update.reason !== undefined) {
-    const reason = stripTerminalControls(update.reason);
-    if (reason.length > 0) lines.push(`Reason: ${reason}`);
-  }
-  return lines.join("\n");
 }
 
 function resolveQuestionText(

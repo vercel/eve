@@ -2,20 +2,22 @@
  * The transcript block model and its renderer.
  *
  * A {@link Block} is one logical unit of the conversation — a user message, a
- * streamed assistant reply, a reasoning trace, a tool call, a nested subagent
- * step, a log line, and so on. {@link renderBlockLines} turns a block into the
+ * streamed assistant reply, a reasoning trace, a tool call, a task starting
+ * or ending, a log line, and so on. {@link renderBlockLines} turns a block into the
  * exact terminal rows it occupies: a colored gutter glyph, brand-aligned
- * indentation, nesting rules for subagents, and word-wrapped content — with no
+ * indentation, nesting rules for an agent's own rows, and word-wrapped content — with no
  * boxes anywhere. Every returned row is already styled and fits within the
  * given width, so the live region can place rows verbatim.
  */
 
-import { renderMarkdown } from "./markdown.js";
+import { renderMarkdown, renderHyperlink } from "./markdown.js";
 import type { ToolDetailLine } from "./line-diff.js";
+import type { TaskKind } from "./task-activity.js";
 import type { Theme } from "./theme.js";
 import type { ToolGroupPresentation } from "./tool-presentation.js";
 import { isPromptControlCommand } from "./prompt-commands.js";
-import { renderTool } from "./tool-rows.js";
+import { renderTool, renderToolHeader } from "./tool-rows.js";
+import { truncate } from "./tool-format.js";
 import { elisionText, TOOL_COLUMN_LEAD } from "./rail.js";
 import {
   clipVisible,
@@ -38,10 +40,9 @@ export type BlockKind =
   | "flow"
   | "command"
   | "question"
-  | "subagent"
+  | "task"
   | "subagent-step"
   | "subagent-tool"
-  | "subagent-close"
   | "connection-auth"
   | "sandbox"
   | "log"
@@ -57,12 +58,12 @@ export interface Block {
   kind: BlockKind;
   /** Stable id for in-place updates while the block is live. */
   id?: string;
-  /** Nesting depth: 0 = top level, 1 = inside a subagent, etc. */
+  /** Nesting depth: 0 = top level, 1 = an agent's own row, etc. */
   depth?: number;
   /** Whether the block is still streaming / mutating (drives the activity pulse). */
   live?: boolean;
 
-  /** Primary label — tool name, subagent name, log source, error title. */
+  /** Primary label — tool name, task name, log source, error title. */
   title?: string;
   /** Past-tense tool label swapped in once the call settles successfully. */
   doneTitle?: string;
@@ -84,8 +85,18 @@ export interface Block {
   /** Structured remediation shown between an error's body and its detail. */
   hint?: string;
 
-  /** Tool, connection, or completed command lifecycle status. */
+  /**
+   * Tool, connection, or completed command lifecycle status. A task line
+   * without one marks the task starting; `done`, `error`, and `denied`
+   * (stopped) mark it ending.
+   */
   status?: ToolStatus;
+  /**
+   * Connection-auth only: the sign-in URL. Its body row is hard-wrapped like
+   * any other, but every wrapped row is an OSC 8 hyperlink to this full URL,
+   * so Cmd-click opens the whole link whatever the terminal width.
+   */
+  link?: string;
   /** When true, treat `body` as pre-styled and only wrap + indent it. */
   preformatted?: boolean;
   /** Reasoning only: collapse the trace to a single "thinking" line. */
@@ -93,7 +104,8 @@ export interface Block {
   /** When true, expand tool input/output instead of summarizing. */
   expanded?: boolean;
   /** Captured-log visibility used for concise-vs-raw diagnostic replay. */
-  logVisibility?: "stderr-only" | "all-only";
+  logVisibility?: "summary" | "all-only";
+  logLevel?: "error" | "warn" | "info" | "debug";
   /** Raw tool input / output for the expanded view. */
   toolInput?: unknown;
   toolOutput?: unknown;
@@ -105,8 +117,12 @@ export interface Block {
   detailLines?: readonly ToolDetailLine[];
   /** When true, `detailLines` stay visible after the call settles (writes). */
   keepDetailWhenDone?: boolean;
-  /** Links a subagent section's header and children so calls can coalesce. */
+  /** The agent call an agent's own row belongs to. */
   subagentCallId?: string;
+  /** The agent an agent's own row belongs to, named above its first row. */
+  agentName?: string;
+  /** Task lines only: whether an agent or a tool does the work. */
+  taskKind?: TaskKind;
   /**
    * Monotonic activity stamp, bumped on every push and in-place update.
    * Recency windows key on it so a parallel-announced call that just
@@ -125,17 +141,8 @@ export interface Block {
 export interface DisplayBlock extends Block {
   /** Items listed when equivalent tool calls are coalesced into one row. */
   toolGroupItems?: readonly ToolGroupItem[];
-  /**
-   * Stand-in for this many earlier sibling rows elided from a capped
-   * subagent run; renders as a single dim `… +N more` line.
-   */
+  /** Earlier captured writes merged into this log section; renders as `… +N more`. */
   elided?: number;
-  /**
-   * This block is the last of its section, so its final row swaps the
-   * nesting rule for the closing `└` — the rail ends on the newest child
-   * instead of a bare corner row.
-   */
-  closesRail?: boolean;
 }
 
 /** One coalesced call's row beneath an aggregated tool header. */
@@ -160,7 +167,7 @@ export interface RenderBlockContext {
    * hang under the previous block's label) without any mutable run state —
    * each captured write stays its own immediately-committed block.
    */
-  previous?: { kind: BlockKind; title?: string };
+  previous?: { kind: BlockKind; title?: string; subagentCallId?: string };
 }
 
 /**
@@ -176,31 +183,28 @@ export function renderBlockLines(
   const depth = block.depth ?? 0;
   const prefix = nestingPrefix(depth, theme);
   const avail = Math.max(8, width - visibleLength(prefix));
-  const rows = renderBody(block, avail, theme, context);
-  // The section's last row carries the closing corner in place of its rule.
-  if (block.closesRail === true && depth > 0) {
-    const corner = closingPrefix(depth, theme);
-    return rows.map((row, index) => `${index === rows.length - 1 ? corner : prefix}${row}`);
+  const rows = renderBody(block, avail, theme, context).map((row) => `${prefix}${row}`);
+  // An agent's own rows interleave with everything else in the order they
+  // finish, so each run of them opens with the agent's name.
+  if (
+    block.agentName !== undefined &&
+    context.previous?.subagentCallId !== block.subagentCallId &&
+    rows.length > 0
+  ) {
+    const name = `${theme.colors.orange(theme.glyph.subagent)} ${theme.colors.dim(block.agentName)}`;
+    return [clipVisible(`${TOOL_COLUMN_LEAD}${name}`, width), ...rows];
   }
-  return rows.map((row) => `${prefix}${row}`);
+  return rows;
 }
 
 /**
- * The gutter prefix for nested rows: the section's two-cell tool-column
- * indent, then a dim vertical rule per nesting level to contain a
- * subagent's output beneath its header — the `※` mark alone carries the
- * section's orange.
+ * The gutter prefix for nested rows: the two-cell tool-column indent, then a
+ * dim vertical rule per nesting level beneath the agent's name.
  */
 function nestingPrefix(depth: number, theme: Theme): string {
   if (depth <= 0) return "";
   const rule = `${theme.colors.dim(theme.glyph.rule)} `;
   return `${TOOL_COLUMN_LEAD}${rule.repeat(depth)}`;
-}
-
-/** The nesting prefix with its innermost rule swapped for the closing `└`. */
-function closingPrefix(depth: number, theme: Theme): string {
-  const rule = `${theme.colors.dim(theme.glyph.rule)} `;
-  return `${TOOL_COLUMN_LEAD}${rule.repeat(depth - 1)}${theme.colors.dim(theme.glyph.corner)} `;
 }
 
 function renderBody(
@@ -209,12 +213,6 @@ function renderBody(
   theme: Theme,
   context: RenderBlockContext,
 ): string[] {
-  // The subagent stand-in row, indented one cell so it aligns with the
-  // tool marks beside it; other kinds (a coalesced log run) render their
-  // elided count inside their own section.
-  if (block.elided !== undefined && block.kind === "subagent-step") {
-    return [` ${elisionText(block.elided, theme)}`];
-  }
   switch (block.kind) {
     case "user":
       return renderUser(block, width, theme);
@@ -245,17 +243,8 @@ function renderBody(
       return renderSandbox(block, width, theme, context);
     case "log":
       return renderLog(block, width, theme);
-    case "subagent":
-      return renderSubagentHeader(block, width, theme, context);
-    case "subagent-close": {
-      // Closes the section's rail. A completed section's corner carries
-      // the collapsed activity footnote instead of railed children.
-      const corner = `${TOOL_COLUMN_LEAD}${theme.colors.dim(theme.glyph.corner)}`;
-      if (block.body !== undefined && block.body.length > 0) {
-        return [clipVisible(`${corner} ${theme.colors.dim(block.body)}`, Math.max(1, width))];
-      }
-      return [corner];
-    }
+    case "task":
+      return renderTask(block, width, theme);
     case "turn-stats":
       return renderTurnStats(block, width, theme);
     case "session-boundary":
@@ -280,16 +269,6 @@ function renderProse(
 ): string[] {
   const rows: string[] = [];
   const isSubagent = block.kind === "subagent-step";
-  // A collapsed child message is one activity row in its section — the
-  // parent's own `▲` reply carries the conclusion. `--subagents full`
-  // restores the verbatim prose.
-  if (isSubagent && block.collapsed === true) {
-    const line =
-      firstNonEmptyLine(block.body) ??
-      (block.reasoning === undefined ? undefined : firstNonEmptyLine(block.reasoning));
-    if (line === undefined) return [];
-    return [theme.colors.dim(sliceVisible(line, Math.max(1, width)))];
-  }
   // The brand anchors every top-level response; Markdown styles the content
   // following it, rather than replacing the response gutter.
   const markdown = context.renderMarkdown ?? true;
@@ -501,8 +480,9 @@ function renderPreformatted(block: Block, width: number, theme: Theme): string[]
           index === 0 ? `${glyph} ${theme.colors.bold(line)}` : `  ${theme.colors.bold(line)}`,
         );
   for (const raw of (block.body ?? "").split("\n")) {
+    const isLink = block.link !== undefined && raw === block.link;
     for (const line of wrapVisibleLine(raw, Math.max(1, width - bodyIndent.length))) {
-      rows.push(`${bodyIndent}${line}`);
+      rows.push(`${bodyIndent}${isLink ? renderHyperlink(line, raw) : line}`);
     }
   }
   return rows;
@@ -544,10 +524,14 @@ function renderSandbox(
  * only ever sees visible blocks.
  */
 function renderLog(block: DisplayBlock, width: number, theme: Theme): string[] {
-  const isErr = block.title === "stderr";
-  const color = isErr ? theme.colors.red : theme.colors.gray;
+  const color =
+    block.logLevel === "error"
+      ? theme.colors.red
+      : block.logLevel === "warn"
+        ? theme.colors.yellow
+        : theme.colors.gray;
   const rule = theme.colors.dim(theme.glyph.rule);
-  const source = isErr ? "stderr" : "stdout";
+  const source = block.logLevel ?? block.title ?? "stdout";
 
   const rows = [`${theme.colors.dim(theme.glyph.reasoning)} ${theme.colors.dim(source)}`];
   if (block.elided !== undefined && block.elided > 0) {
@@ -571,43 +555,43 @@ function renderTurnStats(block: Block, width: number, theme: Theme): string[] {
   return [theme.colors.dim(truncatePlain(line, Math.max(1, width)))];
 }
 
-function renderSubagentHeader(
-  block: Block,
-  width: number,
-  theme: Theme,
-  context: RenderBlockContext,
-): string[] {
-  // `subagent(<name>)`; the generic self-delegation tool (literally named
-  // `agent`) reads as `subagent(self)`. Only the `※` mark carries orange —
-  // lead, rails, and name stay quiet around it.
-  const isSelf = block.title === undefined || block.title === "agent";
-  const rawName = isSelf ? "self" : block.title!;
-  const name = truncatePlain(rawName, Math.max(8, width - 16));
-  const lead = TOOL_COLUMN_LEAD;
-  // The ordinal rides inside the parens (`subagent(self:4)`) in every
-  // state. Completion reports on the closing corner (`└ Done…`); the
-  // header only settles its mark: an in-progress section pulses the `※`
-  // on the shared activity beat — by intensity (orange ↔ dim), so the
-  // glyph keeps anchoring the section — and a done one holds green.
-  const isOrdinal = block.subtitle !== undefined && block.subtitle.startsWith("#");
-  const ordinal = isOrdinal ? `:${block.subtitle!.slice(1)}` : "";
-  const mark =
-    block.status === "done"
-      ? theme.colors.green(theme.glyph.subagent)
-      : context.activityPulse.trim().length > 0
-        ? theme.colors.orange(theme.glyph.subagent)
-        : theme.colors.dim(theme.glyph.subagent);
-  let header = `${lead}${mark} subagent(${name}${ordinal})`;
-  if (!isOrdinal && block.subtitle !== undefined && block.subtitle.length > 0) {
-    header += ` ${theme.colors.dim(block.subtitle)}`;
+/**
+ * A task's line: `※ researcher  Find Q3 revenue numbers` as it starts, and
+ * `✓ researcher  finished in 1m 12s · Read 10 files` (or failed, or stopped)
+ * as it ends. Each is written once; what the task does in between lives in
+ * the task panel above the prompt.
+ */
+function renderTask(block: DisplayBlock, width: number, theme: Theme): string[] {
+  if (block.status === undefined) {
+    return [
+      ` ${renderToolHeader(block.title ?? "task", block.subtitle ?? "", theme.colors.gray(theme.glyph.square), width - 1, theme)}`,
+    ];
   }
-  return [header];
+  const c = theme.colors;
+  const { mark, detail, color } = taskLineStyle(block, theme);
+  const head = `${TOOL_COLUMN_LEAD}${mark} ${c.bold(truncate(block.title ?? "task", width - 4))}`;
+  const budget = width - visibleLength(head) - 2;
+  if (detail.length === 0 || budget < 6) return [clipVisible(head, Math.max(1, width))];
+  return [clipVisible(`${head}  ${color(truncate(detail, budget))}`, Math.max(1, width))];
 }
 
-function firstNonEmptyLine(text: string | undefined): string | undefined {
-  if (text === undefined) return undefined;
-  const line = text.split(/\r?\n/u).find((candidate) => candidate.trim().length > 0);
-  return line?.trim();
+function taskLineStyle(
+  block: Block,
+  theme: Theme,
+): { mark: string; detail: string; color: (text: string) => string } {
+  const c = theme.colors;
+  switch (block.status) {
+    case "done":
+      return { mark: c.green(theme.glyph.success), detail: block.body ?? "", color: c.dim };
+    case "error":
+      return { mark: c.red(theme.glyph.error), detail: block.body ?? "failed", color: c.red };
+    case "denied":
+      return { mark: c.dim(theme.glyph.square), detail: block.body ?? "stopped", color: c.dim };
+    default: {
+      const accent = block.taskKind === "agent" ? c.orange : c.gray;
+      return { mark: accent(theme.glyph.subagent), detail: block.subtitle ?? "", color: c.gray };
+    }
+  }
 }
 
 function wrap(text: string, width: number): string[] {

@@ -67,6 +67,7 @@ describe("createChannelOperations", () => {
         turnPolicy: "steer",
       },
       continuationToken: "slack:C1:T1",
+      successor: expect.objectContaining({ title: "Support thread" }),
     });
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
       command: { kind: "clear" },
@@ -74,7 +75,7 @@ describe("createChannelOperations", () => {
     });
   });
 
-  it("carries an input-response state patch through the durable delivery", async () => {
+  it("carries send and input-response state through the durable delivery", async () => {
     const runtime = createRuntime();
     const { from } = createChannelOperations<{ responder: string }>({
       adapter: { kind: "slack" },
@@ -82,12 +83,26 @@ describe("createChannelOperations", () => {
       runtime,
     });
 
+    await from("C1:T1").send("hello", { auth: null, state: { responder: "U_AUTHOR" } });
     await from("C1:T1").respond([{ optionId: "approve", requestId: "approval-1" }], {
       auth: null,
       state: { responder: "U_APPROVER" },
     });
 
-    expect(runtime.dispatchContinuation).toHaveBeenCalledWith({
+    expect(runtime.dispatchContinuation).toHaveBeenNthCalledWith(1, {
+      command: {
+        auth: null,
+        kind: "send",
+        payload: { message: "hello", state: { responder: "U_AUTHOR" } },
+        requestId: undefined,
+        turnPolicy: "steer",
+      },
+      continuationToken: "slack:C1:T1",
+      successor: expect.objectContaining({
+        adapter: { kind: "slack", state: { responder: "U_AUTHOR" } },
+      }),
+    });
+    expect(runtime.dispatchContinuation).toHaveBeenNthCalledWith(2, {
       command: {
         auth: null,
         kind: "send",
@@ -99,6 +114,9 @@ describe("createChannelOperations", () => {
         turnPolicy: undefined,
       },
       continuationToken: "slack:C1:T1",
+      successor: expect.objectContaining({
+        adapter: { kind: "slack", state: { responder: "U_APPROVER" } },
+      }),
     });
   });
 

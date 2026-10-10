@@ -11,7 +11,7 @@ import {
   StepDynamicToolMetadataKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
-import { appendPendingInputBatch } from "#harness/input-requests.js";
+import { withParkedStep } from "#internal/testing/session-machine.js";
 import { createInstrumentationHooks } from "#instrumentation/lifecycle.js";
 import {
   bindInstrumentationRuntime,
@@ -41,9 +41,9 @@ import {
 // be written; the attribute contract is covered by emit.test.ts.
 vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
 
-vi.mock("ai", () => ({
+vi.mock("ai", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("ai")>()),
   ToolLoopAgent: vi.fn(),
-  jsonSchema: vi.fn((schema: unknown) => schema),
   isStepCount: vi.fn((count: number) => count),
   tool: vi.fn((definition: unknown) => definition),
 }));
@@ -70,7 +70,7 @@ function setupMockAgentForToolExecution(toolName: string, args: unknown): void {
       | undefined;
     const onStepEnd = settings.onStepEnd as ((...args: unknown[]) => Promise<unknown>) | undefined;
 
-    this.generate = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
+    this.stream = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
       let preparedMessages = options.messages;
       if (prepareStep) {
         const prepared = await prepareStep({
@@ -122,7 +122,10 @@ function setupMockAgentForToolExecution(toolName: string, args: unknown): void {
       };
 
       if (onStepEnd) await onStepEnd(result);
-      return { ...result, responseMessages: result.response.messages };
+      return {
+        fullStream: (async function* () {})(),
+        responseMessages: Promise.resolve(result.response.messages),
+      };
     });
 
     return this as unknown as ToolLoopAgent;
@@ -196,7 +199,6 @@ async function createNodeWithSourceOwnedTools(input: {
             : undefined,
           description: frameworkAgent ? AGENT_TOOL_DESCRIPTION : `${name} programmatic tool.`,
           execute: async () => `${name}-sentinel`,
-          execution: frameworkAgent ? "background" : undefined,
           inputSchema: frameworkAgent ? SUBAGENT_TOOL_INPUT_SCHEMA : null,
           logicalPath: `tools/${name}.ts`,
           name,
@@ -260,19 +262,18 @@ describe("createNodeHarnessTools", () => {
     expect(createNodeHarnessTools({ node }).get("web_search")?.label?.start).toBeUndefined();
   });
 
-  it("lowers the compiled framework agent tool as a background tool", async () => {
+  it("lowers the compiled framework agent tool as a workflow tool", async () => {
     const node = await createNodeWithSourceOwnedTools({ names: ["agent"] });
     const agentTool = createNodeHarnessTools({ node }).get("agent");
 
     expect(agentTool?.description).toContain("split a large task into independent pieces");
-    expect(agentTool?.description).toContain("multiple `agent` calls in one response");
-    expect(agentTool?.description).toContain("run a small fixed set in parallel");
-    expect(agentTool?.description).toContain("include essential context");
+    expect(agentTool?.description).toContain("several agents can work at once");
+    expect(agentTool?.description).toContain("state the goal, what to return");
+    expect(agentTool?.description).toContain("put everything it needs in message");
     expect(agentTool?.description).toContain("non-overlapping scopes");
-    expect(agentTool?.description).not.toContain("eve");
-    expect(agentTool?.execution).toBe("background");
-    expect(agentTool?.runtimeAction).toBeUndefined();
-    expect(agentTool?.execute).toBeDefined();
+    expect(agentTool?.description).not.toMatch(/\beve\b/);
+    expect(agentTool?.execute).toBeUndefined();
+    expect(agentTool?.workflowId).toBe("workflow//eve//agentToolServeWorkflow");
   });
 
   it("keeps an authored agent tool separate from self-delegation", async () => {
@@ -283,22 +284,12 @@ describe("createNodeHarnessTools", () => {
     const agentTool = createNodeHarnessTools({ node }).get("agent");
 
     expect(agentTool?.availableInSubagents).toBeUndefined();
-    expect(agentTool?.execution).toBeUndefined();
     expect(agentTool).not.toHaveProperty("resultKind");
     expect(agentTool?.rootOnly).toBeUndefined();
     expect(agentTool?.workflowId).toBeUndefined();
   });
 
-  it("lowers task_cancel from its framework definition", async () => {
-    const node = await createNodeWithSourceOwnedTools({ names: ["task_cancel"] });
-    const tools = createNodeHarnessTools({ node });
-
-    expect(tools.get("task_cancel")?.runtimeAction).toEqual({ kind: "task-control" });
-    expect(tools.get("task_cancel")?.execute).toBeUndefined();
-    expect(tools.has("task_sleep")).toBe(false);
-  });
-
-  it("executes compiled local and remote delegation tools as background tasks", async () => {
+  it("lowers compiled local and remote delegation tools as workflow tools", async () => {
     const delegationTools: StaticRuntimeTurnAgent["tools"] = [
       createPreparedRuntimeSubagentTool({
         description: "Delegate local research.",
@@ -328,21 +319,9 @@ describe("createNodeHarnessTools", () => {
       }),
     });
     for (const name of ["research", "reviewer"]) {
-      expect(tools.get(name)?.execution).toBe("background");
-      expect(tools.get(name)?.execute).toBeDefined();
-      expect(tools.get(name)?.runtimeAction).toBeUndefined();
-      expect(tools.get(name)?.nodeId).toEqual(expect.any(String));
-      expect(tools.get(name)?.workflowId).toBe("workflow//eve//subagentToolExecuteWorkflow");
+      expect(tools.get(name)?.execute).toBeUndefined();
+      expect(tools.get(name)?.workflowId).toBe("workflow//eve//agentToolServeWorkflow");
     }
-  });
-
-  it("does not recreate task tools absent from the compiled graph", async () => {
-    const tools = createNodeHarnessTools({
-      node: await createNodeWithSourceOwnedTools({ names: [] }),
-    });
-
-    expect(tools.has("task_update")).toBe(false);
-    expect(tools.has("task_cancel")).toBe(false);
   });
 });
 
@@ -401,6 +380,9 @@ describe("createExecutionNodeStep", () => {
     ctx.set(InitiatorAuthKey, null);
     ctx.set(BundleKey, {
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      resolvedAgent: { dynamicSkillResolvers: [], dynamicToolResolvers: [], skills: [] },
+      subagentRegistry: rootNode.subagentRegistry,
+      toolRegistry: rootNode.toolRegistry,
     } as never);
     ctx.set(ChannelKey, { kind: "http" });
     ctx.set(SessionIdKey, "sess-root");
@@ -485,6 +467,9 @@ describe("createExecutionNodeStep", () => {
     ctx.set(InitiatorAuthKey, null);
     ctx.set(BundleKey, {
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      resolvedAgent: { dynamicSkillResolvers: [], dynamicToolResolvers: [], skills: [] },
+      subagentRegistry: node.subagentRegistry,
+      toolRegistry: node.toolRegistry,
     } as never);
     ctx.set(ChannelKey, { kind: "http" });
     ctx.set(SessionIdKey, "sess-dynamic");
@@ -512,50 +497,52 @@ describe("createExecutionNodeStep", () => {
         resolverSlug: "wired",
       } satisfies OldSourceOffsetDynamicToolMetadata,
     ]);
-    const session = appendPendingInputBatch({
-      requests: [
-        {
-          action: {
-            callId: "call-wired",
-            input: {},
-            kind: "tool-call",
-            toolName: "wired_dynamic_tool",
-          },
-          allowFreeform: false,
-          display: "confirmation",
-          kind: "tool-approval",
-          options: [
-            { id: "approve", label: "Approve" },
-            { id: "cancel", label: "Cancel" },
-          ],
-          prompt: "Approve dynamic tool",
-          requestId: "approval-wired",
-        },
-      ],
-      responseMessages: [
-        {
-          content: [
-            {
-              input: {},
-              toolCallId: "call-wired",
-              toolName: "wired_dynamic_tool",
-              type: "tool-call",
-            },
-            {
-              approvalId: "approval-wired",
-              toolCallId: "call-wired",
-              type: "tool-approval-request",
-            },
-          ],
-          role: "assistant",
-        },
-      ],
-      session: createSession({
+    const session = withParkedStep(
+      createSession({
         continuationToken: "test-dynamic",
         sessionId: "sess-dynamic",
         turnAgent: node.turnAgent,
       }),
-    });
+      {
+        messages: [
+          {
+            content: [
+              {
+                input: {},
+                toolCallId: "call-wired",
+                toolName: "wired_dynamic_tool",
+                type: "tool-call",
+              },
+              {
+                approvalId: "approval-wired",
+                toolCallId: "call-wired",
+                type: "tool-approval-request",
+              },
+            ],
+            role: "assistant",
+          },
+        ],
+        requests: [
+          {
+            action: {
+              callId: "call-wired",
+              input: {},
+              kind: "tool-call",
+              toolName: "wired_dynamic_tool",
+            },
+            allowFreeform: false,
+            display: "confirmation",
+            kind: "tool-approval",
+            options: [
+              { id: "approve", label: "Approve" },
+              { id: "cancel", label: "Cancel" },
+            ],
+            prompt: "Approve dynamic tool",
+            requestId: "approval-wired",
+          },
+        ],
+      },
+    );
 
     await contextStorage.run(ctx, () =>
       step(session, {

@@ -1,6 +1,8 @@
 import type { ModelMessage } from "ai";
 
+import { assertNotConnectionOwned } from "#connections/ownership.js";
 import type { ContextContainer } from "#context/container.js";
+import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { buildResolveContext } from "#context/dynamic-resolve-context.js";
 import type { ContextReader } from "#context/key.js";
 import {
@@ -9,14 +11,17 @@ import {
   TurnDynamicSubagentSelectionsKey,
   type DurableDynamicSubagentSelection,
 } from "#context/keys.js";
-import { createPreparedWorkflowToolHarnessDefinition } from "#execution/tools/workflow/background.js";
+import { createPreparedWorkflowToolHarnessDefinition } from "#execution/tools/workflow/harness-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createLogger } from "#internal/logging.js";
+import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
 import type { SessionStartedStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { ResolvedDynamicSubagentResolver } from "#runtime/subagents/registry.js";
 import { createPreparedRuntimeSubagentTool } from "#runtime/subagents/registry.js";
 import { normalizeDynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { normalizeDynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
+import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import type { AgentToolExposure } from "#shared/agent-definition.js";
 import { toErrorMessage } from "#shared/errors.js";
 
 const log = createLogger("dynamic-subagents");
@@ -41,6 +46,12 @@ async function resolveSelections(input: {
       if (result === null || result === undefined) {
         return [resolver.nodeId, null] as const;
       }
+      assertNotConnectionOwned({
+        connectionNames: input.ctx.get(ConnectionRegistryKey)?.getConnectionNames() ?? [],
+        name: resolver.name,
+        remedy: "Rename the subagent directory.",
+        subject: "Dynamic subagent",
+      });
       if (isRemoteAgentDefinition(result)) {
         const remoteAgent = await normalizeDynamicRemoteAgentConfig({
           name: resolver.name,
@@ -48,6 +59,7 @@ async function resolveSelections(input: {
         });
         const effectiveRemoteAgent =
           resolver.tool === false ? { ...remoteAgent, tool: false as const } : remoteAgent;
+        assertToolNameAvailable(input.ctx, resolver, effectiveRemoteAgent.tool);
         const prepared = createPreparedRuntimeSubagentTool({
           description: effectiveRemoteAgent.description,
           kind: "remote",
@@ -77,6 +89,7 @@ async function resolveSelections(input: {
         resolver.tool === false
           ? { ...resolvedAgentConfig, tool: false as const }
           : resolvedAgentConfig;
+      assertToolNameAvailable(input.ctx, resolver, effectiveAgentConfig.tool);
       const prepared = createPreparedRuntimeSubagentTool({
         description: effectiveAgentConfig.description,
         kind: "subagent",
@@ -111,6 +124,30 @@ async function resolveSelections(input: {
   }
 
   return selections;
+}
+
+/**
+ * No dynamic subagent may take a name in eve's namespace. One the model can
+ * call cannot take a tool's name either; with `tool: false` it can, since a
+ * same-named authored tool then wraps it.
+ */
+function assertToolNameAvailable(
+  ctx: ContextReader,
+  resolver: ResolvedDynamicSubagentResolver,
+  tool: AgentToolExposure | undefined,
+): void {
+  const reservation = eveNamespaceReservation(resolver.name);
+  if (reservation !== undefined) {
+    throw new Error(
+      `Dynamic subagent "${resolver.name}" from "${resolver.logicalPath}" uses the reserved name "${resolver.name}". ${reservation}; rename the subagent.`,
+    );
+  }
+  if (tool === false) return;
+  const authoredTools = ctx.get(BundleKey)?.toolRegistry.toolsByName;
+  if (authoredTools?.has(resolver.name) !== true) return;
+  throw new Error(
+    `Dynamic subagent "${resolver.name}" from "${resolver.logicalPath}" collides with the tool "${resolver.name}". Set the subagent's tool to false when that tool wraps it.`,
+  );
 }
 
 function isRemoteAgentDefinition(value: unknown): boolean {
@@ -167,18 +204,11 @@ export function buildDynamicSubagentTools(input: ContextReader): readonly Harnes
   const turn = input.get(TurnDynamicSubagentSelectionsKey) ?? {};
   const effective = { ...session, ...turn };
   const tools: HarnessToolDefinition[] = [];
-  const names = new Set<string>();
 
   for (const selection of Object.values(effective)) {
     if (selection === null) {
       continue;
     }
-    if (names.has(selection.prepared.name)) {
-      throw new Error(
-        `Found multiple active dynamic subagents named "${selection.prepared.name}". Subagent names must be unique at runtime.`,
-      );
-    }
-    names.add(selection.prepared.name);
     const modelVisible =
       selection.kind === "subagent"
         ? selection.agentConfig.tool !== false
@@ -193,11 +223,18 @@ export function getDynamicSubagentSelection(
   input: ContextReader,
   nodeId: string,
 ): Exclude<DurableDynamicSubagentSelection, null> | undefined {
-  const turn = input.get(TurnDynamicSubagentSelectionsKey) ?? {};
-  if (Object.hasOwn(turn, nodeId)) {
-    return turn[nodeId] ?? undefined;
-  }
+  return readDynamicSubagentSelections(input)[nodeId] ?? undefined;
+}
 
-  const session = input.get(SessionDynamicSubagentSelectionsKey) ?? {};
-  return session[nodeId] ?? undefined;
+/**
+ * The dynamic subagents selected for the current turn, by node id. A turn
+ * selection overrides the session's, and `null` withdraws one.
+ */
+export function readDynamicSubagentSelections(
+  input: ContextReader,
+): Readonly<Record<string, DurableDynamicSubagentSelection>> {
+  return {
+    ...input.get(SessionDynamicSubagentSelectionsKey),
+    ...input.get(TurnDynamicSubagentSelectionsKey),
+  };
 }

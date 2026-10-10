@@ -47,7 +47,7 @@ const ROOT_TYPE_DEFINITIONS = fileURLToPath(
 const TSC_BIN_PATH = fileURLToPath(
   new URL("../../../../node_modules/typescript/bin/tsc", import.meta.url),
 );
-const DEFAULT_AGENT_MODEL_ID = "spacexai/grok-4.7";
+const DEFAULT_AGENT_MODEL_ID = "openai/gpt-6-luna-fast";
 
 function applicationOwnedEntries<TEntry extends { readonly sourceId: string }>(
   manifest: CompiledAgentManifest,
@@ -140,6 +140,7 @@ describe("compiler artifacts", () => {
         id: DEFAULT_AGENT_MODEL_ID,
       },
       name: "test-agent",
+      reasoning: "high",
     });
     expect(withoutConfig.manifest.config.source).toMatchObject({
       logicalPath: "agent.ts",
@@ -149,6 +150,14 @@ describe("compiler artifacts", () => {
     expect(
       withoutConfig.manifest.bindings[withoutConfig.manifest.config.source.sourceId]?.owner,
     ).toEqual({ feature: "eve:defaults", kind: "framework" });
+
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'export default { model: "openai/gpt-6-luna-fast" };\n',
+    );
+    const authoredConfig = await compileAgent({ startPath: appRoot });
+    expect(authoredConfig.manifest.config.model?.id).toBe("openai/gpt-6-luna-fast");
+    expect(authoredConfig.manifest.config.reasoning).toBeUndefined();
 
     await writeFile(join(agentRoot, "agent.mjs"), "export default {};\n");
     await expect(compileAgent({ startPath: appRoot })).rejects.toThrow(
@@ -176,10 +185,11 @@ describe("compiler artifacts", () => {
         behavior: {
           availability: [],
           handling: {
+            entryPoint: "execute",
             kind: "workflow-tool",
             workflowId: `workflow//${packageInfo.name}@${packageInfo.version}//executeSleepTool`,
           },
-          shape: { lifetime: "step", suspend: "workflow" },
+          shape: { suspend: "workflow" },
         },
         logicalPath: "tools/sleep.mjs",
         name: "sleep",

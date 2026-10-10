@@ -2,6 +2,7 @@ import { AssertionCollector, type RunAssertion } from "#evals/assertions/collect
 import * as RunAssertions from "#evals/assertions/run.js";
 import type { EveEvalAssertionSubject } from "#evals/assertions/run.js";
 import type { EveEvalEventMatch } from "#evals/match.js";
+import { assertReportedToolName } from "#evals/reported-tool-name.js";
 import type {
   EveEvalAssertions,
   EveEvalOutputAssertions,
@@ -24,15 +25,19 @@ export function createScopedAssertions(
   scope: AssertionScope,
 ): EveEvalAssertions {
   const record = createRecorder(collector, scope);
+  const toolName = (name: string) => {
+    assertReportedToolName(name, collector.tools);
+    return name;
+  };
 
   return {
     succeeded: () => record(RunAssertions.succeeded()),
     parked: () => record(RunAssertions.parked()),
     messageIncludes: (token) => record(RunAssertions.messageIncludes(token)),
-    calledTool: (name, options) => record(RunAssertions.calledTool(name, options)),
+    calledTool: (name, options) => record(RunAssertions.calledTool(toolName(name), options)),
     loadedSkill: (skill, options) => record(RunAssertions.loadedSkill(skill, options)),
-    notCalledTool: (name) => record(RunAssertions.notCalledTool(name)),
-    toolOrder: (names) => record(RunAssertions.toolOrder(names)),
+    notCalledTool: (name) => record(RunAssertions.notCalledTool(toolName(name))),
+    toolOrder: (names) => record(RunAssertions.toolOrder(names.map(toolName))),
     usedNoTools: () => record(RunAssertions.usedNoTools()),
     maxToolCalls: (max) => record(RunAssertions.maxToolCalls(max)),
     calledSubagent: (name, options) => record(RunAssertions.calledSubagent(name, options)),

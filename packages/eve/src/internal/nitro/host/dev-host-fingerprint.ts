@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { readDevelopmentEnvironmentHostValues } from "#cli/dev/environment.js";
 import { computeChannelRouteRegistrations } from "#internal/nitro/host/channel-routes.js";
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
+import { usesLocalVercelSchedules } from "#internal/schedules/consumer-route.js";
 
 export async function computeDevelopmentHostFingerprint(
   host: PreparedDevelopmentApplicationHost,
@@ -26,10 +27,10 @@ export async function computeDevelopmentHostFingerprint(
       extensionScopes: agentNodes
         .flatMap((node) => node.extensionMounts)
         .map((mount) => ({
-          packageNamespace: mount.packageNamespace,
+          mountId: mount.mountId,
           sourceRoot: mount.sourceRoot,
         }))
-        .sort((left, right) => left.sourceRoot.localeCompare(right.sourceRoot)),
+        .sort((left, right) => left.mountId.localeCompare(right.mountId)),
       sandboxProviders: [
         ...new Set(
           agentNodes
@@ -41,6 +42,7 @@ export async function computeDevelopmentHostFingerprint(
     channels: computeChannelRouteRegistrations(host),
     environment: readDevelopmentEnvironmentHostValues(host.appRoot),
     instrumentation: await readInstrumentationSource(host),
+    localScheduleConsumer: usesLocalVercelSchedules(manifest),
     workflow: {
       // Authored workflow bodies and step registrations are bundled into the
       // host, so their sources are structural, not runtime, state.

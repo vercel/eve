@@ -56,6 +56,21 @@ describe("prepareAuthoredWorkflowDirectives", () => {
     expect(prepared.source).not.toContain("async execute(");
   });
 
+  it("hoists a task method, the other workflow entry point", async () => {
+    const source = toolModule(
+      ["  async *task({ service }) {", '    "use workflow";', "    yield service;", "  },"].join(
+        "\n",
+      ),
+    );
+
+    const prepared = await prepareAuthoredWorkflowDirectives({ filePath: FILE, source });
+
+    expect(prepared.source).toContain("  task,\n  toModelOutput: (output) => output,");
+    expect(prepared.source).toContain(
+      'async function* task({ service }) {\n    "use workflow";\n    yield service;\n  }',
+    );
+  });
+
   it("hoists an arrow function execute property", async () => {
     const source = toolModule(
       [

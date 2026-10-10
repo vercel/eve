@@ -143,7 +143,10 @@ authored tools.
 
 A tool closes over the locked scope for the current turn, so it cannot be
 redirected to another tenant or caller by the model. eve keeps each tool
-callback replayable after a process restart or redeployment.
+callback replayable after a process restart or redeployment. On replay, eve
+calls `tools()` again with the captured `memory`, `turn`, and session context.
+`messages` is the history the current process resolved the turn's tools with,
+so after a mid-turn restart it also includes the turn's earlier tool results.
 
 ## Lifecycle
 

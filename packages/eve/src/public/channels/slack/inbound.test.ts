@@ -210,7 +210,7 @@ describe("parseAppMentionEvent", () => {
 });
 
 describe("parseMessageEvent", () => {
-  it("preserves bot and subtype message events for onMessage", () => {
+  it("preserves bot messages for onMessage", () => {
     const bot = parseMessageEvent({
       type: "event_callback",
       event: {
@@ -222,20 +222,33 @@ describe("parseMessageEvent", () => {
         ts: "2.0",
       },
     });
-    const subtype = parseMessageEvent({
-      type: "event_callback",
-      event: {
-        type: "message",
-        subtype: "message_changed",
-        text: "edited",
-        channel: "C01",
-        ts: "3.0",
-      },
-    });
 
     expect(bot?.author?.isBot).toBe(true);
-    expect(subtype?.raw.subtype).toBe("message_changed");
   });
+
+  it.each(["bot_message", "file_share", "me_message", "thread_broadcast"])(
+    "keeps the posted-message subtype %s",
+    (subtype) => {
+      const message = parseMessageEvent({
+        type: "event_callback",
+        event: { type: "message", subtype, user: "U01", text: "hi", channel: "C01", ts: "2.0" },
+      });
+
+      expect(message?.raw.subtype).toBe(subtype);
+    },
+  );
+
+  it.each(["message_changed", "message_deleted", "channel_join"])(
+    "drops the system subtype %s",
+    (subtype) => {
+      const message = parseMessageEvent({
+        type: "event_callback",
+        event: { type: "message", subtype, text: "edited", channel: "C01", ts: "3.0" },
+      });
+
+      expect(message).toBeNull();
+    },
+  );
 });
 
 describe("parseDirectMessageEvent", () => {

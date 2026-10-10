@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createTeamsFetchFile, normalizeTeamsFilesPolicy } from "./attachments.js";
+import {
+  collectTeamsFileParts,
+  createTeamsFetchFile,
+  normalizeTeamsFilesPolicy,
+} from "./attachments.js";
 
 describe("createTeamsFetchFile", () => {
   afterEach(() => {
@@ -56,6 +60,18 @@ describe("createTeamsFetchFile", () => {
       expect(tokenProvider).not.toHaveBeenCalled();
     },
   );
+
+  it("stops a SharePoint download at the configured upload limit", async () => {
+    const apiFetch = vi.fn(async () => new Response(new Uint8Array(2 * 1024 * 1024)));
+    const fetchFile = createTeamsFetchFile(
+      normalizeTeamsFilesPolicy({ uploadPolicy: { maxBytes: 1024 * 1024 } }),
+      { credentials: { tokenProvider: () => "connector-token" }, fetch: apiFetch },
+    );
+
+    await expect(
+      fetchFile("https://contoso.sharepoint.com/personal/alice/report.pdf?tempauth=signed"),
+    ).rejects.toThrow("it is over the 1 MB upload limit.");
+  });
 
   it("rejects insecure URLs before fetching", async () => {
     const apiFetch = vi.fn();
@@ -178,5 +194,43 @@ describe("createTeamsFetchFile", () => {
       fetchFile("https://smba.trafficmanager.net/attachments/image"),
     ).resolves.toMatchObject({ mediaType: "image/png" });
     expect(apiFetch).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("collectTeamsFileParts", () => {
+  const upload = {
+    content: {
+      downloadUrl: "https://contoso.sharepoint.com/personal/ada/report.pdf?tempauth=signed",
+      fileType: "pdf",
+    },
+    contentType: "application/vnd.microsoft.teams.file.download.info",
+    name: "report.pdf",
+  };
+
+  it("accepts SharePoint uploads and Bot Connector images by default", () => {
+    const parts = collectTeamsFileParts(
+      [
+        upload,
+        {
+          contentType: "image/png",
+          contentUrl: "https://smba.trafficmanager.net/amer/v3/attachments/A1/views/original",
+        },
+        { contentType: "image/png", contentUrl: "https://images.example.com/chart.png" },
+      ],
+      normalizeTeamsFilesPolicy(undefined),
+    );
+
+    expect(
+      parts.map(({ data, mediaType }) => ({ host: (data as URL).hostname, mediaType })),
+    ).toEqual([
+      { host: "contoso.sharepoint.com", mediaType: "application/pdf" },
+      { host: "smba.trafficmanager.net", mediaType: "image/png" },
+    ]);
+  });
+
+  it("drops every attachment when files are disabled", () => {
+    expect(collectTeamsFileParts([upload], normalizeTeamsFilesPolicy({ enabled: false }))).toEqual(
+      [],
+    );
   });
 });

@@ -26,8 +26,8 @@ vi.mock("./model-source-change.js", () => ({
   changeValidatedAgentModel: async () => ({ kind: "changed" }),
 }));
 vi.mock("#internal/model-auth/available-models.js", () => ({
-  availableDirectModels: async () => ["gpt-5.6-luna-fast", "claude-sonnet-5"],
-  availableHelperModels: async () => ["gpt-5.6-luna-fast", "claude-sonnet-5"],
+  availableDirectModels: async () => ["gpt-5.6-luna-fast", "gpt-6-luna-fast", "claude-sonnet-5"],
+  availableHelperModels: async () => ["gpt-5.6-luna-fast", "gpt-6-luna-fast", "claude-sonnet-5"],
 }));
 vi.mock("#internal/model-auth/vercel.js", () => ({
   resolveVercelSession: async () => ({

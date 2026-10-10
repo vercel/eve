@@ -44,7 +44,7 @@ function createSessionWithUsage(input: {
 
 describe("resolveRemainingSessionTokenLimits", () => {
   it("returns false axes for an uncapped session", () => {
-    expect(resolveRemainingSessionTokenLimits(createSessionWithUsage({}))).toEqual({
+    expect(resolveRemainingSessionTokenLimits(createSessionWithUsage({}), 1)).toEqual({
       maxInputTokensPerSession: false,
       maxOutputTokensPerSession: false,
     });
@@ -57,7 +57,7 @@ describe("resolveRemainingSessionTokenLimits", () => {
       usedOutputTokens: 20_000,
     });
 
-    expect(resolveRemainingSessionTokenLimits(session)).toEqual({
+    expect(resolveRemainingSessionTokenLimits(session, 1)).toEqual({
       maxInputTokensPerSession: 700_000,
       maxOutputTokensPerSession: 30_000,
     });
@@ -68,7 +68,7 @@ describe("resolveRemainingSessionTokenLimits", () => {
       limits: { maxInputTokensPerSession: 1_000_000 },
     });
 
-    expect(resolveRemainingSessionTokenLimits(session)).toEqual({
+    expect(resolveRemainingSessionTokenLimits(session, 1)).toEqual({
       maxInputTokensPerSession: 1_000_000,
       maxOutputTokensPerSession: false,
     });
@@ -82,7 +82,7 @@ describe("resolveRemainingSessionTokenLimits", () => {
     });
     const continued = bumpSessionRuntimeUsageLimits(exhausted);
 
-    expect(resolveRemainingSessionTokenLimits(continued)).toEqual({
+    expect(resolveRemainingSessionTokenLimits(continued, 1)).toEqual({
       maxInputTokensPerSession: 1_000_000,
       maxOutputTokensPerSession: 100_000,
     });
@@ -94,65 +94,35 @@ describe("resolveRemainingSessionTokenLimits", () => {
       usedInputTokens: 150_000,
     });
 
-    expect(resolveRemainingSessionTokenLimits(session)).toEqual({
+    expect(resolveRemainingSessionTokenLimits(session, 1)).toEqual({
       maxInputTokensPerSession: 0,
       maxOutputTokensPerSession: false,
     });
   });
 
-  it("splits the remaining quota across the batch's delegated calls", () => {
+  it("splits the remaining tokens across children started together, flooring each share", () => {
     const session = createSessionWithUsage({
       limits: { maxInputTokensPerSession: 1_000_000, maxOutputTokensPerSession: 50_000 },
-      usedInputTokens: 100_000,
+      usedInputTokens: 100_001,
       usedOutputTokens: 20_000,
     });
 
     expect(resolveRemainingSessionTokenLimits(session, 3)).toEqual({
-      maxInputTokensPerSession: 300_000,
+      maxInputTokensPerSession: 299_999,
       maxOutputTokensPerSession: 10_000,
     });
   });
 
-  it("splits the remaining model token-cost budget across delegated calls", () => {
+  it("splits the remaining model token-cost budget across children started together", () => {
     const session = createSessionWithUsage({
       limits: { maxTokenCostUsdPerSession: 1.5 },
-      usedCostUsd: 0.3,
+      usedCostUsd: 0.5,
     });
 
-    const limits = resolveRemainingSessionTokenLimits(session, 3);
-    expect(limits).toMatchObject({
+    expect(resolveRemainingSessionTokenLimits(session, 4)).toEqual({
       maxInputTokensPerSession: false,
       maxOutputTokensPerSession: false,
-    });
-    expect(limits.maxTokenCostUsdPerSession).toBeCloseTo(0.4);
-  });
-
-  it("floors uneven splits so a batch can never exceed the remainder", () => {
-    const session = createSessionWithUsage({
-      limits: { maxInputTokensPerSession: 100 },
-    });
-
-    expect(resolveRemainingSessionTokenLimits(session, 3)).toEqual({
-      maxInputTokensPerSession: 33,
-      maxOutputTokensPerSession: false,
-    });
-  });
-
-  it("treats a non-positive fan-out as a single delegation", () => {
-    const session = createSessionWithUsage({
-      limits: { maxInputTokensPerSession: 100 },
-    });
-
-    expect(resolveRemainingSessionTokenLimits(session, 0)).toEqual({
-      maxInputTokensPerSession: 100,
-      maxOutputTokensPerSession: false,
-    });
-  });
-
-  it("keeps uncapped parents uncapped regardless of fan-out", () => {
-    expect(resolveRemainingSessionTokenLimits(createSessionWithUsage({}), 5)).toEqual({
-      maxInputTokensPerSession: false,
-      maxOutputTokensPerSession: false,
+      maxTokenCostUsdPerSession: 0.25,
     });
   });
 
@@ -162,7 +132,7 @@ describe("resolveRemainingSessionTokenLimits", () => {
       usedOutputTokens: 10_000,
     });
 
-    expect(resolveRemainingSessionTokenLimits(session)).toEqual({
+    expect(resolveRemainingSessionTokenLimits(session, 1)).toEqual({
       maxInputTokensPerSession: false,
       maxOutputTokensPerSession: 40_000,
     });

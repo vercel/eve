@@ -1,54 +1,54 @@
-import { isJsonObjectValue } from "#shared/json.js";
-import type { ModelAccessChange } from "#shared/model-connection.js";
-import { SteeringStream } from "#cli/dev/tui/steering-stream.js";
 import {
-  type ActionResultStreamEvent,
-  type ActionsRequestedStreamEvent,
-  type AgentInfoResult,
-  type AuthorizationCompletedStreamEvent,
-  type ConnectionAuthorizationOutcome,
-  type AuthorizationRequiredStreamEvent,
-  type InputOption,
-  type InputRequest,
-  type InputRequestedStreamEvent,
-  type InputResponse,
-  type MessageAppendedStreamEvent,
-  type ReasoningAppendedStreamEvent,
-  type SessionFailedStreamEvent,
-  type StepCompletedStreamEvent,
-  type MessageStreamEvent,
-  type SubagentCalledStreamEvent,
-  type SubagentCompletedStreamEvent,
+  openConversationInputs,
+  type ConversationInput,
+  type ConversationState,
+} from "#client/conversation-state.js";
+import {
+  attachEveAgentStore,
+  detachEveAgentStore,
+  EveAgentStore,
+} from "#client/eve-agent-store.js";
+import { isAbortError } from "#client/eve-agent-store-helpers.js";
+import { formatStrandedSessionNotice } from "./stranded-session.js";
+import { normalizeActionRequest, normalizeActionResult } from "#client/message-action-parts.js";
+import { isTerminalToolCallPart } from "./terminal-tool-part.js";
+import { userText } from "./transcript-parts.js";
+import { isTaskRetryRefusal } from "#protocol/task-tools.js";
+import type { SendTurnPayload } from "#client/types.js";
+import type { ModelAccessChange } from "#shared/model-connection.js";
+import type {
+  AgentInfoResult,
   Client,
-  ClientSession,
+  InputOption,
+  InputRequest,
+  InputResponse,
+  MessageStreamEvent,
 } from "#client/index.js";
 import { renderApplicationInfo } from "#cli/commands/info.js";
 import type { EveCliSetupStepEvent, EveCliSetupTerminalEvent } from "#cli/telemetry/index.js";
 import type { OnboardingScreenEvent } from "./setup-commands.js";
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
-import { createEventDeduper } from "#protocol/event-dedupe.js";
-import { isCurrentTurnBoundaryEvent } from "#protocol/message.js";
 import {
   createDevelopmentRuntimeArtifactRefresher,
   type DevelopmentRuntimeArtifactRefresher,
 } from "#services/dev-client.js";
 import { inspectApplication } from "#services/inspect-application.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { SubagentPump, type SubagentPumpOptions, type SubagentView } from "./subagent-pump.js";
-export type {
-  SubagentRun,
-  SubagentStepUpdate,
-  SubagentToolUpdate,
-  SubagentView,
-} from "./subagent-pump.js";
+import {
+  conversationView,
+  isWorking,
+  tuiSessionReducer,
+  type AgentTUIConversationView,
+  type TuiSessionData,
+} from "./conversation-view.js";
 import { devBootPhase, type DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 
 import {
-  type FailureStreamEvent,
   failureKey,
   formatFailureDetail,
   formatFailureHint,
   formatFailureMessage,
+  interruptedError,
   isInterruptedError,
   localFailureHint,
 } from "./errors.js";
@@ -89,12 +89,7 @@ import {
 import type { SetupFlowRenderer } from "./setup-flow.js";
 import type { TraceViewerRenderer } from "./traces/trace-viewer-session.js";
 import type { RemoteDevelopmentTarget } from "./target.js";
-import type {
-  AssistantResponseStatsMode,
-  LogDisplayMode,
-  TerminalPartDisplayMode,
-  TuiDisplayOptions,
-} from "./types.js";
+import type { LogDisplayMode, TuiDisplayOptions } from "./types.js";
 import { TerminalRenderer, type TerminalInput, type TerminalOutput } from "./terminal-renderer.js";
 import {
   createVercelStatusTracker,
@@ -113,114 +108,47 @@ import { getVercelAuthStatus, type VercelAuthStatus } from "#setup/vercel-projec
 import type { DevDiagnostics } from "../diagnostics.js";
 import type { CommandLifecycle } from "../../shutdown.js";
 
-const defaultAssistantResponseStats: AssistantResponseStatsMode = "tokensPerSecond";
 const idleRuntimeArtifactPollMs = 500;
 const idleChatGptAuthPollMs = 5_000;
-const idleSessionReconnectBaseDelayMs = 100;
-const idleSessionReconnectMaxDelayMs = 2_000;
-/**
- * Cooperative-cancel retry cadence: 8 × 250ms covers the turn-dispatch
- * window (locally the cancel hook is claimed well under a second after the
- * send is accepted) without hammering the cancel route.
- */
-const turnCancelRetryDelayMs = 250;
-const turnCancelAttempts = 8;
-
-async function delayMs(ms: number): Promise<void> {
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    timer.unref?.();
-  });
-}
-
-async function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return;
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(done, ms);
-    timer.unref?.();
-    signal.addEventListener("abort", done, { once: true });
-    function done() {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", done);
-      resolve();
-    }
-  });
-}
-
-export type AgentTUIStreamResult = {
-  steer?: (message: string) => Promise<void>;
-  events: AsyncIterable<AgentTUIStreamEvent> | ReadableStream<AgentTUIStreamEvent>;
-  abort?: () => void;
-  /**
-   * Requests cooperative server-side cancellation of the streaming turn
-   * (`/cancel`, Esc, or Ctrl+C; the keys steer when a message is queued). Unlike
-   * {@link abort} — which drops the client stream and forces a fresh session —
-   * the server settles the turn as `turn.cancelled` → `session.waiting`, so
-   * the stream reaches its boundary normally and the session keeps its context.
-   * Best-effort and idempotent; scoped to the turn the user observed when its id is known.
-   */
-  cancel?: () => void;
-  turnState?: AgentTUITurnState;
-};
-
-export type AgentTUIStreamUsage = {
-  inputTokens?: number;
-  outputTokens?: number;
-};
-
-export type AgentTUIStreamEvent =
-  | { type: "turn-start"; turnId: string }
-  | { type: "step-start"; modelId?: string }
-  | { type: "step-finish"; usage?: AgentTUIStreamUsage }
-  | { type: "assistant-delta"; id: string; delta: string }
-  | { type: "assistant-complete"; id: string; text?: string | null }
-  | { type: "reasoning-delta"; id: string; delta: string }
-  | { type: "reasoning-complete"; id: string }
-  | { type: "tool-call-preparing"; toolCallId: string; toolName: string }
-  | { type: "tool-call"; toolCallId: string; toolName: string; input: unknown }
-  | { type: "tool-approval-request"; approvalId: string; toolCallId: string }
-  | { type: "tool-result"; toolCallId: string; output: unknown }
-  | { type: "tool-error"; toolCallId: string; errorText: string }
-  | { type: "tool-rejected"; toolCallId: string; reason: string }
-  | { type: "error"; errorText: string; hint?: string; detail?: string }
-  | { type: "turn-cancelled" }
-  | { type: "finish"; usage?: AgentTUIStreamUsage };
-
-export type AgentTUITurnState = {
-  aborted?: boolean;
-  boundaryEvent?: "session.completed" | "session.failed" | "session.waiting";
-  pendingApprovals: AgentTUIToolApprovalRequest[];
-  pendingQuestions: InputRequest[];
-  sawSessionFailure: boolean;
-  /** Id of the streaming turn, once `turn.started` names it. Scopes cancels. */
-  turnId?: string;
-  /** True while a cooperative-cancel request loop is running for this turn. */
-  cancelInFlight?: boolean;
-};
 
 export type AgentTUISessionOptions = {
   title?: string;
   /**
-   * Text to seed the editable prompt buffer with before the user types.
-   * Set by the runner for the first prompt when `eve dev --input` is used.
+   * Text to seed the composer's draft with before the user types. Set by the
+   * runner for the first prompt when `eve dev --input` is used.
    */
   initialDraft?: string;
-  submittedPrompt?: string;
-  continueSession?: boolean;
-  tools?: TerminalPartDisplayMode;
-  reasoning?: TerminalPartDisplayMode;
-  subagents?: TerminalPartDisplayMode;
-  connectionAuth?: TerminalPartDisplayMode;
-  assistantResponseStats?: AssistantResponseStatsMode;
-  contextSize?: number;
+  /** Closes the composer without discarding its draft. */
+  signal?: AbortSignal;
+};
+
+/** One user action from the composer. */
+export type AgentTUIInput =
+  /** A message or slash command. Messages sent while work runs steer it. */
+  | { type: "submit"; text: string }
+  /** `Esc` or `Ctrl+C` while work runs. */
+  | { type: "cancel" }
+  /** `Ctrl+C` again while cancellation is pending: stop following the turn. */
+  | { type: "interrupt" };
+
+/** Where a prompt sits among the requests being answered, and who asked, when that helps. */
+export type AgentTUIInputContext = {
+  /** 1-based position among the requests answered in a row; the total grows as more arrive. */
+  position?: { index: number; total: number };
+  /** The task that asked, named as its transcript lines are. */
+  requester?: string;
+  /** The task whose run asked; the renderer names it as its task lines do. */
+  taskId?: string;
 };
 
 export type AgentTUIToolApprovalRequest = {
   approvalId: string;
   toolCallId: string;
   toolName: string;
-  title?: string;
+  /** The server's question for this approval, such as `Approve Deploy release?`. */
+  prompt: string;
   input: unknown;
+  context?: AgentTUIInputContext;
 };
 
 export type AgentTUIToolApprovalResponse = {
@@ -241,6 +169,7 @@ export type AgentTUIInputQuestion = {
   display: "select" | "text";
   options?: ReadonlyArray<AgentTUIInputOption>;
   allowFreeform?: boolean;
+  context?: AgentTUIInputContext;
 };
 
 export type AgentTUIInputQuestionResponse = {
@@ -252,6 +181,7 @@ export type AgentTUIAgentHeader = {
   name: string;
   serverUrl: string;
   info?: AgentInfoResult;
+  localDevelopment?: boolean;
 };
 
 export type AgentTUIRenderer = {
@@ -269,9 +199,15 @@ export type AgentTUIRenderer = {
    */
   renderNotice?(text: string): void;
   /**
+   * Puts back a message whose turn was cancelled from outside this prompt, such as `/cancel` from
+   * another client, when the composer is empty. Optional.
+   */
+  restoreDraft?(text: string): void;
+  /**
    * Commits the session boundary (`┌── Session restarted, clear context.`)
-   * when a dead session is replaced mid-conversation. Optional; renderers
-   * without it get the plain notice.
+   * when a dead session is replaced mid-conversation. The old conversation's
+   * transcript settles as shown; the next `renderConversation` starts fresh.
+   * Optional; renderers without it get the plain notice.
    */
   renderSessionBoundary?(): void;
   /**
@@ -292,19 +228,19 @@ export type AgentTUIRenderer = {
    * The returned promise resolves when the user closes the viewer.
    */
   readonly traceViewer?: TraceViewerRenderer;
-  readPrompt?(options?: AgentTUISessionOptions): Promise<string | undefined>;
   /**
-   * Consumes the next prompt produced by mid-turn input: the Esc-popped
-   * steering message when one is staged, otherwise every message queued
-   * during the turn coalesced into one. The runner calls this at a clean
-   * turn boundary and submits the result as the next turn without reading
-   * the prompt. Optional — renderers without mid-turn input never queue.
+   * Reads the next composer action. Resolves `undefined` when `signal`
+   * aborts and rejects with an interrupt when the user leaves.
    */
-  takeQueuedPrompt?(): string | undefined;
+  readInput?(options?: AgentTUISessionOptions): Promise<AgentTUIInput | undefined>;
+  /** Draws the session's transcript from one conversation snapshot. */
+  renderConversation?(view: AgentTUIConversationView): void;
+  /** Commits one error block, such as a message the session did not accept. */
+  renderError?(title: string, message: string): void;
   /**
    * Reports the server session id backing the conversation — pushed by the
    * runner once a send is accepted, and overwritten when a later session's
-   * turn is accepted. Deliberately sticky across `/reset` and interrupt
+   * turn is accepted. Deliberately sticky across `/new` and interrupt
    * recovery: the terminal renderer echoes the LAST session this TUI talked
    * to in the parting line on exit, so an interrupted conversation (whose
    * replacement session never ran a turn) can still be found again
@@ -319,36 +255,6 @@ export type AgentTUIRenderer = {
     question: AgentTUIInputQuestion,
     options?: AgentTUISessionOptions,
   ): Promise<AgentTUIInputQuestionResponse | undefined>;
-  renderStream(result: AgentTUIStreamResult, options?: AgentTUISessionOptions): Promise<void>;
-  /**
-   * Renders a server-initiated turn while `readPrompt` still owns input.
-   * Unlike `renderStream`, this must not replace the active key consumer or
-   * clear the user's draft.
-   */
-  renderIdleStream?(result: AgentTUIStreamResult, options?: AgentTUISessionOptions): Promise<void>;
-  /**
-   * The renderer's whole subagent surface — sections, nested steps and
-   * tools, ghost sweeps, completion. One optional capability with required
-   * members: a renderer either has a subagent view or it doesn't, and a
-   * type-legal partial implementation (which would ghost placeholders or
-   * duplicate parent tool rows) cannot exist.
-   */
-  readonly subagents?: SubagentView;
-  /**
-   * Out-of-band update for one MCP connection authorization lifecycle.
-   * Called by the runner as `authorization.*` events arrive.
-   * The renderer renders this as a persistent body section per
-   * connection that transitions through `required` → `pending` →
-   * one of the terminal `ConnectionAuthorizationOutcome` states.
-   */
-  upsertConnectionAuth?(update: ConnectionAuthUpdate): void;
-  /**
-   * Sets the number of connections currently awaiting an OAuth
-   * callback. The renderer overrides its bottom status bar with a
-   * "waiting for connection authorization" hint while this is > 0,
-   * so the user understands the agent is parked, not hung.
-   */
-  setConnectionAuthPendingCount?(count: number): void;
   /**
    * The log display mode currently in effect. Paired with
    * {@link setLogDisplayMode}; both are absent on renderers that do not
@@ -379,7 +285,7 @@ export type AgentTUIRenderer = {
   /**
    * Clears the rendered transcript and resets per-conversation display
    * state, leaving the UI interactive on a fresh screen. Used by the
-   * `/reset` command to start a new session with a clean slate.
+   * `/new` command to start a new session with a clean slate.
    */
   reset?(): void;
   /**
@@ -387,8 +293,6 @@ export type AgentTUIRenderer = {
    * lifecycle ends.
    */
   shutdown?(): void;
-  /** Suspends an idle prompt so a server-initiated HITL request can own input. */
-  suspendPromptForInput?(): void;
   requestInterrupt?(): void;
   exitRequested?(): boolean;
 };
@@ -437,27 +341,19 @@ type TuiStartup = {
 };
 
 export type EveTUIRunnerOptions = TuiDisplayOptions & {
-  session?: ClientSession;
   /** Production TUI probe injected by the launcher; omitted in hermetic runners. */
   probeMcpConnection?: McpConnectionProbe;
-  /**
-   * Optional client used to attach to child sessions for live subagent
-   * stream observation. When omitted, the TUI still shows the subagent
-   * section but cannot surface the subagent's reasoning / response /
-   * intermediate events — only the parent-stream `called` and
-   * `completed` transitions.
-   */
-  client?: Client;
+  /** Configured client for the conversation's sessions and their subagent streams. */
+  client: Client;
   renderer?: AgentTUIRenderer;
   screen?: TerminalOutput;
   userInput?: TerminalInput;
   /**
-   * Formats an error thrown while dispatching a turn (the initial
-   * `session.send()` POST — e.g. a transport failure or a Vercel
-   * Deployment Protection challenge) into the text rendered in the
-   * inline error region. Defaults to the error's message. Callers that
-   * know about transport-specific challenges (the `eve dev` glue) inject
-   * a richer formatter here.
+   * Formats a session error (a failed send — e.g. a transport failure or a
+   * Vercel Deployment Protection challenge) into the text rendered in the
+   * inline error region. Defaults to the error's message. Callers that know
+   * about transport-specific challenges (the `eve dev` glue) inject a richer
+   * formatter here.
    */
   formatTransportError?: (error: unknown) => string;
   /**
@@ -519,16 +415,12 @@ function authIssueForStatus(status: VercelAuthStatus): SetupIssue | undefined {
 }
 
 export class EveTUIRunner {
-  #session: ClientSession | undefined;
-  readonly #client?: Client;
+  readonly #client: Client;
+  /** Owns the conversation's sessions, root stream, turns, and subagent streams. */
+  readonly #store: EveAgentStore<TuiSessionData>;
   readonly #renderer: AgentTUIRenderer;
+  readonly #diagnostics?: DevDiagnostics;
   readonly #name: string;
-  readonly #tools: TerminalPartDisplayMode;
-  readonly #reasoning: TerminalPartDisplayMode;
-  readonly #subagents: TerminalPartDisplayMode;
-  readonly #connectionAuth: TerminalPartDisplayMode;
-  readonly #assistantResponseStats: AssistantResponseStatsMode;
-  readonly #contextSize?: number;
   readonly #formatTransportError: (error: unknown) => string;
   readonly #runtimeArtifacts?: DevelopmentRuntimeArtifactRefresher;
   readonly #serverUrl?: string;
@@ -554,6 +446,10 @@ export class EveTUIRunner {
   #onBootProgress?: DevBootProgressReporter;
   /** Set when the run loop unwinds, so a late boot login probe cannot paint into a torn-down terminal. */
   #disposed = false;
+  /** The message this TUI last sent, until its turn settles. */
+  #sentMessage?: string;
+  /** Whether this TUI asked to cancel the turn of {@link #sentMessage}. */
+  #cancelRequested = false;
   /** Aborts the off-critical-path boot auth probe when the run loop unwinds. */
   readonly #authProbeAbort = new AbortController();
   /**
@@ -576,78 +472,41 @@ export class EveTUIRunner {
   readonly #vercelStatus?: VercelStatusTracker;
   readonly #mcpConnectionStatus?: McpConnectionStatusTracker;
   #agentInfo?: AgentInfoResult;
-  /**
-   * approval-id → input-request map populated as `input.requested` events
-   * stream in. Used to translate the renderer's approval responses back into
-   * eve `InputResponse[]` payloads on the next `send()`.
-   */
-  readonly #pendingInputRequests = new Map<string, InputRequest>();
-  /** Idle wake result handed from the prompt follower into the normal HITL response loop. */
-  #idleInputResult?: AgentTUIStreamResult;
+  /** Closes the composer when something else needs the keyboard. */
+  #inputController?: AbortController;
+  /** Questions the user skipped; they stay open for the server to resolve. */
+  readonly #dismissedInputs = new Set<string>();
   /** Registry setups queued by tool results on root or child streams. */
   readonly #pendingRegistrySetups: string[] = [];
   #activeRegistrySetup?: string;
-  /** True only while the idle prompt owns terminal input. */
-  #readingPrompt = false;
-  /**
-   * callId → live state for one subagent dispatch. Persists across turn
-   * boundaries because a subagent dispatched in one turn may not emit
-   * `subagent.completed` until a later turn (e.g. after a HITL approval).
-   * Each run holds per-step text accumulators (so reasoning + message land
-   * in the same section per child step) and per-tool state.
-   */
-  readonly #subagentPump: SubagentPump;
-  /**
-   * callId → AbortController for the parallel child-session stream pump
-   * launched on `subagent.called`. Cancelled on `subagent.completed`, when
-   * the session resets, or when the runner shuts down.
-   */
-  /**
-   * name → latest known state for one MCP connection
-   * authorization lifecycle. Persists across turns because a turn that
-   * suspends on a webhook callback resumes in a later turn — the
-   * `_required`/`_pending` events fire in turn N and the `_completed`
-   * event may not arrive until turn N+1. Each entry holds enough
-   * context to re-render the body section idempotently from any
-   * single event.
-   */
-  readonly #connectionAuthRuns = new Map<string, ConnectionAuthRun>();
-  /**
-   * Set of connection names currently in the `pending` state — i.e.
-   * the workflow is suspended waiting on the framework-owned OAuth
-   * callback. Used to drive the renderer's bottom-bar hint.
-   */
-  readonly #pendingConnectionAuths = new Set<string>();
-  /**
-   * The exact session that reported a terminal failure. Recovery replaces it
-   * only if it is still current, so a stale failure from A cannot replace B.
-   */
-  #failedSession?: ClientSession;
+  /** Tool calls whose registry handoff was already queued. */
+  readonly #handledHandoffs = new Set<string>();
+  /** The last session error shown, so each renders once. */
+  #reportedError?: Error;
+  /** Failure cascades already recorded in diagnostics this turn. */
+  readonly #recordedFailures = new Set<string>();
+  readonly #recordedAgentToolFailures = new Set<string>();
   readonly #lifecycle?: CommandLifecycle;
 
   constructor(options: EveTUIRunnerOptions) {
-    this.#session = options.session;
-    if (options.client !== undefined) this.#client = options.client;
+    this.#client = options.client;
     if (options.lifecycle !== undefined) this.#lifecycle = options.lifecycle;
+    if (options.diagnostics !== undefined) this.#diagnostics = options.diagnostics;
     this.#renderer = createRenderer(options);
-    const pumpOptions: SubagentPumpOptions = { formatActionResultError };
-    if (this.#client !== undefined) pumpOptions.client = this.#client;
-    if (this.#renderer.subagents !== undefined) pumpOptions.view = this.#renderer.subagents;
-    if (options.appRoot !== undefined) {
-      pumpOptions.onToolCompleted = async (subagentName, toolName, output) => {
-        const address = registryHandoffAddress(subagentName, toolName, output);
-        if (address !== undefined) this.#queueRegistrySetup(address);
-      };
-    }
-    this.#subagentPump = new SubagentPump(pumpOptions);
+    this.#store = new EveAgentStore({
+      client: options.client,
+      followSubagents: true,
+      reducer: tuiSessionReducer,
+    });
+    this.#store.setCallbacks({
+      onEvent: (event) => this.#recordDiagnostics(event),
+      onSessionChange: (session) => {
+        if (session !== undefined) this.#renderer.setSessionId?.(session.sessionId);
+      },
+      prepareSend: (input) => this.#prepareSend(input),
+    });
     this.#name = options.name ?? "eve";
     this.#withExclusiveTerminal = options.withExclusiveTerminal;
-    this.#tools = options.tools ?? "full";
-    this.#reasoning = options.reasoning ?? "full";
-    this.#subagents = options.subagents ?? "full";
-    this.#connectionAuth = options.connectionAuth ?? "full";
-    this.#assistantResponseStats = options.assistantResponseStats ?? defaultAssistantResponseStats;
-    this.#contextSize = options.contextSize;
     this.#formatTransportError = options.formatTransportError ?? toErrorMessage;
     if (options.initialInput !== undefined) this.#initialInput = options.initialInput;
     if (options.startup !== undefined) this.#startup = options.startup;
@@ -677,9 +536,6 @@ export class EveTUIRunner {
     this.#availablePromptCommands = options.availablePromptCommands ?? PROMPT_COMMANDS;
     if (options.remote !== undefined) {
       this.#remoteAuthFlow = options.remote.runAuthFlow;
-      if (this.#client === undefined) {
-        throw new Error("A remote TUI requires a configured development client.");
-      }
       this.#remoteConnection = createRemoteConnectionController({
         client: this.#client,
         credentials: options.remote.credentials,
@@ -754,6 +610,7 @@ export class EveTUIRunner {
     const header: AgentTUIAgentHeader = {
       name: this.#name,
       serverUrl,
+      localDevelopment: this.#appRoot !== undefined,
     };
     if (headerInfo !== undefined) header.info = headerInfo;
     this.#renderer.renderAgentHeader?.(header);
@@ -770,13 +627,19 @@ export class EveTUIRunner {
     const onStop = () => this.#renderer.requestInterrupt?.();
     if (this.#lifecycle?.signal.aborted === true) onStop();
     else this.#lifecycle?.signal.addEventListener("abort", onStop, { once: true });
+    const unsubscribe = this.#store.subscribe(() => this.#renderSnapshot());
+    attachEveAgentStore(this.#store);
     try {
       await this.#run();
+    } catch (error) {
+      if (!isInterruptedError(error)) throw error;
     } finally {
       this.#lifecycle?.signal.removeEventListener("abort", onStop);
       this.#disposed = true;
       this.#authProbeAbort.abort();
-      this.#subagentPump.abortAll();
+      this.#inputController?.abort();
+      unsubscribe();
+      detachEveAgentStore(this.#store);
       // Restore captured stdout/stderr before a fatal error reaches the CLI.
       this.#renderer.shutdown?.();
       // Drops any in-flight link probe so a late resolution cannot paint
@@ -790,10 +653,6 @@ export class EveTUIRunner {
   async #run() {
     const title = this.#name;
     let prompt: string | undefined;
-    let pendingInputResponses: readonly InputResponse[] | undefined;
-    let hasRunTurn = false;
-    let followCurrentSession = false;
-    let streamWithoutPrompt = false;
     this.#renderer.setStartupPhase?.("starting");
     await this.#loadInitialAgentInfo();
     // Fire-and-forget: the link identity is network-bound to resolve, and the
@@ -851,453 +710,413 @@ export class EveTUIRunner {
         this.#finishCommand({ kind: "result", message: startupOutcome.message });
     }
 
-    while (true) {
-      if (this.#lifecycle?.signal.aborted === true || this.#renderer.exitRequested?.() === true) {
-        return;
+    // One loop for everything that takes the keyboard. The store streams the
+    // session throughout, so the composer stays open while work runs.
+    while (this.#lifecycle?.signal.aborted !== true && this.#renderer.exitRequested?.() !== true) {
+      if (this.#store.snapshot.data.sessionFailed) {
+        this.#replaceSession();
+        continue;
       }
-      const pendingRegistrySetup = this.#pendingRegistrySetups[0];
-      if (
-        pendingRegistrySetup !== undefined &&
-        pendingInputResponses === undefined &&
-        this.#idleInputResult === undefined
-      ) {
-        this.#pendingRegistrySetups.shift();
-        this.#activeRegistrySetup = pendingRegistrySetup;
+      // Answering first lets the agent continue while setup owns the terminal.
+      if (this.#answerableInputs().length > 0) {
+        await this.#answerInputs(title);
+        continue;
+      }
+      // Setup takes the terminal, so it waits for the session to settle.
+      const registrySetup = isWorking(this.#store.snapshot.status)
+        ? undefined
+        : this.#pendingRegistrySetups.shift();
+      if (registrySetup !== undefined) {
+        this.#activeRegistrySetup = registrySetup;
         try {
-          await this.#openRegistrySetup(pendingRegistrySetup);
+          await this.#openRegistrySetup(registrySetup);
         } finally {
           this.#activeRegistrySetup = undefined;
         }
-        followCurrentSession = false;
-        streamWithoutPrompt = false;
-        prompt = undefined;
         continue;
       }
-      if (!streamWithoutPrompt) {
-        if (prompt == null) {
-          if (!this.#renderer.readPrompt) {
-            if (hasRunTurn) {
-              return;
-            }
-
-            throw new Error(
-              "No prompt was provided and the renderer does not support prompt input.",
-            );
-          }
-
-          const promptOptions: AgentTUISessionOptions = { title };
-          if (initialDraft !== undefined) {
-            promptOptions.initialDraft = initialDraft;
-            initialDraft = undefined;
-          }
-
-          try {
-            this.#readingPrompt = true;
-            prompt = await this.#readPromptFollowingSession(promptOptions);
-          } catch (error) {
-            if (isInterruptedError(error)) {
-              if (this.#idleInputResult === undefined && this.#pendingRegistrySetups.length === 0) {
-                return;
-              }
-              streamWithoutPrompt = true;
-              prompt = "";
-            } else {
-              throw error;
-            }
-          } finally {
-            this.#readingPrompt = false;
-          }
-
-          if (this.#pendingRegistrySetups.length > 0 && this.#idleInputResult === undefined) {
-            prompt = undefined;
-            continue;
-          }
-          if (prompt == null && this.#idleInputResult === undefined) {
-            return;
-          }
-        }
-
-        const command = this.#idleInputResult === undefined ? parsePromptCommand(prompt!) : null;
-
-        if (command?.type === "exit") {
-          this.#finishCommand({ kind: "dismiss" });
-          this.#lifecycle?.requestStop();
-          return;
-        }
-
-        if (command?.type === "cancel") {
-          followCurrentSession = await this.#runSessionCommand({
-            absent: "No active turn to cancel",
-            accepted: "Cancellation requested",
-            failed: "Couldn't cancel the turn",
-            invoke: (session) => session.cancel(),
-          });
-          pendingInputResponses = undefined;
-          streamWithoutPrompt = false;
-          prompt = undefined;
-          if (!followCurrentSession) continue;
-        }
-
-        if (command?.type === "reset") {
-          if (!(await this.#resetCurrentSession())) {
-            pendingInputResponses = undefined;
-            streamWithoutPrompt = false;
-            prompt = undefined;
-            continue;
-          }
-          this.#finishCommand({ kind: "dismiss" });
-          pendingInputResponses = undefined;
-          streamWithoutPrompt = false;
-          prompt = undefined;
+      if (prompt === undefined) {
+        const input = await this.#readInput({ title, initialDraft });
+        initialDraft = undefined;
+        if (input === undefined) continue;
+        if (input.type === "cancel") {
+          this.#cancelTurn();
           continue;
         }
-
-        if (command?.type === "compact") {
-          followCurrentSession = await this.#runSessionCommand({
-            absent: "No active session to compact",
-            accepted: "Compaction requested",
-            failed: "Couldn't compact the session",
-            invoke: (session) => session.compact(),
-          });
-          pendingInputResponses = undefined;
-          streamWithoutPrompt = false;
-          prompt = undefined;
-          if (!followCurrentSession) continue;
-        }
-
-        if (command?.type === "clear") {
-          followCurrentSession = await this.#runSessionCommand({
-            absent: "No active session to clear",
-            failed: "Couldn't clear the session",
-            dismissOnAccepted: true,
-            invoke: (session) => session.clear(),
-          });
-          pendingInputResponses = undefined;
-          streamWithoutPrompt = false;
-          prompt = undefined;
-          if (!followCurrentSession) continue;
-        }
-
-        // Help renders locally; unlike extension commands it must work even
-        // without a prompt-command handler (e.g. remote --url sessions).
-        if (command?.type === "help") {
-          if (this.#renderer.choosePromptCommand !== undefined) {
-            const selected = await this.#renderer.choosePromptCommand!(
-              this.#availablePromptCommands,
-            );
-            if (selected !== undefined) initialDraft = selected;
-          } else
-            this.#finishCommand({
-              kind: "result",
-              message: formatPromptCommandHelp(this.#availablePromptCommands),
-            });
-          pendingInputResponses = undefined;
-          streamWithoutPrompt = false;
-          prompt = undefined;
-          continue;
-        }
-
-        if (command?.type === "info") {
-          await this.#showApplicationInfo();
-          pendingInputResponses = undefined;
-          streamWithoutPrompt = false;
-          prompt = undefined;
-          continue;
-        }
-
-        // Like /help, /loglevel renders locally: it adjusts the renderer's
-        // own log filter, so it works without a prompt-command handler.
-        if (command?.type === "loglevel") {
-          const outcome = this.#applyLogLevelCommand(command.argument);
-          const error =
-            outcome.startsWith("/loglevel is not available") ||
-            outcome.startsWith("Unknown log level");
-          this.#finishCommand(
-            error ? { kind: "result", message: outcome } : { kind: "result", summary: outcome },
+        if (input.type === "interrupt") {
+          this.#replaceSession(
+            "Stopped following the turn and started a new session. Earlier context was cleared; the interrupted turn may still be running on the server.",
           );
-          pendingInputResponses = undefined;
-          streamWithoutPrompt = false;
-          prompt = undefined;
           continue;
         }
-
-        // /traces is renderer-local too: the viewer reads the local spool
-        // from disk and owns the screen until the user closes it.
-        if (command?.type === "traces") {
-          await this.#openTraceViewer(command.argument);
-          pendingInputResponses = undefined;
-          streamWithoutPrompt = false;
-          prompt = undefined;
-          continue;
-        }
-
-        if (command?.type === "extension") {
-          try {
-            await this.#executeExtensionCommand(command, title, { trigger: "command" });
-          } catch (error) {
-            if (isInterruptedError(error)) return;
-            throw error;
-          }
-          pendingInputResponses = undefined;
-          prompt = undefined;
-          streamWithoutPrompt = false;
-          continue;
-        }
-
-        hasRunTurn = true;
+        prompt = input.text;
       }
-
-      const idleInputResult = this.#idleInputResult;
-      this.#idleInputResult = undefined;
-      let result =
-        idleInputResult ??
-        (followCurrentSession
-          ? this.#streamCurrentSession()
-          : await (async () => {
-              this.#recoverFailedSession();
-              return await this.#streamTurn({
-                prompt: streamWithoutPrompt ? undefined : prompt,
-                inputResponses: pendingInputResponses,
-              });
-            })());
-      // The session id becomes known once the send is accepted; keep the
-      // renderer's copy fresh so the parting line can name the session.
-      const acceptedSessionId = this.#session?.state.sessionId;
-      if (acceptedSessionId !== undefined) {
-        this.#renderer.setSessionId?.(acceptedSessionId);
-      }
-      let submittedPrompt = prompt;
-      let respondedToInputRequest = false;
-
-      try {
-        while (true) {
-          await this.#renderer.renderStream(result, {
-            title,
-            submittedPrompt,
-            continueSession: Boolean(this.#renderer.readPrompt),
-            tools: this.#tools,
-            reasoning: this.#reasoning,
-            subagents: this.#subagents,
-            connectionAuth: this.#connectionAuth,
-            assistantResponseStats: this.#assistantResponseStats,
-            contextSize: this.#contextSize,
-          });
-
-          const approvalRequests = result.turnState?.pendingApprovals ?? [];
-          const questionRequests = result.turnState?.pendingQuestions ?? [];
-
-          if (approvalRequests.length > 0 || questionRequests.length > 0) {
-            const responses: InputResponse[] = [];
-
-            if (approvalRequests.length > 0) {
-              if (!this.#renderer.readToolApproval) {
-                throw new Error(
-                  "Tool approval was requested, but the renderer does not support tool approval input.",
-                );
-              }
-
-              for (const request of approvalRequests) {
-                const response = await this.#renderer.readToolApproval(request, { title });
-                responses.push({
-                  requestId: request.approvalId,
-                  optionId: response.approved ? "approve" : "cancel",
-                });
-              }
-            }
-
-            if (questionRequests.length > 0) {
-              if (!this.#renderer.readInputQuestion) {
-                throw new Error(
-                  "An interactive question was requested, but the renderer does not support input questions.",
-                );
-              }
-
-              for (const inputRequest of questionRequests) {
-                const question = toAgentTUIInputQuestion(inputRequest);
-                const response = await this.#renderer.readInputQuestion(question, { title });
-                if (response === undefined) {
-                  continue;
-                }
-                const inputResponse: InputResponse = { requestId: inputRequest.requestId };
-                if (response.optionId !== undefined) inputResponse.optionId = response.optionId;
-                if (response.text !== undefined) inputResponse.text = response.text;
-                responses.push(inputResponse);
-              }
-            }
-
-            if (responses.length === 0) {
-              // Every pending question was skipped without an answer. Fall
-              // back to the prompt rather than sending an empty response set:
-              // the questions stay open, and the server decides whether the
-              // user's next message answers, dismisses, or leaves them.
-              break;
-            }
-
-            streamWithoutPrompt = true;
-            pendingInputResponses = responses;
-            prompt = undefined;
-            respondedToInputRequest = true;
-            break;
-          }
-
-          if (this.#enterPendingConnectionAuthorization(result)) {
-            result = this.#streamCurrentSession();
-            submittedPrompt = undefined;
-            continue;
-          }
-
-          if (result.turnState && result.turnState.boundaryEvent === undefined) {
-            if (!result.turnState.aborted) {
-              const strandedSessionId = this.#session?.state.sessionId;
-              this.#renderer.renderNotice?.(
-                strandedSessionId
-                  ? `Lost the event stream — the turn may still be running on the server (session ${strandedSessionId}). Your next message resumes this session; use /cancel to stop the turn.`
-                  : "Lost the connection to the running turn.",
-              );
-            }
-          }
-          break;
-        }
-      } catch (error) {
-        if (isInterruptedError(error)) {
-          return;
-        }
-
-        throw error;
-      }
-
-      if (respondedToInputRequest) {
+      const text = prompt;
+      prompt = undefined;
+      const command = parsePromptCommand(text);
+      if (command === null) {
+        this.#submitMessage(text);
         continue;
       }
-
-      followCurrentSession = false;
-      streamWithoutPrompt = false;
-      pendingInputResponses = undefined;
-      prompt = undefined;
-
-      // A staged key-driven steer message, or messages queued during the turn,
-      // submit immediately as the next turn — but only across a clean turn
-      // boundary. A failed session or a lost stream keeps them; the renderer
-      // restores them into the next prompt's editable buffer instead of
-      // firing them into a session whose state the user hasn't seen.
-      const boundaryEvent = result.turnState?.boundaryEvent;
-      const currentSessionFailed = this.#failedSession === this.#session;
-      if (
-        !currentSessionFailed &&
-        (boundaryEvent === "session.waiting" || boundaryEvent === "session.completed")
-      ) {
-        prompt = this.#renderer.takeQueuedPrompt?.();
-      }
-
-      // The session ended terminally this turn (session.failed, a dispatch
-      // failure, or a user interrupt). Replace it with a fresh one so the
-      // next prompt isn't sent into a dead session, but keep the transcript
-      // on screen. Server-side context is gone with the old session.
-      this.#recoverFailedSession(result.turnState?.aborted === true);
+      const outcome = await this.#runCommand(command, title);
+      if (outcome === "exit") return;
+      if (outcome !== undefined) initialDraft = outcome.draft;
     }
   }
 
-  /**
-   * Resets all per-conversation runner state and, when a client is
-   * available, replaces the active session with a fresh one so the next
-   * turn starts a new server-side conversation. Backs the `/reset` command.
-   * In-flight subagent child-session streams are aborted.
-   */
-  #startNewSession(): void {
-    this.#subagentPump.abortAll();
-    this.#pendingInputRequests.clear();
-    this.#connectionAuthRuns.clear();
-    this.#pendingConnectionAuths.clear();
-    this.#renderer.setConnectionAuthPendingCount?.(0);
-
-    this.#session = undefined;
-    this.#runtimeArtifacts?.clear();
+  /** Runs one slash command; returns `"exit"` or a draft for the next prompt. */
+  async #runCommand(
+    command: PromptCommand,
+    title: string,
+  ): Promise<"exit" | { draft: string } | undefined> {
+    switch (command.type) {
+      case "exit":
+        this.#finishCommand({ kind: "dismiss" });
+        this.#lifecycle?.requestStop();
+        return "exit";
+      case "cancel": {
+        const working = isWorking(this.#store.snapshot.status);
+        if (working) this.#cancelTurn();
+        this.#finishCommand({
+          kind: "result",
+          summary: working ? "Cancellation requested" : "No active turn to cancel",
+        });
+        return;
+      }
+      case "new":
+        await this.#resetSession();
+        return;
+      case "compact":
+        await this.#runSessionCommand({
+          absent: "No active session to compact",
+          accepted: "Compaction requested",
+          failed: "Couldn't compact the session",
+          invoke: () => this.#store.compact(),
+        });
+        return;
+      case "clear":
+        await this.#runSessionCommand({
+          absent: "No active session to clear",
+          accepted: "Session context cleared",
+          failed: "Couldn't clear the session",
+          invoke: () => this.#store.clear(),
+        });
+        return;
+      // Help renders locally; unlike extension commands it must work even
+      // without a prompt-command handler (e.g. remote --url sessions).
+      case "help": {
+        if (this.#renderer.choosePromptCommand === undefined) {
+          this.#finishCommand({
+            kind: "result",
+            message: formatPromptCommandHelp(this.#availablePromptCommands),
+          });
+          return;
+        }
+        const selected = await this.#renderer.choosePromptCommand(this.#availablePromptCommands);
+        return selected === undefined ? undefined : { draft: selected };
+      }
+      case "info":
+        await this.#showApplicationInfo();
+        return;
+      // Like /help, /loglevel renders locally: it adjusts the renderer's own
+      // log filter, so it works without a prompt-command handler.
+      case "loglevel": {
+        const outcome = this.#applyLogLevelCommand(command.argument);
+        const error =
+          outcome.startsWith("/loglevel is not available") ||
+          outcome.startsWith("Unknown log level");
+        this.#finishCommand(
+          error ? { kind: "result", message: outcome } : { kind: "result", summary: outcome },
+        );
+        return;
+      }
+      // /traces is renderer-local too: the viewer reads the local spool from
+      // disk and owns the screen until the user closes it.
+      case "traces":
+        await this.#openTraceViewer(command.argument);
+        return;
+      case "extension":
+        await this.#executeExtensionCommand(command, title, { trigger: "command" });
+        return;
+    }
   }
 
-  /** Clears one failure marker and replaces its source only by identity. */
-  #recoverFailedSession(aborted = false): void {
-    const failedSession = this.#failedSession;
-    if (failedSession === undefined) return;
-    this.#failedSession = undefined;
-    if (this.#session !== failedSession) return;
+  /** Sends a message; while work runs it steers the active turn instead. */
+  #submitMessage(message: string): void {
+    const snapshot = this.#store.snapshot;
+    const steering = isWorking(snapshot.status);
+    this.#sentMessage = message;
+    if (!steering) this.#cancelRequested = false;
+    const input: SendTurnPayload = steering
+      ? { message, turnPolicy: "steer" }
+      : snapshot.session === undefined
+        ? { message }
+        : { message, turnPolicy: "queue" };
+    void this.#store.send(input).catch((error: unknown) => {
+      if (this.#disposed || isAbortError(error)) return;
+      this.#renderSendError(steering ? "Steering failed" : "Error", error);
+    });
+  }
 
-    this.#startNewSession();
-    if (aborted) {
-      this.#renderer.renderNotice?.(
-        "Stopped following the turn and started a new session. Earlier context was cleared; the interrupted turn may still be running on the server.",
+  /** Refreshes local dev artifacts so a new turn runs the latest authored code. */
+  async #prepareSend(input: SendTurnPayload): Promise<SendTurnPayload> {
+    // A steered message joins the running turn, which keeps its artifacts.
+    if (input.turnPolicy === "steer") return input;
+    if (this.#runtimeArtifacts !== undefined) {
+      await this.#runtimeArtifacts.refresh({
+        inputResponses: input.inputResponses,
+        message: typeof input.message === "string" ? input.message : undefined,
+        onRuntimeArtifactsChanged: () => this.#handleRuntimeArtifactsChanged(),
+      });
+    }
+    if (input.message !== undefined) this.#renderer.flushDelayedDevBuildErrors?.();
+    return input;
+  }
+
+  #renderSnapshot(): void {
+    const snapshot = this.#store.snapshot;
+    this.#renderer.renderConversation?.(
+      conversationView(snapshot, this.#appRoot === undefined ? undefined : localFailureHint),
+    );
+    this.#reportSessionError(snapshot.error, snapshot.data.sessionFailed);
+    this.#recordAgentToolFailures(snapshot.conversation);
+    this.#reportFirstResponse(snapshot.conversation);
+    this.#queueRegistryHandoffs(snapshot.conversation);
+    this.#restoreCancelledMessage(snapshot.conversation);
+    if (
+      snapshot.data.sessionFailed ||
+      this.#answerableInputs().length > 0 ||
+      (!isWorking(snapshot.status) && this.#pendingRegistrySetups.length > 0)
+    ) {
+      this.#inputController?.abort();
+    }
+  }
+
+  /** A turn cancelled from outside this prompt hands its message back instead of losing it. */
+  #restoreCancelledMessage(conversation: ConversationState): void {
+    const sent = this.#sentMessage;
+    if (sent === undefined) return;
+    const message = conversation.messages.findLast((candidate) => candidate.role === "user");
+    const turnId = message?.metadata?.turnId;
+    if (message === undefined || turnId === undefined || userText(message) !== sent) return;
+    const status = conversation.turns[turnId]?.status;
+    if (status === undefined || status === "active") return;
+    this.#sentMessage = undefined;
+    if (status === "cancelled" && !this.#cancelRequested) this.#renderer.restoreDraft?.(sent);
+  }
+
+  /** Session failures render from the conversation; other errors get one block each. */
+  #reportSessionError(error: Error | undefined, sessionFailed: boolean): void {
+    if (error === undefined || error === this.#reportedError) return;
+    this.#reportedError = error;
+    if (sessionFailed) return;
+    // A stranded session is a property of that session, not of the connection.
+    if (!this.#renderStrandedSession(error)) {
+      this.#remoteConnection?.reportFailure(error);
+      this.#renderer.renderError?.("Error", this.#formatTransportError(error));
+    }
+  }
+
+  #renderSendError(title: string, error: unknown): void {
+    if (this.#renderStrandedSession(error)) return;
+    this.#renderer.renderError?.(title, this.#formatTransportError(error));
+  }
+
+  #strandedSessionNotice(error: unknown): string | undefined {
+    return formatStrandedSessionNotice(error, {
+      localServer: this.#appRoot !== undefined,
+      sessionId: this.#store.snapshot.session?.sessionId,
+    });
+  }
+
+  /** Renders a stranded-session notice; false when `error` is anything else. */
+  #renderStrandedSession(error: unknown): boolean {
+    const notice = this.#strandedSessionNotice(error);
+    if (notice === undefined) return false;
+    this.#renderer.renderError?.("Session stranded", notice);
+    return true;
+  }
+
+  #reportFirstResponse(conversation: ConversationState): void {
+    if (!this.#onboard || this.#reportedFirstResponse) return;
+    const responded = conversation.messages.some(
+      (message) =>
+        message.role === "assistant" &&
+        message.parts.some((part) => part.type === "text" && part.text.length > 0),
+    );
+    if (!responded) return;
+    this.#reportedFirstResponse = true;
+    this.#onOnboardingStep?.({ flow: "onboarding", step: "first_response" });
+  }
+
+  /** Open requests the user can answer now, including while other work runs. */
+  #answerableInputs(): readonly ConversationInput[] {
+    return openConversationInputs(this.#store.snapshot.conversation).filter(
+      (input) => !this.#dismissedInputs.has(input.request.requestId),
+    );
+  }
+
+  /**
+   * Prompts for open requests one at a time and sends each answer as it is given, so an agent
+   * waiting on one answer resumes without waiting for the rest.
+   */
+  async #answerInputs(title: string): Promise<void> {
+    for (let answered = 0; ; answered += 1) {
+      const inputs = this.#answerableInputs();
+      const input = inputs[0];
+      if (input === undefined) return;
+      const context = inputContext(input, answered + 1, answered + inputs.length);
+      const response = await this.#readInputResponse(input.request, context, title);
+      if (response === undefined) {
+        // A skipped question stays open; the server decides whether the
+        // user's next message answers, dismisses, or leaves it.
+        this.#dismissedInputs.add(input.request.requestId);
+        continue;
+      }
+      void this.#store.send({ inputResponses: [response] }).catch((error: unknown) => {
+        if (this.#disposed || isAbortError(error)) return;
+        this.#renderSendError("Error", error);
+      });
+    }
+  }
+
+  async #readInputResponse(
+    request: InputRequest,
+    context: AgentTUIInputContext | undefined,
+    title: string,
+  ): Promise<InputResponse | undefined> {
+    if (request.kind === "tool-approval") {
+      if (!this.#renderer.readToolApproval) {
+        throw new Error(
+          "Tool approval was requested, but the renderer does not support tool approval input.",
+        );
+      }
+      const response = await this.#renderer.readToolApproval(
+        toAgentTUIToolApprovalRequest(request, context),
+        { title },
       );
-    } else if (this.#renderer.renderSessionBoundary !== undefined) {
+      return { requestId: request.requestId, optionId: response.approved ? "approve" : "cancel" };
+    }
+    if (!this.#renderer.readInputQuestion) {
+      throw new Error(
+        "An interactive question was requested, but the renderer does not support input questions.",
+      );
+    }
+    const response = await this.#renderer.readInputQuestion(
+      toAgentTUIInputQuestion(request, context),
+      { title },
+    );
+    if (response === undefined) return undefined;
+    const inputResponse: InputResponse = { requestId: request.requestId };
+    if (response.optionId !== undefined) inputResponse.optionId = response.optionId;
+    if (response.text !== undefined) inputResponse.text = response.text;
+    return inputResponse;
+  }
+
+  /**
+   * Starts a fresh session after the current one ended or was abandoned. The
+   * transcript stays on screen; server-side context is gone with the old
+   * session.
+   */
+  #replaceSession(notice?: string): void {
+    if (this.#renderer.renderSessionBoundary !== undefined) {
       this.#renderer.renderSessionBoundary();
-    } else {
+    } else if (notice === undefined) {
       this.#renderer.renderNotice?.(
         "Session ended — started a new session. Earlier context was cleared.",
       );
     }
+    if (notice !== undefined) this.#renderer.renderNotice?.(notice);
+    this.#resetConversation();
+  }
+
+  #resetConversation(): void {
+    this.#store.reset();
+    this.#clearRunnerState();
+  }
+
+  #clearRunnerState(): void {
+    this.#dismissedInputs.clear();
+    this.#handledHandoffs.clear();
+    this.#recordedFailures.clear();
+    this.#runtimeArtifacts?.clear();
+  }
+
+  /** Cancels the running turn without holding the composer; the store waits for its turn ID. */
+  #cancelTurn(): void {
+    this.#cancelRequested = true;
+    void this.#store.cancel().catch((error: unknown) => {
+      this.#renderer.renderNotice?.(`Couldn't cancel the turn: ${toErrorMessage(error)}`);
+    });
   }
 
   /** Runs a session mutation and gives every control command one completion policy. */
   async #runSessionCommand(input: {
     readonly absent: string;
-    readonly accepted?: string;
+    readonly accepted: string;
     readonly failed: string;
-    readonly dismissOnAccepted?: boolean;
-    readonly invoke: (session: ClientSession) => Promise<{ status: string }>;
-  }): Promise<boolean> {
-    const session = this.#session;
-    if (session === undefined) {
+    readonly invoke: () => Promise<{ status: string }>;
+  }): Promise<void> {
+    if (this.#store.snapshot.session === undefined) {
       this.#finishCommand({ kind: "result", summary: input.absent });
-      return false;
+      return;
     }
     try {
-      const result = await input.invoke(session);
+      const result = await input.invoke();
       if (result.status !== "accepted") {
         this.#finishCommand({ kind: "result", summary: input.absent });
-        return false;
+        return;
       }
-      this.#finishCommand(
-        input.dismissOnAccepted === true
-          ? { kind: "dismiss" }
-          : { kind: "result", summary: input.accepted },
-      );
-      return true;
+      this.#finishCommand({ kind: "result", summary: input.accepted });
     } catch (error) {
       this.#finishCommand({
         kind: "result",
-        message: toErrorMessage(error),
+        message: this.#strandedSessionNotice(error) ?? toErrorMessage(error),
         summary: input.failed,
       });
-      return false;
     }
   }
 
-  /** Resets the durable owner before clearing the local conversation view. */
-  async #resetCurrentSession(): Promise<boolean> {
-    if (this.#session === undefined) {
-      this.#startNewSession();
-      this.#renderer.reset?.();
-      return true;
-    }
+  /** Retires the durable session before clearing the local conversation view. */
+  async #resetSession(): Promise<void> {
     try {
-      await this.#session.reset();
+      await this.#store.retire();
     } catch (error) {
       this.#finishCommand({
         kind: "result",
         message: `Couldn't reset the session: ${toErrorMessage(error)}`,
       });
-      return false;
+      return;
     }
-
-    this.#startNewSession();
+    this.#clearRunnerState();
     this.#renderer.reset?.();
-    return true;
+    this.#finishCommand({ kind: "dismiss" });
   }
 
-  async #readPromptWithIdleRefresh(options: AgentTUISessionOptions): Promise<string | undefined> {
-    if (!this.#renderer.readPrompt) {
-      return undefined;
+  /**
+   * Reads the composer, closing it when a request or setup needs the keyboard.
+   * Resolves `undefined` only for that runner-owned close; a renderer that
+   * ends input on its own ends the session.
+   */
+  async #readInput(options: AgentTUISessionOptions): Promise<AgentTUIInput | undefined> {
+    if (!this.#renderer.readInput) {
+      throw new Error("The renderer does not support prompt input.");
     }
+    const controller = new AbortController();
+    this.#inputController = controller;
+    try {
+      const input = await this.#withIdleRefresh(
+        this.#renderer.readInput({ ...options, signal: controller.signal }),
+      );
+      if (input === undefined && !controller.signal.aborted) throw interruptedError();
+      return input;
+    } finally {
+      if (this.#inputController === controller) this.#inputController = undefined;
+    }
+  }
 
-    const prompt = this.#renderer.readPrompt(options);
+  /** Polls local dev artifacts while the composer is open, so HMR stays current. */
+  async #withIdleRefresh<T>(prompt: Promise<T>): Promise<T> {
     const runtimeArtifacts = this.#runtimeArtifacts;
     if (runtimeArtifacts === undefined) {
       return await prompt;
@@ -1371,287 +1190,17 @@ export class EveTUIRunner {
     }
   }
 
-  /**
-   * Gives the idle prompt exclusive ownership handoff with `send()`:
-   * follow while the prompt is open, then abort and await the follow before
-   * returning the submitted prompt. Both readers advance the same session
-   * cursor, so the next send starts after every wake event already rendered.
-   */
-  async #readPromptFollowingSession(options: AgentTUISessionOptions): Promise<string | undefined> {
-    const prompt = this.#readPromptWithIdleRefresh(options);
-    if (
-      this.#renderer.renderIdleStream === undefined ||
-      this.#session?.state.sessionId === undefined
-    ) {
-      return await prompt;
-    }
-
-    const controller = new AbortController();
-    const follow = this.#followIdleSession(controller.signal, options).catch((error: unknown) => {
-      if (!controller.signal.aborted) {
-        this.#renderer.renderNotice?.(
-          `Stopped following session updates: ${toErrorMessage(error)}`,
-        );
+  /** Queues setup for registry items whose install needs the terminal. */
+  #queueRegistryHandoffs(conversation: ConversationState): void {
+    if (this.#appRoot === undefined) return;
+    for (const { callId, address } of registryHandoffs(conversation)) {
+      if (this.#handledHandoffs.has(callId)) continue;
+      this.#handledHandoffs.add(callId);
+      if (this.#activeRegistrySetup === address || this.#pendingRegistrySetups.includes(address)) {
+        continue;
       }
-    });
-    try {
-      return await prompt;
-    } finally {
-      controller.abort();
-      await follow;
+      this.#pendingRegistrySetups.push(address);
     }
-  }
-
-  /**
-   * Holds one boundary-blind parent stream open, splitting it into complete
-   * turns for rendering. The underlying iterator stays shared across those
-   * turns and advances the ClientSession cursor once it is stopped.
-   */
-  async #followIdleSession(signal: AbortSignal, options: AgentTUISessionOptions): Promise<void> {
-    const sourceSession = this.#session;
-    if (sourceSession === undefined) return;
-    let reconnectDelayMs = idleSessionReconnectBaseDelayMs;
-    while (!signal.aborted) {
-      const source = sourceSession.stream({ signal })[Symbol.asyncIterator]();
-      let deliveredEvent = false;
-      try {
-        while (!signal.aborted) {
-          let consumed = false;
-          const turn = {
-            async *[Symbol.asyncIterator]() {
-              while (!signal.aborted) {
-                const next = await source.next();
-                if (next.done === true) return;
-                consumed = true;
-                deliveredEvent = true;
-                yield next.value;
-                if (isCurrentTurnBoundaryEvent(next.value)) return;
-              }
-            },
-          };
-          const result = this.#createTUIStreamResult(turn, () => {}, sourceSession);
-          await this.#renderer.renderIdleStream!(result, {
-            ...options,
-            continueSession: true,
-          });
-          this.#enterPendingConnectionAuthorization(result);
-          if (
-            (result.turnState?.pendingApprovals.length ?? 0) > 0 ||
-            (result.turnState?.pendingQuestions.length ?? 0) > 0
-          ) {
-            this.#idleInputResult = {
-              events: (async function* () {})(),
-              turnState: result.turnState,
-            };
-            this.#renderer.suspendPromptForInput?.();
-            return;
-          }
-          if (
-            result.turnState?.boundaryEvent === "session.completed" ||
-            result.turnState?.boundaryEvent === "session.failed"
-          ) {
-            return;
-          }
-          if (!consumed) break;
-        }
-      } finally {
-        await source.return?.();
-      }
-      reconnectDelayMs = deliveredEvent
-        ? idleSessionReconnectBaseDelayMs
-        : Math.min(reconnectDelayMs * 2, idleSessionReconnectMaxDelayMs);
-      if (!signal.aborted) await abortableDelay(reconnectDelayMs, signal);
-    }
-  }
-
-  async #streamTurn(input: {
-    prompt: string | undefined;
-    inputResponses: readonly InputResponse[] | undefined;
-  }): Promise<AgentTUIStreamResult> {
-    // Backs the result's `abort`: lifecycle interruption fires it so the
-    // in-flight stream read settles instead of dangling until server close.
-    const abortController = new AbortController();
-    const sendInput: {
-      message?: string;
-      inputResponses?: readonly InputResponse[];
-      signal?: AbortSignal;
-    } = { signal: abortController.signal };
-    if (input.prompt !== undefined) sendInput.message = input.prompt;
-    if (input.inputResponses !== undefined && input.inputResponses.length > 0) {
-      sendInput.inputResponses = input.inputResponses;
-    }
-
-    let response: Awaited<ReturnType<ClientSession["send"]>>;
-    const sourceSession = this.#session;
-    try {
-      if (this.#runtimeArtifacts !== undefined) {
-        await this.#runtimeArtifacts.refresh({
-          inputResponses: sendInput.inputResponses,
-          message: sendInput.message,
-          onRuntimeArtifactsChanged: () => this.#handleRuntimeArtifactsChanged(),
-        });
-      }
-
-      if (sendInput.message !== undefined && (sendInput.inputResponses?.length ?? 0) === 0) {
-        this.#renderer.flushDelayedDevBuildErrors?.();
-      }
-
-      if (this.#session === undefined) {
-        if (this.#client === undefined) {
-          throw new Error("Cannot create a session without an eve client.");
-        }
-        if (sendInput.message === undefined) {
-          throw new Error("Cannot answer an input request before the session starts.");
-        }
-        const created = await this.#client.sessions.create({
-          ...sendInput,
-          message: sendInput.message,
-        });
-        this.#session = created.session;
-        response = created.response;
-      } else {
-        response =
-          sendInput.inputResponses === undefined
-            ? await this.#session.send(sendInput.message!, {
-                signal: sendInput.signal,
-                turnPolicy: "queue",
-              })
-            : await this.#session.respond(sendInput.inputResponses, { signal: sendInput.signal });
-      }
-    } catch (error) {
-      if (isInterruptedError(error)) throw error;
-      // Dispatching the turn failed before any stream opened (transport
-      // error, auth challenge, …). Surface it through the same error path
-      // as in-stream failures so it renders as an inline region right
-      // where the assistant response would have appeared, then let the
-      // loop recover onto a fresh session before the next prompt.
-      this.#remoteConnection?.reportFailure(error);
-      this.#failedSession = sourceSession;
-      return {
-        events: errorOnlyTUIStream({
-          errorText: this.#formatTransportError(error),
-        }),
-        turnState: createTurnState(),
-      };
-    }
-
-    return this.#createTUIStreamResult(response, () => abortController.abort(), this.#session);
-  }
-
-  /**
-   * Requests cooperative cancellation of the streaming turn and retries
-   * while the turn stays live. A key-driven cancel that lands before the owner
-   * begins the turn (i.e. before `turn.started` reaches the client) resolves as a
-   * benign `no_active_turn` and would otherwise be silently lost, leaving
-   * the TUI showing "Cancelling…" while the turn runs to completion.
-   * Retrying until the stream reaches its boundary closes that window.
-   *
-   * Once `turn.started` names the turn, each retry carries its id, so a
-   * GUARDED retry that outlives the boundary is a benign no-op. An
-   * UNGUARDED attempt (turnId not yet known) has a residual race: if this
-   * turn's boundary, the queue drain, and the next turn's dispatch all
-   * complete while the request is in flight, the cancel can land on the
-   * next turn. Closing it needs turn-scoped cancel admission server-side
-   * (the #867 ledger); until then the renderer backstops it — a
-   * `turn.cancelled` arriving without a local cancel request in that stream
-   * restores the submitted message into the prompt instead of losing it.
-   * Single-flight per turn: repeated cancel keys join the running loop.
-   */
-  async #requestTurnCancellation(
-    turnState: AgentTUITurnState,
-    sourceSession: ClientSession | undefined,
-  ): Promise<void> {
-    if (turnState.cancelInFlight === true) return;
-    turnState.cancelInFlight = true;
-    try {
-      for (let attempt = 0; attempt < turnCancelAttempts; attempt += 1) {
-        if (turnState.boundaryEvent !== undefined || turnState.aborted === true) return;
-        const turnId = turnState.turnId;
-        try {
-          const result = await sourceSession?.cancel(turnId === undefined ? undefined : { turnId });
-          // Accepted means the turn's cancellation hook consumed the
-          // request; the turn settles at its next safe boundary.
-          if (result?.status === "accepted") return;
-        } catch {
-          // No accepted session yet or a transport failure — retry below;
-          // lifecycle interruption remains the hard client-side escape hatch.
-        }
-        await delayMs(turnCancelRetryDelayMs);
-      }
-    } finally {
-      turnState.cancelInFlight = false;
-    }
-  }
-
-  /** Follows the current session without dispatching another turn. */
-  #streamCurrentSession(): AgentTUIStreamResult {
-    if (this.#session === undefined) {
-      throw new Error("Cannot stream a session before its first turn is accepted.");
-    }
-    const abortController = new AbortController();
-    const sourceSession = this.#session;
-    return this.#createTUIStreamResult(
-      sourceSession.stream({ signal: abortController.signal }),
-      () => abortController.abort(),
-      sourceSession,
-    );
-  }
-
-  #createTUIStreamResult(
-    events: AsyncIterable<MessageStreamEvent>,
-    abort: () => void,
-    sourceSession: ClientSession | undefined,
-  ): AgentTUIStreamResult {
-    const turnState = createTurnState();
-    const steering =
-      sourceSession === undefined ? undefined : new SteeringStream(events, sourceSession);
-    return {
-      steer: steering === undefined ? undefined : (message) => steering.send(message),
-      abort: () => {
-        turnState.aborted = true;
-        this.#failedSession = sourceSession;
-        steering?.abort();
-        abort();
-      },
-      cancel: () => {
-        void this.#requestTurnCancellation(turnState, sourceSession);
-      },
-      events: eveEventsToTUIStream({
-        onAssistantResponse: () => {
-          if (this.#onboard && !this.#reportedFirstResponse) {
-            this.#reportedFirstResponse = true;
-            this.#onOnboardingStep?.({ flow: "onboarding", step: "first_response" });
-          }
-        },
-        events: steering ?? events,
-        pendingInputRequests: this.#pendingInputRequests,
-        turnState,
-        onSubagentCalled: (called) => this.#subagentPump.begin(called),
-        onSubagentBackgrounded: (callId) => this.#subagentPump.background(callId),
-        onSubagentCompleted: (callId) => this.#subagentPump.settle(callId),
-        // Cancellation is turn-scoped; background descendants survive.
-        onTurnCancelled: (turnId) => this.#subagentPump.settleCancelledTurn(turnId),
-        onConnectionAuthRequired: (event) => this.#handleConnectionAuthRequired(event),
-        onConnectionAuthCompleted: (event) => this.#handleConnectionAuthCompleted(event),
-        onRegistryHandoff:
-          this.#appRoot === undefined
-            ? undefined
-            : async (address) => this.#queueRegistrySetup(address),
-        onTerminalFailure: () => {
-          this.#failedSession = sourceSession;
-        },
-        failureHintOverride: this.#appRoot === undefined ? undefined : localFailureHint,
-      }),
-      turnState,
-    };
-  }
-
-  #queueRegistrySetup(address: string): void {
-    if (this.#activeRegistrySetup === address || this.#pendingRegistrySetups.includes(address)) {
-      return;
-    }
-    this.#pendingRegistrySetups.push(address);
-    if (this.#readingPrompt) this.#renderer.suspendPromptForInput?.();
   }
 
   async #openRegistrySetup(address: string): Promise<void> {
@@ -1882,7 +1431,7 @@ export class EveTUIRunner {
     try {
       await this.#renderer.traceViewer.open({
         appRoot: this.#appRoot,
-        sessionId: this.#session?.state.sessionId,
+        sessionId: this.#store.snapshot.session?.sessionId,
         reference: argument === "" ? undefined : argument,
       });
     } catch (error) {
@@ -1915,7 +1464,7 @@ export class EveTUIRunner {
   }
 
   /**
-   * Applies `/loglevel [all|stderr|sandbox|none]` against the renderer's buffered
+   * Applies `/loglevel [none|error|warn|debug|all]` against the renderer's buffered
    * log filter and returns the one-line outcome. A bare `/loglevel` reports
    * the current mode instead of changing it.
    */
@@ -1925,11 +1474,11 @@ export class EveTUIRunner {
       return "/loglevel is not available in this session.";
     }
     if (argument === "") {
-      return `Logs: ${renderer.logDisplayMode()}. Use /loglevel all|stderr|sandbox|none — logs stay buffered, so switching also hides or restores past lines.`;
+      return `Logs: ${renderer.logDisplayMode()}. Use /loglevel none|error|warn|debug|all — logs stay buffered, so switching also hides or restores past lines.`;
     }
     const mode = parseLogDisplayMode(argument);
     if (mode === undefined) {
-      return `Unknown log level "${argument}". Use all, stderr, sandbox, or none.`;
+      return `Unknown log level "${argument}". Use none, error, warn, debug, or all.`;
     }
     if (mode === renderer.logDisplayMode()) {
       return `Logs already set to ${mode}.`;
@@ -1938,10 +1487,12 @@ export class EveTUIRunner {
     switch (mode) {
       case "none":
         return "Logs hidden. Output stays buffered — /loglevel all restores it.";
-      case "stderr":
-        return "Showing stderr logs only.";
-      case "sandbox":
-        return "Showing sandbox logs only.";
+      case "error":
+        return "Showing errors.";
+      case "warn":
+        return "Showing warnings and errors.";
+      case "debug":
+        return "Showing all severity-tagged logs.";
       case "all":
         return "Showing all logs.";
     }
@@ -1993,73 +1544,89 @@ export class EveTUIRunner {
     void this.#refreshAgentInfo(true);
   }
 
-  #handleConnectionAuthRequired(event: AuthorizationRequiredStreamEvent): void {
-    const run: ConnectionAuthRun = {
-      name: event.data.name,
-      description: event.data.description,
-      state: "required",
-    };
-    if (event.data.authorization !== undefined) {
-      run.challenge = event.data.authorization;
+  /** Agents' own tool failures reach the diagnostics log whatever the subagent display mode. */
+  #recordAgentToolFailures(conversation: ConversationState): void {
+    const diagnostics = this.#diagnostics;
+    if (diagnostics === undefined) return;
+    for (const agent of Object.values(conversation.agents)) {
+      if (agent.observation.status === "not-followed") continue;
+      for (const message of agent.observation.conversation?.messages ?? []) {
+        for (const part of message.parts) {
+          if (part.type !== "dynamic-tool" || part.state !== "output-error") continue;
+          if (this.#recordedAgentToolFailures.has(part.toolCallId)) continue;
+          this.#recordedAgentToolFailures.add(part.toolCallId);
+          diagnostics.append({
+            source: "tool",
+            summary: `${part.toolName} failed (subagent ${agent.name})`,
+            detail: part.errorText,
+          });
+        }
+      }
     }
-    if (event.data.webhookUrl !== undefined) {
-      run.webhookUrl = event.data.webhookUrl;
-    }
-    this.#connectionAuthRuns.set(event.data.name, run);
-    this.#emitConnectionAuthUpdate(run);
   }
 
-  /**
-   * Marks framework-owned OAuth challenges as parked only after the current
-   * turn has reached its `session.waiting` boundary. A `webhookUrl` is the
-   * runtime's proof that a later callback turn can complete the challenge.
-   */
-  #enterPendingConnectionAuthorization(result: AgentTUIStreamResult): boolean {
-    if (result.turnState?.boundaryEvent !== "session.waiting") {
-      return false;
+  /** Records session activity that the diagnostics log keeps regardless of display. */
+  #recordDiagnostics(event: MessageStreamEvent): void {
+    const diagnostics = this.#diagnostics;
+    if (diagnostics === undefined) return;
+    switch (event.type) {
+      case "turn.started":
+        this.#recordedFailures.clear();
+        break;
+      case "actions.requested":
+        for (const action of event.data.actions) {
+          const descriptor = normalizeActionRequest(action);
+          if (descriptor.kind === "tool-call") diagnostics.recordToolCall(descriptor.toolName);
+        }
+        break;
+      case "action.result":
+        if (isTaskRetryRefusal(event)) {
+          diagnostics.append({
+            source: "tool",
+            summary: `${normalizeActionResult(event.data.result).toolName} was refused for the model to retry`,
+            detail: event.data.error?.message ?? "Refused.",
+          });
+        } else if (event.data.status === "failed") {
+          diagnostics.append({
+            source: "tool",
+            summary: `${normalizeActionResult(event.data.result).toolName} failed`,
+            detail: event.data.error?.message ?? "Tool failed.",
+          });
+        }
+        break;
+      // A task call's receipt never fails; its task's outcome does.
+      case "task.settled":
+        if (event.data.status === "failed") {
+          diagnostics.append({
+            source: "tool",
+            summary: `${this.#store.snapshot.conversation.tasks[event.data.taskId]?.name ?? "A task"} failed`,
+            detail: event.data.error?.message ?? "Task failed.",
+          });
+        }
+        break;
+      case "agent.started":
+        diagnostics.recordSubagentDispatch(event.data.callId);
+        break;
+      case "step.completed":
+        diagnostics.recordStepUsage(event.data.usage);
+        break;
+      case "step.failed":
+      case "turn.failed":
+      case "session.failed": {
+        const key = failureKey(event);
+        if (this.#recordedFailures.has(key)) break;
+        this.#recordedFailures.add(key);
+        const message = formatFailureMessage(event);
+        const detail = formatFailureDetail(event) ?? message;
+        const hint = formatFailureHint(event);
+        diagnostics.append(
+          hint === undefined
+            ? { source: "workflow", summary: `Error: ${message}`, detail }
+            : { source: "workflow", summary: `Error: ${message}`, detail, hint },
+        );
+        break;
+      }
     }
-
-    let added = false;
-    for (const run of this.#connectionAuthRuns.values()) {
-      if (run.state !== "required" || run.webhookUrl === undefined) continue;
-      run.state = "pending";
-      this.#pendingConnectionAuths.add(run.name);
-      this.#emitConnectionAuthUpdate(run);
-      added = true;
-    }
-
-    if (added) {
-      this.#renderer.setConnectionAuthPendingCount?.(this.#pendingConnectionAuths.size);
-    }
-    return this.#pendingConnectionAuths.size > 0;
-  }
-
-  #handleConnectionAuthCompleted(event: AuthorizationCompletedStreamEvent): void {
-    const existing = this.#connectionAuthRuns.get(event.data.name);
-    const run: ConnectionAuthRun = existing ?? {
-      name: event.data.name,
-      description: "",
-      state: event.data.outcome,
-    };
-    run.state = event.data.outcome;
-    if (event.data.reason !== undefined) {
-      run.reason = event.data.reason;
-    }
-    this.#connectionAuthRuns.set(event.data.name, run);
-    this.#pendingConnectionAuths.delete(event.data.name);
-    this.#emitConnectionAuthUpdate(run);
-    this.#renderer.setConnectionAuthPendingCount?.(this.#pendingConnectionAuths.size);
-  }
-
-  #emitConnectionAuthUpdate(run: ConnectionAuthRun): void {
-    const update: ConnectionAuthUpdate = {
-      name: run.name,
-      description: run.description,
-      state: run.state,
-    };
-    if (run.challenge !== undefined) update.challenge = run.challenge;
-    if (run.reason !== undefined) update.reason = run.reason;
-    this.#renderer.upsertConnectionAuth?.(update);
   }
 }
 
@@ -2102,27 +1669,30 @@ function formatAgentUpdateNotice(
   return "Agent updated.";
 }
 
-type EveStreamTranslatorInput = {
-  events: AsyncIterable<MessageStreamEvent>;
-  onAssistantResponse?: () => void;
-  pendingInputRequests: Map<string, InputRequest>;
-  turnState: AgentTUITurnState;
-  onSubagentCalled?: (event: SubagentCalledStreamEvent) => void;
-  onSubagentBackgrounded?: (callId: string) => void;
-  onSubagentCompleted?: (callId: string) => void;
-  onTurnCancelled?: (turnId: string) => void;
-  onConnectionAuthRequired?: (event: AuthorizationRequiredStreamEvent) => void;
-  onConnectionAuthCompleted?: (event: AuthorizationCompletedStreamEvent) => void;
-  /** Opens a setup-bearing registry item in the existing `/add` flow. */
-  onRegistryHandoff?: (address: string) => Promise<void>;
-  onTerminalFailure?: (event: SessionFailedStreamEvent) => void;
-  /**
-   * Replaces a failure's structured hint with a surface-local one (the
-   * local TUI swaps gateway-auth remediation for the in-session `/model`
-   * fix). Returning `undefined` keeps the hint the harness attached.
-   */
-  failureHintOverride?: (event: FailureStreamEvent) => string | undefined;
-};
+/** Tool results in the conversation that hand a registry install to the terminal. */
+function registryHandoffs(
+  conversation: ConversationState,
+): Array<{ readonly callId: string; readonly address: string }> {
+  const handoffs: Array<{ callId: string; address: string }> = [];
+  const collect = (state: ConversationState, subagentName: string | undefined) => {
+    for (const message of state.messages) {
+      for (const part of message.parts) {
+        if (!isTerminalToolCallPart(part) || part.state !== "output-available" || part.partial) {
+          continue;
+        }
+        const address = registryHandoffAddress(subagentName, part.toolName, part.output);
+        if (address !== undefined) handoffs.push({ callId: part.toolCallId, address });
+      }
+    }
+  };
+  collect(conversation, undefined);
+  for (const agent of Object.values(conversation.agents)) {
+    if (agent.observation.status === "not-followed") continue;
+    const child = agent.observation.conversation;
+    if (child !== undefined) collect(child, agent.name);
+  }
+  return handoffs;
+}
 
 /** Returns the registry address carried by a packaged self-modification terminal handoff. */
 export function registryHandoffAddress(
@@ -2142,635 +1712,36 @@ export function registryHandoffAddress(
     : undefined;
 }
 
-/**
- * Reduces one eve session-stream turn into renderer-native TUI events.
- * eve events name assistant/reasoning sections by `turnId` + `stepIndex`;
- * those ids become stable block ids in the terminal renderer.
- */
-async function* eveEventsToTUIStream(
-  input: EveStreamTranslatorInput,
-): AsyncIterable<AgentTUIStreamEvent> {
-  const {
-    events,
-    pendingInputRequests,
-    turnState,
-    onSubagentCalled,
-    onSubagentBackgrounded,
-    onSubagentCompleted,
-    onTurnCancelled,
-    onConnectionAuthRequired,
-    onConnectionAuthCompleted,
-    onRegistryHandoff,
-    onTerminalFailure,
-    failureHintOverride,
-  } = input;
-  const textParts = new Map<string, StreamPartState>();
-  const reasoningParts = new Map<string, StreamPartState>();
-  const toolNames = new Map<string, string>();
-  // Dropping re-delivered events here means every case below is a new emission.
-  const seenEvents = createEventDeduper();
-  // Counts `step.started` events. The harness reuses `stepIndex` across the
-  // model calls of one turn (e.g. the post-subagent call restarts at the same
-  // index), so a part key alone cannot distinguish a new message under a
-  // reused key from a re-emission. A fresh `step.started` since the part
-  // completed is the discriminator.
-  let stepEpoch = 0;
-  const knownToolCalls = new Set<string>();
-  const seenInputRequestIds = new Set<string>();
-  // The harness reports one underlying failure as a cascade (`step.failed` →
-  // `turn.failed` → `session.failed`) with an identical payload on each
-  // event. Render it once, not three times.
-  const emittedFailures = new Set<string>();
-  let sentFinish = false;
-  let visibleTurnCompleted = false;
-  let latestStepUsage: StepCompletedStreamEvent["data"]["usage"] | undefined;
-
-  for await (const event of events) {
-    if (!seenEvents.admit(event)) {
-      continue;
-    }
-
-    if (visibleTurnCompleted && isPostTurnVisibleEvent(event)) {
-      continue;
-    }
-
-    switch (event.type) {
-      case "session.started":
-      case "message.received":
-        // Boundary / metadata events with no direct UI surface.
-        break;
-
-      case "turn.started":
-        // Recorded so key-driven cancellation can scope its request to the
-        // turn the user is watching; a cancel that arrives after the
-        // boundary then no-ops instead of hitting the next turn.
-        if (event.data.turnId !== turnState.turnId) visibleTurnCompleted = false;
-        turnState.turnId = event.data.turnId;
-        yield { type: "turn-start", turnId: event.data.turnId };
-        break;
-
-      case "step.started":
-        stepEpoch += 1;
-        yield { type: "step-start", modelId: event.data.modelId };
-        break;
-
-      case "step.completed": {
-        const stepEvent = event as StepCompletedStreamEvent;
-        latestStepUsage = stepEvent.data.usage;
-        yield* closeOpenParts(textParts, "assistant-complete", stepEpoch);
-        yield* closeOpenParts(reasoningParts, "reasoning-complete", stepEpoch);
-        yield { type: "step-finish", usage: stepEvent.data.usage };
-        break;
-      }
-
-      case "message.appended": {
-        const appended = event as MessageAppendedStreamEvent;
-        const base = textPartId(appended.data.turnId, appended.data.stepIndex);
-        const state = partStateFor(textParts, base);
-
-        if (state.completed) {
-          // No intervening `step.started`: a retry of the same model call.
-          if (stepEpoch <= state.completedEpoch) break;
-          // A fresh model call reusing this part key (the harness restarts
-          // `stepIndex` after a park/resume, e.g. post-subagent): open a new
-          // message generation so it renders as its own block.
-          state.generation += 1;
-          state.text = "";
-          state.completed = false;
-        }
-
-        const delta = appended.data.messageDelta;
-        if (delta.length === 0) break;
-        state.text += delta;
-        if (delta) input.onAssistantResponse?.();
-        yield { type: "assistant-delta", id: partGenerationId(base, state.generation), delta };
-        break;
-      }
-
-      case "message.completed": {
-        const base = textPartId(event.data.turnId, event.data.stepIndex);
-        const state = partStateFor(textParts, base);
-        const message = event.data.message;
-
-        if (state.completed) {
-          if (message === null) break;
-          if (stepEpoch <= state.completedEpoch) break;
-          // Channels that skip per-delta events: a new full message under a
-          // reused key after a fresh model call.
-          state.generation += 1;
-          state.text = message;
-          state.completedEpoch = stepEpoch;
-          yield {
-            type: "assistant-complete",
-            id: partGenerationId(base, state.generation),
-            text: message,
-          };
-          break;
-        }
-
-        const id = partGenerationId(base, state.generation);
-        if (message !== null) {
-          if (state.text.length === 0) {
-            state.text = message;
-            state.completed = true;
-            state.completedEpoch = stepEpoch;
-            yield { type: "assistant-complete", id, text: message };
-          } else if (message.startsWith(state.text)) {
-            const suffix = message.slice(state.text.length);
-            if (suffix.length > 0) {
-              if (suffix) input.onAssistantResponse?.();
-              yield { type: "assistant-delta", id, delta: suffix };
-            }
-            state.text = message;
-            state.completed = true;
-            state.completedEpoch = stepEpoch;
-            yield { type: "assistant-complete", id };
-          } else {
-            state.text = message;
-            state.completed = true;
-            state.completedEpoch = stepEpoch;
-            yield { type: "assistant-complete", id, text: message };
-          }
-        } else if (state.text.length > 0) {
-          state.completed = true;
-          state.completedEpoch = stepEpoch;
-          yield { type: "assistant-complete", id };
-        }
-        break;
-      }
-
-      case "reasoning.appended": {
-        const appended = event as ReasoningAppendedStreamEvent;
-        const base = reasoningPartId(appended.data.turnId, appended.data.stepIndex);
-        const state = partStateFor(reasoningParts, base);
-
-        if (state.completed) {
-          if (stepEpoch <= state.completedEpoch) break;
-          state.generation += 1;
-          state.text = "";
-          state.completed = false;
-        }
-
-        const delta = appended.data.reasoningDelta;
-        if (delta.length === 0) break;
-        state.text += delta;
-        yield { type: "reasoning-delta", id: partGenerationId(base, state.generation), delta };
-        break;
-      }
-
-      case "reasoning.completed": {
-        const base = reasoningPartId(event.data.turnId, event.data.stepIndex);
-        const state = partStateFor(reasoningParts, base);
-        const next = event.data.reasoning;
-
-        if (state.completed) {
-          if (next.length === 0) break;
-          if (stepEpoch <= state.completedEpoch) break;
-          state.generation += 1;
-          state.text = next;
-          state.completedEpoch = stepEpoch;
-          const id = partGenerationId(base, state.generation);
-          yield { type: "reasoning-delta", id, delta: next };
-          yield { type: "reasoning-complete", id };
-          break;
-        }
-
-        const id = partGenerationId(base, state.generation);
-        if (state.text.length === 0 && next.length > 0) {
-          state.text = next;
-          yield { type: "reasoning-delta", id, delta: next };
-        } else if (next.length > 0 && !next.startsWith(state.text)) {
-          yield { type: "reasoning-complete", id };
-          state.generation += 1;
-          state.text = next;
-          state.completed = true;
-          state.completedEpoch = stepEpoch;
-          const replacementId = partGenerationId(base, state.generation);
-          yield { type: "reasoning-delta", id: replacementId, delta: next };
-          yield { type: "reasoning-complete", id: replacementId };
-          break;
-        }
-
-        state.completed = true;
-        state.completedEpoch = stepEpoch;
-        yield { type: "reasoning-complete", id };
-        break;
-      }
-
-      case "actions.requested": {
-        const data = (event as ActionsRequestedStreamEvent).data;
-        const actions = data.actions.filter((action) => action.kind === "tool-call");
-        if (actions.length === 0) break;
-
-        for (const action of actions) {
-          toolNames.set(action.callId, action.toolName);
-          if (knownToolCalls.has(action.callId)) continue;
-          knownToolCalls.add(action.callId);
-          yield {
-            type: "tool-call",
-            toolCallId: action.callId,
-            toolName: action.toolName,
-            input: action.input,
-          };
-        }
-        break;
-      }
-
-      case "input.requested": {
-        const data = (event as InputRequestedStreamEvent).data;
-        const requests = data.requests.filter((request) => request.action.kind === "tool-call");
-        if (requests.length === 0) break;
-
-        for (const request of requests) {
-          const toolCallId = request.action.callId;
-          toolNames.set(toolCallId, request.action.toolName);
-
-          // The session-limit continuation is harness-authored — no model
-          // tool call exists behind it, so fabricating a transcript entry
-          // would render a phantom call. Its question rendering already
-          // carries the prompt copy.
-          if (request.kind !== "session-limit" && !knownToolCalls.has(toolCallId)) {
-            knownToolCalls.add(toolCallId);
-            yield {
-              type: "tool-call",
-              toolCallId,
-              toolName: request.action.toolName,
-              input: request.action.input,
-            };
-          }
-
-          if (seenInputRequestIds.has(request.requestId)) continue;
-          seenInputRequestIds.add(request.requestId);
-          pendingInputRequests.set(request.requestId, request);
-
-          if (request.kind !== "tool-approval") {
-            upsertPendingQuestion(turnState, request);
-            continue;
-          }
-
-          upsertPendingApproval(turnState, request);
-          yield {
-            type: "tool-approval-request",
-            approvalId: request.requestId,
-            toolCallId,
-          };
-        }
-        break;
-      }
-
-      case "approval.candidate": {
-        if (event.data.outcome === "pending") break;
-        const request = pendingInputRequests.get(event.data.requestId);
-        if (request !== undefined) upsertPendingApproval(turnState, request);
-        break;
-      }
-
-      case "approval.settled":
-      case "input.resolved": {
-        const requestIds = new Set(
-          event.type === "input.resolved"
-            ? event.data.resolutions.map((resolution) => resolution.requestId)
-            : [event.data.requestId],
-        );
-        for (const requestId of requestIds) pendingInputRequests.delete(requestId);
-        turnState.pendingApprovals = turnState.pendingApprovals.filter(
-          (request) => !requestIds.has(request.approvalId),
-        );
-        turnState.pendingQuestions = turnState.pendingQuestions.filter(
-          (request) => !requestIds.has(request.requestId),
-        );
-        break;
-      }
-
-      case "action.result": {
-        const resultEvent = event as ActionResultStreamEvent;
-        const result = resultEvent.data.result;
-        const output = "output" in result ? result.output : undefined;
-        if (
-          resultEvent.data.status === "completed" &&
-          isJsonObjectValue(output) &&
-          output.status === "working" &&
-          typeof output.taskId === "string" &&
-          typeof output.agentId === "string"
-        ) {
-          onSubagentBackgrounded?.(result.callId);
-        }
-        if (resultEvent.data.result.kind !== "tool-result") {
-          break;
-        }
-        const callId = resultEvent.data.result.callId;
-        if (!knownToolCalls.has(callId)) {
-          // Results for calls this turn never announced (e.g. subagent
-          // dispatches, which surface through the subagent section instead)
-          // have no tool block to attach to.
-          break;
-        }
-        switch (resultEvent.data.status) {
-          case "completed": {
-            const output = resultEvent.data.result.output;
-            yield {
-              type: "tool-result",
-              toolCallId: callId,
-              output,
-            };
-            const address = registryHandoffAddress(undefined, toolNames.get(callId), output);
-            if (address !== undefined) await onRegistryHandoff?.(address);
-            break;
-          }
-          case "failed":
-            yield {
-              type: "tool-error",
-              toolCallId: callId,
-              errorText: formatActionResultError(resultEvent),
-            };
-            break;
-          case "rejected":
-            yield {
-              type: "tool-rejected",
-              toolCallId: callId,
-              reason: formatActionResultError(resultEvent),
-            };
-            break;
-        }
-        break;
-      }
-
-      case "step.failed":
-      case "turn.failed": {
-        const failure = toFailureEvent(event, emittedFailures, failureHintOverride);
-        if (failure) yield failure;
-        break;
-      }
-
-      case "session.failed": {
-        // Terminal: the server session is dead. Flag the runner so it can
-        // recover onto a fresh session before the next prompt.
-        turnState.sawSessionFailure = true;
-        onTerminalFailure?.(event as SessionFailedStreamEvent);
-        const failure = toFailureEvent(event, emittedFailures, failureHintOverride);
-        if (failure) yield failure;
-        turnState.boundaryEvent = event.type;
-        yield* closeOpenParts(textParts, "assistant-complete", stepEpoch);
-        yield* closeOpenParts(reasoningParts, "reasoning-complete", stepEpoch);
-        yield {
-          type: "finish",
-          usage: latestStepUsage,
-        };
-        sentFinish = true;
-        return;
-      }
-
-      case "session.waiting":
-      case "session.completed":
-        turnState.boundaryEvent = event.type;
-        yield* closeOpenParts(textParts, "assistant-complete", stepEpoch);
-        yield* closeOpenParts(reasoningParts, "reasoning-complete", stepEpoch);
-        yield {
-          type: "finish",
-          usage: latestStepUsage,
-        };
-        sentFinish = true;
-        return;
-
-      case "turn.completed":
-        visibleTurnCompleted = true;
-        yield* closeOpenParts(textParts, "assistant-complete", stepEpoch);
-        yield* closeOpenParts(reasoningParts, "reasoning-complete", stepEpoch);
-        break;
-
-      case "turn.cancelled":
-        // Explicit cooperative cancellation preserves the session.
-        // `session.waiting` follows and finishes the stream normally.
-        onTurnCancelled?.(event.data.turnId);
-        yield* closeOpenParts(textParts, "assistant-complete", stepEpoch);
-        yield* closeOpenParts(reasoningParts, "reasoning-complete", stepEpoch);
-        yield { type: "turn-cancelled" };
-        break;
-
-      case "subagent.called": {
-        // Re-delivery within this translator was filtered above; run creation
-        // and re-entry from a later translator live in the pump's begin().
-        onSubagentCalled?.(event as SubagentCalledStreamEvent);
-        break;
-      }
-
-      case "subagent.started":
-      case "subagent.event":
-        // `subagent.started` and `subagent.event` are not emitted by the
-        // current harness — the parent stream only sees `called` and
-        // `completed`. All intermediate child content is observed via
-        // the runner's parallel child-session stream pump.
-        break;
-
-      case "subagent.completed": {
-        const completed = event as SubagentCompletedStreamEvent;
-        if (completed.data.backgroundTask === undefined) {
-          onSubagentCompleted?.(completed.data.callId);
-        } else {
-          onSubagentBackgrounded?.(completed.data.callId);
-        }
-        break;
-      }
-
-      case "authorization.required":
-        onConnectionAuthRequired?.(event as AuthorizationRequiredStreamEvent);
-        break;
-
-      case "authorization.completed":
-        onConnectionAuthCompleted?.(event as AuthorizationCompletedStreamEvent);
-        break;
-
-      default:
-        // compaction.* — ignored for v1.
-        break;
-    }
-  }
-
-  if (!sentFinish) {
-    yield* closeOpenParts(textParts, "assistant-complete", stepEpoch);
-    yield* closeOpenParts(reasoningParts, "reasoning-complete", stepEpoch);
-    yield { type: "finish", usage: latestStepUsage };
-  }
+function inputContext(
+  input: ConversationInput,
+  index: number,
+  total: number,
+): AgentTUIInputContext | undefined {
+  const context: AgentTUIInputContext = {};
+  if (total > 1) context.position = { index, total };
+  if (input.taskId !== undefined) context.taskId = input.taskId;
+  return context.position === undefined && context.taskId === undefined ? undefined : context;
 }
 
-/**
- * A single-turn stream that carries only an error. Used when dispatching
- * the turn throws before any real stream opens, so the failure flows
- * through the renderer's normal error path and renders as one inline
- * region in transcript order.
- */
-async function* errorOnlyTUIStream(input: {
-  errorText: string;
-}): AsyncIterable<AgentTUIStreamEvent> {
-  yield { type: "error", errorText: input.errorText };
-  yield { type: "finish" };
-}
-
-function createTurnState(): AgentTUITurnState {
-  return {
-    aborted: false,
-    pendingApprovals: [],
-    pendingQuestions: [],
-    sawSessionFailure: false,
-  };
-}
-
-function upsertPendingApproval(state: AgentTUITurnState, request: InputRequest): void {
-  const approval = toAgentTUIToolApprovalRequest(request);
-  const index = state.pendingApprovals.findIndex(
-    (candidate) => candidate.approvalId === approval.approvalId,
-  );
-  if (index === -1) {
-    state.pendingApprovals.push(approval);
-  } else {
-    state.pendingApprovals[index] = approval;
-  }
-}
-
-function toAgentTUIToolApprovalRequest(request: InputRequest): AgentTUIToolApprovalRequest {
-  return {
+function toAgentTUIToolApprovalRequest(
+  request: InputRequest,
+  context: AgentTUIInputContext | undefined,
+): AgentTUIToolApprovalRequest {
+  const approval: AgentTUIToolApprovalRequest = {
     approvalId: request.requestId,
     toolCallId: request.action.callId,
     toolName: request.action.toolName,
+    prompt: request.prompt,
     input: request.action.input,
   };
+  if (context !== undefined) approval.context = context;
+  return approval;
 }
 
-function upsertPendingQuestion(state: AgentTUITurnState, request: InputRequest): void {
-  const index = state.pendingQuestions.findIndex(
-    (candidate) => candidate.requestId === request.requestId,
-  );
-  if (index === -1) {
-    state.pendingQuestions.push(request);
-  } else {
-    state.pendingQuestions[index] = request;
-  }
-}
-
-function textPartId(turnId: string, stepIndex: number): string {
-  return `text:${turnId}:${stepIndex}`;
-}
-
-function reasoningPartId(turnId: string, stepIndex: number): string {
-  return `reasoning:${turnId}:${stepIndex}`;
-}
-
-/**
- * Per-part-key accumulation state for one assistant text or reasoning trace.
- *
- * eve names parts by `turnId:stepIndex`, but the harness reuses `stepIndex`
- * across the model calls of one turn (the post-park call restarts at the same
- * index). `generation` disambiguates: each fresh model call that reuses a
- * completed key opens generation N+1, which renders as its own block.
- */
-type StreamPartState = {
-  generation: number;
-  /** Accumulated text of the current generation. */
-  text: string;
-  completed: boolean;
-  /** Value of the step epoch when the current generation completed. */
-  completedEpoch: number;
-};
-
-function partStateFor(parts: Map<string, StreamPartState>, base: string): StreamPartState {
-  let state = parts.get(base);
-  if (state === undefined) {
-    state = {
-      generation: 0,
-      text: "",
-      completed: false,
-      completedEpoch: 0,
-    };
-    parts.set(base, state);
-  }
-  return state;
-}
-
-/** Generation 0 keeps the bare key so block ids stay stable for the common case. */
-function partGenerationId(base: string, generation: number): string {
-  return generation === 0 ? base : `${base}#${generation}`;
-}
-
-/** Closes every still-open generation at a step or turn boundary. */
-function* closeOpenParts(
-  parts: Map<string, StreamPartState>,
-  type: "assistant-complete" | "reasoning-complete",
-  stepEpoch: number,
-): Generator<AgentTUIStreamEvent> {
-  for (const [base, state] of parts) {
-    if (state.completed || state.text.length === 0) continue;
-    state.completed = true;
-    state.completedEpoch = stepEpoch;
-    yield { type, id: partGenerationId(base, state.generation) };
-  }
-}
-
-function isPostTurnVisibleEvent(event: MessageStreamEvent): boolean {
-  switch (event.type) {
-    case "actions.requested":
-    case "authorization.completed":
-    case "authorization.required":
-    case "input.requested":
-    case "message.appended":
-    case "message.completed":
-    case "reasoning.appended":
-    case "reasoning.completed":
-    case "result.completed":
-    case "step.completed":
-    case "step.failed":
-    case "step.started":
-    case "subagent.called":
-    case "subagent.completed":
-    case "subagent.event":
-    case "subagent.started":
-    case "turn.completed":
-    case "turn.failed":
-      return true;
-    default:
-      return false;
-  }
-}
-
-function formatActionResultError(event: ActionResultStreamEvent): string {
-  if (event.data.error?.message) return event.data.error.message;
-  const output = event.data.result.output;
-  if (typeof output === "string") return output;
-  try {
-    return JSON.stringify(output);
-  } catch {
-    return "Tool execution failed.";
-  }
-}
-
-/**
- * Projects one failure event into a renderable `error` stream event, or
- * `undefined` when the same underlying failure was already emitted earlier in
- * the cascade. Carries the failure as a structured entity: headline, the
- * catalog's remediation hint (surface overrides win), and the diagnostic
- * dump when the failure carries one — i.e. for unrecognized errors escaping
- * user code.
- */
-function toFailureEvent(
-  event: FailureStreamEvent,
-  emittedFailures: Set<string>,
-  failureHintOverride?: (event: FailureStreamEvent) => string | undefined,
-): AgentTUIStreamEvent | undefined {
-  const key = failureKey(event);
-  if (emittedFailures.has(key)) return undefined;
-  emittedFailures.add(key);
-
-  const failure: AgentTUIStreamEvent = {
-    type: "error",
-    errorText: formatFailureMessage(event),
-  };
-  const hint = failureHintOverride?.(event) ?? formatFailureHint(event);
-  if (hint !== undefined) failure.hint = hint;
-  const detail = formatFailureDetail(event);
-  if (detail !== undefined) failure.detail = detail;
-  return failure;
-}
-
-function toAgentTUIInputQuestion(request: InputRequest): AgentTUIInputQuestion {
+function toAgentTUIInputQuestion(
+  request: InputRequest,
+  context: AgentTUIInputContext | undefined,
+): AgentTUIInputQuestion {
   const display: "select" | "text" =
     request.display === "text"
       ? "text"
@@ -2798,32 +1769,7 @@ function toAgentTUIInputQuestion(request: InputRequest): AgentTUIInputQuestion {
   if (request.allowFreeform !== undefined) {
     question.allowFreeform = request.allowFreeform;
   }
+  if (context !== undefined) question.context = context;
 
   return question;
 }
-
-export type ConnectionAuthChallenge = {
-  url?: string;
-  userCode?: string;
-  expiresAt?: string;
-  instructions?: string;
-};
-
-export type ConnectionAuthState = "required" | "pending" | ConnectionAuthorizationOutcome;
-
-export type ConnectionAuthUpdate = {
-  name: string;
-  description: string;
-  state: ConnectionAuthState;
-  challenge?: ConnectionAuthChallenge;
-  reason?: string;
-};
-
-type ConnectionAuthRun = {
-  name: string;
-  description: string;
-  state: ConnectionAuthState;
-  challenge?: ConnectionAuthChallenge;
-  webhookUrl?: string;
-  reason?: string;
-};

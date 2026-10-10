@@ -56,9 +56,10 @@ pnpm docs:check         # docs frontmatter and nav validation
 
 pnpm test               # unit + integration
 pnpm test:unit          # unit tests (<3s)
-pnpm test:integration   # integration tests (<10s)
+pnpm test:integration   # integration tests (several minutes; leave the full run to CI)
 pnpm test:scenario      # scenario tests (2–5 min; requires pnpm build first)
 pnpm test:framework-fixtures # apps/frameworks smoke builds (requires pnpm build first)
+pnpm test:webchat       # web chat template in headless Chromium (needs playwright-core's chromium-headless-shell)
 pnpm test:e2e           # fixture-owned eve eval suites (CI only)
 pnpm test:tui           # TUI smoke scripts (not e2e)
 ```
@@ -71,6 +72,13 @@ narrowest relevant test when a change needs behavioral validation. Copy edits,
 typo fixes, small code reorganizations, and similar non-behavioral changes can
 proceed without local integration or scenario runs. CI is always the official
 line of defense, and every required check must pass before merge.
+
+Do not run a whole integration or scenario tier, or a whole multi-channel
+suite such as the channel conformance suite, locally unless the task
+expressly needs it (for example, the user asks, or you are chasing a failure
+only the full run reproduces). Scope local runs to the files and test names
+your change touches with a path and `-t` filter, and leave the full suites to
+CI.
 
 ## Agent-ready product principles
 

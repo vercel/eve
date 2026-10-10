@@ -5,7 +5,6 @@ import {
   isTeamsToolApprovalResponseActivity,
   readTeamsInputReplyToActivityId,
   renderInputRequestMessage,
-  TEAMS_HITL_CHOICE_INPUT_ID,
   TEAMS_HITL_DATA_KEY,
   TEAMS_HITL_FREEFORM_INPUT_ID,
   TEAMS_HITL_PROMPT_KEY,
@@ -46,12 +45,6 @@ describe("Teams HITL helpers", () => {
         replyToActivityId: "ROOT",
       },
     });
-  });
-
-  it("renders select requests with a ChoiceSet", () => {
-    const body = renderInputRequestMessage({ ...request(), display: "select" });
-    const card = body.attachments?.[0]?.content as { body?: Array<Record<string, unknown>> };
-    expect(card.body?.some((entry) => entry.id === TEAMS_HITL_CHOICE_INPUT_ID)).toBe(true);
   });
 
   it("decodes message and invoke submission values", () => {

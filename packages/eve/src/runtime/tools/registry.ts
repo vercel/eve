@@ -3,8 +3,6 @@ import type { PreparedRuntimeAuthoredTool } from "#runtime/sessions/turn.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { serializeInputSchema, serializeOutputSchema } from "#tools/schema.js";
 import { AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
-import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
-import { subagentToolExecuteWorkflowReference } from "#runtime/subagents/workflow-reference.js";
 import type {
   CompiledToolBehavior,
   PreparedToolBehavior,
@@ -36,6 +34,8 @@ export async function createRuntimeToolRegistry(
     readonly tools: readonly ResolvedToolDefinition[];
   },
   input: {
+    /** Set by `tool: "deferred"` on the agent, which defers its built-in `agent` tool. */
+    readonly deferSelfAgent?: boolean;
     readonly nodeId?: string;
     readonly reservedToolNames?: readonly string[];
   } = {},
@@ -47,7 +47,7 @@ export async function createRuntimeToolRegistry(
   );
 
   for (const toolDefinition of definitions.tools) {
-    const prepared = await createPreparedRuntimeTool(toolDefinition, input.nodeId);
+    const prepared = await createPreparedRuntimeTool(toolDefinition, input);
     registry.register(
       toolDefinition.name,
       { definition: toolDefinition, prepared },
@@ -81,25 +81,16 @@ export function findRegisteredRuntimeTool(
 
 async function createPreparedRuntimeTool(
   definition: ResolvedToolDefinition,
-  nodeId: string | undefined,
+  input: { readonly deferSelfAgent?: boolean; readonly nodeId?: string },
 ): Promise<PreparedRuntimeAuthoredTool> {
   const isSelfAgent =
     definition.behavior?.handling?.kind === "dispatch" &&
     definition.behavior.handling.action === "self-agent";
-  const workflowId = isSelfAgent
-    ? subagentToolExecuteWorkflowReference.workflowId
-    : definition.behavior?.handling?.kind === "workflow-tool"
-      ? definition.behavior.handling.workflowId
-      : undefined;
   return {
     availableInSubagents: definition.availableInSubagents,
-    behavior: prepareToolBehavior(
-      definition.behavior,
-      nodeId,
-      isSelfAgent ? subagentToolExecuteWorkflowReference.workflowId : undefined,
-    ),
+    behavior: prepareToolBehavior(definition.behavior, input.nodeId),
+    deferred: definition.deferred ?? ((isSelfAgent && input.deferSelfAgent) || undefined),
     description: definition.description,
-    execution: definition.execution,
     inputSchema: serializeInputSchema(definition.inputSchema),
     kind: "authored-tool",
     logicalPath: definition.logicalPath,
@@ -108,51 +99,31 @@ async function createPreparedRuntimeTool(
     outputSchema: serializeOutputSchema(definition.outputSchema),
     rootOnly: isSelfAgent || undefined,
     sourceId: definition.sourceId,
-    task:
-      workflowId === undefined
-        ? undefined
-        : isSelfAgent
-          ? {
-              nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
-
-              workflowId,
-            }
-          : { workflowId },
   };
 }
 
 function prepareToolBehavior(
   behavior: CompiledToolBehavior | undefined,
   nodeId: string | undefined,
-  workflowIdOverride?: string,
 ): PreparedToolBehavior | undefined {
   if (behavior === undefined) return undefined;
 
   let handling: PreparedToolHandling | undefined;
-  if (workflowIdOverride !== undefined && nodeId !== undefined) {
+  if (behavior.handling?.kind === "dispatch") {
+    if (nodeId === undefined) {
+      throw new Error("The self-agent tool requires a concrete runtime node id.");
+    }
     handling = {
       kind: "dispatch",
       target: { kind: "self-agent-call", nodeId, subagentName: AGENT_TOOL_NAME },
     };
-  } else if (behavior.handling?.kind === "dispatch") {
-    if (behavior.handling.action === "self-agent" && nodeId === undefined) {
-      throw new Error("The self-agent tool requires a concrete runtime node id.");
-    }
-    const target =
-      behavior.handling.action === "self-agent"
-        ? {
-            kind: "self-agent-call" as const,
-            nodeId: nodeId!,
-            subagentName: AGENT_TOOL_NAME,
-          }
-        : { kind: behavior.handling.action };
-    handling = { kind: "dispatch", target };
   } else if (behavior.handling?.kind === "workflow-tool") {
     handling = {
       kind: "dispatch",
       target: {
+        entryPoint: behavior.handling.entryPoint,
         kind: "workflow-tool-call",
-        workflowId: workflowIdOverride ?? behavior.handling.workflowId,
+        workflowId: behavior.handling.workflowId,
       },
     };
   } else {
@@ -162,6 +133,5 @@ function prepareToolBehavior(
   return {
     availability: behavior.availability,
     handling,
-    presentation: behavior.presentation,
   };
 }

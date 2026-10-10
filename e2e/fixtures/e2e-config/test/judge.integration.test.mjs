@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { e2eJudgeModel } from "../src/judge.ts";
 
-test("fixture judge adapts Gateway Responses into evaluation answers", async (t) => {
+test("fixture judge adapts Gateway Responses into decision answers", async (t) => {
   const previousKey = process.env.AI_GATEWAY_API_KEY;
   process.env.AI_GATEWAY_API_KEY = "fixture-gateway-key";
   t.after(() => {
@@ -33,7 +33,7 @@ test("fixture judge adapts Gateway Responses into evaluation answers", async (t)
     });
   });
 
-  const result = await e2eJudgeModel().doEvaluate({
+  const result = await e2eJudgeModel().doDecide({
     state: { response: "Hello Alice" },
     questions: {
       accurate: { type: "boolean", instructions: "Greets Alice" },

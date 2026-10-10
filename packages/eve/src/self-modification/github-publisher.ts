@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import type { GitHubCredentialProvider, GitHubRepository } from "./config.js";
+import type { GitHubCredentialProvider, GitHubRepository } from "./remote/config.js";
 import type { PreparedSelfModificationWorkspace } from "./git-workspace.js";
 import { assertFullSha, assertGitRef, assertOperationId } from "./identifiers.js";
 import {

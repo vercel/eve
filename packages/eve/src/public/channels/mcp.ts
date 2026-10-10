@@ -1,3 +1,4 @@
+import { sessionAuthFromResult } from "#channel/auth/result.js";
 import { parseJsonObject } from "#shared/json.js";
 import { z } from "#compiled/zod/index.js";
 import {
@@ -16,12 +17,24 @@ import type {
 } from "#internal/invocation/agent-invocation.js";
 import { WorkflowAgentInvocationExecution } from "#internal/invocation/workflow-execution.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import {
+  createPublishedTools,
+  MCP_TOOL_SESSIONS_EXTENSION,
+} from "#internal/mcp/published-tools.js";
+import {
+  resolveMcpRequestPrincipals,
+  type McpRequestPrincipals,
+} from "#internal/mcp/forwarded-principal-header.js";
+import type { TrustedForwarders } from "#channel/forwarded-principal.js";
+import type { SessionAuthContext } from "#channel/types.js";
+import { createMcpSkillsFeature } from "#internal/mcp/skills.js";
 import { validateMcpHttpRequest, validateMcpMetadataRequest } from "#internal/mcp/http-security.js";
 import {
   createMcpStreamableHttpServer,
   defineMcpTool,
   McpToolOperationError,
   type McpCallToolResult,
+  type McpServerFeature,
   type McpServerTool,
 } from "#internal/mcp/streamable-http-server.js";
 import {
@@ -40,21 +53,57 @@ import {
   readAgentInfoRouteResponse,
   readRouteChannelName,
   readRouteSessionCreator,
+  readSkillFileSource,
 } from "#internal/nitro/routes/channel-route-context.js";
 export interface McpChannelInput {
   /** Existing eve route-auth policy. Use `none()` for explicit public access. */
   readonly auth: AuthFn<Request> | readonly AuthFn<Request>[];
   /** Override the default MCP route path (`/eve/v1/mcp`). */
   readonly route?: string;
+  /**
+   * Serve the `agent_*` tools, which start and follow a durable agent task.
+   * With `false`, the channel serves only what `tools` and `skills` publish.
+   * @default true
+   */
+  readonly agent?: boolean;
+  /**
+   * Also publish the agent's invocable tools, each `tools/call` running the
+   * tool as the route-authenticated caller. While `agent` is on, an agent
+   * tool named like an `agent_*` tool is not published. Also advertises the
+   * `dev.eve/tool-sessions` extension: a client that declares it joins a tool
+   * session by sending `_meta["dev.eve/tool-session"]` on `tools/call`.
+   * @default false
+   */
+  readonly tools?: boolean;
+  /**
+   * Lets a route-authenticated forwarder, such as another eve agent's
+   * `forwardPrincipal` connection, run the published tools as a user it names
+   * in the `eve-forwarded-principal` header. Receives the verified forwarder
+   * and what it asserts, as eveChannel's `trustedForwarders` does; match the
+   * forwarder precisely. Accepted principals carry the forwarder's id as the
+   * `eve:forwarded-by` attribute. `agent_*` tools still act as the route
+   * caller. Omit to refuse any request carrying the header with 403.
+   */
+  readonly trustedForwarders?: TrustedForwarders;
+  /**
+   * Also serve the agent's skills as SEP-2640 skills under `skill://`
+   * (`skills/list`, `skills/get`, and the `resources/*` methods), readable
+   * by every route-authenticated caller.
+   * @default false
+   */
+  readonly skills?: boolean;
 }
 
-/** Public MCP channel exposing durable agent invocation compatibility tools. */
+/** Public MCP channel publishing this agent's `agent_*` tools and, optionally, its tools and skills. */
 export type McpChannel = Channel;
 
 /**
  * Publishes this agent as a stateless Streamable HTTP MCP server.
  *
- * This channel owns only MCP transport and durable eve invocation. It reuses
+ * This channel owns MCP transport, durable eve invocation through the
+ * `agent_*` tools (unless `agent: false`), with `tools: true` the agent's
+ * invocable tools, each call run through `invokeTool`, and with
+ * `skills: true` the agent's skills and their files. It reuses
  * eve's inbound auth strategies and recognizes `oauthResource(...)` metadata
  * when OAuth discovery is needed.
  * The file containing this channel must be `agent/channels/mcp.ts`.
@@ -63,22 +112,21 @@ export function mcpChannel(input: McpChannelInput): McpChannel {
   if (input?.auth === undefined) {
     throw new Error("mcpChannel requires auth. Use none() for explicit public access.");
   }
+  const publish: McpPublishOptions = {
+    agent: input.agent ?? true,
+    skills: input.skills ?? false,
+    tools: input.tools ?? false,
+  };
+  if (!publish.agent && !publish.tools && !publish.skills) {
+    throw new Error(
+      "mcpChannel publishes nothing with agent, tools, and skills all false. Enable one.",
+    );
+  }
   const path = input.route ?? "/eve/v1/mcp";
   const oauth = readOAuthResourceOptions(input.auth);
-  const routes = [
-    GET(
-      path,
-      async (request, args) => await authenticateMcpRequest(request, args, input.auth, oauth),
-    ),
-    POST(
-      path,
-      async (request, args) => await authenticateMcpRequest(request, args, input.auth, oauth),
-    ),
-    DELETE(
-      path,
-      async (request, args) => await authenticateMcpRequest(request, args, input.auth, oauth),
-    ),
-  ];
+  const handle = async (request: Request, args: RouteHandlerArgs) =>
+    await authenticateMcpRequest(request, args, input, oauth, publish);
+  const routes = [GET(path, handle), POST(path, handle), DELETE(path, handle)];
   if (oauth !== undefined) {
     routes.unshift(...protectedResourceMetadataRoutes(oauth, path));
   }
@@ -324,22 +372,38 @@ function readChallengeScheme(value: string): string | undefined {
 async function authenticateMcpRequest(
   request: Request,
   args: RouteHandlerArgs,
-  policy: AuthFn<Request> | readonly AuthFn<Request>[],
+  input: McpChannelInput,
   oauth: OAuthResourceOptions | undefined,
+  publish: McpPublishOptions,
 ): Promise<Response> {
   const securityFailure = validateMcpHttpRequest(request);
   if (securityFailure !== undefined) return securityFailure;
-  const auth = await routeAuth(request, policy);
+  const auth = await routeAuth(request, input.auth);
   if (auth instanceof Response) {
     return oauth === undefined ? auth : addResourceChallenge(auth, request, oauth);
   }
-  return await handleMcpRequest(request, args, auth);
+  const sessionAuth = sessionAuthFromResult(auth);
+  const principals = await resolveMcpRequestPrincipals(
+    request,
+    sessionAuth,
+    input.trustedForwarders,
+  );
+  if (principals instanceof Response) return principals;
+  return await handleMcpRequest(request, args, sessionAuth, principals, publish);
+}
+
+interface McpPublishOptions {
+  readonly agent: boolean;
+  readonly skills: boolean;
+  readonly tools: boolean;
 }
 
 async function handleMcpRequest(
   request: Request,
   args: RouteHandlerArgs,
-  auth: import("#channel/types.js").SessionAuthContext,
+  auth: SessionAuthContext,
+  principals: McpRequestPrincipals,
+  publish: McpPublishOptions,
 ): Promise<Response> {
   const createSession = readRouteSessionCreator(args);
   const channelName = readRouteChannelName(args);
@@ -365,15 +429,45 @@ async function handleMcpRequest(
     createSession,
     from: args.from,
   });
+  const agentTools = publish.agent
+    ? createInvocationTools(
+        execution,
+        description,
+        auth.authenticator === "none" && auth.principalType === "anonymous",
+      )
+    : [];
+  // One `describe()` serves both the published tools and the skill catalog.
+  const described = publish.tools || publish.skills ? await args.describe() : undefined;
+  const publishedTools =
+    publish.tools && described !== undefined
+      ? createPublishedTools({
+          invokeTool: args.invokeTool,
+          principals,
+          reserved: new Set(agentTools.map((tool) => tool.name)),
+          tools: described.tools,
+        })
+      : [];
+  const features: McpServerFeature[] = [];
+  if (publish.tools) {
+    // Advertised only; published tools read the key from each call's `_meta`.
+    features.push({
+      capabilities: { extensions: { [MCP_TOOL_SESSIONS_EXTENSION]: {} } },
+      register() {},
+    });
+  }
+  if (publish.skills && described !== undefined) {
+    const files = readSkillFileSource(args);
+    if (files === undefined) {
+      return Response.json({ error: "MCP requires agent route context." }, { status: 500 });
+    }
+    features.push(createMcpSkillsFeature({ files, skills: described.skills }));
+  }
   return await createMcpStreamableHttpServer({
     authenticate: async () => auth,
-    instructions: MCP_SERVER_INSTRUCTIONS,
+    features,
+    instructions: publish.agent ? MCP_SERVER_INSTRUCTIONS : undefined,
     name: agentInfo.agent.name,
-    tools: createInvocationTools(
-      execution,
-      description,
-      auth.authenticator === "none" && auth.principalType === "anonymous",
-    ),
+    tools: publish.agent || publish.tools ? [...agentTools, ...publishedTools] : undefined,
     version: resolveInstalledPackageInfo().version,
   })(request);
 }

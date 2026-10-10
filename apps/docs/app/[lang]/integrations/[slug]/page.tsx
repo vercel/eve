@@ -3,8 +3,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
+import { JsonLd } from "@/components/geistdocs/json-ld";
 import { canonicalAlternates, integrationPath } from "@/lib/geistdocs/canonical";
 import { pageTitleMetadata } from "@/lib/geistdocs/metadata-title";
+import { integrationStructuredData } from "@/lib/geistdocs/structured-data";
 import { buildConnectionInstall, buildConnectionSetup } from "@/lib/integrations/connection-setup";
 import {
   getIntegration,
@@ -44,11 +46,17 @@ export const generateMetadata = async ({
   }
   const title = `${integration.name} Integration`;
   const titleMetadata = pageTitleMetadata(title);
+  const canonicalPath = integrationPath(integration.slug);
   return {
     ...titleMetadata,
     description: integration.tagline,
-    alternates: canonicalAlternates(integrationPath(integration.slug)),
-    openGraph: titleMetadata.openGraph,
+    alternates: canonicalAlternates(canonicalPath),
+    openGraph: {
+      ...titleMetadata.openGraph,
+      description: integration.tagline,
+      type: "website",
+      url: canonicalPath,
+    },
     twitter: {
       ...titleMetadata.twitter,
       card: "summary_large_image",
@@ -88,6 +96,12 @@ const IntegrationDetailPage = async ({ params }: PageProps<"/[lang]/integrations
 
   return (
     <main className="mx-auto w-full max-w-[768px] px-4 pt-16 pb-32 sm:px-6">
+      <JsonLd
+        data={integrationStructuredData({
+          name: integration.name,
+          pathname: integrationPath(integration.slug),
+        })}
+      />
       <Link
         className="inline-flex items-center gap-1.5 text-gray-800 text-sm transition-colors hover:text-gray-1000"
         href="/integrations"
@@ -98,7 +112,7 @@ const IntegrationDetailPage = async ({ params }: PageProps<"/[lang]/integrations
       </Link>
 
       <header className="mt-8 flex flex-col gap-5 border-b pb-10">
-        <span className="flex size-14 items-center justify-center rounded-xl border bg-background text-gray-1000">
+        <span className="flex size-14 items-center justify-center rounded-xl border bg-background">
           <Logo aria-hidden className="size-7" height={28} width={28} />
         </span>
         <div className="flex flex-col gap-2">

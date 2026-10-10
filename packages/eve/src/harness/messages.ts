@@ -5,11 +5,11 @@ import type {
   DeliverPayload,
   SessionAuthContext,
   TurnCaller,
-  TaskDeliveryPolicy,
 } from "#channel/types.js";
 import type { InputResponse } from "#shared/input.js";
 import type { StepInput } from "#harness/types.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
+import { attachInputText, readInputText } from "#internal/input-text.js";
 
 /** Reason a framework-authored user-role message was added to model history. */
 export type FrameworkMessageKind =
@@ -17,9 +17,9 @@ export type FrameworkMessageKind =
   | "context.state"
   | "context.compaction"
   | "memory.load"
-  | "execution.background_task"
   | "execution.continuation"
-  | "execution.retry";
+  | "execution.retry"
+  | "task.result";
 
 /** Semantic classification for every user-role message in model history. */
 export type UserMessageKind = "user" | FrameworkMessageKind;
@@ -109,9 +109,9 @@ export function isFrameworkMessageKind(value: unknown): value is FrameworkMessag
     value === "context.state" ||
     value === "context.compaction" ||
     value === "memory.load" ||
-    value === "execution.background_task" ||
     value === "execution.continuation" ||
-    value === "execution.retry"
+    value === "execution.retry" ||
+    value === "task.result"
   );
 }
 
@@ -160,7 +160,13 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
   });
   const outputSchema = b.outputSchema ?? a.outputSchema;
 
+  const attributedInputResponses = [
+    ...(a.attributedInputResponses ?? []),
+    ...(b.attributedInputResponses ?? []),
+  ];
+
   const result: {
+    attributedInputResponses?: StepInput["attributedInputResponses"];
     inputResponses?: readonly InputResponse[];
     message?: string | UserContent;
     context?: readonly string[];
@@ -169,6 +175,10 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
 
   if (inputResponses !== undefined) {
     result.inputResponses = inputResponses;
+  }
+
+  if (attributedInputResponses.length > 0) {
+    result.attributedInputResponses = attributedInputResponses;
   }
 
   if (message !== undefined) {
@@ -183,10 +193,20 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
     result.outputSchema = outputSchema;
   }
 
+  // Typed text describes one message, so it survives only when the other input has none.
+  const inputText =
+    normalizeUserContent(a.message) === undefined
+      ? readInputText(b)
+      : normalizeUserContent(b.message) === undefined
+        ? readInputText(a)
+        : undefined;
   return attachClientContext(
-    frameworkMessageKind === undefined
-      ? result
-      : markFrameworkStepInput(result, frameworkMessageKind),
+    attachInputText(
+      frameworkMessageKind === undefined
+        ? result
+        : markFrameworkStepInput(result, frameworkMessageKind),
+      inputText,
+    ),
     ephemeralContext,
   );
 }
@@ -213,6 +233,19 @@ export function normalizeUserContent(
     return undefined;
   }
   return parts.length === content.length ? content : parts;
+}
+
+/**
+ * Model-only assistant text between tool results and a person's next message.
+ * Without it, providers such as Anthropic fold the message into the user turn
+ * that carries the tool results, and the model reads it as tool output: it
+ * continues its plan instead of answering.
+ */
+export const TOOL_RESULT_BOUNDARY = "…";
+
+/** Whether a user message appended to `messages` would share a turn with tool results. */
+export function followsToolResults(messages: readonly ModelMessage[]): boolean {
+  return messages.findLast((message) => message.role !== "user")?.role === "tool";
 }
 
 export function createTurnInputMessages(input: StepInput | undefined): UserModelMessage[] {
@@ -399,7 +432,6 @@ interface DeliverLike {
   readonly auth?: SessionAuthContext | null;
   readonly caller?: TurnCaller;
   readonly deliveryMetadata?: readonly ChannelDeliveryMetadataEntry[];
-  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
   readonly kind: "deliver";
   readonly payloads: readonly DeliverPayload[];
 }
@@ -422,21 +454,20 @@ export function coalesceDeliveries<T extends DeliverLike>(items: readonly T[]): 
   }
 
   let auth = first.auth;
-  let taskDeliveryPolicy = first.taskDeliveryPolicy;
   let caller = first.caller;
   const payloads = [...first.payloads];
   const deliveryMetadata = [...(first.deliveryMetadata ?? [])];
 
   for (const item of rest) {
     const payloadOffset = payloads.length;
-    taskDeliveryPolicy = item.taskDeliveryPolicy ?? taskDeliveryPolicy;
     if (item.auth !== undefined) {
       auth = item.auth;
     }
     if (item.caller !== undefined) {
-      if (caller !== undefined) {
+      if (caller !== undefined && caller.callId !== item.caller.callId) {
         throw new Error("Cannot coalesce deliveries from different turns.");
       }
+      // The same caller's later message awaits its reply at its own address.
       caller = item.caller;
     }
     payloads.push(...item.payloads);
@@ -450,7 +481,6 @@ export function coalesceDeliveries<T extends DeliverLike>(items: readonly T[]): 
 
   return {
     ...first,
-    taskDeliveryPolicy,
     auth,
     caller,
     deliveryMetadata: deliveryMetadata.length === 0 ? undefined : deliveryMetadata,

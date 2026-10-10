@@ -375,6 +375,7 @@ async function startNitroDevelopmentServer(
   const environmentPort = readEnvironmentPort();
   const requestedPort = options.port ?? environmentPort;
   const hasExplicitServerConfiguration =
+    options.resume === true ||
     options.developmentExtensions !== undefined ||
     options.host !== undefined ||
     options.port !== undefined ||
@@ -435,8 +436,14 @@ async function startNitroDevelopmentServer(
     workflowWorld = createDevelopmentWorkflowWorld({
       appRoot: project.appRoot,
       preparedHost,
+      resume: options.resume,
       transportSecret: workflowTransportSecret,
     });
+    const localWorkflowWorld = workflowWorld;
+    const onRuntimePruned =
+      localWorkflowWorld === undefined
+        ? undefined
+        : () => localWorkflowWorld.reconcileExpiredRuns();
     // Parent-owned control routes must answer before the World starts: queue
     // redelivery begins at start(), and a delivery's World calls would
     // otherwise fall through to the worker and 404.
@@ -492,6 +499,7 @@ async function startNitroDevelopmentServer(
         await activateDevelopmentGeneration({
           appRoot: preparedHost.appRoot,
           generation: preparedHost.generation,
+          onRuntimePruned,
         });
         initialGenerationPublished = true;
       },
@@ -503,6 +511,7 @@ async function startNitroDevelopmentServer(
       developmentExtensions,
       devServer: activeDevServer,
       initialHost: preparedHost,
+      onRuntimePruned,
     });
 
     authoredSourceWatcher = await devBootPhase(

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
 
 /**
  * Integration coverage for forwarded principal across the create route and the
@@ -30,6 +31,7 @@ import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { eveChannel, type EveChannelInput } from "#public/channels/eve.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
+import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 
 const ROUTER_CALLER: SessionAuthContext = {
   attributes: {},
@@ -92,6 +94,7 @@ function createEveCreateHandler(input: EveChannelInput) {
     async fetch(req: Request) {
       const args = attachRouteSessionCreator<RouteHandlerArgs>(
         {
+          ...mockAgentRouteArgs(),
           ...mockChannelContext(vi.fn()),
           attachSession: vi.fn() as any,
           to: vi.fn() as never,
@@ -133,6 +136,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
             url: "https://caller.example.com/eve/v1/callback/parent-token",
           },
           message: "check my dashboards",
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
         }),
         headers: {
           "content-type": "application/json",
@@ -251,6 +255,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
               url: "https://caller.example.com/eve/v1/callback/parent-token",
             },
             message: "check my dashboards",
+            protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
           }),
           headers: {
             "content-type": "application/json",
@@ -305,6 +310,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
             url: "https://caller.example.com/eve/v1/callback/parent-token",
           },
           message: "check my dashboards",
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
         }),
         headers: {
           "content-type": "application/json",
@@ -343,6 +349,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
             url: "https://caller.example.com/eve/v1/callback/parent-token",
           },
           message: "check my dashboards",
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
         }),
         headers: {
           "content-type": "application/json",

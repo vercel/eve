@@ -548,7 +548,7 @@ describe("applyLoadedTrace", () => {
             "gen_ai.input.messages": JSON.stringify([
               { parts: [{ content: "hi", type: "text" }], role: "user" },
             ]),
-            "ai.prompt.system": "system prompt",
+            "gen_ai.system_instructions": '[{"content":"system prompt","type":"text"}]',
             "ai.response.text": "reply",
           },
         }),

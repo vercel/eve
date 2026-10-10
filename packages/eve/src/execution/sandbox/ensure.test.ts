@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
+import { readDurableSession } from "#execution/durable-session-store.js";
+import { importConversation, readLegacySnapshot } from "#execution/legacy-session/snapshot.js";
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { defineParentSandbox, defineSandbox } from "#public/definitions/sandbox.js";
@@ -14,7 +16,7 @@ vi.mock("#runtime/sandbox/prepared-artifacts.js", () => ({
   loadSandboxPreparedArtifact: vi.fn(async () => null),
 }));
 
-function fixture(setup?: () => void, returnCopy = false) {
+function fixture(setup?: () => void, returnCopy = false, onSessionEnd?: () => Promise<void>) {
   const deleteSandbox = vi.fn(async () => {});
   const stopSandbox = vi.fn(async () => {});
   const shutdownSandbox = vi.fn(async () => {});
@@ -22,19 +24,24 @@ function fixture(setup?: () => void, returnCopy = false) {
     const sandbox = mockSandbox();
     return {
       sandbox: sandbox.session,
-      onSessionDelete: deleteSandbox,
+      onSandboxDelete: deleteSandbox,
       onRuntimeShutdown: shutdownSandbox,
-      onSessionStop: stopSandbox,
+      onSandboxStop: stopSandbox,
     };
   });
   const start = vi.fn(async () => ({ handle: await create(), state: null }));
   const provider = defineSandboxProvider({
     name: "test",
-    environment: () => ({
-      prepare: async () => null,
-      resume: create,
-      start,
-    }),
+    environment: () => {
+      const implementation = {
+        prepare: async () => null,
+        resume: create,
+        start,
+      };
+      return onSessionEnd === undefined
+        ? implementation
+        : Object.assign(implementation, { onSessionEnd });
+    },
   });
   const environment = provider.environment();
   const selector = defineSandbox(async () => {
@@ -56,7 +63,15 @@ function fixture(setup?: () => void, returnCopy = false) {
       workspaceResourceRoot: { logicalPath: "", rootEntries: [] },
     },
   };
-  return { create, deleteSandbox, registry, shutdownSandbox, start, stopSandbox };
+  return {
+    create,
+    deleteSandbox,
+    onSessionEnd,
+    registry,
+    shutdownSandbox,
+    start,
+    stopSandbox,
+  };
 }
 async function open(
   registry: RuntimeSandboxRegistry,
@@ -138,6 +153,43 @@ describe("ensureSandboxAccess", () => {
     });
     expect(setup).not.toHaveBeenCalled();
     expect(value.create).toHaveBeenCalledOnce();
+  });
+
+  it("starts a fresh sandbox for a session imported from eve 0.54", async () => {
+    const setup = vi.fn();
+    const value = fixture(setup);
+    const imported = importConversation(
+      readLegacySnapshot({
+        sessionId: "session-1",
+        snapshot: {
+          version: 1,
+          session: {
+            sessionId: "session-1",
+            continuationToken: "http:legacy",
+            history: [],
+            agent: { system: "" },
+            // eve 0.54 persisted a backend reconnect record, not provider state.
+            sandboxState: {
+              initialized: true,
+              session: {
+                backendName: "test",
+                metadata: { sandboxId: "sbx_old" },
+                sessionKey: "old",
+              },
+            },
+          },
+        },
+      }),
+    );
+
+    await open(
+      value.registry,
+      "session-1",
+      readDurableSession(imported.sessionState).sandboxState ?? null,
+    );
+
+    expect(setup).toHaveBeenCalledOnce();
+    expect(value.start).toHaveBeenCalledOnce();
   });
 
   it("passes empty live options when a child inherits its parent sandbox", async () => {
@@ -251,5 +303,68 @@ describe("ensureSandboxAccess", () => {
     await access.get();
     expect(value.deleteSandbox).toHaveBeenCalledOnce();
     expect(value.create).toHaveBeenCalledTimes(2);
+  });
+
+  it("passes terminal cleanup to the provider from durable state", async () => {
+    const onSessionEnd = vi.fn(async () => {});
+    const value = fixture(undefined, false, onSessionEnd);
+    const { access } = await open(value.registry);
+
+    await access.end?.("expired");
+
+    expect(onSessionEnd).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ session: expect.objectContaining({ id: "session-1" }) }),
+      null,
+      null,
+      { reason: "expired" },
+    );
+    expect(value.deleteSandbox).not.toHaveBeenCalled();
+    await expect(access.captureState()).resolves.toEqual({ session: null });
+  });
+
+  it("falls back to resumed handle deletion when the provider has no terminal hook", async () => {
+    const value = fixture();
+    const { access } = await open(value.registry);
+
+    await access.end?.("completed");
+
+    expect(value.deleteSandbox).toHaveBeenCalledOnce();
+    await expect(access.captureState()).resolves.toEqual({ session: null });
+  });
+
+  it("does not start a sandbox just to end a session that never opened one", async () => {
+    const value = fixture();
+    const access = await ensureSandboxAccess({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      nodeId: "__root__",
+      registry: value.registry,
+      sessionId: "unused",
+      state: null,
+    });
+
+    await access.end?.("expired");
+
+    expect(value.start).not.toHaveBeenCalled();
+    expect(value.create).not.toHaveBeenCalled();
+  });
+
+  it("does not end a sandbox borrowed from another session", async () => {
+    const onSessionEnd = vi.fn(async () => {});
+    const value = fixture(undefined, false, onSessionEnd);
+    const access = await ensureSandboxAccess({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      nodeId: "__root__",
+      ownsSandbox: false,
+      registry: value.registry,
+      sessionId: "child",
+      state: {
+        session: { providerName: "test", state: null, stateProtocolVersion: 1 },
+      },
+    });
+
+    await access.end?.("completed");
+
+    expect(onSessionEnd).not.toHaveBeenCalled();
+    expect(value.create).not.toHaveBeenCalled();
   });
 });

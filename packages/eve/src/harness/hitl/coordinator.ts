@@ -1,0 +1,584 @@
+import type { SessionAuthContext } from "#channel/types.js";
+import { buildCallbackContext } from "#context/build-callback-context.js";
+import { contextStorage } from "#context/container.js";
+import { AuthKey, SessionKey } from "#context/keys.js";
+import {
+  buildApprovalResponseAuth,
+  handleApprovalResponsePolicyError,
+} from "#execution/tool-auth.js";
+import {
+  createApprovalCandidate,
+  expireApprovalCandidates,
+  finishApprovalCandidate,
+  getActiveApprovalCandidate,
+  getApprovalAuditState,
+  markApprovalCandidateAuthorizationRequired,
+  settleAllowedCandidate,
+  settleUnavailableCandidate,
+  sameResponder,
+  settleDirectApprovalResponse,
+  type ActiveApprovalCandidate,
+  type ApprovalCandidateDecision,
+  type ApprovalSettlementAuditRecord,
+} from "#harness/hitl/candidates.js";
+import {
+  clearPendingAuthorization,
+  getAuthorizationResult,
+  getPendingAuthorization,
+  isAuthorizationSignal,
+  type AuthorizationChallenge,
+} from "#harness/authorization.js";
+import { isApprovalRequest } from "#harness/input-request-class.js";
+import { suspendedSteps } from "#harness/session-machine/view.js";
+import type { HarnessSession, HarnessToolLookup, StepInput } from "#harness/types.js";
+import { createLogger, logError } from "#internal/logging.js";
+import type { InputRequest } from "#shared/input.js";
+
+const UNAUTHENTICATED_APPROVAL_FEEDBACK = "Authentication is required to respond to this approval.";
+const REQUESTER_ONLY_APPROVAL_FEEDBACK =
+  "Only the person who requested this action can respond to this approval.";
+const UNAVAILABLE_TOOL_APPROVAL_REASON =
+  "The tool this approval was for is no longer available, so the call won't run.";
+const TEMPORARILY_UNAVAILABLE_APPROVAL_REASON =
+  "Approval authorization is temporarily unavailable. Please try again.";
+const APPROVAL_AUTHORIZER_TIMEOUT_MS = 10_000;
+const APPROVAL_CANDIDATE_TTL_MS = 10 * 60_000;
+
+const log = createLogger("harness.hitl");
+
+interface ApprovalDeliveryResult {
+  readonly challenges: readonly AuthorizationChallenge[];
+  readonly feedback: readonly string[];
+  readonly kind:
+    | "continue"
+    | "continue-coordination"
+    | "authorization-required"
+    | "responses-completed"
+    | "park";
+  readonly session: HarnessSession;
+  readonly stepInput?: StepInput;
+}
+
+/**
+ * Advances approval state by one durable phase.
+ *
+ * | State | Input | Transition |
+ * | --- | --- | --- |
+ * | pending request | Approve or Cancel | create responder-bound candidate |
+ * | pending candidate | coordinator pass | run current authorizer |
+ * | pending candidate | allowed | settle with its decision; competitors go stale |
+ * | pending candidate | rejected/error/expiry | append terminal history |
+ * | pending candidate | authorization required | persist private challenge |
+ * | authorization required | matching callback | re-run current authorizer |
+ * | settled request | any later response | no state change |
+ *
+ * Delivery ingestion returns before authorizer work so candidate creation
+ * commits before long-running policy execution. Candidate results also
+ * commit before lifecycle events are projected by the next stack layer.
+ */
+export async function coordinateApprovalDelivery(input: {
+  readonly now?: number;
+  readonly session: HarnessSession;
+  readonly stepInput?: StepInput;
+  readonly tools: HarnessToolLookup;
+  readonly prepareTools?: (request: InputRequest) => Promise<HarnessToolLookup>;
+}): Promise<ApprovalDeliveryResult> {
+  const now = input.now ?? Date.now();
+  const expiredCandidates = getApprovalAuditState(input.session.state).activeCandidates.filter(
+    (candidate) => candidate.expiresAt <= now,
+  );
+  const expiredChallengeIds = expiredCandidates.flatMap(
+    (candidate) =>
+      candidate.authorizationChallenges?.map(
+        (challenge) => challenge.attemptId ?? challenge.candidateId ?? challenge.name,
+      ) ?? [],
+  );
+  const expiredState = expireApprovalCandidates({ now, state: input.session.state });
+  let session: HarnessSession = {
+    ...input.session,
+    state: clearPendingAuthorization(expiredState, expiredChallengeIds),
+  };
+  const audit = getApprovalAuditState(session.state);
+  const batches = suspendedSteps(session.state).filter((step) => step.requests.length > 0);
+  const pendingRequestIds = new Set(
+    batches.flatMap((batch) => batch.requests.map((request) => request.requestId)),
+  );
+  const pendingSettlements = audit.settlements.filter((settlement) =>
+    pendingRequestIds.has(settlement.requestId),
+  );
+  const settledRequestIds = new Set(audit.settlements.map((settlement) => settlement.requestId));
+  // A direct response settles its individual request before the whole batch
+  // resolves. Keep that response while its request is still pending so a
+  // later response can complete the batch; only discard responses for requests
+  // that have left pending input entirely.
+  const deduplicableSettledRequestIds = new Set(
+    [...settledRequestIds].filter((requestId) => !pendingRequestIds.has(requestId)),
+  );
+  const discardedDuplicate = hasResponseForRequest(input.stepInput, deduplicableSettledRequestIds);
+  const deduplicatedInput = discardedDuplicate
+    ? removeConsumedResponses(input.stepInput, deduplicableSettledRequestIds)
+    : input.stepInput;
+  if (
+    discardedDuplicate &&
+    pendingSettlements.length === 0 &&
+    !hasMeaningfulInput(deduplicatedInput)
+  ) {
+    return deliveryResult(session, deduplicatedInput, "park");
+  }
+  if (batches.length === 0) return deliveryResult(session, deduplicatedInput);
+
+  const stepInput = deduplicatedInput;
+  const authorizationRequiredRequestIds = new Set(
+    batches.flatMap((batch) => batch.responseAuthRequiredRequestIds ?? []),
+  );
+  const allRequests = batches.flatMap((batch) => batch.requests);
+  const requests = new Map(allRequests.map((request) => [request.requestId, request]));
+  const challenges: AuthorizationChallenge[] = [];
+  const feedback: string[] = [];
+  const consumed = new Set<string>();
+  let didCommit = false;
+  const candidatesAtStart = getApprovalAuditState(session.state).activeCandidates;
+
+  const deliveredResponses = [
+    ...(stepInput?.attributedInputResponses ?? []),
+    ...(stepInput?.inputResponses ?? []).map((response) => ({ auth: undefined, response })),
+  ];
+  for (const { auth: attributedResponder, response } of deliveredResponses) {
+    const request = requests.get(response.requestId);
+    if (request === undefined || !isApprovalRequest(request)) continue;
+
+    const requiresAuthorization = authorizationRequiredRequestIds.has(response.requestId);
+    if (!requiresAuthorization) {
+      const context = contextStorage.getStore();
+      const responder =
+        attributedResponder !== undefined
+          ? attributedResponder
+          : (context?.get(AuthKey) ?? context?.get(SessionKey)?.auth.current ?? null);
+      const decision = toCandidateDecision(response.optionId);
+      // Without a response policy, only the requester may settle the call. An
+      // unauthenticated or anonymous requester has no identity to match, so
+      // any responder may settle it. A tool opts into other responders by
+      // defining `approval.response`.
+      const requester =
+        suspendedSteps(session.state).find((step) =>
+          step.requests.some((request) => request.requestId === response.requestId),
+        )?.requester ?? null;
+      if (
+        responder !== null &&
+        decision !== undefined &&
+        requester !== null &&
+        !sameResponder(requester, responder)
+      ) {
+        consumed.add(response.requestId);
+        feedback.push(REQUESTER_ONLY_APPROVAL_FEEDBACK);
+        continue;
+      }
+      if (responder !== null && decision !== undefined) {
+        const settled = settleDirectApprovalResponse({
+          actor: responder,
+          outcome: decision === "approve" ? "allowed" : "cancelled",
+          requestId: response.requestId,
+          settledAt: now,
+          state: session.state,
+        });
+        session = { ...session, state: settled.state };
+        didCommit ||= settled.changed;
+      }
+      continue;
+    }
+    consumed.add(response.requestId);
+
+    // A response policy decides Cancel as well as Approve, so a responder it
+    // rejects can neither approve nor cancel someone else's request.
+    const decision = toCandidateDecision(response.optionId);
+    if (decision === undefined) continue;
+    const responder =
+      attributedResponder !== undefined
+        ? attributedResponder
+        : buildCallbackContext().session.auth.current;
+    if (responder === null) {
+      feedback.push(UNAUTHENTICATED_APPROVAL_FEEDBACK);
+      continue;
+    }
+
+    const created = createApprovalCandidate({
+      candidateIdPrefix: approvalCandidateIdPrefix(request.requestId, responder, decision),
+      createdAt: now,
+      decision,
+      expiresAt: now + APPROVAL_CANDIDATE_TTL_MS,
+      requestId: request.requestId,
+      responder,
+      state: session.state,
+    });
+    session = { ...session, state: created.state };
+    didCommit ||= created.changed;
+  }
+
+  const remainingStepInput = removeConsumedResponses(stepInput, consumed);
+  if (consumed.size > 0) {
+    return deliveryResult(
+      session,
+      remainingStepInput,
+      didCommit ? "continue-coordination" : "continue",
+      [],
+      feedback,
+    );
+  }
+  if (didCommit) {
+    return deliveryResult(session, remainingStepInput, "continue", [], feedback);
+  }
+
+  // Candidates are persisted in an earlier pass. Run pending candidates and
+  // resume only authorization-required candidates whose callback arrived.
+  const parkedChallengeNames = new Set(
+    getPendingAuthorization(session.state)?.challenges.map((challenge) => challenge.name) ?? [],
+  );
+  for (const candidate of candidatesAtStart) {
+    if (candidate.status === "authorization-required") {
+      const candidateChallenges = candidate.authorizationChallenges ?? [];
+      const hasCallback = candidateChallenges.some(
+        (challenge) => getAuthorizationResult(challenge.name) !== undefined,
+      );
+      if (!hasCallback) {
+        challenges.push(
+          ...candidateChallenges.filter((challenge) => !parkedChallengeNames.has(challenge.name)),
+        );
+        continue;
+      }
+    }
+
+    const request = requests.get(candidate.requestId);
+    if (
+      request === undefined ||
+      getActiveApprovalCandidate(session.state, candidate.candidateId) === undefined
+    ) {
+      continue;
+    }
+    const processed = await authorizeCandidate({
+      candidateId: candidate.candidateId,
+      decision: candidate.decision,
+      now,
+      request,
+      responder: candidate.responder,
+      restoreTools: async () => (await input.prepareTools?.(request)) ?? input.tools,
+      session,
+    });
+    session = processed.session;
+    didCommit ||= processed.didCommit;
+    challenges.push(...processed.challenges);
+    const settlement = getApprovalAuditState(session.state).settlements.find(
+      (entry) => entry.requestId === candidate.requestId,
+    );
+    if (settlement !== undefined) pendingSettlements.push(settlement);
+  }
+
+  const resumedStepInput = appendSettledResponses(remainingStepInput, pendingSettlements);
+  // Only a terminal candidate pass completes response processing. Ingestion must
+  // still commit before policy work, and live candidates still own their park.
+  if (
+    (didCommit || expiredCandidates.length > 0) &&
+    getApprovalAuditState(session.state).activeCandidates.length === 0
+  ) {
+    return deliveryResult(session, resumedStepInput, "responses-completed");
+  }
+  if (pendingSettlements.length > 0) {
+    return deliveryResult(session, resumedStepInput, "continue");
+  }
+  return didCommit
+    ? deliveryResult(session, resumedStepInput, "continue-coordination")
+    : deliveryResult(
+        session,
+        resumedStepInput,
+        challenges.length > 0 ? "authorization-required" : "continue",
+        challenges,
+      );
+}
+
+async function authorizeCandidate(input: {
+  readonly candidateId: string;
+  readonly decision: ApprovalCandidateDecision;
+  readonly now: number;
+  readonly request: InputRequest;
+  readonly responder: ActiveApprovalCandidate["responder"];
+  /** The entries of the step that asked, restored by running its resolvers. */
+  readonly restoreTools: () => Promise<HarnessToolLookup>;
+  readonly session: HarnessSession;
+}): Promise<{
+  readonly challenges: readonly AuthorizationChallenge[];
+  readonly didCommit: boolean;
+  readonly session: HarnessSession;
+}> {
+  // Expiry is checked again immediately before callback/policy execution.
+  let session = {
+    ...input.session,
+    state: expireApprovalCandidates({ now: input.now, state: input.session.state }),
+  };
+  if (getActiveApprovalCandidate(session.state, input.candidateId) === undefined) {
+    return { challenges: [], didCommit: false, session };
+  }
+
+  let tools: HarnessToolLookup;
+  try {
+    tools = await input.restoreTools();
+  } catch (error) {
+    // A resolver or its infrastructure failed: the entry may still exist, so the request waits.
+    logError(log, "approval tools could not be restored", error, {
+      requestId: input.request.requestId,
+    });
+    return failCandidate({ ...input, reason: TEMPORARILY_UNAVAILABLE_APPROVAL_REASON, session });
+  }
+  const definition = tools.get(input.request.action.toolName);
+  // Gone from the restored catalog: no response can approve the call, and it can't run.
+  if (definition === undefined) {
+    const settled = settleUnavailableCandidate({
+      candidateId: input.candidateId,
+      reason: UNAVAILABLE_TOOL_APPROVAL_REASON,
+      settledAt: input.now,
+      state: session.state,
+    });
+    return {
+      challenges: [],
+      didCommit: settled.changed,
+      session: { ...session, state: settled.state },
+    };
+  }
+  const { approval } = definition;
+  const responsePolicy =
+    approval !== undefined && typeof approval !== "function" ? approval.response : undefined;
+  if (responsePolicy === undefined) {
+    return failCandidate({ ...input, reason: TEMPORARILY_UNAVAILABLE_APPROVAL_REASON, session });
+  }
+
+  try {
+    const context = buildCallbackContext();
+    const outcome = await withAuthorizerTimeout(
+      responsePolicy({
+        auth: buildApprovalResponseAuth({
+          responder: input.responder,
+          scope: input.candidateId,
+        }),
+        request: {
+          callId: input.request.action.callId,
+          requestId: input.request.requestId,
+          principal:
+            suspendedSteps(session.state).find((step) =>
+              step.requests.some((request) => request.requestId === input.request.requestId),
+            )?.requester ?? null,
+          toolInput: input.request.action.input,
+          toolName: input.request.action.toolName,
+        },
+        response: { decision: input.decision, principal: input.responder },
+        session: {
+          id: context.session.id,
+          initiator: context.session.auth.initiator,
+          parent: context.session.parent,
+          turn: context.session.turn,
+        },
+      }),
+    );
+    if (outcome.status === "rejected") {
+      session = {
+        ...session,
+        state: finishApprovalCandidate({
+          candidateId: input.candidateId,
+          completedAt: input.now,
+          reason: outcome.reason,
+          state: session.state,
+          status: "rejected",
+        }),
+      };
+      return { challenges: [], didCommit: true, session };
+    }
+    if (outcome.status !== "allowed") {
+      return failCandidate({ ...input, session });
+    }
+
+    const settled = settleAllowedCandidate({
+      candidateId: input.candidateId,
+      settledAt: input.now,
+      state: session.state,
+    });
+    return {
+      challenges: [],
+      didCommit: settled.changed,
+      session: { ...session, state: settled.state },
+    };
+  } catch (error) {
+    const authorization = await handleApprovalResponsePolicyError(error).catch(() => undefined);
+    if (isAuthorizationSignal(authorization)) {
+      const providerExpiresAt = authorization.challenges
+        .map((entry) => Date.parse(entry.challenge.expiresAt ?? ""))
+        .filter(Number.isFinite)
+        .sort((a, b) => a - b)[0];
+      session = {
+        ...session,
+        state: markApprovalCandidateAuthorizationRequired({
+          authorizationChallenges: authorization.challenges.map((challenge) => ({
+            ...challenge,
+            candidateId: input.candidateId,
+          })),
+          candidateId: input.candidateId,
+          expiresAt: providerExpiresAt,
+          state: session.state,
+        }),
+      };
+      return {
+        challenges: authorization.challenges.map((challenge) => ({
+          ...challenge,
+          candidateId: input.candidateId,
+        })),
+        didCommit: true,
+        session,
+      };
+    }
+    return failCandidate({ ...input, session });
+  }
+}
+
+function failCandidate(input: {
+  readonly candidateId: string;
+  readonly now: number;
+  readonly request: InputRequest;
+  readonly reason?: string;
+  readonly session: HarnessSession;
+}): {
+  readonly challenges: readonly AuthorizationChallenge[];
+  readonly didCommit: true;
+  readonly session: HarnessSession;
+} {
+  const reason = input.reason ?? "We couldn’t verify your response. Please try again.";
+  return {
+    challenges: [],
+    didCommit: true,
+    session: {
+      ...input.session,
+      state: finishApprovalCandidate({
+        candidateId: input.candidateId,
+        completedAt: input.now,
+        reason,
+        state: input.session.state,
+        status: "failed",
+      }),
+    },
+  };
+}
+
+function hasResponseForRequest(
+  stepInput: StepInput | undefined,
+  requestIds: ReadonlySet<string>,
+): boolean {
+  return (
+    stepInput?.attributedInputResponses?.some(({ response }) =>
+      requestIds.has(response.requestId),
+    ) === true ||
+    stepInput?.inputResponses?.some((response) => requestIds.has(response.requestId)) === true
+  );
+}
+
+function hasMeaningfulInput(stepInput: StepInput | undefined): boolean {
+  return (
+    stepInput?.message !== undefined ||
+    (stepInput?.attributedInputResponses?.length ?? 0) > 0 ||
+    (stepInput?.inputResponses?.length ?? 0) > 0 ||
+    (stepInput?.runtimeActionResults?.length ?? 0) > 0
+  );
+}
+
+function appendSettledResponses(
+  stepInput: StepInput | undefined,
+  settlements: readonly ApprovalSettlementAuditRecord[],
+): StepInput | undefined {
+  if (settlements.length === 0) return stepInput;
+  const existingRequestIds = new Set([
+    ...(stepInput?.inputResponses ?? []).map((response) => response.requestId),
+    ...(stepInput?.attributedInputResponses ?? []).map(({ response }) => response.requestId),
+  ]);
+  const missingSettlements = settlements.filter(
+    (settlement) => !existingRequestIds.has(settlement.requestId),
+  );
+  if (missingSettlements.length === 0) return stepInput;
+  return {
+    ...stepInput,
+    inputResponses: [
+      ...(stepInput?.inputResponses ?? []),
+      // An unavailable request answers as cancel, so nothing runs; `answer` reports it unavailable.
+      ...missingSettlements.map((settlement) => ({
+        optionId: settlement.outcome === "allowed" ? "approve" : "cancel",
+        requestId: settlement.requestId,
+      })),
+    ],
+  };
+}
+
+function removeConsumedResponses(
+  stepInput: StepInput | undefined,
+  consumed: ReadonlySet<string>,
+): StepInput | undefined {
+  if (stepInput === undefined) return undefined;
+  const attributed = (stepInput.attributedInputResponses ?? []).filter(
+    ({ response }) => !consumed.has(response.requestId),
+  );
+  const plain = (stepInput.inputResponses ?? []).filter(
+    (response) => !consumed.has(response.requestId),
+  );
+  const inputResponses = [...plain, ...attributed.map(({ response }) => response)];
+  return {
+    ...stepInput,
+    attributedInputResponses: undefined,
+    inputResponses,
+  };
+}
+
+function deliveryResult(
+  session: HarnessSession,
+  stepInput: StepInput | undefined,
+  kind: ApprovalDeliveryResult["kind"] = "continue",
+  challenges: readonly AuthorizationChallenge[] = [],
+  feedback: readonly string[] = [],
+): ApprovalDeliveryResult {
+  return { challenges, feedback, kind, session, stepInput };
+}
+
+function toCandidateDecision(optionId: string | undefined): ApprovalCandidateDecision | undefined {
+  if (optionId === "approve") return "approve";
+  // ACP's Deny button sends "deny" where eve's own prompts send "cancel".
+  if (optionId === "cancel" || optionId === "deny") return "cancel";
+  return undefined;
+}
+
+function approvalCandidateIdPrefix(
+  requestId: string,
+  responder: SessionAuthContext,
+  decision: ApprovalCandidateDecision,
+): string {
+  const principal = [
+    responder.authenticator,
+    responder.issuer ?? "",
+    responder.principalType,
+    responder.principalId,
+  ].join(":");
+  const prefix = `${encodeCandidateIdPart(requestId)}.${encodeCandidateIdPart(principal)}`;
+  // Approve keeps its established id; Cancel needs its own so both can be pending.
+  return decision === "approve" ? prefix : `${prefix}.${encodeCandidateIdPart(decision)}`;
+}
+
+function encodeCandidateIdPart(value: string): string {
+  return Array.from(value, (character) => character.codePointAt(0)!.toString(36)).join("-");
+}
+
+async function withAuthorizerTimeout<T>(promise: Promise<T> | T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      Promise.resolve(promise),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("Approval response authorizer timed out.")),
+          APPROVAL_AUTHORIZER_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}

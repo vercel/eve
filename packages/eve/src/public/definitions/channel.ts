@@ -37,8 +37,8 @@ export type {
   ResetSessionResult,
   SessionCallback,
   TurnPolicy,
-  TaskDeliveryPolicy,
 } from "#channel/types.js";
+export { SessionStrandedError } from "#channel/session-stranded-error.js";
 export type { Session, SessionHandle } from "#channel/session.js";
 export type { ChannelAudience } from "#shared/channel-audience.js";
 export type {
@@ -58,6 +58,13 @@ export type {
   ChannelSource,
 };
 export type { ChannelCors, ChannelCorsOptions } from "#channel/cors.js";
+export type {
+  AgentDescription,
+  AgentSkillDescription,
+  AgentSkillFileDescription,
+  AgentToolDescription,
+} from "#channel/agent-description.js";
+export type { InvokeToolFn, InvokeToolOptions, InvokeToolResult } from "#channel/invoke-tool.js";
 export { DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT, WS } from "#channel/routes.js";
 export type {
   AttachSessionFn,
@@ -208,7 +215,13 @@ export interface ChannelEvents<TCtx = void> {
   readonly "message.appended"?: ChannelEventHandler<"message.appended", TCtx>;
   readonly "reasoning.appended"?: ChannelEventHandler<"reasoning.appended", TCtx>;
   readonly "reasoning.completed"?: ChannelEventHandler<"reasoning.completed", TCtx>;
+  readonly "step.started"?: ChannelEventHandler<"step.started", TCtx>;
+  readonly "step.completed"?: ChannelEventHandler<"step.completed", TCtx>;
   readonly "input.requested"?: ChannelEventHandler<"input.requested", TCtx>;
+  readonly "input.resolved"?: ChannelEventHandler<"input.resolved", TCtx>;
+  readonly "task.started"?: ChannelEventHandler<"task.started", TCtx>;
+  readonly "task.settled"?: ChannelEventHandler<"task.settled", TCtx>;
+  readonly "turn.waiting"?: ChannelEventHandler<"turn.waiting", TCtx>;
   readonly "turn.failed"?: ChannelEventHandler<"turn.failed", TCtx>;
   readonly "turn.completed"?: ChannelEventHandler<"turn.completed", TCtx>;
   readonly "turn.cancelled"?: ChannelEventHandler<"turn.cancelled", TCtx>;
@@ -318,7 +331,13 @@ const channelEventTypes: Record<keyof ChannelEvents, null> = {
   "message.appended": null,
   "reasoning.appended": null,
   "reasoning.completed": null,
+  "step.started": null,
+  "step.completed": null,
   "input.requested": null,
+  "input.resolved": null,
+  "task.started": null,
+  "task.settled": null,
+  "turn.waiting": null,
   "turn.failed": null,
   "turn.completed": null,
   "turn.cancelled": null,

@@ -1,5 +1,6 @@
 import type { UnstampedMessageStreamEvent, MessageStreamEvent } from "#protocol/message.js";
-import { isCurrentTurnBoundaryEvent } from "#protocol/message.js";
+import { TurnSegment } from "#client/session-utils.js";
+import { createSessionContract } from "#internal/testing/session-contract.js";
 
 /**
  * Minimal, duck-typed handle to one workflow `Run`'s readable stream.
@@ -23,11 +24,17 @@ export interface WorkflowRunHandle {
  */
 export interface CapturedTurnStream {
   /**
-   * Reads stream lines until the next turn-boundary event (`session.waiting`,
-   * `session.completed`, or `session.failed`) and returns every event
-   * observed in that turn.
+   * Reads stream lines until the next turn boundary (`session.waiting`,
+   * `session.completed`, `session.failed`, or a `turn.waiting` while an input
+   * request is unanswered) and returns every event observed in that segment.
    */
   nextTurn(): Promise<MessageStreamEvent[]>;
+  /**
+   * Reads stream lines until `matches` accepts an event, such as the
+   * `turn.waiting` an open turn emits while it parks, and returns every event
+   * read through that one.
+   */
+  nextUntil(matches: (event: MessageStreamEvent) => boolean): Promise<MessageStreamEvent[]>;
   /** Releases the reader lock on the underlying `ReadableStream`. */
   dispose(): void;
 }
@@ -48,14 +55,34 @@ export function captureTurnEvents(
   const state: StreamState = { buffer: "" };
   const decoder = options.decoder ?? new TextDecoder();
   let disposed = false;
+  // Every stream a test reads is held to the session contract readers rely on.
+  const contract = createSessionContract();
+  let index = 0;
+
+  const readUntil = async (matches: (event: MessageStreamEvent) => boolean) => {
+    if (disposed) {
+      throw new Error("CapturedTurnStream: stream already disposed.");
+    }
+
+    return await readUntilMatch(reader, state, decoder, (event) => {
+      const [violation] = contract.observe(event);
+      if (violation !== undefined) {
+        throw new Error(
+          `Session stream contract (${violation.rule}) at event ${index}: ${violation.message}`,
+        );
+      }
+      index += 1;
+      return matches(event);
+    });
+  };
 
   return {
     async nextTurn() {
-      if (disposed) {
-        throw new Error("CapturedTurnStream: stream already disposed.");
-      }
-
-      return await readUntilBoundary(reader, state, decoder);
+      const segment = new TurnSegment();
+      return await readUntil((event) => segment.observe(event));
+    },
+    async nextUntil(matches) {
+      return await readUntil(matches);
     },
     dispose() {
       if (disposed) {
@@ -144,10 +171,11 @@ interface StreamState {
   buffer: string;
 }
 
-async function readUntilBoundary(
+async function readUntilMatch(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   state: StreamState,
   decoder: InstanceType<typeof TextDecoder>,
+  matches: (event: MessageStreamEvent) => boolean,
 ): Promise<MessageStreamEvent[]> {
   const events: MessageStreamEvent[] = [];
 
@@ -167,7 +195,7 @@ async function readUntilBoundary(
       const event = JSON.parse(line) as MessageStreamEvent;
       events.push(event);
 
-      if (isCurrentTurnBoundaryEvent(event)) {
+      if (matches(event)) {
         return events;
       }
     }
@@ -201,3 +229,12 @@ export function stampTestEvents(
 ): MessageStreamEvent[] {
   return events.map((event, index) => stampTestEvent(event, index));
 }
+
+/** Token usage a session reports in tests that build session events without caring about its value. */
+export const TEST_USAGE = {
+  cacheReadTokens: 800,
+  cacheWriteTokens: 0,
+  costUsd: 0.0042,
+  inputTokens: 1200,
+  outputTokens: 150,
+};

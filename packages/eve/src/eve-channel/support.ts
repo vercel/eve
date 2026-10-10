@@ -1,9 +1,10 @@
 import type { UserContent } from "ai";
 
+import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
-import type { MessageStreamEvent, SubagentCalledStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 import type { ChannelCors } from "#public/definitions/channel.js";
 import {
   defaultEveAuth,
@@ -25,42 +26,74 @@ export function healthResponse(): Response {
   });
 }
 
-export async function findRemoteSubagentBinding(input: {
+/** Clients display the error text directly; keep operator details in structured fields. */
+export function strandedSessionResponse(error: unknown): Response | undefined {
+  if (!SessionStrandedError.is(error)) return undefined;
+  const body: Record<string, unknown> = {
+    code: "session_stranded",
+    error: "This session is no longer available.",
+    ok: false,
+  };
+  if (error.owner.eveVersion !== undefined) body.eveVersion = error.owner.eveVersion;
+  return Response.json(body, { headers: { "cache-control": "no-store" }, status: 409 });
+}
+
+/** Where a remote child the parent session recorded runs, and its credential key. */
+export interface RemoteAgentBinding {
+  readonly forwardPrincipal?: boolean;
+  readonly name: string;
+  readonly resolverId?: string;
+  readonly url: string;
+}
+
+interface RemoteAgentStreamCoordinates {
   readonly callId: string;
   readonly childSessionId: string;
   readonly childStreamPath: string;
-  readonly parentSessionId: string;
-  readonly parent: {
-    getEventStream(options?: { startIndex?: number }): Promise<ReadableStream<MessageStreamEvent>>;
-    getStreamTailIndex(): Promise<number>;
-  };
-}): Promise<SubagentCalledStreamEvent | undefined> {
+}
+
+/** Finds the remote child the parent session recorded for one proxy route, from its `agent.started` event. */
+export async function findRemoteAgentBinding(
+  input: RemoteAgentStreamCoordinates & {
+    readonly parent: {
+      getEventStream(options?: {
+        startIndex?: number;
+      }): Promise<ReadableStream<MessageStreamEvent>>;
+      getStreamTailIndex(): Promise<number>;
+    };
+  },
+): Promise<RemoteAgentBinding | undefined> {
   const tailIndex = await input.parent.getStreamTailIndex();
   if (tailIndex < 0) return undefined;
 
   const events = await input.parent.getEventStream({ startIndex: 0 });
   const reader = events.getReader();
-  let binding: SubagentCalledStreamEvent | undefined;
+  let binding: RemoteAgentBinding | undefined;
   try {
     for (let index = 0; index <= tailIndex; index += 1) {
       const next = await reader.read();
       if (next.done) break;
-      const event = next.value;
-      if (
-        event.type === "subagent.called" &&
-        event.data.sessionId === input.parentSessionId &&
-        event.data.callId === input.callId &&
-        event.data.childSessionId === input.childSessionId &&
-        event.data.childStreamPath === input.childStreamPath &&
-        event.data.remote !== undefined
-      ) {
-        binding = event;
-      }
+      binding = readRemoteAgentBinding(next.value, input) ?? binding;
     }
   } finally {
     await reader.cancel().catch(() => {});
   }
   return binding;
+}
+
+function readRemoteAgentBinding(
+  event: MessageStreamEvent,
+  coordinates: RemoteAgentStreamCoordinates,
+): RemoteAgentBinding | undefined {
+  if (event.type !== "agent.started") return undefined;
+  const { data } = event;
+  // The stream path embeds the parent session id, so matching it binds the parent.
+  const matches =
+    data.callId === coordinates.callId &&
+    data.sessionId === coordinates.childSessionId &&
+    data.streamPath === coordinates.childStreamPath;
+  if (!matches || data.remote === undefined) return undefined;
+  return { name: data.name, ...data.remote };
 }
 
 export function normalizeEveCors(cors: EveChannelCors | undefined): ChannelCors {
@@ -129,6 +162,7 @@ interface OnMessageOutcome {
 export async function resolveOnMessage(input: {
   readonly auth: SessionAuthContext | null;
   readonly config: EveChannelInput;
+  readonly invocation?: EveHandle["invocation"];
   readonly message: string | UserContent;
   readonly request: Request;
   readonly sessionId?: string;
@@ -137,10 +171,13 @@ export async function resolveOnMessage(input: {
 
   let result: EveMessageResult;
   try {
+    const base = { caller: input.auth, request: input.request };
     const eve: EveHandle =
       input.sessionId === undefined
-        ? { caller: input.auth, request: input.request }
-        : { caller: input.auth, request: input.request, sessionId: input.sessionId };
+        ? input.invocation === undefined
+          ? base
+          : { ...base, invocation: input.invocation }
+        : { ...base, sessionId: input.sessionId };
     const ctx: EveMessageContext = { eve };
     result = await handler(ctx, input.message);
     if (result === null || result === undefined) {

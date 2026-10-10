@@ -22,11 +22,11 @@ describe("durable session checkpoints", () => {
       continuationToken: "alias",
       version: DURABLE_SESSION_VERSION,
       hasProxyInputRequests: false,
-      emissionState: { sequence: 0, sessionStarted: false, stepIndex: 0, turnId: "" },
       snapshot: { session: projectToDurableSession(session) },
     });
     expect(readDurableSession(state)).toBe(state.snapshot.session);
     expect(state.snapshot.session.agent).toEqual({ system: "test system" });
+    expect(state.snapshot.session).not.toHaveProperty("history");
   });
 
   it("refreshes projections when replacing session program memory", () => {
@@ -40,7 +40,7 @@ describe("durable session checkpoints", () => {
     expect(state.continuationToken).toBe("old");
   });
 
-  it.each([{ version: 2, snapshot: { session: {} } }, { version: 1 }])(
+  it.each([{ version: 1, snapshot: { session: {} } }, { version: DURABLE_SESSION_VERSION }])(
     "rejects unsupported checkpoints without a storage fallback",
     (state) => {
       expect(() => readDurableSession(state as DurableSessionState)).toThrow(

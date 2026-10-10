@@ -8,7 +8,7 @@ import {
   renderSelectQuestion,
   renderTextQuestion,
 } from "./setup-panel.js";
-import { renderFlowDrawer } from "./flow-drawer.js";
+import { renderFlowDrawer, renderTransientDrawer } from "./flow-drawer.js";
 import { stripAnsi } from "#cli/ui/terminal-text.js";
 import { createTheme } from "./theme.js";
 
@@ -225,6 +225,18 @@ describe("renderFlowDrawer", () => {
     expect(rows.rows.at(-2)).toBe("");
     expect(rows.rows.at(-1)).toBe("─".repeat(60));
     expect(rows.rows.join("\n").split("add to your agent")).toHaveLength(2);
+  });
+
+  it("clips a corner label so the top rule keeps the terminal width", () => {
+    const { rows } = renderTransientDrawer(
+      ["  Approve random_number?"],
+      [],
+      theme,
+      30,
+      "subagent(number_picker:13) · 2 of 10",
+    );
+
+    expect(rows[0]).toBe("── subagent(number_picker:… ──");
   });
 
   it("places question controls below the drawer boundary", () => {
@@ -537,6 +549,29 @@ describe("renderSelectQuestion", () => {
     );
     const clipped = rows.find((row) => row.includes("\x1b[34m"));
     expect(clipped?.endsWith("\x1b[0m")).toBe(true);
+  });
+
+  it("wraps shared help below the options without repeating it on rows", () => {
+    const options = [
+      { value: "owner", label: "Owner team" },
+      { value: "member", label: "Member team", disabled: true, disabledReason: "needs permission" },
+    ];
+    const rows = renderSelectQuestion(
+      {
+        kind: "search",
+        message: "Select your team",
+        options,
+        helpText: "For disabled teams, ask a team owner to run setup, or choose another team.",
+        select: initialSelectState({ options }),
+      },
+      theme,
+      50,
+    );
+    const text = rows.join("\n");
+    expect(text.indexOf("For disabled teams")).toBeGreaterThan(text.indexOf("Member team"));
+    expect(text.match(/ask a team owner/g)).toHaveLength(1);
+    expect(text).toContain("choose another team.");
+    expect(rows.every((line) => line.length <= 50)).toBe(true);
   });
 
   it("renders a warning-toned disabled row with a dim label and yellow alert annotation", () => {

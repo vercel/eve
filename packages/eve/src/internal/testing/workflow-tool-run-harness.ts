@@ -4,7 +4,7 @@ import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { serializeInputSchema, toInputSchema } from "#tools/schema.js";
 import { getRun } from "#internal/workflow/runtime.js";
 import {
-  type BlockingWorkflowToolDefinition,
+  type WorkflowExecuteToolDefinition,
   defineWorkflowTool,
 } from "#tools/workflow-definition.js";
 
@@ -23,6 +23,7 @@ export function buildWorkflowToolSerializedContext(input: {
   return {
     "eve.auth": null,
     "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
+    "eve.stateLayout": 1,
     "eve.capabilities": { requestInput: input.requestInput ?? false },
     "eve.channel": { kind: "http", state: {} },
     ...(input.acceptedDeploymentId === undefined
@@ -46,7 +47,6 @@ export function buildWorkflowToolSerializedContext(input: {
  */
 export async function createWorkflowToolRuntime(input: {
   readonly agentName: string;
-  readonly background?: boolean;
   readonly execute: (...args: never[]) => unknown;
   readonly inputSchema?: ResolvedToolDefinition["inputSchema"];
   readonly toolName: string;
@@ -58,9 +58,8 @@ export async function createWorkflowToolRuntime(input: {
         logicalPath: `tools/${input.toolName}.ts`,
         loadNamespace: async () => ({
           default: defineWorkflowTool({
-            execution: input.background === true ? "background" : undefined,
             description: `Deploys a service (${input.toolName}).`,
-            execute: input.execute as BlockingWorkflowToolDefinition["execute"],
+            execute: input.execute as WorkflowExecuteToolDefinition["execute"],
             inputSchema: serializeInputSchema(input.inputSchema ?? DEPLOY_INPUT_SCHEMA) ?? {},
           }),
         }),

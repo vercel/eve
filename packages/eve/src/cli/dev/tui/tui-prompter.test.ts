@@ -45,6 +45,7 @@ describe("createTuiPrompter", () => {
 
     await prompter.select({
       message: "extension/agent-browser",
+      helpText: "Press Enter to continue.",
       description: "Add browser automation tools to an eve agent.",
       metadata: [{ label: "Source", value: "Official eve registry" }],
       options: [{ value: "add", label: "Add to project" }],
@@ -53,6 +54,7 @@ describe("createTuiPrompter", () => {
     expect(renderer.readSelect).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: "single",
+        helpText: "Press Enter to continue.",
         description: "Add browser automation tools to an eve agent.",
         metadata: [{ label: "Source", value: "Official eve registry" }],
       }),

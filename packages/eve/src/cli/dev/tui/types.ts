@@ -8,6 +8,14 @@ export type { LogDisplayMode };
 export type TerminalPartDisplayMode = "full" | "collapsed" | "auto-collapsed" | "hidden";
 
 /**
+ * Controls how subagent tasks render. `collapsed` writes a line when a
+ * subagent task starts and when it ends, and shows its current activity in
+ * the task panel above the prompt; `full` also writes each finished child
+ * message and tool call; `hidden` shows neither lines nor panel rows.
+ */
+export type SubagentDisplayMode = "full" | "collapsed" | "hidden";
+
+/**
  * Controls which usage statistic is shown for assistant responses.
  */
 export type AssistantResponseStatsMode = "tokens" | "tokensPerSecond";
@@ -32,12 +40,11 @@ export type TuiDisplayOptions = {
   reasoning?: TerminalPartDisplayMode;
 
   /**
-   * How subagent sections should render. `full` shows every nested child
-   * event line and the subagent's output; `auto-collapsed` collapses the
-   * section once the subagent reaches `done`; `collapsed` always shows
-   * only the header; `hidden` skips the section entirely.
+   * How subagent tasks render.
+   *
+   * @default "collapsed"
    */
-  subagents?: TerminalPartDisplayMode;
+  subagents?: SubagentDisplayMode;
 
   /**
    * How MCP connection authorization sections should render. `full`
@@ -66,12 +73,10 @@ export type TuiDisplayOptions = {
   contextSize?: number;
 
   /**
-   * Which captured output (stdout, stderr, sandbox lifecycle lines) to
-   * surface as inline regions. Output is always captured and buffered so it
+   * Minimum log severity to surface as inline regions. Output is always captured and buffered so it
    * cannot corrupt the frame; this only controls what is rendered. The
    * `/loglevel` command switches the mode at runtime, retroactively hiding or
-   * restoring buffered lines. `TerminalRenderer` defaults to `none`; the
-   * `eve dev` CLI defaults to `stderr`.
+   * restoring buffered lines. Defaults to `error`. Only `all` includes unclassified raw output.
    */
   logs?: LogDisplayMode;
 };

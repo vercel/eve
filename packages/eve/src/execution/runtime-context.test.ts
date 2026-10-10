@@ -9,11 +9,9 @@ import {
   ParentTraceContextKey,
   type Session,
   type SessionAuthContext,
-  ActivityObserverKey,
   SessionIdKey,
   SessionKey,
   ScheduleIdKey,
-  TaskDeliveryPolicyKey,
   SessionTitleKey,
 } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
@@ -156,22 +154,6 @@ function createMinimalBundle(): Parameters<typeof buildRunContext>[0]["bundle"] 
 }
 
 describe("buildRunContext", () => {
-  it.each([undefined, "auto", "cohort"] as const)(
-    "resolves an ordinary send policy %s",
-    (taskDeliveryPolicy) => {
-      const ctx = buildRunContext({
-        bundle: createMinimalBundle(),
-        run: {
-          auth: null,
-          adapter: { kind: "http" },
-          input: { message: "Report" },
-          taskDeliveryPolicy,
-        },
-      });
-      expect(ctx.get(TaskDeliveryPolicyKey)).toBe(taskDeliveryPolicy ?? "auto");
-    },
-  );
-
   it.each([undefined, testAuth])(
     "defers prewarm initiator identity unless explicitly forwarded (%s)",
     (initiatorAuth) => {
@@ -239,10 +221,9 @@ describe("buildRunContext", () => {
     expect(ctx.require(ScheduleIdKey)).toBe("dynamic-tasks");
   });
 
-  it("inherits schedule provenance but not its delivery policy in child sessions", () => {
+  it("inherits schedule provenance in child sessions", () => {
     const scope = new ContextContainer();
     scope.set(ScheduleIdKey, "automatic-reports");
-    scope.set(TaskDeliveryPolicyKey, "auto");
     const ctx = contextStorage.run(scope, () =>
       buildRunContext({
         bundle: createMinimalBundle(),
@@ -260,10 +241,9 @@ describe("buildRunContext", () => {
       }),
     );
     expect(ctx.require(ScheduleIdKey)).toBe("automatic-reports");
-    expect(ctx.get(TaskDeliveryPolicyKey)).toBe("cohort");
   });
 
-  it("stores a title only for top-level sessions", () => {
+  it("stores titles for root and remote-owned sessions, not local children", () => {
     const root = buildRunContext({
       bundle: createMinimalBundle(),
       run: {
@@ -289,6 +269,22 @@ describe("buildRunContext", () => {
 
     expect(root.get(SessionTitleKey)).toBe("Investigate the incident");
     expect(child.get(SessionTitleKey)).toBeUndefined();
+    const remote = buildRunContext({
+      bundle: createMinimalBundle(),
+      run: {
+        auth: null,
+        adapter: { kind: "eve" },
+        input: { message: "Remote task" },
+        traceRoot: { kind: "own" },
+        parent: {
+          callId: "call",
+          rootSessionId: "caller-root",
+          sessionId: "caller",
+          turn: { id: "turn_0", sequence: 0 },
+        },
+      },
+    });
+    expect(remote.get(SessionTitleKey)).toBe("Remote task");
   });
 
   it("does not invent a continuation for an ID-only run", () => {
@@ -331,31 +327,6 @@ describe("buildRunContext", () => {
     });
 
     expect(ctx.get(SessionIdKey)).toBeUndefined();
-  });
-
-  it("seeds inherited private activity observer configuration", () => {
-    const sink = {
-      url: "https://root.example.com/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
-      version: 1 as const,
-    };
-    const workIdentity = {
-      id: "work:root:turn:call",
-      kind: "subagent" as const,
-      parentId: "work:root:turn",
-      rootSessionId: "root",
-      rootTurnId: "turn",
-    };
-    const ctx = buildRunContext({
-      bundle: createMinimalBundle(),
-      run: {
-        auth: null,
-        adapter: { kind: "subagent" },
-        input: { message: "hi" },
-        activityObserver: { sink, workIdentity },
-      },
-    });
-
-    expect(ctx.get(ActivityObserverKey)).toEqual({ sink, workIdentity });
   });
 
   it("grafts parent custom metadata and inherits the conversation audience", () => {

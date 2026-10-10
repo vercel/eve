@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
 
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import type { Session } from "#channel/session.js";
@@ -8,6 +9,8 @@ import { writeForwardedParentSessionBaggage } from "#protocol/baggage.js";
 import { none } from "#public/channels/auth.js";
 import { eveChannel, type TrustedForwarders } from "#public/channels/eve.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
+import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
+import { SessionStrandedError } from "#channel/session-stranded-error.js";
 
 function route(
   method: "GET" | "POST",
@@ -38,6 +41,7 @@ function createFixedSession(overrides: Partial<Session> = {}): Session {
 
 function createArgs(session = createFixedSession()): RouteHandlerArgs {
   return {
+    ...mockAgentRouteArgs(),
     ...mockChannelContext(vi.fn()),
     attachSession: () => session,
     to: vi.fn() as never,
@@ -173,6 +177,7 @@ describe("eve ID-addressed session routes", () => {
             url: "https://caller.example.com/eve/v1/callback/tok123",
           },
           message: "hello",
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
         }),
         headers: {
           "content-type": "application/json",
@@ -213,6 +218,7 @@ describe("eve ID-addressed session routes", () => {
             url: "https://caller.example.com/eve/v1/callback/tok123",
           },
           message: "hello",
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
         }),
         headers: {
           "content-type": "application/json",
@@ -254,6 +260,7 @@ describe("eve ID-addressed session routes", () => {
             url: "https://caller.example.com/eve/v1/callback/tok123",
           },
           message: "hello",
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
         }),
         headers: {
           "content-type": "application/json",
@@ -303,6 +310,7 @@ describe("eve ID-addressed session routes", () => {
                 }
               : undefined,
             message: "hello",
+            protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
           }),
           headers: {
             "content-type": "application/json",
@@ -316,7 +324,7 @@ describe("eve ID-addressed session routes", () => {
       );
 
       expect(response.status).toBe(202);
-      await expect(response.json()).resolves.toEqual({
+      await expect(response.json()).resolves.toMatchObject({
         ok: true,
         sessionId: "wrun_A",
         status: "accepted",
@@ -368,6 +376,7 @@ describe("eve ID-addressed session routes", () => {
               url: "https://caller.example.com/eve/v1/callback/tok123",
             },
             message: "hello",
+            protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
           }),
           headers: {
             "content-type": "application/json",
@@ -386,6 +395,9 @@ describe("eve ID-addressed session routes", () => {
         expect.objectContaining({
           parent: trusted ? parent : undefined,
         }),
+      );
+      expect(createSession.mock.calls[0]?.[0].traceRoot).toEqual(
+        trusted ? { kind: "own" } : undefined,
       );
       const untrusted = logs.records.filter(
         (record) => record.message === "ignoring remote parent lineage from an untrusted forwarder",
@@ -468,6 +480,29 @@ describe("eve ID-addressed session routes", () => {
     });
   });
 
+  it("returns a user-facing stranded conflict with structured diagnostic metadata", async () => {
+    const session = createFixedSession({
+      send: vi.fn().mockRejectedValue(new SessionStrandedError({ eveVersion: "0.1.0" })),
+    });
+    const response = await route("POST", "/eve/v1/session/:sessionId")(
+      new Request("https://eve.test/eve/v1/session/wrun_A", {
+        body: JSON.stringify({ message: "Alice follows up after the upgrade." }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+      createArgs(session),
+    );
+
+    expect(response.status).toBe(409);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({
+      code: "session_stranded",
+      error: "This session is no longer available.",
+      eveVersion: "0.1.0",
+      ok: false,
+    });
+  });
+
   it.each([
     ["cancel", "/eve/v1/session/:sessionId/cancel"],
     ["compact", "/eve/v1/session/:sessionId/compact"],
@@ -485,21 +520,17 @@ describe("eve ID-addressed session routes", () => {
     expect(session[operation]).toHaveBeenCalledTimes(1);
   });
 
-  it("forwards owned-task cancellation without changing the response", async () => {
+  it("forwards the turn guard without changing the response", async () => {
     const session = createFixedSession();
     const response = await route("POST", "/eve/v1/session/:sessionId/cancel")(
       new Request("https://eve.test/eve/v1/session/wrun_A/cancel", {
-        body: JSON.stringify({ tasks: true, turnId: "turn_1" }),
+        body: JSON.stringify({ turnId: "turn_1" }),
         method: "POST",
       }),
       createArgs(session),
     );
 
-    expect(session.cancel).toHaveBeenCalledWith({
-      taskId: undefined,
-      tasks: true,
-      turnId: "turn_1",
-    });
+    expect(session.cancel).toHaveBeenCalledWith({ turnId: "turn_1" });
     expect(response.status).toBe(202);
     await expect(response.json()).resolves.toEqual({
       ok: true,

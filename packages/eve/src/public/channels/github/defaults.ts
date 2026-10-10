@@ -3,6 +3,8 @@ import type { SandboxSession } from "#shared/sandbox-session.js";
 type NetworkPolicySandboxSession = SandboxSession & {
   setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
 };
+import { promptQueueEvents } from "#channel/prompt-queue.js";
+import { renderTextInputRequest } from "#channel/resolve-text.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { createLogger, extractErrorId, formatErrorHint, logError } from "#internal/logging.js";
@@ -18,6 +20,7 @@ import {
 } from "#public/channels/github/inbound.js";
 import type {
   GitHubChannelEvents,
+  GitHubEventContext,
   GitHubInboundContext,
   GitHubInboundResult,
   GitHubProgressConfig,
@@ -90,6 +93,13 @@ interface GitHubDefaultEventOptions {
 
 /** Builds GitHub's built-in event handlers for acknowledgement and terminal output. */
 export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): GitHubChannelEvents {
+  async function showPrompt(channel: GitHubEventContext, request: InputRequest): Promise<void> {
+    const sections = [renderInputRequest(request)];
+    const replyInstruction = renderReplyInstruction(request, await options.botName?.());
+    if (replyInstruction !== undefined) sections.push(replyInstruction);
+    await postCommentChunks(channel, sections.join("\n\n"));
+  }
+
   return {
     async "turn.started"(_event, channel, ctx) {
       if (options.progress?.reactions !== false) {
@@ -108,13 +118,8 @@ export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): Gi
       await postCommentChunks(channel, event.message);
     },
 
-    async "input.requested"(event, channel, _ctx) {
-      if (event.requests.length === 0) return;
-      const sections = event.requests.map(renderInputRequest);
-      const replyInstruction = renderReplyInstruction(event.requests, await options.botName?.());
-      if (replyInstruction !== undefined) sections.push(replyInstruction);
-      await postCommentChunks(channel, sections.join("\n\n"));
-    },
+    // A comment can only answer the prompt it sees, so prompts post one at a time.
+    ...promptQueueEvents(showPrompt),
 
     async "session.failed"(event, channel) {
       const hint = formatErrorHint(event);
@@ -143,32 +148,21 @@ export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): Gi
 }
 
 function renderInputRequest(request: InputRequest): string {
-  const lines = [request.prompt];
-  if (request.options !== undefined && request.options.length > 0) {
-    lines.push(
-      "",
-      ...request.options.map((option, index) => {
-        const description = option.description ? ` - ${option.description}` : "";
-        return `${index + 1}. ${option.label}${description}`;
-      }),
-    );
-  }
-  if (request.allowFreeform === true) {
-    lines.push("", "You can also reply with a custom answer.");
-  }
-  return lines.join("\n");
+  const body = renderTextInputRequest(request);
+  return request.allowFreeform === true
+    ? `${body}\n\nYou can also reply with a custom answer.`
+    : body;
 }
 
 // The default onComment hook only dispatches comments that @mention the bot,
 // so a prompt without this instruction invites replies that are silently ignored.
 function renderReplyInstruction(
-  requests: readonly InputRequest[],
+  request: InputRequest,
   botName: string | undefined,
 ): string | undefined {
   const name = botName?.trim();
   if (!name) return undefined;
-  const firstOption = requests.find((request) => (request.options?.length ?? 0) > 0)?.options?.[0];
-  const example = firstOption?.label ?? "<your answer>";
+  const example = request.options?.[0]?.label ?? "<your answer>";
   return `Answer by mentioning me in a reply, e.g. \`@${name} ${example}\`.`;
 }
 

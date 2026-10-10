@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createReadmeHeadingIdsPlugin,
   createResolveReadmeLinksPlugin,
   resolveReadmeHref,
   sanitizeReadmeHref,
@@ -22,8 +23,8 @@ describe("resolveReadmeHref", () => {
     );
   });
 
-  it("preserves page anchors and safe absolute links", () => {
-    expect(resolveReadmeHref("#quick-start", sourceRevisionHref)).toBe("#quick-start");
+  it("targets rendered heading IDs and preserves safe absolute links", () => {
+    expect(resolveReadmeHref("#quick-start", sourceRevisionHref)).toBe("#user-content-quick-start");
     expect(resolveReadmeHref("https://eve.dev/docs", sourceRevisionHref)).toBe(
       "https://eve.dev/docs",
     );
@@ -31,6 +32,33 @@ describe("resolveReadmeHref", () => {
 
   it("rejects relative links when the source is not a pinned GitHub tree", () => {
     expect(resolveReadmeHref("docs/setup.md", "https://example.com/template")).toBeUndefined();
+  });
+});
+
+describe("createReadmeHeadingIdsPlugin", () => {
+  it("adds GitHub-compatible heading IDs, including duplicate headings", () => {
+    const tree = {
+      type: "root",
+      children: [
+        {
+          type: "heading",
+          depth: 2,
+          children: [{ type: "text", value: "Link wallet" }],
+        },
+        { type: "heading", depth: 3, children: [{ type: "text", value: "Link wallet" }] },
+        { type: "heading", depth: 3, children: [{ type: "text", value: "Link wallet-1" }] },
+        { type: "heading", depth: 3, children: [{ type: "text", value: "Node.js" }] },
+        { type: "heading", depth: 3, children: [{ type: "text", value: "Next.js setup" }] },
+      ],
+    };
+
+    createReadmeHeadingIdsPlugin()()(tree);
+
+    expect(tree.children[0]).toHaveProperty("data.hProperties.id", "link-wallet");
+    expect(tree.children[1]).toHaveProperty("data.hProperties.id", "link-wallet-1");
+    expect(tree.children[2]).toHaveProperty("data.hProperties.id", "link-wallet-1-1");
+    expect(tree.children[3]).toHaveProperty("data.hProperties.id", "nodejs");
+    expect(tree.children[4]).toHaveProperty("data.hProperties.id", "nextjs-setup");
   });
 });
 

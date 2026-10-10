@@ -19,6 +19,7 @@ import {
 } from "#internal/nitro/dev-runtime-artifacts-retention.js";
 import { renameWithTransientBusyRetry } from "#shared/rename-with-retry.js";
 import { resolvePackageRoot } from "#internal/application/package.js";
+import { resolveDevelopmentRuntimeArtifactsSnapshotsDirectory } from "#internal/nitro/dev-runtime-generation-metadata.js";
 
 const DEV_RUNTIME_ARTIFACTS_DIRECTORY = "dev-runtime";
 const DEV_RUNTIME_ARTIFACTS_GENERATION_METADATA = "generation.json";
@@ -66,10 +67,6 @@ export interface DevelopmentRuntimeArtifactsActivation {
  */
 export function resolveDevelopmentRuntimeArtifactsPointerPath(appRoot: string): string {
   return join(appRoot, ".eve", DEV_RUNTIME_ARTIFACTS_DIRECTORY, "current.json");
-}
-
-function resolveDevelopmentRuntimeArtifactsSnapshotsDirectory(appRoot: string): string {
-  return join(appRoot, ".eve", DEV_RUNTIME_ARTIFACTS_DIRECTORY, "snapshots");
 }
 
 function isDevelopmentRuntimeArtifactsSnapshotRoot(appRoot: string, snapshotRoot: string): boolean {
@@ -318,9 +315,7 @@ export function readActiveDevelopmentRuntimeArtifactsSnapshot(
   };
 }
 
-/**
- * Reads a revision token for the latest dev runtime artifact snapshot.
- */
+/** Reads a revision token for the latest dev runtime artifact snapshot. */
 export function readDevelopmentRuntimeArtifactsRevision(
   appRoot: string,
 ): DevelopmentRuntimeArtifactsRevision {
@@ -342,11 +337,11 @@ export async function pruneDevelopmentRuntimeArtifactsSnapshots(input: {
   readonly gracePeriodMs?: number;
   readonly now?: number;
   readonly retainCount?: number;
-}): Promise<void> {
+}): Promise<boolean> {
   const pointer = readDevelopmentRuntimeArtifactsPointer(
     resolveDevelopmentRuntimeArtifactsPointerPath(input.appRoot),
   );
-  await pruneDevelopmentRuntimeArtifactsSnapshotDirectory({
+  return await pruneDevelopmentRuntimeArtifactsSnapshotDirectory({
     activeSnapshotRoot:
       pointer?.version === DEV_RUNTIME_ARTIFACTS_POINTER_VERSION ? pointer.snapshotRoot : undefined,
     gracePeriodMs: input.gracePeriodMs,

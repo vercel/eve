@@ -1,29 +1,42 @@
 import { getPendingAuthorization } from "#harness/authorization.js";
-import { hasPendingInputBatch } from "#harness/input-requests.js";
-import { getPendingCoordinationBatch } from "#harness/coordination.js";
+import { sessionView } from "#harness/session-machine/commit.js";
+import { ownOpenRequestIds } from "#harness/session-machine/transitions.js";
+import { runtimeWait } from "#harness/session-machine/view.js";
+import type { TaskToolCall } from "#execution/tasks/calls.js";
 import type { HarnessSession } from "#harness/types.js";
+import { openSignIns, type SessionProjection } from "#protocol/session-projection.js";
 
-/** Derives the workflow fields used to select the next action at the park boundary. */
-export function derivePendingState(session: HarnessSession): {
+/**
+ * Derives the workflow fields used to select the next action at the park boundary. Whether the
+ * session awaits input or a sign-in is the projection's; which callbacks resume it, and which
+ * calls wait on the runtime, is execution state.
+ */
+export function derivePendingState(
+  session: HarnessSession,
+  projection: SessionProjection,
+): {
   readonly authorizationAttemptIds?: readonly string[];
   readonly hasPendingAuthorization: boolean;
   readonly hasPendingInputBatch: boolean;
+  /** The pending batch has workflow tool runs to start; task tool calls are answered by the session. */
+  readonly hasRunsToDispatch?: boolean;
   readonly pendingCoordinationCallIds?: readonly string[];
+  readonly pendingTaskToolCalls?: readonly TaskToolCall[];
 } {
-  const batch = getPendingCoordinationBatch(session.state);
   const pendingAuth = getPendingAuthorization(session.state);
   const base = {
     authorizationAttemptIds: pendingAuth?.challenges.flatMap((challenge) =>
       challenge.attemptId === undefined ? [] : [challenge.attemptId],
     ),
-    hasPendingAuthorization: pendingAuth !== undefined,
-    hasPendingInputBatch: hasPendingInputBatch(session.state),
+    hasPendingAuthorization: openSignIns(projection).length > 0,
+    hasPendingInputBatch: ownOpenRequestIds(sessionView(projection, session.state)).size > 0,
   };
-  if (batch === undefined) return base;
+  const waiting = runtimeWait(session.state);
+  if (waiting === undefined) return base;
   return {
     ...base,
-    pendingCoordinationCallIds: [...batch.runtimeActions, ...batch.tasks].map(
-      (request) => request.callId,
-    ),
+    hasRunsToDispatch: waiting.tasks.length > 0,
+    pendingCoordinationCallIds: waiting.callIds,
+    pendingTaskToolCalls: waiting.taskToolCalls,
   };
 }

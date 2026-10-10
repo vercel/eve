@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import { defaultEvents, defaultInputRequestedHandler } from "#public/channels/slack/defaults.js";
+import { defaultInputRequestedHandler } from "#public/channels/slack/approval-cards.js";
+import { defaultEvents } from "#public/channels/slack/defaults.js";
 import type { SlackChannelState, SlackEventContext } from "#public/channels/slack/slackChannel.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 
@@ -99,6 +100,8 @@ function buildChannelStub(state: Partial<SlackChannelState> = {}) {
   return { channel, post, postDirectMessage, postEphemeral, request, startTyping };
 }
 
+const RECIPIENT = { slackUsersByPrincipal: { "slack:T01:U777": "U777" } };
+
 function authRequiredEvent(
   overrides: { url?: string; userCode?: string; displayName?: string } = {},
 ) {
@@ -106,6 +109,7 @@ function authRequiredEvent(
     authorization: { url: overrides.url ?? "https://connect.example.com/a/sca_1", ...overrides },
     description: "Authorization required for notion",
     name: "notion",
+    principalId: "slack:T01:U777",
     sequence: 0,
     stepIndex: 0,
     turnId: "turn_0",
@@ -238,6 +242,7 @@ describe("defaultInputRequestedHandler private input requests", () => {
 
   it("previews the triggering message and updates the routed DM card after settlement", async () => {
     const { channel, post, postDirectMessage, request } = buildChannelStub({
+      slackUsersByPrincipal: { "slack:T1:U_REVIEWER": "U_REVIEWER" },
       triggeringMessageTs: "111.333",
       triggeringUserId: "U_REVIEWER",
     });
@@ -293,13 +298,65 @@ describe("defaultInputRequestedHandler private input requests", () => {
       blocks?: unknown[];
     };
     expect(JSON.stringify(update.blocks)).not.toContain("eve_input:route:");
+    expect(JSON.stringify(update.blocks)).not.toContain("I've paused");
+    expect(request).toHaveBeenCalledWith("chat.delete", { channel: "D123", ts: "dm2" });
+    expect(request).toHaveBeenCalledWith("chat.update", {
+      channel: "C123",
+      text: "Approved by <@U_REVIEWER>.",
+      ts: "ts1",
+    });
+    expect(channel.state.pendingApprovalCards).toEqual({});
+  });
+
+  it("retires a thread approval that resolves without a click, even when Slack fails", async () => {
+    const logs = captureLogRecords();
+    const { channel, post, request } = buildChannelStub();
+    post
+      .mockResolvedValueOnce({ id: "details-ts", raw: { ok: true } })
+      .mockResolvedValueOnce({ id: "card-ts", raw: { ok: true } });
+
+    await defaultInputRequestedHandler()(
+      { requests: [approvalRequest()], sequence: 1, stepIndex: 0, turnId: "turn-1" },
+      channel,
+      sessionCtx,
+    );
+    expect(channel.state.pendingApprovalCards?.["approval-1"]).toMatchObject({
+      detailsMessageTs: "details-ts",
+      messageTs: "card-ts",
+    });
+
+    request.mockRejectedValueOnce(new Error("Slack unavailable"));
+    await defaultEvents["input.resolved"]!(
+      {
+        resolutions: [{ kind: "tool-approval", outcome: "ignored", requestId: "approval-1" }],
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "turn-2",
+      },
+      channel,
+      sessionCtx,
+    );
+
+    expect(request).toHaveBeenCalledWith(
+      "chat.update",
+      expect.objectContaining({
+        channel: "C123",
+        text: "Answered: No longer needed",
+        ts: "card-ts",
+      }),
+    );
+    expect(request).toHaveBeenCalledWith("chat.delete", { channel: "C123", ts: "details-ts" });
+    expect(channel.state.pendingApprovalCards).toEqual({});
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "failed to retire approval message" }),
+    );
   });
 });
 
 describe("defaultEvents approval lifecycle", () => {
-  it("sends candidate progress privately", async () => {
+  it("posts no notice that would outlive a pending candidate", async () => {
     const { channel, postEphemeral } = buildChannelStub({
-      pendingApprovalCandidateUsers: { "candidate-1": "U777" },
+      slackUsersByPrincipal: { "slack:T1:U777": "U777" },
     });
     const ctx = sessionContext({
       attributes: { user_id: "U777" },
@@ -322,15 +379,12 @@ describe("defaultEvents approval lifecycle", () => {
       ctx,
     );
 
-    expect(postEphemeral).toHaveBeenCalledWith(
-      "U777",
-      "Checking whether you can approve this action…",
-    );
+    expect(postEphemeral).not.toHaveBeenCalled();
   });
 
-  it("routes candidate progress from event identity instead of ambient auth", async () => {
+  it("routes candidate feedback from event identity instead of ambient auth", async () => {
     const { channel, postEphemeral } = buildChannelStub({
-      pendingApprovalCandidateUsers: { "candidate-1": "U777" },
+      slackUsersByPrincipal: { "slack:T1:U777": "U777" },
       teamId: "T1",
     });
     const wrongAmbientUser = sessionContext({
@@ -343,7 +397,8 @@ describe("defaultEvents approval lifecycle", () => {
     await defaultEvents["approval.candidate"]!(
       {
         candidateId: "candidate-1",
-        outcome: "pending",
+        outcome: "rejected",
+        reason: "GitHub write access is required.",
         requestId: "approval-1",
         responderPrincipalId: "slack:T1:U777",
         sequence: 1,
@@ -354,16 +409,12 @@ describe("defaultEvents approval lifecycle", () => {
       wrongAmbientUser,
     );
 
-    expect(postEphemeral).toHaveBeenCalledWith(
-      "U777",
-      "Checking whether you can approve this action…",
-    );
-    expect(channel.state.pendingApprovalCandidateUsers).toEqual({ "candidate-1": "U777" });
+    expect(postEphemeral).toHaveBeenCalledWith("U777", "GitHub write access is required.");
   });
 
   it("delivers an immediate rejection through the responder mapping", async () => {
     const { channel, postEphemeral } = buildChannelStub({
-      pendingApprovalCandidateUsers: { "candidate-1": "U777" },
+      slackUsersByPrincipal: { "slack:T1:U777": "U777" },
     });
     const ctx = sessionContext({
       attributes: { user_id: "U777" },
@@ -390,86 +441,6 @@ describe("defaultEvents approval lifecycle", () => {
     expect(postEphemeral).toHaveBeenCalledWith("U777", "GitHub write access is required.");
   });
 
-  it("updates the shared card only after settlement", async () => {
-    const { channel, request } = buildChannelStub({
-      approvalResponderUsers: { "slack:T1:U777": "U777" },
-      pendingApprovalCards: {
-        "approval-1": {
-          messageBlocks: [
-            {
-              actions: [{ action_id: "eve_input:tool-approval:approval-1:button:1" }],
-              body: { text: "Approve?", type: "mrkdwn" },
-              type: "card",
-            },
-          ],
-          messageTs: "123.456",
-        },
-      },
-    });
-
-    await defaultEvents["approval.settled"]!(
-      {
-        outcome: "approved",
-        requestId: "approval-1",
-        responderPrincipalId: "slack:T1:U777",
-        sequence: 1,
-        stepIndex: 0,
-        turnId: "turn-1",
-      },
-      channel,
-      sessionCtx,
-    );
-
-    expect(request).toHaveBeenCalledWith(
-      "chat.update",
-      expect.objectContaining({ channel: "C123", text: "Answered: Approve", ts: "123.456" }),
-    );
-    const update = request.mock.calls.find(([method]) => method === "chat.update")?.[1] as {
-      blocks?: unknown[];
-    };
-    expect(JSON.stringify(update.blocks)).toContain("Answered by <@U777>");
-    expect(channel.state.pendingApprovalCards).toEqual({});
-  });
-
-  it("settles the request when its buttons carry tool-approval metadata", async () => {
-    const { channel, request } = buildChannelStub({
-      approvalResponderUsers: { "slack:T1:U777": "U777" },
-      pendingApprovalCards: {
-        "approval-1": {
-          messageBlocks: [
-            {
-              actions: [
-                { action_id: "eve_input:tool-approval:approval-1:button:0" },
-                { action_id: "eve_input:tool-approval:approval-1:button:1" },
-              ],
-              body: { text: "Approve?", type: "mrkdwn" },
-              type: "card",
-            },
-          ],
-          messageTs: "123.456",
-        },
-      },
-    });
-
-    await defaultEvents["approval.settled"]!(
-      {
-        outcome: "approved",
-        requestId: "approval-1",
-        responderPrincipalId: "slack:T1:U777",
-        sequence: 1,
-        stepIndex: 0,
-        turnId: "turn-1",
-      },
-      channel,
-      sessionCtx,
-    );
-
-    const update = request.mock.calls.find(([method]) => method === "chat.update")?.[1] as {
-      blocks?: unknown[];
-    };
-    expect(JSON.stringify(update.blocks)).not.toContain("eve_input:tool-approval:approval-1");
-  });
-
   it("keeps earlier grouped cards settled when approvals are answered out of order", async () => {
     const requestIds = Array.from({ length: 5 }, (_, index) => `approval-${index + 1}`);
     const messageBlocks = requestIds.map((requestId) => ({
@@ -481,7 +452,7 @@ describe("defaultEvents approval lifecycle", () => {
       type: "card",
     }));
     const { channel, request } = buildChannelStub({
-      approvalResponderUsers: { "slack:T1:U777": "U777" },
+      slackUsersByPrincipal: { "slack:T1:U777": "U777" },
       pendingApprovalCards: Object.fromEntries(
         requestIds.map((requestId) => [requestId, { messageBlocks, messageTs: "123.456" }]),
       ),
@@ -517,27 +488,28 @@ describe("defaultEvents approval lifecycle", () => {
 });
 
 describe("defaultEvents authorization.required", () => {
-  it("posts a public status and delivers the challenge ephemerally to the triggering user", async () => {
-    const { channel, post, postEphemeral } = buildChannelStub({ triggeringUserId: "U777" });
+  it("posts a public status and delivers the challenge ephemerally to the event principal", async () => {
+    const { channel, post, postEphemeral } = buildChannelStub(RECIPIENT);
 
     await defaultEvents["authorization.required"]!(authRequiredEvent(), channel, sessionCtx);
 
     expect(post).toHaveBeenCalledTimes(1);
     const publicText = post.mock.calls[0]?.[0] as string;
-    expect(publicText).toBe("Connect with Notion to continue");
+    expect(publicText).toBe("Paused: waiting for <@U777> to connect Notion…");
     expect(publicText).not.toContain("https://");
     expect(postEphemeral).toHaveBeenCalledTimes(1);
     expect(postEphemeral.mock.calls[0]?.[0]).toBe("U777");
     const message = postEphemeral.mock.calls[0]?.[1] as { text: string; blocks: unknown[] };
     expect(message.text).toContain("https://connect.example.com/a/sca_1");
+    // The sign-in holds the turn, so the prompt can cancel it.
+    expect(JSON.stringify(message.blocks)).toContain(
+      JSON.stringify(JSON.stringify({ channelId: "C123", threadTs: "111.222", turnId: "turn_0" })),
+    );
     expect(channel.state.pendingAuthMessageTs).toEqual({ notion: "ts1" });
   });
 
   it("does not post a public status for candidate-scoped authorization", async () => {
-    const { channel, post, postEphemeral } = buildChannelStub({
-      pendingApprovalCandidateUsers: { "candidate-1": "U777" },
-      triggeringUserId: "U_OTHER",
-    });
+    const { channel, post, postEphemeral } = buildChannelStub(RECIPIENT);
 
     await defaultEvents["authorization.required"]!(
       { ...authRequiredEvent(), candidateId: "candidate-1" },
@@ -547,33 +519,48 @@ describe("defaultEvents authorization.required", () => {
 
     expect(post).not.toHaveBeenCalled();
     expect(postEphemeral).toHaveBeenCalledTimes(1);
+    // A responder's sign-in belongs to an approval, not a turn it could cancel.
+    expect(JSON.stringify(postEphemeral.mock.calls[0]?.[1])).not.toContain("eve_sign_in:cancel");
   });
 
-  it("uses only the candidate mapping for candidate-scoped challenges", async () => {
+  it("targets the event principal instead of the current caller or stale channel state", async () => {
     const { channel, postEphemeral } = buildChannelStub({
-      pendingApprovalCandidateUsers: { "candidate-1": "U_CANDIDATE" },
+      slackUsersByPrincipal: {
+        "slack:T01:U777": "U777",
+        "slack:T01:U_CURRENT": "U_CURRENT",
+      },
       triggeringUserId: "U_STALE",
     });
-    const wrongAmbientUser = sessionContext({
-      attributes: { user_id: "U_WRONG" },
+    const laterCaller = sessionContext({
+      attributes: { user_id: "U_CURRENT" },
       authenticator: "slack-webhook",
-      principalId: "slack:T01:U_WRONG",
+      principalId: "slack:T01:U_CURRENT",
       principalType: "user",
     });
 
-    await defaultEvents["authorization.required"]!(
-      { ...authRequiredEvent(), candidateId: "candidate-1" },
-      channel,
-      wrongAmbientUser,
-    );
+    await defaultEvents["authorization.required"]!(authRequiredEvent(), channel, laterCaller);
 
-    expect(postEphemeral.mock.calls[0]?.[0]).toBe("U_CANDIDATE");
+    expect(postEphemeral.mock.calls[0]?.[0]).toBe("U777");
   });
 
-  it("does not leak a candidate challenge when its mapping is missing", async () => {
+  it("resolves a custom-auth principal through its recorded Slack user", async () => {
+    const { channel, postEphemeral } = buildChannelStub({
+      slackUsersByPrincipal: { "okta|alice": "U_ALICE" },
+    });
+
+    await defaultEvents["authorization.required"]!(
+      { ...authRequiredEvent(), candidateId: "candidate-1", principalId: "okta|alice" },
+      channel,
+      sessionCtx,
+    );
+
+    expect(postEphemeral.mock.calls[0]?.[0]).toBe("U_ALICE");
+  });
+
+  it("does not leak a challenge whose principal has no Slack user", async () => {
     const { channel, postEphemeral } = buildChannelStub({ triggeringUserId: "U_STALE" });
     await defaultEvents["authorization.required"]!(
-      { ...authRequiredEvent(), candidateId: "candidate-missing" },
+      { ...authRequiredEvent(), candidateId: "candidate-1" },
       channel,
       sessionContext({
         attributes: { user_id: "U_WRONG" },
@@ -585,22 +572,8 @@ describe("defaultEvents authorization.required", () => {
     expect(postEphemeral).not.toHaveBeenCalled();
   });
 
-  it("targets the current Slack caller instead of stale channel state", async () => {
-    const { channel, postEphemeral } = buildChannelStub({ triggeringUserId: "U_FIRST" });
-    const currentCaller = sessionContext({
-      attributes: { user_id: "U_CURRENT" },
-      authenticator: "slack-webhook",
-      principalId: "slack:T01:U_CURRENT",
-      principalType: "user",
-    });
-
-    await defaultEvents["authorization.required"]!(authRequiredEvent(), channel, currentCaller);
-
-    expect(postEphemeral.mock.calls[0]?.[0]).toBe("U_CURRENT");
-  });
-
   it("renders the device user code in the ephemeral blocks and fallback text", async () => {
-    const { channel, postEphemeral } = buildChannelStub({ triggeringUserId: "U777" });
+    const { channel, postEphemeral } = buildChannelStub(RECIPIENT);
 
     await defaultEvents["authorization.required"]!(
       authRequiredEvent({ userCode: "OTB-DGO" }),
@@ -610,11 +583,13 @@ describe("defaultEvents authorization.required", () => {
 
     const message = postEphemeral.mock.calls[0]?.[1] as { text: string; blocks: unknown[] };
     expect(JSON.stringify(message.blocks)).toContain("OTB-DGO");
-    expect(message.text).toContain("(code: OTB-DGO)");
+    expect(message.text).toBe(
+      "Connect your Notion account to continue: https://connect.example.com/a/sca_1 If asked for a confirmation code, enter OTB-DGO.",
+    );
   });
 
   it("renders the challenge displayName instead of the title-cased connection name", async () => {
-    const { channel, post, postEphemeral } = buildChannelStub({ triggeringUserId: "U777" });
+    const { channel, post, postEphemeral } = buildChannelStub(RECIPIENT);
 
     await defaultEvents["authorization.required"]!(
       authRequiredEvent({ displayName: "Notion Workspace" }),
@@ -622,34 +597,38 @@ describe("defaultEvents authorization.required", () => {
       sessionCtx,
     );
 
-    expect(post.mock.calls[0]?.[0]).toBe("Connect with Notion Workspace to continue");
+    expect(post.mock.calls[0]?.[0]).toBe(
+      "Paused: waiting for <@U777> to connect Notion Workspace…",
+    );
     const message = postEphemeral.mock.calls[0]?.[1] as { text: string };
-    expect(message.text).toContain("Sign in with Notion Workspace");
+    expect(message.text).toContain("Connect your Notion Workspace account");
   });
 
-  it("posts a link-free public status when there is no triggering user", async () => {
-    const { channel, post, postEphemeral } = buildChannelStub({ triggeringUserId: null });
+  it("posts a link-free public status when the principal has no Slack user", async () => {
+    const { channel, post, postEphemeral } = buildChannelStub({ triggeringUserId: "U_STALE" });
 
     await defaultEvents["authorization.required"]!(authRequiredEvent(), channel, sessionCtx);
 
     expect(postEphemeral).not.toHaveBeenCalled();
     expect(post).toHaveBeenCalledTimes(1);
     const publicText = post.mock.calls[0]?.[0] as string;
-    expect(publicText).toBe("Authorization required for Notion (no triggering user)");
+    expect(publicText).toBe(
+      "Notion needs to be connected to continue, but the sign-in link couldn't be sent privately.",
+    );
     expect(publicText).not.toContain("https://");
     expect(channel.state.pendingAuthMessageTs).toEqual({ notion: "ts1" });
   });
 
   it("keeps the link-free public status when the ephemeral delivery fails", async () => {
     const logs = captureLogRecords();
-    const { channel, post, postEphemeral } = buildChannelStub({ triggeringUserId: "U777" });
+    const { channel, post, postEphemeral } = buildChannelStub(RECIPIENT);
     postEphemeral.mockRejectedValueOnce(new Error("ephemeral rejected"));
 
     await defaultEvents["authorization.required"]!(authRequiredEvent(), channel, sessionCtx);
 
     expect(post).toHaveBeenCalledTimes(1);
     const publicText = post.mock.calls[0]?.[0] as string;
-    expect(publicText).toBe("Connect with Notion to continue");
+    expect(publicText).toBe("Paused: waiting for <@U777> to connect Notion…");
     expect(publicText).not.toContain("https://");
     expect(channel.state.pendingAuthMessageTs).toEqual({ notion: "ts1" });
     expect(logs.records).toContainEqual(
@@ -659,7 +638,7 @@ describe("defaultEvents authorization.required", () => {
 
   it("reuses an existing public status when authorization is already pending", async () => {
     const { channel, post, postEphemeral } = buildChannelStub({
-      triggeringUserId: "U777",
+      ...RECIPIENT,
       pendingAuthMessageTs: { notion: "ts0" },
     });
 
@@ -752,5 +731,18 @@ describe("defaultEvents authorization.completed", () => {
     expect(request).not.toHaveBeenCalled();
     expect(post).not.toHaveBeenCalled();
     expect(postEphemeral).not.toHaveBeenCalled();
+  });
+});
+
+describe("defaultEvents turn.completed", () => {
+  it("clears the thread status when a turn ends without a reply", async () => {
+    const { channel, post, startTyping } = buildChannelStub();
+    const turn = { sequence: 0, turnId: "turn_0" };
+
+    await defaultEvents["turn.started"]!(turn, channel, sessionCtx);
+    await defaultEvents["turn.completed"]!({ ...turn, sequence: 1 }, channel, sessionCtx);
+
+    expect(startTyping.mock.calls).toEqual([["Thinking..."], []]);
+    expect(post).not.toHaveBeenCalled();
   });
 });

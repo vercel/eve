@@ -1,5 +1,7 @@
-import { isApprovalRequest } from "#harness/input-request-class.js";
-import type { PendingInputBatchEvent } from "#harness/pending-input-batches.js";
+import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
+import type { SettledCall } from "#harness/session-machine/transitions.js";
+import type { StepCoordinates as PendingInputBatchEvent } from "#harness/session-machine/view.js";
+import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 
 const IGNORED_INPUT_REASON = "Ignored because the user continued without responding.";
@@ -14,40 +16,19 @@ export interface ResolvedInputBatch {
     readonly outcome: "answered" | ApprovalTerminalStatus;
     readonly request: InputRequest;
     readonly response?: InputResponse;
-    readonly toolReplayIdentity?: string;
   }[];
 }
 
-export function buildResolvedInputBatch(
-  batch: {
-    readonly event?: PendingInputBatchEvent;
-    readonly requests: readonly InputRequest[];
-    readonly toolReplayIdentities?: Readonly<Record<string, string>>;
-  },
-  responses: readonly InputResponse[],
-): ResolvedInputBatch | undefined {
-  if (batch.event === undefined) return undefined;
-  const responseMap = new Map(responses.map((response) => [response.requestId, response]));
-  return {
-    event: batch.event,
-    inputs: batch.requests.map((request) => {
-      const response = responseMap.get(request.requestId);
-      return {
-        outcome: isApprovalRequest(request)
-          ? resolveApprovalOutcome(response).status
-          : response === undefined
-            ? "ignored"
-            : "answered",
-        request,
-        response,
-        ...(batch.toolReplayIdentities?.[request.requestId] === undefined
-          ? {}
-          : {
-              toolReplayIdentity: batch.toolReplayIdentities[request.requestId],
-            }),
-      };
-    }),
-  };
+/**
+ * One request's terminal outcome once its batch resolves: an approval's
+ * decision, or whether a question received a response.
+ */
+export function resolveInputOutcome(
+  kind: InputRequest["kind"],
+  response: InputResponse | undefined,
+): "answered" | ApprovalTerminalStatus {
+  if (kind === "tool-approval") return resolveApprovalOutcome(response).status;
+  return response === undefined ? "ignored" : "answered";
 }
 
 export function resolveApprovalOutcome(response: InputResponse | undefined): {
@@ -73,9 +54,13 @@ export function resolveApprovalOutcome(response: InputResponse | undefined): {
 
   // ACP uses "deny" while harness-owned approval prompts use "cancel".
   if (response.optionId === "cancel" || response.optionId === "deny") {
+    const note = response.text?.trim();
     return {
       approved: false,
-      reason: TOOL_EXECUTION_DENIED_MESSAGE,
+      // The responder may be an approver other than the user, so the note is quoted, not merged.
+      reason: note
+        ? `${TOOL_EXECUTION_DENIED_MESSAGE} The person who denied it wrote: ${JSON.stringify(note)}`
+        : TOOL_EXECUTION_DENIED_MESSAGE,
       status: "denied",
     };
   }
@@ -84,5 +69,37 @@ export function resolveApprovalOutcome(response: InputResponse | undefined): {
     approved: false,
     reason: TOOL_EXECUTION_INVALID_APPROVAL_MESSAGE,
     status: "invalid",
+  };
+}
+
+/**
+ * What the model reads when a call's tool went away before the call could run.
+ * `searchable` says whether the agent has `eve__search` to find another.
+ */
+export function unavailableToolMessage(toolName: string, searchable: boolean): string {
+  const next = searchable
+    ? `find an available tool with ${SEARCH_TOOL_NAME} and make a new call`
+    : "make a new call with an available tool";
+  return `The tool "${toolName}" is no longer available, so the call didn't run. If the task still needs it, ${next}.`;
+}
+
+/**
+ * A call that ends without running: its failed runtime result, which the lifecycle reports at the
+ * step's coordinates, and the `error-text` result the model reads.
+ */
+export function failedCall(call: {
+  readonly callId: string;
+  readonly message: string;
+  readonly toolName: string;
+}): Required<SettledCall> {
+  const { callId, message, toolName } = call;
+  return {
+    part: {
+      output: { type: "error-text", value: message },
+      toolCallId: callId,
+      toolName,
+      type: "tool-result",
+    },
+    result: createRuntimeToolResultFromValue({ callId, isError: true, output: message, toolName }),
   };
 }

@@ -1,8 +1,25 @@
 import { jsonSchema } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
+import { CALL_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
-import { getHarnessEmissionState } from "#harness/emission-state.js";
+import {
+  inlineTool,
+  subagentTool,
+  toolMap,
+  workflowTool,
+} from "#internal/testing/catalog-fixtures.js";
+import {
+  foldingHandler,
+  parkedSteps,
+  positionOf,
+  withOpenTurn,
+} from "#internal/testing/session-machine.js";
+import {
+  createFrameworkUserMessage,
+  createUserMessage,
+  TOOL_RESULT_BOUNDARY,
+} from "#harness/messages.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -86,7 +103,7 @@ describe("generation steering with the real AI SDK", () => {
     }
   });
 
-  it.each(["input.requested", "turn.completed", "step.failed"] as const)(
+  it.each(["input.requested", "turn.waiting", "step.failed"] as const)(
     "finishes committing %s when a correction arrives during publication",
     async (boundary) => {
       const logs = captureLogRecords();
@@ -131,10 +148,10 @@ describe("generation steering with the real AI SDK", () => {
           ],
         ]),
         resolveModel: async () => model,
-        handleEvent: async (event) => {
+        handleEvent: foldingHandler(async (event) => {
           events.push(event);
           if (event.type === boundary) steering.abort();
-        },
+        }),
       });
       const ctx = new ContextContainer();
       ctx.set(SessionKey, {
@@ -148,7 +165,14 @@ describe("generation steering with the real AI SDK", () => {
       expect(result.steered).toBeUndefined();
       expect(result.next).toBeNull();
       expect(events.filter((event) => event.type === boundary)).toHaveLength(1);
-      expect(events.filter((event) => event.type === "session.waiting")).toHaveLength(1);
+      // A failed step ends the turn; an approval holds it open.
+      const endsTurn = boundary === "step.failed";
+      expect(events.filter((event) => event.type === "session.waiting")).toHaveLength(
+        endsTurn ? 1 : 0,
+      );
+      expect(events.filter((event) => event.type === "turn.waiting")).toHaveLength(
+        endsTurn ? 0 : 1,
+      );
       expect(events.filter((event) => event.type === "message.appended")).toHaveLength(0);
       const parked = logs.records.filter(
         (record) => record.message === "model call failed — parking session for retry by the user",
@@ -228,7 +252,7 @@ describe("generation steering with the real AI SDK", () => {
     const interrupted = await running;
     expect(providerSignal?.aborted).toBe(true);
     expect(interrupted.steered).toBe(true);
-    expect(getHarnessEmissionState(interrupted.session.state).turnId).toBe("turn_0");
+    expect(positionOf(interrupted.session).turnId).toBe("turn_0");
     // The provider ignores abort and finishes its obsolete request anyway.
     firstStream!.enqueue({
       type: "tool-call",
@@ -254,6 +278,54 @@ describe("generation steering with the real AI SDK", () => {
     expect(JSON.stringify(doStream.mock.calls[1]?.[0].prompt)).toContain("Who won in 2026?");
     expect(JSON.stringify(doStream.mock.calls[1]?.[0].prompt)).toContain("Actually 2025");
     expect(JSON.stringify(doStream.mock.calls[1]?.[0].prompt)).not.toContain("Stale");
+  });
+
+  it("ends the superseded step with a terminal step event before the next step starts", async () => {
+    const steering = new AbortController();
+    const pending = Promise.withResolvers<void>();
+    const events: UnstampedMessageStreamEvent[] = [];
+    const doStream = vi
+      .fn<MockLanguageModelV3["doStream"]>()
+      .mockImplementationOnce(async () => {
+        pending.resolve();
+        return { stream: new ReadableStream<Part>() };
+      })
+      .mockImplementationOnce(async () => ({
+        stream: new ReadableStream<Part>({
+          start(controller) {
+            finish(controller, "Corrected 2025 report");
+          },
+        }),
+      }));
+    const model = new MockLanguageModelV3({ doStream });
+    const createStep = (signal?: AbortSignal) =>
+      createToolLoopHarness({
+        resolveModel: async () => model,
+        tools: new Map(),
+        steeringSignal: signal,
+        handleEvent: async (event) => {
+          events.push(event);
+        },
+      });
+    const running = createStep(steering.signal)(session(), {
+      message: "Alice is preparing the 2026 report.",
+    });
+    await pending.promise;
+    steering.abort();
+    const interrupted = await running;
+    expect(interrupted.steered).toBe(true);
+    await createStep()(interrupted.session, {
+      message: "Alice corrected the report year to 2025.",
+    });
+    const stepEvents = events
+      .filter((event) => ["step.started", "step.completed", "step.failed"].includes(event.type))
+      .map((event) => `${event.type}:${(event.data as { stepIndex: number }).stepIndex}`);
+    expect(stepEvents).toEqual([
+      "step.started:0",
+      expect.stringMatching(/^step\.(completed|failed):0$/),
+      "step.started:1",
+      "step.completed:1",
+    ]);
   });
 
   it("finishes a local tool once and preserves its result for the corrected model call", async () => {
@@ -321,6 +393,66 @@ describe("generation steering with the real AI SDK", () => {
     const prompt = JSON.stringify(doStream.mock.calls[1]?.[0].prompt);
     expect(prompt).toContain("saved");
     expect(prompt).toContain("Use the corrected year");
+    // The correction starts its own user turn instead of joining the tool result's.
+    const roles = (call: number) => doStream.mock.calls[call]![0].prompt.map(({ role }) => role);
+    expect(roles(0)).toEqual(["system", "user"]);
+    expect(roles(1)).toEqual(["system", "user", "assistant", "tool", "assistant", "user"]);
+    expect(doStream.mock.calls[1]![0].prompt.at(-2)).toMatchObject({
+      content: [{ text: TOOL_RESULT_BOUNDARY, type: "text" }],
+    });
+  });
+
+  it("starts a steering message's own user turn after tool results followed by a framework note", async () => {
+    const doStream = vi.fn<MockLanguageModelV3["doStream"]>(async () => ({
+      stream: new ReadableStream<Part>({
+        start(controller) {
+          finish(controller, "Quarterly Business Review");
+        },
+      }),
+    }));
+    const heldTurn = withOpenTurn(
+      {
+        ...session(),
+        history: [
+          createUserMessage("user", "Compile Alice's churn report"),
+          {
+            role: "assistant",
+            content: [{ type: "tool-call", toolCallId: "report-1", toolName: "report", input: {} }],
+          },
+          {
+            role: "tool",
+            content: [
+              {
+                type: "tool-result",
+                toolCallId: "report-1",
+                toolName: "report",
+                output: { type: "text", value: "Started task report-1." },
+              },
+            ],
+          },
+          createFrameworkUserMessage("context.state", "Alice's reports are due Monday."),
+        ],
+      },
+      { sequence: 0, stepIndex: 1, turnId: "turn_0" },
+    );
+    await createToolLoopHarness({
+      handleEvent: async () => {},
+      resolveModel: async () => new MockLanguageModelV3({ doStream }),
+      tools: new Map(),
+    })(heldTurn, { message: "What does QBR stand for?" });
+    const prompt = doStream.mock.calls[0]![0].prompt;
+    expect(prompt.map(({ role }) => role)).toEqual([
+      "system",
+      "user",
+      "assistant",
+      "tool",
+      "user",
+      "assistant",
+      "user",
+    ]);
+    expect(prompt.at(-2)).toMatchObject({
+      content: [{ text: TOOL_RESULT_BOUNDARY, type: "text" }],
+    });
   });
 
   it("does not interrupt after assistant text has been published", async () => {
@@ -351,5 +483,100 @@ describe("generation steering with the real AI SDK", () => {
     expect(result.steered).toBeUndefined();
     expect(providerSignal?.aborted).toBe(false);
     expect(events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
+  });
+
+  it.each([
+    ["a workflow tool directly", workflowTool("deploy_service"), "deploy_service", {}],
+    [
+      "a workflow tool through eve__tool",
+      workflowTool("deploy_service", "execute", { deferred: true }),
+      CALL_TOOL_NAME,
+      { name: "deploy_service" },
+    ],
+    [
+      "an agent through eve__tool",
+      subagentTool("billing_specialist", { deferred: true }),
+      CALL_TOOL_NAME,
+      { input: { message: "Review Bob's dispute." }, name: "billing_specialist" },
+    ],
+  ] as const)(
+    "interrupts a step that calls %s, since it runs only after the step",
+    async (_case, entry, toolName, input) => {
+      const steering = new AbortController();
+      const model = new MockLanguageModelV3({
+        doStream: async () => ({
+          stream: new ReadableStream<Part>({
+            start(controller) {
+              controller.enqueue({
+                type: "tool-call",
+                toolCallId: "call-1",
+                toolName,
+                input: JSON.stringify(input),
+              });
+              controller.enqueue({
+                type: "finish",
+                finishReason: { unified: "tool-calls", raw: undefined },
+                usage,
+              });
+              controller.close();
+            },
+          }),
+        }),
+      });
+      const result = await createToolLoopHarness({
+        steeringSignal: steering.signal,
+        tools: toolMap(entry),
+        resolveModel: async () => model,
+        handleEvent: async (event) => {
+          if (event.type === "actions.requested") steering.abort();
+        },
+      })(session(), { message: "Alice asks for the work to start" });
+
+      expect(result.steered).toBe(true);
+      expect(parkedSteps(result.session)).toEqual([]);
+    },
+  );
+
+  it("does not interrupt a step once an inline entry called through eve__tool is running", async () => {
+    const steering = new AbortController();
+    const executing = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const refund = vi.fn(async () => {
+      executing.resolve();
+      await release.promise;
+      return { refunded: true };
+    });
+    const model = new MockLanguageModelV3({
+      doStream: async () => ({
+        stream: new ReadableStream<Part>({
+          start(controller) {
+            controller.enqueue({
+              type: "tool-call",
+              toolCallId: "refund-1",
+              toolName: CALL_TOOL_NAME,
+              input: JSON.stringify({ input: {}, name: "refund_invoice" }),
+            });
+            controller.enqueue({
+              type: "finish",
+              finishReason: { unified: "tool-calls", raw: undefined },
+              usage,
+            });
+            controller.close();
+          },
+        }),
+      }),
+    });
+    const running = createToolLoopHarness({
+      steeringSignal: steering.signal,
+      tools: toolMap(inlineTool("refund_invoice", { deferred: true, execute: refund })),
+      resolveModel: async () => model,
+      handleEvent: async () => {},
+    })(session(), { message: "Alice asks for a refund of invoice in_1" });
+    await executing.promise;
+    steering.abort();
+    release.resolve();
+
+    expect((await running).steered).toBeUndefined();
+    expect(refund).toHaveBeenCalledOnce();
   });
 });

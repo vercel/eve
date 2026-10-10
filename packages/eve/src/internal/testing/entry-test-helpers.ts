@@ -30,6 +30,7 @@ export function buildSerializedContext(overrides: {
   const context: Record<string, unknown> = {
     "eve.auth": overrides.auth ?? null,
     "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
+    "eve.stateLayout": 1,
     "eve.channel": channel,
   };
   if (overrides.audience !== undefined) {
@@ -68,14 +69,26 @@ export function expectSingleTurn(events: readonly MessageStreamEvent[], turnId: 
   expect(new Set(eventTurnIds)).toEqual(new Set([turnId]));
 }
 
-const CALLER_STEP_NAMES = new Set([
-  "bindTurnCallerContextStep",
-  "notifyTurnCallerStep",
-  "resolveInitialTurnCallerStep",
+const CALLER_STEP_NAMES = new Set(["notifyTurnCallerStep", "resolveInitialTurnCallerStep"]);
+
+/** Steps that run only when a session has workflow tool runs, tasks, or a caller to act on. */
+const CONDITIONAL_STEP_NAMES = new Set([
+  "cancelDescendantTurnsStep",
+  "dispatchCoordinationStep",
+  "notifyCancelledTaskCallerStep",
+  "terminateChildSessionsStep",
 ]);
 
 export async function listCallerStepNames(runId: string): Promise<string[]> {
-  return (await listStepNames(runId)).filter((name) => CALLER_STEP_NAMES.has(name)).sort();
+  return await listStepNamesIn(runId, CALLER_STEP_NAMES);
+}
+
+export async function listConditionalStepNames(runId: string): Promise<string[]> {
+  return await listStepNamesIn(runId, CONDITIONAL_STEP_NAMES);
+}
+
+async function listStepNamesIn(runId: string, names: ReadonlySet<string>): Promise<string[]> {
+  return (await listStepNames(runId)).filter((name) => names.has(name)).sort();
 }
 
 async function listStepNames(runId: string): Promise<string[]> {

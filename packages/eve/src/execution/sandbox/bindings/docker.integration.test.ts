@@ -9,7 +9,10 @@ import {
   type DockerCommandResult,
   type DockerProcess,
 } from "#execution/sandbox/bindings/docker-cli.js";
-import { createDockerSandboxProvider } from "#execution/sandbox/bindings/docker.js";
+import {
+  createDockerSandboxProvider,
+  pruneDockerSandboxTemplates,
+} from "#execution/sandbox/bindings/docker.js";
 import { EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV } from "#execution/sandbox/development-run.js";
 import {
   createDockerSandboxOptionsHash,
@@ -26,6 +29,10 @@ import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { bufferToStream } from "#execution/sandbox/stream-utils.js";
 import { createSandboxProviderIdentity } from "#execution/sandbox/provider-identity.js";
+import { createSandboxProviderFiles } from "#execution/sandbox/provider-files.js";
+import { createSandboxProviderHost } from "#execution/sandbox/provider-host.js";
+import { resolveSandboxCacheDirectory } from "#internal/application/paths.js";
+import { createSandboxProviderResources } from "#shared/sandbox-provider.js";
 
 const createScratchDirectory = useTemporaryDirectories();
 
@@ -434,7 +441,7 @@ describe("Docker provider create", () => {
 
       // An authored stop releases the container; filesystem state survives
       // for the next `create` to restart from.
-      await handle.onSessionStop();
+      await handle.onSandboxStop();
       expect(findCall(calls, (args) => args[0] === "stop")?.args).toEqual([
         "stop",
         "-t",
@@ -716,5 +723,70 @@ describe("Docker provider create", () => {
     await expect(handle.sandbox.setNetworkPolicy({ allow: { "*": [] } })).rejects.toThrow(
       /Vercel provider/,
     );
+  });
+});
+
+describe("Docker template prune", () => {
+  function createImageStoreDockerCli() {
+    const images = new Set<string>();
+    const fake = createFakeDockerCli((args) => {
+      const reference = String(args.at(-1));
+      if (args[0] === "image" && args[1] === "inspect") {
+        return images.has(reference) ? undefined : { exitCode: 1, stderr: "No such image" };
+      }
+      if (args[0] === "build") images.add(args[args.indexOf("--tag") + 1]!);
+      if (args[0] === "pull" || args[0] === "commit") images.add(reference);
+      if (args[0] === "rmi" && !images.delete(reference)) {
+        return { exitCode: 1, stderr: `No such image: ${reference}` };
+      }
+      return undefined;
+    });
+    return { ...fake, images };
+  }
+
+  // Mirrors how prewarm and session start build the provider context.
+  async function prepareLikeDevelopment(appRoot: string, cli: DockerCli) {
+    return await createDockerSandboxProvider(undefined, cli).prepare({
+      files: createSandboxProviderFiles(join(appRoot, "sandbox")),
+      host: createSandboxProviderHost(appRoot),
+      resources: createSandboxProviderResources({}),
+      sourceRevision: "test-source-revision",
+      storagePath: resolveSandboxCacheDirectory(appRoot),
+    });
+  }
+
+  async function pruneEverything(appRoot: string, cli: DockerCli) {
+    await pruneDockerSandboxTemplates({
+      appRoot,
+      dockerCli: cli,
+      now: Date.now() + 60_000,
+      recentWindowMs: 0,
+      retainCount: 0,
+    });
+  }
+
+  it("removes a stale template image that prepare recorded", async () => {
+    const appRoot = await createScratchDirectory("eve-docker-prune-");
+    const { cli, images } = createImageStoreDockerCli();
+
+    const { imageReference } = await prepareLikeDevelopment(appRoot, cli);
+    expect(images).toContain(imageReference);
+
+    await pruneEverything(appRoot, cli);
+
+    expect(images).not.toContain(imageReference);
+  });
+
+  it("removes the Dockerfile image a stale template was built from", async () => {
+    const appRoot = await createScratchDirectory("eve-docker-prune-");
+    const { calls, cli, images } = createImageStoreDockerCli();
+    await mkdir(join(appRoot, "sandbox"), { recursive: true });
+    await writeFile(join(appRoot, "sandbox", "Dockerfile"), "FROM node:24\n");
+
+    await prepareLikeDevelopment(appRoot, cli);
+    await pruneEverything(appRoot, cli);
+
+    expect(findCall(calls, (args) => args[0] === "build")).toBeDefined();
+    expect([...images].filter((image) => image.startsWith("eve-sandbox-dockerfile:"))).toEqual([]);
   });
 });

@@ -68,7 +68,7 @@ describe("mockModel", () => {
 
   it("keeps framework scaffolding out of authored user messages", async () => {
     const requests: MockModelRequest[] = [];
-    const agents = "[Agents]\n<agents>\n</agents>";
+    const tasks = "[Tasks]\n<tasks>\n</tasks>";
     const notice = [
       "[Pending approvals]",
       "The following tool calls are awaiting approval and have not executed:",
@@ -77,7 +77,7 @@ describe("mockModel", () => {
     const result = await generateText({
       messages: [
         { content: "Run the mixed approval flow.", role: "user" },
-        { content: agents, role: "user" },
+        { content: tasks, role: "user" },
         { content: notice, role: "user" },
       ],
       model: mockModel((request) => {
@@ -91,7 +91,7 @@ describe("mockModel", () => {
       lastUserMessage: "Run the mixed approval flow.",
       messages: [
         { role: "user", text: "Run the mixed approval flow." },
-        { role: "user", text: agents },
+        { role: "user", text: tasks },
         { role: "user", text: notice },
       ],
       userMessageCount: 1,
@@ -145,6 +145,84 @@ describe("mockModel", () => {
         isError: false,
         name: "get_weather",
         output: { city: "Brooklyn", condition: "sunny" },
+      }),
+    ]);
+  });
+
+  it("preserves eve file content parts in streamed mock requests", async () => {
+    const requests: MockModelRequest[] = [];
+    const content = [
+      { type: "text" as const, text: "Rendered stripes:" },
+      {
+        type: "file" as const,
+        data: { type: "data" as const, data: "iVBORw0KGgo=" },
+        filename: "stripes.png",
+        mediaType: "image/png",
+      },
+    ];
+    const result = streamText({
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            { type: "tool-call", toolCallId: "render-1", toolName: "render-stripes", input: {} },
+          ],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "render-1",
+              toolName: "render-stripes",
+              output: { type: "content", value: content },
+            },
+          ],
+        },
+      ],
+      model: mockModel((request) => {
+        requests.push(request);
+        return "Received the image.";
+      }),
+    });
+
+    await expect(result.text).resolves.toBe("Received the image.");
+    expect(requests[0]!.toolResults[0]!.output).toEqual(content);
+  });
+
+  it("gives responders tool-result files in the tagged file shape", async () => {
+    const png = Buffer.from("\x89PNG\r\n\x1a\n", "latin1").toString("base64");
+    const requests: MockModelRequest[] = [];
+    const model = mockModel((request) => {
+      requests.push(request);
+      return request.toolResults.length === 0 ? { toolCalls: [{ name: "screenshot" }] } : "Seen.";
+    });
+
+    await generateText({
+      model,
+      prompt: "Take a screenshot.",
+      stopWhen: stepCountIs(2),
+      tools: {
+        screenshot: tool({
+          execute: async () => ({ png }),
+          inputSchema: jsonSchema({ type: "object" }),
+          toModelOutput: ({ output }) => ({
+            type: "content",
+            value: [
+              { text: "Screenshot:", type: "text" },
+              { data: { data: output.png, type: "data" }, mediaType: "image/png", type: "file" },
+            ],
+          }),
+        }),
+      },
+    });
+
+    expect(requests[1]!.toolResults[0]!.output).toEqual([
+      { text: "Screenshot:", type: "text" },
+      expect.objectContaining({
+        data: { data: png, type: "data" },
+        mediaType: "image/png",
+        type: "file",
       }),
     ]);
   });

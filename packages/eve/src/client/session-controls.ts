@@ -1,4 +1,4 @@
-import { ClientError } from "#client/client-error.js";
+import { createClientError } from "#client/client-error.js";
 import type {
   CancelSessionResult,
   ClearResult,
@@ -28,7 +28,6 @@ export async function cancelClientSession(input: {
   readonly context: SessionControlContext;
   readonly options?: {
     readonly signal?: AbortSignal;
-    readonly tasks?: boolean;
     readonly turnId?: string;
   };
   readonly sessionId: string;
@@ -142,7 +141,7 @@ async function postJson(input: {
     ),
   );
   const text = await response.text();
-  if (!response.ok) throw new ClientError(response.status, text, response.headers);
+  if (!response.ok) throw createClientError(response.status, text, response.headers);
   try {
     return { payload: JSON.parse(text) as unknown, response };
   } catch {

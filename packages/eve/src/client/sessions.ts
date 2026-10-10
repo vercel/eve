@@ -24,12 +24,12 @@ export class ClientSessions {
 
   /** Creates a session and starts its first turn with a message. */
   async create<TOutput = unknown>(
-    input: SendTurnInput<TOutput>,
+    input: SendTurnInput<TOutput> & CreateSessionOptions,
   ): Promise<CreatedClientSession<TOutput>>;
   /** Creates a conversation session before its first turn. */
   async create(options?: CreateSessionOptions): Promise<CreatedIdleClientSession>;
   async create<TOutput = unknown>(
-    input: CreateSessionOptions | SendTurnInput<TOutput> = {},
+    input: CreateSessionOptions | (SendTurnInput<TOutput> & CreateSessionOptions) = {},
   ): Promise<CreatedClientSession<TOutput> | CreatedIdleClientSession> {
     if ("message" in input) return await ClientSession.create(this.#context, input);
     return { session: await ClientSession.prewarm(this.#context, input) };

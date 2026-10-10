@@ -6,7 +6,12 @@
  * them back to full input responses inside the channel deliver hook.
  */
 
+import type { UserContent } from "ai";
+
+import { resolvedPromptLabel } from "#channel/resolved-prompt.js";
+import type { InputResolution } from "#protocol/message.js";
 import {
+  type InputOption,
   type InputRequest,
   type InputResponse,
   parseInputResponse,
@@ -20,13 +25,15 @@ export const TELEGRAM_HITL_CALLBACK_PREFIX = "eve:";
 /** Synthetic request id prefix sent through `send()` for callback queries. */
 export const TELEGRAM_CALLBACK_RESPONSE_PREFIX = "telegram_callback:";
 
-/** Synthetic request id prefix sent through `send()` for replies to ForceReply prompts. */
+/** Synthetic request id prefix the deliver hook uses for replies to ForceReply prompts. */
 export const TELEGRAM_REPLY_RESPONSE_PREFIX = "telegram_reply:";
 
 const TELEGRAM_BUTTON_LABEL_MAX_LENGTH = 64;
 const TELEGRAM_INPUT_PLACEHOLDER_MAX_LENGTH = 64;
 const TELEGRAM_PROMPT_MAX_LENGTH = 4000;
 const TELEGRAM_INLINE_ROW_SIZE = 2;
+/** Keeps an edited prompt under Telegram's 4096-character message cap. */
+const TELEGRAM_RESOLVED_LABEL_MAX_LENGTH = 90;
 
 /**
  * Durable HITL state. `hitlCallbacks` maps compact callback ids to their stored
@@ -38,6 +45,15 @@ export interface TelegramHitlState {
   hitlCallbacks?: Record<string, InputResponse>;
   nextHitlCallbackId?: number;
   pendingFreeformReplies?: Record<string, string>;
+  /** Posted prompts with inline keyboards, keyed by requestId, until eve resolves them. */
+  hitlPrompts?: Record<string, TelegramHitlPrompt>;
+}
+
+/** What a posted prompt needs so its message can be edited once eve resolves it. */
+export interface TelegramHitlPrompt {
+  readonly messageId: string;
+  readonly options: readonly Pick<InputOption, "id" | "label">[];
+  readonly text: string;
 }
 
 /**
@@ -96,6 +112,40 @@ export function registerTelegramFreeformPrompt(
   };
 }
 
+/** Records a posted inline-keyboard prompt so {@link takeTelegramResolvedPrompt} can edit it. */
+export function registerTelegramHitlPrompt(
+  state: TelegramHitlState,
+  request: InputRequest,
+  posted: { readonly messageId: string; readonly text: string },
+): void {
+  state.hitlPrompts = {
+    ...state.hitlPrompts,
+    [request.requestId]: {
+      ...posted,
+      options: (request.options ?? []).map(({ id, label }) => ({ id, label })),
+    },
+  };
+}
+
+/**
+ * Forgets a resolved prompt, returning the edit that
+ * replaces its keyboard with the outcome, or `undefined` when eve never posted it.
+ */
+export function takeTelegramResolvedPrompt(
+  state: TelegramHitlState,
+  resolution: InputResolution,
+): { readonly messageId: string; readonly text: string } | undefined {
+  const prompt = state.hitlPrompts?.[resolution.requestId];
+  if (prompt === undefined) return undefined;
+  const { [resolution.requestId]: _, ...rest } = state.hitlPrompts ?? {};
+  state.hitlPrompts = rest;
+  const label = truncate(
+    resolvedPromptLabel(resolution, prompt.options),
+    TELEGRAM_RESOLVED_LABEL_MAX_LENGTH,
+  );
+  return { messageId: prompt.messageId, text: `${prompt.text}\n\n${label}` };
+}
+
 /**
  * Wraps Telegram callback data as a synthetic `InputResponse` (requestId prefixed
  * with `telegram_callback:`, optionId hardcoded to `"selected"`). It is a
@@ -120,6 +170,23 @@ export function telegramReplyInputResponse(input: {
   });
 }
 
+/**
+ * Wraps a text message that replied to a bot message as a synthetic response,
+ * so the deliver hook can match it to a pending ForceReply prompt.
+ */
+export function telegramReplyInputResponses(
+  replyToBotMessageId: unknown,
+  message: string | UserContent | undefined,
+): ValidatedInputResponse[] {
+  if (typeof replyToBotMessageId !== "string") return [];
+  const text =
+    typeof message === "string"
+      ? message
+      : (message ?? []).flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n");
+  if (text.trim().length === 0) return [];
+  return [telegramReplyInputResponse({ messageId: replyToBotMessageId, text })];
+}
+
 /** True when an input response needs Telegram-specific durable-state remapping. */
 export function isTelegramSyntheticResponse(response: InputResponse): boolean {
   return (
@@ -138,11 +205,10 @@ export function resolveTelegramInputResponses(
   for (const response of responses) {
     if (response.requestId.startsWith(TELEGRAM_CALLBACK_RESPONSE_PREFIX)) {
       const callbackData = response.requestId.slice(TELEGRAM_CALLBACK_RESPONSE_PREFIX.length);
+      // The mapping outlives the press: a later press of the same button still
+      // reaches the session, which reads an answered request's option as new input.
       const mapped = state.hitlCallbacks?.[callbackData];
-      if (mapped !== undefined) {
-        resolved.push(mapped);
-        delete state.hitlCallbacks?.[callbackData];
-      }
+      if (mapped !== undefined) resolved.push(mapped);
       continue;
     }
 

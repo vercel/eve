@@ -6,7 +6,7 @@ vi.mock("#execution/dynamic-workflow/workflow.js", async (importOriginal) => ({
   runJsProgram: mocks.runJsProgram,
 }));
 
-import { executeWorkflowProgram } from "#execution/dynamic-workflow/tool.js";
+import { runWorkflowProgramTask } from "#execution/dynamic-workflow/tool.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
 import { workflow } from "#tools/provided/workflow.js";
 import { readWorkflowProgramOptions } from "#tools/workflow-program-input.js";
@@ -21,11 +21,10 @@ describe("workflow", () => {
 
     expect(isWorkflowToolDefinition(definition)).toBe(true);
     expect(definition.description).toContain(
-      "ctx.agent(name, { message: string, agentId?: string, outputSchema?: object })",
+      "ctx.agent(name, { message: string, outputSchema?: object })",
     );
-    expect(definition.description).toContain(
-      "resolves directly to the child's JSON-serializable output",
-    );
+    expect(definition.description).toContain("Each call starts a new agent");
+    expect(definition.description).toContain("resolves directly to the agent's reply");
     expect(definition.description).toContain("does not return an agent metadata wrapper");
     expect(definition.description).toContain("owning agent resolves the target");
     expect(definition.description).toContain(
@@ -33,7 +32,7 @@ describe("workflow", () => {
     );
     expect(definition.description).not.toContain("Available agents");
     expect(definition.description).toContain("at most 7 agents");
-    expect(definition.execute).toBe(executeWorkflowProgram);
+    expect(definition.task).toBe(runWorkflowProgramTask);
 
     const inputSchema = serializeInputSchema(definition.inputSchema);
     expect(inputSchema).toMatchObject({
@@ -52,9 +51,7 @@ describe("workflow", () => {
     expect(inputSchema).toMatchObject({
       properties: {
         js: {
-          description: expect.stringContaining(
-            "resolves directly to the child's JSON-serializable output",
-          ),
+          description: expect.stringContaining("resolves directly to the agent's reply"),
         },
       },
     });
@@ -62,8 +59,8 @@ describe("workflow", () => {
   });
 
   it("preserves the trusted budget in the compiled definition", () => {
-    const previousWorkflowId = Reflect.get(executeWorkflowProgram, "workflowId");
-    Reflect.set(executeWorkflowProgram, "workflowId", "workflow//test//executeWorkflowProgram");
+    const previousWorkflowId = Reflect.get(runWorkflowProgramTask, "workflowId");
+    Reflect.set(runWorkflowProgramTask, "workflowId", "workflow//test//runWorkflowProgramTask");
     try {
       const normalized = normalizeToolDefinition(
         workflow({ maxSubagents: 4 }),
@@ -77,9 +74,9 @@ describe("workflow", () => {
       });
     } finally {
       if (previousWorkflowId === undefined) {
-        Reflect.deleteProperty(executeWorkflowProgram, "workflowId");
+        Reflect.deleteProperty(runWorkflowProgramTask, "workflowId");
       } else {
-        Reflect.set(executeWorkflowProgram, "workflowId", previousWorkflowId);
+        Reflect.set(runWorkflowProgramTask, "workflowId", previousWorkflowId);
       }
     }
   });
@@ -94,7 +91,7 @@ describe("workflow", () => {
     mocks.runJsProgram.mockResolvedValue({ ok: true });
     const ctx = { callId: "call" } as never;
 
-    await expect(executeWorkflowProgram({ js: "return 1", maxSubagents: 3 }, ctx)).resolves.toEqual(
+    await expect(runWorkflowProgramTask({ js: "return 1", maxSubagents: 3 }, ctx)).resolves.toEqual(
       { ok: true },
     );
     expect(mocks.runJsProgram).toHaveBeenCalledWith("return 1", ctx, {

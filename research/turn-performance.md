@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/876
 status: proposed
-last_updated: "2026-09-04"
+last_updated: "2026-10-02"
 ---
 
 # Turn performance and Workflow overhead
@@ -392,6 +392,9 @@ and crash-cleanup behavior remains on the existing path.
 
 This is the lowest-risk structural change. Prove exact step-count reduction and no change to root,
 subagent, task, failure, and cancellation results.
+
+Follow-up: `bindTurnCallerContextStep` has since been removed. A turn's first `turnStep` now binds
+the delegated caller, so delegated turns no longer pay that step either.
 
 #### Hosted result
 

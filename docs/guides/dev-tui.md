@@ -9,17 +9,21 @@ description: "Use eve locally or connect to a deployed agent from an interactive
 eve dev
 ```
 
-The footer shows the active model and connection separated by dots. Vercel account connections show the team slug once it resolves; the local server port is omitted.
+The footer shows the active model, reasoning level when set, speed indicator, and connection separated by dots, such as `gpt-6-luna · high · ⚡︎`. The model label omits the provider prefix and removes `-fast` only at the end. A single `⚡︎` marks a model with that suffix or explicit **Fast** mode; terminals without Unicode support use an ASCII marker.
+
+Vercel account connections show the team slug once it resolves; the local server port is omitted.
 
 The transcript remains in your terminal scrollback after you exit. Run `/help` in the UI to see the commands available in the current session.
+
+Before your first message, the empty composer may suggest asking your local agent to edit its instructions or add a tool or channel. The suggestion depends on the agent's current capabilities; typing replaces it without sending a message or changing files.
 
 ## Commands
 
 | Command     | Description                                                                                                                                                  |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `/model`    | Choose the model, speed, and reasoning. Pass a model ID to set it directly: `/model provider/model-id`.                                                      |
-| `/reset`    | Start a fresh session.                                                                                                                                       |
-| `/clear`    | Clear the session's model-message history. `/new` is an alias.                                                                                               |
+| `/new`      | Start a fresh session and clear the screen. `/reset` is an alias.                                                                                            |
+| `/clear`    | Clear the session's model-message history and keep the session.                                                                                              |
 | `/compact`  | Compact the current session's context.                                                                                                                       |
 | `/cancel`   | Cancel the current turn without discarding settled context.                                                                                                  |
 | `/login`    | Connect a ChatGPT subscription, Vercel account, or provider API key.                                                                                         |
@@ -30,6 +34,8 @@ The transcript remains in your terminal scrollback after you exit. Run `/help` i
 | `/info`     | Show the resolved application, compiled artifacts, discovery diagnostics, and messaging routes.                                                              |
 | `/help`     | List available commands.                                                                                                                                     |
 | `/exit`     | Quit the UI.                                                                                                                                                 |
+
+When a message or stream reconnection reaches a [stranded session](../concepts/execution-model-and-durability#stranded-sessions), the TUI says why and which eve version built it, when known. New messages and approvals are not delivered. Run `/new` to end the stranded session; your next message starts a fresh one. `/clear` is refused, because it would keep the stranded session. A session from a previous `eve dev` invocation that the same eve version built is not stranded; see [local workflow recovery](../reference/cli#local-workflow-recovery). A message accepted before the upgrade is not redelivered.
 
 `/login`, `/model`, `/add`, `/deploy`, `/info`, and `/traces` are available when `eve dev` runs locally. They are unavailable when the UI connects through `eve remote connect`.
 
@@ -71,7 +77,7 @@ Changes apply together after the final choice, then the picker returns to chat. 
 
 A successful login or model change takes effect on the next prompt.
 
-Gateway connections default to `spacexai/grok-4.7`; OpenAI and ChatGPT default to `gpt-6-luna-fast`; Anthropic defaults to `claude-sonnet-5`. An explicitly authored compatible model stays selected. If a new default is unavailable, eve offers the connection's available models. Dynamic or custom model expressions must be edited in `agent.ts`.
+Gateway connections default to `openai/gpt-6-luna-fast`; OpenAI and ChatGPT default to `gpt-6-luna-fast`; Anthropic defaults to `claude-sonnet-5`. An explicitly authored compatible model stays selected. If a new default is unavailable, eve offers the connection's available models. Dynamic or custom model expressions must be edited in `agent.ts`.
 
 ## Add an integration
 
@@ -90,27 +96,33 @@ Required authorization or deployment setup still runs for the selected item. Pre
 
 ## Work with the agent
 
-Type a message and press `Enter` to send it. When the agent asks a question or requests tool approval, respond in the prompt shown by the UI. Connection authorization can open a browser; keep local `eve dev` running until the browser returns to it.
+Type a message and press `Enter` to send it. When the agent asks a question or requests tool approval, respond in the prompt shown by the UI. Each answer is sent as soon as you give it. When several requests are open, the prompt shows its place among them, such as `2 of 5`, and names the task that asked as its transcript lines do. Connection authorization can open a browser; keep local `eve dev` running until the browser returns to it.
 
-The activity line shows **Thinking** while the model reasons or waits to respond, **Generating** while it writes a response or tool input, and **Running** while tools execute. A blinking dot and elapsed time indicate progress, with token counts shown when available. The activity line disappears when the turn finishes or needs your input.
+The activity line shows **Thinking** while the model reasons or waits to respond, **Generating** while it writes a response or tool input, and **Running** while tools execute. A blinking dot and elapsed time indicate progress, with token counts shown when available. While [tasks](../tools/tasks) work, the drawer header replaces this line: it shows the parent's current activity, task count, and turn elapsed time without token counts. **Waiting** means the parent is waiting on work; **Working** appears without a turn timer when tasks remain active between turns.
 
-While a turn is running, `Enter` sends your message immediately as steering. Before assistant output begins, the runtime interrupts pending model generation and continues the same turn with your correction. Executing tools finish safely. After output begins, steering applies at the next workflow boundary and preserves streamed text.
+A tool call shows the tool's own `label`, or eve's copy for built-in tools such as `Read README.md`. Any other call shows a readable tool name without its extension or connection prefix, such as `List issues` for `linear__list_issues`. Approval prompts name the call the same way, such as `Approve Linear: List issues?`.
 
-Slash commands wait until the turn ends, except `/cancel`, which cancels directly. If the session does not support steering, messages queue for the next turn. Press `Esc` or `Ctrl+C` to cancel a turn with no queued messages. With queued messages, these keys select the oldest message for steering, or for the next turn if steering is unavailable. If a direct cancellation requested with `/cancel` or `Ctrl+C` does not settle, press `Ctrl+C` to stop waiting. The UI then returns to the prompt and asks you to press `Ctrl+C` again to exit. At an idle prompt, press `Ctrl+C` twice to exit.
+A task, such as a call to a subagent, writes one line to the transcript when it starts and one when it finishes, fails, or is stopped. The finished line names how long the task took and, for a subagent, what it did, such as `Read 3 files, Ran 2 commands`. Task starts use the same tool-call styling as synchronous calls. While tasks work, an activity drawer above the prompt shows each task's name, current activity, and elapsed time without repeating its launch prompt. Subagents use readable labels, such as `subagent(stock price)` for a `stock-price` subagent or `subagent(worker)` for the `code__worker` subagent of the code extension, with elapsed time beside the name and the latest observed tool grouped beneath an elbow. The tool remains visible between calls rather than switching to a starting placeholder. During questions and approvals, activity stays visible above the request with a shared divider when screen space permits; the request takes priority on small terminals. Background work started by a followed subagent appears beneath that subagent; deeper work uses an ownership path instead of further indentation. The panel caps its height and prioritizes tasks needing approval when work overflows. The UI does not show the model's own `eve__task_wait` and `eve__task_cancel` calls; their effect appears as the **Waiting** header and a stopped task's line.
 
-| Key           | Action                                                                                                                  |
-| ------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `Enter`       | Send the current message or answer.                                                                                     |
-| `Shift+Enter` | Insert a newline. Requires a terminal that reports modified keys.                                                       |
-| `Esc`         | Cancel a running turn, or steer with the oldest queued message.                                                         |
-| `Ctrl+C`      | Cancel or steer during a turn; stop a pending cancellation, then exit on the next press; press twice to exit when idle. |
-| `↑` / `↓`     | Move through input lines or sent-message history.                                                                       |
-| `Ctrl+L`      | Cycle log display modes.                                                                                                |
-| `Ctrl+R`      | Redraw the screen.                                                                                                      |
+The prompt stays open while the agent works, including turns started elsewhere, such as a scheduled run. While a turn is running, `Enter` sends your message immediately as steering. Before assistant output begins, the runtime interrupts pending model generation and continues the same turn with your correction. Executing tools finish safely. After output begins, steering applies at the next workflow boundary and preserves streamed text.
+
+Slash commands run immediately, even during a turn. Press `Esc` or `Ctrl+C`, or run `/cancel`, to cancel a running turn. If you cancel before the turn has started, eve waits for that turn's ID before sending cancellation, so the request cannot cancel a later turn. If a cancellation does not settle, press `Ctrl+C` again to stop waiting: eve starts a new session, and the next `Ctrl+C` exits. At an idle prompt, press `Ctrl+C` twice to exit.
+
+| Key           | Action                                                                                                     |
+| ------------- | ---------------------------------------------------------------------------------------------------------- |
+| `Enter`       | Send the current message or answer.                                                                        |
+| `Shift+Enter` | Insert a newline. Requires a terminal that reports modified keys.                                          |
+| `Esc`         | Cancel a running turn.                                                                                     |
+| `Ctrl+C`      | Cancel a running turn; press again to stop waiting and start a new session; press twice to exit when idle. |
+| `↑` / `↓`     | Move through input lines or sent-message history.                                                          |
+| `Ctrl+L`      | Cycle log display modes.                                                                                   |
+| `Ctrl+R`      | Redraw the screen.                                                                                         |
 
 ## Logs and traces
 
-By default, the UI shows `stderr` logs. Use `/loglevel <all|stderr|sandbox|none>` to change the display; bare `/loglevel` reports the current setting. `Ctrl+L` cycles the same modes.
+By default, the UI shows severity-tagged errors. Use `/loglevel <none|error|warn|debug|all>` to change the display; bare `/loglevel` reports the current setting. `warn` adds warnings, `debug` adds all severity-tagged records, and `all` also shows unclassified stdout, stderr, and sandbox output. `none` hides logs. Errors render red, warnings yellow, and unclassified stderr neutral. `Ctrl+L` cycles the same modes. These modes filter received records; they do not change `EVE_LOG_LEVEL` or enable a dependency's debug logging.
+
+Workflow SDK output, such as lines tagged `[workflow-sdk]` or `[world-local]`, reports internal runtime details, so the transcript shows it only in `all` mode.
 
 Every `eve dev` process writes diagnostic logs to `.eve/logs/`, regardless of the display mode. Read them with [`eve logs`](../reference/cli#eve-logs).
 
@@ -123,6 +135,8 @@ Use `eve dev` flags to control tool calls, reasoning, subagents, connection auth
 ```bash
 eve dev --tools full --reasoning collapsed --logs all
 ```
+
+`--subagents` accepts `collapsed` (the default), `full`, or `hidden`. `full` also writes each subagent message and tool call to the transcript as it finishes, and `hidden` leaves subagent tasks out of the transcript and the task panel.
 
 Use `--host` and `--port` to bind the local server, or `--no-ui` to run without the terminal UI. Set `EVE_TUI_RENDER_MARKDOWN=0` to show assistant and subagent responses without Markdown parsing or styling; `1` (the default) enables Markdown rendering. See the [`eve dev` CLI reference](../reference/cli#eve-dev) for the complete option list, accepted values, and defaults.
 

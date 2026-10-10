@@ -9,6 +9,7 @@ import { ContextContainer } from "#context/container.js";
 import { AuthKey, ContinuationTokenKey, SessionIdKey } from "#context/keys.js";
 import { emitProxiedSubagentEvent } from "#subagents/event-proxy-step.js";
 import { projectToDurableSession } from "#execution/session.js";
+import { positionOf, withOpenTurn } from "#internal/testing/session-machine.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import type { StreamEventHook } from "#public/definitions/hook.js";
@@ -72,6 +73,7 @@ function buildBundle(
           "approval.candidate": hook,
           "approval.settled": hook,
           "turn.completed": hook,
+          "turn.waiting": hook,
           "session.waiting": hook,
         },
         logicalPath: "hooks/audit.ts",
@@ -208,9 +210,10 @@ describe("subagent authorization proxy", () => {
     expect(hook.mock.calls.map(([event]) => event)).toEqual(chunks.map(decodeEvent));
     expect(hook.mock.calls.every(([, ctx]) => ctx.session.id === parentSessionId)).toBe(true);
   });
-  it("preserves required/completed events as standalone parent turns", async () => {
+  it("parks the parent's open turn on a sign-in without ending it", async () => {
     const parentSessionId = "parent-session";
-    const session = createSession(parentSessionId);
+    const openTurn = { sessionStarted: true, sequence: 3, stepIndex: 1, turnId: "parent-turn" };
+    const session = withOpenTurn(createSession(parentSessionId), openTurn);
     const { bundle, ctx, hook } = buildContext({
       adapter: authorizationAdapter,
       sessionId: parentSessionId,
@@ -270,13 +273,14 @@ describe("subagent authorization proxy", () => {
       kind: authorizationAdapter.kind,
       state: { outcome: "authorized" },
     });
-    expect(chunks).toHaveLength(6);
-    expect(decodeEvent(chunks[0]!)).toMatchObject(requiredEvent);
-    expect(decodeEvent(chunks[1]!).type).toBe("turn.completed");
-    expect(decodeEvent(chunks[2]!).type).toBe("session.waiting");
-    expect(decodeEvent(chunks[3]!)).toMatchObject(completedEvent);
-    expect(decodeEvent(chunks[4]!).type).toBe("turn.completed");
-    expect(decodeEvent(chunks[5]!).type).toBe("session.waiting");
+    // The call that needs the sign-in keeps running, so the parent's turn parks
+    // and resumes under the same turn id rather than ending.
+    expect(chunks.map(decodeEvent)).toMatchObject([
+      requiredEvent,
+      { data: { sequence: 3, turnId: "parent-turn" }, type: "turn.waiting" },
+      completedEvent,
+    ]);
+    expect(positionOf(completed.sessionState.snapshot.session)).toMatchObject(openTurn);
     expect(hook.mock.calls.map(([event]) => event)).toEqual(chunks.map(decodeEvent));
     expect(hook.mock.calls.every(([, ctx]) => ctx.session.id === parentSessionId)).toBe(true);
   });

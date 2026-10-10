@@ -1,17 +1,22 @@
-import { evaluate } from "#ai/evaluate.js";
+import { decide } from "#ai/decide.js";
 import type { JsonValue } from "#shared/json.js";
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 import type { AgentRouterInput } from "#execution/tools/agent-router.js";
 
 /** Routes one task through the complete workflow agent metadata snapshot. */
-export async function executeAgentRouterTool(
+export async function runAgentRouterTask(
   input: AgentRouterInput,
   ctx: WorkflowToolContext,
 ): Promise<JsonValue> {
   "use workflow";
 
   const target = await chooseTarget(input.message, descriptions(ctx), ctx.abortSignal);
-  return ctx.agent(target, { message: input.message });
+  const response = await ctx.agent(target).send(input.message, { signal: ctx.abortSignal });
+  const { message, status } = await response.result();
+  if (status === "failed") {
+    throw new Error(`Agent "${target}" failed to handle the task.`);
+  }
+  return message ?? null;
 }
 
 async function chooseTarget(
@@ -27,7 +32,7 @@ async function chooseTarget(
   }
   if (names.length === 1) return names[0]!;
 
-  const result = await evaluate({
+  const result = await decide({
     abortSignal,
     state: { message },
     questions: {

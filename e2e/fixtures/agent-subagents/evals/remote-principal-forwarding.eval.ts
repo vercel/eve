@@ -21,7 +21,7 @@ const CREATE_CHILD_MESSAGE = [
 const CONTINUE_CHILD_MESSAGE = [
   WORKSPACE_FORWARDING_MARKER,
   "A different user is making this request now.",
-  "Continue that same remote-loopback agent using its agentId with this message:",
+  "Continue that same remote-loopback agent using its taskId with this message:",
   JSON.stringify(WORKSPACE_LOOKUP_MESSAGE),
 ].join(" ");
 const CLARIFICATION = [
@@ -30,7 +30,10 @@ const CLARIFICATION = [
   "Do not reuse previous answers; let the service deny access when no membership exists.",
 ].join(" ");
 
-/** Three users resume one remote child; each tool call resolves only its current caller's workspace membership. */
+/**
+ * Three users continue one remote child by its taskId; each call resolves only its own caller's
+ * workspace membership.
+ */
 export default defineEval({
   tags: ["principal-forwarding"],
   description:
@@ -39,12 +42,12 @@ export default defineEval({
     // Alice creates the child and reads her workspace label.
     const aliceTurn = await t.send(CREATE_CHILD_MESSAGE);
     const aliceParent = await waitForRemoteChild(t, aliceTurn.session, aliceTurn);
-    const childSessionId = aliceParent.childSessionId;
+    const { childSessionId, taskId } = aliceParent;
     const aliceChild = await t.target.watchTurn(childSessionId).result();
     await expectWorkspaceReads(t, aliceChild, ALICE_WORKSPACE_LABEL);
     let childEventCount = aliceChild.events.length;
 
-    // Bob continues the same child and must resolve Bob's workspace label, not Alice's.
+    // Bob continues it by its taskId and must resolve Bob's workspace label, not Alice's.
     const bobTurn = await aliceParent.session.send(CONTINUE_CHILD_MESSAGE, {
       headers: { authorization: BOB_AUTHORIZATION },
     });
@@ -52,7 +55,7 @@ export default defineEval({
       t,
       aliceParent.session,
       bobTurn,
-      childSessionId,
+      aliceParent,
       BOB_AUTHORIZATION,
     );
     const bobChild = await t.target
@@ -70,7 +73,7 @@ export default defineEval({
       t,
       bobParent.session,
       observerTurn,
-      childSessionId,
+      aliceParent,
       OBSERVER_AUTHORIZATION,
     );
     const observerChild = await t.target
@@ -87,7 +90,10 @@ export default defineEval({
       },
     });
 
-    t.event("subagent.called", { data: { name: "remote-loopback" }, count: 3 })
+    t.event("task.started", { data: { kind: "agent", name: "remote-loopback", taskId }, count: 3 })
+      .soft()
+      .label("every caller continues the same task");
+    t.event("agent.started", { data: { name: "remote-loopback" }, count: 1 })
       .soft()
       .label("no repeated delegation");
     t.succeeded();
@@ -119,13 +125,19 @@ async function expectWorkspaceReads(
 
 type SessionCursor = Pick<EveEvalSession, "respond" | "send" | "sessionId" | "state">;
 
+/** The remote-loopback agent task and the remote session every call to it reaches. */
+interface RemoteChild {
+  readonly childSessionId: string;
+  readonly taskId: string;
+}
+
 async function waitForRemoteChild(
   t: EveEvalContext,
   initial: SessionCursor,
   initialTurn: EveEvalTurn,
-  expectedSessionId?: string,
+  expected?: RemoteChild,
   authorization?: string,
-): Promise<{ readonly childSessionId: string; readonly session: SessionCursor }> {
+): Promise<RemoteChild & { readonly session: SessionCursor }> {
   let session = initial;
   let turn = initialTurn;
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -133,15 +145,8 @@ async function waitForRemoteChild(
       throw new Error("Remote child wait has no parent session cursor.");
     }
     turn.expectOk();
-    const call = turn.events.find(
-      (event) => event.type === "subagent.called" && event.data.name === "remote-loopback",
-    );
-    if (call?.type === "subagent.called") {
-      if (expectedSessionId !== undefined && call.data.childSessionId !== expectedSessionId) {
-        throw new Error("The parent turn did not continue the existing remote child.");
-      }
-      return { childSessionId: call.data.childSessionId, session };
-    }
+    const child = findRemoteChild(turn, expected);
+    if (child !== undefined) return { ...child, session };
     turn.noFailedActions();
     if (attempt === 4) break;
     if (turn.inputRequests.length > 0) {
@@ -163,4 +168,25 @@ async function waitForRemoteChild(
     }
   }
   throw new Error("The parent did not call remote-loopback after five turns.");
+}
+
+/** A later call reaches the task's session, which `agent.started` announced once with the task's ID. */
+function findRemoteChild(turn: EveEvalTurn, expected?: RemoteChild): RemoteChild | undefined {
+  for (const event of turn.events) {
+    if (event.type !== "task.started" || event.data.name !== "remote-loopback") continue;
+    if (expected !== undefined) {
+      if (event.data.taskId !== expected.taskId) {
+        throw new Error("The parent turn did not continue the existing remote-loopback task.");
+      }
+      return expected;
+    }
+    const started = turn.events.find(
+      (candidate) =>
+        candidate.type === "agent.started" && candidate.data.taskId === event.data.taskId,
+    );
+    if (started?.type === "agent.started") {
+      return { childSessionId: started.data.sessionId, taskId: event.data.taskId };
+    }
+  }
+  return undefined;
 }

@@ -1,3 +1,4 @@
+import { toProxyInputRequestEntries } from "#harness/proxy-input-requests.js";
 import { describe, expect, it } from "vitest";
 
 import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js";
@@ -9,6 +10,10 @@ import { ContextContainer } from "#context/container.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeContext } from "#context/serialize.js";
+import { applyTransition, sessionView } from "#harness/session-machine/commit.js";
+import { relay } from "#harness/session-machine/transitions.js";
+import { storedProjection } from "#harness/session-machine/view.js";
+import { withOpenTurn } from "#internal/testing/session-machine.js";
 import { hasProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { HarnessEmitFn, HarnessSession } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -17,7 +22,7 @@ import { createRuntimeAdapterRegistry } from "#runtime/channels/registry.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
-import { emitProxiedInputRequest, routeDeliverPayload } from "#subagents/hitl-proxy.js";
+import { routeDeliverPayload } from "#subagents/hitl-proxy.js";
 
 /**
  * Integration coverage for subagent HITL proxy emission and routing.
@@ -164,6 +169,25 @@ function buildEmptySession(continuationToken: string, sessionId: string): Harnes
   };
 }
 
+function buildOpenTurnSession(continuationToken: string, sessionId: string): HarnessSession {
+  return withOpenTurn(buildEmptySession(continuationToken, sessionId), {
+    sequence: 3,
+    stepIndex: 1,
+    turnId: "turn_3",
+  });
+}
+
+/** Relays a child's batch through the parent's machine, returning the routes it leaves. */
+async function emitProxiedInputRequest(input: {
+  readonly emit: HarnessEmitFn;
+  readonly hookPayload: Parameters<typeof toProxyInputRequestEntries>[0];
+  readonly session: HarnessSession;
+}) {
+  const view = sessionView(storedProjection(input.session.state), input.session.state);
+  await applyTransition(input.session, relay(view, { payload: input.hookPayload }), input.emit);
+  return toProxyInputRequestEntries(input.hookPayload);
+}
+
 /**
  * Builds an adapter-aware emit helper and a captured-events sink
  * paired to one parent context. The returned `emit` mirrors the
@@ -220,10 +244,11 @@ describe("subagent HITL proxy → Slack-style text-approve regression (Finding #
     });
 
     const { emit, events, persistAdapterState } = buildCapturingEmit(ctx);
-    const { entries, session: sessionAfterEmit } = await emitProxiedInputRequest({
+    const parentSession = buildOpenTurnSession("parent-token", "sess-parent");
+    const entries = await emitProxiedInputRequest({
       emit,
       hookPayload,
-      session: buildEmptySession("parent-token", "sess-parent"),
+      session: parentSession,
     });
     // Simulate the workflow step's post-step
     // `ctx.set(ChannelKey, { …adapter, state })` — the mutation the
@@ -246,20 +271,28 @@ describe("subagent HITL proxy → Slack-style text-approve regression (Finding #
             requestIds: ["req-approve-1"],
           },
           childContinuationToken: "subagent:parent:call-1",
+          event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
           kind: "tool-approval",
+          reply: { options: approvalRequest.options },
         },
       ],
     ]);
 
-    // The helper follows the proxied `input.requested` with a
-    // `turn.completed` + `session.waiting` pair so client event-stream
-    // readers stop draining and prompt for the HITL response.
-    const emittedTypes = events.map((event) => event.type);
-    expect(emittedTypes).toEqual(["input.requested", "turn.completed", "session.waiting"]);
-
-    // The returned session carries the advanced emission state so
-    // the next harness step starts a fresh logical turn.
-    expect(sessionAfterEmit.state?.["eve.harness.emission"]).toBeDefined();
+    // The proxied `input.requested` parks the parent's open turn with
+    // `turn.waiting`; the call that asked is still running, so the turn
+    // neither completes nor resets.
+    expect(events.slice(1)).toEqual([
+      {
+        data: {
+          on: "input",
+          sequence: 3,
+          turnId: "turn_3",
+          usage: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0 },
+        },
+        type: "turn.waiting",
+      },
+    ]);
+    expect(events[0]?.type).toBe("input.requested");
 
     // The serialized adapter state must include mutations made while
     // rendering the proxied input request.
@@ -312,7 +345,8 @@ describe("subagent HITL proxy → Slack-style text-approve regression (Finding #
         payload: {
           inputResponses: [{ optionId: "approve", requestId: "req-approve-1" }],
         },
-        retireRequestIds: ["req-approve-1"],
+        // The child decides the approval, so it stays open here until the child settles it.
+        resolved: { event: { sequence: 0, stepIndex: 0, turnId: "turn_0" }, resolutions: [] },
       },
     ]);
   });
@@ -348,7 +382,7 @@ describe("subagent HITL proxy → concurrent-descendant routing", () => {
       request: requestA,
       subagentName: "descendantA",
     });
-    const { entries: entriesA } = await emitProxiedInputRequest({
+    const entriesA = await emitProxiedInputRequest({
       emit,
       hookPayload: payloadA,
       session: buildEmptySession("parent-token", "sess-parent"),
@@ -363,7 +397,7 @@ describe("subagent HITL proxy → concurrent-descendant routing", () => {
       request: requestB,
       subagentName: "descendantB",
     });
-    const { entries: entriesB } = await emitProxiedInputRequest({
+    const entriesB = await emitProxiedInputRequest({
       emit,
       hookPayload: payloadB,
       session: buildEmptySession("parent-token", "sess-parent"),

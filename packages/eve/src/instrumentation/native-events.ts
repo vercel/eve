@@ -2,8 +2,8 @@ import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { contextStorage } from "#context/container.js";
 import { instrumentChannelDelivery } from "#instrumentation/channel-delivery.js";
 import type {
-  InstrumentationActionFailedEvent,
-  InstrumentationActionStartedEvent,
+  InstrumentationToolCallFailedEvent,
+  InstrumentationToolCallStartedEvent,
   InstrumentationAttemptScope,
   InstrumentationHooks,
   InstrumentationInputRequestedEvent,
@@ -18,16 +18,15 @@ import {
   inputIdempotencyKey,
   sessionIdempotencyKey,
   turnIdempotencyKey,
+  toolCallIdempotencyKey,
 } from "#instrumentation/lifecycle.js";
 import {
-  findInstrumentationActionScopeForCall,
   rememberInstrumentationActionScope,
   rememberInstrumentationInputScope,
   takeInstrumentationActionScopeForCall,
-  takeInstrumentationActionScopeForTask,
   takeInstrumentationInputScope,
 } from "#instrumentation/state.js";
-import type { ResolvedInputBatch } from "#harness/input-requests.js";
+import type { ResolvedInputBatch } from "#harness/input-request-resolution.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
 import type { HandleEventFn } from "#harness/types.js";
 import {
@@ -36,10 +35,10 @@ import {
   type RuntimeActionResult,
 } from "#shared/action-types.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
-import { deriveTaskId } from "#tasks/task-id.js";
-import type { TaskUsage, TaskView } from "#tasks/types.js";
 
 export interface CreateInstrumentationHandleEventInput {
+  readonly isFrameworkTool?: (name: string) => boolean;
+  readonly traceSessionId?: string;
   readonly agentName?: string;
   readonly channelKind?: string;
   readonly channelAudience?: ChannelAudience;
@@ -68,6 +67,7 @@ export function createInstrumentationHandleEvent(
   const publishedInputs = new Set<string>();
   let activeTurnId = input.turnId;
   return async (event, messages) => {
+    const startedAtMs = Date.now();
     await handleEvent(event, messages);
     const lifecycleEvent = toLifecycleEvent(event, input, activeTurnId);
     if (event.type === "turn.started") activeTurnId = event.data.turnId;
@@ -107,7 +107,7 @@ export function createInstrumentationHandleEvent(
     }
     if (lifecycleEvent !== undefined) await hooks.publish(lifecycleEvent);
     if (event.type === "actions.requested") {
-      await publishActionStarts(event, input, hooks, publishedActions);
+      await publishActionStarts(event, input, hooks, publishedActions, startedAtMs);
     } else if (event.type === "action.result") {
       await publishActionTerminal(event, input, hooks);
     } else if (event.type === "input.requested") {
@@ -199,27 +199,49 @@ async function publishActionStarts(
   input: CreateInstrumentationHandleEventInput,
   hooks: InstrumentationHooks,
   published: Set<string>,
+  startedAtMs: number,
 ): Promise<void> {
   const scope = input.getAttemptScope?.();
   if (scope === undefined) return;
   const capturesInputs = hooks.capturesInputs ?? hooks.capturesContent;
 
   for (const action of event.data.actions) {
+    const deferred =
+      isRuntimeWorkflowToolAction(action) ||
+      action.kind === "subagent-call" ||
+      action.kind === "remote-agent-call";
     const idempotencyKey = actionIdempotencyKey(input.sessionId, event.data.turnId, action.callId);
     if (published.has(idempotencyKey)) continue;
     published.add(idempotencyKey);
-    rememberInstrumentationActionScope(idempotencyKey, scope);
+    rememberInstrumentationActionScope(
+      idempotencyKey,
+      scope,
+      deferred
+        ? {
+            type: "tool.call.started",
+            callId: action.callId,
+            toolName: actionName(action),
+            frameworkTool: isFrameworkAction(action, input),
+            scope,
+            idempotencyKey: toolCallIdempotencyKey(scope, action.callId, 0),
+            startedAtMs: Date.now(),
+            input: capturesInputs ? action.input : undefined,
+          }
+        : undefined,
+    );
     await hooks.publish(
       Object.freeze({
         callId: action.callId,
+        startedAtMs,
         idempotencyKey,
         input: capturesInputs ? action.input : undefined,
-        ...(isRuntimeWorkflowToolAction(action) ? { isWorkflowTool: true } : undefined),
+        ...(deferred ? { isWorkflowTool: true } : undefined),
         kind: action.kind === "workflow-tool-call" ? "tool-call" : action.kind,
-        name: actionName(action),
+        toolName: actionName(action),
+        frameworkTool: isFrameworkAction(action, input),
         scope,
-        type: "action.started",
-      } satisfies InstrumentationActionStartedEvent),
+        type: "tool.call.started",
+      } satisfies InstrumentationToolCallStartedEvent),
     );
   }
 }
@@ -229,16 +251,11 @@ async function publishActionTerminal(
   input: CreateInstrumentationHandleEventInput,
   hooks: InstrumentationHooks,
 ): Promise<void> {
-  const correlation = findInstrumentationActionScopeForCall(
+  const correlation = takeInstrumentationActionScopeForCall(
     input.sessionId,
     event.data.result.callId,
   );
   if (correlation === undefined) return;
-  const backgroundTask = readBackgroundTaskReceipt(event.data.result, correlation);
-  if (event.data.status === "completed" && backgroundTask !== undefined) {
-    return;
-  }
-  takeInstrumentationActionScopeForCall(input.sessionId, event.data.result.callId);
   const { idempotencyKey, scope } = correlation;
   const capturesOutputs = hooks.capturesOutputs ?? hooks.capturesContent;
 
@@ -256,7 +273,7 @@ async function publishActionTerminal(
             : { type: "result" },
         ),
         scope,
-        type: "action.completed",
+        type: "tool.call.completed",
         usage: actionUsage(event.data.result),
       }),
     );
@@ -278,88 +295,10 @@ async function publishActionTerminal(
       idempotencyKey,
       outcome: event.data.status,
       scope,
-      type: "action.failed",
-    } satisfies InstrumentationActionFailedEvent),
+      type: "tool.call.failed",
+      usage: actionUsage(event.data.result),
+    } satisfies InstrumentationToolCallFailedEvent),
   );
-}
-
-/** Settles actions whose model-facing result was an admitted background-task receipt. */
-export async function publishBackgroundTaskSettlements(input: {
-  readonly acceptedAtMs?: number;
-  readonly hooks: InstrumentationHooks;
-  readonly views: readonly TaskView[];
-}): Promise<void> {
-  const capturesOutputs = input.hooks.capturesOutputs ?? input.hooks.capturesContent;
-  const acceptedAtMs = input.acceptedAtMs ?? Date.now();
-  for (const view of input.views) {
-    if (view.status !== "completed" && view.status !== "failed" && view.status !== "cancelled") {
-      continue;
-    }
-    const correlation = takeInstrumentationActionScopeForTask(view.taskId);
-    if (correlation === undefined) continue;
-    if (view.status === "completed") {
-      await input.hooks.publish(
-        Object.freeze({
-          acceptedAtMs,
-          idempotencyKey: correlation.idempotencyKey,
-          outcome: "completed",
-          output: Object.freeze(
-            capturesOutputs ? { output: view.lastOutput.data, type: "result" } : { type: "result" },
-          ),
-          scope: correlation.scope,
-          type: "action.completed",
-          usage: instrumentationUsage(view.usage),
-        }),
-      );
-      continue;
-    }
-    await input.hooks.publish(
-      Object.freeze({
-        acceptedAtMs,
-        error:
-          view.status === "failed"
-            ? capturesOutputs
-              ? view.lastOutput.data
-              : undefined
-            : new Error("The background task was cancelled."),
-        errorCode:
-          view.status === "failed" ? "BACKGROUND_TASK_FAILED" : "BACKGROUND_TASK_CANCELLED",
-        idempotencyKey: correlation.idempotencyKey,
-        outcome: view.status,
-        scope: correlation.scope,
-        type: "action.failed",
-      } satisfies InstrumentationActionFailedEvent),
-    );
-  }
-}
-
-function readBackgroundTaskReceipt(
-  result: RuntimeActionResult,
-  correlation: { readonly scope: InstrumentationAttemptScope },
-): { readonly taskId: string } | undefined {
-  const output = result.output;
-  if (typeof output !== "object" || output === null || Array.isArray(output)) return undefined;
-  if (Reflect.get(output, "status") !== "working") return undefined;
-  const taskId = Reflect.get(output, "taskId");
-  if (typeof taskId !== "string") return undefined;
-  const expectedTaskId = deriveTaskId({
-    callId: result.callId,
-    parentSessionId: correlation.scope.sessionId,
-    parentTurnId: correlation.scope.turnId,
-  });
-  return taskId === expectedTaskId ? { taskId } : undefined;
-}
-
-function instrumentationUsage(usage: TaskUsage | undefined): InstrumentationUsage | undefined {
-  if (usage === undefined) return undefined;
-  return {
-    inputTokenDetails: {
-      cacheReadTokens: usage.cacheReadTokens,
-      cacheWriteTokens: usage.cacheWriteTokens,
-    },
-    inputTokens: usage.inputTokens,
-    outputTokens: usage.outputTokens,
-  };
 }
 
 function actionUsage(result: RuntimeActionResult): InstrumentationUsage | undefined {
@@ -370,7 +309,9 @@ function actionUsage(result: RuntimeActionResult): InstrumentationUsage | undefi
   ) {
     return undefined;
   }
-  return {
+  const usage: {
+    -readonly [K in keyof InstrumentationUsage]: InstrumentationUsage[K];
+  } = {
     inputTokenDetails: {
       cacheReadTokens: result.usage.cacheReadTokens,
       cacheWriteTokens: result.usage.cacheWriteTokens,
@@ -378,11 +319,20 @@ function actionUsage(result: RuntimeActionResult): InstrumentationUsage | undefi
     inputTokens: result.usage.inputTokens,
     outputTokens: result.usage.outputTokens,
   };
+  if (result.usage.costUsd !== undefined) usage.costUsd = result.usage.costUsd;
+  return usage;
+}
+
+/** A skill load runs eve's skill loader; any other call is eve's when its tool is. */
+function isFrameworkAction(
+  action: RuntimeActionRequest,
+  input: Pick<CreateInstrumentationHandleEventInput, "isFrameworkTool">,
+): boolean {
+  return action.kind === "load-skill" || input.isFrameworkTool?.(actionName(action)) === true;
 }
 
 function actionName(action: RuntimeActionRequest): string {
   if (action.kind === "tool-call" || action.kind === "workflow-tool-call") return action.toolName;
-  if (action.kind === "load-skill") return "load_skill";
   return action.name;
 }
 
@@ -401,6 +351,7 @@ function toLifecycleEvent(
         parentLineage: input.parentLineage,
         parentTraceContext: input.parentTraceContext,
         rootSessionId: input.rootSessionId ?? input.sessionId,
+        traceSessionId: input.traceSessionId,
         scheduleId: input.scheduleId,
         sessionId: input.sessionId,
         title: input.title,
@@ -428,6 +379,7 @@ function toLifecycleEvent(
         parentLineage: input.parentLineage,
         parentTraceContext: input.parentTraceContext,
         rootSessionId: input.rootSessionId ?? input.sessionId,
+        traceSessionId: input.traceSessionId,
         sequence: event.data.sequence,
         sessionId: input.sessionId,
         turnId: event.data.turnId,

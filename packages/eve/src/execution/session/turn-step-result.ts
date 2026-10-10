@@ -1,39 +1,21 @@
-import { createDurableSessionState } from "#execution/durable-session-store.js";
+import { storedProjection } from "#harness/session-machine/view.js";
+import { createDurableSessionValues } from "#execution/durable-session-store.js";
 import { derivePendingState } from "#execution/session/pending-turn-state.js";
 import type { DurableStepResult } from "#execution/session/turn-step-types.js";
-import { getBackgroundTasks } from "#harness/workflow-tool-runs.js";
+import { sessionView } from "#harness/session-machine/commit.js";
+import { ownOpenRequestIds } from "#harness/session-machine/transitions.js";
 import { getTurnUsageState, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
 import type { StepResult } from "#harness/types.js";
-import { preserveSerializedBackgroundTaskObservabilityState } from "#shared/serialized-observability-state.js";
 
 export function resolveSessionStepResult(
   stepResult: StepResult,
   nextSerializedContext: Record<string, unknown>,
-  beforeStepContext: Record<string, unknown>,
-  /** The turn this step belongs to. */
-  turnId: string,
 ): DurableStepResult {
-  const nextState = createDurableSessionState({ session: stepResult.session });
-  if (stepResult.steered)
-    return {
-      action: "steered",
-      serializedContext: nextSerializedContext,
-      sessionState: nextState,
-    };
-  const backgroundTransition =
-    stepResult.backgroundTasks === undefined || stepResult.backgroundTaskSession === undefined
-      ? {}
-      : {
-          backgroundTaskContext: preserveSerializedBackgroundTaskObservabilityState(
-            beforeStepContext,
-            nextSerializedContext,
-            stepResult.backgroundTasks,
-          ),
-          backgroundTaskState: createDurableSessionState({
-            session: stepResult.backgroundTaskSession,
-          }),
-          backgroundTasks: stepResult.backgroundTasks,
-        };
+  const values = {
+    serializedContext: nextSerializedContext,
+    ...createDurableSessionValues(stepResult.session),
+  };
+  if (stepResult.steered) return { action: "steered", ...values };
 
   if (
     stepResult.next !== null &&
@@ -43,45 +25,44 @@ export function resolveSessionStepResult(
     const sessionTotals = getTurnUsageState(stepResult.session.state)?.session;
     return {
       action: "done",
-      ...backgroundTransition,
       output: stepResult.next.output,
       isError: stepResult.next.isError,
-      serializedContext: nextSerializedContext,
-      sessionState: nextState,
+      ...values,
       usage: sessionTotals === undefined ? undefined : toUsage(sessionTotals),
       usageDelta: takeSessionUsageDelta(stepResult.session).delta,
     };
   }
 
-  if (stepResult.next === null) {
-    const pending = derivePendingState(stepResult.session);
+  if (stepResult.held?.kind === "tasks") {
+    return { action: "held", hold: "tasks", ...values, taskIds: stepResult.held.taskIds };
+  }
+  if (stepResult.held?.kind === "request") {
+    const projection = storedProjection(stepResult.session.state);
+    const pending = derivePendingState(stepResult.session, projection);
+    return {
+      action: "held",
+      authorizationAttemptIds: pending.authorizationAttemptIds ?? [],
+      hasPendingInputBatch: pending.hasPendingInputBatch,
+      hold: "request",
+      inputRequestIds: [...ownOpenRequestIds(sessionView(projection, stepResult.session.state))],
+      ...values,
+    };
+  }
 
-    // A turn that ends while its own background tasks are working yields: its answer is interim.
-    // Usage stays unreported so the caller's final result includes every yielded turn. An error
-    // is final and always answers the caller.
+  if (stepResult.next === null) {
+    const { hasRunsToDispatch, pendingCoordinationCallIds, pendingTaskToolCalls } =
+      derivePendingState(stepResult.session, storedProjection(stepResult.session.state));
+    const pending = { hasRunsToDispatch, pendingCoordinationCallIds, pendingTaskToolCalls };
+
+    // Usage stays unreported until the turn settles, so the caller's result includes all of it.
     if (stepResult.settledTurn !== undefined) {
-      const yielded =
-        stepResult.settledTurn.isError !== true &&
-        getBackgroundTasks(stepResult.session.state).query({ state: "working", turnId }).length > 0;
-      if (yielded) {
-        return {
-          action: "park",
-          ...backgroundTransition,
-          ...pending,
-          settled: { ...stepResult.settledTurn, notifyCaller: false },
-          serializedContext: nextSerializedContext,
-          sessionState: nextState,
-        };
-      }
       const { delta, session: reportedSession } = takeSessionUsageDelta(stepResult.session);
       return {
         action: "park",
-        ...backgroundTransition,
         ...pending,
         serializedContext: nextSerializedContext,
-        sessionState: createDurableSessionState({ session: reportedSession }),
+        ...createDurableSessionValues(reportedSession),
         settled: {
-          notifyCaller: true,
           output: stepResult.settledTurn.output,
           isError: stepResult.settledTurn.isError,
           usage: delta,
@@ -89,19 +70,8 @@ export function resolveSessionStepResult(
       };
     }
 
-    return {
-      action: "park",
-      ...backgroundTransition,
-      ...pending,
-      serializedContext: nextSerializedContext,
-      sessionState: nextState,
-    };
+    return { action: "park", ...pending, ...values };
   }
 
-  return {
-    action: "continue",
-    ...backgroundTransition,
-    serializedContext: nextSerializedContext,
-    sessionState: nextState,
-  };
+  return { action: "continue", ...values };
 }

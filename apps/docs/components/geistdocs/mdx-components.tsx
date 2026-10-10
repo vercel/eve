@@ -5,6 +5,7 @@ import { Flag } from "lucide-react";
 import type { MDXComponents } from "mdx/types";
 import Link from "next/link";
 import { AgentRuntimeDiagram } from "./agent-runtime-diagram";
+import { EveCodeBenchmark } from "./eve-code-benchmark";
 
 const localComponents: MDXComponents = {
   a: ({ href, ...props }) =>
@@ -23,6 +24,7 @@ const localComponents: MDXComponents = {
   Flag,
   Folder,
   AgentRuntimeDiagram,
+  EveCodeBenchmark,
   Step,
   Steps,
 };

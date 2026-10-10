@@ -1,6 +1,7 @@
+import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { describe, expect, it } from "vitest";
-import { resumeHook, start } from "#internal/workflow/runtime.js";
+import { resumeHook } from "#internal/workflow/runtime.js";
 
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import {
@@ -30,6 +31,7 @@ function buildSerializedContext(overrides: {
   return {
     "eve.auth": null,
     "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
+    "eve.stateLayout": 1,
     "eve.capabilities": { requestInput: true },
     "eve.channel": { kind: overrides.channelKind, state: {} },
     "eve.continuationToken": overrides.continuationToken,
@@ -87,7 +89,7 @@ describe("session-limit continuation decline integration", () => {
     const continuationToken = "http:limit-decline-root";
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",

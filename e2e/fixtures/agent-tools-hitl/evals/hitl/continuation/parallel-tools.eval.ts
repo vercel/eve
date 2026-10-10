@@ -1,7 +1,7 @@
 import { defineEval } from "eve/evals";
 import {
+  expectApprovalCancelled,
   scriptedSession,
-  approveSavedChange,
   expectChangeStillUnexecuted,
   expectReply,
   requestFrom,
@@ -21,12 +21,12 @@ export default defineEval({
     // When the user asks to read and save in parallel.
     const live = await session.start("Read and save the draft in parallel.");
 
-    // Then the reply reports both results and completes; A stays unexecuted and answerable.
+    // Then the reply reports both results and completes; the message cancelled A, which never runs.
     await expectToolResult(t, live, "save-draft");
     const turn = await expectReply(t, live, 'Draft status: ready. Draft saved: {"writes":1}.');
     turn.calledTool("read-draft", { status: "completed", count: 1 });
     turn.calledTool("save-draft", { status: "completed", count: 1 });
     expectChangeStillUnexecuted(session);
-    await approveSavedChange(t, session, approval);
+    expectApprovalCancelled(session, approval);
   },
 });

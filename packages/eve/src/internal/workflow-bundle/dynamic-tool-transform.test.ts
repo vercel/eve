@@ -146,7 +146,7 @@ export default defineDynamic({
               return ctx.toolInput.force ? { type: "user-approval", reason: requestReason } : "not-applicable";
             },
             response(ctx) {
-              return ctx.responder.principalId === allowedResponder
+              return ctx.response.principal.principalId === allowedResponder
                 ? { status: "allowed" }
                 : { status: "rejected", reason: "wrong responder" };
             },

@@ -60,23 +60,6 @@ export const webLogo = (props: LogoProps) => (
   </svg>
 );
 
-const BuzzLogo = (props: LogoProps) => (
-  <svg fill="none" viewBox="0 0 466 309" xmlns="http://www.w3.org/2000/svg" {...props}>
-    <defs>
-      <mask id="buzz-logo-mask">
-        <circle cx="91.7" cy="154.5" fill="white" r="91.7" />
-        <circle cx="374.3" cy="154.5" fill="white" r="91.7" />
-        <rect fill="white" height="309" rx="34" width="210" x="128" />
-        <ellipse cx="193.3" cy="84.4" fill="black" rx="27" ry="27" />
-        <ellipse cx="276" cy="84.4" fill="black" rx="27" ry="27" />
-        <rect fill="black" height="38.3" rx="5" width="136.9" x="166.3" y="157.2" />
-        <rect fill="black" height="37.6" rx="5" width="136.2" x="166.9" y="235.1" />
-      </mask>
-    </defs>
-    <rect fill="currentColor" height="309" mask="url(#buzz-logo-mask)" width="466" />
-  </svg>
-);
-
 const browserUseLogo = (props: LogoProps) => (
   <svg fill="none" viewBox="0 0 1000 1000" xmlns="http://www.w3.org/2000/svg" {...props}>
     <path
@@ -320,6 +303,16 @@ const similarwebLogo = (props: LogoProps) => <SiSimilarweb {...props} />;
 
 const stripeLogo = (props: LogoProps) => <SiStripe color="default" {...props} />;
 
+export const linkLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path d="M0 0h32v32H0z" fill="#00D66F" />
+    <path
+      d="M15.144 6H10c1.001 4.18 3.923 7.753 7.58 10-3.664 2.247-6.579 5.82-7.58 10h5.144c1.275-3.867 4.804-7.227 9.142-7.913v-4.18c-4.344-.68-7.874-4.04-9.142-7.907Z"
+      fill="#011E0F"
+    />
+  </svg>
+);
+
 const supabaseLogo = (props: LogoProps) => <SiSupabase color="default" {...props} />;
 
 const ticktickLogo = (props: LogoProps) => <SiTicktick color="default" {...props} />;
@@ -494,7 +487,7 @@ const liveblocksLogo = (props: LogoProps) => (
   </svg>
 );
 
-const linqLogo = (props: LogoProps) => (
+export const linqLogo = (props: LogoProps) => (
   <svg fill="none" viewBox="0 0 629.586 757.741" xmlns="http://www.w3.org/2000/svg" {...props}>
     <path
       fill="currentColor"
@@ -800,7 +793,6 @@ const shopifyLogo = (props: LogoProps) => (
 export const logos = {
   eve: eveLogo,
   web: webLogo,
-  buzz: BuzzLogo,
   "browser-use": browserUseLogo,
   github: githubLogo,
   slack: slackLogo,
@@ -853,6 +845,7 @@ export const logos = {
   shopify: shopifyLogo,
   similarweb: similarwebLogo,
   stripe: stripeLogo,
+  link: linkLogo,
   supabase: supabaseLogo,
   "ticket-tailor": ticketTailorLogo,
   ticktick: ticktickLogo,

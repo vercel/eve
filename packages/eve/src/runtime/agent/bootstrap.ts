@@ -39,7 +39,8 @@ export type RuntimeDynamicModelReference = Readonly<
  * Minimal runtime-owned agent shape prepared for one harness turn.
  */
 interface RuntimeTurnAgentBase {
-  readonly availableSkills?: readonly AvailableSkillDescription[];
+  /** The skills the system prompt lists: every authored skill that isn't deferred. */
+  readonly listedSkills?: readonly AvailableSkillDescription[];
   readonly id: string;
   readonly instructions: readonly string[];
   readonly initialMessages?: readonly HarnessModelMessage[];
@@ -86,7 +87,6 @@ export const BOOTSTRAP_RUNTIME_SYSTEM_PROMPT =
  */
 export function createResolvedRuntimeTurnAgent(input: {
   readonly agent: ResolvedAgent;
-  readonly dynamicSubagentsAvailable?: boolean;
   readonly id?: string;
   readonly nodeId?: string;
   readonly tools: readonly PreparedRuntimeTool[];
@@ -97,30 +97,16 @@ export function createResolvedRuntimeTurnAgent(input: {
   if (id === undefined) {
     throw new Error("Expected a path-derived agent id while resolving agent resources.");
   }
-  const subagentDeclaredTool = input.tools.some(
-    (tool) => tool.kind === "subagent" || tool.kind === "remote",
-  );
-  const subagentFrameworkRootTool = input.tools.some(
-    (tool) =>
-      tool.behavior?.handling?.kind === "dispatch" &&
-      tool.behavior.handling.target.kind === "self-agent-call",
-  );
   const base: RuntimeTurnAgentBase = {
-    availableSkills: agent.skills.map((skill) => ({
-      description: skill.description,
-      name: skill.name,
-    })),
+    listedSkills: agent.skills
+      .filter((skill) => skill.deferred !== true)
+      .map((skill) => ({ description: skill.description, name: skill.name })),
     id,
     initialMessages: agent.instructions
       .filter((entry) => entry.role === "user" && entry.content.trim().length > 0)
       .map((entry) => createFrameworkUserMessage("context.instruction", entry.content.trim())),
     instructions: composeRuntimeBasePrompt({
-      connections: agent.connections,
       instructions: agent.instructions,
-      subagentsAvailable:
-        input.dynamicSubagentsAvailable === true ||
-        subagentDeclaredTool ||
-        subagentFrameworkRootTool,
       toolsAvailable: input.tools.length > 0,
       workspaceSpec: agent.workspaceSpec,
     }),

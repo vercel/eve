@@ -1,6 +1,7 @@
 import type {
   AssistantResponseStatsMode,
   LogDisplayMode,
+  SubagentDisplayMode,
   TerminalPartDisplayMode,
   TuiDisplayOptions,
 } from "#cli/dev/tui/types.js";
@@ -12,7 +13,7 @@ interface DevelopmentTuiOptions {
   readonly contextSize?: number;
   readonly logs?: LogDisplayMode;
   readonly reasoning?: TerminalPartDisplayMode;
-  readonly subagents?: TerminalPartDisplayMode;
+  readonly subagents?: SubagentDisplayMode;
   readonly tools?: TerminalPartDisplayMode;
   readonly ui?: boolean;
 }
@@ -31,7 +32,7 @@ export function resolveDevUiMode(input: {
 /** Builds terminal-UI display options with the defaults used by `eve dev`. */
 export function resolveTuiDisplayOptions(options: DevelopmentTuiOptions): TuiDisplayOptions {
   const display: TuiDisplayOptions = {
-    logs: options.logs ?? "stderr",
+    logs: options.logs ?? "error",
     // Collapsed reasoning renders as the fixed thinking line; `--reasoning
     // full` restores the streaming transcript trace.
     reasoning: options.reasoning ?? "auto-collapsed",

@@ -5,9 +5,11 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./cache-checks": "./src/cache-checks.ts",
+    "./catalog-tools": "./src/catalog-tools.ts",
     "./instrumentation": "./src/instrumentation.ts",
     "./instrumentation-otel": "./src/instrumentation-otel.ts",
-    "./task-receipts": "./src/task-receipts.ts"
+    "./mock-script": "./src/mock-script.ts"
   },
   "scripts": {
     "test:integration": "node --test test/*.integration.test.mjs",

@@ -8,6 +8,27 @@ interface TextResolvableRequest {
 }
 
 /**
+ * Renders a request's prompt and numbered options as the plain text that
+ * {@link resolveTextToResponse} parses, so a reply with the number, label, or
+ * id answers it. Channels append their own reply instructions.
+ */
+export function renderTextInputRequest(
+  request: TextResolvableRequest & { readonly prompt: string },
+): string {
+  const lines = [request.prompt];
+  if (request.options !== undefined && request.options.length > 0) {
+    lines.push(
+      "",
+      ...request.options.map((option, index) => {
+        const description = option.description ? ` - ${option.description}` : "";
+        return `${index + 1}. ${option.label}${description}`;
+      }),
+    );
+  }
+  return lines.join("\n");
+}
+
+/**
  * Maps freeform text to an {@link InputResponse} for a single request.
  *
  * Resolution order:

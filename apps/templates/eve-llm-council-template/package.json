@@ -12,14 +12,14 @@
     "build:web": "next build --turbopack apps/web",
     "dev": "next dev apps/web",
     "dev:eve": "eve dev",
-    "dev:services": "vercel dev",
+    "dev:all": "vercel dev --local",
     "dev:web": "next dev apps/web",
     "typecheck": "tsc -p apps/web/tsconfig.json"
   },
   "dependencies": {
     "@comark/react": "0.6.2",
-    "ai": "7.0.105",
-    "eve": "^0.66.3",
+    "ai": "7.0.128",
+    "eve": "^0.73.0",
     "geist": "1.7.2",
     "next": "16.3.4",
     "react": "19.2.8",
@@ -30,6 +30,7 @@
     "@types/node": "~26.2.0",
     "@types/react": "~19.2.15",
     "@types/react-dom": "~19.2.3",
+    "microsandbox": "^0.5.10",
     "typescript": "7.0.2"
   },
   "packageManager": "pnpm@11.25.0"

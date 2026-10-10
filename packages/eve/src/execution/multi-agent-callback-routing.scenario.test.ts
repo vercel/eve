@@ -13,7 +13,8 @@ import {
   notifyTurnCallerStep,
   resolveInitialTurnCallerStep,
 } from "#subagents/parent-notification.js";
-import { startRemoteAgentSession } from "#subagents/remote-dispatch.js";
+import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
+import { startRemoteAgentSession } from "#execution/agent-sessions/remote.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { authHookToken, CallbackBaseUrlKey, getHookUrl } from "#harness/authorization.js";
 import {
@@ -238,6 +239,7 @@ describe("multi-agent callback routing", () => {
         response.end(
           JSON.stringify({
             ok: true,
+            protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
             sessionId: "remote-session-1",
             status: "accepted",
           }),
@@ -417,7 +419,6 @@ describe("multi-agent callback routing", () => {
       const sessionCallback = {
         callId: "call-support",
         subagentName: "research",
-        taskId: "task-support",
         ...callback,
       };
       const serializedContext = {

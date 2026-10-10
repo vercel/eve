@@ -1,4 +1,4 @@
-import { parseFrontmatter, hasFrontmatter } from "#internal/helpers/gray-matter.js";
+import { parseFrontmatter, hasFrontmatter } from "#internal/helpers/frontmatter.js";
 import {
   normalizeScheduleDefinition,
   normalizeSkillDefinition,
@@ -8,8 +8,6 @@ import { isObject } from "#shared/guards.js";
 import { defineSchedule, type ScheduleDefinition } from "#public/definitions/schedule.js";
 import { defineSkill, type SkillDefinition } from "#public/definitions/skill.js";
 import type { InstructionsDefinition } from "#public/definitions/instructions.js";
-
-const CLOSED_FRONTMATTER_PATTERN = /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/;
 
 /**
  * Parsed markdown document with optional YAML frontmatter.
@@ -42,19 +40,9 @@ function parseMarkdownDocument(source: string): ParsedMarkdownDocument {
     };
   }
 
-  let document: {
-    content: string;
-    data: unknown;
-  };
-
-  try {
-    document = parseFrontmatter(source);
-  } catch (error) {
-    if (startsWithFrontmatterFence(source) && !hasClosedFrontmatterFence(source)) {
-      throw new Error("Markdown frontmatter is missing a closing delimiter.");
-    }
-
-    throw error;
+  const document = parseFrontmatter(source);
+  if (document === undefined) {
+    throw new Error("Markdown frontmatter is missing a closing delimiter.");
   }
 
   if (!isObject(document.data)) {
@@ -173,14 +161,6 @@ export function lowerSkillMarkdown(
   );
 }
 
-function startsWithFrontmatterFence(source: string): boolean {
-  return source.startsWith("---\n") || source.startsWith("---\r\n");
-}
-
-function hasClosedFrontmatterFence(source: string): boolean {
-  return CLOSED_FRONTMATTER_PATTERN.test(source);
-}
-
 function normalizeFrontmatterMarkdownBody(markdown: string): string {
   return markdown.replace(/^\r?\n/u, "");
 }
@@ -197,6 +177,14 @@ function applyOptionalSkillFrontmatter(
   const metadata = toOptionalStringRecord(frontmatter.metadata, "metadata");
   if (metadata !== undefined) {
     rawDefinition.metadata = metadata;
+  }
+
+  const deferred = frontmatter.deferred;
+  if (deferred !== undefined && deferred !== null) {
+    if (typeof deferred !== "boolean") {
+      throw new Error('Expected "deferred" frontmatter to be true or false.');
+    }
+    rawDefinition.deferred = deferred;
   }
 }
 

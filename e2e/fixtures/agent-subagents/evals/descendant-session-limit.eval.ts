@@ -35,7 +35,7 @@ export default defineEval({
     await t.require(
       continueRequest.requestId,
       satisfies(
-        (requestId: string) => !requestId.startsWith(`${rootSessionId}:limit:`),
+        (requestId: string) => !new RegExp(`^${rootSessionId}:\\d+:limit:`, "u").test(requestId),
         "continuation request belongs to a descendant session",
       ),
     );
@@ -80,7 +80,7 @@ export default defineEval({
       `Do not call any tool or subagent. Reply with exactly ${ROOT_RECOVERY_TOKEN} and nothing else.`,
     );
     recovered.expectOk();
-    stopSession.calledSubagent("limited-worker", { status: "working", count: 1 });
+    stopSession.event("task.started", { data: { name: "limited-worker" }, count: 1 });
     recovered.messageIncludes(ROOT_RECOVERY_TOKEN);
   },
 });

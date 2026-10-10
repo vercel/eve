@@ -1,6 +1,5 @@
 import type {
   AgentActionTraceState,
-  AgentInvocationTraceState,
   AgentSessionTraceState,
   AgentTraceStateStore,
   AgentTurnTraceState,
@@ -9,7 +8,6 @@ import type {
 export class InMemoryAgentTraceStateStore implements AgentTraceStateStore {
   readonly #actionAnchors = new Map<string, AgentActionTraceState>();
   readonly #actions = new Map<string, AgentActionTraceState>();
-  readonly #invocations = new Map<string, AgentInvocationTraceState>();
   readonly #sessions = new Map<string, AgentSessionTraceState>();
   readonly #turns = new Map<string, AgentTurnTraceState>();
 
@@ -27,18 +25,6 @@ export class InMemoryAgentTraceStateStore implements AgentTraceStateStore {
     for (const [key, state] of this.#actions) {
       if (state.sessionId === sessionId && (turnId === undefined || state.turnId === turnId)) {
         this.#actions.delete(key);
-      }
-    }
-  }
-
-  deleteInvocation(idempotencyKey: string): void {
-    this.#invocations.delete(idempotencyKey);
-  }
-
-  deleteInvocations(sessionId: string, turnId?: string): void {
-    for (const [key, state] of this.#invocations) {
-      if (state.sessionId === sessionId && (turnId === undefined || state.turnId === turnId)) {
-        this.#invocations.delete(key);
       }
     }
   }
@@ -68,19 +54,6 @@ export class InMemoryAgentTraceStateStore implements AgentTraceStateStore {
     );
   }
 
-  findInvocations(
-    sessionId?: string,
-    turnId?: string,
-    parentActionCallId?: string,
-  ): readonly AgentInvocationTraceState[] {
-    return [...this.#invocations.values()].filter(
-      (state) =>
-        (sessionId === undefined || state.sessionId === sessionId) &&
-        (turnId === undefined || state.turnId === turnId) &&
-        (parentActionCallId === undefined || state.parentActionCallId === parentActionCallId),
-    );
-  }
-
   getAction(idempotencyKey: string): AgentActionTraceState | undefined {
     return this.#actions.get(idempotencyKey);
   }
@@ -99,10 +72,6 @@ export class InMemoryAgentTraceStateStore implements AgentTraceStateStore {
 
   setActionAnchor(idempotencyKey: string, state: AgentActionTraceState): void {
     this.#actionAnchors.set(idempotencyKey, state);
-  }
-
-  setInvocation(idempotencyKey: string, state: AgentInvocationTraceState): void {
-    this.#invocations.set(idempotencyKey, state);
   }
 
   setSession(sessionId: string, state: AgentSessionTraceState): void {

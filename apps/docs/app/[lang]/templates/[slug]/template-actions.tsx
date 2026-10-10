@@ -55,38 +55,28 @@ export const TemplateActions = ({
   return (
     <div className="grid gap-2 sm:flex sm:flex-wrap">
       <Button
-        className="w-full justify-center font-medium text-background-100! text-label-14 sm:w-52"
+        className="w-full justify-center font-medium text-label-14 sm:w-52"
         onClick={copyPrompt}
-        type="button"
-      >
-        <span className="flex items-center gap-2">
-          {copied ? (
-            <>
-              <CheckIcon aria-hidden="true" className="size-4" />
-              Paste into your agent
-            </>
+        prefix={
+          copied ? (
+            <CheckIcon aria-hidden="true" className="size-4" />
           ) : (
-            <>
-              <CopyIcon aria-hidden="true" className="size-4" />
-              Setup with one prompt
-            </>
-          )}
-        </span>
+            <CopyIcon aria-hidden="true" className="size-4" />
+          )
+        }
+      >
+        {copied ? "Paste into your agent" : "Setup with one prompt"}
       </Button>
       <Button
-        asChild
         className="w-full justify-center font-medium text-label-14 sm:w-auto"
-        variant="outline"
+        href={secondaryAction.href}
+        onClick={() => track(secondaryAction.event, { template })}
+        prefix={<ExternalLinkIcon aria-hidden="true" className="size-4" />}
+        rel="noopener noreferrer"
+        target="_blank"
+        variant="secondary"
       >
-        <a
-          href={secondaryAction.href}
-          onClick={() => track(secondaryAction.event, { template })}
-          rel="noopener noreferrer"
-          target="_blank"
-        >
-          <ExternalLinkIcon aria-hidden="true" className="size-4" />
-          {secondaryAction.label}
-        </a>
+        {secondaryAction.label}
       </Button>
       <span aria-live="polite" className="sr-only">
         {copied ? "Setup prompt copied to clipboard." : ""}

@@ -196,7 +196,7 @@ export class SelectComponent extends Prompt<string | string[]> {
 /** Renders the active component by dispatching to the renderer for its mode. */
 function renderSelectComponent(
   self: SelectComponent,
-  opts: { message: string; placeholder?: string },
+  opts: { message: string; placeholder?: string; helpText?: string },
   leadingRail: "white" | "green",
   footerNote: string | undefined,
 ): string {
@@ -208,6 +208,7 @@ function renderSelectComponent(
       state,
       leadingRail,
       message: opts.message,
+      helpText: opts.helpText,
       multiple: self.multiple,
       filter: self.filter,
       placeholder: opts.placeholder,
@@ -229,6 +230,7 @@ function renderSelectComponent(
       footerNote,
       leadingRail,
       message: opts.message,
+      helpText: opts.helpText,
       options: self.options,
       selectedValues: self.selectedValues(),
       state,
@@ -242,6 +244,7 @@ function renderSelectComponent(
     footerNote,
     leadingRail,
     message: opts.message,
+    helpText: opts.helpText,
     options: self.options,
     state,
   });
@@ -260,6 +263,7 @@ function renderSelectComponent(
  */
 export async function runSelectComponent<T extends PromptValue>(input: {
   message: string;
+  helpText?: string;
   options: readonly PromptOption<T>[];
   multiple: boolean;
   search: boolean;
@@ -295,7 +299,7 @@ export async function runSelectComponent<T extends PromptValue>(input: {
       if (!promptRef) return "";
       return renderSelectComponent(
         promptRef,
-        { message: input.message, placeholder: input.placeholder },
+        { message: input.message, placeholder: input.placeholder, helpText: input.helpText },
         input.leadingRail,
         guard?.note(),
       );

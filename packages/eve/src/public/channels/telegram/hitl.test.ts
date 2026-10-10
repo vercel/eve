@@ -2,13 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   TELEGRAM_CALLBACK_RESPONSE_PREFIX,
-  TELEGRAM_HITL_CALLBACK_PREFIX,
   TELEGRAM_REPLY_RESPONSE_PREFIX,
   isTelegramSyntheticResponse,
   registerTelegramFreeformPrompt,
   renderTelegramInputRequest,
   resolveTelegramInputResponses,
-  telegramCallbackInputResponse,
   telegramReplyInputResponse,
   type TelegramHitlState,
 } from "#public/channels/telegram/hitl.js";
@@ -63,24 +61,6 @@ describe("renderTelegramInputRequest", () => {
 });
 
 describe("resolveTelegramInputResponses", () => {
-  it("maps compact callback ids back to real request ids", () => {
-    const state: TelegramHitlState = {
-      hitlCallbacks: {
-        [`${TELEGRAM_HITL_CALLBACK_PREFIX}0`]: {
-          optionId: "approve",
-          requestId: "call_1",
-        },
-      },
-    };
-
-    expect(
-      resolveTelegramInputResponses(state, [
-        telegramCallbackInputResponse(`${TELEGRAM_HITL_CALLBACK_PREFIX}0`),
-      ]),
-    ).toEqual([{ optionId: "approve", requestId: "call_1" }]);
-    expect(state.hitlCallbacks).toEqual({});
-  });
-
   it("maps replies to ForceReply prompts back to freeform answers", () => {
     const state: TelegramHitlState = {};
     registerTelegramFreeformPrompt(state, { messageId: "99", requestId: "call_1" });

@@ -272,7 +272,9 @@ describe("ensureChannel", () => {
     expect(agentChatSource).toMatch(/<PromptInputTextarea\s+disabled=\{isResuming\}/);
     expect(agentChatSource).toContain('turnPolicy: "steer"');
     expect(agentChatSource).toContain('const isResuming = agent.status === "resuming"');
-    expect(agentChatSource).toContain("canRespond={!isBusy && !isResuming}");
+    expect(agentChatSource).toContain(
+      '!isResuming && agent.data.inputs[requestId]?.status === "open"',
+    );
     expect(agentChatSource).toContain("{showPendingThinking ? <PendingThinking /> : null}");
     expect(agentChatSource).not.toContain("StatusDot");
     await expect(readFile(join(projectRoot, "app/icon.svg"), "utf8")).resolves.toContain(
@@ -551,16 +553,19 @@ describe("ensureChannel", () => {
       join(projectRoot, "app/_components/agent-message.tsx"),
       "utf8",
     );
-    const questionSource = await readFile(
-      join(projectRoot, "components/ai-elements/question.tsx"),
+    const questionnaireSource = await readFile(
+      join(projectRoot, "components/ui/questionnaire.tsx"),
       "utf8",
     );
-    expect(agentMessageSource).toContain('inputRequest?.kind === "question"');
+    const packageJson = JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8"));
+    expect(agentMessageSource).toContain("questionsFor(part.toolCallId)");
     expect(agentMessageSource).toContain("<QuestionRequest");
     expect(agentMessageSource).toContain("onInputResponses");
-    expect(questionSource).toContain("export const Question");
-    expect(questionSource).toContain("export const QuestionInput");
-    expect(questionSource).toContain("export const QuestionOption");
+    expect(questionnaireSource).toContain('from "@shadcn/react/questionnaire"');
+    expect(packageJson.dependencies).toHaveProperty("@shadcn/react");
+    await expect(
+      pathExists(join(projectRoot, "components/ai-elements/question.tsx")),
+    ).resolves.toBe(false);
   });
 
   test("scaffolds a Web Chat Stop button with the agent cancellation API", async () => {

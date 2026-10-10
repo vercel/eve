@@ -1,3 +1,5 @@
+import { createHash, randomUUID } from "node:crypto";
+import { link, mkdir, unlink, writeFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -11,17 +13,18 @@ import { memoizeModuleNamespaceFactories } from "#compiler/source-graph.js";
 import {
   collectRuntimeModuleBindingsForManifest,
   compiledModuleMapSchema,
-  resolveCompiledModuleExtensionScopeNamespace,
+  resolveExtensionBindingMountId,
   type CompiledModuleMap,
 } from "#compiler/module-map.js";
 import { loadFrameworkProgrammaticModule } from "#framework/sources/registry.js";
-import { loadAuthoredModuleNamespace } from "#internal/authored-module-loader.js";
+import {
+  bundleAuthoredModuleMapForGeneration,
+  loadAuthoredModuleNamespace,
+} from "#internal/authored-module-loader.js";
 import { readMaterializedAuthoredModuleIndex } from "#internal/materialized-authored-modules.js";
 import type { RuntimeDiskCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 import { formatValidationError } from "#runtime/validation.js";
-
-const EXT_CONFIG_SCOPE = Symbol.for("eve.ext-config-scope");
 
 /** Hydrates the compiled module map from the manifest’s authored bindings. */
 export async function loadCompiledModuleMapFromAuthoredSource(input: {
@@ -52,6 +55,43 @@ async function hydrateCompiledModuleMapFromManifest(
     });
   }
 
+  if (
+    [manifest, ...manifest.subagents.map((subagent) => subagent.agent)].some(
+      (node) => node.extensionMounts.length > 0,
+    )
+  ) {
+    const moduleMapPath = join(runtimeAppRoot, ".eve", "compile", "authored-module-map.mjs");
+    const { code } = await bundleAuthoredModuleMapForGeneration({
+      appRoot: authoredAppRoot,
+      manifest,
+      moduleMapPath,
+      resolveExternalPaths: true,
+    });
+    const hash = createHash("sha256").update(code).digest("hex");
+    const fileName = `authored-module-map-${hash}.mjs`;
+    const outputPath = join(runtimeAppRoot, ".eve", "compile", fileName);
+    await mkdir(join(runtimeAppRoot, ".eve", "compile"), { recursive: true });
+    const temporaryPath = `${outputPath}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(temporaryPath, code, { flag: "wx" });
+      try {
+        await link(temporaryPath, outputPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      }
+    } finally {
+      await unlink(temporaryPath).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== "ENOENT") throw error;
+      });
+    }
+    // Independent application loads need fresh mutable extension handles, but share bundle bytes.
+    return await loadMaterializedCompiledModuleMap({
+      moduleMapPath: fileName,
+      runtimeAppRoot,
+      instanceId: randomUUID(),
+    });
+  }
+
   const nodes: CompiledModuleMap["nodes"] = {};
   const nodeManifests: ReadonlyArray<{
     readonly manifest: CompiledAgentNodeManifest | CompiledAgentResources;
@@ -64,7 +104,7 @@ async function hydrateCompiledModuleMapFromManifest(
   ];
   for (const node of nodeManifests) {
     nodes[node.nodeId] = {
-      modules: await hydrateCompiledNodeScope(node.manifest, (sourcePath) =>
+      modules: await hydrateCompiledNodeScope(node.manifest, authoredAppRoot, (sourcePath) =>
         resolve(authoredAppRoot, relative(manifest.appRoot, sourcePath)),
       ),
     };
@@ -74,47 +114,43 @@ async function hydrateCompiledModuleMapFromManifest(
 
 async function hydrateCompiledNodeScope(
   manifest: CompiledAgentNodeManifest | CompiledAgentResources,
+  appRoot: string,
   resolveSourcePath: (sourcePath: string) => string,
 ): Promise<CompiledModuleMap["nodes"][string]["modules"]> {
-  const mountScopes = new Map(
-    manifest.extensionMounts.map((mount) => [mount.mountSourceId, mount.packageNamespace]),
-  );
-  const container = globalThis as Record<symbol, unknown>;
   const modules: CompiledModuleMap["nodes"][string]["modules"] = {};
   for (const { binding, sourceId } of collectRuntimeModuleBindingsForManifest(manifest)) {
-    const mountConfigScope = mountScopes.get(sourceId);
-    if (mountConfigScope !== undefined) container[EXT_CONFIG_SCOPE] = mountConfigScope;
-    try {
-      modules[sourceId] =
-        binding.backing.kind === "programmatic"
-          ? await loadFrameworkProgrammaticModule(
-              binding.backing,
-              Object.fromEntries(
-                Object.entries(binding.backing.dependencies ?? {}).map(
-                  ([alias, dependencySourceId]) => [alias, modules[dependencySourceId]!],
-                ),
+    modules[sourceId] =
+      binding.backing.kind === "programmatic"
+        ? await loadFrameworkProgrammaticModule(
+            binding.backing,
+            Object.fromEntries(
+              Object.entries(binding.backing.dependencies ?? {}).map(
+                ([alias, dependencySourceId]) => [alias, modules[dependencySourceId]!],
               ),
-            )
-          : memoizeModuleNamespaceFactories(
-              await loadAuthoredModuleNamespace(resolveSourcePath(binding.backing.sourcePath), {
-                externalDependencies: binding.backing.externalDependencies,
-                extensionScopeNamespace: resolveCompiledModuleExtensionScopeNamespace(binding),
-              }),
-            );
-    } finally {
-      if (mountConfigScope !== undefined) container[EXT_CONFIG_SCOPE] = undefined;
-    }
+            ),
+          )
+        : memoizeModuleNamespaceFactories(
+            await loadAuthoredModuleNamespace(resolveSourcePath(binding.backing.sourcePath), {
+              appRoot: binding.owner.kind === "application" ? appRoot : undefined,
+              externalDependencies: binding.backing.externalDependencies,
+              extension: (() => {
+                const mountId = resolveExtensionBindingMountId(binding);
+                return mountId === undefined ? undefined : { mountId };
+              })(),
+            }),
+          );
   }
   return modules;
 }
 
 async function loadMaterializedCompiledModuleMap(input: {
+  readonly instanceId?: string;
   readonly moduleMapPath: string;
   readonly runtimeAppRoot: string;
 }): Promise<CompiledModuleMap> {
   const moduleMapPath = join(input.runtimeAppRoot, ".eve", "compile", input.moduleMapPath);
   const moduleNamespace = (await import(
-    `${pathToFileURL(moduleMapPath).href}?generation=${encodeURIComponent(input.moduleMapPath)}`
+    `${pathToFileURL(moduleMapPath).href}?generation=${encodeURIComponent(input.instanceId ?? input.moduleMapPath)}`
   )) as { readonly default?: unknown; readonly moduleMap?: unknown };
   const parsed = compiledModuleMapSchema.safeParse(
     moduleNamespace.moduleMap ?? moduleNamespace.default,

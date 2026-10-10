@@ -44,7 +44,13 @@ describe("spanMetricChips", () => {
   it("prefers gateway cost over provider cost and parses string ints", () => {
     expect(
       spanMetricChips(
-        span({ attributes: { "gen_ai.usage.cost": 0.5, "agent.usage.input_tokens": "900" } }),
+        span({
+          attributes: {
+            "gen_ai.operation.name": "chat",
+            "gen_ai.usage.cost": 0.5,
+            "gen_ai.usage.input_tokens": "900",
+          },
+        }),
       ),
     ).toEqual(["↑900", "$0.5000"]);
   });

@@ -2,11 +2,7 @@ import type { UserContent } from "ai";
 import { RunExpiredError, WorkflowRunNotFoundError } from "#compiled/@workflow/errors/index.js";
 
 import type { SessionAuthContext } from "#channel/types.js";
-import {
-  INTERNAL_CHANNEL_DELIVER,
-  type ChannelFrom,
-  type InternalChannelSource,
-} from "#channel/channel-operations.js";
+import type { ChannelFrom } from "#channel/channel-operations.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import type {
   AgentInvocation,
@@ -23,7 +19,7 @@ import {
 import type { RouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { getRun, getWorld } from "#internal/workflow/runtime.js";
 import type { HandleMessageStreamEvent, InputResolution } from "#protocol/message.js";
-import type { InputRequest, InputResponse } from "#shared/input.js";
+import { type InputRequest, type InputResponse, parseInputResponses } from "#shared/input.js";
 import type { JsonValue } from "#shared/json.js";
 import { parseJsonValue } from "#shared/json.js";
 
@@ -121,11 +117,9 @@ export class WorkflowAgentInvocationExecution {
     const token = run.attributes[INVOCATION_TOKEN_ATTRIBUTE];
     if (token === undefined) return { type: "not_found" };
     try {
-      const source = this.#from(token) as InternalChannelSource;
-      await source[INTERNAL_CHANNEL_DELIVER](
-        { inputResponses: deliveredResponses },
-        { auth: input.auth },
-      );
+      await this.#from(token).respond(parseInputResponses(deliveredResponses), {
+        auth: input.auth,
+      });
     } catch (error) {
       if (RunExpiredError.is(error)) return { type: "not_found" };
       throw error;
@@ -364,9 +358,13 @@ function projectInvocation(
         break;
       case "message.completed":
         // Only tool-call narration continues the turn; any other finish is the reply.
-        if (event.data.finishReason !== "tool-calls" && event.data.message !== null) {
+        if (event.data.finishReason !== "tool-calls") {
           result = safeJson(event.data.message);
         }
+        break;
+      case "turn.waiting":
+        // Text completed before the turn parked was interim; the reply comes after it resumes.
+        result = undefined;
         break;
       case "turn.completed":
         settled = "completed";

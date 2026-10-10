@@ -45,13 +45,15 @@ npx eve@latest init my-agent
 ```
 
 This creates a new `my-agent` directory, installs its dependencies, initializes Git, and starts
-the interactive terminal UI.
+the interactive terminal UI. The generated agent uses `openai/gpt-6-luna-fast` with high reasoning.
 
 To start with another AI Gateway model, pass its model ID:
 
 ```bash
 npx eve@latest init my-agent --model openai/gpt-5.6-terra
 ```
+
+Passing `--model` without `--reasoning` uses the provider's default reasoning. Pass `--reasoning` to set it explicitly.
 
 To add eve to an existing project, pass a path:
 
@@ -93,7 +95,8 @@ Choose the model in `agent/agent.ts`:
 import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: "spacexai/grok-4.7",
+  model: "openai/gpt-6-luna-fast",
+  reasoning: "high",
 });
 ```
 
@@ -106,6 +109,20 @@ npm run dev
 That's a working agent. Add human-in-the-loop prompts, subagents, and schedules as needed.
 Follow the [first-agent tutorial](https://eve.dev/docs/tutorial/first-agent) for a complete
 walkthrough.
+
+### Add Web Chat
+
+From your agent's directory, link a Vercel project and add Web Chat:
+
+```bash
+npx eve link
+npx eve add channel/web
+```
+
+Choose a hosting layout, then **Sign in with Vercel** to provision authentication for members of the project's team.
+You can also select **Web Chat** from the terminal UI's `/add` channel picker.
+Run `npx eve deploy` when ready to publish. Local development works without browser sign-in.
+See the [Web Chat setup guide](https://eve.dev/docs/channels/eve#web-chat-with-sign-in-with-vercel) for permissions and recovery.
 
 ## Community
 

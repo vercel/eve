@@ -1,8 +1,4 @@
 import type { ChannelAdapter } from "#channel/adapter.js";
-import {
-  attachChannelActivityPresentation,
-  type ChannelActivityPresentation,
-} from "#channel/activity-renderer.js";
 import type { UserContent } from "ai";
 import type { ChannelReceiveContext } from "#channel/channel-operations.js";
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
@@ -85,9 +81,11 @@ export function setChannelBuildMetadata(
   factory: ChannelBuildMetadataFactory,
 ): void {
   if (!isCompiledChannel(channel)) throw new TypeError("Expected a compiled channel.");
+  // Enumerable so `{ ...channel, routes }` keeps build metadata when an app
+  // wraps a channel's routes.
   Object.defineProperty(channel, CHANNEL_BUILD_METADATA, {
     configurable: true,
-    enumerable: false,
+    enumerable: true,
     value: factory,
   });
 }
@@ -109,14 +107,6 @@ export function getChannelInstrumentationKind(value: unknown): string | undefine
 
   const routeSignature = channelRouteSignature(value);
   return routeSignature === undefined ? undefined : channelInstrumentationKinds.get(routeSignature);
-}
-
-export function setChannelActivityRenderers(
-  channel: unknown,
-  input: ChannelActivityPresentation,
-): void {
-  if (!isCompiledChannel(channel)) throw new TypeError("Expected a compiled channel.");
-  attachChannelActivityPresentation(channel.adapter, input);
 }
 
 export function setChannelInstrumentationKind(channel: CompiledChannel, kind: string): void {

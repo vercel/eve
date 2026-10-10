@@ -12,13 +12,9 @@ export async function routeSelectedDelivery(
   selection: TurnSelection,
   cursor: SessionStateCursor,
 ): Promise<RoutedTurnSelection> {
-  const routed = await routeDeliverToChildren({
-    delivery: selection.delivery,
-    sessionWritable: cursor.sessionWritable,
-    serializedContext: cursor.serializedContext,
-    sessionState: cursor.sessionState,
-  });
-  await cursor.apply(routed);
+  const routed = await cursor.advance((state) =>
+    routeDeliverToChildren({ delivery: selection.delivery, ...state }),
+  );
   if (routed.kind === "cancel-turn") return { kind: "cancel-turn" };
   if (routed.remainder === undefined) return { kind: "consumed" };
   return { ...selection, delivery: routed.remainder };

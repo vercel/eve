@@ -20,7 +20,17 @@ const pending = {
     toolName: "agent",
   },
 } as never;
-const agent = vi.fn();
+/** Each child's reply to the one message a program sends it. */
+const reply = vi.fn();
+const agent = (target: string) => ({
+  send: async (message: string) => ({
+    result: async () => ({
+      data: undefined,
+      message: await reply(target, message),
+      status: "waiting",
+    }),
+  }),
+});
 const ctx = {
   abortSignal: new AbortController().signal,
   agent,
@@ -35,10 +45,10 @@ describe("runJsProgram", () => {
     mocks.runWorkflowProgramStep
       .mockResolvedValueOnce({ interrupt: pending, pending: [pending], status: "interrupted" })
       .mockResolvedValueOnce({ output: { result: "done" }, status: "completed" });
-    agent.mockResolvedValue({ result: "child" });
+    reply.mockResolvedValue({ result: "child" });
 
     await expect(runJsProgram("return 1", ctx, options)).resolves.toEqual({ result: "done" });
-    expect(agent).toHaveBeenCalledWith("researcher", { message: "one" });
+    expect(reply).toHaveBeenCalledWith("researcher", "one");
     expect(mocks.runWorkflowProgramStep).toHaveBeenLastCalledWith(
       expect.objectContaining({
         resume: {
@@ -66,12 +76,12 @@ describe("runJsProgram", () => {
         status: "interrupted",
       })
       .mockResolvedValueOnce({ output: ["one", "two"], status: "completed" });
-    agent.mockImplementation((_target, call: { readonly message: string }) =>
-      call.message === "one" ? first.promise : second.promise,
+    reply.mockImplementation((_target, message: string) =>
+      message === "one" ? first.promise : second.promise,
     );
 
     const result = runJsProgram("return 1", ctx, options);
-    await vi.waitFor(() => expect(agent).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(reply).toHaveBeenCalledTimes(2));
     first.resolve("one");
     await Promise.resolve();
     expect(mocks.runWorkflowProgramStep).toHaveBeenCalledTimes(1);
@@ -85,7 +95,7 @@ describe("runJsProgram", () => {
     mocks.runWorkflowProgramStep
       .mockResolvedValueOnce({ interrupt: pending, pending: [pending], status: "interrupted" })
       .mockResolvedValueOnce({ output: "caught", status: "completed" });
-    agent.mockRejectedValue(new Error("child failed"));
+    reply.mockRejectedValue(new Error("child failed"));
 
     await expect(runJsProgram("return 1", ctx, options)).resolves.toBe("caught");
     expect(mocks.runWorkflowProgramStep).toHaveBeenLastCalledWith(
@@ -107,10 +117,10 @@ describe("runJsProgram", () => {
         status: "interrupted",
       })
       .mockResolvedValueOnce({ output: "limited", status: "completed" });
-    agent.mockResolvedValueOnce("one").mockResolvedValueOnce("two");
+    reply.mockResolvedValueOnce("one").mockResolvedValueOnce("two");
 
     await expect(runJsProgram("return 1", ctx, options)).resolves.toBe("limited");
-    expect(agent).toHaveBeenCalledTimes(2);
+    expect(reply).toHaveBeenCalledTimes(2);
     expect(mocks.runWorkflowProgramStep).toHaveBeenLastCalledWith(
       expect.objectContaining({
         resume: expect.objectContaining({
@@ -148,7 +158,7 @@ describe("runJsProgram", () => {
       pending: [pending],
       status: "interrupted",
     });
-    agent.mockImplementation(async () => {
+    reply.mockImplementation(async () => {
       controller.abort(new Error("owner cancelled"));
       throw new Error("child stopped");
     });

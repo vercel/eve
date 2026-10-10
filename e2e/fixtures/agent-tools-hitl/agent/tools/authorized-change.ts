@@ -10,10 +10,17 @@ export default defineTool({
   inputSchema: z.object({}),
   approval: {
     request: always(),
-    response: ({ responder }) =>
-      responder.principalId === "e2e-approval-responder"
+    response: ({ request, response }) => {
+      // The person who asked for the change may withdraw it; only the fixture approver approves it.
+      if (response.decision === "cancel") {
+        return response.principal.principalId === request.principal?.principalId
+          ? { status: "allowed" }
+          : { status: "rejected", reason: "Only the requester can cancel this change." };
+      }
+      return response.principal.principalId === "e2e-approval-responder"
         ? { status: "allowed" }
-        : { status: "rejected", reason: "Wrong responder." },
+        : { status: "rejected", reason: "Wrong responder." };
+    },
   },
   async execute() {
     executions.update((count) => count + 1);

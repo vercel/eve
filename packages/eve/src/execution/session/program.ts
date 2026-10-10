@@ -1,23 +1,31 @@
+import { STUB_CONTEXT_KEY, type StubScope } from "#tool-stubs/types.js";
+import { withStubPlayback } from "#execution/tool-stubs/playback.js";
 import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
 import {
-  bindTurnCallerContextStep,
   notifyCancelledTaskCallerStep,
   notifyTurnCallerStep,
   resolveInitialTurnCallerStep,
 } from "#subagents/parent-notification.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import type { HarnessModelMessage } from "#harness/messages.js";
 import { nextTurnDelivery, type NextTurnInstruction } from "#execution/session/next-input.js";
-import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { SessionExecution } from "#execution/session/turn.js";
+import { createTurnControl, type TurnControl } from "#execution/session/turn-control.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
+import { cancelWorkingTasks, sessionTaskTable } from "#execution/tasks/session.js";
+import { workingTasks } from "#execution/tasks/table.js";
 import type { TurnOutcome, TurnStepPayload } from "#execution/session/turn-step-types.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
 import { finalizeSession, type SessionTerminalOutcome } from "#execution/session/finalization.js";
 import { type SessionInboxHandle } from "#execution/session-inbox/inbox.js";
-import { createSessionTimeoutControl } from "#execution/session/timeout-control.js";
-import { SessionHandoff, sessionAnchorToken } from "#execution/session/handoff.js";
+import type { SessionTimeoutControl } from "#execution/session/timeout-control.js";
+import {
+  type CompactionHandoff,
+  SessionHandoff,
+  sessionAnchorToken,
+} from "#execution/session/handoff.js";
 import { signalSessionAnchorStep } from "#execution/session/handoff-steps.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
 
@@ -41,18 +49,28 @@ export type SessionAnchor =
     }
   | { readonly kind: "successor" };
 
+/** What an owner does before it first waits on its inbox. */
+export type SessionStart =
+  /** Runs a turn first; `input` is absent for a session started without a message. */
+  | { readonly kind: "turn"; readonly input: DeliverHookPayload | undefined }
+  /** A prewarmed session parks on the inbox before any session-scoped lifecycle work. */
+  | { readonly kind: "first-message" }
+  /** A successor that received a settled session waits for its next input. */
+  | { readonly kind: "parked" };
+
 export interface SessionBoot {
   readonly anchor: SessionAnchor;
   readonly caller: TurnCaller | undefined;
   readonly capabilities?: SessionCapabilities;
   readonly deploymentId: string;
-  readonly initialInput: DeliverHookPayload | undefined;
-  /** Parks on the inbox before any session-scoped lifecycle work. */
-  readonly awaitFirstMessage: boolean;
+  readonly history: HarnessModelMessage[];
+  readonly initialTurnControl?: TurnControl;
+  readonly start: SessionStart;
   readonly retention?: AgentWorkflowRetentionDefinition;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionId: string;
   readonly sessionState: DurableSessionState;
+  readonly sessionTimeoutControl?: SessionTimeoutControl;
   readonly sessionTimeoutDeadline?: Date;
   readonly sessionTimeoutMs: number | false;
   readonly sessionWritable: WritableStream<Uint8Array>;
@@ -80,7 +98,12 @@ export async function runPreparedSession(
   boot: SessionBoot,
   inbox: SessionInboxHandle,
 ): Promise<WorkflowEntryResult> {
+  const scope = boot.serializedContext[STUB_CONTEXT_KEY] as StubScope | undefined;
+  if (scope !== undefined && scope.rootSessionId === undefined) {
+    boot.serializedContext[STUB_CONTEXT_KEY] = { ...scope, rootSessionId: boot.sessionId };
+  }
   const cursor = new SessionStateCursor({
+    history: boot.history,
     inbox,
     sessionWritable: boot.sessionWritable,
     serializedContext: boot.serializedContext,
@@ -101,22 +124,25 @@ export async function runPreparedSession(
   let result: WorkflowEntryResult = { output: "", isError: true };
   let loop: SessionLoopOutcome | undefined;
   try {
-    try {
-      loop = await runSessionLoop(boot, { cursor, handoff, inbox, progress });
-    } finally {
-      await inbox.dispose();
-    }
-    if (loop.kind === "transferred") {
-      if (boot.anchor.kind !== "self") return { output: "" };
-      result = await handoff.awaitAnchoredResult();
+    result = await withStubPlayback(scope, boot.sessionId, async () => {
+      try {
+        loop = await runSessionLoop(boot, { cursor, handoff, inbox, progress });
+      } finally {
+        await inbox.dispose();
+      }
+      if (loop.kind === "transferred") {
+        if (boot.anchor.kind !== "self") return { output: "" };
+        result = await handoff.awaitAnchoredResult();
+        return result;
+      }
+      result = await finalizeSession(loop.outcome, {
+        caller: progress.caller,
+        cursor,
+        sessionWritable: boot.sessionWritable,
+      });
+      progress.terminalEmitted = true;
       return result;
-    }
-    result = await finalizeSession(loop.outcome, {
-      caller: progress.caller,
-      cursor,
-      sessionWritable: boot.sessionWritable,
     });
-    progress.terminalEmitted = true;
     return result;
   } catch (error) {
     if (!progress.terminalEmitted) {
@@ -127,6 +153,8 @@ export async function runPreparedSession(
     }
     throw createSafeOuterWorkflowError();
   } finally {
+    // Also dispose if playback setup fails before the session loop starts. Disposal is idempotent.
+    await inbox.dispose();
     await reportResultToAnchor(boot, result, handoff, loop);
   }
 }
@@ -198,68 +226,88 @@ async function runSessionLoop(
     queue,
     sessionId: boot.sessionId,
   });
-  const sessionTimeout =
-    boot.sessionTimeoutDeadline === undefined
-      ? undefined
-      : createSessionTimeoutControl({
-          deadline: boot.sessionTimeoutDeadline,
-          sessionId: boot.sessionId,
-        });
+  const sessionTimeout = boot.sessionTimeoutControl;
 
-  const nextParkedActivity = async (
-    expectedAttemptIds: ReadonlySet<string>,
-  ): Promise<Exclude<NextTurnInstruction, { kind: "workflow" }>> => {
+  const nextParkedActivity = async (): Promise<
+    Exclude<NextTurnInstruction, { kind: "workflow" | "cancel-working-tasks" }>
+  > => {
     while (true) {
       const next = await nextTurnDelivery({
         cursor,
-        expectedAttemptIds,
+        hasWorkingTasks: () => workingTasks(sessionTaskTable(cursor)).length > 0,
         inbox,
         queue,
       });
-      if (next.kind !== "workflow") return next;
-      await execution.handleWorkflowMessage(next.message);
+      if (next.kind === "workflow") {
+        await execution.handleWorkflowMessage(next.message);
+        continue;
+      }
+      if (next.kind === "cancel-working-tasks") {
+        await cancelWorkingTasks(cursor, "turn_cancelled");
+        continue;
+      }
+      return next;
     }
   };
 
+  let turnControl =
+    boot.initialTurnControl ?? (boot.anchor.kind === "self" ? createTurnControl() : undefined);
   let turnIndex = 0;
+  // Set when a turn compacts and kept until the session moves to a fresh run,
+  // so this run's event log does not keep growing.
+  let compactionHandoffDue = false;
   const runTurn = async (payload: TurnStepPayload | undefined): Promise<TurnOutcome> => {
     const caller = progress.caller;
-    if (caller?.taskId !== undefined) queue.rememberTask(caller.taskId);
-    if (caller !== undefined) {
-      await cursor.apply({
-        serializedContext: await bindTurnCallerContextStep({
-          caller,
-          serializedContext: cursor.serializedContext,
-        }),
-      });
-    }
+    const control = turnControl;
+    turnControl = undefined;
     progress.turnId = `turn_${String(turnIndex++)}`;
-    return await execution.runTurn(payload);
+    const outcome = await execution.runTurn(payload, { caller, control });
+    if (outcome.caller !== undefined) progress.caller = outcome.caller;
+    if (outcome.compacted === true) compactionHandoffDue = true;
+    return outcome;
+  };
+  const transferState = () => ({
+    history: cursor.history,
+    serializedContext: cursor.serializedContext,
+    sessionState: cursor.sessionState,
+  });
+  const dueCompactionHandoff = (): CompactionHandoff | undefined =>
+    compactionHandoffDue &&
+    progress.caller === undefined &&
+    workingTasks(sessionTaskTable(cursor)).length === 0
+      ? { sessionTimeoutDeadline: boot.sessionTimeoutDeadline }
+      : undefined;
+  /**
+   * Hands a session that compacted to a fresh run on this deployment while
+   * nothing is waiting. When input arrives first, the next lone delivery
+   * carries the handoff instead; see `runDeliveredTurn`.
+   */
+  const tryCompactionHandoff = async (): Promise<SessionLoopOutcome | undefined> => {
+    const compaction = dueCompactionHandoff();
+    if (compaction === undefined || queue.pendingCount > 0 || inbox.hasPending()) return undefined;
+    const transfer = await handoff.tryCompactionTransfer(transferState(), compaction);
+    return transfer.kind === "transferred" ? transfer : undefined;
   };
   const runDeliveredTurn = async (
     next: Extract<NextTurnInstruction, { kind: "turn" }>,
   ): Promise<SessionActionResult> => {
-    const transfer = await handoff.tryTransfer(next, {
-      serializedContext: cursor.serializedContext,
-      sessionState: cursor.sessionState,
+    const transfer = await handoff.tryTransfer(next, transferState(), {
+      compaction: dueCompactionHandoff(),
     });
     if (transfer.kind === "transferred") return transfer;
     if (next.delivery.caller !== undefined) progress.caller = next.delivery.caller;
     return { action: await runTurn({ delivery: next.delivery }), kind: "action" };
   };
-  const settleCancelledTurn = async () => {
-    const settled = await settleCancelledTurnStep({
-      sessionWritable: boot.sessionWritable,
-      serializedContext: cursor.serializedContext,
-      sessionState: cursor.sessionState,
-    });
-    await cursor.apply(settled);
+  const settleCancelledTurn = async (reportUsage: boolean) => {
+    const settled = await cursor.advanceWithHistory((state) =>
+      settleCancelledTurnStep({ ...state, reportUsage }),
+    );
     progress.caller = undefined;
     return settled;
   };
   const awaitPrewarmedAction = async (): Promise<SessionActionResult> => {
     while (true) {
-      const next = await nextParkedActivity(new Set());
+      const next = await nextParkedActivity();
       switch (next.kind) {
         case "expired":
         case "reset":
@@ -271,17 +319,22 @@ async function runSessionLoop(
         case "turn":
           return await runDeliveredTurn(next);
         case "cancel-turn":
-        case "authorization-resume":
           continue;
       }
     }
   };
   const runInitialAction = async (): Promise<SessionActionResult> => {
-    if (boot.awaitFirstMessage) return await awaitPrewarmedAction();
-    const action = await runTurn(
-      boot.initialInput === undefined ? undefined : { delivery: boot.initialInput },
-    );
-    return { action, kind: "action" };
+    switch (boot.start.kind) {
+      case "first-message":
+        return await awaitPrewarmedAction();
+      case "parked":
+        return { action: { kind: "park" }, kind: "action" };
+      case "turn": {
+        const { input } = boot.start;
+        const action = await runTurn(input === undefined ? undefined : { delivery: input });
+        return { action, kind: "action" };
+      }
+    }
   };
 
   try {
@@ -301,14 +354,15 @@ async function runSessionLoop(
       }
 
       if (action.cancelled === true) {
-        const cancelledCaller = { caller: progress.caller, sessionId: boot.sessionId };
-        const settled = await settleCancelledTurn();
-        await notifyCancelledTaskCallerStep(
-          settled.usage === undefined
-            ? cancelledCaller
-            : { ...cancelledCaller, usage: settled.usage },
-        );
-      } else if (action.settled?.notifyCaller === true) {
+        const { caller } = progress;
+        const settled = await settleCancelledTurn(caller !== undefined);
+        if (caller !== undefined) {
+          const notification = { caller, sessionId: boot.sessionId };
+          await notifyCancelledTaskCallerStep(
+            settled.usage === undefined ? notification : { ...notification, usage: settled.usage },
+          );
+        }
+      } else if (action.settled !== undefined) {
         if (progress.caller !== undefined) {
           await notifyTurnCallerStep({
             caller: progress.caller,
@@ -320,17 +374,12 @@ async function runSessionLoop(
         progress.caller = undefined;
       }
 
-      // An open authorization challenge must not wedge the session:
-      // ordinary deliveries keep starting normal turns while the challenge
-      // waits for its callback. The pending challenge survives intervening
-      // turns because every park re-derives `authorizationAttemptIds` from
-      // durable session state.
-      const next = await nextParkedActivity(new Set(action.authorizationAttemptIds ?? []));
+      const transferred = await tryCompactionHandoff();
+      if (transferred !== undefined) return transferred;
+
+      const next = await nextParkedActivity();
 
       switch (next.kind) {
-        case "authorization-resume":
-          action = await runTurn({ delivery: { kind: "deliver", payloads: next.payloads } });
-          continue;
         case "expired":
         case "reset":
         case "closed":
@@ -340,11 +389,8 @@ async function runSessionLoop(
           action = await runTurn({ control: next.kind });
           continue;
         case "cancel-turn":
-          await cancelDescendantTurnsStep({
-            serializedContext: cursor.serializedContext,
-            sessionState: cursor.sessionState,
-          });
-          await settleCancelledTurn();
+          await execution.cancelTurnWork();
+          await settleCancelledTurn(false);
           // Cancellation consumes any outstanding caller; do not report the prior turn.
           action = { ...action, settled: undefined };
           continue;
@@ -357,6 +403,7 @@ async function runSessionLoop(
       }
     }
   } finally {
+    turnControl?.dispose();
     await sessionTimeout?.dispose();
   }
 }

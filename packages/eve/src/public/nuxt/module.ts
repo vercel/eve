@@ -6,18 +6,31 @@ import type { NuxtModule } from "@nuxt/schema";
 
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import {
+  resolveDevServerTimeout,
+  resolveSharedEveDevServer,
+  type EveFrameworkHost,
+} from "#shared/framework-eve-server.js";
+import {
   ensureEveVercelServicesConfig,
   mergeEveVercelConfig,
   type VercelBuildConfig,
 } from "#shared/vercel-services.js";
 
-import { EVE_BASE_URL_ENV, resolveSharedEveDevServer } from "./dev-server.js";
 import { joinRoutePrefix, normalizeOrigin, resolveProductionTarget } from "./routing.js";
+
+const EVE_BASE_URL_ENV = "EVE_BASE_URL";
+const EVE_NUXT_HOST: EveFrameworkHost = { label: "Nuxt", slug: "nuxt" };
 
 /**
  * Options for the eve Nuxt module.
  */
 export interface EveNuxtModuleOptions {
+  /**
+   * Maximum time in milliseconds to wait for the eve development server to
+   * start, including waiting for another Nuxt process to start it. Defaults
+   * to 180000 (three minutes).
+   */
+  devServerTimeoutMs?: number;
   /**
    * Path to the eve application root, resolved relative to the Nuxt project
    * root unless absolute. Defaults to the Nuxt project root. The dev server is
@@ -64,6 +77,7 @@ interface NitroVercelConfigHost {
 async function resolveEveProxyTarget(input: {
   readonly appRoot: string;
   readonly dev: boolean;
+  readonly devServerTimeoutMs?: number;
   readonly onDevServerSpawned?: (child: ChildProcess) => void;
 }): Promise<string> {
   if (!input.dev) {
@@ -75,7 +89,11 @@ async function resolveEveProxyTarget(input: {
     return joinRoutePrefix(normalizeOrigin(configuredEveBaseUrl), EVE_ROUTE_PREFIX);
   }
 
-  const handle = await resolveSharedEveDevServer(input.appRoot);
+  const handle = await resolveSharedEveDevServer({
+    appRoot: input.appRoot,
+    host: EVE_NUXT_HOST,
+    timeoutMs: input.devServerTimeoutMs,
+  });
   if (handle.process !== undefined) {
     input.onDevServerSpawned?.(handle.process);
   }
@@ -104,6 +122,7 @@ const eveNuxtModule: NuxtModule<EveNuxtModuleOptions> = defineNuxtModule<EveNuxt
   async setup(options, nuxt) {
     const nuxtRoot = nuxt.options.rootDir;
     const appRoot = resolveApplicationRoot(nuxtRoot, options.eveRoot);
+    const devServerTimeoutMs = resolveDevServerTimeout(options.devServerTimeoutMs, EVE_NUXT_HOST);
 
     // Auto-import the Vue composable so app code can call `useEveAgent()`
     // without an explicit import, matching Nuxt's composable conventions.
@@ -140,10 +159,11 @@ const eveNuxtModule: NuxtModule<EveNuxtModuleOptions> = defineNuxtModule<EveNuxt
         const proxyTarget = await resolveEveProxyTarget({
           appRoot,
           dev: nuxt.options.dev,
+          devServerTimeoutMs,
           onDevServerSpawned: (child) => {
             // Prefer Nuxt's lifecycle for cleanup so the dev server is torn
             // down on graceful shutdown and dev restarts. The process-exit
-            // guard in dev-server.ts remains as a fallback for non-graceful
+            // guard in framework-eve-server.ts remains as a fallback for non-graceful
             // exits.
             nuxt.hook("close", () => {
               if (!child.killed) {

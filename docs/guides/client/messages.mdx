@@ -40,7 +40,16 @@ When the stream includes `session.failed`, the turn returns `status: "failed"` r
 seconds when a durable run has been accepted but its command inbox is still starting. The caller's
 abort signal cancels the wait. Other errors, `session.respond()`, control methods, and raw HTTP
 requests do not use this retry. An unknown
-or terminal session throws `ClientError` immediately with `session_not_active`. The client never creates a replacement session.
+or terminal session throws `ClientError` immediately with `session_not_active`. A
+[stranded](../../concepts/execution-model-and-durability#stranded-sessions) session throws
+`ClientSessionStrandedError`, a `ClientError` with `code: "session_stranded"` and the
+`eveVersion` that built the session when it recorded one. It is never retried automatically. Call
+`session.reset()` and create a new session.
+The client never creates a replacement session. Following or reconnecting to a stranded session's
+stream reports the same typed error without retrying, including when you were waiting for a
+response to a message accepted before the upgrade. That accepted message is not redelivered.
+`session.clear()` throws the same error, because clearing would keep a session that cannot run.
+`session.stream({ follow: false })` and `session.snapshot()` still read the recorded history.
 
 ## Send a full turn payload
 

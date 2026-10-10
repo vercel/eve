@@ -16,11 +16,11 @@ Scoped assertions take no explicit value and gate by default. Assertions on `t` 
 | `t.messageIncludes(token)`                            | Joined assistant text contains `token` (string or RegExp)                     |
 | `turn.outputEquals(value)` / `.outputMatches(schema)` | Deep equality or Standard Schema validation of turn/session structured output |
 | `t.calledTool(name, opts?)`                           | A matching tool call completed (`input`, `output`, `status`, `count`)         |
-| `t.loadedSkill(skill, opts?)`                         | Sugar for `t.calledTool("load_skill", { input: { skill }, ...opts })`         |
+| `t.loadedSkill(skill, opts?)`                         | A load of `skill` completed (`output`, `status`, `count`)                     |
 | `t.notCalledTool(name)`                               | No request for `name` in any lifecycle state                                  |
 | `t.toolOrder([...names])`                             | Tool requests appear in order                                                 |
-| `t.usedNoTools()`                                     | No tool calls at all                                                          |
-| `t.maxToolCalls(n)`                                   | At most `n` tool calls                                                        |
+| `t.usedNoTools()`                                     | No tool calls at all; skill loads don't count                                 |
+| `t.maxToolCalls(n)`                                   | At most `n` tool calls; skill loads don't count                               |
 | `t.noFailedActions()`                                 | No tool, subagent, or skill action reported a failure                         |
 | `t.calledSubagent(name, opts?)`                       | A subagent delegation happened (identity, remote, output, status, count)      |
 | `t.event(type, opts?)` / `t.notEvent(type, opts?)`    | Typed event presence, data, and count matching                                |
@@ -47,6 +47,8 @@ attached.messageIncludes("Sunny");
 ```
 
 `t.calledTool` and `t.usedNoTools` are mutually exclusive; assert one or the other, never both in the same run.
+
+A call through [`eve__tool`](../concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) is reported under the name and input of the entry it reaches, such as `linear__list_issues`, so assert on that entry; `eve__search` calls count as tool calls in `t.usedNoTools()` and `t.maxToolCalls(n)`, and skill loads don't. The tool-name assertions and `turn.requireToolCall` throw for `eve__tool` and `eve__skill`, whose calls are reported as their entries and as skill loads, and for a retired name such as `load_skill` unless the root agent declares a tool by that name or has a dynamic tool resolver, and say what to assert instead.
 
 ## Value assertions with `t.check`
 
@@ -83,11 +85,11 @@ Pick the cheapest builder that captures what "correct" means. When exact match i
 
 ## The matcher mini-language
 
-`t.calledTool` and `t.calledSubagent` take matcher objects. Tools accept `{ input, output, status, count }`; subagents accept `{ callId, childSessionId, remoteUrl, output, status, count }`. Calls match `status: "completed"` by default. Tool lifecycle checks also accept `"pending"`, `"failed"`, and `"rejected"`. Subagent checks use the shared task status values: `"working"`, `"input_required"`, `"completed"`, `"failed"`, and `"cancelled"`. A numeric `count` requires an exact number of calls matching every supplied constraint. Use a predicate for ranges or other custom count requirements; it receives the observed number of matching calls.
+`t.calledTool` and `t.calledSubagent` take matcher objects. Tools accept `{ input, output, status, count }`; subagents accept `{ callId, childSessionId, remoteUrl, output, status, count }`. Calls match `status: "completed"` by default. Tool lifecycle checks also accept `"pending"`, `"failed"`, and `"rejected"`. Subagent checks accept `"working"`, `"completed"`, `"failed"`, and `"cancelled"`. A numeric `count` requires an exact number of calls matching every supplied constraint. Use a predicate for ranges or other custom count requirements; it receives the observed number of matching calls.
 
-A background subagent that has only returned a working task receipt remains `working`; use `t.calledSubagent(name, { status: "working" })` to assert that delegation. Both blocking and background calls become `completed` when their actual successful result is observed through `subagent.completed`, even when the child session stays available for another call. A rejected dispatch is `failed`; an explicit cancelled child outcome is `cancelled`.
+A subagent call is a task call: it stays `working` until its `task.settled` event arrives, then takes that event's `status` (`completed`, `failed`, or `cancelled`) and, when completed, its `output`. A completed call leaves the child session available for later calls with the same `taskId`.
 
-The runner derives these values from captured events. It does not read stored task state, and the current stream does not expose every task transition. A proxied input request alone does not update the subagent call to `input_required`; assert that request with `requireInputRequest`. Check task notifications for background failure and cancellation when no child outcome event is present.
+The runner counts each `task.started` with `kind: "agent"` as a subagent call and takes its status from `task.settled`. `childSessionId` and `remoteUrl` come from the task's `agent.started`, so they are absent for a call that failed before its session opened. A proxied input request alone does not change the subagent call's status; assert that request with `requireInputRequest`.
 
 Matcher values accept a literal (objects partial-deep-match), a RegExp, or a predicate function that returns a boolean:
 
@@ -125,8 +127,8 @@ Typed event matching covers presence, absence, numeric or predicate counts, part
 ```ts
 turn.notEvent("result.completed");
 turn.eventOrder([
-  { type: "subagent.called", data: { name: "researcher" }, count: 2 },
-  { type: "subagent.completed", data: { subagentName: "researcher" }, count: 2 },
+  { type: "task.started", data: { name: "researcher" }, count: 2 },
+  { type: "task.settled", data: { status: "completed" }, count: 2 },
 ]);
 ```
 

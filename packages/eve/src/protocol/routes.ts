@@ -37,6 +37,9 @@ export const EVE_SESSION_CLEAR_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessi
 /** Stable route pattern for resetting one exact session ID. */
 export const EVE_SESSION_RESET_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/reset`;
 
+/** Stable route pattern for eval tool-stub verification. */
+export const EVE_SESSION_STUBS_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/stubs`;
+
 /** Stable event-stream route pattern for one exact session ID. */
 export const EVE_SESSION_STREAM_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/stream`;
 
@@ -115,12 +118,6 @@ export const EVE_CONNECTION_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/connec
  */
 export const EVE_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/callback/:token`;
 
-/** Capability route used by a parent task to answer a remote child HITL batch. */
-export const EVE_TASK_INPUT_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/task-input/:token`;
-
-/** Capability route for best-effort activity batches. */
-export const EVE_ACTIVITY_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/activity/:token`;
-
 /** Builds the ID-addressed message route for one session. */
 export function createEveSessionRoutePath(sessionId: string): string {
   return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}`;
@@ -190,7 +187,7 @@ export function createEveTaskInputRoutePath(token: string): string {
   return `${EVE_ROUTE_PREFIX}/task-input/${encodeURIComponent(token)}`;
 }
 
-/** Builds the capability path for one root activity collector. */
-export function createEveActivityRoutePath(token: string): string {
-  return `${EVE_ROUTE_PREFIX}/activity/${encodeURIComponent(token)}`;
+/** Builds the tool-stub verification route for one session. */
+export function createEveSessionStubsRoutePath(sessionId: string): string {
+  return `${createEveSessionRoutePath(sessionId)}/stubs`;
 }

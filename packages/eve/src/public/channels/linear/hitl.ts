@@ -1,3 +1,4 @@
+import { renderTextInputRequest } from "#channel/resolve-text.js";
 import type { InputRequest } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 
@@ -26,18 +27,8 @@ export function linearInputRequestSignal(requests: readonly InputRequest[]): {
 }
 
 function renderLinearInputRequest(request: InputRequest): string {
-  const lines = [request.prompt];
-  if (request.options !== undefined && request.options.length > 0) {
-    lines.push(
-      "",
-      ...request.options.map((option, index) => {
-        const description = option.description ? ` - ${option.description}` : "";
-        return `${index + 1}. ${option.label}${description}`;
-      }),
-    );
-  }
-  if (request.allowFreeform === true) {
-    lines.push("", "You can also reply with a custom answer.");
-  }
-  return lines.join("\n");
+  const body = renderTextInputRequest(request);
+  return request.allowFreeform === true
+    ? `${body}\n\nYou can also reply with a custom answer.`
+    : body;
 }

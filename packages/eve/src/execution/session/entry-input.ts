@@ -12,7 +12,6 @@ export const SESSION_HANDOFF_VERSION = 2;
  * and deserialized at each `"use step"` boundary.
  */
 export interface InitialWorkflowEntryInput {
-  readonly activityCollectorRunId?: string;
   readonly continuationConflictCommand?: Extract<SessionCommand, { readonly kind: "send" }>;
   readonly input: RunInput["input"];
   readonly kind: "initial";
@@ -21,15 +20,35 @@ export interface InitialWorkflowEntryInput {
   readonly retention?: AgentWorkflowRetentionDefinition;
   readonly sessionTimeoutMs?: number | false;
   readonly serializedContext: Record<string, unknown>;
-  readonly taskId?: string;
 }
 
-/** A successor owner started by a previous owner during a deployment handoff. */
-export interface HandoffWorkflowEntryInput {
+/** Why a previous owner started a successor, and what the successor does first. */
+export type SessionHandoffStart =
+  | {
+      /** The one delivery that triggered a deployment handoff; processed before any later arrival. */
+      readonly delivery: DeliverHookPayload;
+      readonly reason?: undefined;
+    }
+  | {
+      /**
+       * The previous owner compacted the session and moved it to a fresh run on
+       * its own deployment, so no single run's event log grows with the
+       * session.
+       */
+      readonly reason: "compaction";
+      /**
+       * The lone delivery that arrived before the owner could move, processed
+       * first. Without one, the successor parks until the next input arrives.
+       */
+      readonly delivery?: DeliverHookPayload;
+      /** Compaction does not extend the session's lifetime. */
+      readonly sessionTimeoutDeadline?: Date;
+    };
+
+/** A successor owner started by a previous owner during a handoff. */
+export type HandoffWorkflowEntryInput = SessionHandoffStart & {
   readonly activationToken: string;
   readonly checkpoint: SessionCheckpoint;
-  /** The one delivery that triggered the handoff; processed before any later arrival. */
-  readonly delivery: DeliverHookPayload;
   /** Omitted by version 1 sources, whose hooks cannot safely be force-claimed. */
   readonly handoffVersion?: number;
   readonly kind: "handoff";
@@ -37,7 +56,7 @@ export interface HandoffWorkflowEntryInput {
   readonly sessionWritable: WritableStream<Uint8Array>;
   /** Stable public identity; also the original run that anchors the stream. */
   readonly sessionId: string;
-}
+};
 
 export type WorkflowEntryInput = InitialWorkflowEntryInput | HandoffWorkflowEntryInput;
 

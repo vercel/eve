@@ -1,7 +1,6 @@
 import type { UserContent } from "ai";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
-import { copyChannelActivityPresentation } from "#channel/activity-renderer.js";
 import {
   createChannelDeliveryMetadata,
   type ChannelDeliverySource,
@@ -20,7 +19,6 @@ import type {
   SessionCallback,
   SessionCommand,
   TurnPolicy,
-  TaskDeliveryPolicy,
 } from "#channel/types.js";
 import { DEFAULT_TURN_POLICY } from "#channel/types.js";
 import { isReservedSessionCommandToken } from "#execution/session-inbox/address.js";
@@ -31,7 +29,6 @@ interface BaseChannelAddressDeliveryOptions {
   readonly initiatorAuth?: SessionAuthContext | null;
   readonly title?: string;
   readonly turnPolicy?: TurnPolicy;
-  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
 }
 
 /** Delivery options for a channel address whose continuation token is already bound. */
@@ -41,7 +38,9 @@ export type ChannelAddressDeliveryOptions<TState = undefined> = [TState] extends
 
 /**
  * Dynamic handle for whichever durable session currently owns one channel-local address.
- * Only {@link send} may create a session when the address is unowned.
+ * Only {@link send} may create a session: when the address is unowned, or in
+ * place of a stranded session that another eve version built. Sends to a session whose
+ * owner is only unavailable throw `SessionStrandedError` and deliver nothing.
  */
 interface ChannelAddress<TState = undefined> {
   readonly continuationToken: string;
@@ -72,7 +71,6 @@ export function createChannelAddress<TState = undefined>(input: {
   readonly metadata?: ChannelDeliverySource;
   readonly runtime: Runtime;
   readonly turnPolicy?: TurnPolicy;
-  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
 }): ChannelAddress<TState> {
   const metadata: Partial<ChannelDeliverySource> = input.metadata ?? {};
   const namespacedToken = `${input.channelName}:${input.continuationToken}`;
@@ -89,9 +87,7 @@ export function createChannelAddress<TState = undefined>(input: {
           : undefined;
       const payload = normalizeSendInput(sendInput);
       const caller = sessionCallbackToTurnCaller(options.callback);
-      const taskDeliveryPolicy = options.taskDeliveryPolicy ?? input.taskDeliveryPolicy;
       const commandWithoutCaller = {
-        taskDeliveryPolicy,
         auth: options.auth,
         delivery,
         kind: "send" as const,
@@ -107,27 +103,6 @@ export function createChannelAddress<TState = undefined>(input: {
       };
       const command: Extract<SessionCommand, { readonly kind: "send" }> =
         caller === undefined ? commandWithoutCaller : { ...commandWithoutCaller, caller };
-      const dispatch = async (): Promise<Session | undefined> => {
-        const result = await input.runtime.dispatchContinuation({
-          command,
-          continuationToken: namespacedToken,
-        });
-        return result.status === "accepted"
-          ? createSession(result.sessionId, input.runtime, {
-              ...metadata,
-              turnPolicy: input.turnPolicy,
-            })
-          : undefined;
-      };
-
-      const existing = await dispatch();
-      if (existing !== undefined) return existing;
-      if (payload.inputResponses && payload.inputResponses.length > 0) {
-        throw new Error(
-          "Cannot deliver inputResponses — the target session was not found via continuation token.",
-        );
-      }
-
       const state = (options as { readonly state?: TState }).state;
       const adapter =
         state === undefined
@@ -136,9 +111,7 @@ export function createChannelAddress<TState = undefined>(input: {
               ...input.adapter,
               state: { ...input.adapter.state, ...(state as Record<string, unknown>) },
             };
-      if (adapter !== input.adapter) copyChannelActivityPresentation(input.adapter, adapter);
       const runInput: RunInput = {
-        taskDeliveryPolicy,
         adapter,
         auth: options.auth,
         capabilities: { requestInput: true },
@@ -152,15 +125,26 @@ export function createChannelAddress<TState = undefined>(input: {
           context: payload.context,
           message: serializeUrlFilePartsInMessage(payload.message) ?? "",
           outputSchema: payload.outputSchema,
+          state: payload.state,
         },
         requestId: metadata.requestId,
         title: options.title,
       };
-      const handle = await input.runtime.createSession(runInput);
-      return createSession(handle.sessionId, input.runtime, {
-        ...metadata,
-        turnPolicy: input.turnPolicy,
+      const toSession = (sessionId: string) =>
+        createSession(sessionId, input.runtime, { ...metadata, turnPolicy: input.turnPolicy });
+
+      const result = await input.runtime.dispatchContinuation({
+        command,
+        continuationToken: namespacedToken,
+        successor: runInput,
       });
+      if (result.status === "accepted") return toSession(result.sessionId);
+      if (payload.inputResponses && payload.inputResponses.length > 0) {
+        throw new Error(
+          "Cannot deliver inputResponses — the target session was not found via continuation token.",
+        );
+      }
+      return toSession((await input.runtime.createSession(runInput)).sessionId);
     },
     async send(message, options) {
       return await this.deliver({ message }, options);
@@ -214,7 +198,6 @@ export function createChannelAddressFn<TState = undefined>(input: {
   readonly metadata?: ChannelDeliverySource;
   readonly runtime: Runtime;
   readonly turnPolicy?: TurnPolicy;
-  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
 }): ChannelAddressFn<TState> {
   return (continuationToken) => createChannelAddress({ ...input, continuationToken });
 }

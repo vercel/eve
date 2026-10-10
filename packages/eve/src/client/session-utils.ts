@@ -1,11 +1,16 @@
 import type {
   AuthorizationRequiredStreamEvent,
   MessageCompletedStreamEvent,
-  MessageStreamEvent,
   TurnFailureStreamEvent,
   UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";
+import {
+  foldSession,
+  initialSessionProjection,
+  openInputs,
+  openSignIns,
+} from "#protocol/session-projection.js";
 import type { InputRequest } from "#shared/input.js";
 
 /** A connection authorization challenge that remains unresolved at a turn boundary. */
@@ -13,6 +18,7 @@ interface PendingAuthorization {
   readonly authorization?: AuthorizationRequiredStreamEvent["data"]["authorization"];
   readonly description: string;
   readonly name: string;
+  readonly attemptId?: string;
   readonly webhookUrl?: string;
 }
 
@@ -30,38 +36,35 @@ interface TurnEventSummary {
 export function summarizeTurnEvents(
   events: readonly UnstampedMessageStreamEvent[],
 ): TurnEventSummary {
+  const segment = new TurnSegment();
   let boundary: UnstampedMessageStreamEvent | undefined;
   let failure: TurnFailureStreamEvent | undefined;
   let message: string | undefined;
-  const inputRequests: InputRequest[] = [];
-  const pendingAuthorizations = new Map<string, PendingAuthorization>();
 
   for (const event of events) {
-    if (isCurrentTurnBoundaryEvent(event)) boundary = event;
+    if (segment.observe(event)) boundary = event;
     if (isTurnFailureEvent(event)) failure = event;
     if (isFinalMessageCompleted(event)) message = event.data.message ?? undefined;
-    if (event.type === "input.requested") inputRequests.push(...event.data.requests);
-    if (event.type === "authorization.required") {
-      pendingAuthorizations.set(event.data.name, event.data);
-    }
-    if (event.type === "authorization.completed") {
-      pendingAuthorizations.delete(event.data.name);
-    }
+    // Text completed before the turn parked was interim; the reply comes after it resumes.
+    if (event.type === "turn.waiting") message = undefined;
   }
 
   return {
     boundary,
     failure,
-    inputRequests,
+    inputRequests: segment.inputRequests,
     message,
-    pendingAuthorizations: [...pendingAuthorizations.values()],
-    status:
-      boundary?.type === "session.waiting"
-        ? "waiting"
-        : boundary?.type === "session.failed"
-          ? "failed"
-          : "completed",
+    pendingAuthorizations: segment.pendingAuthorizations,
+    status: summarizeBoundaryStatus(boundary),
   };
+}
+
+function summarizeBoundaryStatus(
+  boundary: UnstampedMessageStreamEvent | undefined,
+): TurnEventSummary["status"] {
+  if (boundary?.type === "session.waiting" || boundary?.type === "turn.waiting") return "waiting";
+  if (boundary?.type === "session.failed") return "failed";
+  return "completed";
 }
 
 /** Collects one segment of an event stream through its current-turn boundary. */
@@ -69,11 +72,65 @@ export async function collectTurnEvents(
   stream: AsyncIterable<UnstampedMessageStreamEvent>,
 ): Promise<readonly UnstampedMessageStreamEvent[]> {
   const events: UnstampedMessageStreamEvent[] = [];
+  const segment = new TurnSegment();
   for await (const event of stream) {
     events.push(event);
-    if (isCurrentTurnBoundaryEvent(event)) break;
+    if (segment.observe(event)) break;
   }
   return events;
+}
+
+/**
+ * Returns true when a read of a session's events ends at `event`: at a current-turn boundary, or
+ * at a `turn.waiting` on `"input"` (or while a request read in the segment is unanswered). The
+ * turn stays open there until a person acts; a `turn.waiting` on `"tasks"` is informational and
+ * reading goes on to the turn's real end.
+ * A reader that follows sign-in callbacks reads past a sign-in's `turn.waiting` or
+ * `session.waiting` while its callback is outstanding, because the callback resumes the same turn.
+ */
+export function endsTurnSegment(
+  event: UnstampedMessageStreamEvent,
+  open: { readonly callbacks: boolean; readonly requests: boolean },
+): boolean {
+  if (event.type === "turn.waiting") {
+    return open.requests || (event.data.on === "input" && !open.callbacks);
+  }
+  return isCurrentTurnBoundaryEvent(event) && (event.type !== "session.waiting" || !open.callbacks);
+}
+
+/** The requests and sign-ins one segment of a session's events leaves open. */
+export class TurnSegment {
+  #projection = initialSessionProjection();
+  readonly #authorizations = new Map<string, PendingAuthorization>();
+  readonly #followCallbacks: boolean;
+
+  constructor(options: { readonly followCallbacks?: boolean } = {}) {
+    this.#followCallbacks = options.followCallbacks === true;
+  }
+
+  get inputRequests(): readonly InputRequest[] {
+    return openInputs(this.#projection).map((input) => input.request);
+  }
+
+  get pendingAuthorizations(): readonly PendingAuthorization[] {
+    return openSignIns(this.#projection).flatMap(
+      (attempt) => this.#authorizations.get(attempt.attemptId) ?? [],
+    );
+  }
+
+  /** Records `event` and returns true when it ends the segment. */
+  observe(event: UnstampedMessageStreamEvent): boolean {
+    this.#projection = foldSession(this.#projection, event);
+    if (event.type === "authorization.required") {
+      this.#authorizations.set(event.data.attemptId ?? event.data.name, event.data);
+    }
+    return endsTurnSegment(event, {
+      callbacks:
+        this.#followCallbacks &&
+        openSignIns(this.#projection).some((attempt) => attempt.awaitsCallback === true),
+      requests: openInputs(this.#projection).length > 0,
+    });
+  }
 }
 
 function isFinalMessageCompleted(
@@ -82,10 +139,9 @@ function isFinalMessageCompleted(
   return event.type === "message.completed" && event.data.finishReason !== "tool-calls";
 }
 
-export function updatePendingAuthorizations(pending: Set<string>, event: MessageStreamEvent): void {
-  if (event.type === "authorization.required" && event.data.webhookUrl !== undefined) {
-    pending.add(event.data.name);
-  } else if (event.type === "authorization.completed") {
-    pending.delete(event.data.name);
-  }
+export function authorizationKey(data: {
+  readonly name: string;
+  readonly attemptId?: string;
+}): string {
+  return data.attemptId === undefined ? `name:${data.name}` : `attempt:${data.attemptId}`;
 }

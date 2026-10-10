@@ -1,27 +1,25 @@
 import type { UserContent } from "ai";
 
-import type {
-  ActivityObserverConfig,
-  SessionCallback,
-  SessionCapabilities,
-  TaskDeliveryPolicy,
-} from "#channel/types.js";
+import type { SessionCallback, SessionCapabilities } from "#channel/types.js";
+import type { LegacyRemoteAgentCaller } from "#execution/legacy-remote-agent/protocol.js";
 import type { JsonObject } from "#shared/json.js";
+import type { ToolStub } from "#tool-stubs/types.js";
 
 export interface ParsedCreateBody {
-  taskDeliveryPolicy?: TaskDeliveryPolicy;
-  activityObserver?: ActivityObserverConfig;
+  stubs?: readonly ToolStub[];
   callback?: SessionCallback;
   capabilities?: SessionCapabilities;
   message?: string | UserContent;
   context?: readonly string[];
   operationId?: string;
   outputSchema?: JsonObject;
+  /** Remote agent protocol of a delegating caller; set only with {@link callback}. */
+  protocolVersion?: number;
+  legacyRemoteAgentCaller?: LegacyRemoteAgentCaller;
 }
 
 /** Enforces the fields that only make sense when creation also starts a turn. */
 export function validateMessageFreeCreate(input: {
-  readonly activityObserver: ActivityObserverConfig | undefined;
   readonly callback: SessionCallback | undefined;
   readonly hasClientContext: boolean;
   readonly hasMessageField: boolean;
@@ -35,16 +33,11 @@ export function validateMessageFreeCreate(input: {
     );
   }
   if (input.message !== undefined) return undefined;
-  if (
-    input.hasClientContext ||
-    input.callback !== undefined ||
-    input.activityObserver !== undefined ||
-    input.outputSchema !== undefined
-  ) {
+  if (input.hasClientContext || input.callback !== undefined || input.outputSchema !== undefined) {
     return Response.json(
       {
         error:
-          "Creating a session without a message does not accept 'clientContext', 'callback', 'activityObserver', or 'outputSchema'.",
+          "Creating a session without a message does not accept 'clientContext', 'callback', or 'outputSchema'.",
         ok: false,
       },
       { status: 400 },

@@ -178,6 +178,7 @@ export function deployProject(
         "deploy",
         "--prod",
         "--yes",
+        "--logs",
         ...(input.headless ? ["--non-interactive"] : []),
       ];
       const success = await withPhase(log, "Deploying the agent to Vercel production...", () =>
@@ -195,9 +196,11 @@ export function deployProject(
         // transient until a warning/error settles it) so the build failure is
         // visible instead of just the exit code.
         log.error(
-          "`vercel deploy --prod` failed. The deploy output above shows the cause; fix it, then retry.",
+          "`vercel deploy --prod` failed. Check the build logs above for the first error, then retry. To retrieve the logs again, run `vercel inspect <deployment-url> --logs` from this project.",
         );
-        throw new Error("Deployment failed after channel setup.");
+        throw new Error(
+          "Deployment failed. Check the build logs above, or run `vercel inspect <deployment-url> --logs` from this project.",
+        );
       }
 
       const pulledEnvironment = await withPhase(

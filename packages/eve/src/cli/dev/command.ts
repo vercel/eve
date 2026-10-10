@@ -28,6 +28,7 @@ import {
   parseLogsMode,
   parsePortOption,
   parseStatsMode,
+  parseSubagentDisplayMode,
 } from "../option-parsers.js";
 
 interface DevelopmentCommandLogger {
@@ -120,8 +121,8 @@ export function registerRemoteCommands(input: {
     )
     .option(
       "--subagents <mode>",
-      "How subagent sections render: full | collapsed | auto-collapsed | hidden",
-      parseDisplayMode,
+      "How subagent tasks render: full | collapsed | hidden",
+      parseSubagentDisplayMode,
     )
     .option(
       "--connection-auth <mode>",
@@ -138,11 +139,7 @@ export function registerRemoteCommands(input: {
       "Model context window size, shown as a usage percentage",
       parseContextSizeOption,
     )
-    .option(
-      "--logs <mode>",
-      "Which server/agent logs to show: all | stderr | sandbox | none",
-      parseLogsMode,
-    )
+    .option("--logs <mode>", "Log severity: none | error | warn | debug | all", parseLogsMode)
     .action(async (options: DevelopmentCliOptions & { url: string }) => {
       const remoteTarget = resolveDevelopmentUrlTarget(options, undefined)!;
       const mode = resolveDevUiMode({ options, interactive: hasInteractiveTerminal() });
@@ -188,6 +185,7 @@ export function registerDevelopmentCommand(input: {
     .option("--host <host>", "Host interface to bind")
     .option("--port <port>", "Port to listen on (defaults to $PORT, then 2000)", parsePortOption)
     .option("--no-ui", "Start the server without an interactive UI")
+    .option("--resume", "Attempt recovery of retained runs from previous local dev invocations")
     .option("--no-default-extensions", "Do not mount default development extensions")
     .option("--name <name>", "Title shown in the terminal UI (defaults to the app folder name)")
     .option("--input <text>", "Pre-fill the prompt input")
@@ -204,8 +202,8 @@ export function registerDevelopmentCommand(input: {
     )
     .option(
       "--subagents <mode>",
-      "How subagent sections render: full | collapsed | auto-collapsed | hidden",
-      parseDisplayMode,
+      "How subagent tasks render: full | collapsed | hidden",
+      parseSubagentDisplayMode,
     )
     .option(
       "--connection-auth <mode>",
@@ -222,11 +220,7 @@ export function registerDevelopmentCommand(input: {
       "Model context window size, shown as a usage percentage",
       parseContextSizeOption,
     )
-    .option(
-      "--logs <mode>",
-      "Which server/agent logs to show: all | stderr | sandbox | none",
-      parseLogsMode,
-    )
+    .option("--logs <mode>", "Log severity: none | error | warn | debug | all", parseLogsMode)
     .action(async (options: DevelopmentCliOptions) => {
       const interactive = hasInteractiveTerminal();
       const mode = resolveDevUiMode({ options, interactive });
@@ -274,6 +268,7 @@ export function registerDevelopmentCommand(input: {
           ...(options.defaultExtensions === false
             ? { developmentExtensions: noDevelopmentExtensions() }
             : {}),
+          resume: options.resume,
           existing: mode === "tui" ? "attach-if-unconfigured" : "reject",
           host: options.host,
           onBootProgress,

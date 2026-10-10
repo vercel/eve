@@ -6,17 +6,16 @@ import {
 import type { MessageStreamEvent } from "#protocol/message.js";
 import type { UserContent } from "ai";
 import type {
-  ActivityObserverConfig,
   CancelTurnResult,
   ClearSessionResult,
   CompactSessionResult,
+  GetEventStreamOptions,
   ResetSessionResult,
   Runtime,
   SessionAuthContext,
   SessionCallback,
   SessionSendCommandResult,
   TurnPolicy,
-  TaskDeliveryPolicy,
   TurnCaller,
 } from "#channel/types.js";
 import { DEFAULT_TURN_POLICY } from "#channel/types.js";
@@ -41,34 +40,38 @@ import { attachClientContext, readClientContext } from "#internal/client-context
 /** Immutable-ID handle for one exact durable session. */
 export interface Session {
   readonly id: string;
-  /** Sends a message to this exact session ID without creating or following a replacement. */
+  /**
+   * Sends a message to this exact session ID without creating or following a
+   * replacement. Throws `SessionStrandedError` when the session's owner cannot
+   * execute here; nothing is delivered. Call {@link reset} to end it.
+   */
   send(
     message: string | UserContent,
     options: SessionSendOptions,
   ): Promise<SessionSendCommandResult>;
-  /** Answers pending input requests on this exact session ID. */
+  /** Answers pending input requests on this exact session ID. Throws `SessionStrandedError` like {@link send}. */
   respond<const TResponses extends readonly InputResponse[]>(
     inputResponses: StrictInputResponses<TResponses>,
     options: SessionRespondOptions,
   ): Promise<SessionSendCommandResult>;
-  /** Requests cancellation of this exact session's active turn and optionally its owned tasks. */
-  cancel(options?: {
-    taskId?: string;
-    tasks?: boolean;
-    turnId?: string;
-  }): Promise<CancelTurnResult>;
+  /** Requests cancellation of this exact session's active turn. */
+  cancel(options?: { turnId?: string }): Promise<CancelTurnResult>;
   /** Queues compaction on this exact session ID. */
   compact(): Promise<CompactSessionResult>;
   /** Queues a context clear on this exact session ID. */
   clear(): Promise<ClearSessionResult>;
   /** Terminally retires this exact session ID. */
   reset(options?: { reason?: string }): Promise<ResetSessionResult>;
-  getEventStream(options?: { startIndex?: number }): Promise<ReadableStream<MessageStreamEvent>>;
+  /**
+   * Opens the recorded stream. Following it throws `SessionStrandedError`
+   * while its owner is stranded; `follow: false` reads recorded history up to
+   * the current tail without inspecting or changing the session.
+   */
+  getEventStream(options?: GetEventStreamOptions): Promise<ReadableStream<MessageStreamEvent>>;
   getStreamTailIndex(): Promise<number>;
 }
 
 interface SessionDeliveryOptions {
-  readonly activityObserver?: ActivityObserverConfig;
   readonly auth: SessionAuthContext | null;
   /** Public callback destination for a delegated continuation turn. */
   readonly callback?: SessionCallback;
@@ -81,8 +84,6 @@ export type SessionSendOptions = SessionDeliveryOptions & {
   /** Initial workflow title for a prewarmed session. */
   readonly title?: string;
   readonly turnPolicy?: TurnPolicy;
-  /** Updates the session policy; omission preserves it. New sessions default to auto, schedules to cohort. */
-  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
 };
 
 /** Options for answering pending input requests through a fixed session handle. */
@@ -114,7 +115,7 @@ export function createSession(
     id,
     async send(message, options) {
       const delivery = createDelivery(metadata);
-      const caller = sessionCallbackToTurnCaller(options.callback, options.activityObserver);
+      const caller = sessionCallbackToTurnCaller(options.callback);
       const payload = attachClientContext<{
         context?: readonly string[];
         message: string | UserContent | undefined;
@@ -129,7 +130,6 @@ export function createSession(
         payload,
         requestId: metadata.requestId,
         turnPolicy: options.turnPolicy ?? metadata.turnPolicy ?? DEFAULT_TURN_POLICY,
-        taskDeliveryPolicy: options.taskDeliveryPolicy,
         title: options.title,
       };
       return await runtime.dispatchSession({
@@ -142,7 +142,7 @@ export function createSession(
         throw new Error("respond() requires at least one input response.");
       }
       const validatedInputResponses = parseInputResponses(inputResponses);
-      const caller = sessionCallbackToTurnCaller(options.callback, options.activityObserver);
+      const caller = sessionCallbackToTurnCaller(options.callback);
       const delivery = createDelivery(metadata);
       const payload = attachClientContext<{
         context?: readonly string[];
@@ -163,12 +163,8 @@ export function createSession(
         sessionId: id,
       });
     },
-    async cancel(options?: { taskId?: string; tasks?: boolean; turnId?: string }) {
-      const command: { kind: "cancel"; taskId?: string; tasks?: boolean; turnId?: string } = {
-        kind: "cancel",
-      };
-      if (options?.taskId !== undefined) command.taskId = options.taskId;
-      if (options?.tasks !== undefined) command.tasks = options.tasks;
+    async cancel(options?: { turnId?: string }) {
+      const command: { kind: "cancel"; turnId?: string } = { kind: "cancel" };
       if (options?.turnId !== undefined) command.turnId = options.turnId;
       return await runtime.dispatchSession({ command, sessionId: id });
     },
@@ -184,7 +180,7 @@ export function createSession(
         sessionId: id,
       });
     },
-    async getEventStream(options?: { startIndex?: number }) {
+    async getEventStream(options?: GetEventStreamOptions) {
       return runtime.getEventStream(id, options);
     },
     async getStreamTailIndex() {
@@ -264,15 +260,12 @@ function namespaceContinuationToken(currentToken: string, rawToken: string): str
 /** @internal Converts validated public callback metadata into runtime turn routing. */
 export function sessionCallbackToTurnCaller(
   callback: SessionCallback | undefined,
-  activityObserver?: ActivityObserverConfig,
 ): TurnCaller | undefined {
   return callback === undefined
     ? undefined
     : {
-        activityObserver,
         callId: callback.callId,
         replyTo: { kind: "callback", token: callback.token, url: callback.url },
         subagentName: callback.subagentName,
-        taskId: callback.taskId,
       };
 }

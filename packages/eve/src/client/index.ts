@@ -6,10 +6,30 @@ export { EveAgentStore } from "#client/eve-agent-store.js";
 export { Client } from "#client/client.js";
 export { AgentInfoResponseError } from "#client/agent-info-error.js";
 export { HealthResponseError } from "#client/health-response-error.js";
-export { ClientError } from "#client/client-error.js";
+export { ClientError, ClientSessionStrandedError } from "#client/client-error.js";
 export { defaultMessageReducer } from "#client/message-reducer.js";
+export { conversationReducer } from "#client/conversation-reducer.js";
+export {
+  transcriptReducer,
+  type TranscriptData,
+  type TranscriptMessage,
+  type TranscriptReducerOptions,
+} from "#client/transcript-reducer.js";
+export { openConversationInputs } from "#client/conversation-state.js";
+export { toolCallState, type ToolCallState, type ToolCallStatus } from "#client/tool-call-state.js";
+
+export type {
+  AgentObservation,
+  ConversationAgentSession,
+  ConversationInput,
+  ConversationState,
+  ConversationTask,
+  ConversationTaskCall,
+  ConversationTurn,
+} from "#client/conversation-state.js";
 export { createDataUrlFilePart, createTextWithFileContent } from "#client/file-parts.js";
 export { MessageResponse } from "#client/message-response.js";
+export { ClientAgentSession } from "#client/agent-session.js";
 export { ClientSession } from "#client/session.js";
 export {
   ClientSessions,
@@ -100,6 +120,7 @@ export type {
   ActionPartialStreamEvent,
   ActionResultStreamEvent,
   ActionsRequestedStreamEvent,
+  AgentStartedStreamEvent,
   AssistantStepFinishReason,
   AuthorizationOutcome,
   CompactionCompletedStreamEvent,
@@ -123,21 +144,22 @@ export type {
   RuntimeTraceContext,
   SessionCompletedStreamEvent,
   SessionFailedStreamEvent,
+  SessionPredecessor,
   SessionStartedStreamEvent,
   SessionWaitingStreamEvent,
   MessageStreamEvent,
   StepCompletedStreamEvent,
   StepFailedStreamEvent,
   StepStartedStreamEvent,
-  SubagentCalledStreamEvent,
-  SubagentChildEventStreamEvent,
-  SubagentCompletedStreamEvent,
-  SubagentStartedStreamEvent,
+  TaskSettledStreamEvent,
+  TaskStartedStreamEvent,
   TurnCancelledStreamEvent,
   TurnCompletedStreamEvent,
   TurnFailedStreamEvent,
   TurnStartedStreamEvent,
   TurnFailureStreamEvent,
+  TurnWaitingOn,
+  TurnWaitingStreamEvent,
 } from "#protocol/message.js";
 
 export { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";
@@ -151,3 +173,4 @@ export {
 } from "#shared/input.js";
 
 export { resolveTextToResponse, resolveTextToResponses } from "#channel/resolve-text.js";
+export type { ToolStub, ToolStubOutcome } from "#tool-stubs/types.js";

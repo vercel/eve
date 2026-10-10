@@ -13,6 +13,43 @@ function render(block: DisplayBlock, width = 60): string[] {
 }
 
 describe("renderBlockLines", () => {
+  it("links every wrapped row of a connection-auth URL to the full URL", () => {
+    const url = `https://auth.example.com/authorize?client_id=abc&redirect_uri=${"x".repeat(160)}`;
+    const raw = renderBlockLines(
+      {
+        kind: "connection-auth",
+        title: "Catalog · authorization · required",
+        body: `Sign in to Catalog\nOpen to authorize:\n${url}`,
+        link: url,
+        preformatted: true,
+      },
+      100,
+      theme,
+      ctx,
+    );
+    const urlRows = raw.filter((row) => row.includes("\x1b]8;;"));
+    expect(urlRows.length).toBeGreaterThan(1);
+    for (const row of urlRows) {
+      expect(row).toContain(`\x1b]8;;${url}\x1b\\`);
+      expect(visibleLength(row)).toBeLessThanOrEqual(100);
+    }
+    expect(urlRows.map((row) => stripAnsi(row).trim()).join("")).toBe(url);
+    expect(raw.map(stripAnsi)).toContain("  Open to authorize:");
+  });
+  it("colors only classified failures red, warnings yellow, and raw stderr neutral", () => {
+    const colored = createTheme({ color: true, unicode: true });
+    const body = (logLevel?: "error" | "warn") =>
+      renderBlockLines(
+        { kind: "log", title: "stderr", body: "message", logLevel },
+        60,
+        colored,
+        ctx,
+      ).join("\n");
+    expect(body("error")).toContain(colored.colors.red("message"));
+    expect(body("warn")).toContain(colored.colors.yellow("message"));
+    expect(body()).toContain(colored.colors.gray("message"));
+    expect(body()).not.toContain(colored.colors.red("message"));
+  });
   it("renders a user message behind a left bar", () => {
     expect(render({ kind: "user", body: "hello there" })).toEqual(["│ hello there"]);
   });
@@ -262,27 +299,20 @@ describe("renderBlockLines", () => {
     ]);
   });
 
-  it("renders a counted subagent header for coalesced parallel calls", () => {
-    const lines = render({
-      kind: "subagent",
-      title: "echo-marker",
-      subtitle: "3 calls",
-      live: false,
-    });
-    expect(lines).toEqual(["  ※ subagent(echo-marker) 3 calls"]);
-  });
-
-  it("folds the ordinal into a completed header without a Done suffix", () => {
-    // Completion reports on the closing corner; the header only flips its
-    // mark to green.
-    const lines = render({
-      kind: "subagent",
-      title: "agent",
-      subtitle: "#4",
-      status: "done",
-      live: false,
-    });
-    expect(lines).toEqual(["  ※ subagent(self:4)"]);
+  it("writes a task's start and end as single lines", () => {
+    const agent = { kind: "task", taskKind: "agent", title: "researcher", live: false } as const;
+    expect(render({ ...agent, subtitle: "Find the Q3 revenue numbers" })).toEqual([
+      "  ▪ researcher  Find the Q3 revenue numbers",
+    ]);
+    expect(
+      render({ ...agent, status: "done", body: "finished in 1min 12s · Read 3 files" }),
+    ).toEqual(["  ✓ researcher  finished in 1min 12s · Read 3 files"]);
+    expect(render({ ...agent, status: "error", body: "failed · Rate limited" })).toEqual([
+      "  ⨯ researcher  failed · Rate limited",
+    ]);
+    expect(render({ ...agent, status: "denied", body: "stopped" })).toEqual([
+      "  ▪ researcher  stopped",
+    ]);
   });
 
   it("renders steered and queued messages without extra arrow rows", () => {
@@ -319,50 +349,21 @@ describe("renderBlockLines", () => {
     expect(rows).toEqual(["│ \x1b[1mhello\x1b[22m"]);
   });
 
-  it("pulses the in-progress subagent mark by intensity, with a quiet label", () => {
-    const colorTheme = createTheme({ color: true, unicode: true });
-    const running = { kind: "subagent", title: "echo-marker", live: true } as const;
-    const onBeat = renderBlockLines(running, 80, colorTheme, { activityPulse: "▪" })[0] ?? "";
-    const offBeat = renderBlockLines(running, 80, colorTheme, { activityPulse: " " })[0] ?? "";
-
-    // The mark rides the shared beat: orange on, dim off — the glyph never
-    // blanks, so the section keeps its anchor.
-    expect(onBeat).toContain("\x1b[38;5;208m※");
-    expect(offBeat).toContain("\x1b[2m※");
-    expect(stripAnsi(offBeat)).toBe("  ※ subagent(echo-marker)");
-
-    // The label stays quiet — no bold anywhere in the header.
-    expect(onBeat).not.toContain("\x1b[1m");
-  });
-
-  it("collapses a child message to its first line inside the section", () => {
-    const lines = render({
+  it("names the agent above the first of its rows, not above each one", () => {
+    const row = {
       kind: "subagent-step",
+      subagentCallId: "call-1",
+      agentName: "researcher",
       depth: 1,
-      collapsed: true,
-      body: "The trade-off is abstraction.\n\nMore detail…",
+      body: "Checked the filings.",
       live: false,
-    });
-    expect(lines).toEqual(["  │ The trade-off is abstraction."]);
-
-    // `--subagents full` keeps the verbatim prose.
-    const full = render({
-      kind: "subagent-step",
-      depth: 1,
-      body: "First paragraph.\n\nSecond paragraph.",
-      live: false,
-    });
-    expect(full.length).toBeGreaterThan(1);
-  });
-
-  it("renders an elided stand-in row inside the subagent gutter", () => {
-    const lines = render({
-      kind: "subagent-step",
-      depth: 1,
-      live: false,
-      elided: 6,
-    });
-    expect(lines).toEqual(["  │  … (6 more)"]);
+    } as const;
+    expect(render(row)).toEqual(["  ※ researcher", "  │ Checked the filings."]);
+    const continued = renderBlockLines(row, 80, theme, {
+      activityPulse: "▪",
+      previous: { kind: "subagent-tool", subagentCallId: "call-1" },
+    }).map(stripAnsi);
+    expect(continued).toEqual(["  │ Checked the filings."]);
   });
 
   it("nests subagent tools under the orange rule", () => {

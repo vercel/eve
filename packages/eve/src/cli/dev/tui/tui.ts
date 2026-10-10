@@ -59,10 +59,15 @@ function inlineArgumentSuggestions(appRoot: string) {
   ): Promise<readonly PromptArgumentSuggestion[]> => {
     if (command === "loglevel") {
       return [
-        { value: "all", label: "all", hint: "Show all captured logs" },
-        { value: "stderr", label: "stderr", hint: "Show stderr logs only" },
-        { value: "sandbox", label: "sandbox", hint: "Show sandbox logs only" },
-        { value: "none", label: "none", hint: "Hide captured logs" },
+        { value: "none", label: "none", hint: "Hide logs" },
+        { value: "error", label: "error", hint: "Errors only (default)" },
+        { value: "warn", label: "warn", hint: "Warnings and errors" },
+        {
+          value: "debug",
+          label: "debug",
+          hint: "All severity-tagged logs",
+        },
+        { value: "all", label: "all", hint: "Include raw stdout and sandbox output" },
       ];
     }
     if (command === "login") {
@@ -77,19 +82,19 @@ function inlineArgumentSuggestions(appRoot: string) {
         await import("#setup/boxes/select-model.js");
       const catalog = await fetchGatewayCatalog().catch(() => undefined);
       return modelOptionsFromCatalog(catalog).map((option) => {
-        const reasoning = gatewayModelCapabilities(catalog, option.value)?.reasoningLevels;
+        const capabilities = gatewayModelCapabilities(catalog, option.value);
         return {
           value: option.value,
           label: option.value,
           hint: option.hint,
-          ...(reasoning === undefined || reasoning.length === 0
-            ? {}
-            : {
+          ...(capabilities?.reasoning
+            ? {
                 next: [
                   { value: "default", label: "default" },
-                  ...reasoning.map((value) => ({ value, label: value })),
+                  ...capabilities.reasoningLevels.map((value) => ({ value, label: value })),
                 ],
-              }),
+              }
+            : {}),
         };
       });
     }

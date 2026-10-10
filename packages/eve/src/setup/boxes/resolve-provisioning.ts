@@ -34,6 +34,7 @@ import {
   validateTeam,
 } from "../vercel-project.js";
 import { withSpinner } from "../with-spinner.js";
+import type { VercelTeamRequirement } from "../vercel-project-api.js";
 
 /** Injected for tests; defaults to the real Vercel project and fs helpers. */
 export interface ResolveProvisioningDeps {
@@ -78,6 +79,7 @@ export interface ResolveProvisioningOptions {
    */
   projectSelection?: "create-or-link" | "existing-only";
   teamSelectMessage?: (currentTeam: string) => string;
+  teamRequirement?: VercelTeamRequirement;
   deps?: ResolveProvisioningDeps;
 }
 
@@ -288,7 +290,11 @@ export function resolveProvisioning(
 
     if (deployVercel) {
       await deps.requireAuth(parent(), prompter, { signal });
-      const teamOptions = { signal, selectMessage: options.teamSelectMessage };
+      const teamOptions = {
+        signal,
+        selectMessage: options.teamSelectMessage,
+        teamRequirement: options.teamRequirement,
+      };
       const team = await deps.pickTeam(prompter, parent(), undefined, teamOptions);
       const projectOptions = [
         {

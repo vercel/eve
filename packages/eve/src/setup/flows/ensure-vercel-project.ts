@@ -10,6 +10,7 @@ import { runInteractive, type AnySetupBox } from "../runner.js";
 import { snapshotSetupState, type SetupState } from "../state.js";
 import { WizardCancelledError } from "../step.js";
 import { requireAuth } from "../vercel-project.js";
+import { checkTeamRequirement, type VercelTeamRequirement } from "../vercel-project-api.js";
 import { inProjectSetupState, prompterSink } from "./in-project.js";
 import { runLoginFlow } from "./login.js";
 
@@ -27,6 +28,7 @@ export async function ensureVercelProject(input: {
   prompter: Prompter;
   signal?: AbortSignal;
   teamSelectMessage?: (currentTeam: string) => string;
+  teamRequirement?: VercelTeamRequirement;
   deps?: Partial<EnsureVercelProjectDeps>;
 }): Promise<VercelProjectReference> {
   const readLink = input.deps?.readProjectLink ?? readProjectLink;
@@ -44,7 +46,21 @@ export async function ensureVercelProject(input: {
   }
 
   const existing = await readLink(input.appRoot);
-  if (existing !== undefined) return existing;
+  if (existing !== undefined) {
+    if (input.teamRequirement) {
+      const issue = await checkTeamRequirement(
+        input.appRoot,
+        existing.orgId,
+        input.teamRequirement,
+        { signal: input.signal },
+      );
+      if (issue)
+        throw new Error(
+          `Cannot configure the linked Vercel team. ${issue} Run \`eve link\` to choose another team, or ask its owner to finish setup.`,
+        );
+    }
+    return existing;
+  }
 
   const state = inProjectSetupState(input.appRoot, { kind: "unresolved" });
   const boxes: AnySetupBox<SetupState>[] = [
@@ -56,6 +72,7 @@ export async function ensureVercelProject(input: {
       adoptExistingLink: false,
       projectSelection: "create-or-link",
       teamSelectMessage: input.teamSelectMessage,
+      teamRequirement: input.teamRequirement,
       deps: input.deps?.resolveProvisioning,
     }),
     linkVercelProject({ prompter: input.prompter, deps: input.deps?.linkProject }),

@@ -1,20 +1,17 @@
+import { parseToolStubs } from "#tool-stubs/rules.js";
 import type { FilePart, TextPart, UserContent } from "ai";
 
 import type {
-  ActivityObserverConfig,
   SessionAuthContext,
   SessionCallback,
   SessionCapabilities,
   TurnPolicy,
-  TaskDeliveryPolicy,
 } from "#channel/types.js";
 import type { Session } from "#channel/session.js";
+import { strandedSessionResponse } from "#eve-channel/support.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
-import {
-  parseActivityObserverField,
-  validateActivityObserverBinding,
-} from "#eve-channel/activity-observer-request.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
+import { isMissingWorkflowRunError } from "#internal/workflow/is-inactive-workflow-run-error.js";
 import {
   EVE_MESSAGE_STREAM_CONTENT_TYPE,
   EVE_MESSAGE_STREAM_FORMAT,
@@ -28,16 +25,22 @@ import {
   EVE_STREAM_VERSION_HEADER,
 } from "#protocol/message.js";
 import {
+  REMOTE_AGENT_PROTOCOL_MISMATCH,
+  REMOTE_AGENT_PROTOCOL_VERSION,
+  readRemoteAgentProtocolVersion,
+} from "#protocol/remote-agent-protocol.js";
+import {
+  LEGACY_REMOTE_AGENT_PROTOCOL_VERSION,
+  splitLegacyTaskFields,
+} from "#execution/legacy-remote-agent/protocol.js";
+import {
   collectUploadPolicyViolations,
   formatUploadPolicyViolation,
   type UploadPolicy,
 } from "#public/channels/upload-policy.js";
 import { isInputResponse, type ValidatedInputResponse } from "#shared/input.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
-import {
-  parseTaskDeliveryPolicyField,
-  parseTurnPolicyField,
-} from "#eve-channel/delivery-policy-request.js";
+import { parseTurnPolicyField } from "#eve-channel/turn-policy-request.js";
 import { type ParsedCreateBody, validateMessageFreeCreate } from "#eve-channel/create-request.js";
 
 const SESSION_STREAM_HEARTBEAT_MS = 10_000;
@@ -63,7 +66,9 @@ export async function deriveOperationContinuationToken(input: {
   return `eve:op:${hex.slice(0, 32)}`;
 }
 
-export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateBody | Response {
+export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBody | Response {
+  const legacy = splitLegacyTaskFields(input);
+  const { payload } = legacy;
   if (payload.inputResponses !== undefined) {
     return Response.json(
       { error: "'inputResponses' is only accepted for an existing session.", ok: false },
@@ -78,24 +83,17 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
 
   const callback = parseCallbackField(payload.callback);
   if (callback instanceof Response) return callback;
+  const protocolVersion =
+    callback === undefined ? undefined : parseProtocolVersionField(payload.protocolVersion);
+  if (protocolVersion instanceof Response) return protocolVersion;
 
   const capabilities = parseCapabilitiesField(payload.capabilities);
   if (capabilities instanceof Response) return capabilities;
 
-  const activityObserver = parseActivityObserverField(payload.activityObserver);
-  if (activityObserver instanceof Response) return activityObserver;
-  if (activityObserver !== undefined) {
-    const observerRejection = validateActivityObserverBinding(activityObserver, callback);
-    if (observerRejection !== undefined) return observerRejection;
-  }
-
-  const taskDeliveryPolicy = parseTaskDeliveryPolicyField(payload.taskDeliveryPolicy, message);
-  if (taskDeliveryPolicy instanceof Response) return taskDeliveryPolicy;
   const outputSchema = parseOutputSchemaField(payload.outputSchema);
   if (outputSchema instanceof Response) return outputSchema;
 
   const messageFreeRejection = validateMessageFreeCreate({
-    activityObserver,
     callback,
     hasClientContext: payload.clientContext !== undefined,
     hasMessageField: "message" in payload,
@@ -113,21 +111,31 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
   }
 
   const result: ParsedCreateBody = {
-    taskDeliveryPolicy,
-    activityObserver,
     callback,
     capabilities,
     context,
     outputSchema,
   };
+  if (payload.stubs !== undefined) {
+    try {
+      result.stubs = parseToolStubs(payload.stubs);
+    } catch (error) {
+      return Response.json(
+        { ok: false, error: error instanceof Error ? error.message : "Invalid tool stubs." },
+        { status: 400 },
+      );
+    }
+  }
   if (message !== undefined) result.message = message;
   if (typeof rawOperationId === "string") result.operationId = rawOperationId;
+  if (protocolVersion !== undefined) result.protocolVersion = protocolVersion;
+  if (protocolVersion === LEGACY_REMOTE_AGENT_PROTOCOL_VERSION) {
+    result.legacyRemoteAgentCaller = legacy.taskId === undefined ? {} : { taskId: legacy.taskId };
+  }
   return result;
 }
 
 interface ParsedSessionMessageBody {
-  taskDeliveryPolicy?: TaskDeliveryPolicy;
-  activityObserver?: ActivityObserverConfig;
   callback?: SessionCallback;
   message?: string | UserContent;
   inputResponses?: readonly ValidatedInputResponse[];
@@ -137,8 +145,15 @@ interface ParsedSessionMessageBody {
 }
 
 export function parseSessionMessageBody(
-  payload: Record<string, unknown>,
+  input: Record<string, unknown>,
 ): ParsedSessionMessageBody | Response {
+  const { payload } = splitLegacyTaskFields(input);
+  if (Object.hasOwn(payload, "stubs")) {
+    return Response.json(
+      { ok: false, error: "Tool stubs are fixed at session creation." },
+      { status: 400 },
+    );
+  }
   const tokenRejection = rejectSessionContinuationToken(payload);
   if (tokenRejection !== null) return tokenRejection;
 
@@ -146,18 +161,10 @@ export function parseSessionMessageBody(
   if (message instanceof Response) return message;
   const callback = parseCallbackField(payload.callback);
   if (callback instanceof Response) return callback;
-  const activityObserver = parseActivityObserverField(payload.activityObserver);
-  if (activityObserver instanceof Response) return activityObserver;
-  if (activityObserver !== undefined) {
-    const observerRejection = validateActivityObserverBinding(activityObserver, callback);
-    if (observerRejection !== undefined) return observerRejection;
-  }
   const inputResponses = parseInputResponses(payload.inputResponses);
   if (inputResponses instanceof Response) return inputResponses;
   const context = parseClientContextField(payload.clientContext);
   if (context instanceof Response) return context;
-  const taskDeliveryPolicy = parseTaskDeliveryPolicyField(payload.taskDeliveryPolicy, message);
-  if (taskDeliveryPolicy instanceof Response) return taskDeliveryPolicy;
   const outputSchema = parseOutputSchemaField(payload.outputSchema);
   if (outputSchema instanceof Response) return outputSchema;
   const turnPolicy = parseTurnPolicyField(payload.turnPolicy);
@@ -181,20 +188,16 @@ export function parseSessionMessageBody(
   }
 
   return {
-    activityObserver,
     callback,
     message,
     inputResponses,
     context,
     outputSchema,
     turnPolicy,
-    taskDeliveryPolicy,
   };
 }
 
 interface ParsedCancelTurnBody {
-  taskId?: string;
-  tasks?: boolean;
   turnId?: string;
 }
 
@@ -205,31 +208,13 @@ export async function parseCancelTurnBody(req: Request): Promise<ParsedCancelTur
   if (tokenRejection !== null) return tokenRejection;
 
   const turnId = payload.turnId;
-  const taskId = payload.taskId;
-  const tasks = payload.tasks;
   if (turnId !== undefined && (typeof turnId !== "string" || turnId.length === 0)) {
     return Response.json(
       { error: "Expected 'turnId' to be a non-empty string.", ok: false },
       { status: 400 },
     );
   }
-  if (tasks !== undefined && typeof tasks !== "boolean") {
-    return Response.json(
-      { error: "Expected 'tasks' to be a boolean.", ok: false },
-      { status: 400 },
-    );
-  }
-  if (taskId !== undefined && (typeof taskId !== "string" || taskId.length === 0)) {
-    return Response.json(
-      { error: "Expected 'taskId' to be a non-empty string.", ok: false },
-      { status: 400 },
-    );
-  }
-  const result: ParsedCancelTurnBody = {};
-  if (typeof taskId === "string") result.taskId = taskId;
-  if (typeof tasks === "boolean") result.tasks = tasks;
-  if (typeof turnId === "string") result.turnId = turnId;
-  return result;
+  return typeof turnId === "string" ? { turnId } : {};
 }
 
 export async function parseJsonRequest(req: Request): Promise<Record<string, unknown> | Response> {
@@ -313,11 +298,24 @@ export async function createSessionStreamResponse(
 ): Promise<Response> {
   const startIndex = parseStartIndex(request);
   if (startIndex instanceof Response) return startIndex;
-  const includeTailIndex = parseIncludeTailIndex(request);
+  const follow = parseFollow(request);
+  const includeTailIndex = !follow || parseIncludeTailIndex(request);
 
   try {
-    const tailIndex = includeTailIndex ? await session.getStreamTailIndex() : undefined;
-    const events = await session.getEventStream({ startIndex });
+    // Resolve the tail before committing a response; otherwise an unknown or
+    // unreachable session would answer 200 and fail mid-body. Open the event
+    // stream alongside the tail lookup to avoid an extra round trip.
+    const eventsPromise = session.getEventStream({ follow, startIndex });
+    // Handled below; this keeps an early rejection from being reported as unhandled.
+    eventsPromise.catch(() => {});
+    let tailIndex: number;
+    try {
+      tailIndex = await session.getStreamTailIndex();
+    } catch (error) {
+      void eventsPromise.then((events) => events.cancel()).catch(() => {});
+      throw error;
+    }
+    const events = await eventsPromise;
     const controlVersion =
       new URL(request.url).searchParams.get(EVE_STREAM_CONTROL_VERSION_QUERY) ===
       EVE_STREAM_CONTROL_VERSION
@@ -331,20 +329,26 @@ export async function createSessionStreamResponse(
       [EVE_STREAM_FORMAT_HEADER]: EVE_MESSAGE_STREAM_FORMAT,
       [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION,
     });
-    if (tailIndex !== undefined) {
+    if (includeTailIndex) {
       headers.set(EVE_STREAM_TAIL_INDEX_HEADER, String(tailIndex));
     }
     return new Response(
       serializeAsNdjson(
         events,
         request.signal,
-        streamEventLimit(startIndex, tailIndex),
+        includeTailIndex ? streamEventLimit(startIndex, tailIndex) : undefined,
         controlVersion !== undefined,
       ),
       { headers },
     );
-  } catch {
-    return Response.json({ error: "Session not found.", ok: false }, { status: 404 });
+  } catch (error) {
+    const stranded = strandedSessionResponse(error);
+    if (stranded !== undefined) return stranded;
+    const notFound = isMissingWorkflowRunError(error);
+    return Response.json(
+      { error: notFound ? "Session not found." : "Session stream unavailable.", ok: false },
+      { status: notFound ? 404 : 503 },
+    );
   }
 }
 
@@ -367,6 +371,33 @@ function parseCallbackField(value: unknown): SessionCallback | Response | undefi
   if (parsed.ok) return parsed.callback;
 
   return Response.json({ error: parsed.message, ok: false }, { status: 400 });
+}
+
+/** Delegating callers must speak a remote agent protocol this deployment serves. */
+function parseProtocolVersionField(value: unknown): number | Response {
+  // Only an absent version means protocol 1; 0.66–0.68 callers omit the field.
+  if (value !== undefined && typeof value !== "number") {
+    return Response.json(
+      { error: "Expected 'protocolVersion' to be a number.", ok: false },
+      { status: 400 },
+    );
+  }
+  const callerVersion = readRemoteAgentProtocolVersion(value);
+  if (
+    callerVersion === REMOTE_AGENT_PROTOCOL_VERSION ||
+    callerVersion === LEGACY_REMOTE_AGENT_PROTOCOL_VERSION
+  ) {
+    return callerVersion;
+  }
+  return Response.json(
+    {
+      code: REMOTE_AGENT_PROTOCOL_MISMATCH,
+      error: `This deployment speaks eve remote agent protocol ${String(REMOTE_AGENT_PROTOCOL_VERSION)}, but the caller speaks protocol ${String(callerVersion)}. Upgrade both deployments to the same eve release.`,
+      ok: false,
+      protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
+    },
+    { status: 409 },
+  );
 }
 
 function parseCapabilitiesField(value: unknown): SessionCapabilities | Response | undefined {
@@ -582,6 +613,12 @@ function toClientContextMessage(content: string): string {
 export function parseIncludeTailIndex(request: Request): boolean {
   const raw = new URL(request.url).searchParams.get("includeTailIndex");
   return raw === "1" || raw === "true";
+}
+
+/** `follow=false` (or `0`) bounds the read at the durable tail; following is the default. */
+function parseFollow(request: Request): boolean {
+  const raw = new URL(request.url).searchParams.get("follow");
+  return raw !== "0" && raw !== "false";
 }
 
 export function parseStartIndex(request: Request): number | undefined | Response {

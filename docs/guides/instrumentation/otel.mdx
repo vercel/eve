@@ -126,6 +126,10 @@ The resolver receives the channel, session, final model input, step, and turn.
 Keys beginning with `eve.` are reserved. Content excluded by
 `otel({ tracePolicy })` is not available to the resolver.
 
+Authored values appear under `ai.settings.context.*`. Framework channel, session,
+step, turn, and version identifiers use structural span attributes instead of
+runtime-context copies. `ai.settings.context.eve.environment` remains available.
+
 ## Trace topology
 
 OpenTelemetry destinations receive the following trace topology for an ordinary
@@ -135,16 +139,41 @@ agent turn:
 invoke_agent <agent>
   └── agent.step
         ├── chat <model>
-        └── agent.action
-              └── execute_tool <tool>
+        └── execute_tool <tool>
 ```
 
-Each turn starts a new trace. The first subagent trace links to its caller with
-`eve.link.type=agent.dispatch`; the link is not an authorization grant. For a
-remote agent, `trustedForwarders` lets the receiver accept the sender's session
-lineage and trace-content policy. See [Remote agents](../guides/remote-agents#preserving-trace-content).
-Use `gen_ai.conversation.id` to find the traces for one conversation in your
-destination's span-search surface.
+Each root agent turn starts a new trace. If eve receives a local caller's trace
+context, the first local subagent turn uses that trace. Its span is a
+child of the dispatch span and has a different span ID. Without caller trace
+context, the first subagent turn starts a new trace. Later turns in the child
+session start new traces. They do not use the original dispatch span as their
+parent.
+
+Use `gen_ai.tool.call.id` to correlate tool and approval spans. Tool failures use
+`error.type`. These attributes replace the duplicate `agent.action.call_id` and
+`agent.action.error.code` fields without changing trace schema version 4.
+
+Model and activation spans record token counts under `gen_ai.usage.*`, without
+duplicate `agent.usage.*` token fields. Step and tool spans retain `agent.usage.*`.
+Cost values remain unchanged.
+
+A remote child starts a separate trace with a root `invoke_agent` span. Its first
+turn links to the caller with `eve.link.type=agent.dispatch`. The receiving
+deployment applies its sampler. Queries for local dispatches must use
+`parentSpanId` or `agent.parent_run.id` and `agent.parent_call.id` instead of a
+dispatch link.
+
+Use `gen_ai.conversation.id` to find the root session and its child sessions
+across traces. eve adds this ID to spans created during model, tool, and memory
+execution. This includes spans from third-party instrumentation. `agent.run.id`
+identifies one agent session, not the full conversation.
+
+The shared conversation ID does not give access to message history, agent state,
+or credentials. It does not give authorization or require the same worker for
+each turn. Remote requests carry the conversation ID in W3C Baggage.
+`trustedForwarders` controls whether the receiver accepts parent session data
+and the trace-content policy. See
+[Remote agents](../guides/remote-agents#preserving-trace-content).
 
 ## Local traces
 

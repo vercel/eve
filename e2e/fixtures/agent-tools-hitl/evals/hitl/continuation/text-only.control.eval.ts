@@ -1,7 +1,7 @@
 import { defineEval } from "eve/evals";
 import {
+  expectApprovalCancelled,
   scriptedSession,
-  approveSavedChange,
   expectChangeStillUnexecuted,
   expectReply,
   requestFrom,
@@ -21,10 +21,11 @@ export default defineEval({
     // When the user asks what is waiting without requesting tools.
     const live = await session.start("Explain what is waiting, without calling any tools.");
 
-    // Then the text reply completes; A stays unexecuted and answerable.
+    // Then the text reply completes; the message cancelled A, which never runs.
     const reply = await expectReply(t, live, "Your changes are waiting for approval.");
-    reply.usedNoTools();
+    // The cancelled approval reports a not-run result; the reply itself calls no tools.
+    reply.notEvent("actions.requested");
     expectChangeStillUnexecuted(session);
-    await approveSavedChange(t, session, approval);
+    expectApprovalCancelled(session, approval);
   },
 });

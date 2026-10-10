@@ -1,5 +1,6 @@
+import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import { describe, expect, it } from "vitest";
-import { getRun, getWorld, start } from "#internal/workflow/runtime.js";
+import { getRun, getWorld } from "#internal/workflow/runtime.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import { workflowEntry } from "#execution/session/entry.js";
 import { hydrateWorkflowReturnValue } from "@workflow/core/serialization";
@@ -18,7 +19,7 @@ describe("workflow step authorization", () => {
       toolName: "deploy_service",
     });
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -54,21 +55,16 @@ describe("workflow step authorization", () => {
     });
   }, 60_000);
 
-  it.each([
-    { background: false, service: "interactive" },
-    { background: true, service: "interactive" },
-    { background: false, service: "retry" },
-  ])(
-    "parks on its own callback and resumes the step (background=$background, service=$service)",
-    async ({ background, service }) => {
+  it.each(["interactive", "retry"])(
+    "parks on its own callback and resumes the step (service=%s)",
+    async (service) => {
       const runtime = await createWorkflowToolRuntime({
         agentName: "workflow-step-auth",
-        background,
         execute: authorizedDeployWorkflow,
         toolName: "deploy_service",
       });
       await runtime.run(async () => {
-        const run = await start(workflowEntry, [
+        const run = await startSessionOwner(workflowEntry, [
           {
             kind: "initial",
             ownerDeploymentId: "dpl_inline",
@@ -90,15 +86,11 @@ describe("workflow step authorization", () => {
         ]);
         const stream = captureTurnEvents(run);
         try {
-          const events = [];
-          for (
-            let i = 0;
-            i < 5 && filterEventsByType(events, "authorization.required").length === 0;
-            i++
-          )
-            events.push(...(await stream.nextTurn()));
+          // The sign-in parks the open turn; the run keeps waiting for its callback.
+          const events = await stream.nextUntil((event) => event.type === "turn.waiting");
+          expect(events.at(-2)?.type).toBe("authorization.required");
+          expect(filterEventsByType(events, "turn.completed")).toHaveLength(0);
           const required = filterEventsByType(events, "authorization.required")[0]!;
-          expect(required).toBeDefined();
           const url = new URL(required.data.webhookUrl!);
           const parts = url.pathname.split("/").map(decodeURIComponent);
           const token = parts.at(-1)!;
@@ -124,6 +116,9 @@ describe("workflow step authorization", () => {
               (event) => event.data.outcome,
             ),
           ).toEqual(["authorized"]);
+          // The turn the sign-in parked resumes and completes once.
+          expect(filterEventsByType(events, "turn.started")).toHaveLength(1);
+          expect(filterEventsByType(events, "turn.completed")).toHaveLength(1);
           const text = JSON.stringify(events);
           expect(text).toContain("authenticatedAs");
           expect(text).toContain("user-1");

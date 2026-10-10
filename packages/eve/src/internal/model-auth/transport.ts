@@ -1,8 +1,4 @@
-import {
-  createGateway,
-  type Experimental_EvaluationModel as EvaluationModel,
-  type LanguageModel,
-} from "ai";
+import { createGateway, type LanguageModel } from "ai";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { resolveModelApiKey } from "./api-key.js";
 import {
@@ -73,9 +69,9 @@ export function localGatewayModel(id: string): LanguageModel | undefined {
   return createLocalGateway()?.languageModel(id);
 }
 
-/** Resolve an evaluation model through the same local Gateway connection used by language models. */
-export function localGatewayEvaluationModel(
+/** Resolve a decision model through the same local Gateway connection used by language models. */
+export function localGatewayDecisionModel(
   id: string,
-): Exclude<EvaluationModel, string> | undefined {
-  return createLocalGateway()?.evaluationModel(id);
+): ReturnType<ReturnType<typeof createGateway>["decisionModel"]> | undefined {
+  return createLocalGateway()?.decisionModel(id);
 }

@@ -6,6 +6,11 @@ import {
   setReadFileStamp,
 } from "#execution/tools/file-state.js";
 import { resolveAbsoluteFilePath } from "#execution/sandbox/require-sandbox.js";
+import {
+  detectImageMediaType,
+  readMediaMetadata,
+  type MediaMetadata,
+} from "#internal/attachments/media-metadata.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import { capLineLength, MAX_OUTPUT_BYTES } from "#execution/sandbox/truncate-output.js";
 
@@ -16,6 +21,8 @@ import { capLineLength, MAX_OUTPUT_BYTES } from "#execution/sandbox/truncate-out
 const DEFAULT_OFFSET = 1;
 const DEFAULT_LIMIT = 2000;
 
+// Matches the inline cap for inbound image attachments.
+const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
 // ---------------------------------------------------------------------------
 // Input / result shapes
 // ---------------------------------------------------------------------------
@@ -34,6 +41,11 @@ export interface ReadFileInput {
  */
 export interface ReadFileResult {
   readonly content: string;
+  /**
+   * Set when the file is a PNG, JPEG, GIF, or WebP image the model sees as
+   * an image. Carries no bytes, so `action.result` stays small.
+   */
+  readonly image?: MediaMetadata;
   readonly nextOffset?: number;
   readonly path: string;
   readonly totalLines: number;
@@ -47,7 +59,8 @@ export interface ReadFileResult {
 /**
  * Reads one text file from the sandbox, applies output shaping
  * (offset, limit, line numbering, truncation), and persists a full-file
- * stamp into durable read-file state for stale-write detection.
+ * stamp into durable read-file state for stale-write detection. Image
+ * files return their bytes for the model to view instead.
  *
  * Used by the framework `read_file` tool and authored wrappers around its
  * exported definition.
@@ -61,29 +74,34 @@ export async function executeReadFileOnSandbox(
   const resolvedPath = await resolveAbsoluteFilePath(sandbox, filePath);
   const normalizedPath = normalizeModelPath(resolvedPath);
 
+  const bytes = await sandbox.readBinaryFile({ path: resolvedPath });
+  if (bytes === null) {
+    throw new Error(
+      `File not found: ${filePath}. Verify the path exists and is accessible in the sandbox.`,
+    );
+  }
+
+  // ── Classify as text, image, or unsupported binary ──────────────────
+  // Clean text stays text even behind an ASCII image signature such as
+  // `GIF89a`; real images always carry NUL or non-UTF-8 bytes.
+  const rawContent = decodeUtf8(bytes);
+  if (rawContent === undefined || rawContent.includes("\0")) {
+    const imageMediaType = detectImageMediaType(bytes);
+    if (imageMediaType !== undefined) {
+      return buildImageReadResult(bytes, normalizedPath, imageMediaType);
+    }
+    throw new Error(
+      `File "${filePath}" appears to be a binary file. ` +
+        "read_file only supports text files and PNG, JPEG, GIF, or WebP images.",
+    );
+  }
+
   // ── Validate offset / limit ─────────────────────────────────────────
   const effectiveOffset = offset ?? DEFAULT_OFFSET;
   const effectiveLimit = limit ?? DEFAULT_LIMIT;
 
   if (effectiveOffset < 1) {
     throw new Error(`offset must be >= 1. Received: ${effectiveOffset}.`);
-  }
-
-  // ── Read full file for fingerprinting ───────────────────────────────
-  const rawContent = await sandbox.readTextFile({ path: resolvedPath });
-
-  if (rawContent === null) {
-    throw new Error(
-      `File not found: ${filePath}. Verify the path exists and is accessible in the sandbox.`,
-    );
-  }
-
-  // ── Reject non-text (NUL bytes) ─────────────────────────────────────
-  if (rawContent.includes("\0")) {
-    throw new Error(
-      `File "${filePath}" contains NUL bytes and appears to be a binary file. ` +
-        "read_file only supports text files.",
-    );
   }
 
   // ── Split into lines ────────────────────────────────────────────────
@@ -176,6 +194,32 @@ export async function executeReadFileOnSandbox(
     content,
     path: normalizedPath,
     totalLines,
+    truncated: false,
+  };
+}
+
+// Decodes exactly like `readTextFile` so write_file's stale-write check
+// fingerprints the same text this read stamps.
+function decodeUtf8(bytes: Uint8Array): string | undefined {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return undefined;
+  }
+}
+
+function buildImageReadResult(bytes: Uint8Array, path: string, mediaType: string): ReadFileResult {
+  if (bytes.byteLength > MAX_IMAGE_BYTES) {
+    throw new Error(
+      `Image "${path}" is ${bytes.byteLength} bytes; read_file shows images up to 3 MiB. ` +
+        "Resize or crop it in the sandbox first.",
+    );
+  }
+  return {
+    content: `Image ${path} (${mediaType}, ${bytes.byteLength} bytes).`,
+    image: readMediaMetadata(bytes, mediaType),
+    path,
+    totalLines: 0,
     truncated: false,
   };
 }

@@ -2,6 +2,7 @@ import type { FilePart, TextPart, UserContent } from "ai";
 
 import type { FetchFileContext, FetchFileResult } from "#channel/adapter.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
+import { readLimitedBytes } from "#internal/attachments/limited-read.js";
 import { createLogger } from "#internal/logging.js";
 import {
   resolveSlackBotToken,
@@ -19,7 +20,7 @@ import {
   formatUploadPolicyViolation,
   isUploadsDisabled,
 } from "#public/channels/upload-policy.js";
-import type { UploadPolicy } from "#public/channels/upload-policy.js";
+import { DEFAULT_UPLOAD_POLICY, type UploadPolicy } from "#public/channels/upload-policy.js";
 
 const log = createLogger("slack.attachments");
 
@@ -175,6 +176,8 @@ export function buildSlackTurnMessage(
 export function createSlackFetchFile(input: {
   readonly api?: SlackTransportOptions;
   readonly botToken?: SlackBotToken;
+  /** Downloads stop at this many bytes. Defaults to the framework's 25 MB. */
+  readonly maxBytes?: number;
 }): (url: string, context?: FetchFileContext) => Promise<FetchFileResult | null> {
   const api = resolveSlackTransportOptions(input.api);
   return async (url, context) => {
@@ -206,7 +209,11 @@ export function createSlackFetchFile(input: {
       });
     }
     return {
-      bytes: Buffer.from(await response.arrayBuffer()),
+      bytes: await readLimitedBytes(
+        response,
+        input.maxBytes ?? DEFAULT_UPLOAD_POLICY.maxBytes,
+        "slack",
+      ),
       mediaType,
     };
   };

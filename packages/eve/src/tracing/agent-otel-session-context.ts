@@ -26,6 +26,7 @@ import type { AgentTurnTraceState } from "#tracing/agent-trace-state.js";
 import { applyPrincipalTraceDecision } from "#instrumentation/principal-summary.js";
 import { normalizeInstrumentationChannelKind } from "#internal/instrumentation.js";
 import type { ConversationEnvironment } from "#shared/conversation-context.js";
+import { traceSessionIdOf } from "#tracing/agent-otel-attributes.js";
 
 interface AgentOtelSessionContextInput {
   readonly environment: ConversationEnvironment;
@@ -70,6 +71,7 @@ export function createAgentOtelSessionContext(
         context: initialSessionContext(input, event, decision),
         parentLineage: event.parentLineage,
         rootSessionId: event.rootSessionId,
+        traceSessionId: traceSessionIdOf(event),
         scheduleId: event.scheduleId,
         title: event.title,
       };
@@ -100,6 +102,8 @@ export function createAgentOtelSessionContext(
     let turnContext = useInitialContext
       ? { ...session.context, isRemote: false }
       : freshTurnContext(input, event.idempotencyKey, session.decision);
+    if (caller !== undefined && !("isRemote" in caller && caller.isRemote === true))
+      turnContext = { ...turnContext, traceId: caller.traceId };
     const turn: AgentTurnTraceState = {
       caller: caller === undefined ? undefined : adoptedSpanContext(caller),
       context: turnContext,
@@ -107,11 +111,15 @@ export function createAgentOtelSessionContext(
       initiatorPrincipal: applyPrincipalTraceDecision(event.initiatorPrincipal, session.decision),
       parentLineage: event.parentLineage ?? session.parentLineage,
       rootSessionId: event.rootSessionId,
+      traceSessionId: traceSessionIdOf(event),
       sequence: event.sequence,
       startTimeMs: Date.now(),
       subagentName: (event.parentLineage ?? session.parentLineage)?.subagentName,
     };
-    if (isSampledTrace(turn.context)) {
+    if (
+      isSampledTrace(turn.context) &&
+      (caller === undefined || ("isRemote" in caller && caller.isRemote === true))
+    ) {
       const agentName = session.agentName ?? turn.subagentName;
       const sampled =
         input.samplesTrace?.(turn.context.traceId, {
@@ -170,7 +178,13 @@ function initialSessionContext(
       traceFlags: decision.action === "drop" ? 0 : handed.traceFlags,
     };
   }
-  const traceId = input.idGenerator.deriveTraceId(`session:${event.sessionId}`);
+  const traceId =
+    (event.parentTraceContext !== undefined &&
+    "isRemote" in event.parentTraceContext &&
+    event.parentTraceContext.isRemote === true
+      ? undefined
+      : event.parentTraceContext?.traceId) ??
+    input.idGenerator.deriveTraceId(`session:${event.sessionId}`);
   const sampled = decision.action === "record";
   return {
     isRemote: false,

@@ -1,18 +1,25 @@
 import { simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { CALL_TOOL_NAME, SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { ContextContainer } from "#context/container.js";
 import { AuthKey, InitiatorAuthKey, SessionIdKey } from "#context/keys.js";
 import { serializeContext } from "#context/serialize.js";
-import { createDurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
+import {
+  createDurableSessionValues,
+  readDurableSession,
+} from "#execution/durable-session-store.js";
 import { turnStep } from "#execution/session/turn-step.js";
+import { runSessionStateStep } from "#internal/testing/session-state-step.js";
 import type { DurableStepResult, TurnStepPayload } from "#execution/session/turn-step-types.js";
 import {
   getApprovalAuditState,
   markApprovalCandidateAuthorizationRequired,
-} from "#harness/approval-candidates.js";
-import { setPendingAuthorization } from "#harness/authorization.js";
-import { getPendingInputBatches } from "#harness/pending-input-batches.js";
+} from "#harness/hitl/candidates.js";
+import { CallbackBaseUrlKey, setPendingAuthorization } from "#harness/authorization.js";
+import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
+import { defineInteractiveAuthorization } from "#shared/connection-types.js";
+import { suspendedSteps } from "#harness/session-machine/view.js";
 import type { HarnessSession } from "#harness/types.js";
 import { defineOpenAPIConnection } from "#public/definitions/connections/openapi.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
@@ -23,11 +30,7 @@ import {
 } from "#runtime/sessions/runtime-context-keys.js";
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import { resolveRuntimeModelReference } from "#runtime/agent/resolve-model.js";
-import type {
-  ResolvedDynamicConnectionResolver,
-  ResolvedDynamicToolResolver,
-} from "#runtime/types.js";
-import connectionSearch from "#tools/framework/connection-search.js";
+import type { ResolvedDynamicConnectionResolver } from "#runtime/types.js";
 import { clearDurableDynamicCallbacks } from "#tools/durable-callbacks.js";
 import type { ApprovalResponseContext } from "#approval/definition.js";
 
@@ -55,25 +58,26 @@ const usage = {
   outputTokens: { reasoning: undefined, text: 1, total: 1 },
 };
 const sessionId = "turn-connection-approval";
+const TOOL_GONE_RESULT =
+  'The tool "notes__saveNote" is no longer available, so the call didn\'t run. If the task still needs it, find an available tool with eve__search and make a new call.';
 
-function modelResponse(toolName?: string, callId?: string, connection = "notes") {
+/** A model step that saves notes through `execute`, or replies when `callId` is omitted. */
+function modelResponse(callId?: string | readonly string[], connection = "notes") {
+  const callIds = callId === undefined ? [] : typeof callId === "string" ? [callId] : callId;
   return {
     stream: simulateReadableStream({
       chunks: [
         { type: "stream-start" as const, warnings: [] },
-        ...(toolName
-          ? [
-              {
-                type: "tool-call" as const,
-                toolCallId: callId ?? (toolName === "connection_search" ? "search" : "save"),
-                toolName,
-                input: JSON.stringify(
-                  toolName === "connection_search"
-                    ? { connection, keywords: "save" }
-                    : { body: { note: "hello" } },
-                ),
-              },
-            ]
+        ...(callIds.length > 0
+          ? callIds.map((toolCallId) => ({
+              type: "tool-call" as const,
+              toolCallId,
+              toolName: CALL_TOOL_NAME,
+              input: JSON.stringify({
+                name: `${connection}__saveNote`,
+                input: { body: { note: "hello" } },
+              }),
+            }))
           : [
               { type: "text-start" as const, id: "reply" },
               { type: "text-delta" as const, id: "reply", delta: "Saved." },
@@ -83,7 +87,7 @@ function modelResponse(toolName?: string, callId?: string, connection = "notes")
           type: "finish" as const,
           finishReason: {
             raw: undefined,
-            unified: toolName ? ("tool-calls" as const) : ("stop" as const),
+            unified: callIds.length > 0 ? ("tool-calls" as const) : ("stop" as const),
           },
           usage,
         },
@@ -95,28 +99,32 @@ function modelResponse(toolName?: string, callId?: string, connection = "notes")
 function setup(
   scope: "turn.started" | "session.started" = "turn.started",
   reject = false,
-  variation?: "destination" | "name" | "request-only",
+  variation?: "destination" | "name" | "request-only" | "unapproved-name",
 ) {
   const response = vi.fn((context: ApprovalResponseContext) => {
-    expect(context.responder.principalId).toBe("bob");
+    expect(context.response.principal.principalId).toBe("bob");
     expect(context.session.initiator?.principalId).toBe("alice");
     return reject
       ? { status: "rejected" as const, reason: "Only the notes owner can approve." }
       : { status: "allowed" as const };
   });
   const policyTurns: string[] = [];
-  let removed = false;
+  let connection: "available" | "failing" | "removed" = "available";
   const resolver = vi.fn((event: unknown) => {
-    if (removed) return {};
+    if (connection === "failing") throw new Error("The notes directory is unreachable.");
+    if (connection === "removed") return {};
     const sequence = (event as { data: { sequence?: number } }).data.sequence ?? 0;
     return {
-      [variation === "name" && sequence > 0 ? "second-notes" : "notes"]: defineOpenAPIConnection({
+      [(variation === "name" || variation === "unapproved-name") && sequence > 0
+        ? "second-notes"
+        : "notes"]: defineOpenAPIConnection({
         baseUrl:
           variation === "destination"
             ? `https://notes-${sequence}.example.com`
             : "https://notes.example.com",
         instanceKey: variation === "destination" ? `turn-${sequence}` : undefined,
         description: "Save notes",
+        headers: { "X-Caller": (ctx) => ctx.session.auth.current?.principalId ?? "none" },
         spec: {
           openapi: "3.0.0",
           info: { title: "Notes", version: "1.0.0" },
@@ -142,18 +150,21 @@ function setup(
             },
           },
         },
-        approval: {
-          request: () => "user-approval",
-          response:
-            variation === "request-only"
-              ? undefined
-              : (context) => {
-                  policyTurns.push(
-                    (event as { data: { turnId?: string } }).data.turnId ?? "session",
-                  );
-                  return response(context);
-                },
-        },
+        approval:
+          variation === "unapproved-name"
+            ? undefined
+            : {
+                request: () => "user-approval",
+                response:
+                  variation === "request-only"
+                    ? undefined
+                    : (context) => {
+                        policyTurns.push(
+                          (event as { data: { turnId?: string } }).data.turnId ?? "session",
+                        );
+                        return response(context);
+                      },
+              },
       }),
     };
   });
@@ -164,16 +175,6 @@ function setup(
       logicalPath: "connections/notes.ts",
       slug: "notes",
       sourceId: "notes",
-      sourceKind: "module",
-    },
-  ];
-  const dynamicToolResolvers: ResolvedDynamicToolResolver[] = [
-    {
-      eventNames: ["step.started"],
-      events: connectionSearch.events as ResolvedDynamicToolResolver["events"],
-      logicalPath: "tools/connection-search.ts",
-      slug: "connection-search",
-      sourceId: "eve:connection-search",
       sourceKind: "module",
     },
   ];
@@ -189,7 +190,8 @@ function setup(
   const resolvedAgent: Partial<CompiledBundle["resolvedAgent"]> = {
     connections: [],
     dynamicConnectionResolvers,
-    dynamicToolResolvers,
+    dynamicSkillResolvers: [],
+    dynamicToolResolvers: [],
   };
   const sandboxRegistry: {
     sandbox: CompiledBundle["graph"]["root"]["sandboxRegistry"]["sandbox"] | null;
@@ -232,8 +234,7 @@ function setup(
   vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(bundle);
   const doStream = vi
     .fn()
-    .mockImplementationOnce(() => modelResponse("connection_search"))
-    .mockImplementationOnce(() => modelResponse("notes__saveNote"))
+    .mockImplementationOnce(() => modelResponse("save"))
     .mockImplementation(() => modelResponse());
   vi.mocked(resolveRuntimeModelReference).mockResolvedValue(new MockLanguageModelV4({ doStream }));
   const fetch = vi.fn(
@@ -249,6 +250,7 @@ function setup(
   ctx.set(BundleKey, bundle);
   ctx.set(ChannelKey, adapter);
   ctx.set(SessionIdKey, sessionId);
+  ctx.set(CallbackBaseUrlKey, "https://agent.example.com");
   const session: HarnessSession = {
     agent: { modelReference: { id: "test" }, system: "Save notes.", tools: [] },
     compaction: { recentWindowSize: 10, threshold: 100_000 },
@@ -258,11 +260,11 @@ function setup(
   };
   let snapshot = {
     serializedContext: serializeContext(ctx),
-    sessionState: createDurableSessionState({ session }),
+    ...createDurableSessionValues(session),
   };
   const events: Array<{ type: string; data: Record<string, unknown> }> = [];
   async function step(input?: TurnStepPayload): Promise<DurableStepResult> {
-    const result = await turnStep({
+    const stepInput = {
       ...snapshot,
       input,
       sessionWritable: new WritableStream<Uint8Array>({
@@ -273,8 +275,13 @@ function setup(
           }
         },
       }),
-    });
-    snapshot = result;
+    };
+    const result = await runSessionStateStep(stepInput, turnStep);
+    snapshot = {
+      history: result.history,
+      serializedContext: result.serializedContext,
+      sessionState: result.sessionState,
+    };
     return result;
   }
   return {
@@ -285,20 +292,26 @@ function setup(
     response,
     step,
     policyTurns,
-    removeConnection() {
-      removed = true;
+    /** The session state as last committed. */
+    state() {
+      return readDurableSession(snapshot.sessionState).state;
+    },
+    /** What the connection's resolver does from now on. */
+    setConnection(state: typeof connection) {
+      connection = state;
     },
     updateSession(update: (session: HarnessSession) => HarnessSession) {
       snapshot = {
         ...snapshot,
-        sessionState: createDurableSessionState({
-          session: update({
+        ...createDurableSessionValues(
+          update({
             ...session,
             ...readDurableSession(snapshot.sessionState),
             agent: session.agent,
             compaction: session.compaction,
+            history: snapshot.history,
           }),
-        }),
+        ),
       };
     },
   };
@@ -311,176 +324,235 @@ afterEach(() => {
 });
 
 describe("turn connection approval restoration", () => {
-  it("authorizes requests from two originating turns independently in one cold delivery", async () => {
-    const fixture = setup();
+  it("keeps the provider tools and system prompt identical while connections change", async () => {
+    const fixture = setup("turn.started", false, "unapproved-name");
     await fixture.step({
       delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's first note." }] },
     });
-    const first = await fixture.step();
-    const firstBatch = getPendingInputBatches(readDurableSession(first.sessionState).state)[0]!;
-    fixture.doStream
-      .mockImplementationOnce(() => modelResponse("connection_search", "search-2"))
-      .mockImplementationOnce(() => modelResponse("notes__saveNote", "save-2"));
+    await fixture.step();
+    fixture.doStream.mockImplementationOnce(() => modelResponse("save-2", "second-notes"));
     await fixture.step({
-      delivery: {
-        kind: "deliver",
-        payloads: [{ message: "Prepare Alice's second independent note." }],
-      },
+      delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's second note." }] },
     });
-    const second = await fixture.step();
-    const batches = getPendingInputBatches(readDurableSession(second.sessionState).state);
-    expect(batches).toHaveLength(2);
-    expect(batches[1]!.event!.turnId).not.toBe(firstBatch.event!.turnId);
-    clearDurableDynamicCallbacks(sessionId);
+    await fixture.step();
+    expect(fixture.fetch).toHaveBeenCalledTimes(2);
+
+    const requests = fixture.doStream.mock.calls.map(
+      ([options]) =>
+        options as {
+          prompt: { role: string; content: unknown }[];
+          tools: { name: string }[];
+        },
+    );
+    expect(requests.length).toBeGreaterThanOrEqual(2);
+    const [first, ...later] = requests;
+    expect(first!.tools.map((tool) => tool.name)).toEqual([SEARCH_TOOL_NAME, CALL_TOOL_NAME]);
+    const system = (request: (typeof requests)[number]) =>
+      request.prompt.filter((message) => message.role === "system");
+    for (const request of later) {
+      expect(request.tools).toEqual(first!.tools);
+      expect(system(request)).toEqual(system(first!));
+    }
+    // Connection names reach the model only through appended context messages.
+    const last = JSON.stringify(requests.at(-1)!.prompt);
+    expect(JSON.stringify(system(first!))).not.toContain("- notes:");
+    expect(last).toContain("- notes: Save notes");
+    expect(last).toContain("- second-notes: Save notes");
+  });
+
+  it("rejects only the approved call whose instance pin was evicted", async () => {
+    const fixture = setup("turn.started", false, "request-only");
+    // One more parked call than the pin map holds evicts the first call's pin.
+    const callIds = Array.from({ length: 51 }, (_, index) => `save-${index}`);
+    fixture.doStream.mockReset();
+    fixture.doStream
+      .mockImplementationOnce(() => modelResponse(callIds))
+      .mockImplementation(() => modelResponse());
+    await fixture.step({
+      delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's notes." }] },
+    });
+    const parked = await fixture.step();
+    const requests = suspendedSteps(readDurableSession(parked.sessionState).state).flatMap(
+      (batch) => batch.requests,
+    );
     await fixture.step({
       delivery: {
         kind: "deliver",
-        auth: bob,
+        auth: alice,
         payloads: [
           {
-            inputResponses: batches.flatMap((batch) =>
-              batch.requests.map((request) => ({
-                requestId: request.requestId,
-                optionId: "approve",
-              })),
-            ),
+            inputResponses: requests.map((request) => ({
+              requestId: request.requestId,
+              optionId: "approve",
+            })),
           },
         ],
       },
     });
-    clearDurableDynamicCallbacks(sessionId);
-    const resumed = await fixture.step();
-    expect(fixture.policyTurns).toEqual(batches.map((batch) => batch.event!.turnId));
-    expect(fixture.response).toHaveBeenCalledTimes(2);
-    expect(
-      getApprovalAuditState(readDurableSession(resumed.sessionState).state).settlements,
-    ).toHaveLength(2);
-    expect(fixture.fetch).toHaveBeenCalled();
-    expect(fixture.events.filter((event) => event.type === "session.failed")).toEqual([]);
+    // A missing pin can't prove the connection is unchanged, so that call fails
+    // rather than re-pinning to whatever the connection resolves to now.
+    const failed = fixture.events.flatMap((event) =>
+      event.type === "action.result" && event.data.status === "failed"
+        ? [event.data.result as { callId: string; output: unknown }]
+        : [],
+    );
+    expect(failed.map((result) => result.callId)).toEqual(["save-0"]);
+    expect(JSON.stringify(failed[0]!.output)).toContain(
+      "connection for this tool call changed or is unavailable",
+    );
+    expect(fixture.fetch).toHaveBeenCalledTimes(50);
   });
-  it.each([false, true])(
-    "fails before execution when the resumed connection changes (cold: %s)",
-    async (cold) => {
-      const fixture = setup("turn.started", false, "destination");
-      await fixture.step({
-        delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's note." }] },
-      });
-      const parked = await fixture.step();
-      const request = getPendingInputBatches(readDurableSession(parked.sessionState).state)[0]!
-        .requests[0]!;
-      if (cold) clearDurableDynamicCallbacks(sessionId);
-      await fixture.step({
-        delivery: {
-          kind: "deliver",
-          auth: bob,
-          payloads: [{ inputResponses: [{ requestId: request.requestId, optionId: "approve" }] }],
-        },
-      });
-      if (cold) clearDurableDynamicCallbacks(sessionId);
-      await expect(fixture.step()).rejects.toThrow(
-        "connection for this tool call changed or is unavailable",
-      );
-      expect(fixture.response).toHaveBeenCalledOnce();
-      expect(fixture.fetch).not.toHaveBeenCalled();
-    },
-  );
 
-  it.each([false, true])(
-    "refuses an older tool missing from persisted metadata while approving an available tool (cold: %s)",
-    async (cold) => {
-      const fixture = setup("turn.started", false, "name");
-      await fixture.step({
-        delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's first note." }] },
-      });
-      await fixture.step();
-      fixture.doStream
-        .mockImplementationOnce(() =>
-          modelResponse("connection_search", "search-2", "second-notes"),
-        )
-        .mockImplementationOnce(() => modelResponse("second-notes__saveNote", "save-2"));
-      await fixture.step({
-        delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's second note." }] },
-      });
-      const second = await fixture.step();
-      const batches = getPendingInputBatches(readDurableSession(second.sessionState).state);
-      expect(batches).toHaveLength(2);
-      expect(batches.map((batch) => batch.requests[0]!.action.toolName)).toEqual([
-        "notes__saveNote",
-        "second-notes__saveNote",
-      ]);
-      if (cold) clearDurableDynamicCallbacks(sessionId);
-      await fixture.step({
-        delivery: {
-          kind: "deliver",
-          auth: bob,
-          payloads: [
-            {
-              inputResponses: batches.flatMap((batch) =>
-                batch.requests.map((request) => ({
-                  requestId: request.requestId,
-                  optionId: "approve",
-                })),
-              ),
-            },
-          ],
-        },
-      });
-      if (cold) clearDurableDynamicCallbacks(sessionId);
-      const resumed = await fixture.step();
-      const state = readDurableSession(resumed.sessionState).state;
-      const older = batches[0]!.requests[0]!;
-      const newer = batches[1]!.requests[0]!;
-      expect(fixture.policyTurns).toEqual([batches[1]!.event!.turnId]);
-      expect(getApprovalAuditState(state).candidateHistory).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            requestId: older.requestId,
-            status: "failed",
-            reason: "Approval authorization is temporarily unavailable. Please try again.",
-          }),
-        ]),
-      );
-      expect(getApprovalAuditState(state).settlements).toEqual([
-        expect.objectContaining({ requestId: newer.requestId, outcome: "allowed" }),
-      ]);
-      expect(getPendingInputBatches(state).flatMap((batch) => batch.requests)).toEqual([older]);
-      expect(getPendingInputBatches(state)[0]!.toolReplayIdentities).toEqual(
-        batches[0]!.toolReplayIdentities,
-      );
-      expect(fixture.fetch).toHaveBeenCalledOnce();
-    },
-  );
-
-  it("rejects a missing connection before replay even without a response policy", async () => {
+  it("fails an approved call whose connection is gone, and the session continues", async () => {
     const fixture = setup("turn.started", false, "request-only");
     await fixture.step({
       delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's note." }] },
     });
     const parked = await fixture.step();
-    const request = getPendingInputBatches(readDurableSession(parked.sessionState).state)[0]!
-      .requests[0]!;
-    fixture.removeConnection();
-    await expect(
-      fixture.step({
+    const request = suspendedSteps(readDurableSession(parked.sessionState).state)[0]!.requests[0]!;
+    fixture.setConnection("removed");
+    const resumed = await fixture.step({
+      delivery: {
+        kind: "deliver",
+        auth: alice,
+        payloads: [{ inputResponses: [{ requestId: request.requestId, optionId: "approve" }] }],
+      },
+    });
+
+    expect(fixture.fetch).not.toHaveBeenCalled();
+    const failed = fixture.events.findIndex(
+      (event) =>
+        event.type === "action.result" &&
+        event.data.status === "failed" &&
+        (event.data.result as { callId: string }).callId === request.action.callId,
+    );
+    expect(fixture.events[failed]?.data.result).toMatchObject({ output: TOOL_GONE_RESULT });
+    // The model reads the failure as the call's result, and the turn completes.
+    expect(JSON.stringify(fixture.doStream.mock.calls.at(-1)![0])).toContain(
+      "is no longer available, so the call didn't run",
+    );
+    expect(fixture.events.slice(failed).map((event) => event.type)).toContain("turn.completed");
+    expect(suspendedSteps(readDurableSession(resumed.sessionState).state)).toEqual([]);
+  });
+
+  describe("a connection with a response policy, while its request waits", () => {
+    /** Parks Alice's note for approval and returns its request. */
+    async function parkNote(fixture: ReturnType<typeof setup>) {
+      await fixture.step({
+        delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's note." }] },
+      });
+      const parked = await fixture.step();
+      return suspendedSteps(readDurableSession(parked.sessionState).state)[0]!.requests[0]!;
+    }
+
+    /** Delivers Bob's approval, then runs until the session waits again. */
+    async function approveAsBob(fixture: ReturnType<typeof setup>, requestId: string) {
+      let result = await fixture.step({
         delivery: {
           kind: "deliver",
           auth: bob,
-          payloads: [{ inputResponses: [{ requestId: request.requestId, optionId: "approve" }] }],
+          payloads: [{ inputResponses: [{ requestId, optionId: "approve" }] }],
         },
-      }),
-    ).rejects.toThrow("connection for this tool call changed or is unavailable");
-    expect(fixture.fetch).not.toHaveBeenCalled();
+      });
+      while (result.action === "continue") result = await fixture.step();
+      return readDurableSession(result.sessionState).state;
+    }
+
+    it("settles the request as unavailable when the connection is gone", async () => {
+      const fixture = setup();
+      const request = await parkNote(fixture);
+      fixture.setConnection("removed");
+
+      const state = await approveAsBob(fixture, request.requestId);
+
+      expect(fixture.response).not.toHaveBeenCalled();
+      expect(fixture.fetch).not.toHaveBeenCalled();
+      expect(fixture.events).toContainEqual(
+        expect.objectContaining({
+          type: "approval.candidate",
+          data: expect.objectContaining({
+            outcome: "failed",
+            reason: "The tool this approval was for is no longer available, so the call won't run.",
+            requestId: request.requestId,
+            responderPrincipalId: "bob",
+          }),
+        }),
+      );
+      expect(fixture.events).toContainEqual(
+        expect.objectContaining({
+          type: "input.resolved",
+          data: expect.objectContaining({
+            resolutions: [
+              expect.objectContaining({ outcome: "denied", requestId: request.requestId }),
+            ],
+          }),
+        }),
+      );
+      // The model reads the failure under its own eve__tool call.
+      expect(modelToolResult(fixture, request.action.callId)).toEqual(
+        expect.objectContaining({
+          output: { type: "error-text", value: TOOL_GONE_RESULT },
+          toolName: CALL_TOOL_NAME,
+        }),
+      );
+      expect(suspendedSteps(state)).toEqual([]);
+      expect(fixture.events.at(-1)?.type).toBe("session.waiting");
+      expect(fixture.events.map((event) => event.type)).toContain("turn.completed");
+    });
+
+    it("keeps the request pending while the connection's resolver fails, and a retried approval runs it", async () => {
+      const fixture = setup();
+      const request = await parkNote(fixture);
+      fixture.setConnection("failing");
+      const before = fixture.events.length;
+
+      // The step restores its connections before it reads the approval, so the
+      // failure fails the turn, parks the session, and commits nothing.
+      await approveAsBob(fixture, request.requestId);
+
+      expect(fixture.events.slice(before).map((event) => event.type)).toEqual([
+        "step.failed",
+        "turn.failed",
+        "session.waiting",
+      ]);
+      expect(suspendedSteps(fixture.state())[0]!.requests[0]!.requestId).toBe(request.requestId);
+      expect(getApprovalAuditState(fixture.state()).candidateHistory).toEqual([]);
+      expect(fixture.response).not.toHaveBeenCalled();
+      expect(fixture.fetch).not.toHaveBeenCalled();
+
+      fixture.setConnection("available");
+      const approved = await approveAsBob(fixture, request.requestId);
+
+      expect(fixture.response).toHaveBeenCalledOnce();
+      expect(fixture.fetch).toHaveBeenCalledOnce();
+      expect(suspendedSteps(approved)).toEqual([]);
+    });
   });
 
-  it("leaves the request pending when its connection can no longer be reconstructed", async () => {
+  it("names the responder, not the requester, on a candidate's sign-in events", async () => {
+    const signIn = defineInteractiveAuthorization<{ readonly nonce: string }>({
+      async getToken() {
+        throw new ConnectionAuthorizationRequiredError("notes-approver");
+      },
+      async startAuthorization() {
+        return { challenge: { url: "https://idp.example/sign-in" }, resume: { nonce: "n1" } };
+      },
+      async completeAuthorization() {
+        return { token: "approver-token" };
+      },
+    });
     const fixture = setup();
+    fixture.response.mockImplementation(((context: ApprovalResponseContext) =>
+      context.auth
+        .getToken(signIn, { authKey: "notes-approver" })
+        .then(() => ({ status: "allowed" as const }))) as never);
     await fixture.step({
-      delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's note." }] },
+      delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's note for Bob." }] },
     });
     const parked = await fixture.step();
-    const request = getPendingInputBatches(readDurableSession(parked.sessionState).state)[0]!
-      .requests[0]!;
-    fixture.removeConnection();
+    const request = suspendedSteps(readDurableSession(parked.sessionState).state)[0]!.requests[0]!;
+
+    const signInStart = fixture.events.length;
     await fixture.step({
       delivery: {
         kind: "deliver",
@@ -488,18 +560,46 @@ describe("turn connection approval restoration", () => {
         payloads: [{ inputResponses: [{ requestId: request.requestId, optionId: "approve" }] }],
       },
     });
-    clearDurableDynamicCallbacks(sessionId);
-    const refused = await fixture.step();
-    expect(fixture.response).not.toHaveBeenCalled();
-    expect(fixture.fetch).not.toHaveBeenCalled();
-    const state = readDurableSession(refused.sessionState).state;
-    expect(getPendingInputBatches(state)[0]!.requests[0]!.requestId).toBe(request.requestId);
-    expect(getApprovalAuditState(state).candidateHistory).toEqual([
-      expect.objectContaining({
-        status: "failed",
-        reason: "Approval authorization is temporarily unavailable. Please try again.",
-      }),
-    ]);
+    // Ingesting the candidate, running its policy, and parking on sign-in are separate passes.
+    for (let result = await fixture.step(); result.action === "continue";) {
+      result = await fixture.step();
+    }
+    const candidate = fixture.events
+      .slice(signInStart)
+      .find((event) => event.type === "approval.candidate");
+    const required = fixture.events
+      .slice(signInStart)
+      .find((event) => event.type === "authorization.required");
+    expect(candidate?.data).toMatchObject({ responderPrincipalId: "bob" });
+    expect(required?.data).toMatchObject({
+      attemptId: expect.any(String),
+      candidateId: candidate?.data.candidateId,
+      principalId: "bob",
+    });
+
+    const completionStart = fixture.events.length;
+    await fixture.step({
+      delivery: {
+        kind: "deliver",
+        payloads: [
+          {
+            authorizationCallback: {
+              attemptId: required?.data.attemptId,
+              callback: { method: "GET", params: { code: "ok" } },
+              connectionName: required?.data.name,
+            },
+          },
+        ],
+      },
+    });
+    const completed = fixture.events
+      .slice(completionStart)
+      .find((event) => event.type === "authorization.completed");
+    expect(completed?.data).toMatchObject({
+      attemptId: required?.data.attemptId,
+      outcome: "authorized",
+      principalId: "bob",
+    });
   });
 
   it("restores the originating connection for a sign-in callback without a premature turn", async () => {
@@ -508,7 +608,7 @@ describe("turn connection approval restoration", () => {
       delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's note for Bob." }] },
     });
     const parked = await fixture.step();
-    const batch = getPendingInputBatches(readDurableSession(parked.sessionState).state)[0]!;
+    const batch = suspendedSteps(readDurableSession(parked.sessionState).state)[0]!;
     const request = batch.requests[0]!;
     const ingested = await fixture.step({
       delivery: {
@@ -556,33 +656,34 @@ describe("turn connection approval restoration", () => {
         ],
       },
     });
-    expect(fixture.policyTurns).toEqual([batch.event!.turnId]);
+    expect(fixture.policyTurns).toEqual([batch.event.turnId]);
     expect(fixture.response).toHaveBeenCalledOnce();
     expect(fixture.fetch).toHaveBeenCalledOnce();
+    // The approval held its turn, so the responder's sign-in resumes it without starting another.
     const events = fixture.events.slice(start);
-    expect(events.findIndex((event) => event.type === "authorization.completed")).toBeLessThan(
-      events.findIndex((event) => event.type === "turn.started"),
-    );
-    expect(events.filter((event) => event.type === "turn.started")).toHaveLength(1);
+    expect(events.some((event) => event.type === "authorization.completed")).toBe(true);
+    expect(events.filter((event) => event.type === "turn.started")).toHaveLength(0);
   });
 
   it.each([false, true])(
-    "approves and executes a discovered tool with a cold callback cache: %s",
+    "approves and executes a connection tool with a cold callback cache: %s",
     async (cold) => {
       const fixture = setup();
       await fixture.step({
         delivery: { kind: "deliver", payloads: [{ message: "Save hello in notes." }] },
       });
       const parked = await fixture.step();
-      const request = getPendingInputBatches(readDurableSession(parked.sessionState).state)[0]!
+      const request = suspendedSteps(readDurableSession(parked.sessionState).state)[0]!
         .requests[0]!;
       expect(request.action.toolName).toBe("notes__saveNote");
+      expect(request.prompt).toBe("Approve Notes: Save note?");
       expect(
-        getPendingInputBatches(readDurableSession(parked.sessionState).state)[0]!
-          .toolReplayIdentities,
-      ).toEqual({
-        [request.requestId]: expect.stringMatching(/^connection:/),
-      });
+        fixture.events.flatMap((event) =>
+          event.type === "actions.requested"
+            ? Object.values(event.data.presentation ?? {}).map((entry) => entry.label)
+            : [],
+        ),
+      ).toContain("Notes: Save note");
       expect(fixture.fetch).not.toHaveBeenCalled();
       if (cold) clearDurableDynamicCallbacks(sessionId);
       const candidate = await fixture.step({
@@ -602,15 +703,21 @@ describe("turn connection approval restoration", () => {
         getApprovalAuditState(readDurableSession(resumed.sessionState).state).settlements,
       ).toEqual([expect.objectContaining({ outcome: "allowed", requestId: request.requestId })]);
       expect(fixture.fetch).toHaveBeenCalledOnce();
-      expect(getPendingInputBatches(readDurableSession(resumed.sessionState).state)).toEqual([]);
+      // Bob approved Alice's call, so the approved request goes out as Bob.
+      expect(callerHeader(fixture.fetch.mock.calls[0])).toBe("bob");
+      expect(suspendedSteps(readDurableSession(resumed.sessionState).state)).toEqual([]);
       expect(resumed.serializedContext).not.toHaveProperty("eve.pendingConnectionCalls");
-      expect(fixture.events.filter((event) => event.type === "turn.started")).toHaveLength(2);
+      expect(fixture.events.filter((event) => event.type === "turn.started")).toHaveLength(1);
       expect(fixture.events).toContainEqual(
         expect.objectContaining({
           type: "action.result",
           data: expect.objectContaining({
             status: "completed",
-            result: expect.objectContaining({ toolName: "notes__saveNote" }),
+            result: expect.objectContaining({
+              callId: request.action.callId,
+              output: { body: { saved: true }, status: 200, statusText: "" },
+              toolName: "notes__saveNote",
+            }),
           }),
         }),
       );
@@ -623,8 +730,7 @@ describe("turn connection approval restoration", () => {
       delivery: { kind: "deliver", payloads: [{ message: "Save hello in notes." }] },
     });
     const parked = await fixture.step();
-    const request = getPendingInputBatches(readDurableSession(parked.sessionState).state)[0]!
-      .requests[0]!;
+    const request = suspendedSteps(readDurableSession(parked.sessionState).state)[0]!.requests[0]!;
     await fixture.step({
       delivery: {
         kind: "deliver",
@@ -650,8 +756,7 @@ describe("turn connection approval restoration", () => {
       delivery: { kind: "deliver", payloads: [{ message: "Save hello in notes." }] },
     });
     const parked = await fixture.step();
-    const request = getPendingInputBatches(readDurableSession(parked.sessionState).state)[0]!
-      .requests[0]!;
+    const request = suspendedSteps(readDurableSession(parked.sessionState).state)[0]!.requests[0]!;
     await fixture.step({
       delivery: {
         kind: "deliver",
@@ -665,3 +770,21 @@ describe("turn connection approval restoration", () => {
     expect(fixture.fetch).toHaveBeenCalledOnce();
   });
 });
+
+/** The result the model read back for `callId` on its latest request. */
+function modelToolResult(fixture: ReturnType<typeof setup>, callId: string): unknown {
+  const [options] = fixture.doStream.mock.calls.at(-1)! as [
+    { prompt: { content: unknown; role: string }[] },
+  ];
+  return options.prompt
+    .flatMap((message) =>
+      message.role === "tool" ? (message.content as { toolCallId: string }[]) : [],
+    )
+    .find((part) => part.toolCallId === callId);
+}
+
+function callerHeader(call: readonly unknown[] | undefined): string | null {
+  const [input, init] = (call ?? []) as [Request | string | URL, RequestInit | undefined];
+  const headers = new Headers(input instanceof Request ? input.headers : init?.headers);
+  return headers.get("x-caller");
+}

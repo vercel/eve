@@ -58,7 +58,72 @@ export default defineTool({
 
 The option defaults to `true` and works with `defineTool` and `defineWorkflowTool`. A root copy does not receive a tool with this option, and a tool authored inside a declared subagent is unavailable because that agent runs in a delegated session. This controls tool availability only; it does not add or remove entries from a workflow's `ctx.agents` registry.
 
+### Keep a tool out of the tool list
+
+Set `deferred: true` when the model needs a tool only occasionally, or when an agent has more tools than you want in every model request:
+
+```ts title="agent/tools/export_report.ts"
+export default defineTool({
+  deferred: true,
+  description: "Export a finished report as a PDF.",
+  inputSchema: z.object({ reportId: z.string() }),
+  execute({ reportId }) {
+    return exportReport(reportId);
+  },
+});
+```
+
+A deferred tool is not in the model's tool list, and eve doesn't name it in context. The model finds its name, description, and signature with [`eve__search`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) and calls it with `eve__tool({ name: "export_report", input })`. After that, the call runs exactly like a direct call: approvals, `endsTurn`, `toModelOutput`, hooks, and stream events see `export_report`, not `execute`.
+
+The option works with `defineTool`, `defineWorkflowTool`, and dynamic tool entries. Provider tools such as `webSearch()` cannot be deferred, because the provider has to see their definition; the compiler rejects `deferred` on them. To defer an agent, set [`tool: "deferred"`](/docs/subagents#declared-subagents) on its `defineAgent` definition.
+
 Compiled tools preserve Zod schema composition, including input and output schemas imported from helper modules. Durable replay metadata stays separate from the original schema, so adding it does not mutate shared schema objects.
+
+### End the turn after a tool call
+
+Set `endsTurn: true` when a successful call is the whole answer, such as reacting to a message. eve ends the turn after the call instead of calling the model again, so the turn completes without a final message and channels post no reply:
+
+```ts title="agent/tools/react.ts"
+export default defineTool({
+  description: "React to the current message. Use this when a reaction is the whole answer.",
+  endsTurn: true,
+  inputSchema: z.object({ emoji: z.string() }),
+  async execute({ emoji }) {
+    await addReaction(emoji);
+    return { emoji };
+  },
+});
+```
+
+With `endsTurn: true`, eve tells the model that the call ends its turn by appending this sentence, after a blank line, to the description the model sees:
+
+```text
+Calling this tool ends your turn once it succeeds: do not write a reply or call other tools in the same step. If it fails, you will see the error and can continue.
+```
+
+Write `description` for what the tool does and when to use it, and leave the turn-ending rule to eve. The appended sentence is not part of the tool definition, so `eve info` shows the description as you wrote it.
+
+To decide from the result instead, pass a function. eve calls it with the output of `execute` after each successful call, and the call ends the turn only when the function returns `true` or resolves to `true`. If the function throws or rejects, eve logs a warning and the turn continues as though it returned `false`:
+
+```ts title="agent/tools/react.ts"
+export default defineTool({
+  description:
+    "React to the current message. When the reaction posts, your turn ends; otherwise, reply in text.",
+  inputSchema: z.object({ emoji: z.string() }),
+  async execute({ emoji }) {
+    return { posted: await addReaction(emoji) };
+  },
+  endsTurn: (output) => output.posted,
+});
+```
+
+Declare `endsTurn` after `execute`, as above, so TypeScript infers `output` from what `execute` returns. With an `outputSchema`, `output` takes that schema's type wherever `endsTurn` appears.
+
+eve does not append the sentence for a function, because whether the call ends the turn is known only after it runs. Describe the behavior in `description` when the model needs to know it.
+
+The turn ends only when every tool call in the model's step can end the turn and succeeds, and every `endsTurn` function returns `true`. Otherwise the model receives the results and continues as usual. Text the model writes before the call is narration, so channels do not post it as the reply. While [tasks](/docs/tools/tasks) are still working, the turn waits for them and then calls the model again.
+
+eve ignores `endsTurn` in delegated sessions, which must return a reply to their caller, and on turns that request structured output; the model does not see the appended sentence there, and eve does not call an `endsTurn` function. `defineWorkflowTool` rejects `endsTurn` at build time. Dynamic tool entries accept `endsTurn: true` or `false`; eve rejects a function when the resolver returns the entry, because dynamic tool metadata is stored durably. To end a turn without taking any other action, add the opt-in [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool.
 
 ### Label tool activity
 
@@ -80,13 +145,15 @@ export default defineTool({
 });
 ```
 
-The label is presentation only. It does not replace the path-derived tool name, enter model input, or change execution. eve records the bounded label on the corresponding public action event so activity renderers and other authorized stream consumers can use it without interpreting raw tool data. Built-in channel activity can show `Deploy storefront to production` instead of `deploy`; if the callback throws or returns an empty label, activity falls back to the tool name.
+The label is presentation only. It does not replace the path-derived tool name, enter model input, or change execution. eve records the bounded label on the corresponding public action event so activity renderers and other authorized stream consumers can use it without interpreting raw tool data. Built-in channel activity can show `Deploy storefront to production` instead of `Deploy`; if the callback throws or returns an empty label, activity falls back to a readable form of the tool name, such as `Sync accounts` for `sync_accounts`.
 
-Provided tools define labels for `bash`, `glob`, `grep`, `load_skill`, `read_file`, `web_fetch`, `web_search`, and `write_file`.
+Provided tools define labels for `bash`, `glob`, `grep`, `read_file`, `web_fetch`, `web_search`, and `write_file`.
+
+Calls the model makes through the [catalog](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) read the same way. A deferred tool, agent, or connection tool called through `eve__tool` shows its own label, exactly as a direct call would. An `eve__search` call shows `Search tools for “linear issues”`, then `Searched tools for “linear issues”, found 5` when it returns. A skill load shows `Load skill release-notes`, then `Loaded skill release-notes`, and a connection's sign-in entry shows `Sign in to Linear`.
 
 ### Stream preliminary tool results
 
-For a `defineTool` executor with the default execution mode, an async generator streams complete
+For a `defineTool` executor, an async generator streams complete
 output snapshots before it finishes. Each `yield` replaces the previous snapshot; the final
 yield is the normal tool result the model receives:
 
@@ -112,8 +179,8 @@ snapshot is visible to channels, hooks, and clients but never enters model
 history or `toModelOutput`; only the final yield does. Treat snapshots as
 last-write-wins by tool call id, not append-only progress. The durable runtime
 can retry a step and replay overlapping snapshots. A generator `return` value is not used as
-the result in this mode; yield the final output. Workflow and background generators have
-different result rules, described under [yield and return](#yield-and-return).
+the result in this mode; yield the final output. Workflow generators have different result
+rules, described under [yield and return](#yield-and-return).
 
 Use `label.delta(input, partial)` to project preliminary snapshots into
 user-facing activity, and `label.complete(input, output)` to describe successful
@@ -128,69 +195,46 @@ label. `label.complete` does not run for failed or rejected tool calls. The
 full values remain available in `action.partial` and `action.result`; renderers
 receive only the projected text.
 
-### Background execution
+### Durable waits
 
-Background execution controls how a workflow tool delivers its result to the parent agent.
-Set `execution: "background"` on `defineWorkflowTool`; ordinary `defineTool` calls always finish
-inside the initiating step.
+A tool call with an `execute` entry point finishes before the model continues. The definition
+decides whether the executor can wait durably while the call is pending:
 
-| Definition                                       | Durable waits inside `execute`                           | Result delivered to the model                                                                          |
-| ------------------------------------------------ | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `defineTool`                                     | No; the executor runs inside the initiating step.        | Executor output after it finishes.                                                                     |
-| `defineWorkflowTool`                             | Yes; the tool call waits while the workflow can suspend. | Workflow output after it finishes.                                                                     |
-| `defineWorkflowTool` + `execution: "background"` | Yes; the workflow body can outlive the initiating step.  | Task receipt before the body finishes; one combined report after all tasks in its cohort are terminal. |
+| Definition           | Durable waits inside `execute`                           | Result delivered to the model      |
+| -------------------- | -------------------------------------------------------- | ---------------------------------- |
+| `defineTool`         | No; the executor runs inside the initiating step.        | Executor output after it finishes. |
+| `defineWorkflowTool` | Yes; the tool call waits while the workflow can suspend. | Workflow output after it finishes. |
 
-A background workflow tool's result is the receipt `{ status: "working", taskId }`; its eventual
-output belongs to the task. Use this mode when the conversation should continue while the body
-waits for a person, webhook, or timer.
+A workflow tool that defines `task(input, ctx)` in place of `execute` runs each call as a
+[task](/docs/tools/workflows#run-calls-as-tasks-task):
+the call returns a receipt at once, and the workflow's output reaches the model later in a
+`task.result` message. One that defines `serve(receive, ctx)` runs a
+[resumable task](/docs/tools/workflows#resumable-tasks-serve), which the model can send more calls
+by its `taskId`.
 
-For background tools, `outputSchema` and `toModelOutput` describe the fixed receipt. The body's
-return value is available through the completed task's output.
+Built-in, declared local, and remote subagent tools run as resumable tasks: each call returns a
+receipt at once, and the child's reply reaches the model later in a `task.result` message.
+Inside an authored workflow, awaiting a [`ctx.agent` session's `response.result()`](/docs/tools/workflows#delegate-work-ctxagent)
+waits for the child's turn to end instead.
 
-The `TaskExec` argument and `task.postMessage` have been removed. Return the terminal result;
-background yields are consumed without publishing progress or retaining a task-progress stream. In a workflow body, keep values needed after a wait in local variables; workflow replay
-reconstructs them across durable waits.
-Use [`ctx.ask`](/docs/tools/workflows#ask-a-human-ctxask) when the body needs an answer from the human.
-Background tools are a normal execution mode and need no root-agent flag. Built-in, declared local,
-and remote subagents use this task lifecycle automatically.
-
-After the initiating turn accepts background tasks, eve supplies runtime-authored state for that
-cohort and instructs the model to acknowledge that the work started without waiting for results.
-[Schedule](/docs/schedules)-initiated turns are the exception: no user prompted them, so their
-launches keep conditional delivery and send no acknowledgement.
-Channel sessions default to `taskDeliveryPolicy: "auto"`: ready results can invoke
-the parent while other tasks continue. The parent reports independently useful
-results and can stay silent until related work settles. Each reporting context
-includes the whole cohort and available outputs, including previously withheld
-results. Ready results may share a turn.
-Schedules default to `"cohort"`: terminal outcomes wait for overlapping tasks
-to settle, then arrive together. Pass `taskDeliveryPolicy` to `send(...)` to select
-or update the session policy. See
-[Background task results](/docs/channels/overview#background-task-results) and
-[Schedules](/docs/schedules#background-task-results).
-User questions, input requests, and explicit task messages do not wait for the
-cohort under either policy. Failure and cancellation update lifecycle state
-immediately; their automatic reports follow the selected policy.
-See [Completion batching](/docs/subagents#completion-batching).
+The `TaskExec` argument and `task.postMessage` have been removed. Return the result. In a workflow
+body, keep values needed after a wait in local variables; workflow replay reconstructs them across
+durable waits. Use [`ctx.ask`](/docs/tools/workflows#ask-a-human-ctxask) when the body needs an
+answer from the human.
 
 ### Yield and return
 
 `yield` hands a value to eve's generator consumer, which processes it and advances the generator.
 It does not by itself create a durable wait for a person, timer, or external event. The value's
-meaning depends on the tool's execution mode:
+meaning depends on the executor:
 
-| Executor                                            | Ordinary `yield value`                                                                  | Final output                                                                                                      |
-| --------------------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `defineTool`, default execution                     | Earlier values are `action.partial` snapshots; the final yield becomes the tool result. | Last yielded value; a generator `return` value is ignored.                                                        |
-| `defineWorkflowTool`, default execution             | Every yield is an `action.partial` snapshot.                                            | Explicit return value; falls back to the last yield if the return is `null` or `undefined`, then to `null`.       |
-| `defineWorkflowTool` with `execution: "background"` | Consumed without publishing progress or requesting a parent-agent turn.                 | Explicit return value becomes the task output; no return completes with `null`. The last yield is not a fallback. |
+| Executor             | Ordinary `yield value`                                                                  | Final output                                                                                                |
+| -------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `defineTool`         | Earlier values are `action.partial` snapshots; the final yield becomes the tool result. | Last yielded value; a generator `return` value is ignored.                                                  |
+| `defineWorkflowTool` | Every yield is an `action.partial` snapshot.                                            | Explicit return value; falls back to the last yield if the return is `null` or `undefined`, then to `null`. |
 
-For a background workflow tool, return completes the task and throw fails it. The automatic
-cohort report is separate from the original tool call's receipt.
-
-Progress snapshots do not enter model history as intermediate tool results. For a default
-executor, the final output selected by the rules above becomes the tool result. For a background
-executor, the terminal cohort report provides input to a later parent-agent turn.
+Progress snapshots do not enter model history as intermediate tool results. The final output
+selected by the rules above becomes the tool result.
 
 ### Workflows as tools
 
@@ -206,6 +250,7 @@ examples.
 - `ctx.session`: session metadata, turn, auth, parent lineage.
 - `ctx.callId`: the id of the current tool call, carried by the call's [stream events](/docs/concepts/sessions-runs-and-streaming) and approval context.
 - `ctx.toolName`: the final runtime name the model called, including any namespace qualification.
+- `ctx.messages`: the model input for the step that requested this call, the same messages a `step.started` [dynamic resolver](/docs/guides/dynamic-capabilities) reads.
 - `ctx.abortSignal`: aborts when the active turn is cancelled. Pass it to cancellation-aware work; sandbox sessions from `ctx.getSandbox()` are already bound to it.
 - `ctx.getSandbox()`: the live [sandbox](/docs/sandbox) handle.
 
@@ -287,9 +332,11 @@ export default defineTool({
 
 The `toolOutput.text` and `toolOutput.json` builders construct the other two output shapes; hand-written literals remain valid everywhere.
 
-File payloads must be base64 strings — raw bytes (`Uint8Array`, `Buffer`) are rejected because they do not survive eve's durable JSON boundary. Keep payloads small: a content-part image is persisted in session history and re-sent on every subsequent model call, and eve warns above 3 MiB. Sending image parts to a model without vision support fails with that provider's error, the same as image parts in user messages.
+File payloads must be base64 strings — raw bytes (`Uint8Array`, `Buffer`) are rejected because they do not survive eve's durable JSON boundary. eve warns above 3 MiB. Sending image parts to a model without vision support fails with that provider's error, the same as image parts in user messages.
 
-When older turns are compacted, file payloads are dropped from the summary and replaced with a text stub naming the file and media type — the model cannot re-see a compacted image. Content parts are for "look at this now"; if the agent may need an artifact again later, write it to the [sandbox](/docs/sandbox) and return its path.
+eve writes each returned file to the session sandbox and keeps only a reference in session history, so the file's bytes are not stored again on every workflow step. Every later model call sends the same file, which keeps it visible on later turns and keeps the provider's prompt cache valid. See [Inbound attachments](/docs/sandbox#inbound-attachments). Compaction counts an image at roughly what providers bill for it rather than its base64 length.
+
+When compaction drops older tool results, each file becomes a text reference such as `Attached file /workspace/.eve/attachments/<hash>/chart.png (image/png)`. The built-in `read_file` tool shows PNG, JPEG, GIF, and WebP files up to 3 MiB to the model as images, so the agent can open a compacted image again.
 
 Do not return secrets, credentials, unnecessary personal data, or unbounded sensitive content from tools. Filter, minimize, and redact tool outputs before returning them.
 

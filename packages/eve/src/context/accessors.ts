@@ -7,6 +7,7 @@ export type {
   SessionAuth,
   SessionAuthContext,
   SessionParent,
+  SessionPredecessor,
   SessionTurn,
 } from "#context/keys.js";
 

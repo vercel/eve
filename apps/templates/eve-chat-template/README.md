@@ -43,10 +43,10 @@ Run the web app locally without additional services:
 pnpm dev
 ```
 
-To run the web app and eve as the Vercel service graph, use:
+To run the web app and eve as the Vercel service graph without linking a Vercel project, use:
 
 ```bash
-pnpm dev:services
+pnpm dev:all
 ```
 
 To require the same password locally, put this in `.env.local`:
@@ -130,7 +130,7 @@ Start the web app development server:
 pnpm dev
 ```
 
-Use `pnpm dev:services` to run the full Vercel service graph locally.
+Use `pnpm dev:all` to run the full Vercel service graph locally without linking a Vercel project.
 
 ## What Is Included
 

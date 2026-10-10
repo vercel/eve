@@ -1,9 +1,10 @@
-import { createElement, StrictMode, useState } from "react";
+import { createElement, StrictMode, useEffect, useRef, useState } from "react";
 import { act, create as createRenderer } from "react-test-renderer";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { useEveAgent, type UseEveAgentHelpers } from "#react/use-eve-agent.js";
 import type { EveMessageData } from "#client/message-reducer.js";
+import type { ConversationState } from "#client/conversation-state.js";
 import {
   EVE_MESSAGE_STREAM_VERSION,
   EVE_SESSION_ID_HEADER,
@@ -18,7 +19,7 @@ import {
   createTurnFailedEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
-import { stampTestEvents } from "#internal/testing/events.js";
+import { TEST_USAGE, stampTestEvents } from "#internal/testing/events.js";
 import type { ClientSessionState } from "#client/types.js";
 
 function createStartedMessageResponse(sessionId: string, continuationToken: string): Response {
@@ -76,6 +77,10 @@ function createAbortError(): Error {
 
 function optimisticUserData(message: string, status: "failed" | "submitted") {
   return {
+    tasks: {},
+    agents: {},
+    inputs: {},
+    turns: {},
     messages: [
       {
         id: expect.stringMatching(/^optimistic:/),
@@ -94,8 +99,12 @@ function completedTurnData(input: {
   readonly assistantMessage?: string;
   readonly turnId: string;
   readonly userMessage: string;
-}): EveMessageData {
+}): ConversationState {
   return {
+    tasks: {},
+    agents: {},
+    inputs: {},
+    turns: {},
     messages: [
       {
         id: expect.stringMatching(/^evt_.+:user$/),
@@ -118,6 +127,7 @@ function completedTurnData(input: {
               parts: [
                 { type: "step-start" as const },
                 {
+                  id: expect.stringMatching(/^evt_/),
                   state: "done" as const,
                   stepIndex: 0,
                   text: input.assistantMessage,
@@ -185,7 +195,7 @@ describe("useEveAgent", () => {
       const cancel = vi.fn();
       const body = new ReadableStream<Uint8Array>({
         start(controller) {
-          const [waiting] = stampTestEvents([createSessionWaitingEvent()]);
+          const [waiting] = stampTestEvents([createSessionWaitingEvent(TEST_USAGE)]);
           controller.enqueue(new TextEncoder().encode(`${JSON.stringify(waiting)}\n`));
         },
         cancel,
@@ -232,7 +242,7 @@ describe("useEveAgent", () => {
     let creates = 0;
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
       if (init?.method === "POST") return createStartedMessageResponse(`session_${++creates}`, "");
-      return createEagerStreamResponse([createSessionWaitingEvent()]);
+      return createEagerStreamResponse([createSessionWaitingEvent(TEST_USAGE)]);
     });
     let agent: UseEveAgentHelpers<EveMessageData> | undefined;
     function Chat({
@@ -283,7 +293,7 @@ describe("useEveAgent", () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockReturnValueOnce(accepted.promise)
-      .mockResolvedValueOnce(createEagerStreamResponse([createSessionWaitingEvent()]));
+      .mockResolvedValueOnce(createEagerStreamResponse([createSessionWaitingEvent(TEST_USAGE)]));
     let agent: UseEveAgentHelpers<EveMessageData> | undefined;
     function Chat({ prewarm }: { readonly prewarm: boolean }) {
       agent = useEveAgent({ prewarm });
@@ -346,7 +356,7 @@ describe("useEveAgent", () => {
     let creates = 0;
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
       if (init?.method === "POST") return createStartedMessageResponse(`session_${++creates}`, "");
-      return createEagerStreamResponse([createSessionWaitingEvent()]);
+      return createEagerStreamResponse([createSessionWaitingEvent(TEST_USAGE)]);
     });
     let agent: UseEveAgentHelpers<EveMessageData> | undefined;
     let setPrewarm: ((value: boolean) => void) | undefined;
@@ -450,6 +460,45 @@ describe("useEveAgent", () => {
     });
   });
 
+  it("keeps a turn sent on mount through a Strict Mode effect replay", async () => {
+    let streamSignal: AbortSignal | null | undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      if ((init?.method ?? "GET") === "POST") {
+        return createStartedMessageResponse("session_1", "http:session_1");
+      }
+
+      streamSignal = init?.signal;
+      return new Response(new ReadableStream<Uint8Array>(), {
+        headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+      });
+    });
+
+    let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
+
+    function TestComponent() {
+      const agent = useEveAgent({ prewarm: false });
+      const sent = useRef(false);
+      helpers = agent;
+      useEffect(() => {
+        if (sent.current) return;
+        sent.current = true;
+        void agent.send("Hello");
+      }, [agent]);
+      return null;
+    }
+
+    await act(async () => {
+      create(createElement(StrictMode, null, createElement(TestComponent)));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+
+    expect(helpers?.status).toBe("submitted");
+    expect(helpers?.data).toEqual(optimisticUserData("Hello", "submitted"));
+    expect(streamSignal?.aborted).toBe(false);
+  });
+
   it.each([undefined, false])("defers creation until send (prewarm=%s)", async (prewarm) => {
     const events = [
       createMessageReceivedEvent({
@@ -463,7 +512,7 @@ describe("useEveAgent", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(TEST_USAGE),
     ];
 
     const startResponse = createDeferred<Response>();
@@ -586,7 +635,7 @@ describe("useEveAgent", () => {
       .mockImplementation(async (_request, init) =>
         init?.method === "POST"
           ? await startResponse.promise
-          : createEagerStreamResponse([createSessionWaitingEvent()]),
+          : createEagerStreamResponse([createSessionWaitingEvent(TEST_USAGE)]),
       );
 
     let randomWord = "jazz";
@@ -643,7 +692,7 @@ describe("useEveAgent", () => {
       .mockImplementation(async (_request, init) =>
         init?.method === "POST"
           ? await startResponse.promise
-          : createEagerStreamResponse([createSessionWaitingEvent()]),
+          : createEagerStreamResponse([createSessionWaitingEvent(TEST_USAGE)]),
       );
 
     let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
@@ -722,7 +771,7 @@ describe("useEveAgent", () => {
         stepIndex: 0,
         turnId: "turn_2",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(TEST_USAGE),
     ];
 
     vi.spyOn(globalThis, "fetch")
@@ -802,6 +851,7 @@ describe("useEveAgent", () => {
         turnId: "turn_1",
       }),
       createSessionFailedEvent({
+        usage: TEST_USAGE,
         code: "MODEL_CALL_FAILED",
         message: "Bad Request",
         sessionId: "session_1",
@@ -874,7 +924,7 @@ describe("useEveAgent", () => {
         sequence: 0,
         turnId: "turn_1",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(TEST_USAGE),
     ];
 
     const startResponse = createDeferred<Response>();
@@ -938,7 +988,7 @@ describe("useEveAgent", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(TEST_USAGE),
     ]);
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -984,7 +1034,7 @@ describe("useEveAgent", () => {
       init?.method === "POST"
         ? await startResponse.promise
         : await startResponse.promise.then(() =>
-            createEagerStreamResponse([createSessionWaitingEvent()]),
+            createEagerStreamResponse([createSessionWaitingEvent(TEST_USAGE)]),
           ),
     );
 

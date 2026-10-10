@@ -1,11 +1,6 @@
 import type { TelegramInstrumentationMetadata } from "#public/channels/telegram/index.js";
 import { defaultDeliverResult, type ChannelAdapterContext } from "#channel/adapter.js";
-import {
-  INTERNAL_CHANNEL_DELIVER,
-  type ChannelFrom,
-  type ChannelResolveSession,
-  type InternalChannelSource,
-} from "#channel/channel-operations.js";
+import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
@@ -38,6 +33,7 @@ import {
 import {
   defaultEvents,
   defaultOnMessage,
+  defaultTelegramAuth,
   isTelegramBotMentioned,
 } from "#public/channels/telegram/defaults.js";
 import {
@@ -45,7 +41,7 @@ import {
   isTelegramSyntheticResponse,
   resolveTelegramInputResponses,
   telegramCallbackInputResponse,
-  telegramReplyInputResponse,
+  telegramReplyInputResponses,
   type TelegramHitlState,
 } from "#public/channels/telegram/hitl.js";
 import {
@@ -107,6 +103,11 @@ export interface TelegramChannelState extends TelegramHitlState {
   messageThreadId: number | null;
   /** Telegram user id that triggered the current session/turn. */
   triggeringUserId?: string | null;
+  /**
+   * Bot message id that the triggering message replied to. The deliver hook
+   * reads it from delivery state to answer a pending ForceReply prompt.
+   */
+  replyToBotMessageId?: string | null;
   /** Public authorization status messages, keyed by connection name. */
   pendingAuthMessageIds?: Record<string, string>;
 }
@@ -157,6 +158,7 @@ export interface TelegramChannelEvents {
   readonly "message.completed"?: TelegramEventHandler<"message.completed">;
   readonly "message.appended"?: TelegramEventHandler<"message.appended">;
   readonly "input.requested"?: TelegramEventHandler<"input.requested">;
+  readonly "input.resolved"?: TelegramEventHandler<"input.resolved">;
   readonly "turn.failed"?: TelegramEventHandler<"turn.failed">;
   readonly "turn.completed"?: TelegramEventHandler<"turn.completed">;
   readonly "turn.cancelled"?: TelegramEventHandler<"turn.cancelled">;
@@ -583,29 +585,14 @@ async function dispatchMessage(input: {
     username: input.message.from?.username,
   });
   const channelContext = result.context ?? [];
-  const replyText = input.message.text || input.message.caption;
-  const replyInputResponses =
-    input.message.replyToMessage?.from?.isBot === true && replyText.trim().length > 0
-      ? [
-          telegramReplyInputResponse({
-            messageId: input.message.replyToMessage.messageId,
-            text: replyText,
-          }),
-        ]
-      : undefined;
 
   try {
-    const source = input.from(
-      telegramContinuationTokenFromState(state),
-    ) as InternalChannelSource<TelegramChannelState>;
-    await source[INTERNAL_CHANNEL_DELIVER](
-      {
-        context: [contextBlock, ...channelContext],
-        inputResponses: replyInputResponses,
-        message: turnMessage,
-      },
-      { auth: result.auth, state, title: result.title },
-    );
+    await input.from(telegramContinuationTokenFromState(state)).send(turnMessage, {
+      auth: result.auth,
+      context: [contextBlock, ...channelContext],
+      state,
+      title: result.title,
+    });
   } catch (error) {
     log.error("message delivery failed", { error });
   }
@@ -646,8 +633,10 @@ async function dispatchCallbackQuery(input: {
     if (!input.query.message || !state.chatId) return;
     try {
       const source = input.from(telegramContinuationTokenFromState(state));
+      // The presser acts as themselves, so a press that starts a turn lets
+      // their next message steer it.
       await source.respond([telegramCallbackInputResponse(input.query.data)], {
-        auth: null,
+        auth: defaultTelegramAuth({ ...input.query.message, from: input.query.from }),
       });
     } catch (error) {
       log.error("callback query delivery failed", { error });
@@ -678,7 +667,11 @@ function attachTelegramDeliver(channel: TelegramChannel): void {
   if (!isCompiledChannel(channel)) return;
   const adapter = channel.adapter;
   adapter.deliver = (payload: DeliverPayload, ctx: ChannelAdapterContext<TelegramChannelState>) => {
-    const responses = payload.inputResponses ?? [];
+    const state = payload.state as Partial<TelegramChannelState> | undefined;
+    const responses = [
+      ...(payload.inputResponses ?? []),
+      ...telegramReplyInputResponses(state?.replyToBotMessageId, payload.message),
+    ];
     if (responses.some(isTelegramSyntheticResponse)) {
       const resolved = resolveTelegramInputResponses(ctx.state, responses);
       if (resolved.length > 0) {

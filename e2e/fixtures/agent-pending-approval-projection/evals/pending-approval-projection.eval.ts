@@ -1,21 +1,21 @@
 import { defineEval } from "eve/evals";
 
-const INITIAL_TARGET = "005INITIALTARGET";
-const CORRECTED_TARGET = "005CORRECTEDTARGET";
+const INITIAL_TARGET = "Alice";
+const CORRECTED_TARGET = "Bob";
 
 export default defineEval({
   tags: ["real-model"],
-  description: "A newer user correction supersedes the model-visible pending-approval projection.",
+  description:
+    "An updated plan uses the latest requested target while an earlier action awaits approval.",
   async test(t) {
     const turn = await t.send(
       [
-        "I am the original requester and confirm the intended outcome:",
-        `set the target to explicit user id ${CORRECTED_TARGET}, not ${INITIAL_TARGET}.`,
-        "The correction is authorized. Please revise and submit the plan now.",
+        `The change plan should now target ${CORRECTED_TARGET} instead of ${INITIAL_TARGET}.`,
+        "Please update the plan and send the revised version.",
       ].join("\n"),
       {
         clientContext: [
-          `Original request: present a change plan targeting user id ${INITIAL_TARGET}.`,
+          `Alice asked for a change plan targeting ${INITIAL_TARGET}.`,
           [
             "[Pending approvals]",
             "The following tool calls are awaiting approval and have not executed:",

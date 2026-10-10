@@ -1,6 +1,5 @@
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import type { HarnessToolMap } from "#harness/types.js";
 import type { ContextReader } from "#context/key.js";
 import {
   SessionIdKey,
@@ -103,12 +102,6 @@ export function replayDynamicTools(
   if (metadata.length > 0 && scope.sessionId.length === 0) {
     throw new Error("Dynamic tool replay requires a session id.");
   }
-  const background = metadata.find((entry) => entry.execution === "background");
-  if (background !== undefined) {
-    throw new Error(
-      `Dynamic tool "${background.name}" used removed background execution. Move durable background work to a static defineWorkflowTool().`,
-    );
-  }
   return metadata.map((entry) => {
     const owner = { ...entry, ...scope };
     const approvalKeyReference = entry.callbacks.approvalKey;
@@ -147,7 +140,10 @@ export function replayDynamicTools(
       -readonly [K in keyof HarnessToolDefinition]: HarnessToolDefinition[K];
     } = {
       availableInSubagents: entry.availableInSubagents,
+      deferred: entry.deferred,
+      frameworkTool: entry.frameworkTool,
       description: entry.description,
+      endsTurn: entry.endsTurn,
       execute: createToolExecuteWithAuth({
         scope: entry.name,
         execute: (input, context) => {
@@ -159,7 +155,6 @@ export function replayDynamicTools(
       }),
       inputSchema: replayDynamicToolSchema(entry, owner, "inputSchema")!,
       name: entry.name,
-      execution: entry.execution,
       approval: buildReplayedApproval(entry, owner),
       ...(approvalKeyReference === undefined
         ? {}
@@ -263,24 +258,7 @@ function requireCurrentDynamicToolMetadata(
   return metadata as readonly CurrentDynamicToolMetadata[];
 }
 
-/**
- * Builds live dynamic tool definitions. Narrower scopes appear first so they
- * win on name collision (the tool loop uses `??=` for deduplication).
- */
-export function buildResponseAuthorizationTools(input: {
-  readonly authoredTools: HarnessToolMap;
-  readonly context?: ContextReader;
-}): HarnessToolMap {
-  const tools = new Map<string, HarnessToolDefinition>();
-  for (const tool of input.context === undefined ? [] : buildDynamicTools(input.context)) {
-    if (!tools.has(tool.name)) tools.set(tool.name, tool);
-  }
-  for (const [name, tool] of input.authoredTools) {
-    if (!tools.has(name)) tools.set(name, tool);
-  }
-  return tools;
-}
-
+/** Builds live dynamic tool definitions. Narrower scopes appear first so they win on name collision. */
 export function buildDynamicTools(ctx: ContextReader): readonly HarnessToolDefinition[] {
   const step = replayDynamicTools(
     requireCurrentDynamicToolMetadata(ctx.get(StepDynamicToolMetadataKey) ?? []),
@@ -295,4 +273,11 @@ export function buildDynamicTools(ctx: ContextReader): readonly HarnessToolDefin
     { sessionId: ctx.get(SessionIdKey) ?? "", scope: "session" },
   );
   return [...step, ...turn, ...session];
+}
+
+/** The names of the dynamic tools every scope holds. */
+export function dynamicToolNames(ctx: ContextReader): readonly string[] {
+  return [StepDynamicToolMetadataKey, TurnDynamicToolMetadataKey, SessionDynamicToolMetadataKey]
+    .flatMap((key) => ctx.get(key) ?? [])
+    .map((metadata) => metadata.name);
 }

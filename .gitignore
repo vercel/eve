@@ -27,6 +27,8 @@ apps/benchmarks/evals/*/.eve-authoring-bootstrap.json
 packages/eve/.workflow-vitest/
 packages/eve/.generated/
 packages/eve/src/extensions/code/extension/
+packages/eve/src/extensions/git/extension/
+packages/eve/src/computer-use/extension/
 playwright-report/
 test-results/
 
@@ -34,8 +36,6 @@ test-results/
 packages/eve/docs/
 packages/eve/LICENSE
 packages/eve/NOTICE
-packages/eve-buzz-acp-adapter/LICENSE
-packages/eve-buzz-acp-adapter/NOTICE
 
 # Logs
 *.log
