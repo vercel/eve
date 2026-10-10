@@ -5,7 +5,7 @@ import { AuthKey, SessionKey } from "#context/keys.js";
 import { clearPendingAuthorization } from "#harness/authorization.js";
 import type { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
 import { validateHarnessModelMessages } from "#harness/messages.js";
-import { fail } from "#harness/session-machine/transitions.js";
+import { fail, hold } from "#harness/session-machine/transitions.js";
 import { readTurnState, writeTurnState } from "#harness/session-machine/state.js";
 import type { StepCoordinates } from "#harness/session-machine/view.js";
 import type { Step } from "#harness/step/context.js";
@@ -62,8 +62,8 @@ export async function parkOnApprovals(
     readonly tasks: readonly RuntimeWorkflowTaskRequest[];
     /** The entries the step's calls ran, whose approvals the requests ask for. */
     readonly tools: HarnessToolLookup;
-    /** The step made calls the runtime runs, so the turn waits on them instead. */
-    readonly waitsOnRuntime: boolean;
+    /** Runtime calls run first, or the caller will report a sibling sign-in hold. */
+    readonly waitsOn: "runtime" | "sign-in" | undefined;
   },
 ): Promise<StepResult> {
   const transition = parkOnApprovalsTransition(step.view(), {
@@ -75,7 +75,14 @@ export async function parkOnApprovals(
     responseAuthRequiredRequestIds: responsePolicyRequestIds(input.tools, input.requests),
   });
   await step.apply(transition, [...step.session.history, ...(transition.commit ?? [])]);
-  if (input.waitsOnRuntime) return { next: null, session: step.session };
+  if (input.waitsOn !== undefined) {
+    if (
+      input.waitsOn === "runtime" &&
+      input.tasks.some((task) => task.entry.entryPoint === "execute")
+    )
+      await step.apply(hold(step.view(), { on: "tasks" }));
+    return { next: null, session: step.session };
+  }
   if (hasRunnableQueue(step.view())) return { next: step.runStep, session: step.session };
   return holdForInput(step);
 }

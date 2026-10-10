@@ -167,7 +167,11 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
         ...parked,
         requests: approvalRequests,
         tools: input.catalog,
-        waitsOnRuntime: workflowToolCalls.length > 0 || authorizationInterrupt !== undefined,
+        waitsOn: authorizationInterrupt
+          ? "sign-in"
+          : workflowToolCalls.length > 0
+            ? "runtime"
+            : undefined,
       });
       // Approval only precedes sign-in for the same call, not an executing sibling.
       if (authorizationInterrupt) {
@@ -184,6 +188,9 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
         ...authorizationInterrupt,
         history: step.session.history,
       });
+    }
+    if (dispatched.workflowRequests.some((task) => task.entry.entryPoint === "execute")) {
+      await step.apply(hold(step.view(), { on: "tasks" }));
     }
     return { next: null, session: step.session };
   }
