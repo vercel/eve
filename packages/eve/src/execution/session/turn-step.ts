@@ -10,10 +10,6 @@ import { sessionProvider } from "#context/providers/session.js";
 import { ConnectionRegistryKey, connectionProvider } from "#context/providers/connection.js";
 import { sandboxProvider } from "#context/providers/sandbox.js";
 import {
-  drainDynamicInstructionUserMessages,
-  prepareDynamicInstructionPreamble,
-} from "#context/dynamic-instruction-lifecycle.js";
-import {
   AuthKey,
   ScheduleIdKey,
   ScheduleInstanceKey,
@@ -439,20 +435,11 @@ async function runSessionStepBody(
       if (registry !== undefined) ctx.setVirtualContext(ConnectionRegistryKey, registry.value);
       const sandbox = await sandboxProvider.create(ctx, initialSession);
       if (sandbox !== undefined) ctx.setVirtualContext(SandboxKey, sandbox.value);
-      // A user-role instruction the session's start resolves enters history ahead of the turn's
-      // input, as it would from the turn's own preamble.
-      prepareDynamicInstructionPreamble(ctx, history.initial.messages);
+      // A user-role instruction the session's start resolves stays in its slot until the step
+      // builds the conversation, which takes it ahead of the turn's input.
       try {
         await contextStorage.run(ctx, () => handleEvent([...facts, ...admission.facts]));
       } finally {
-        const instructions = drainDynamicInstructionUserMessages(ctx);
-        if (instructions.length > 0) {
-          admissionChangedSession = true;
-          initialSession = {
-            ...initialSession,
-            history: validateHarnessModelMessages([...initialSession.history, ...instructions]),
-          };
-        }
         if (sandbox !== undefined) {
           const sandboxState = await sandbox.value.captureState();
           if (

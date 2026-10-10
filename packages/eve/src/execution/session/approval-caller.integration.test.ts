@@ -8,7 +8,7 @@ import {
   toolCallsStreamResult,
 } from "#internal/testing/approval-resume.js";
 import { defineAgent } from "#public/definitions/agent.js";
-import { defineDynamic } from "#dynamic/definition.js";
+import { defineDynamic } from "#public/definitions/model.js";
 import type { Approval, ApprovalResponsePolicy } from "#approval/definition.js";
 import { workflowEntry } from "#execution/session/entry.js";
 import {
@@ -150,12 +150,11 @@ async function withChainRun(
     agent: {
       definition: defineAgent({
         model: defineDynamic({
-          events: {
-            "step.started": () => ({
-              model: options.model ?? scriptedModel,
-              modelContextWindowTokens: 200_000,
-            }),
-          },
+          select: () => null,
+          resolve: () => ({
+            model: options.model ?? scriptedModel,
+            modelContextWindowTokens: 200_000,
+          }),
         }),
       }),
       name,
