@@ -304,7 +304,11 @@ async function stageToolOutputFiles(
         };
       }
       const ref = await writeSandboxRef(data.bytes, part.mediaType, part.filename, sandbox);
-      return { ...part, data: { type: "url" as const, url: encodeSandboxRef(ref) } };
+      return {
+        ...part,
+        data: { type: "url" as const, url: encodeSandboxRef(ref) },
+        mediaType: ref.mediaType,
+      };
     }),
   );
   return { ...output, value };

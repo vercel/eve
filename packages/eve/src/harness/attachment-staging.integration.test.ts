@@ -843,10 +843,10 @@ describe("hydrateSandboxAttachments (integration)", () => {
   it("applies the same rule to files a tool returns", async () => {
     const sandbox = mockSandbox({ id: "sbx_tool_gate" });
     const runtime = await createTestRuntime();
-    const file = (data: Buffer, filename: string) => ({
+    const file = (data: Buffer, filename: string, mediaType = "image/png") => ({
       data: { data: data.toString("base64"), type: "data" as const },
       filename,
-      mediaType: "image/png",
+      mediaType,
       type: "file" as const,
     });
     const messages: ModelMessage[] = [
@@ -855,7 +855,11 @@ describe("hydrateSandboxAttachments (integration)", () => {
           {
             output: {
               type: "content",
-              value: [file(pngBytes(9000, 9000), "huge.png"), file(pngBytes(8, 8), "shot.png")],
+              value: [
+                file(pngBytes(9000, 9000), "huge.png"),
+                file(pngBytes(8, 8), "shot.png"),
+                file(pngBytes(8, 8), "mislabeled.jpg", "image/jpeg"),
+              ],
             },
             toolCallId: "shot-1",
             toolName: "screenshot",
@@ -883,6 +887,12 @@ describe("hydrateSandboxAttachments (integration)", () => {
           type: "text",
         },
         expect.objectContaining({ filename: "shot.png", type: "file" }),
+        {
+          text: expect.stringMatching(/^Attached file .*\/mislabeled\.jpg \(image\/png\)$/),
+          type: "text",
+        },
+        // The bytes go to the provider under the type they prove.
+        expect.objectContaining({ filename: "mislabeled.jpg", mediaType: "image/png" }),
       ],
     });
   });

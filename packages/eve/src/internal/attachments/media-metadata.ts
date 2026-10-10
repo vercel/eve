@@ -57,8 +57,6 @@ export function estimateMediaTokens(metadata: MediaMetadata): number {
 
 const GENERIC_MEDIA_TYPE = "application/octet-stream";
 const PDF_MEDIA_TYPE = "application/pdf";
-// The PDF header may follow up to 1 KiB of leading bytes.
-const PDF_HEADER_WINDOW = 1024;
 
 /**
  * The media type a staged file carries: the format its bytes prove for an
@@ -93,13 +91,10 @@ const VERIFIABLE_MEDIA_TYPES: ReadonlySet<string> = new Set([
   PDF_MEDIA_TYPE,
 ]);
 
+// The format allows leading bytes before the header, but providers expect it
+// at the start, and a header deeper in would mark text that mentions it.
 function hasPdfHeader(bytes: Uint8Array): boolean {
-  const head = Buffer.from(
-    bytes.buffer,
-    bytes.byteOffset,
-    Math.min(bytes.byteLength, PDF_HEADER_WINDOW),
-  );
-  return head.includes("%PDF-", 0, "latin1");
+  return readAscii(bytes, 0, 5) === "%PDF-";
 }
 
 /** Names the PNG, GIF, JPEG, or WebP format its leading bytes identify. */
