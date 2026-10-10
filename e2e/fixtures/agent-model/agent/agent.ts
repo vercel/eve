@@ -1,26 +1,27 @@
 import { e2eAgentConfig, e2eModel } from "@eve-e2e/config";
-import { defineAgent, defineDynamic, type ReactionView } from "eve";
+import { defineAgent, type ReactionView } from "eve";
+import { defineDynamic } from "eve/models";
 
 const model = e2eModel();
 const { experimental } = e2eAgentConfig();
 
 /**
- * Dynamic-model e2e fixture. The agent selects the latest user text, so live model objects
+ * Dynamic-model e2e fixture. The model selects the latest user text, so live model objects
  * exercise the same selection, omission, and failure paths as gateway ids.
  */
-export default defineDynamic({
+export default defineAgent({
   experimental,
-  select: (view) => lastUserText(view.messages),
-  resolve: (text) => {
-    if (text.length === 0) throw new Error("The model resolver did not receive incoming input.");
-    if (text.includes("[model: boom]")) throw new Error("intentional resolver failure");
-    if (text.includes("[model: mini]")) {
-      return defineAgent({ model, modelContextWindowTokens: 128_000 });
-    }
-    if (text.includes("[model: catalog]")) return defineAgent({ model });
-    if (text.includes("[model: missing]")) return null;
-    return defineAgent({ model, modelContextWindowTokens: 1_000_000 });
-  },
+  model: defineDynamic({
+    select: (view) => lastUserText(view.messages),
+    resolve: (text) => {
+      if (text.length === 0) throw new Error("The model resolver did not receive incoming input.");
+      if (text.includes("[model: boom]")) throw new Error("intentional resolver failure");
+      if (text.includes("[model: mini]")) return { model, modelContextWindowTokens: 128_000 };
+      if (text.includes("[model: catalog]")) return model;
+      if (text.includes("[model: missing]")) return null as never;
+      return { model, modelContextWindowTokens: 1_000_000 };
+    },
+  }),
 });
 
 function lastUserText(messages: ReactionView["messages"]): string {

@@ -104,16 +104,18 @@ describe("dynamic runtime model resolution", () => {
 
   it("loads resolver-only definitions and normalizes explicit metadata", async () => {
     const moduleMap = createModuleMap({
-      default: defineDynamic({
-        select: (_view, ctx) => ctx.channel.kind ?? null,
-        resolve: (kind) => ({
-          model: kind === "slack" ? "openai/gpt-5.5-mini" : "openai/gpt-5.5",
-          modelContextWindowTokens: 128_000,
-          modelOptions: {
-            providerOptions: { gateway: { order: ["openai"] } },
-          },
+      default: {
+        model: defineDynamic({
+          select: (_view, ctx) => ctx.channel.kind ?? null,
+          resolve: (kind) => ({
+            model: kind === "slack" ? "openai/gpt-5.5-mini" : "openai/gpt-5.5",
+            modelContextWindowTokens: 128_000,
+            modelOptions: {
+              providerOptions: { gateway: { order: ["openai"] } },
+            },
+          }),
         }),
-      }),
+      },
     });
 
     const definition = await loadDynamicRuntimeModelDefinition({

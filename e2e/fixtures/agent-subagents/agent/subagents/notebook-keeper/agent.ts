@@ -1,4 +1,5 @@
-import { defineDynamic } from "eve";
+import { defineAgent } from "eve";
+import { defineDynamic } from "eve/models";
 import { mockModel } from "eve/evals";
 
 import { respondAsNotebookKeeper } from "../../lib/notebook.js";
@@ -6,11 +7,13 @@ import { respondAsNotebookKeeper } from "../../lib/notebook.js";
 const keeperModel = mockModel({ modelId: "notebook-keeper", respond: respondAsNotebookKeeper });
 
 /** The local notebook keeper; the remote one is `remote-loopback` running the same script. */
-export default defineDynamic({
+export default defineAgent({
   description:
     "Test fixture: keeps Alice's tide station notebook notes. Call it only for NOTEBOOK directives.",
   // Selected per step: in mock mode this fixture replaces static authored
   // models with eve's bootstrap mock, which would drop the keeper's script.
-  select: () => null,
-  resolve: () => ({ model: keeperModel, modelContextWindowTokens: 1_000_000 }),
+  model: defineDynamic({
+    select: () => null,
+    resolve: () => ({ model: keeperModel, modelContextWindowTokens: 1_000_000 }),
+  }),
 });

@@ -1,5 +1,6 @@
 import { e2eAgentConfig, MOCK_MODEL_SENTINEL } from "@eve-e2e/config";
-import { defineAgent, defineDynamic } from "eve";
+import { defineAgent } from "eve";
+import { defineDynamic } from "eve/models";
 
 const requestedModel = process.env.EVE_E2E_MODEL;
 const selectedModel =
@@ -13,9 +14,11 @@ if (requestedModel === MOCK_MODEL_SENTINEL) {
 
 const { experimental } = e2eAgentConfig();
 
-// Without a select, the dynamic agent resolves once, after the session's first commit.
-export default defineDynamic({
+// A select of null resolves the model once, after the session's first commit.
+export default defineAgent({
   experimental,
-  select: () => null,
-  resolve: () => defineAgent({ model: selectedModel, modelContextWindowTokens: 1_000_000 }),
+  model: defineDynamic({
+    select: () => null,
+    resolve: () => ({ model: selectedModel, modelContextWindowTokens: 1_000_000 }),
+  }),
 });

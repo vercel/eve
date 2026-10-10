@@ -103,13 +103,15 @@ describe("reactions", () => {
     const model = scriptedModel(log, prompts);
     const runtime = await createTestRuntime({
       agent: {
-        definition: defineDynamic({
-          select: () => null,
-          resolve: () => {
-            log.push("resolve:model");
-            return defineAgent({ model, modelContextWindowTokens: 200_000 });
-          },
-        }) as never,
+        definition: defineAgent({
+          model: defineDynamic({
+            select: () => null,
+            resolve: () => {
+              log.push("resolve:model");
+              return { model, modelContextWindowTokens: 200_000 };
+            },
+          }),
+        }),
         name: "reactions",
       },
       modules: [

@@ -31,24 +31,47 @@ describe("normalizeAgentDefinition", () => {
     expect(definition.reasoning).toBe("high");
   });
 
-  it("accepts a dynamic agent, with its static fields beside", () => {
-    const resolve = () => ({ model: "openai/gpt-5.5-mini" });
-    const definition = normalizeAgentDefinition(
-      defineDynamic({ defaultTools: false, resolve, select: () => null }),
-      FAILURE_MESSAGE,
-    );
+  it("accepts a dynamic model field beside static fields", () => {
+    const model = defineDynamic({ select: () => null, resolve: () => "openai/gpt-5.5-mini" });
+    const definition = normalizeAgentDefinition({ defaultTools: false, model }, FAILURE_MESSAGE);
 
     expect(definition.defaultTools).toBe(false);
-    expect(definition.model).toMatchObject({ kind: "eve:dynamic", resolve });
+    expect(definition.model).toBe(model);
   });
 
-  it("rejects a dynamic model field", () => {
+  it("rejects a dynamic agent.ts, pointing at the dynamic model field", () => {
     expect(() =>
       normalizeAgentDefinition(
-        { model: defineDynamic({ select: () => null, resolve: () => "openai/gpt-5.5-mini" }) },
+        defineDynamic({ select: () => null, resolve: () => ({ model: "openai/gpt-5.5-mini" }) }),
         FAILURE_MESSAGE,
       ),
-    ).toThrow(/Make the whole agent.ts dynamic/);
+    ).toThrow(/make the model field dynamic/);
+  });
+
+  it("rejects model settings beside a dynamic model", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: defineDynamic({ select: () => null, resolve: () => "openai/gpt-5.5-mini" }),
+          modelContextWindowTokens: 128_000,
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(/returns its "modelContextWindowTokens" and "modelOptions" from resolve/);
+  });
+
+  it("rejects keys beside a dynamic model's select and resolve", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: {
+            ...defineDynamic({ select: () => null, resolve: () => "openai/gpt-5.5-mini" }),
+            reasoning: "high",
+          },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(/takes only select and resolve. Unknown key\(s\): reasoning/);
   });
 
   it("rejects a dynamic compaction model", () => {

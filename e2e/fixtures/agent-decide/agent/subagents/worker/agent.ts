@@ -1,8 +1,8 @@
-import { defineDynamic } from "eve";
+import { defineAgent } from "eve";
 
 import { fixtureModel } from "../../testing";
 
-export default defineDynamic({
+export default defineAgent({
   description: "Complete one assigned investigation.",
-  ...fixtureModel((_request, routing) => `child-result:${routing.model}:${routing.requests}`),
+  model: fixtureModel((_request, routing) => `child-result:${routing.model}:${routing.decisions}`),
 });

@@ -2,13 +2,28 @@ import type { ModelMessage } from "ai";
 
 import type { SessionAuth, SessionPredecessor } from "#context/keys.js";
 import type { SessionSchedule } from "#context/session-schedule.js";
+import type { UserPart } from "#protocol/session-events/envelope.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
 
 /**
+ * The session's latest turn, running or not. Select its `id` to resolve once per turn: it stays
+ * the same through the turn's tool calls, pauses, and steering, and until the next turn starts.
+ */
+export interface ReactionTurn {
+  readonly id: string;
+  readonly status: "running" | "paused" | "settled";
+  /**
+   * What started the turn: the parts of the messages it opened with. Messages that steer it
+   * later don't change them.
+   */
+  readonly input: readonly UserPart[];
+}
+
+/**
  * What a reaction selects from: the session's tables, the position of the latest event of each
- * type, the effective model, and the conversation.
+ * type, the latest turn, the effective model, and the conversation.
  *
  * `messages` is the conversation as the model sees it. Steps that run without the conversation,
  * such as a task settling between turns, skip a reaction whose `select` reads it; the reaction runs
@@ -17,6 +32,8 @@ import type { ConversationContext } from "#shared/conversation-context.js";
 export interface ReactionView extends SessionView {
   /** The line position of the latest event of each type, and `"*"` for the latest fact. */
   readonly latest: Readonly<Record<string, number | undefined>>;
+  /** The session's latest turn, or `null` before its first. */
+  readonly turn: ReactionTurn | null;
   /** The model the session uses now, or `null` before one is chosen. */
   readonly model: { readonly id: string } | null;
   readonly messages: readonly ModelMessage[];

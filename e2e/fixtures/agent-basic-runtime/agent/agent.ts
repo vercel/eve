@@ -1,6 +1,7 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
-import { defineAgent, defineDynamic, type ReactionView } from "eve";
+import { defineAgent, type ReactionView } from "eve";
 import { mockModel } from "eve/evals";
+import { defineDynamic } from "eve/models";
 
 const DISABLED_AGENT_TOOL_REQUEST = "E2E_DISABLED_ROOT_AGENT_TOOL";
 const CHILD_REQUEST = 'Call eve__reply exactly once with {"answer":"client-recursion-ok"}.';
@@ -61,23 +62,23 @@ function hasUserText(messages: ReactionView["messages"], expected: string): bool
   });
 }
 
-export default defineDynamic({
+export default defineAgent({
   ...agentConfig,
   // This child exercises traced HTTP cleanup; schema-following has separate model evals.
-  select: (view) =>
-    hasUserText(view.messages, DISABLED_AGENT_TOOL_REQUEST)
-      ? "disabled-agent-tool"
-      : hasUserText(view.messages, CHILD_REQUEST)
-        ? "result-child"
-        : null,
-  resolve: (probe) =>
-    defineAgent(
+  model: defineDynamic({
+    select: (view) =>
+      hasUserText(view.messages, DISABLED_AGENT_TOOL_REQUEST)
+        ? "disabled-agent-tool"
+        : hasUserText(view.messages, CHILD_REQUEST)
+          ? "result-child"
+          : null,
+    resolve: (probe) =>
       probe === "disabled-agent-tool"
         ? { model: disabledAgentToolModel, modelContextWindowTokens: 1_000_000 }
         : probe === "result-child"
           ? { model: childModel, modelContextWindowTokens: 1_000_000 }
           : { model, modelContextWindowTokens },
-    ),
+  }),
   experimental: config.experimental,
   reasoning: "high",
 });

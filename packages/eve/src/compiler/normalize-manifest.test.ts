@@ -628,7 +628,9 @@ describe("compileAgentManifest source graph", () => {
       {
         logicalPath: "agent.ts",
         loadNamespace: async () => ({
-          default: defineDynamic({ select: () => null, resolve: () => "openai/gpt-5.4" }),
+          default: defineAgent({
+            model: defineDynamic({ select: () => null, resolve: () => "openai/gpt-5.4" }),
+          }),
         }),
       },
     ]);

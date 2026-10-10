@@ -44,24 +44,10 @@ export function normalizeAgentDefinition(
   value: unknown,
   message: string,
 ): Readonly<NormalizedAgentDefinition> {
-  // A dynamic `agent.ts` resolves its model per session; its other fields are static.
   if (isDynamicSentinel(value)) {
-    assertResolverForm(value, `${message} The dynamic agent`, { events: false });
-    const { kind, resolve, select, ...fields } = value as unknown as Record<string, unknown>;
-    if (fields.model !== undefined) {
-      throw new Error(
-        `${message} A dynamic agent returns its model from resolve; remove the static "model" field.`,
-      );
-    }
-    const normalized = normalizeAgentDefinition({ ...fields, model: "dynamic" }, message);
-    return {
-      ...normalized,
-      model: {
-        kind,
-        resolve: expectFunction(resolve, message),
-        select: expectFunction(select, message),
-      } as unknown as NormalizedAgentDefinition["model"],
-    };
+    throw new Error(
+      `${message} agent.ts exports defineAgent(). To choose the model per session, make the model field dynamic: model: defineDynamic({ select, resolve }) from "eve/models", or model: auto({ ... }).`,
+    );
   }
   const record = expectObjectRecord(value, message);
   expectOnlyKnownKeys(
@@ -85,14 +71,17 @@ export function normalizeAgentDefinition(
     throw new Error(`${message} The "model" field is required.`);
   }
 
-  if (isDynamicSentinel(record.model)) {
+  const definition: Mutable<NormalizedAgentDefinition> = {
+    model: normalizeAgentModel(record.model, message),
+  };
+  if (
+    isDynamicSentinel(definition.model) &&
+    (record.modelContextWindowTokens !== undefined || record.modelOptions !== undefined)
+  ) {
     throw new Error(
-      `${message} The "model" field takes a static model. Make the whole agent.ts dynamic instead: export default defineDynamic({ select, resolve: () => defineAgent({ model }) }).`,
+      `${message} A dynamic model returns its "modelContextWindowTokens" and "modelOptions" from resolve, with the model they describe; remove them beside it.`,
     );
   }
-  const definition: Mutable<NormalizedAgentDefinition> = {
-    model: record.model as NormalizedAgentDefinition["model"],
-  };
 
   if (record.description !== undefined) {
     definition.description = expectString(record.description, message);
@@ -138,6 +127,23 @@ export function normalizeAgentDefinition(
   }
 
   return definition as Readonly<NormalizedAgentDefinition>;
+}
+
+/** A static model passes through; a dynamic one keeps only its `select` and `resolve`. */
+function normalizeAgentModel(value: unknown, message: string): NormalizedAgentDefinition["model"] {
+  if (!isDynamicSentinel(value)) return value as NormalizedAgentDefinition["model"];
+  const subject = `${message} The dynamic "model"`;
+  assertResolverForm(value, subject, { events: false });
+  const extra = Object.keys(value).filter(
+    (key) => key !== "kind" && key !== "select" && key !== "resolve",
+  );
+  if (extra.length > 0) {
+    throw new Error(
+      `${subject} takes only select and resolve. Unknown key(s): ${extra.join(", ")}.`,
+    );
+  }
+  // Keep the sentinel itself: eve's own resolvers, such as auto(), carry internal hooks on it.
+  return value as NormalizedAgentDefinition["model"];
 }
 
 function normalizeAgentReasoningDefinition(

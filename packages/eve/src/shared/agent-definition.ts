@@ -95,7 +95,9 @@ export type PublicAgentDynamicModelResult =
   | PublicAgentStaticModelDefinition
   | PublicAgentModelSelectionDefinition;
 
-export type PublicAgentDynamicModelDefinition = DynamicSentinel<PublicAgentDynamicModelResult>;
+/** A `model` chosen per session: `defineDynamic()` from `eve/models`, or `auto()`. */
+// oxlint-disable-next-line typescript/no-explicit-any -- any selection: `select` produces it, `resolve` consumes it.
+export type PublicAgentDynamicModelDefinition = DynamicSentinel<PublicAgentDynamicModelResult, any>;
 
 export function isDynamicModelDefinition(
   value: unknown,
@@ -104,9 +106,12 @@ export function isDynamicModelDefinition(
 }
 
 /**
- * The model handle you assign to an agent's `model` field.
+ * The model handle you assign to an agent's `model` field: a static model, or one chosen per
+ * session with `defineDynamic()` from `eve/models` or `auto()`.
  */
-export type PublicAgentModelDefinition = PublicAgentStaticModelDefinition;
+export type PublicAgentModelDefinition =
+  | PublicAgentStaticModelDefinition
+  | PublicAgentDynamicModelDefinition;
 
 export interface InternalAgentCompactionDefinition {
   /**
@@ -387,10 +392,22 @@ type PublicAgentDefinitionBase = {
  * Shared public definition for an agent. Static models may carry definition-level
  * metadata; dynamic models must return metadata with each concrete selection.
  */
-export type PublicAgentDefinition = PublicAgentDefinitionBase & {
-  /** Language model used for agent turns. Make `agent.ts` dynamic to choose it per session. */
-  readonly model: PublicAgentStaticModelDefinition;
-  /** Optional context-window override for the static model. */
-  readonly modelContextWindowTokens?: number;
-  readonly modelOptions?: AgentModelOptionsDefinition;
-};
+export type PublicAgentDefinition = PublicAgentDefinitionBase &
+  (
+    | {
+        /** Language model used for agent turns. */
+        readonly model: PublicAgentStaticModelDefinition;
+        /** Optional context-window override for the static model. */
+        readonly modelContextWindowTokens?: number;
+        readonly modelOptions?: AgentModelOptionsDefinition;
+      }
+    | {
+        /**
+         * The model chosen per session. `resolve` returns the model with its context window,
+         * options, and reasoning, so those fields don't sit beside it.
+         */
+        readonly model: PublicAgentDynamicModelDefinition;
+        readonly modelContextWindowTokens?: never;
+        readonly modelOptions?: never;
+      }
+  );

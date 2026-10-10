@@ -30,10 +30,13 @@ export type NormalizedSubagentConfig =
     };
 
 export function normalizeSubagentConfig(value: unknown, message: string): NormalizedSubagentConfig {
-  // A static description makes a subagent the parent always sees, with settings its own session
-  // resolves, as the root agent does; without one, the whole subagent is dynamic.
+  // A dynamic subagent chooses the whole subagent: its description, or whether there is one. A
+  // subagent the parent always sees, with a model chosen per session, is a defineAgent() whose
+  // model field is dynamic.
   if (isDynamicSentinel(value) && (value as { description?: unknown }).description !== undefined) {
-    return { definition: value, kind: "local" };
+    throw new Error(
+      `${message} A dynamic subagent returns its description from resolve. To keep the description and choose the model per session, export defineAgent({ description, model: defineDynamic({ select, resolve }) }) with defineDynamic from "eve/models".`,
+    );
   }
   if (isDynamicSentinel(value)) {
     assertDynamicSentinelKeys(value, message, ["build", "defaultTools"]);

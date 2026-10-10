@@ -41,6 +41,7 @@ import {
   writeReactionsState,
 } from "./state.js";
 import { pendingIntents, satisfyIntents } from "./kinds/hook.js";
+import { latestTurn } from "./turn.js";
 
 const log = createLogger("reactions");
 const neverAborted = new AbortController().signal;
@@ -143,7 +144,10 @@ function actOnCancels(
     return;
   }
   writeReactionsState(ctx, satisfyIntents(readReactionsState(ctx), pending));
-  cancelTurn({ hook, ...(first.intent.reason === undefined ? {} : { reason: first.intent.reason }) });
+  cancelTurn({
+    hook,
+    ...(first.intent.reason === undefined ? {} : { reason: first.intent.reason }),
+  });
 }
 
 function startsCompaction(written: readonly WrittenEvent[]): boolean {
@@ -156,8 +160,10 @@ function startsCompaction(written: readonly WrittenEvent[]): boolean {
 
 /**
  * Rebuilds the code of every slot that carries some, for a step in a process that didn't build it:
- * `resolve` runs again with the selection the slot recorded. `revision` is the runtime revision the
- * step runs; slots resolved under another resolve again after the step's first commit.
+ * the reaction's `rebuild` reads what the slot recorded, or else `resolve` runs again with the
+ * selection it recorded. `revision` is the runtime revision the step runs. A slot this rebuilds
+ * is current under it; one built under another that this process already holds resolves again
+ * after the step's first commit.
  */
 export async function restoreReactions(
   ctx: ContextContainer,
@@ -183,25 +189,38 @@ export async function restoreReactions(
     log.debug("Rebuilding a reaction's code from its recorded selection", {
       reaction: reaction.label,
     });
+    // This process's code rebuilt it, so a new revision needn't resolve it again.
+    const current = readReactionsState(ctx).revision;
+    const stamp = (restored: Slot): Slot =>
+      current === undefined || restored.revision === current
+        ? restored
+        : { ...restored, revision: current };
     try {
+      if (reaction.rebuild !== undefined) {
+        const restored = stamp(slot);
+        const live = await reaction.rebuild(slot.value, rctx);
+        if (restored !== slot) writeSlot(ctx, reaction.id, restored);
+        if (live !== undefined) writeLive(ctx, reaction.id, restored, live);
+        continue;
+      }
       const contribution = await reaction.contribute(
         await reaction.resolve(slot.selection, rctx),
         rctx,
       );
       const value = parseJsonValue(contribution.value ?? null);
-      let restored = slot;
+      let restored = stamp(slot);
       let live = contribution.live;
       if (canonicalJson(value) !== canonicalJson(slot.value)) {
         log.warn("A reaction rebuilt from its recorded selection returned something different", {
           reaction: reaction.label,
         });
         if (reaction.reconcile === undefined) {
-          restored = { ...slot, value };
-          writeSlot(ctx, reaction.id, restored);
+          restored = { ...restored, value };
         } else {
           live = reaction.reconcile(slot.value, { live, value });
         }
       }
+      if (restored !== slot) writeSlot(ctx, reaction.id, restored);
       if (live !== undefined) writeLive(ctx, reaction.id, restored, live);
     } catch (error) {
       if (reaction.failure === "throw") throw error;
@@ -385,6 +404,7 @@ function reactionView(
     { ...currentView(ctx) },
     {
       latest: { enumerable: true, value: latest },
+      turn: { enumerable: true, value: latestTurn(currentView(ctx)) },
       messages: {
         enumerable: true,
         get() {

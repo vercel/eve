@@ -252,7 +252,11 @@ describe("runReactions", () => {
     });
     const selected = session({
       resolve: ((count: number) =>
-        defineTool({ description: `Count ${count}.`, execute: async () => count, inputSchema: {} })) as never,
+        defineTool({
+          description: `Count ${count}.`,
+          execute: async () => count,
+          inputSchema: {},
+        })) as never,
       select: (() => counter.get()) as never,
     });
     await inSession(read, { written: written(1) });
@@ -322,20 +326,38 @@ describe("runReactions", () => {
     expect(selections).toEqual([1, 1]);
   });
 
+  it("doesn't resolve again under a new revision what a fresh process rebuilt under it", async () => {
+    const selections: unknown[] = [];
+    const ctx = session(counted(selections));
+    await restoreReactions(ctx, { revision: "r1" });
+    await runReactions(ctx, { conversation: [user("a")], written: written(1) });
+    forgetSessionLive(ctx.get(SessionIdKey)!);
+    await restoreReactions(ctx, { revision: "r2" });
+    await runReactions(ctx, { conversation: [user("a")], written: written(2) });
+
+    // Once to choose, once to rebuild under r2, and not again after r2's first commit.
+    expect(selections).toEqual([1, 1]);
+    expect(slotsOf(ctx, "tool")[0]?.slot.revision).toBe("r2");
+  });
+
   it("keeps a data slot under a new runtime revision until its selection changes", async () => {
     const resolved: unknown[] = [];
-    const ctx = session({ resolve: (() => null) as never, select: (() => null) as never }, [], [
-      {
-        logicalPath: "instructions/policy.ts",
-        resolve: (selected: unknown) => {
-          resolved.push(selected);
-          return defineInstructions({ markdown: `Policy ${String(selected)}.` });
+    const ctx = session(
+      { resolve: (() => null) as never, select: (() => null) as never },
+      [],
+      [
+        {
+          logicalPath: "instructions/policy.ts",
+          resolve: (selected: unknown) => {
+            resolved.push(selected);
+            return defineInstructions({ markdown: `Policy ${String(selected)}.` });
+          },
+          select: (view: { readonly messages: readonly ModelMessage[] }) => view.messages.length,
+          slug: "policy",
+          sourceId: "instructions/policy.ts",
         },
-        select: (view: { readonly messages: readonly ModelMessage[] }) => view.messages.length,
-        slug: "policy",
-        sourceId: "instructions/policy.ts",
-      },
-    ]);
+      ],
+    );
     await restoreReactions(ctx, { revision: "r1" });
     await runReactions(ctx, { conversation: [user("a")], written: written(1) });
     await restoreReactions(ctx, { revision: "r2" });

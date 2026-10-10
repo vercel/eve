@@ -1,17 +1,24 @@
 import type { Experimental_DecisionModel } from "ai";
-import { defineDynamic } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponder } from "eve/evals";
 import { auto } from "eve/models";
 
-/** What the router chose for a session's latest message, and how many times it has decided. */
+/** What the router chose for a turn, and how many times it decided for the turn's input. */
 export interface Routing {
   readonly model: string;
   readonly reasoning: string;
-  readonly requests: number;
+  readonly decisions: number;
 }
 
-/** Decisions per session. `resolve` reads only its selection, so the count lives beside it. */
+/**
+ * Decisions by the input they routed: a turn that decides once reports 1, in a warm process or a
+ * fresh one. Process-local, as the eval host is.
+ */
 const decisions = new Map<string, number>();
+
+/** The latest user text the router decided on. */
+function routedInput(userMessages: readonly string[]): string | undefined {
+  return [...userMessages].reverse().find((text) => decisions.has(text));
+}
 
 export const permissionDecisionModel: Exclude<Experimental_DecisionModel, string> = {
   specificationVersion: "v4",
@@ -35,6 +42,8 @@ export const decisionModel: Exclude<Experimental_DecisionModel, string> = {
   supportedQuestionTypes: ["choice"],
   async doDecide({ state, questions }) {
     const serialized = JSON.stringify(state);
+    const input = (state as { messages: { text: string }[] }).messages.at(-1)?.text ?? "";
+    decisions.set(input, (decisions.get(input) ?? 0) + 1);
     if (serialized.includes("service unavailable")) {
       throw new Error("Decision service unavailable.");
     }
@@ -57,51 +66,31 @@ export const decisionModel: Exclude<Experimental_DecisionModel, string> = {
 };
 
 /**
- * Run the real router with deterministic decision and language models. `respond` receives the
- * routing the model it answers for was chosen with: each decision binds a model to it.
+ * The real router, with deterministic decision and language models. `respond` receives the
+ * routing the model answering was chosen with: each option's model knows its own.
  */
 export function fixtureModel(
-  respond: (
-    request: MockModelRequest,
-    routing: Routing,
-  ) => ReturnType<MockModelResponder>,
+  respond: (request: MockModelRequest, routing: Routing) => ReturnType<MockModelResponder>,
 ) {
-  const unused: MockModelResponder = () => "unused";
-  const model = auto({
+  const option = (model: string, reasoning: "high" | "low", description: string) => ({
+    description,
+    model: mockModel({
+      modelId: model,
+      respond: (request) =>
+        respond(request, {
+          decisions: decisions.get(routedInput(request.userMessages) ?? "") ?? 0,
+          model,
+          reasoning,
+        }),
+    }),
+    modelContextWindowTokens: 1_000_000,
+    reasoning,
+  });
+  return auto({
     model: decisionModel,
     options: {
-      "openai/large": {
-        model: mockModel({ modelId: "openai/large", respond: unused }),
-        description: "Difficult investigations",
-        reasoning: "high",
-      },
-      "openai/small": {
-        model: mockModel({ modelId: "openai/small", respond: unused }),
-        description: "Routine requests",
-        reasoning: "low",
-      },
-    },
-  });
-  return defineDynamic({
-    select: model.select,
-    resolve: async (state, ctx) => {
-      const selected = await model.resolve(state, ctx);
-      const selection =
-        typeof selected === "object" && "model" in selected ? selected : { model: selected };
-      const requests = (decisions.get(ctx.session.id) ?? 0) + 1;
-      decisions.set(ctx.session.id, requests);
-      const modelId =
-        typeof selection.model === "string" ? selection.model : selection.model.modelId;
-      const routing: Routing = {
-        model: modelId,
-        reasoning: selection.reasoning ?? "provider-default",
-        requests,
-      };
-      return {
-        ...selection,
-        model: mockModel({ modelId, respond: (request) => respond(request, routing) }),
-        modelContextWindowTokens: 1_000_000,
-      };
+      "openai/large": option("openai/large", "high", "Difficult investigations"),
+      "openai/small": option("openai/small", "low", "Routine requests"),
     },
   });
 }

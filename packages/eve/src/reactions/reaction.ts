@@ -69,9 +69,17 @@ export interface Reaction {
   /** Reads the conversation in `resolve`, so it runs only where the step has it. */
   readonly conversation?: boolean;
   /**
-   * Reconciles code rebuilt in another process with the JSON the slot recorded, when the two
-   * differ. The slot keeps what it recorded; the returned live value replaces the rebuilt one.
-   * Without it, the rebuilt contribution replaces the recorded one.
+   * Rebuilds the code from the JSON the slot recorded, for a process that didn't build it, without
+   * calling `resolve` again: auto() rebuilds the model it chose from the option it recorded, and
+   * doesn't decide again. A throw withdraws the slot. Without it, `resolve` runs again with the
+   * recorded selection.
+   */
+  readonly rebuild?: (recorded: JsonValue, ctx: InternalResolveContext) => unknown;
+  /**
+   * Reconciles code `resolve` rebuilt in another process with the JSON the slot recorded, when
+   * the two differ. The slot keeps what it recorded; the returned live value replaces the rebuilt
+   * one, and a throw withdraws the slot with the error. Without it, the rebuilt contribution
+   * replaces the recorded one.
    */
   readonly reconcile?: (recorded: JsonValue, rebuilt: Contribution) => unknown;
   /** A failure fails the commit instead of withdrawing the slot. */

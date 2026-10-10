@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ContextContainer } from "#context/container.js";
 import { anthropic } from "#public/models/anthropic/index.js";
 
+import { latestTurn } from "#reactions/turn.js";
+
 import { auto } from "./auto.js";
 
 const runtime = vi.hoisted(() => ({
@@ -41,12 +43,30 @@ function context(
   return { abortSignal, text };
 }
 
-/** Runs the reaction as the runner does: `select` over the conversation, then `resolve`. */
+/** A session whose latest turn opened with `text`, as the projection records it. */
+function view(text: string) {
+  const tables = {
+    deliveries: {
+      d1: { deliveryId: "d1", introducedAt: 1, parts: [{ kind: "text", text }], turnId: "t1" },
+    },
+    parts: {},
+    session: { latestTurnId: "t1" },
+    turns: {
+      t1: {
+        cause: { deliveryId: "d1" },
+        follows: null,
+        introducedAt: 2,
+        status: "running",
+        turnId: "t1",
+      },
+    },
+  } as never;
+  return { ...(tables as object), turn: latestTurn(tables) } as never;
+}
+
+/** Runs the reaction as the runner does: `select` over the session's tables, then `resolve`. */
 function run(definition: ReturnType<typeof auto>, input: ReturnType<typeof context>) {
-  const selected = definition.select!(
-    { messages: [{ role: "user", content: input.text }] } as never,
-    {} as never,
-  );
+  const selected = definition.select(view(input.text), {} as never);
   return definition.resolve(selected, {
     abortSignal: input.abortSignal,
     channel: {},

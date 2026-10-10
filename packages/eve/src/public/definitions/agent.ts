@@ -1,4 +1,5 @@
 import type {
+  AgentBuildDefinition,
   PublicAgentDefinition,
   PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
@@ -53,35 +54,34 @@ export type DynamicLocalSubagentDefinition = Extract<
 /** Definition a dynamic subagent resolver may select at runtime. */
 export type DynamicSubagentDefinition = DynamicLocalSubagentDefinition | RemoteAgentDefinition;
 
-/** Static fields a dynamic `agent.ts` declares beside `select` and `resolve`. */
-export type DynamicAgentStaticFields = Omit<
-  DynamicLocalSubagentDefinition,
-  "description" | "model" | "modelContextWindowTokens" | "modelOptions"
-> & { readonly description?: string };
+/** Static fields a dynamic subagent declares beside `select` and `resolve`. */
+export interface DynamicSubagentStaticFields {
+  readonly build?: AgentBuildDefinition;
+  readonly defaultTools?: boolean;
+}
 
-/** What a dynamic `agent.ts` resolves to. */
-export type DynamicAgentResult = AgentDefinition | RemoteAgentDefinition | null;
+/** What a dynamic subagent resolves to: the subagent, or `null` to omit it. */
+export type DynamicSubagentResult = DynamicSubagentDefinition | null;
 
 /**
- * Makes `agent.ts` dynamic: `resolve` returns `defineAgent(...)` for the session, and eve calls
- * it again when `select` changes. Fields that can't vary per session, such as `build` or
- * `compaction`, sit beside `select` and `resolve`.
+ * Makes a whole subagent dynamic: `resolve` returns `defineAgent({ description, model })`, a
+ * remote agent, or `null` to omit it, and eve calls it again when `select` changes. Packaging
+ * fields, `build` and `defaultTools`, sit beside `select` and `resolve`.
  *
- * In the root agent, and in a subagent with a static `description`, `resolve` chooses the
- * model, its options, and reasoning for the agent's own session. Without a static description,
- * `subagents/<name>/agent.ts` chooses the whole subagent: `resolve` returns it with its
- * description, or `null` to omit it.
+ * To keep a subagent's description and choose only its model per session, export `defineAgent()`
+ * with a dynamic `model` field instead: `defineDynamic` from `eve/models`, or `auto()`.
  *
  * ```ts
  * export default defineDynamic({
- *   select: (view) => view.messages.some(hasImage),
- *   resolve: (image) => defineAgent({ model: image ? "google/gemini-3.5-flash" : "zai/glm-5.2" }),
+ *   select: (_view, ctx) => ctx.session.auth.current?.attributes?.role === "finance",
+ *   resolve: (finance) =>
+ *     finance ? defineAgent({ description: "Answer billing questions.", model: "zai/glm-5.2" }) : null,
  * });
  * ```
  */
 export function defineDynamic<TSelected = null>(
-  definition: DynamicDefinition<TSelected, DynamicAgentResult> & Partial<DynamicAgentStaticFields>,
-): DynamicSentinel<DynamicAgentResult, TSelected> & Partial<DynamicAgentStaticFields> {
+  definition: DynamicDefinition<TSelected, DynamicSubagentResult> & DynamicSubagentStaticFields,
+): DynamicSentinel<DynamicSubagentResult, TSelected> & DynamicSubagentStaticFields {
   return defineDynamicBase(definition);
 }
 
