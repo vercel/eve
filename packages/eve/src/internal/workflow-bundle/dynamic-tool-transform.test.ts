@@ -1330,6 +1330,39 @@ export default defineDynamic({
     expect(execFn()).toBe("inner");
   });
 
+  it("callback bindings that shadow an enclosing name are not captured", async () => {
+    // Minifiers reuse short names, so a destructured callback parameter or a
+    // callback-local declaration can shadow a binding the tool captures.
+    const source = `
+import { defineDynamic, defineTool } from "eve/tools";
+
+function makeTool(e) {
+  return defineTool({
+    description: "T",
+    inputSchema: { type: "object" },
+    approval: ({ toolInput: e }) => (e?.value === "secret" ? "user-approval" : "not-applicable"),
+    toModelOutput(output) { const e = "local"; return { type: "text", value: e + output }; },
+    execute({ value }) { return e() + ":" + value; },
+  });
+}
+
+export default defineDynamic({
+  events: { "session.started": async () => ({ tool: makeTool(() => "echo") }) },
+});
+`;
+
+    const { callHandler } = await transformAndEval("tools/shadow-pattern.ts", source);
+    const tool = (await callHandler()).tool as Record<string, Function>;
+    const callbacks = durableCallbacks(tool);
+
+    expect(tool.approval!({ toolInput: { value: "secret" } })).toBe("user-approval");
+    expect(tool.toModelOutput!("!")).toEqual({ type: "text", value: "local!" });
+    expect(tool.execute!({ value: "hi" })).toBe("echo:hi");
+    expect(callbacks.approvalRequest!.closure).toEqual({});
+    expect(callbacks.toModelOutput!.closure).toEqual({});
+    expect(Object.keys(callbacks.execute!.closure)).toEqual(["e"]);
+  });
+
   it("resolver ctx values are captured separately from execute ctx", async () => {
     // The handler captures ctx.session.id at resolve time.
     // The execute function receives its own ctx with session.turn etc.
