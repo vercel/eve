@@ -488,32 +488,23 @@ describe("eveChannel — events", () => {
     });
   });
 
-  it("loads URL file parts through fetchFile and holds the bytes to the upload policy", async () => {
-    const uploads = new Map([
-      ["https://uploads.example.com/small", Buffer.from("ok")],
-      ["https://uploads.example.com/large", Buffer.from("too large")],
-    ]);
+  it("hands staging its fetchFile and the upload policy it holds every file to", async () => {
+    const fetchFile = vi.fn(async (url: string) =>
+      url.startsWith("https://uploads.example.com/") ? Buffer.from("ok") : null,
+    );
     const adapter = getEveAdapter({
       auth: none(),
-      async fetchFile(url) {
-        if (url === "https://uploads.example.com/typed") {
-          return { bytes: Buffer.from("x"), mediaType: "video/mp4" };
-        }
-        return uploads.get(url) ?? null;
-      },
-      uploadPolicy: { allowedMediaTypes: ["image/*", "text/*"], maxBytes: 4 },
+      fetchFile,
+      uploadPolicy: { allowedMediaTypes: ["image/*"], maxBytes: 4 },
     });
 
-    await expect(adapter.fetchFile!("https://uploads.example.com/small")).resolves.toEqual(
+    await expect(adapter.fetchFile!("https://uploads.example.com/a")).resolves.toEqual(
       Buffer.from("ok"),
     );
     await expect(adapter.fetchFile!("https://elsewhere.example.com/a")).resolves.toBeNull();
-    await expect(adapter.fetchFile!("https://uploads.example.com/large")).rejects.toThrow(
-      "The file is 9 bytes, over the 4-byte upload limit.",
-    );
-    await expect(adapter.fetchFile!("https://uploads.example.com/typed")).rejects.toThrow(
-      'The file\'s media type "video/mp4" is not allowed by this channel.',
-    );
+    expect(adapter.uploadPolicy).toEqual({ allowedMediaTypes: ["image/*"], maxBytes: 4 });
+    // Without either option the channel keeps the framework's HTTP adapter.
+    expect(getEveAdapter({ auth: none() }).kind).toBe("http");
   });
 
   it("passes configured event handlers through with session context", async () => {

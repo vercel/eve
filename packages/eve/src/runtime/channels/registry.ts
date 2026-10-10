@@ -41,6 +41,7 @@ const ADAPTER_NON_EVENT_FIELDS: ReadonlySet<string> = new Set([
   "createAdapterContext",
   "fetchFile",
   "instrumentation",
+  "uploadPolicy",
 ]);
 
 /**
@@ -159,6 +160,10 @@ function carriesAdapterBehavior(adapter: ChannelAdapter): boolean {
   }
 
   if (adapter.fetchFile !== undefined) {
+    return true;
+  }
+
+  if (adapter.uploadPolicy !== undefined) {
     return true;
   }
 

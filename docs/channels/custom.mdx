@@ -572,7 +572,9 @@ The `URL` object survives the queue boundary as a string and is reconstituted in
 
 Return bytes to stage the file to the sandbox. Return `null` when the URL is not one your channel resolves: eve then downloads a public `https:` URL itself, with the 25 MB default size cap and a 30-second timeout, and refuses private or reserved addresses. It downloads at most 10 URLs per message, one at a time. Any other URL, or a download that fails, reaches the model as a note. The model provider never fetches an attachment, so a link that expires or needs credentials can't fail later model calls.
 
-The framework handles staging bytes to the sandbox, enforcing upload policy, hydrating files for the model call, and reconstituting `URL` objects after queue serialization. See [Inbound attachments](../sandbox#inbound-attachments) for the shared storage, size, and provider-input behavior.
+Set `uploadPolicy` on `defineChannel` to cap what eve stages for the channel, for example `uploadPolicy: { maxBytes: 10 * 1024 * 1024, allowedMediaTypes: ["image/*", "application/pdf"] }`. eve checks every staged file against it, on the final bytes and the media type they prove, including URLs it downloads itself. A file that breaks the policy reaches the model as a note. Without `uploadPolicy`, eve checks only what your `fetchFile` enforces, and its own downloads stop at 25 MB.
+
+The framework handles staging bytes to the sandbox, hydrating files for the model call, and reconstituting `URL` objects after queue serialization. See [Inbound attachments](../sandbox#inbound-attachments) for the shared storage, size, and provider-input behavior.
 
 ## What to read next
 

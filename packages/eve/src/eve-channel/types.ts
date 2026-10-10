@@ -145,7 +145,9 @@ export interface EveChannelInput {
   readonly trustedForwarders?: TrustedForwarders;
   /**
    * Attachment policy for inbound file parts. Omit for the framework default (25 MB cap, all media
-   * types); `"disabled"` rejects every attachment; a partial config is merged onto the default. Violations reject with 413 (too large) or 415 (bad type).
+   * types); `"disabled"` rejects every attachment; a partial config is merged onto the default. Violations in the
+   * request reject with 413 (too large) or 415 (bad type). eve also checks every file it stages, including URLs, on
+   * its final bytes and verified media type; a file that breaks the policy there reaches the model as a note.
    */
   readonly uploadPolicy?: UploadPolicyInput;
   /**
@@ -155,8 +157,7 @@ export interface EveChannelInput {
    *
    * Return bytes or `{ bytes, mediaType?, filename? }` to stage the file, or
    * `null` when the URL is not yours: eve then downloads a public `https:` URL
-   * itself. Fetched bytes must pass {@link uploadPolicy}; a file over its limit
-   * or of a disallowed type reaches the model as a note.
+   * itself. Fetched bytes must pass {@link uploadPolicy}.
    */
   readonly fetchFile?: FetchFileFunction;
   /**

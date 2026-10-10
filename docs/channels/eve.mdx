@@ -195,7 +195,7 @@ export default eveChannel({
 });
 ```
 
-`fetchFile` follows the [custom channel contract](./custom#file-uploads): return bytes to stage the file, or `null` for a URL that isn't yours. eve then downloads a public `https:` URL itself, and any other URL reaches the model as a note. The bytes `fetchFile` returns must pass `uploadPolicy`. A file over the cap, or with a disallowed media type, reaches the model as a note instead of failing the request. See [Inbound attachments](../sandbox#inbound-attachments) for how eve stores files and shows them to the model.
+`fetchFile` follows the [custom channel contract](./custom#file-uploads): return bytes to stage the file, or `null` for a URL that isn't yours. eve then downloads a public `https:` URL itself, and any other URL reaches the model as a note. `uploadPolicy` covers every file eve stages for the channel, including URLs that `fetchFile` loads and URLs eve downloads itself. eve checks the final bytes and the media type they prove, so a file over the cap, or one whose bytes are a disallowed type, reaches the model as a note instead of failing the request. See [Inbound attachments](../sandbox#inbound-attachments) for how eve stores files and shows them to the model.
 
 ### Stream events
 

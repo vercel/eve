@@ -5,6 +5,7 @@ import type { RouteDefinition } from "#channel/routes.js";
 import type { Session, SessionHandle } from "#channel/session.js";
 import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { StepInput } from "#harness/types.js";
+import type { UploadPolicyInput } from "#public/channels/upload-policy.js";
 import type { AudienceContext } from "#shared/conversation-context.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 
@@ -104,6 +105,15 @@ export interface GenericChannelDefinition<
    * note. A provider never fetches an attachment.
    */
   readonly fetchFile?: FetchFileFunction;
+
+  /**
+   * Size cap and media types for every file eve stages for this channel,
+   * checked against the final bytes and the media type they prove, including
+   * links eve downloads itself. A file that breaks the policy reaches the
+   * model as a note. Omit to check nothing beyond your own `fetchFile`; eve's
+   * own downloads then stop at the 25 MB framework default.
+   */
+  readonly uploadPolicy?: UploadPolicyInput;
 
   /**
    * Channel-owned metadata exposed to instrumentation callbacks. This is the
