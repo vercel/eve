@@ -17,7 +17,7 @@ export default defineEval({
     const cancelled = await t.target.watchTurn(parked.sessionId, { startIndex }).result();
     cancelled.event("interaction.settled", {
       count: 1,
-      data: { interactionId: request.requestId, outcome: "withdrawn" },
+      data: { interactionId: request.requestId, outcome: "interrupted" },
     });
     cancelled.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
     cancelled.notEvent("call.settled", {
