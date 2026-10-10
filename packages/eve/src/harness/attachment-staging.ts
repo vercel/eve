@@ -268,6 +268,7 @@ async function stageToolOutputFiles(
     output.value.map(async (part): Promise<ToolOutputContentPart> => {
       if (!isInlineToolOutputFile(part) || part.data.type !== "data") return part;
       const data = readFileData(part.data.data);
+      if (data.kind === "link") return part;
       if (sandbox === null || data.kind !== "bytes") {
         return {
           text: `Returned file ${part.filename ?? "file"} (${part.mediaType}) could not be stored.`,
@@ -477,7 +478,11 @@ async function stageFilePart(
     return attachmentNote(part, `could not be retrieved: ${error.message}`);
   }
   if (resolved === null) {
-    return { ...part, data: data.url };
+    // Only a provider can fetch an http(s) link; any other scheme would fail
+    // every later model call.
+    return data.url.protocol === "http:" || data.url.protocol === "https:"
+      ? { ...part, data: data.url }
+      : attachmentNote(part, "could not be retrieved.");
   }
   return stageResolvedBytes(part, resolved, sandbox);
 }

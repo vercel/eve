@@ -224,6 +224,26 @@ describe("stageAttachmentsToSandbox (integration)", () => {
     );
   });
 
+  it("turns a link with a scheme no channel resolves into a note", async () => {
+    const sandbox = mockSandbox({ id: "sbx_unknown_scheme" });
+    const runtime = await createTestRuntime();
+    const content: UserContent = [
+      { data: "myapp-file:abc", filename: "upload.txt", mediaType: "text/plain", type: "file" },
+    ];
+
+    const staged = await runtime.runAsSession({ sandbox }, async () =>
+      stageAttachmentsToSandbox(content),
+    );
+
+    expect(staged).toEqual([
+      {
+        text: expect.stringMatching(/^Attachment upload\.txt could not be retrieved/),
+        type: "text",
+      },
+    ]);
+    expect(sandbox.writes).toHaveLength(0);
+  });
+
   it("refines FilePart.mediaType when fetchFile returns a FetchFileResult", async () => {
     const resolvedBytes = Buffer.from("PNGDATA", "utf8");
     const adapter: ChannelAdapter<any> = {
