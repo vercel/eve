@@ -142,6 +142,36 @@ describe("runDeployCommand", () => {
     expect(process.exitCode).toBe(1);
   });
 
+  test("links and deploys a workspace root non-interactively", async () => {
+    const projectRoot = await createWorkspaceProject();
+    const logger = new TestLogger();
+    const linkDeps = { ...createNonInteractiveLinkDeps(), isEveProject };
+    const deployDeps = createDeployProjectDeps();
+
+    await runDeployCommand(
+      logger,
+      projectRoot,
+      {
+        createPrompter: () => createFakePrompter({}).prompter,
+        hasInteractiveTerminal: () => false,
+        nonInteractiveLinkDeps: linkDeps,
+        flowDeps: {
+          detectDeployment: vi.fn(async () => LINKED),
+          deployProject: deployDeps,
+        },
+      },
+      { nonInteractive: true, project: "my-workspace", yes: true, traceSampling: false },
+    );
+
+    expect(logger.errors).toEqual([]);
+    expect(process.exitCode).toBeUndefined();
+    expect(linkDeps.runVercel).toHaveBeenCalledWith(
+      ["link", "--project", "my-workspace", "--yes"],
+      { cwd: projectRoot, nonInteractive: true },
+    );
+    expect(deployDeps.runVercel).toHaveBeenCalled();
+  });
+
   test("points an unlinked non-interactive run at eve link", async () => {
     const projectRoot = await createAgentProject();
     const logger = new TestLogger();
