@@ -109,12 +109,16 @@ one prompt-cache rewrite on upgrade.
 
 ## Channel fixes
 
-- Slack collects files from every message since the app's last reply in the
-  thread, capped at 10 messages (#705). It skips `mode: "external"` files such
+- When a mention carries no files, Slack collects the files of every message
+  since the previous mention of the app, capped at 10 messages and skipping
+  the app's own messages (#705). That earlier mention's turn collected the
+  files before it. A message that doesn't mention the app gets no lookback. It skips `mode: "external"` files such
   as Google Drive links, whose link stays in the message text (#855). It stops
   dropping audio and video, and its file fetch gets a timeout.
 - Bytes in a `send()` payload cross the queue as `data:` URLs, so no world
-  serializer sees a raw `Uint8Array` (#497).
+  serializer sees a raw `Uint8Array` (#497). `message.received` reports an
+  inline file's size instead of echoing its `data:` URL, because the session
+  stream stores that event.
 - A cancelled turn stages its attachments inside the framework providers, so a
   photo sent just before a steering message survives (#3419).
 
@@ -129,6 +133,9 @@ one prompt-cache rewrite on upgrade.
   call, which is the failure this plan removes. Provider file references, such
   as the Gemini Files API, fit this better and need a store. Until then, audio
   and video render as labels, and the agent can process them with tools.
+- **Per-request image limits.** Anthropic lowers its per-side limit to 2000 px
+  when a request carries more than 20 images. Gating on that would need the
+  inline decision to count images across history, which breaks its purity.
 - Outbound files, a `toModel` conversion hook, model capability metadata, and
   trace content.
 
