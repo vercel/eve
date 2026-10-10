@@ -1,4 +1,4 @@
-import type { FilePart, UserContent } from "ai";
+import type { FilePart, ModelMessage, UserContent } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ChannelAdapter, FetchFileResult } from "#channel/adapter.js";
@@ -13,6 +13,9 @@ import {
   stageAttachmentsToSandbox,
 } from "#harness/attachment-staging.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
+import { requestPublicUrl } from "#execution/web-fetch/request.js";
+
+vi.mock("#execution/web-fetch/request.js", () => ({ requestPublicUrl: vi.fn() }));
 
 /**
  * Integration coverage for {@link stageAttachmentsToSandbox}.
@@ -305,24 +308,93 @@ describe("stageAttachmentsToSandbox (integration)", () => {
     expect(filePart.mediaType).toBe("text/csv");
   });
 
-  it("passes URL FileParts through unchanged when the active adapter has no fetchFile function", async () => {
+  it("downloads a link no channel resolver claims, so the provider never fetches it", async () => {
+    vi.mocked(requestPublicUrl).mockResolvedValueOnce(
+      new Response("PNG", { headers: { "content-type": "image/png" } }),
+    );
     const adapter: ChannelAdapter<any> = { kind: "custom-channel", state: {} };
-    const fileUrl = new URL("https://example.com/a.bin");
-    const sandbox = mockSandbox({ id: "sbx_no_resolver" });
+    const sandbox = mockSandbox({ id: "sbx_public_link" });
     const runtime = await createTestRuntime();
     const content: UserContent = [
-      { data: fileUrl, filename: "a.bin", mediaType: "application/octet-stream", type: "file" },
+      {
+        data: new URL("https://example.com/a.bin"),
+        filename: "a.bin",
+        mediaType: "application/octet-stream",
+        type: "file",
+      },
     ];
 
     const staged = (await runtime.runAsSession({ channel: adapter, sandbox }, async () =>
       stageAttachmentsToSandbox(content),
     )) as UserContent;
 
-    // Without fetchFile, URL FileParts pass through for the model
-    // provider to handle directly.
+    expect(vi.mocked(requestPublicUrl)).toHaveBeenCalledWith(
+      "https://example.com/a.bin",
+      expect.objectContaining({ maxResponseSize: 25 * 1024 * 1024 }),
+    );
     const filePart = staged[0] as FilePart;
-    expect(filePart.data).toBeInstanceOf(URL);
-    expect((filePart.data as URL).href).toBe("https://example.com/a.bin");
+    expect(isSandboxRefUrl(filePart.data)).toBe(true);
+    expect(filePart.mediaType).toBe("image/png");
+  });
+
+  it("turns a link eve can't download into a note", async () => {
+    const sandbox = mockSandbox({ id: "sbx_bad_link" });
+    const runtime = await createTestRuntime();
+    vi.mocked(requestPublicUrl)
+      .mockResolvedValueOnce(new Response("missing", { status: 404 }))
+      .mockResolvedValueOnce(
+        new Response("<html>sign in</html>", { headers: { "content-type": "text/html" } }),
+      )
+      .mockRejectedValueOnce(new Error("URL must not target localhost"));
+    const link = (data: string, filename: string): FilePart => ({
+      data,
+      filename,
+      mediaType: "application/pdf",
+      type: "file",
+    });
+
+    const staged = await runtime.runAsSession({ sandbox }, async () =>
+      stageAttachmentsToSandbox([
+        link("http://example.com/plain.pdf", "plain.pdf"),
+        link("https://example.com/gone.pdf", "gone.pdf"),
+        link("https://docs.example.com/d/1", "doc.pdf"),
+        link("https://127.0.0.1/internal.pdf", "internal.pdf"),
+      ]),
+    );
+
+    expect(staged).toEqual([
+      {
+        text: "Attachment plain.pdf could not be retrieved: eve downloads only public https:// links.",
+        type: "text",
+      },
+      {
+        text: "Attachment gone.pdf could not be retrieved: The link returned HTTP 404.",
+        type: "text",
+      },
+      {
+        text: "Attachment doc.pdf could not be retrieved: The link returned a web page instead of a file.",
+        type: "text",
+      },
+      {
+        text: "Attachment internal.pdf could not be retrieved: The link could not be downloaded.",
+        type: "text",
+      },
+    ]);
+    expect(sandbox.writes).toHaveLength(0);
+  });
+
+  it("leaves a provider file reference for the provider to resolve", async () => {
+    const sandbox = mockSandbox({ id: "sbx_reference" });
+    const runtime = await createTestRuntime();
+    const content: UserContent = [
+      { data: { openai: "file-abc" }, mediaType: "application/pdf", type: "file" },
+    ];
+
+    const staged = await runtime.runAsSession({ sandbox }, async () =>
+      stageAttachmentsToSandbox(content),
+    );
+
+    expect(staged).toEqual(content);
     expect(sandbox.writes).toHaveLength(0);
   });
 
@@ -683,6 +755,40 @@ describe("hydrateSandboxAttachments (integration)", () => {
       text: `Attached file ${stagedPath} (application/octet-stream)`,
       type: "text",
     });
+  });
+
+  it("renders a link or eve-url marker left in history by an older release as a note", async () => {
+    const runtime = await createTestRuntime();
+    const messages: ModelMessage[] = [
+      {
+        content: [
+          { text: "what is in these?", type: "text" },
+          {
+            data: new URL("https://docs.example.com/d/1"),
+            filename: "sheet.pdf",
+            mediaType: "application/pdf",
+            type: "file",
+          },
+          {
+            data: "eve-url:telegram-file:photo",
+            filename: "photo.jpg",
+            mediaType: "image/jpeg",
+            type: "file",
+          },
+        ],
+        role: "user",
+      },
+    ];
+
+    const hydrated = await runtime.runAsSession(undefined, async () =>
+      hydrateSandboxAttachments(messages),
+    );
+
+    expect(hydrated[0]?.content).toEqual([
+      { text: "what is in these?", type: "text" },
+      { text: "Attachment sheet.pdf could not be retrieved.", type: "text" },
+      { text: "Attachment photo.jpg could not be retrieved.", type: "text" },
+    ]);
   });
 
   it("returns the input array unchanged (no allocation) when no messages contain sandbox refs", async () => {

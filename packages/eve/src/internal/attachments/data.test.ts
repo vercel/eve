@@ -47,6 +47,19 @@ describe("readFileData", () => {
     expect(readFileData("eve-url:https://example.com/a.png")).toEqual({ kind: "unreadable" });
   });
 
+  it("reads the AI SDK's tagged shapes and provider references", () => {
+    expect(bytesOf({ data: "aGk=", type: "data" })).toBe("hi");
+    expect(bytesOf({ text: "plain", type: "text" })).toBe("plain");
+    expect(readFileData({ type: "url", url: "https://example.com/a" })).toEqual({
+      kind: "link",
+      url: new URL("https://example.com/a"),
+    });
+    expect(readFileData({ reference: { openai: "file-1" }, type: "reference" })).toEqual({
+      kind: "reference",
+    });
+    expect(readFileData({ openai: "file-1" })).toEqual({ kind: "reference" });
+  });
+
   it("reports unsupported shapes and malformed data URLs as unreadable", () => {
     for (const value of [42, null, {}, { 0: 1, 1: 2 }, "data:text/plain;base64"]) {
       expect(readFileData(value), JSON.stringify(value)).toEqual({ kind: "unreadable" });
