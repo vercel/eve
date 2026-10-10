@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { defineDynamic as defineDynamicAgent } from "#public/definitions/agent.js";
-import { cancel, defineHook } from "#public/definitions/hook.js";
+import { cancel, defineHook, type HookDefinition } from "#public/definitions/hook.js";
 import { defineDynamic as defineDynamicInstructions } from "#public/definitions/instructions.js";
 import { defineDynamic as defineDynamicSkills } from "#public/definitions/skill.js";
 import { defineDynamic as defineDynamicTools, defineTool } from "#public/tools/index.js";
@@ -30,6 +30,21 @@ describe("defineDynamic and defineHook", () => {
       // @ts-expect-error: a hook's resolve needs a select too.
       defineHook({ resolve: () => null }),
     ).toThrow("Return null from select to resolve once per session");
+  });
+
+  it("type event handlers from their keys, with or without a declared type", () => {
+    const declared: HookDefinition = defineHook({
+      events: {
+        "call.settled"(event, ctx) {
+          void event.data.callId;
+          void ctx.view;
+        },
+      },
+    });
+    const inferred = defineHook({ events: { "*": (event) => void event.type } });
+    expect([declared, inferred]).toHaveLength(2);
+    // @ts-expect-error: not a hook event.
+    defineHook({ events: { "step.started": () => null } });
   });
 
   it("reject a hook with both forms", () => {

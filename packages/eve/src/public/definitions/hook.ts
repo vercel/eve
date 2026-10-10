@@ -224,7 +224,7 @@ export type HookDefinition<TKey extends HookEventKey = HookEventKey, TSelected =
  */
 export function defineHook<const T extends StreamEventHooks<HookEventKey>>(definition: {
   readonly events: ExactDefinition<T, StreamEventHooks<HookEventKey>>;
-}): EventHookDefinition<Extract<keyof T, HookEventKey>>;
+}): EventHookDefinition<NoInfer<Extract<keyof T, HookEventKey>>>;
 export function defineHook<TSelected>(
   definition: ResolverHookDefinition<TSelected>,
 ): ResolverHookDefinition<TSelected>;

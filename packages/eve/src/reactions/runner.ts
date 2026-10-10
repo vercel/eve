@@ -32,6 +32,7 @@ import {
   canonicalJson,
   clearLive,
   digestOf,
+  forgetSessionLive,
   readLive,
   readReactionsState,
   type ReactionsState,
@@ -160,6 +161,11 @@ export async function restoreReactions(
 ): Promise<void> {
   if (input.revision !== undefined) {
     writeReactionsState(ctx, { ...readReactionsState(ctx), revision: input.revision });
+  }
+  // A test seam: every step rebuilds its code as a fresh process would.
+  if (process.env.EVE_REACTIONS_COLD === "1") {
+    const sessionId = ctx.get(SessionIdKey);
+    if (sessionId !== undefined) forgetSessionLive(sessionId);
   }
   const { reactions } = await bundleReactions(ctx);
   for (const reaction of reactions) {
