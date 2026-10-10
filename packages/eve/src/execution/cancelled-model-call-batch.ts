@@ -1,6 +1,7 @@
 import { contextStorage, type ContextContainer } from "#context/container.js";
-import { AuthKey, TurnDeliveryIdsKey } from "#context/keys.js";
+import { AuthKey, SandboxKey, TurnDeliveryIdsKey } from "#context/keys.js";
 import { preserveSerializedSessionDynamicModelSelection } from "#context/serialized-dynamic-model-selection.js";
+import { withContextScope } from "#context/run-step.js";
 import { serializeContext } from "#context/serialize.js";
 import { preserveCancelledTurnMessage } from "#execution/cancelled-turn-message.js";
 import { createDurableSessionValues } from "#execution/durable-session-store.js";
@@ -35,7 +36,20 @@ async function cancelledWithoutCheckpoint(
     session = deferred.session;
     if (deferred.message !== undefined) preserved = { ...stepInput, message: deferred.message };
   }
+  // A cancellation at step entry lands before the framework providers exist, and staging the
+  // message's attachments needs the sandbox.
+  if (ctx.get(SandboxKey) === undefined && hasFileParts(preserved?.message)) {
+    const scoped = await withContextScope(ctx, session, async (current) => ({
+      result: undefined,
+      session: await preserveCancelledTurnMessage(current, preserved),
+    }));
+    return scoped.session;
+  }
   return await contextStorage.run(ctx, () => preserveCancelledTurnMessage(session, preserved));
+}
+
+function hasFileParts(message: StepInput["message"]): boolean {
+  return Array.isArray(message) && message.some((part) => part.type === "file");
 }
 
 /** Builds the successful step result that commits a cancelled batch's completed model calls. */

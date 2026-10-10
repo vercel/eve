@@ -1,134 +1,112 @@
 /**
- * Shared helpers for decoding AI SDK `FilePart.data` values into raw
- * bytes and inspecting their size without fetching remote resources.
+ * Shared helpers for reading AI SDK `FilePart.data` values without
+ * fetching remote resources.
  *
- * URL-shaped inputs that require IO return `null`; channel attachment
- * refs are resolved explicitly by the staging layer.
+ * Every value has one meaning: typed arrays, base64 strings, and `data:`
+ * URLs carry bytes; any other string or `URL` with a scheme is a link the
+ * staging layer resolves. Anything else is unreadable.
  */
 
-import { isAttachmentRefUrl, parseAttachmentRef } from "#internal/attachments/refs.js";
+import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
+
+/** What a `FilePart.data` value carries. */
+export type FileData =
+  | { readonly kind: "bytes"; readonly bytes: Buffer }
+  | { readonly kind: "link"; readonly url: URL }
+  | { readonly kind: "unreadable" };
+
+// Base64 has no colon, so a leading scheme always marks a link.
+const SCHEME_PREFIX = /^[a-z][a-z\d+.-]*:/i;
+
+const UNREADABLE: FileData = { kind: "unreadable" };
 
 /**
- * Converts any inline AI SDK `FilePart.data` value into raw bytes.
- *
- * Returns `null` for every URL-shaped input the caller is expected to
- * handle out-of-band, including `eve-attachment:` refs and remote URLs.
+ * Classifies one `FilePart.data` value. A string with a framework-internal
+ * scheme is unreadable: only eve mints those refs, so a caller-supplied one
+ * must never turn into a privileged read.
  */
-export async function fileDataToBytes(data: unknown): Promise<Buffer | null> {
-  // Buffer extends Uint8Array — check it first so genuine Buffer inputs
-  // short-circuit to identity instead of an unnecessary copy.
+export function readFileData(data: unknown): FileData {
   if (typeof Buffer !== "undefined" && Buffer.isBuffer(data)) {
-    return data;
+    return { bytes: data, kind: "bytes" };
   }
-
   if (data instanceof Uint8Array) {
-    return Buffer.from(data);
+    return { bytes: Buffer.from(data), kind: "bytes" };
   }
-
   if (data instanceof ArrayBuffer) {
-    return Buffer.from(new Uint8Array(data));
+    return { bytes: Buffer.from(new Uint8Array(data)), kind: "bytes" };
   }
-
-  if (typeof data === "string") {
-    return decodeStringData(data);
-  }
-
   if (data instanceof URL) {
-    if (data.protocol === "data:") {
-      return decodeStringData(data.href);
-    }
-    // Every other URL scheme (including eve-attachment: and http(s):)
-    // requires IO the caller must own.
-    return null;
+    return data.protocol === "data:" ? decodeDataUrl(data.href) : { kind: "link", url: data };
   }
-
-  return null;
+  if (typeof data !== "string") {
+    return UNREADABLE;
+  }
+  if (data.startsWith("data:")) {
+    return decodeDataUrl(data);
+  }
+  if (SCHEME_PREFIX.test(data)) {
+    if (hasInternalRefScheme(data)) return UNREADABLE;
+    const url = URL.parse(data);
+    return url === null ? UNREADABLE : { kind: "link", url };
+  }
+  // Bare strings are base64 payloads, matching AI SDK's `DataContent`.
+  return { bytes: Buffer.from(data, "base64"), kind: "bytes" };
 }
 
 /**
- * Returns the byte length of `FilePart.data` without performing any IO.
+ * Returns the byte length of `FilePart.data` without performing any IO, or
+ * `null` when only a fetch could tell.
  */
 export function getKnownByteLength(data: unknown): number | null {
-  if (typeof Buffer !== "undefined" && Buffer.isBuffer(data)) {
+  if (data instanceof Uint8Array || data instanceof ArrayBuffer) {
     return data.byteLength;
   }
-
-  if (data instanceof Uint8Array) {
-    return data.byteLength;
+  if (data instanceof URL) {
+    return data.protocol === "data:" ? computeStringByteLength(data.href) : null;
   }
-
-  if (data instanceof ArrayBuffer) {
-    return data.byteLength;
+  if (typeof data !== "string") {
+    return null;
   }
-
-  if (typeof data === "string") {
+  if (data.startsWith("data:")) {
     return computeStringByteLength(data);
   }
-
-  if (isAttachmentRefUrl(data)) {
-    const ref = parseAttachmentRef(data);
-    return ref.size ?? null;
-  }
-
-  if (data instanceof URL) {
-    if (data.protocol === "data:") {
-      return computeStringByteLength(data.href);
-    }
-    return null;
-  }
-
-  return null;
+  return SCHEME_PREFIX.test(data) ? null : estimateBase64ByteLength(data);
 }
 
-function decodeStringData(value: string): Buffer | null {
-  if (value.startsWith("data:")) {
-    const comma = value.indexOf(",");
-    if (comma === -1) {
-      return null;
-    }
-    const header = value.slice(5, comma);
-    const body = value.slice(comma + 1);
-    if (header.endsWith(";base64")) {
-      return Buffer.from(body, "base64");
-    }
-    return Buffer.from(decodeURIComponent(body), "utf8");
+function decodeDataUrl(value: string): FileData {
+  const comma = value.indexOf(",");
+  if (comma === -1) {
+    return UNREADABLE;
   }
-
-  if (/^https?:\/\//.test(value)) {
-    return null;
+  const header = value.slice(5, comma);
+  const body = value.slice(comma + 1);
+  if (header.endsWith(";base64")) {
+    return { bytes: Buffer.from(body, "base64"), kind: "bytes" };
   }
-
-  // Bare strings are treated as base64 payloads, matching AI SDK's
-  // `DataContent` convention.
-  return Buffer.from(value, "base64");
+  try {
+    return { bytes: Buffer.from(decodeURIComponent(body), "utf8"), kind: "bytes" };
+  } catch {
+    return UNREADABLE;
+  }
 }
 
 function computeStringByteLength(value: string): number | null {
-  if (value.startsWith("data:")) {
-    const comma = value.indexOf(",");
-    if (comma === -1) {
-      return null;
-    }
-    const header = value.slice(5, comma);
-    const body = value.slice(comma + 1);
-    if (header.endsWith(";base64")) {
-      return estimateBase64ByteLength(body);
-    }
-    // Percent-encoded UTF-8 payload — estimate by decoding; the bytes
-    // we care about are the final UTF-8 octets, not the percent-encoded
-    // string length.
-    try {
-      return Buffer.byteLength(decodeURIComponent(body), "utf8");
-    } catch {
-      return Buffer.byteLength(body, "utf8");
-    }
-  }
-
-  if (/^https?:\/\//.test(value)) {
+  const comma = value.indexOf(",");
+  if (comma === -1) {
     return null;
   }
-
-  return estimateBase64ByteLength(value);
+  const header = value.slice(5, comma);
+  const body = value.slice(comma + 1);
+  if (header.endsWith(";base64")) {
+    return estimateBase64ByteLength(body);
+  }
+  // Percent-encoded UTF-8 payload: count the decoded octets, not the
+  // percent-encoded string length.
+  try {
+    return Buffer.byteLength(decodeURIComponent(body), "utf8");
+  } catch {
+    return Buffer.byteLength(body, "utf8");
+  }
 }
 
 function estimateBase64ByteLength(base64: string): number {

@@ -72,11 +72,17 @@ describe("stageAttachmentsToSandbox (integration)", () => {
     expect(sandbox.writes).toHaveLength(0);
   });
 
-  it("returns the message unchanged when no SandboxKey is bound on the context", async () => {
+  it("replaces each file with a note when no sandbox is bound, so history never keeps it", async () => {
     const runtime = await createTestRuntime();
-    const payload = Buffer.from("bytes", "utf8");
     const content: UserContent = [
-      { data: payload, filename: "orphan.txt", mediaType: "text/plain", type: "file" },
+      { type: "text", text: "see attached" },
+      { data: Buffer.from("bytes"), filename: "orphan.txt", mediaType: "text/plain", type: "file" },
+      {
+        data: "eve-url:telegram-file:photo",
+        filename: "photo.jpg",
+        mediaType: "image/jpeg",
+        type: "file",
+      },
     ];
 
     // `runAsSession` without a sandbox argument leaves SandboxKey unbound.
@@ -84,7 +90,32 @@ describe("stageAttachmentsToSandbox (integration)", () => {
       stageAttachmentsToSandbox(content),
     );
 
-    expect(staged).toBe(content);
+    expect(staged).toEqual([
+      { type: "text", text: "see attached" },
+      { text: "Attachment orphan.txt could not be stored: no sandbox is available.", type: "text" },
+      { text: "Attachment photo.jpg could not be stored: no sandbox is available.", type: "text" },
+    ]);
+  });
+
+  it("replaces data that is not bytes, base64, or a URL with a note", async () => {
+    const sandbox = mockSandbox({ id: "sbx_unreadable" });
+    const runtime = await createTestRuntime();
+    // A Uint8Array that crossed a JSON boundary arrives as a plain object.
+    const content: UserContent = [
+      {
+        data: { 0: 1, 1: 2 } as never,
+        filename: "photo.png",
+        mediaType: "image/png",
+        type: "file",
+      },
+    ];
+
+    const staged = await runtime.runAsSession({ sandbox }, async () =>
+      stageAttachmentsToSandbox(content),
+    );
+
+    expect(staged).toEqual([{ text: "Attachment photo.png could not be read.", type: "text" }]);
+    expect(sandbox.writes).toHaveLength(0);
   });
 
   it("dedupes repeated uploads of the same payload within one session", async () => {
@@ -165,6 +196,32 @@ describe("stageAttachmentsToSandbox (integration)", () => {
     expect(sandbox.writes).toHaveLength(1);
     const written = sandbox.writes[0]?.content as Buffer;
     expect(written.equals(resolvedBytes)).toBe(true);
+  });
+
+  it("hands a string with any scheme to fetchFile instead of decoding it as base64", async () => {
+    const urls: string[] = [];
+    const adapter: ChannelAdapter<any> = {
+      async fetchFile(url) {
+        urls.push(url);
+        return Buffer.from("stored-upload");
+      },
+      kind: "custom-channel",
+      state: {},
+    };
+    const sandbox = mockSandbox({ id: "sbx_custom_scheme" });
+    const runtime = await createTestRuntime();
+    const content: UserContent = [
+      { data: "myapp-file:abc", filename: "upload.txt", mediaType: "text/plain", type: "file" },
+    ];
+
+    const staged = (await runtime.runAsSession({ channel: adapter, sandbox }, async () =>
+      stageAttachmentsToSandbox(content),
+    )) as UserContent;
+
+    expect(urls).toEqual(["myapp-file:abc"]);
+    expect(decodeSandboxRef((staged[0] as FilePart).data as URL).size).toBe(
+      Buffer.byteLength("stored-upload"),
+    );
   });
 
   it("refines FilePart.mediaType when fetchFile returns a FetchFileResult", async () => {

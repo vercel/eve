@@ -133,7 +133,7 @@ export function inlinesSandboxRefAsBytes(ref: SandboxRef): boolean {
  * Accepts `URL` instances with the `eve-sandbox:` scheme. Strings are
  * NOT accepted — the staging and hydration layers only inspect
  * URL-instance `FilePart.data` values, matching the existing
- * `data instanceof URL` branch in `fileDataToBytes`.
+ * `data instanceof URL` branch in `readFileData`.
  */
 export function isSandboxRefUrl(value: unknown): value is URL {
   return value instanceof URL && value.protocol === SANDBOX_URL_SCHEME;

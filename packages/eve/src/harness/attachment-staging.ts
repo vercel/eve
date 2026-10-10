@@ -10,7 +10,7 @@ import { contextStorage, loadContext } from "#context/container.js";
 import { SandboxKey } from "#context/keys.js";
 import { createFrameworkUserMessage } from "#harness/messages.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
-import { fileDataToBytes } from "#internal/attachments/data.js";
+import { readFileData } from "#internal/attachments/data.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
 import { createLogger } from "#internal/logging.js";
 import { readMediaMetadata } from "#internal/attachments/media-metadata.js";
@@ -82,8 +82,9 @@ export async function stageAttachmentsForAdapter(
 }
 
 /**
- * Context-bound variant of {@link stageAttachmentsForAdapter}. Returns
- * the input unchanged when there is no active sandbox or no file parts.
+ * Context-bound variant of {@link stageAttachmentsForAdapter}. Without an
+ * active sandbox, every file part becomes a note: history never keeps an
+ * attachment eve did not stage.
  */
 export async function stageAttachmentsToSandbox(
   message: string | UserContent,
@@ -99,14 +100,13 @@ export async function stageAttachmentsToSandbox(
   }
 
   const container = loadContext();
-  const sandboxAccess = container.get(SandboxKey);
-  if (sandboxAccess === undefined) {
-    return message;
-  }
-
-  const sandbox = await sandboxAccess.get();
+  const sandbox = (await container.get(SandboxKey)?.get()) ?? null;
   if (sandbox === null) {
-    return message;
+    return message.map((part) =>
+      part.type === "file" && !isSandboxRefUrl(part.data)
+        ? attachmentNote(part, "could not be stored: no sandbox is available.")
+        : part,
+    );
   }
 
   // Build the adapter context once up front. When an adapter is bound,
@@ -131,8 +131,8 @@ export async function stageAttachmentsToSandbox(
  * Moves inline file payloads in `content` tool outputs into the sandbox and
  * leaves `eve-sandbox:` refs in their place, so durable history never
  * carries tool-result bytes. {@link hydrateSandboxAttachments} restores the
- * bytes on every model call. Without an active sandbox, messages pass
- * through unchanged.
+ * bytes on every model call. Without an active sandbox, each file becomes a
+ * note instead.
  */
 export async function stageToolResultMedia<T extends ModelMessage>(
   messages: readonly T[],
@@ -140,10 +140,7 @@ export async function stageToolResultMedia<T extends ModelMessage>(
   if (!messages.some(hasInlineToolResultFile)) {
     return [...messages];
   }
-  const sandbox = await contextStorage.getStore()?.get(SandboxKey)?.get();
-  if (sandbox === undefined || sandbox === null) {
-    return [...messages];
-  }
+  const sandbox = (await contextStorage.getStore()?.get(SandboxKey)?.get()) ?? null;
   return Promise.all(
     messages.map(async (message) => {
       if (message.role !== "tool" || !hasInlineToolResultFile(message)) {
@@ -262,17 +259,22 @@ function isToolOutputRefFile(part: ToolOutputContentPart): part is ToolOutputFil
 
 async function stageToolOutputFiles(
   output: ToolResultOutput,
-  sandbox: SandboxSession,
+  sandbox: SandboxSession | null,
 ): Promise<ToolResultOutput> {
   if (output.type !== "content" || !output.value.some(isInlineToolOutputFile)) {
     return output;
   }
   const value = await Promise.all(
-    output.value.map(async (part) => {
+    output.value.map(async (part): Promise<ToolOutputContentPart> => {
       if (!isInlineToolOutputFile(part) || part.data.type !== "data") return part;
-      const bytes = await fileDataToBytes(part.data.data);
-      if (bytes === null) return part;
-      const ref = await writeSandboxRef(bytes, part.mediaType, part.filename, sandbox);
+      const data = readFileData(part.data.data);
+      if (sandbox === null || data.kind !== "bytes") {
+        return {
+          text: `Returned file ${part.filename ?? "file"} (${part.mediaType}) could not be stored.`,
+          type: "text",
+        };
+      }
+      const ref = await writeSandboxRef(data.bytes, part.mediaType, part.filename, sandbox);
       return { ...part, data: { type: "url" as const, url: encodeSandboxRef(ref) } };
     }),
   );
@@ -449,37 +451,40 @@ async function stageFilePart(
     return part;
   }
 
-  // URL objects (including reconstituted ones) → try fetchFile
-  if (part.data instanceof URL && part.data.protocol !== "data:") {
-    let resolved: FetchFileResult | null;
-    try {
-      resolved = await tryFetchFile(part.data.href, adapterCtx);
-    } catch (error) {
-      if (!(error instanceof EveAttachmentError)) throw error;
-      const filename = part.filename?.trim() || "file";
-      log.warn("attachment resolver failed — degrading to text part", {
-        adapterKind: error.adapterKind,
-        error: error.cause,
-        filename,
-        kind: error.kind,
-      });
-      return {
-        text: `Attachment ${filename} could not be retrieved: ${error.message}`,
-        type: "text",
-      };
-    }
-    if (resolved === null) {
-      return part;
-    }
-    return stageResolvedBytes(part, resolved, sandbox);
+  const data = readFileData(part.data);
+  if (data.kind === "bytes") {
+    return stageResolvedBytes(part, { bytes: data.bytes }, sandbox);
+  }
+  if (data.kind === "unreadable") {
+    log.warn("attachment data is not bytes, base64, or a URL — degrading to text part", {
+      filename: part.filename,
+      mediaType: part.mediaType,
+    });
+    return attachmentNote(part, "could not be read.");
   }
 
-  // Inline data (Buffer, base64, data URL) → stage directly
-  const bytes = await fileDataToBytes(part.data);
-  if (bytes === null) {
-    return part;
+  let resolved: FetchFileResult | null;
+  try {
+    resolved = await tryFetchFile(data.url.href, adapterCtx);
+  } catch (error) {
+    if (!(error instanceof EveAttachmentError)) throw error;
+    log.warn("attachment resolver failed — degrading to text part", {
+      adapterKind: error.adapterKind,
+      error: error.cause,
+      filename: part.filename,
+      kind: error.kind,
+    });
+    return attachmentNote(part, `could not be retrieved: ${error.message}`);
   }
-  return stageResolvedBytes(part, { bytes }, sandbox);
+  if (resolved === null) {
+    return { ...part, data: data.url };
+  }
+  return stageResolvedBytes(part, resolved, sandbox);
+}
+
+/** A model-visible note that stands in for an attachment eve could not stage. */
+function attachmentNote(part: FilePart, outcome: string): TextPart {
+  return { text: `Attachment ${part.filename?.trim() || "file"} ${outcome}`, type: "text" };
 }
 
 async function stageResolvedBytes(
