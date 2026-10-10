@@ -279,7 +279,14 @@ describe("dynamic runtime model resolution", () => {
         } as never,
         state,
       }),
-    ).rejects.toThrow(/unknown key\(s\): contextWindowTokens/);
+    ).rejects.toThrow(/returned "contextWindowTokens", which can't vary per session/);
+    await expect(
+      resolveRuntimeModelSelection({
+        durability: "live",
+        selection: { build: {}, defaultTools: false, model: "openai/gpt-5.5-mini" } as never,
+        state,
+      }),
+    ).rejects.toThrow(/returned "build", "defaultTools".*declare them beside select and resolve/);
     await expect(
       resolveRuntimeModelSelection({
         catalog: createCatalog(null),

@@ -312,7 +312,7 @@ function validateDynamicModelSelection(selection: PublicAgentModelSelectionDefin
   );
   if (unknownKeys.length > 0) {
     throw new Error(
-      `Dynamic model resolver returned a selection with unknown key(s): ${unknownKeys.join(", ")}. Expected { model, reasoning?, modelContextWindowTokens?, modelOptions? }.`,
+      `A dynamic agent.ts returns only runtime settings: model, reasoning, modelContextWindowTokens, and modelOptions. It returned ${unknownKeys.map((key) => `"${key}"`).join(", ")}, which can't vary per session; declare ${unknownKeys.length === 1 ? "it" : "them"} beside select and resolve instead.`,
     );
   }
 
