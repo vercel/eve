@@ -45,7 +45,9 @@ export function skillReaction(resolver: ResolvedDynamicSkillResolver): Reaction 
     id: `skill:${resolver.extensionNamespace ?? ""}:${resolver.slug}`,
     kind: "skill",
     label: resolver.logicalPath,
-    resolve: authoredResolve(resolver.logicalPath, resolver.resolve),
+    resolve: authoredResolve(resolver.logicalPath, resolver.resolve, {
+      framework: resolver.framework,
+    }),
     select: resolver.select as Reaction["select"],
   };
 }

@@ -186,6 +186,21 @@ export function defineDynamic<TResult = unknown, TSelected = null, TStatic exten
   ) as unknown as DynamicSentinel<TResult, TSelected> & TStatic;
 }
 
+const FRAMEWORK_RESOLVER = Symbol.for("eve.framework-resolver");
+
+/**
+ * Marks a definition eve generates, such as a memory slot's tools: its `resolve` runs in the
+ * session's context with eve's own resolve context, as eve's internal reactions do.
+ */
+export function asFrameworkResolver<T extends object>(definition: T): T {
+  Object.defineProperty(definition, FRAMEWORK_RESOLVER, { value: true });
+  return definition;
+}
+
+export function isFrameworkResolver(value: unknown): boolean {
+  return typeof value === "object" && value !== null && FRAMEWORK_RESOLVER in value;
+}
+
 export function isDynamicSentinel(value: unknown): value is DynamicSentinel {
   return (
     typeof value === "object" &&

@@ -91,7 +91,9 @@ export interface BundleReactions {
 export function authoredResolve(
   label: string,
   resolve: (selected: never, ctx: never) => unknown,
+  options: { readonly framework?: boolean } = {},
 ): Reaction["resolve"] {
+  if (options.framework === true) return resolve as Reaction["resolve"];
   return (selected, ctx) =>
     runOnSelection(label, () => resolve(selected as never, publicResolveContext(ctx) as never));
 }

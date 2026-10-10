@@ -38,7 +38,9 @@ export function connectionReaction(resolver: ResolvedDynamicConnectionResolver):
     id: `connection:${resolver.extensionNamespace ?? ""}:${resolver.slug}`,
     kind: "connection",
     label: resolver.logicalPath,
-    resolve: authoredResolve(resolver.logicalPath, resolver.resolve),
+    resolve: authoredResolve(resolver.logicalPath, resolver.resolve, {
+      framework: resolver.framework,
+    }),
     select: resolver.select as Reaction["select"],
   };
 }

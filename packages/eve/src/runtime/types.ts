@@ -228,6 +228,8 @@ export type ReactionResolveFn = (selected: never, ctx: never) => unknown;
 
 /** A `defineDynamic()` export reattached from its compiled module. */
 export interface ResolvedReactionSource extends Readonly<ModuleSourceRef> {
+  /** eve generated it: its `resolve` runs in the session's context. */
+  readonly framework?: true;
   readonly select: ReactionSelectFn;
   readonly resolve: ReactionResolveFn;
 }

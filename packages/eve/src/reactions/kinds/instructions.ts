@@ -42,7 +42,9 @@ export function instructionsReaction(resolver: ResolvedDynamicInstructionsResolv
     id: `instructions:${resolver.slug}`,
     kind: "instructions",
     label: resolver.logicalPath,
-    resolve: authoredResolve(resolver.logicalPath, resolver.resolve),
+    resolve: authoredResolve(resolver.logicalPath, resolver.resolve, {
+      framework: resolver.framework,
+    }),
     select: resolver.select as Reaction["select"],
   };
 }

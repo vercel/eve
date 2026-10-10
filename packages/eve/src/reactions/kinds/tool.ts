@@ -43,7 +43,9 @@ export function toolReaction(resolver: ResolvedDynamicToolResolver): Reaction {
     kind: "tool",
     label: resolver.logicalPath,
     reconcile: (recorded, rebuilt) => reconcileTools(resolver, recorded, rebuilt),
-    resolve: authoredResolve(resolver.logicalPath, resolver.resolve),
+    resolve: authoredResolve(resolver.logicalPath, resolver.resolve, {
+      framework: resolver.framework,
+    }),
     select: resolver.select as Reaction["select"],
   };
 }

@@ -1,5 +1,9 @@
 import type { CompiledModuleMap } from "#compiler/module-map.js";
-import { assertResolverForm, isDynamicSentinel } from "#dynamic/definition.js";
+import {
+  assertResolverForm,
+  isDynamicSentinel,
+  isFrameworkResolver,
+} from "#dynamic/definition.js";
 import { loadResolvedModuleExport, ResolveAgentError } from "#runtime/resolve-helpers.js";
 import type { ResolvedReactionSource } from "#runtime/types.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -31,6 +35,7 @@ export async function resolveDynamicDefinition<T extends ModuleSourceRef>(
     );
     return {
       ...definition,
+      ...(isFrameworkResolver(value) ? { framework: true as const } : {}),
       resolve: value.resolve as ResolvedReactionSource["resolve"],
       select: value.select as ResolvedReactionSource["select"],
     };

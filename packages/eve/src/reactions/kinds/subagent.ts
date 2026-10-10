@@ -31,7 +31,9 @@ export function subagentReaction(resolver: ResolvedDynamicSubagentResolver): Rea
     id: `subagent:${resolver.nodeId}`,
     kind: "subagent",
     label: resolver.logicalPath,
-    resolve: authoredResolve(resolver.logicalPath, resolver.resolve),
+    resolve: authoredResolve(resolver.logicalPath, resolver.resolve, {
+      framework: resolver.framework,
+    }),
     select: resolver.select as Reaction["select"],
   };
 }
