@@ -15,7 +15,8 @@ export default defineTool({
         ? { type: "denied", reason: "A change freeze is in effect." }
         : "user-approval",
     response: ({ response }) => {
-      if (response.principal.principalId !== "bob") return { status: "rejected" };
+      if (response.principal.principalId !== "bob")
+        return { reason: "Only Bob may approve the frozen change.", status: "rejected" };
       // Simulate a policy change between asking and execution. Bob is not frozen.
       freezeStarted.update(() => true);
       return { status: "allowed" };

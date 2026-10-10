@@ -9,6 +9,7 @@ import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-targe
 import { resolveRemoteDevelopmentClientOptions } from "#services/dev-client/client-options.js";
 import { createDevelopmentCredentialGate } from "#services/dev-client/credential-gate.js";
 import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/message.js";
+import { encodeTestLine } from "#internal/testing/events.js";
 
 const AGENT_INFO = createTestAgentInfoResult({
   agentRoot: "/tmp/weather-agent/agent",
@@ -31,6 +32,13 @@ function testBinding(
     logicalPath,
     owner,
   };
+}
+
+/** A stream whose one line ends the session. */
+function endedStream(): Response {
+  return new Response(encodeTestLine({ data: { outcome: "completed" }, type: "session.ended" }), {
+    headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+  });
 }
 
 afterEach(() => {
@@ -70,11 +78,7 @@ describe("Client request policy", () => {
       .mockResolvedValueOnce(
         Response.json({ sessionId: "session_1", status: "accepted" }, { status: 202 }),
       )
-      .mockResolvedValueOnce(
-        new Response(`${JSON.stringify({ data: {}, type: "session.completed" })}\n`, {
-          headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
-        }),
-      );
+      .mockResolvedValueOnce(endedStream());
     const client = new Client({
       host: "https://eve.test?x-vercel-protection-bypass=secret",
     });
@@ -101,11 +105,7 @@ describe("Client request policy", () => {
       .mockResolvedValueOnce(
         Response.json({ sessionId: "session_1", status: "accepted" }, { status: 202 }),
       )
-      .mockResolvedValueOnce(
-        new Response(`${JSON.stringify({ data: {}, type: "session.completed" })}\n`, {
-          headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
-        }),
-      );
+      .mockResolvedValueOnce(endedStream());
     const client = new Client({ host: "https://eve.test", redirect: "manual" });
 
     await client.info();
@@ -141,11 +141,7 @@ describe("Client request policy", () => {
       .mockResolvedValueOnce(
         Response.json({ sessionId: "session_1", status: "accepted" }, { status: 202 }),
       )
-      .mockResolvedValueOnce(
-        new Response(`${JSON.stringify({ data: {}, type: "session.completed" })}\n`, {
-          headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
-        }),
-      );
+      .mockResolvedValueOnce(endedStream());
     const client = new Client({
       host: "https://eve.test",
       auth: { vercelOidc: { token: "oidc-tok" } },

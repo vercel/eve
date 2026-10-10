@@ -102,7 +102,6 @@ interface ModelCallerInput {
   readonly catalog: StepCatalog;
   readonly model: LanguageModel;
   readonly generation: GenerationSteering;
-  readonly hidesHeldText: boolean;
   readonly turnMessages: readonly UserModelMessage[];
   readonly approvedTools: ReadonlySet<string>;
   readonly pendingApprovalsNote: string | undefined;
@@ -232,7 +231,6 @@ export class ModelCaller {
   private buildRequest(): RequestMessages {
     return requestMessages(this.step, {
       catalog: this.input.catalog,
-      hidesHeldText: this.input.hidesHeldText,
       messages: this.prompt.messages,
       pendingApprovalsNote: this.input.pendingApprovalsNote,
       projectedMessages: this.projectedMessages,
@@ -434,7 +432,7 @@ export class ModelCaller {
       ),
       {
         excludedActionToolNames,
-        hidesHeldText: this.input.hidesHeldText && workingTaskIds(step.session).length > 0,
+        held: workingTaskIds(step.session).length > 0,
         tools: catalog,
         interruptSignal: generation.signal,
       },

@@ -19,10 +19,9 @@ export default defineEval({
     completed.eventsSatisfy("local agent calls preserve dispatch kind", (events) =>
       events.some(
         (event) =>
-          event.type === "actions.requested" &&
-          event.data.actions.some(
-            (action) => action.kind === "subagent-call" && action.name === "echo-marker",
-          ),
+          event.type === "call.requested" &&
+          event.data.capability.kind === "agent" &&
+          event.data.capability.name === "echo-marker",
       ),
     );
 

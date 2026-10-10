@@ -1,11 +1,11 @@
 import type { EveAgentReducer, EveAgentReducerEvent } from "eve/react";
-import type { MessageStreamEvent } from "eve/client";
+import type { SessionStreamEvent } from "eve/client";
 
 import { buildTraceTurnsFromTranscript } from "./trace";
 import type { TraceStep, TraceTurn } from "./types";
 
 export interface TraceProjection {
-  readonly events: readonly MessageStreamEvent[];
+  readonly events: readonly SessionStreamEvent[];
   readonly turns: readonly TraceTurn[];
 }
 
@@ -64,13 +64,13 @@ function reduceTraceProjection(
       return {
         events,
         turns:
-          event.type === "message.received" ? turns : [...clientMessageTurns(data.turns), ...turns],
+          event.type === "delivery.consumed" ? turns : [...clientMessageTurns(data.turns), ...turns],
       };
     }
   }
 }
 
-function buildTraceTurnsFromEvents(events: readonly MessageStreamEvent[]): readonly TraceTurn[] {
+function buildTraceTurnsFromEvents(events: readonly SessionStreamEvent[]): readonly TraceTurn[] {
   return buildTraceTurnsFromTranscript(events);
 }
 

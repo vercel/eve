@@ -28,25 +28,20 @@ export default defineEval({
 
     const typed = await session.send("approve", asAlice);
     expectHeld(typed);
-    typed.notEvent("input.resolved");
-    typed.notEvent("action.result");
-    typed.notEvent("step.started");
+    typed.notEvent("interaction.settled");
+    typed.notEvent("call.settled");
+    typed.notEvent("model.started");
 
     const settled = (
       await session.respond(answers("approve", authorized), asReleaseManager)
     ).expectOk();
-    settled.event("approval.settled", {
+    settled.event("interaction.settled", {
       count: 1,
-      data: { outcome: "approved", requestId: authorized.requestId },
+      data: { interactionId: authorized.requestId, outcome: "accepted" },
     });
-    settled.event("input.resolved", {
+    settled.event("interaction.settled", {
       count: 1,
-      data: {
-        resolutions: (items) =>
-          [a.requestId, authorized.requestId].every((id) =>
-            items.some((item) => item.requestId === id && item.outcome === "approved"),
-          ),
-      },
+      data: { interactionId: a.requestId, outcome: "accepted" },
     });
     settled.calledTool("change-a", { status: "completed", count: 1 });
     settled.calledTool("authorized-change", { status: "completed", count: 1 });

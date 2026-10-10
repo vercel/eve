@@ -1,8 +1,8 @@
 import { defineEval } from "eve/evals";
 
-import { budgetQuestion, expectResolved, follow } from "../helpers.ts";
+import { budgetQuestion, follow } from "../helpers.ts";
 
-/** Alice cancels her turn while the budget question waits: it closes unanswered, as cancelled. */
+/** Alice cancels her turn while the budget question waits: it closes unanswered. */
 export default defineEval({
   description: "Cancelling the turn withdraws its budget question.",
   tags: ["hitl", "budget", "cancel"],
@@ -13,9 +13,12 @@ export default defineEval({
 
     await session.cancel();
     const cancelled = await follow(t, session, startIndex);
-    expectResolved(cancelled, request, "cancelled");
-    cancelled.event("input.resolved", { count: 1 });
-    cancelled.event("turn.cancelled", { count: 1 });
-    cancelled.notEvent("step.started");
+    // The cancel interrupts the question; nobody answered it.
+    cancelled.event("interaction.settled", {
+      count: 1,
+      data: { interactionId: request.requestId, outcome: "interrupted" },
+    });
+    cancelled.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
+    cancelled.notEvent("model.requested");
   },
 });

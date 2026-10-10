@@ -6,36 +6,37 @@ const CHILD_REPLY = /^WORKFLOW-CHILD-STAGED /u;
 
 /**
  * The root delegates to `workflow-stager`, whose own turn holds on a staging
- * task after writing text. The child's turn parks with `turn.waiting` as any
- * held turn does, but its held text step reports `"tool-calls"`, so the
- * parent's task receives only the child's final reply.
+ * task after writing text. The child's turn pauses as any held turn does, but
+ * its held text is narration, so the parent's task receives only the child's
+ * final reply.
  */
 export default defineEval({
-  description: "A child session's held turn reports tool-calls and returns only its final reply.",
+  description:
+    "A child session's held turn narrates its held text and returns only its final reply.",
   async test(t) {
     const parent = await t.send("WORKFLOW-DELEGATE-STAGE");
     parent.expectOk();
     const started = parent.events.find(
-      (event) => event.type === "agent.started" && event.data.name === "workflow-stager",
+      (event) => event.type === "child.opened" && event.data.name === "workflow-stager",
     );
-    if (started?.type !== "agent.started") throw new Error("workflow-stager never started.");
+    if (started?.type !== "child.opened") throw new Error("workflow-stager never started.");
 
     const child = await t.target.watchTurn(started.data.sessionId).result();
     child.expectOk();
-    child.event("message.completed", {
+    child.event("content.completed", {
       count: 1,
-      data: { finishReason: "tool-calls", message: STAGER_INTERIM_MESSAGE },
+      data: { kind: "text", phase: "narration", value: STAGER_INTERIM_MESSAGE },
     });
-    child.event("message.completed", {
+    child.event("content.completed", {
       count: 1,
-      data: { finishReason: "stop", message: CHILD_REPLY },
+      data: { kind: "text", phase: "reply", value: CHILD_REPLY },
     });
-    child.event("turn.waiting", { count: 1 });
-    child.event("turn.completed", { count: 1 });
+    child.event("turn.paused", { count: 1 });
+    child.event("turn.settled", { count: 1, data: { outcome: "completed" } });
 
-    parent.event("task.settled", {
+    parent.event("call.settled", {
       count: 1,
-      data: { callId: "delegate", output: CHILD_REPLY, status: "completed" },
+      data: { callId: "delegate", outcome: "completed", output: CHILD_REPLY },
     });
     parent.messageIncludes("WORKFLOW-DELEGATE-RESULT WORKFLOW-CHILD-STAGED");
     t.noFailedActions();

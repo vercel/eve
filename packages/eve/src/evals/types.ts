@@ -39,6 +39,8 @@ export type EveEvalActionStatus =
  * `call.requested` request with its matching `call.settled`.
  */
 export interface EveEvalToolCall {
+  /** The call's id, as its `call.*` facts name it. */
+  readonly callId: string;
   /** Authored tool name (e.g. `"get_weather"`). */
   readonly name: string;
   /** Tool input as requested by the model. */
@@ -99,7 +101,7 @@ export interface EveEvalDerivedFacts {
   readonly skillLoads: readonly EveEvalSkillLoad[];
   readonly subagentCalls: readonly EveEvalSubagentCall[];
   readonly subagentCallCount: number;
-  /** Every HITL input request raised during the run (`input.requested`). */
+  /** Every HITL input request raised during the run (`interaction.opened`). */
   readonly inputRequests: readonly InputRequest[];
   /** True when the run ended parked on unanswered HITL input requests. */
   readonly parked: boolean;
@@ -324,6 +326,14 @@ export interface EveEvalLiveTurn {
     type: TType,
     options?: EveEvalWaitForEventOptions<TType>,
   ): Promise<EveEvalStreamEvent<TType>>;
+  /**
+   * Wait until a call to the tool named `name` settles, matching `options`. Without a `status`,
+   * any settled outcome matches.
+   */
+  waitForToolCall(
+    name: string,
+    options?: Omit<EveEvalToolCallMatchOptions, "count">,
+  ): Promise<EveEvalToolCall>;
 }
 
 /** Operations and state belonging to one accepted session. */
@@ -345,7 +355,7 @@ interface EveEvalSessionDriver {
   cancel(): Promise<CancelSessionResult>;
   /**
    * Compact this session's history between turns and wait for it to finish.
-   * Returns the compaction events through `session.waiting`; throws when the
+   * Returns the compaction's events through its `context.settled`; throws when the
    * session is no longer active.
    */
   compact(): Promise<EveEvalTurn>;
@@ -368,7 +378,7 @@ interface EveEvalSessionDriver {
   sendFile(text: string, filePath: string, mediaType?: string): Promise<EveEvalTurn>;
   /**
    * The session an agent run opened, as this session's stream announced it with
-   * `agent.started`. Its `stream()` follows the child through this parent session
+   * `child.opened`. Its `stream()` follows the child through this parent session
    * with the eval client's credentials, and stops with the eval unless given a `signal`.
    */
   agent(opened: ChildOpened): EveEvalAgentSession;
@@ -544,7 +554,7 @@ export interface EveEvalTargetHandle extends EveEvalTarget {
   /**
    * Attach to a pre-existing session and consume one turn boundary.
    *
-   * When that boundary is `session.waiting`, the attached session recovers
+   * When that boundary leaves the session open, the attached session recovers
    * the exact session ID, so `session.send(...)` and `session.respond(...)`
    * continue the same durable session.
    */
@@ -555,9 +565,19 @@ export interface EveEvalTargetHandle extends EveEvalTarget {
   /**
    * Observe one in-progress turn from a session created outside the eval.
    * The returned live-turn handle starts consuming immediately and owns the
-   * stream through its next turn boundary.
+   * stream through its next turn boundary, or, with `until`, through the line
+   * holding the first event `until` matches: a read that ends no turn, such as
+   * a context change between turns, ends at `context.settled`.
    */
-  watchTurn(sessionId: string, opts?: { readonly startIndex?: number }): EveEvalLiveTurn;
+  watchTurn(sessionId: string, opts?: EveEvalWatchOptions): EveEvalLiveTurn;
+}
+
+/** Where a watched read starts, and what ends it when no turn boundary does. */
+export interface EveEvalWatchOptions {
+  /** The stream line to start from. */
+  readonly startIndex?: number;
+  /** Ends the read with the line holding the first matching event, instead of a turn boundary. */
+  readonly until?: (event: SessionStreamEvent) => boolean;
 }
 
 // ---------------------------------------------------------------------------

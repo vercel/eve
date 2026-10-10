@@ -15,13 +15,13 @@ export default defineEval({
     const turnId = held.events.find((event) => event.type === "turn.started")?.data.turnId;
 
     const resumed = (await session.respond(answers("continue", request), asAlice)).expectOk();
-    expectResolved(resumed, request, "answered");
+    expectResolved(resumed, request, "accepted");
     resumed.notEvent("turn.started");
     resumed.eventOrder([
-      { type: "input.resolved" },
-      { type: "step.started", data: { turnId } },
-      { type: "message.completed", data: { message: REPLY.statusNote, turnId } },
-      { type: "turn.completed", data: { turnId } },
+      { type: "interaction.settled", data: { interactionId: request.requestId } },
+      { type: "model.requested", data: { owner: { turnId } } },
+      { type: "content.completed", data: { phase: "reply", value: REPLY.statusNote } },
+      { type: "turn.settled", data: { outcome: "completed", turnId } },
     ]);
   },
 });

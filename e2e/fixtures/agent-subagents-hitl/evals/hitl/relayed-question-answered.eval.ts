@@ -20,16 +20,12 @@ export default defineEval({
     const answered = await session.respond([
       { optionId: production.id, requestId: request.requestId },
     ]);
-    answered.event("input.resolved", {
+    answered.event("interaction.settled", {
       count: 1,
       data: {
-        resolutions: [
-          {
-            outcome: "answered",
-            requestId: request.requestId,
-            response: { optionId: production.id },
-          },
-        ],
+        interactionId: request.requestId,
+        outcome: "accepted",
+        response: { optionId: production.id },
       },
     });
     const reply = answered.message?.includes("RELAY-RESULT")

@@ -157,6 +157,7 @@ export interface TwilioChannelEvents {
   readonly "content.delta"?: TwilioEventHandler<"content.delta">;
   readonly "interaction.opened"?: TwilioEventHandler<"interaction.opened">;
   readonly "interaction.settled"?: TwilioEventHandler<"interaction.settled">;
+  readonly "response.admitted"?: TwilioEventHandler<"response.admitted">;
   readonly "turn.settled"?: TwilioEventHandler<"turn.settled">;
   readonly "session.ended"?: TwilioEventHandler<"session.ended">;
   readonly "delivery.settled"?: TwilioEventHandler<"delivery.settled">;

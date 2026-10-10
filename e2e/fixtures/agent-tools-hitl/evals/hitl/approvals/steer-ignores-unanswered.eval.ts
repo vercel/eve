@@ -28,34 +28,35 @@ export default defineEval({
     await session.respond(answers("approve", a), asAlice);
 
     const steered = (await session.send(SAY.hello, asAlice)).expectOk();
-    steered.event("input.resolved", {
+    steered.event("interaction.settled", {
       count: 1,
-      data: {
-        resolutions: (items) =>
-          items.some((item) => item.requestId === a.requestId && item.outcome === "approved") &&
-          items.some((item) => item.requestId === b.requestId && item.outcome === "ignored"),
-      },
+      data: { interactionId: a.requestId, outcome: "accepted" },
+    });
+    steered.event("interaction.settled", {
+      count: 1,
+      data: { interactionId: b.requestId, outcome: "withdrawn" },
     });
     steered.calledTool("change-a", { status: "completed", output: { executions: 1 }, count: 1 });
     expectNotRun(steered, "change-b");
-    steered.event("action.result", {
+    steered.event("call.settled", {
       data: {
-        result: { output: { approval: { status: "ignored" } }, toolName: "change-b" },
-        status: "rejected",
+        callId: b.action.callId,
+        outcome: "rejected",
+        output: { approval: { status: "ignored" } },
       },
     });
     steered.notEvent("turn.started");
-    steered.event("message.received", { count: 1, data: { message: SAY.hello } });
-    // The answers resolve first. A runs in the result-reading step; Alice's
-    // queued message is received by the next step of the same turn.
+    steered.event("delivery.consumed", {
+      count: 1,
+      data: { parts: [{ kind: "text", text: SAY.hello }] },
+    });
+    // The answers settle first and A runs; the model reads A's result, then Alice's message.
     steered.eventOrder([
-      { type: "input.resolved" },
-      { type: "step.started", data: { stepIndex: 1 } },
-      { type: "action.result", data: { status: "completed", result: { toolName: "change-a" } } },
-      { type: "message.received", data: { message: SAY.hello } },
-      { type: "step.started", data: { stepIndex: 2 } },
-      { type: "message.completed", data: { message: REPLY.hello } },
-      { type: "turn.completed" },
+      { type: "interaction.settled" },
+      { type: "call.settled", data: { callId: a.action.callId, outcome: "completed" } },
+      { type: "model.started" },
+      { type: "content.completed", data: { phase: "reply", value: REPLY.hello } },
+      { data: { outcome: "completed" }, type: "turn.settled" },
     ]);
   },
 });

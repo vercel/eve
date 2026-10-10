@@ -853,7 +853,9 @@ describe("createWorkflowRuntime#createSession", () => {
       resolvedAgent: { config: {} },
       turnAgent: createTestTurnAgent(),
     } as never);
-    const bytes = new TextEncoder().encode('{"type":"test.event"}\n');
+    const bytes = new TextEncoder().encode(
+      `${JSON.stringify({ at: "2026-09-02T00:00:00.000Z", facts: [{ data: {}, type: "session.started" }] })}\n`,
+    );
     const getReadable = vi.fn(
       () =>
         new ReadableStream<Uint8Array>({
@@ -880,51 +882,12 @@ describe("createWorkflowRuntime#createSession", () => {
     const event = await reader.read();
     reader.releaseLock();
 
-    expect(event.value).toEqual({ type: "test.event" });
+    expect(event.value).toMatchObject({
+      meta: { position: { index: 0, line: 0 } },
+      type: "session.started",
+    });
     expect(getRunMock).toHaveBeenCalledWith("owner-run");
     expect(getReadable).toHaveBeenCalledTimes(1);
-  });
-
-  it("normalizes persisted v24 appends before exposing a current event stream", async () => {
-    const legacy = {
-      data: {
-        messageDelta: "lo",
-        messageSoFar: "Hello",
-        sequence: 2,
-        stepIndex: 0,
-        turnId: "turn-1",
-      },
-      meta: { at: "2026-09-02T00:00:00.000Z", id: "evt-v24" },
-      type: "message.appended",
-    };
-    const bytes = new TextEncoder().encode(`${JSON.stringify(legacy)}\n`);
-    getRunMock.mockReturnValue({
-      getReadable: () =>
-        new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.enqueue(bytes);
-            controller.close();
-          },
-        }),
-    });
-
-    const stream = await buildRuntime({} as RuntimeCompiledArtifactsSource).getEventStream(
-      "owner-run",
-    );
-
-    await expect(stream.getReader().read()).resolves.toEqual({
-      done: false,
-      value: {
-        data: {
-          messageDelta: "lo",
-          sequence: 2,
-          stepIndex: 0,
-          turnId: "turn-1",
-        },
-        meta: legacy.meta,
-        type: "message.appended",
-      },
-    });
   });
 });
 

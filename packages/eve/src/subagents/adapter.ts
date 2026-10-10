@@ -48,6 +48,9 @@ export const SUBAGENT_ADAPTER: ChannelAdapter = {
   async "interaction.settled"(event, ctx) {
     await forwardFact(event, ctx);
   },
+  async "response.admitted"(event, ctx) {
+    await forwardFact(event, ctx);
+  },
   async "response.settled"(event, ctx) {
     await forwardFact(event, ctx);
   },

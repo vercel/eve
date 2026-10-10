@@ -163,6 +163,8 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       );
     },
 
+    "response.admitted": prompts["response.admitted"],
+
     async "interaction.settled"(fact, ctx) {
       const { data } = fact;
       const { channel } = ctx;

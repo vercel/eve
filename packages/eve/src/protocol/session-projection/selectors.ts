@@ -136,6 +136,18 @@ export function openInteractions(
     .sort((a, b) => a.introducedAt - b.introducedAt);
 }
 
+/**
+ * Open interactions that hold an admitted answer: answered for now, waiting for the rest of
+ * their batch to be decided. A typed reply moves on to the next request past them.
+ */
+export function answeredInteractionIds(view: SessionView): ReadonlySet<string> {
+  return new Set(
+    Object.values(view.responses)
+      .filter((row) => row.status === "admitted")
+      .map((row) => row.interactionId),
+  );
+}
+
 export function delivery(view: SessionView, deliveryId: string): DeliveryRow | undefined {
   return view.deliveries[deliveryId];
 }

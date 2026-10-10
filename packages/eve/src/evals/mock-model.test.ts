@@ -1,9 +1,30 @@
 import { generateText, jsonSchema, stepCountIs, streamText, tool } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { SessionIdKey } from "#context/keys.js";
 import { mockModel, type MockModelRequest } from "#evals/mock-model.js";
 
 describe("mockModel", () => {
+  it("keeps a session's call ids unique, and each session's scripted ids its own", async () => {
+    const model = mockModel({
+      respond: () => ({ toolCalls: [{ id: "stage", name: "stage_deploy" }] }),
+    });
+    const callIdIn = (sessionId: string) => {
+      const ctx = new ContextContainer();
+      ctx.set(SessionIdKey, sessionId);
+      return contextStorage.run(ctx, async () => {
+        const result = await generateText({ model, prompt: "Stage the deploy." });
+        return result.toolCalls[0]?.toolCallId;
+      });
+    };
+
+    expect(await callIdIn("session-a")).toBe("stage");
+    expect(await callIdIn("session-b")).toBe("stage");
+    // The same session calls again, as after a sign-in dropped its first call.
+    expect(await callIdIn("session-a")).toBe("stage#2");
+  });
+
   it("returns a deterministic default response", async () => {
     const result = await generateText({
       model: mockModel(),

@@ -4,6 +4,7 @@ import type {
   InteractionOpenedData,
   InteractionSettledData,
 } from "#protocol/session-events/families/interaction.js";
+import type { ResponseAdmittedData } from "#protocol/session-events/families/response.js";
 import type { InputRequest } from "#shared/input.js";
 
 /**
@@ -46,6 +47,13 @@ export function promptQueueEvents<TChannel extends { state: PromptQueueState }>(
     },
     async "interaction.settled"(
       _event: { readonly data: InteractionSettledData },
+      ctx: { readonly channel: TChannel; readonly view: SessionView },
+    ): Promise<void> {
+      await refresh(ctx.channel, ctx.view);
+    },
+    /** An answer that waits for the rest of its batch moves the channel to the next request. */
+    async "response.admitted"(
+      _event: { readonly data: ResponseAdmittedData },
       ctx: { readonly channel: TChannel; readonly view: SessionView },
     ): Promise<void> {
       await refresh(ctx.channel, ctx.view);

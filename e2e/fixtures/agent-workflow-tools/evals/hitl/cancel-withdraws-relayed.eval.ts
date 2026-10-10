@@ -15,13 +15,13 @@ export default defineEval({
 
     await parked.session.cancel();
     const cancelled = await t.target.watchTurn(parked.sessionId, { startIndex }).result();
-    cancelled.event("input.resolved", {
+    cancelled.event("interaction.settled", {
       count: 1,
-      data: { resolutions: [{ outcome: "cancelled", requestId: request.requestId }] },
+      data: { interactionId: request.requestId, outcome: "interrupted" },
     });
-    cancelled.event("turn.cancelled", { count: 1 });
-    cancelled.notEvent("action.result", {
-      data: { status: "completed", result: { toolName: "confirm_deploy" } },
+    cancelled.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
+    cancelled.notEvent("call.settled", {
+      data: { callId: request.action.callId, outcome: "completed" },
     });
   },
 });

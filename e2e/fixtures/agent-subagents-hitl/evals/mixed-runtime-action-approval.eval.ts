@@ -23,9 +23,9 @@ export default defineEval({
 
     parked.calledTool("collision-gate", { count: 1, status: "pending" });
     parked.eventOrder([
-      { type: "actions.requested" },
-      { type: "input.requested" },
-      { type: "turn.waiting" },
+      { type: "call.requested" },
+      { data: { request: { kind: "approval" } }, type: "interaction.opened" },
+      { type: "turn.paused" },
     ]);
     session.requireInputRequest({ display: "confirmation", toolName: "collision-gate" });
 
@@ -40,9 +40,9 @@ export default defineEval({
     t.noFailedActions();
     t.calledTool("collision-gate", { count: 1, status: "completed" });
     t.calledSubagent("collision-child", { count: 1, status: "completed" });
-    t.event("task.settled", {
+    t.event("call.settled", {
       count: 1,
-      data: { callId: "collision-child-call", status: "completed" },
+      data: { callId: "collision-child-call", outcome: "completed" },
     });
   },
 });

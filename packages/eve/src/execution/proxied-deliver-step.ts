@@ -67,8 +67,8 @@ interface ChildBucket {
 
 /**
  * Splits an envelope and forwards descendant input to the child that asked for
- * it. This session relayed each forwarded request's `input.requested`, so it
- * also relays their `input.resolved` once the answers are on their way down.
+ * it. This session relayed each forwarded request's `interaction.opened`, so it
+ * also relays their `interaction.settled` once the answers are on their way down.
  */
 export async function routeProxiedDeliverStep(
   input: SessionStepState & { readonly delivery: DeliverHookPayload },

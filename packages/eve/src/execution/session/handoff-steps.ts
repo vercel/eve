@@ -1,5 +1,5 @@
 import { queuedInput, storedProjection } from "#harness/session-machine/view.js";
-import { openRequests, waitsOnSignIn } from "#protocol/session-projection.js";
+import { openRequests, waitsOnSignIn } from "#protocol/session-reader.js";
 import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { holdsHitlRequests } from "#harness/hitl/index.js";
 import {

@@ -139,16 +139,16 @@ import { linearChannel } from "eve/channels/linear";
 
 export default linearChannel({
   events: {
-    async "message.completed"(eventData, channel) {
-      if (eventData.finishReason === "tool-calls" || !eventData.message) return;
-      await channel.linear.createActivity({
-        body: `Done.\n\n${eventData.message}`,
+    async "content.completed"(event, ctx) {
+      if (event.data.phase !== "reply" || typeof event.data.value !== "string") return;
+      await ctx.channel.linear.createActivity({
+        body: `Done.\n\n${event.data.value}`,
         type: "response",
       });
     },
-    async "input.requested"(eventData, channel) {
-      await channel.linear.createActivity({
-        body: eventData.requests.map((request) => request.prompt).join("\n\n"),
+    async "interaction.opened"(event, ctx) {
+      await ctx.channel.linear.createActivity({
+        body: event.data.request.prompt,
         type: "elicitation",
       });
     },

@@ -1,3 +1,4 @@
+import type { InteractionOutcome } from "eve/client";
 import type {
   EveEvalAssertions,
   EveEvalContext,
@@ -54,30 +55,17 @@ export function answers(optionId: string, ...requests: readonly InputRequest[]) 
 
 /**
  * The model never runs while a request of the turn's own is open: no
- * `step.started` falls between the request's `input.requested` and its
- * `input.resolved` (or the end of the stream, while it is still open).
+ * `model.started` falls between the request's `interaction.opened` and its
+ * `interaction.settled` (or the end of the stream, while it is still open).
  */
 export function expectNoModelCallWhileOpen(on: EveEvalAssertions, requestId: string) {
-  on.eventsSatisfy(`no model step starts while ${requestId} is open`, (events) => {
-    const asked = events.findIndex(
-      (event) =>
-        event.type === "input.requested" &&
-        event.data.requests.some((request) => request.requestId === requestId),
-    );
-    if (asked < 0) return false;
-    const resolved = events.findIndex(
-      (event, index) =>
-        index > asked &&
-        event.type === "input.resolved" &&
-        event.data.resolutions.some((resolution) => resolution.requestId === requestId),
-    );
-    const open = events.slice(asked + 1, resolved < 0 ? events.length : resolved);
-    return !open.some((event) => event.type === "step.started");
-  });
+  on.eventsSatisfy(`no model run starts while ${requestId} is open`, (events) =>
+    noModelCallBetween(events, requestId),
+  );
 }
 
 /**
- * No `step.started` falls between the authorization `attemptId` opening and closing.
+ * No `model.started` falls between the sign-in `attemptId` opening and settling.
  * `before` carries the events streamed before `on` started, such as the ask.
  */
 export function expectNoModelCallDuringAuthorization(
@@ -85,39 +73,41 @@ export function expectNoModelCallDuringAuthorization(
   attemptId: string,
   before: EveEvalTurn["events"] = [],
 ) {
-  on.eventsSatisfy(`no model step starts while authorization ${attemptId} is open`, (observed) => {
-    const events = [...before, ...observed];
-    const asked = events.findIndex(
-      (event) => event.type === "authorization.required" && event.data.attemptId === attemptId,
-    );
-    if (asked < 0) return false;
-    const closed = events.findIndex(
-      (event, index) =>
-        index > asked &&
-        event.type === "authorization.completed" &&
-        event.data.attemptId === attemptId,
-    );
-    const open = events.slice(asked + 1, closed < 0 ? events.length : closed);
-    return !open.some((event) => event.type === "step.started");
-  });
+  on.eventsSatisfy(`no model run starts while sign-in ${attemptId} is open`, (observed) =>
+    noModelCallBetween([...before, ...observed], attemptId),
+  );
 }
 
-/** The latest authorization `turn` asked for: its attempt and its fixture callback URL. */
+/** Whether no model run starts while the interaction `interactionId` is open in `events`. */
+function noModelCallBetween(events: EveEvalTurn["events"], interactionId: string): boolean {
+  const asked = events.findIndex(
+    (event) => event.type === "interaction.opened" && event.data.interactionId === interactionId,
+  );
+  if (asked < 0) return false;
+  const settled = events.findIndex(
+    (event, index) =>
+      index > asked &&
+      event.type === "interaction.settled" &&
+      event.data.interactionId === interactionId,
+  );
+  const open = events.slice(asked + 1, settled < 0 ? events.length : settled);
+  return !open.some((event) => event.type === "model.started");
+}
+
+/** The latest sign-in `turn` asked for: its interaction and its fixture callback URL. */
 export function authorizationFrom(turn: Pick<EveEvalTurn, "events">): {
   attemptId: string;
   url: URL;
 } {
   const required = [...turn.events]
     .reverse()
-    .find((event) => event.type === "authorization.required");
-  if (
-    required?.type !== "authorization.required" ||
-    required.data.attemptId === undefined ||
-    required.data.authorization?.url === undefined
-  ) {
-    throw new Error("Expected an authorization with an attempt id and a callback URL.");
+    .find((event) => event.type === "interaction.opened" && event.data.request.kind === "sign-in");
+  const url =
+    required?.type === "interaction.opened" ? required.data.request.signIn?.url : undefined;
+  if (required?.type !== "interaction.opened" || url === undefined) {
+    throw new Error("Expected a sign-in with a callback URL.");
   }
-  return { attemptId: required.data.attemptId, url: new URL(required.data.authorization.url) };
+  return { attemptId: required.data.interactionId, url: new URL(url) };
 }
 
 /** Completes a fixture authorization the way a browser would: an unauthenticated GET. */
@@ -143,28 +133,28 @@ export async function budgetQuestion(t: EveEvalContext) {
   return { held, request, session };
 }
 
-/** The turn is held on input: it says so, and neither completes nor fails. */
+/** The turn is held on a person: it pauses for an interaction, and doesn't settle. */
 export function expectHeld(turn: EveEvalTurn) {
-  turn.event("turn.waiting", { data: { on: "input" } });
-  turn.notEvent("turn.completed");
-  turn.notEvent("turn.failed");
+  turn.event("turn.paused", {
+    data: { awaiting: (awaiting) => awaiting.some((entry) => "interactionId" in entry) },
+  });
+  turn.notEvent("turn.settled");
 }
 
-/** `request` resolved exactly once in `on`, with `outcome`. */
-export function expectResolved(on: EveEvalAssertions, request: InputRequest, outcome: string) {
-  on.event("input.resolved", {
+/** `request` settled exactly once in `on`, with `outcome`. */
+export function expectResolved(
+  on: EveEvalAssertions,
+  request: InputRequest,
+  outcome: InteractionOutcome,
+) {
+  on.event("interaction.settled", {
     count: 1,
-    data: {
-      resolutions: (items) =>
-        items.some((item) => item.requestId === request.requestId && item.outcome === outcome),
-    },
+    data: { interactionId: request.requestId, outcome },
   });
 }
 
-/** `toolName`'s call never ran: it has a rejected not-run result and no completed one. */
+/** `toolName`'s call never ran: it settled rejected, and no call of it completed. */
 export function expectNotRun(on: EveEvalAssertions, toolName: string) {
-  on.event("action.result", {
-    data: { status: "rejected", result: { toolName } },
-  });
-  on.notEvent("action.result", { data: { status: "completed", result: { toolName } } });
+  on.calledTool(toolName, { status: "rejected" });
+  on.calledTool(toolName, { count: 0, status: "completed" });
 }

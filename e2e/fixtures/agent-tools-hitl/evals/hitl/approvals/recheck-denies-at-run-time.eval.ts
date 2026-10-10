@@ -29,18 +29,18 @@ export default defineEval({
     );
 
     const frozen = (await session.respond(answers("approve", request), asBob)).expectOk();
-    expectResolved(frozen, request, "approved");
+    expectResolved(frozen, request, "accepted");
     expectNotRun(frozen, "frozen-change");
-    frozen.event("action.result", {
+    frozen.event("call.settled", {
       count: 1,
       data: {
-        status: "rejected",
-        result: {
-          output: { code: "TOOL_EXECUTION_DENIED", message: "A change freeze is in effect." },
-          toolName: "frozen-change",
-        },
+        callId: request.action.callId,
+        outcome: "rejected",
+        output: { code: "TOOL_EXECUTION_DENIED", message: "A change freeze is in effect." },
       },
     });
-    frozen.event("message.completed", { data: { message: "Frozen change: not run." } });
+    frozen.event("content.completed", {
+      data: { phase: "reply", value: "Frozen change: not run." },
+    });
   },
 });

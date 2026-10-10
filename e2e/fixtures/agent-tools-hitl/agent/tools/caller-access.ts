@@ -8,7 +8,9 @@ export default defineTool({
   approval: {
     request: always(),
     response: ({ response }) =>
-      response.principal.principalId === "bob" ? { status: "allowed" } : { status: "rejected" },
+      response.principal.principalId === "bob"
+        ? { status: "allowed" }
+        : { reason: "Only Bob may approve release-access checks.", status: "rejected" },
   },
   execute: (_input, ctx) => ({
     actor: ctx.session.auth.current?.principalId ?? "none",

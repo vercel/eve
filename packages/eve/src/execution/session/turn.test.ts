@@ -2,6 +2,7 @@ import type { TurnPause } from "#execution/session/pending-turn-state.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import type { SessionView } from "#harness/session-machine/view.js";
 import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { SessionExecution } from "#execution/session/turn.js";
@@ -48,6 +49,37 @@ vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
 }));
 vi.mock("#execution/coordination-dispatch-step.js", () => ({ dispatchCoordinationStep: vi.fn() }));
 
+// A task run's late spend publishes a fact; this suite's sessions carry no bundle to publish with.
+const committed = vi.hoisted((): unknown[] => []);
+
+vi.mock("#execution/publish-session-events.js", async (importOriginal) => {
+  const { readDurableSession } = await import("#execution/durable-session-store.js");
+  const { sessionView } = await import("#harness/session-machine/commit.js");
+  const { storedProjection } = await import("#harness/session-machine/view.js");
+  const unchanged = vi.fn(
+    async (target: { serializedContext: Record<string, unknown>; sessionState: unknown }) => ({
+      serializedContext: target.serializedContext,
+      sessionState: target.sessionState,
+    }),
+  );
+  return {
+    ...(await importOriginal()),
+    publishSessionEvents: unchanged,
+    // Task steps commit through it: record what they decide; the state they saved comes back.
+    commitSessionStep: vi.fn(
+      async (
+        target: { serializedContext: Record<string, unknown>; sessionState: DurableSessionState },
+        decide: (view: SessionView) => readonly { readonly events: readonly unknown[] }[],
+      ) => {
+        const { state } = readDurableSession(target.sessionState);
+        committed.push(
+          ...decide(sessionView(storedProjection(state), state)).flatMap((t) => t.events),
+        );
+        return { serializedContext: target.serializedContext, sessionState: target.sessionState };
+      },
+    ),
+  };
+});
 vi.mock("#execution/session/turn-step.js", () => ({
   turnStep: vi.fn(),
 }));
@@ -1181,6 +1213,13 @@ describe("SessionExecution checkpoints", () => {
       inputTokens: 250,
       outputTokens: 25,
     });
+    // No call is open to own it, so the spend is the task's own late usage.
+    expect(committed).toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({ kind: "delegated-late" }),
+        type: "usage.recorded",
+      }),
+    );
   });
 
   it("hands the step each workflow run's delegated usage once, even when its outcome arrives twice", async () => {
@@ -1265,10 +1304,11 @@ describe("SessionExecution checkpoints", () => {
       }),
     ).resolves.toMatchObject({ kind: "done" });
 
-    expect(vi.mocked(turnStep).mock.calls[1]?.[0].input?.runtimeResults?.delegatedUsage).toEqual([
-      spent(300),
-      spent(500),
-    ]);
+    // Each call owns what its run spent.
+    expect(vi.mocked(turnStep).mock.calls[1]?.[0].input?.runtimeResults?.delegatedUsage).toEqual({
+      "draft-call": spent(300),
+      "review-call": spent(500),
+    });
   });
 
   it("does not let steering that woke a wait interrupt the step that reads it", async () => {

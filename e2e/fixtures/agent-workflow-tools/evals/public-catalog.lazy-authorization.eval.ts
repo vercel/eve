@@ -35,13 +35,12 @@ export default defineEval({
     started.eventsSatisfy("no sign-in is requested before the protected call", (events) => {
       const protectedCall = events.findIndex(
         (event) =>
-          event.type === "actions.requested" &&
-          event.data.actions.some(
-            (action) =>
-              action.kind === "tool-call" && action.toolName === "public-catalog__list_orders",
-          ),
+          event.type === "call.requested" &&
+          event.data.capability.name === "public-catalog__list_orders",
       );
-      const signIn = events.findIndex((event) => event.type === "authorization.required");
+      const signIn = events.findIndex(
+        (event) => event.type === "interaction.opened" && event.data.request.kind === "sign-in",
+      );
       return protectedCall >= 0 && signIn > protectedCall;
     });
     // The public tool runs before anyone signs in.
@@ -51,16 +50,18 @@ export default defineEval({
       output: mentions("Lamp"),
     });
     // Only the protected tool asks for sign-in, and the turn holds on it.
-    started.event("authorization.required", { count: 1 });
-    started.notEvent("authorization.completed");
-    started.event("turn.waiting", { count: 1 });
-    started.notEvent("session.waiting");
+    started.event("interaction.opened", { count: 1, data: { request: { kind: "sign-in" } } });
+    started.notEvent("interaction.settled");
+    started.event("turn.paused", { count: 1 });
+    started.notEvent("turn.settled");
 
-    const required = started.events.find((event) => event.type === "authorization.required");
-    if (required?.type !== "authorization.required") {
+    const required = started.events.find(
+      (event) => event.type === "interaction.opened" && event.data.request.kind === "sign-in",
+    );
+    if (required?.type !== "interaction.opened") {
       throw new Error("The protected tool did not produce an authorization challenge.");
     }
-    const callback = fixtureAuthorizationCallback(t.target.url, required.data.authorization?.url);
+    const callback = fixtureAuthorizationCallback(t.target.url, required.data.request.signIn?.url);
     if (session.sessionId === undefined || session.state === undefined) {
       throw new Error("The turn did not create a session.");
     }
@@ -77,10 +78,10 @@ export default defineEval({
     completed.expectOk();
     completed.notEvent("turn.started");
     completed.noFailedActions();
-    completed.notEvent("authorization.required");
-    completed.event("authorization.completed", {
+    completed.notEvent("interaction.opened");
+    completed.event("interaction.settled", {
       count: 1,
-      data: { candidateId: required.data.candidateId, outcome: "authorized" },
+      data: { interactionId: required.data.interactionId, outcome: "accepted" },
     });
     // The server answers list_orders only when the request carries the bearer.
     completed.calledTool("public-catalog__list_orders", {

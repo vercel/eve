@@ -11,7 +11,7 @@ export default defineEval({
     }
     const conversation = await t.session();
     const live = await conversation.start("Alice is preparing the 2026 report.");
-    const started = await live.waitForEvent("step.started");
+    const started = await live.waitForEvent("model.started");
     const observedAt = Date.now();
     t.log(
       `Pending generation observed ${observedAt - Date.parse(started.meta.at)} ms after step.started.`,
@@ -23,11 +23,11 @@ export default defineEval({
     const result = await live.result();
     await correction.result();
     result.event("turn.started", { count: 1 });
-    result.event("turn.completed", { count: 1 });
-    result.event("message.received", { count: 2 });
-    result.notEvent("turn.cancelled");
-    result.notEvent("turn.failed");
-    result.notEvent("step.failed");
+    result.event("turn.settled", { count: 1, data: { outcome: "completed" } });
+    result.event("delivery.consumed", { count: 2 });
+    result.notEvent("turn.settled", { data: { outcome: "cancelled" } });
+    result.notEvent("turn.settled", { data: { outcome: "failed" } });
+    result.notEvent("model.settled", { data: { outcome: "failed" } });
     result.messageIncludes("Corrected 2025 report");
     await t.require(
       result.events,
@@ -35,7 +35,8 @@ export default defineEval({
         (events: typeof result.events) =>
           !events.some(
             (event) =>
-              event.type === "message.appended" && event.data.messageDelta.includes("Original"),
+              (event.type === "content.delta" && event.data.delta.includes("Original")) ||
+              (event.type === "content.completed" && String(event.data.value).includes("Original")),
           ),
         "the superseded generation never publishes its answer",
       ),

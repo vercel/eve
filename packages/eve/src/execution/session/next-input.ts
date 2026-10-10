@@ -1,5 +1,5 @@
 import { storedProjection } from "#harness/session-machine/view.js";
-import { openInputs } from "#protocol/session-projection.js";
+import { openRequests } from "#protocol/session-reader.js";
 import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
 import type {
   ControlOrigin,
@@ -64,7 +64,7 @@ export async function nextTurnDelivery(input: {
     if (admitted.kind === "workflow") return { kind: "workflow", message: admitted.message };
     if (
       admitted.kind === "cancel" &&
-      openInputs(storedProjection(cursor.sessionState.snapshot.session.state)).some(
+      openRequests(storedProjection(cursor.sessionState.snapshot.session.state).view).some(
         (input) => input.request.kind === "session-limit",
       )
     )

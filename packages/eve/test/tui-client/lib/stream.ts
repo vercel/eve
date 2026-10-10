@@ -1,4 +1,4 @@
-import type { SessionStreamEvent, InputRequest } from "eve/client";
+import type { SessionStreamEvent } from "eve/client";
 
 import { theme } from "./theme.ts";
 
@@ -20,7 +20,7 @@ const state: PrintState = {
  * - Assistant replies stream as default terminal text after a muted
  *   `agent>` prefix.
  * - Secondary scaffolding (turn/tool/session lifecycle) is dim gray.
- * - Failures (`step.failed`, `turn.failed`, `session.failed`) are red.
+ * - Failures (failed model runs, turns, and sessions) are red.
  */
 export function printStreamEvent(event: SessionStreamEvent): void {
   switch (event.type) {
@@ -35,23 +35,16 @@ export function printStreamEvent(event: SessionStreamEvent): void {
       process.stdout.write(theme.muted(`\n[turn ${event.data.turnId}]\n`));
       return;
 
-    case "reasoning.appended":
-      if (state.message.open) {
-        process.stdout.write("\n");
-        state.message.open = false;
+    case "content.delta":
+      if (event.data.kind === "reasoning") {
+        if (state.message.open) {
+          process.stdout.write("\n");
+          state.message.open = false;
+        }
+        state.reasoning.open = true;
+        process.stdout.write(theme.info(event.data.delta));
+        return;
       }
-      state.reasoning.open = true;
-      process.stdout.write(theme.info(event.data.reasoningDelta));
-      return;
-
-    case "reasoning.completed":
-      if (state.reasoning.open) {
-        process.stdout.write("\n");
-        state.reasoning.open = false;
-      }
-      return;
-
-    case "message.appended":
       if (state.reasoning.open) {
         process.stdout.write("\n");
         state.reasoning.open = false;
@@ -60,67 +53,64 @@ export function printStreamEvent(event: SessionStreamEvent): void {
         process.stdout.write(theme.muted("agent> "));
         state.message.open = true;
       }
-      process.stdout.write(event.data.messageDelta);
+      process.stdout.write(event.data.delta);
       return;
 
-    case "message.completed":
-      if (state.message.open) {
-        process.stdout.write("\n");
-        state.message.open = false;
-      }
-      return;
-
-    case "actions.requested": {
+    case "content.completed":
       closeOpenStreams();
-      const names = event.data.actions.map(actionLabel).join(", ");
-      process.stdout.write(theme.muted(`[tool-call] ${names}\n`));
+      return;
+
+    case "call.requested":
+      closeOpenStreams();
+      process.stdout.write(theme.muted(`[tool-call] ${event.data.capability.name}\n`));
+      return;
+
+    case "call.settled":
+      closeOpenStreams();
+      process.stdout.write(theme.muted(`[tool-result] ${event.data.outcome}\n`));
+      return;
+
+    case "delivery.consumed": {
+      closeOpenStreams();
+      const text = event.data.parts.flatMap((part) => (part.kind === "text" ? [part.text] : []));
+      process.stdout.write(`${theme.muted("user>")} ${text.join(" ")}\n`);
       return;
     }
 
-    case "action.result":
+    case "interaction.opened": {
       closeOpenStreams();
-      process.stdout.write(theme.muted(`[tool-result] ${event.data.status}\n`));
-      return;
-
-    case "message.received":
-      closeOpenStreams();
-      process.stdout.write(`${theme.muted("user>")} ${event.data.message}\n`);
-      return;
-
-    case "input.requested": {
-      closeOpenStreams();
-      for (const request of event.data.requests) {
-        const summary = describeInputRequest(request);
-        process.stdout.write(`${theme.muted("[input requested]")} ${theme.warning(summary)}\n`);
-      }
-      return;
-    }
-
-    case "step.failed":
-    case "turn.failed":
-    case "session.failed": {
-      closeOpenStreams();
+      const { request } = event.data;
+      const options = (request.options ?? []).map((option) => option.id).join(" | ") || "freeform";
       process.stdout.write(
-        theme.danger(`\n[${event.type}] ${event.data.code} ${event.data.message}\n`),
+        `${theme.muted("[input requested]")} ${theme.warning(`${request.kind}: ${request.prompt}, options: ${options}`)}\n`,
       );
-      if (event.data.details) {
-        process.stdout.write(theme.muted(`${JSON.stringify(event.data.details, null, 2)}\n`));
+      return;
+    }
+
+    case "model.settled":
+    case "turn.settled":
+    case "session.ended": {
+      closeOpenStreams();
+      const { error } = event.data;
+      if (event.data.outcome === "failed" && error !== undefined) {
+        process.stdout.write(theme.danger(`\n[${event.type}] ${error.code} ${error.message}\n`));
+        if (error.hint) process.stdout.write(theme.muted(`${error.hint}\n`));
+        return;
+      }
+      if (event.type === "turn.settled") {
+        process.stdout.write(theme.muted(`[turn ${event.data.turnId} ${event.data.outcome}]\n`));
       }
       return;
     }
 
-    case "turn.completed":
-      closeOpenStreams();
-      process.stdout.write(theme.muted(`[turn ${event.data.turnId} completed]\n`));
-      return;
-
-    case "step.started":
+    case "model.started":
       process.stdout.write(theme.muted(`[model ${event.data.modelId}]\n`));
       return;
 
-    case "step.completed":
-    case "session.waiting":
-    case "session.completed":
+    case "delivery.admitted":
+    case "delivery.settled":
+    case "model.requested":
+    case "usage.recorded":
       return;
 
     default:
@@ -137,31 +127,6 @@ function closeOpenStreams(): void {
   if (state.message.open) {
     process.stdout.write("\n");
     state.message.open = false;
-  }
-}
-
-function actionLabel(action: { kind?: string; toolName?: string; name?: string }): string {
-  if (action.toolName) return action.toolName;
-  if (action.name) return action.name;
-  return action.kind ?? "?";
-}
-
-function describeInputRequest(request: InputRequest): string {
-  const tool = request.action.toolName;
-  const args = compactJson(request.action.input);
-  const optionList =
-    (request.options ?? []).map((option: { id: string }) => option.id).join(" | ") || "freeform";
-  const argSuffix = args === "{}" ? "" : ` ${args}`;
-  return `${request.display ?? "input"} for ${tool}${argSuffix}, options: ${optionList}`;
-}
-
-function compactJson(value: unknown): string {
-  try {
-    const json = JSON.stringify(value);
-    if (typeof json !== "string") return "";
-    return json.length > 120 ? `${json.slice(0, 117)}...` : json;
-  } catch {
-    return "";
   }
 }
 

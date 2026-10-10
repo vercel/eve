@@ -44,19 +44,19 @@ export default defineEval({
       "parent input hooks record the published approval once per subscriber",
       (events) => {
         if (!Array.isArray(observations) || observations.length !== 2) return false;
-        const approvals = events.filter((event) => event.type === "input.requested");
+        const approvals = events.filter(
+          (event) => event.type === "interaction.opened" && event.data.request.kind === "approval",
+        );
         const approval = approvals[0];
-        if (approvals.length !== 1 || approval?.type !== "input.requested") return false;
+        if (approvals.length !== 1 || approval?.type !== "interaction.opened") return false;
+        const position = `${approval.meta.position.line}:${approval.meta.position.index}`;
         const records = observations as InputHookObservation[];
         return (
           records.every(
             (record) =>
               record.sessionId === started.sessionId &&
-              record.eventId === approval.meta.id &&
-              record.requestIds.length === approval.data.requests.length &&
-              record.requestIds.every(
-                (id, index) => id === approval.data.requests[index]?.requestId,
-              ),
+              record.position === position &&
+              record.interactionId === approval.data.interactionId,
           ) &&
           (["typed", "wildcard"] as const).every(
             (subscriber) =>

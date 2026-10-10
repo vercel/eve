@@ -1,6 +1,8 @@
 import {
-  conversationProjection,
-  withConversationProjection,
+  conversationLedger,
+  emptyConversationLedger,
+  foldConversationLedger,
+  withConversationLedger,
 } from "#client/conversation-projection.js";
 import type { EveAgentReducer, EveAgentReducerEvent } from "#client/reducer.js";
 import {
@@ -37,11 +39,13 @@ import {
 } from "#channel/interaction-prompts.js";
 import { actionLabel } from "#shared/action-label.js";
 import {
-  foldSession,
-  initialSessionProjection,
+  callPlace,
+  readerInput,
+  readerSignIn,
   reportedCallStatus,
-  type SessionProjection,
-} from "#protocol/session-projection.js";
+  runPlace,
+} from "#protocol/session-reader.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
 import { toolPartState } from "#client/tool-part-state.js";
 
 export type {
@@ -72,7 +76,7 @@ type EveAssistantMessage = EveMessage & { readonly role: "assistant" };
 export function defaultMessageReducer(): EveAgentReducer<EveMessageData> {
   return {
     initial() {
-      return withConversationProjection({ messages: [] }, initialSessionProjection());
+      return withConversationLedger({ messages: [] }, emptyConversationLedger());
     },
     reduce(data, event) {
       return reduceMessageData(data, event);
@@ -81,37 +85,24 @@ export function defaultMessageReducer(): EveAgentReducer<EveMessageData> {
 }
 
 function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): EveMessageData {
-  const projection = foldSession(conversationProjection(data), event);
-  const content = withConversationProjection(reduceContent(data, event, projection), projection);
+  const { ledger } = foldConversationLedger(conversationLedger(data), event);
+  const content = withConversationLedger(reduceContent(data, event, ledger.view), ledger);
   const callIds = toolCallIds(content, event);
-  return withConversationProjection(
+  return withConversationLedger(
     callIds.length === 0 ? content : withToolPartStates(content, callIds),
-    projection,
+    ledger,
   );
 }
 
-/** Where a model run's parts go: its turn, and its step in the turn. */
-function runPlace(
-  before: SessionProjection,
-  after: SessionProjection,
-  runId: string | undefined,
-): { readonly turnId: string; readonly stepIndex: number } | undefined {
-  if (runId === undefined) return undefined;
-  const run = after.runs?.[runId] ?? before.runs?.[runId];
-  if (run?.turnId === undefined) return undefined;
-  return { stepIndex: run.stepIndex ?? 0, turnId: run.turnId };
-}
-
 /**
- * What an event says about the conversation's messages and parts. `after` is the projection with
- * the event folded in; the data still carries the one before it.
+ * What an event says about the conversation's messages and parts. `after` is the tables with
+ * the event folded in.
  */
 function reduceContent(
   data: EveMessageData,
   event: EveAgentReducerEvent,
-  after: SessionProjection,
+  after: SessionView,
 ): EveMessageData {
-  const before = conversationProjection(data);
   switch (event.type) {
     case "client.message.submitted":
     case "client.message.failed":
@@ -147,7 +138,7 @@ function reduceContent(
       );
 
     case "model.requested": {
-      const place = runPlace(before, after, event.data.runId);
+      const place = runPlace(after, event.data.runId);
       if (place === undefined) return data;
       return updateAssistantMessage(data, place.turnId, (message) =>
         ensureStepStartPart(message, place.stepIndex),
@@ -155,7 +146,7 @@ function reduceContent(
     }
 
     case "model.settled": {
-      const place = runPlace(before, after, event.data.runId);
+      const place = runPlace(after, event.data.runId);
       if (place === undefined) return data;
       const existing = data.messages.find(
         (message) => message.role === "assistant" && message.metadata?.turnId === place.turnId,
@@ -181,7 +172,7 @@ function reduceContent(
     case "content.delta": {
       const { delta, kind, partId } = event.data;
       const existing = findRunPart(data, partId);
-      const place = existing ?? runPlace(before, after, event.scope?.runId);
+      const place = existing ?? runPlace(after, event.scope?.runId);
       const declared = kind ?? existing?.type;
       const type = isRunKind(declared) ? declared : undefined;
       if (place === undefined || type === undefined) return data;
@@ -198,7 +189,7 @@ function reduceContent(
 
     case "content.completed": {
       const { kind, partId, runId, value } = event.data;
-      const place = runPlace(before, after, runId) ?? findRunPart(data, partId);
+      const place = runPlace(after, runId) ?? findRunPart(data, partId);
       if (place === undefined) return data;
       if (kind === "result") {
         return updateAssistantMessage(data, place.turnId, (message) => ({
@@ -222,8 +213,7 @@ function reduceContent(
     case "call.input": {
       const existing = findToolPart(data, event.data.callId);
       if (existing !== undefined && existing.state !== "input-streaming") return data;
-      const place =
-        findToolPlace(data, event.data.callId) ?? runPlace(before, after, event.scope?.runId);
+      const place = findToolPlace(data, event.data.callId) ?? runPlace(after, event.scope?.runId);
       if (place === undefined) return data;
       const toolName = event.data.name ?? existing?.toolName ?? "unknown";
       const inputText =
@@ -244,13 +234,7 @@ function reduceContent(
       const { callId, capability, owner } = event.data;
       const existing = findToolPart(data, callId);
       if (existing !== undefined && existing.state !== "input-streaming") return data;
-      const call = after.calls[callId];
-      const place =
-        "runId" in owner
-          ? runPlace(before, after, owner.runId)
-          : call === undefined
-            ? undefined
-            : { stepIndex: call.stepIndex, turnId: call.turnId };
+      const place = "runId" in owner ? runPlace(after, owner.runId) : callPlace(after, callId);
       if (place === undefined) return data;
       const descriptor = normalizeCapability(capability);
       return updateAssistantMessage(data, place.turnId, (message) =>
@@ -272,7 +256,7 @@ function reduceContent(
       const { interactionId } = event.data;
       if (event.data.request.kind === "sign-in") {
         const prompt = signInPromptOf(event.data, event.scope);
-        const attempt = after.authorizations[interactionId];
+        const attempt = readerSignIn(after, interactionId);
         if (prompt === undefined || attempt === undefined) return data;
         return updateAssistantMessage(data, attempt.turnId, (message) =>
           upsertPart(
@@ -281,7 +265,7 @@ function reduceContent(
           ),
         );
       }
-      const opened = after.inputs[interactionId];
+      const opened = readerInput(after, interactionId);
       if (opened === undefined) return data;
       const { request } = opened;
       const existing = findToolPart(data, request.action.callId);
@@ -317,22 +301,23 @@ function reduceContent(
         return removeToolPart(data, callId);
       }
       const existing = findToolPart(data, callId);
-      const call = before.calls[callId];
-      const turnId = call?.turnId ?? event.scope?.turnId;
+      const place = callPlace(after, callId);
+      const name = after.calls[callId]?.capability.name;
+      const turnId = place?.turnId ?? event.scope?.turnId;
       if (existing === undefined && turnId === undefined) return data;
       const part = {
         ...existing,
         input: existing?.input,
-        stepIndex: existing?.stepIndex ?? call?.stepIndex ?? 0,
+        stepIndex: existing?.stepIndex ?? place?.stepIndex ?? 0,
         toolCallId: callId,
         toolMetadata: mergeToolMetadata(existing?.toolMetadata, {
           eve: {
             kind: existing?.toolMetadata?.eve?.kind ?? "tool-call",
             label: event.data.title,
-            name: existing?.toolMetadata?.eve?.name ?? call?.name ?? "unknown",
+            name: existing?.toolMetadata?.eve?.name ?? name ?? "unknown",
           },
         }),
-        toolName: existing?.toolName ?? call?.name ?? "unknown",
+        toolName: existing?.toolName ?? name ?? "unknown",
         type: "dynamic-tool" as const,
       };
       const output =
@@ -375,7 +360,7 @@ function reduceContent(
 
     case "interaction.settled": {
       const { interactionId, outcome, reason } = event.data;
-      const attempt = before.authorizations[interactionId];
+      const attempt = readerSignIn(after, interactionId);
       if (attempt !== undefined) {
         const settled: { -readonly [K in keyof SignInSettlement]: SignInSettlement[K] } = {
           attemptId: interactionId,
@@ -385,7 +370,7 @@ function reduceContent(
         if (reason !== undefined) settled.reason = reason;
         return completeAuthorization(data, settled, attempt);
       }
-      const response = after.inputs[interactionId]?.response;
+      const response = readerInput(after, interactionId)?.response;
       const existing =
         response === undefined ? undefined : findToolPartByApprovalId(data, interactionId);
       if (existing === undefined) return data;
@@ -451,10 +436,7 @@ function withToolPartStates(data: EveMessageData, callIds: readonly string[]): E
     if (part === undefined) continue;
     const derived = toolPartState(next, part);
     if (derived !== part) {
-      next = withConversationProjection(
-        replaceToolPart(next, derived),
-        conversationProjection(data),
-      );
+      next = withConversationLedger(replaceToolPart(next, derived), conversationLedger(data));
     }
   }
   return next;
@@ -480,17 +462,17 @@ function closeStreamingRuns(
  */
 function removeUnsettledToolParts(
   parts: readonly EveMessagePart[],
-  projection: SessionProjection,
+  view: SessionView,
 ): readonly EveMessagePart[] {
   return parts.filter((part) => {
     if (part.type !== "dynamic-tool") return true;
     if (part.state === "input-streaming") return false;
     if (part.state !== "input-available") return true;
-    const call = projection.calls[part.toolCallId];
+    const call = view.calls[part.toolCallId];
     return (
       call === undefined ||
       call.taskId !== undefined ||
-      reportedCallStatus(projection, call) !== "running"
+      reportedCallStatus(view, part.toolCallId) !== "running"
     );
   });
 }

@@ -10,7 +10,7 @@ import type { SessionEvent } from "#protocol/session-event.js";
 import { linesOf } from "#protocol/session-lines.js";
 import { eventsOf } from "#harness/publication.js";
 import type { StoredLine } from "#protocol/session-events/envelope.js";
-import { cloneView, emptySessionView, foldLine } from "#protocol/session-projection/fold.js";
+import { copyView, emptySessionView, foldLine } from "#protocol/session-projection/fold.js";
 import type { SessionView as PublicSessionView } from "#protocol/session-projection/tables.js";
 import { SESSION_PROJECTION_STATE_KEY, storedProjection } from "./view.js";
 
@@ -102,7 +102,7 @@ function advanceView(
 ): PublicSessionView {
   const current = view ?? emptySessionView();
   if (!("facts" in line)) return { ...current, position: Math.max(current.position, position + 1) };
-  const next = cloneView(current);
+  const next = copyView(current);
   foldLine(next, line, position, { retention: "operational" });
   return next;
 }
@@ -149,16 +149,12 @@ export function saveSessionProjection<T extends HarnessSessionBase>(
   return saveProjection(session, currentProjection(ctx));
 }
 
-/**
- * The session saves the lifecycle its steps read. Calls and tasks are for the stream's readers,
- * which fold them from the events, and their outputs can be large, so the checkpoint omits them.
- */
+/** The session saves the coordinates and public view its steps read. */
 export function saveProjection<T extends HarnessSessionBase>(
   session: T,
   projection: SessionProjection,
 ): T {
-  const saved: SessionProjection = { ...projection, calls: {}, tasks: {} };
-  return { ...session, state: { ...session.state, [SESSION_PROJECTION_STATE_KEY]: saved } };
+  return { ...session, state: { ...session.state, [SESSION_PROJECTION_STATE_KEY]: projection } };
 }
 
 /** The projection one step reads and folds what it publishes into. */

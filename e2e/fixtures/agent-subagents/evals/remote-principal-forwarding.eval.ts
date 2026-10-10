@@ -45,7 +45,8 @@ export default defineEval({
     const { childSessionId, taskId } = aliceParent;
     const aliceChild = await t.target.watchTurn(childSessionId).result();
     await expectWorkspaceReads(t, aliceChild, ALICE_WORKSPACE_LABEL);
-    let childEventCount = aliceChild.events.length;
+    // Each read starts at the line after the last one read.
+    let childNextLine = aliceChild.session.state!.streamIndex;
 
     // Bob continues it by its taskId and must resolve Bob's workspace label, not Alice's.
     const bobTurn = await aliceParent.session.send(CONTINUE_CHILD_MESSAGE, {
@@ -59,10 +60,10 @@ export default defineEval({
       BOB_AUTHORIZATION,
     );
     const bobChild = await t.target
-      .watchTurn(childSessionId, { startIndex: childEventCount })
+      .watchTurn(childSessionId, { startIndex: childNextLine })
       .result();
     await expectWorkspaceReads(t, bobChild, BOB_WORKSPACE_LABEL);
-    childEventCount += bobChild.events.length;
+    childNextLine = bobChild.session.state!.streamIndex;
 
     // A grantless observer continues it once more. Reusing either prior membership
     // would complete this call; correct per-turn scoping denies access.
@@ -77,23 +78,22 @@ export default defineEval({
       OBSERVER_AUTHORIZATION,
     );
     const observerChild = await t.target
-      .watchTurn(childSessionId, { startIndex: childEventCount })
+      .watchTurn(childSessionId, { startIndex: childNextLine })
       .result();
     observerChild.expectOk();
     observerChild.calledTool("read-workspace-label", { status: "failed" });
     observerChild.calledTool("read-workspace-label", { count: 0, status: "completed" });
-    observerChild.event("action.result", {
+    observerChild.event("call.settled", {
       data: {
         error: { message: /No workspace membership exists for e2e-observer/ },
-        result: { kind: "tool-result", toolName: "read-workspace-label" },
-        status: "failed",
+        outcome: "failed",
       },
     });
 
-    t.event("task.started", { data: { kind: "agent", name: "remote-loopback", taskId }, count: 3 })
+    t.event("call.started", { data: { taskId }, count: 3 })
       .soft()
       .label("every caller continues the same task");
-    t.event("agent.started", { data: { name: "remote-loopback" }, count: 1 })
+    t.event("child.opened", { data: { name: "remote-loopback" }, count: 1 })
       .soft()
       .label("no repeated delegation");
     t.succeeded();
@@ -170,21 +170,25 @@ async function waitForRemoteChild(
   throw new Error("The parent did not call remote-loopback after five turns.");
 }
 
-/** A later call reaches the task's session, which `agent.started` announced once with the task's ID. */
+/** A later call reaches the task's session, which `child.opened` announced once under the task. */
 function findRemoteChild(turn: EveEvalTurn, expected?: RemoteChild): RemoteChild | undefined {
+  if (expected !== undefined) {
+    const reached = turn.events.some(
+      (event) => event.type === "call.started" && event.data.taskId === expected.taskId,
+    );
+    if (reached) return expected;
+    if (turn.events.some((event) => event.type === "task.started")) {
+      throw new Error("The parent turn did not continue the existing remote-loopback task.");
+    }
+    return undefined;
+  }
   for (const event of turn.events) {
     if (event.type !== "task.started" || event.data.name !== "remote-loopback") continue;
-    if (expected !== undefined) {
-      if (event.data.taskId !== expected.taskId) {
-        throw new Error("The parent turn did not continue the existing remote-loopback task.");
-      }
-      return expected;
-    }
     const started = turn.events.find(
       (candidate) =>
-        candidate.type === "agent.started" && candidate.data.taskId === event.data.taskId,
+        candidate.type === "child.opened" && candidate.scope?.taskId === event.data.taskId,
     );
-    if (started?.type === "agent.started") {
+    if (started?.type === "child.opened") {
       return { childSessionId: started.data.sessionId, taskId: event.data.taskId };
     }
   }

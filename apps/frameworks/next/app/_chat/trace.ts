@@ -1,675 +1,207 @@
+import {
+  failure,
+  reply,
+  viewOfEvents,
+  type CallRow,
+  type PartRow,
+  type RunRow,
+  type SessionPreviews,
+  type SessionView,
+  type TurnRow,
+} from "eve/events";
+
 import type {
   TraceAction,
-  TraceActionError,
   TraceActionKind,
   TraceStep,
   TraceTurn,
   TranscriptStreamEvent,
 } from "./types";
 
-type MutableTraceAction = {
-  callId: string;
-  durationMs?: number;
-  endTime?: string;
-  error?: TraceActionError;
-  input?: unknown;
-  kind: TraceActionKind;
-  name: string;
-  output?: unknown;
-  startTime?: string;
-  status: TraceAction["status"];
-};
-
-type MutableTraceStep = {
-  actions: MutableTraceAction[];
-  actionCount: number;
-  actionsByCallId: Map<string, MutableTraceAction>;
-  durationMs?: number;
-  endTime?: string;
-  errorMessage?: string;
-  events: TranscriptStreamEvent[];
-  finishReason?: string;
-  reasoningText?: string;
-  responseText?: string;
-  startTime?: string;
-  status: TraceStep["status"];
-  stepIndex: number;
-  subagentCount: number;
-  usage?: TraceStep["usage"];
-};
-
-type MutableTraceTurn = {
-  assistantMessage?: string;
-  durationMs?: number;
-  endTime?: string;
-  events: TranscriptStreamEvent[];
-  sequence?: number;
-  startTime?: string;
-  status: TraceTurn["status"];
-  steps: MutableTraceStep[];
-  stepsByIndex: Map<number, MutableTraceStep>;
-  subagentCount: number;
-  turnId: string;
-  userMessage?: string;
-};
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
-}
-
-function readString(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function readNumber(value: unknown): number | undefined {
-  return typeof value === "number" ? value : undefined;
-}
-
-function readEventTimestamp(event: TranscriptStreamEvent): string | undefined {
-  return readString(event.meta?.at);
-}
-
-function getEventTurnId(event: TranscriptStreamEvent): string | undefined {
-  if (!("data" in event) || !isRecord(event.data)) {
-    return undefined;
-  }
-
-  return readString((event.data as Record<string, unknown>).turnId);
-}
-
-function getEventSequence(event: TranscriptStreamEvent): number | undefined {
-  if (!("data" in event) || !isRecord(event.data)) {
-    return undefined;
-  }
-
-  return readNumber((event.data as Record<string, unknown>).sequence);
-}
-
-function getEventStepIndex(event: TranscriptStreamEvent): number | undefined {
-  if (!("data" in event) || !isRecord(event.data)) {
-    return undefined;
-  }
-
-  return readNumber((event.data as Record<string, unknown>).stepIndex);
-}
-
-function ensureTurn(
-  orderedTurns: MutableTraceTurn[],
-  turnsById: Map<string, MutableTraceTurn>,
-  turnId: string,
-): MutableTraceTurn {
-  const existing = turnsById.get(turnId);
-  if (existing !== undefined) {
-    return existing;
-  }
-
-  const nextTurn: MutableTraceTurn = {
-    events: [],
-    status: "running",
-    steps: [],
-    stepsByIndex: new Map(),
-    subagentCount: 0,
-    turnId,
-  };
-  turnsById.set(turnId, nextTurn);
-  orderedTurns.push(nextTurn);
-  return nextTurn;
-}
-
-function ensureStep(turn: MutableTraceTurn, stepIndex: number): MutableTraceStep {
-  const existing = turn.stepsByIndex.get(stepIndex);
-  if (existing !== undefined) {
-    return existing;
-  }
-
-  const nextStep: MutableTraceStep = {
-    actions: [],
-    actionCount: 0,
-    actionsByCallId: new Map(),
-    events: [],
-    status: "running",
-    stepIndex,
-    subagentCount: 0,
-  };
-  turn.stepsByIndex.set(stepIndex, nextStep);
-  turn.steps.push(nextStep);
-  return nextStep;
-}
-
-function getMostRecentStep(turn: MutableTraceTurn): MutableTraceStep | undefined {
-  return turn.steps[turn.steps.length - 1];
-}
-
-function createTraceAction(input: {
-  readonly callId: string;
-  readonly input?: unknown;
-  readonly kind: TraceActionKind;
-  readonly name: string;
-  readonly status?: TraceAction["status"];
-}): MutableTraceAction {
-  return {
-    callId: input.callId,
-    input: input.input,
-    kind: input.kind,
-    name: input.name,
-    status: input.status ?? "requested",
-  };
-}
-
-function ensureAction(step: MutableTraceStep, action: MutableTraceAction): MutableTraceAction {
-  const existing = step.actionsByCallId.get(action.callId);
-  if (existing !== undefined) {
-    return existing;
-  }
-
-  step.actionsByCallId.set(action.callId, action);
-  step.actions.push(action);
-  step.actionCount = step.actions.length;
-  return action;
-}
-
-function getTraceActionKindFromRequest(action: Record<string, unknown>): TraceActionKind {
-  const kind = readString(action.kind);
-  switch (kind) {
-    case "load-skill":
-    case "subagent-call":
-    case "tool-call":
-      return kind;
-    default:
-      return "unknown";
-  }
-}
-
-function getTraceActionKindFromResult(result: Record<string, unknown>): TraceActionKind {
-  const kind = readString(result.kind);
-  switch (kind) {
-    case "load-skill-result":
-      return "load-skill";
-    case "subagent-result":
-      return "subagent-call";
-    case "tool-result":
-      return "tool-call";
-    default:
-      return "unknown";
-  }
-}
-
-function getTraceActionNameFromRequest(action: Record<string, unknown>): string | undefined {
-  const kind = getTraceActionKindFromRequest(action);
-  switch (kind) {
-    case "load-skill":
-      return readString(action.name);
-    case "subagent-call":
-      return readString(action.subagentName) ?? readString(action.name);
-    case "tool-call":
-      return readString(action.toolName);
-    case "unknown":
-      return (
-        readString(action.toolName) ?? readString(action.subagentName) ?? readString(action.name)
-      );
-  }
-}
-
-function getTraceActionNameFromResult(result: Record<string, unknown>): string | undefined {
-  const kind = getTraceActionKindFromResult(result);
-  switch (kind) {
-    case "load-skill":
-      return readString(result.name);
-    case "subagent-call":
-      return readString(result.subagentName);
-    case "tool-call":
-      return readString(result.toolName);
-    case "unknown":
-      return (
-        readString(result.toolName) ?? readString(result.subagentName) ?? readString(result.name)
-      );
-  }
-}
-
-function readActionResultError(value: unknown): TraceActionError | undefined {
-  if (!isRecord(value)) {
-    return undefined;
-  }
-
-  const code = readString(value.code);
-  const message = readString(value.message);
-  if (code === undefined || message === undefined) {
-    return undefined;
-  }
-
-  return {
-    code,
-    message,
-  };
-}
-
-function getTraceActionStatusFromResult(eventData: Record<string, unknown>): TraceAction["status"] {
-  const normalizedStatus = readString(eventData.status);
-  if (normalizedStatus === "completed" || normalizedStatus === "failed") {
-    return normalizedStatus;
-  }
-
-  return readActionResultError(eventData.error) !== undefined ? "failed" : "completed";
-}
-
-function getTraceActionErrorFromResult(
-  eventData: Record<string, unknown>,
-): TraceActionError | undefined {
-  return readActionResultError(eventData.error);
-}
-
-function abortOpenTraceWork(input: {
-  readonly endedAt?: string;
-  readonly message?: string;
-  readonly turn: MutableTraceTurn;
-}): void {
-  for (const step of input.turn.steps) {
-    if (step.status === "running") {
-      if (input.endedAt !== undefined && step.endTime === undefined) {
-        step.endTime = input.endedAt;
-      }
-      if (input.message !== undefined && step.errorMessage === undefined) {
-        step.errorMessage = input.message;
-      }
-      step.status = "aborted";
-    }
-
-    for (const action of step.actions) {
-      if (action.status !== "requested" && action.status !== "running") {
-        continue;
-      }
-
-      if (input.endedAt !== undefined && action.endTime === undefined) {
-        action.endTime = input.endedAt;
-      }
-      action.status = "aborted";
-    }
-  }
-}
-
-function applyDuration(input: {
-  readonly endTime?: string;
-  readonly setDuration: (durationMs: number | undefined) => void;
-  readonly startTime?: string;
-}): void {
-  if (input.startTime === undefined || input.endTime === undefined) {
-    input.setDuration(undefined);
-    return;
-  }
-
-  const startMs = Date.parse(input.startTime);
-  const endMs = Date.parse(input.endTime);
-
-  if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs < startMs) {
-    input.setDuration(undefined);
-    return;
-  }
-
-  input.setDuration(endMs - startMs);
-}
-
-function toReadonlyTurn(turn: MutableTraceTurn): TraceTurn {
-  return {
-    assistantMessage: turn.assistantMessage,
-    durationMs: turn.durationMs,
-    endTime: turn.endTime,
-    events: turn.events,
-    sequence: turn.sequence,
-    startTime: turn.startTime,
-    status: turn.status,
-    steps: turn.steps.map((step) => ({
-      actions: step.actions.map((action) => ({
-        callId: action.callId,
-        durationMs: action.durationMs,
-        endTime: action.endTime,
-        error: action.error,
-        input: action.input,
-        kind: action.kind,
-        name: action.name,
-        output: action.output,
-        startTime: action.startTime,
-        status: action.status,
-      })),
-      actionCount: step.actionCount,
-      durationMs: step.durationMs,
-      endTime: step.endTime,
-      errorMessage: step.errorMessage,
-      events: step.events,
-      finishReason: step.finishReason,
-      reasoningText: step.reasoningText,
-      responseText: step.responseText,
-      startTime: step.startTime,
-      status: step.status,
-      stepIndex: step.stepIndex,
-      subagentCount: step.subagentCount,
-      usage: step.usage,
-    })),
-    subagentCount: turn.subagentCount,
-    turnId: turn.turnId,
-    userMessage: turn.userMessage,
-  };
-}
-
 /**
  * Reconstructs the shared turn model from the persisted session transcript.
  *
- * The web UI renders both chat and debugger surfaces from this one transcript-
- * first view, deriving durations from event timestamps when available.
+ * The transcript folds into eve's shared session tables, the same ones the server and every
+ * channel read. Each model run of a turn is one trace step, each call a run made is one of its
+ * actions, and durations come from the times of the lines that started and ended them.
  */
 export function buildTraceTurnsFromTranscript(
   events: readonly TranscriptStreamEvent[],
 ): readonly TraceTurn[] {
-  const orderedTurns: MutableTraceTurn[] = [];
-  const turnsById = new Map<string, MutableTraceTurn>();
-  let lastTurnId: string | undefined;
+  const { view, previews } = viewOfEvents(events);
+  return Object.values(view.turns)
+    .sort((a, b) => a.introducedAt - b.introducedAt)
+    .map((turn) => traceTurn(view, previews, turn, events));
+}
 
-  for (const event of events) {
-    let turnId = getEventTurnId(event);
+function traceTurn(
+  view: SessionView,
+  previews: SessionPreviews,
+  turn: TurnRow,
+  events: readonly TranscriptStreamEvent[],
+): TraceTurn {
+  const runs = Object.values(view.runs)
+    .filter((run) => "turnId" in run.owner && run.owner.turnId === turn.turnId)
+    .sort((a, b) => a.introducedAt - b.introducedAt);
+  const steps = runs.map((run, stepIndex) => traceStep(view, previews, turn, run, stepIndex));
+  const answer = textOf(reply(view, turn.turnId));
+  const failureMessage = failure(view, turn.turnId)?.message;
+  return {
+    assistantMessage: answer.length > 0 ? answer : undefined,
+    durationMs: durationBetween(turn.startedAt, turn.endedAt),
+    endTime: turn.endedAt,
+    events: events.filter((event) => scopeTurnId(event) === turn.turnId),
+    failureMessage,
+    sequence: turnSequence(turn.turnId),
+    startTime: turn.startedAt,
+    status: turnStatus(turn),
+    steps,
+    subagentCount: steps.reduce((count, step) => count + step.subagentCount, 0),
+    turnId: turn.turnId,
+    userMessage: userMessageOf(view, turn.turnId),
+  };
+}
 
-    if (
-      turnId === undefined &&
-      lastTurnId !== undefined &&
-      (event.type === "session.completed" ||
-        event.type === "session.failed" ||
-        event.type === "session.waiting")
-    ) {
-      turnId = lastTurnId;
-    }
+function traceStep(
+  view: SessionView,
+  previews: SessionPreviews,
+  turn: TurnRow,
+  run: RunRow,
+  stepIndex: number,
+): TraceStep {
+  const parts = Object.values(view.parts)
+    .filter((part) => part.runId === run.runId)
+    .sort((a, b) => a.introducedAt - b.introducedAt);
+  const streaming = Object.values(previews.parts).filter((part) => part.runId === run.runId);
+  const calls = Object.values(view.calls)
+    .filter((call) => "runId" in call.owner && call.owner.runId === run.runId)
+    .sort((a, b) => a.introducedAt - b.introducedAt);
+  const actions = calls.map((call) => traceAction(call, turn));
+  const response =
+    textOf(parts.filter((part) => part.kind === "text")) ||
+    streaming
+      .filter((part) => part.kind === "text")
+      .map((part) => part.text)
+      .join("");
+  const reasoning =
+    textOf(parts.filter((part) => part.kind === "reasoning")) ||
+    streaming
+      .filter((part) => part.kind === "reasoning")
+      .map((part) => part.text)
+      .join("");
+  const callIds = new Set(calls.map((call) => call.callId));
+  const subagentCount = Object.values(view.children).filter(
+    (child) => "callId" in child.owner && callIds.has(child.owner.callId),
+  ).length;
+  return {
+    actionCount: actions.length,
+    actions,
+    durationMs: durationBetween(run.startedAt, run.endedAt),
+    endTime: run.endedAt,
+    errorMessage: run.error?.message,
+    events: [],
+    finishReason: run.finishReason,
+    reasoningText: reasoning.length > 0 ? reasoning : undefined,
+    responseText: response.length > 0 ? response : undefined,
+    startTime: run.startedAt,
+    status: stepStatus(run, turn),
+    stepIndex,
+    subagentCount,
+    usage: run.usage,
+  };
+}
 
-    if (turnId === undefined) {
-      continue;
-    }
+function traceAction(call: CallRow, turn: TurnRow): TraceAction {
+  return {
+    callId: call.callId,
+    durationMs: durationBetween(call.startedAt, call.endedAt),
+    endTime: call.endedAt,
+    error:
+      call.error === undefined ? undefined : { code: call.error.code, message: call.error.message },
+    input: call.input,
+    kind: actionKind(call.capability.kind),
+    name: call.capability.name,
+    output: call.output,
+    startTime: call.startedAt,
+    status: actionStatus(call, turn),
+  };
+}
 
-    const turn = ensureTurn(orderedTurns, turnsById, turnId);
-    turn.events.push(event);
-    lastTurnId = turnId;
-
-    const sequence = getEventSequence(event);
-    if (sequence !== undefined) {
-      turn.sequence = sequence;
-    }
-
-    const eventTimestamp = readEventTimestamp(event);
-    const eventStepIndex = getEventStepIndex(event);
-    const step =
-      eventStepIndex !== undefined ? ensureStep(turn, eventStepIndex) : getMostRecentStep(turn);
-
-    if (step !== undefined && eventStepIndex !== undefined) {
-      step.events.push(event);
-    } else if (step !== undefined && event.type === "agent.started") {
-      step.events.push(event);
-    }
-
-    if (event.type === "turn.started") {
-      if (eventTimestamp !== undefined) {
-        turn.startTime = eventTimestamp;
-      }
-      continue;
-    }
-
-    if (event.type === "message.received" && isRecord(event.data)) {
-      turn.userMessage = readString(event.data.message);
-      continue;
-    }
-
-    if (event.type === "step.started" && step !== undefined) {
-      if (eventTimestamp !== undefined) {
-        step.startTime = eventTimestamp;
-      }
-      step.status = "running";
-      continue;
-    }
-
-    if (event.type === "reasoning.appended" && step !== undefined) {
-      step.reasoningText = (step.reasoningText ?? "") + event.data.reasoningDelta;
-      continue;
-    }
-
-    if (event.type === "reasoning.completed" && step !== undefined && isRecord(event.data)) {
-      step.reasoningText = readString(event.data.reasoning);
-      continue;
-    }
-
-    if (event.type === "message.appended" && step !== undefined) {
-      step.responseText = (step.responseText ?? "") + event.data.messageDelta;
-      continue;
-    }
-
-    if (event.type === "message.completed" && step !== undefined && isRecord(event.data)) {
-      const message = readString(event.data.message);
-      const finishReason = readString(event.data.finishReason);
-
-      if (finishReason !== undefined) {
-        step.finishReason = finishReason;
-      }
-
-      if (message !== undefined) {
-        step.responseText = message;
-        if (finishReason !== "tool-calls") {
-          turn.assistantMessage = message;
-        }
-      }
-      continue;
-    }
-
-    if (event.type === "actions.requested" && step !== undefined && isRecord(event.data)) {
-      const actions = event.data.actions;
-      if (Array.isArray(actions)) {
-        for (const actionValue of actions) {
-          if (!isRecord(actionValue)) {
-            continue;
-          }
-
-          const callId = readString(actionValue.callId);
-          const name = getTraceActionNameFromRequest(actionValue);
-          if (callId === undefined || name === undefined) {
-            continue;
-          }
-
-          const action = ensureAction(
-            step,
-            createTraceAction({
-              callId,
-              input: actionValue.input,
-              kind: getTraceActionKindFromRequest(actionValue),
-              name,
-              status: "running",
-            }),
-          );
-          action.input = actionValue.input;
-          action.status = "running";
-          if (eventTimestamp !== undefined && action.startTime === undefined) {
-            action.startTime = eventTimestamp;
-          }
-        }
-      }
-      continue;
-    }
-
-    if (event.type === "input.requested" && step !== undefined && isRecord(event.data)) {
-      const requests = event.data.requests;
-      if (Array.isArray(requests)) {
-        for (const requestValue of requests) {
-          if (!isRecord(requestValue)) {
-            continue;
-          }
-
-          const actionValue = requestValue.action;
-          if (!isRecord(actionValue)) {
-            continue;
-          }
-
-          const callId = readString(actionValue.callId);
-          const name = getTraceActionNameFromRequest(actionValue);
-          if (callId === undefined || name === undefined) {
-            continue;
-          }
-
-          const action = ensureAction(
-            step,
-            createTraceAction({
-              callId,
-              input: actionValue.input,
-              kind: getTraceActionKindFromRequest(actionValue),
-              name,
-              status: "requested",
-            }),
-          );
-          action.input = actionValue.input;
-          action.status = "requested";
-          if (eventTimestamp !== undefined && action.startTime === undefined) {
-            action.startTime = eventTimestamp;
-          }
-        }
-      }
-      continue;
-    }
-
-    if (event.type === "action.result" && step !== undefined && isRecord(event.data)) {
-      const resultValue = event.data.result;
-      if (!isRecord(resultValue)) {
-        continue;
-      }
-
-      const callId = readString(resultValue.callId);
-      const name = getTraceActionNameFromResult(resultValue);
-      if (callId === undefined || name === undefined) {
-        continue;
-      }
-
-      const action = ensureAction(
-        step,
-        createTraceAction({
-          callId,
-          kind: getTraceActionKindFromResult(resultValue),
-          name,
-        }),
-      );
-
-      action.kind = getTraceActionKindFromResult(resultValue);
-      action.name = name;
-      action.output = resultValue.output;
-      action.status = getTraceActionStatusFromResult(event.data);
-      action.error = getTraceActionErrorFromResult(event.data);
-      if (eventTimestamp !== undefined) {
-        action.endTime = eventTimestamp;
-      }
-      continue;
-    }
-
-    if (event.type === "agent.started") {
-      turn.subagentCount += 1;
-      if (step !== undefined) {
-        step.subagentCount += 1;
-      }
-      continue;
-    }
-
-    if (event.type === "step.completed" && step !== undefined && isRecord(event.data)) {
-      const finishReason = readString(event.data.finishReason);
-      if (finishReason !== undefined) {
-        step.finishReason = finishReason;
-      }
-
-      if (eventTimestamp !== undefined) {
-        step.endTime = eventTimestamp;
-      }
-      step.status = "completed";
-
-      const usageValue = event.data.usage;
-      if (isRecord(usageValue)) {
-        step.usage = {
-          cacheReadTokens: readNumber(usageValue.cacheReadTokens),
-          cacheWriteTokens: readNumber(usageValue.cacheWriteTokens),
-          inputTokens: readNumber(usageValue.inputTokens),
-          outputTokens: readNumber(usageValue.outputTokens),
-        };
-      }
-      continue;
-    }
-
-    if (event.type === "step.failed" && step !== undefined && isRecord(event.data)) {
-      if (eventTimestamp !== undefined) {
-        step.endTime = eventTimestamp;
-      }
-      step.errorMessage = readString(event.data.message);
-      for (const action of step.actions) {
-        if (action.status !== "requested" && action.status !== "running") {
-          continue;
-        }
-
-        if (eventTimestamp !== undefined && action.endTime === undefined) {
-          action.endTime = eventTimestamp;
-        }
-        action.status = "aborted";
-      }
-      step.status = "failed";
-      continue;
-    }
-
-    if (event.type === "turn.completed") {
-      if (eventTimestamp !== undefined) {
-        turn.endTime = eventTimestamp;
-      }
-      turn.status = "completed";
-      continue;
-    }
-
-    if (event.type === "turn.failed" || event.type === "session.failed") {
-      const failureMessage =
-        isRecord(event.data) && typeof event.data.message === "string"
-          ? event.data.message
-          : undefined;
-      if (eventTimestamp !== undefined) {
-        turn.endTime = eventTimestamp;
-      }
-      abortOpenTraceWork({
-        endedAt: eventTimestamp,
-        message: failureMessage,
-        turn,
-      });
-      turn.status = "failed";
-      continue;
-    }
-
-    if (
-      event.type === "session.waiting" &&
-      turn.endTime === undefined &&
-      eventTimestamp !== undefined
-    ) {
-      turn.endTime = eventTimestamp;
-    }
+function actionKind(kind: string): TraceActionKind {
+  switch (kind) {
+    case "tool":
+      return "tool-call";
+    case "skill":
+      return "load-skill";
+    case "agent":
+      return "subagent-call";
+    default:
+      return "unknown";
   }
+}
 
-  for (const turn of orderedTurns) {
-    applyDuration({
-      endTime: turn.endTime,
-      setDuration: (durationMs) => {
-        turn.durationMs = durationMs;
-      },
-      startTime: turn.startTime,
-    });
-
-    for (const step of turn.steps) {
-      applyDuration({
-        endTime: step.endTime,
-        setDuration: (durationMs) => {
-          step.durationMs = durationMs;
-        },
-        startTime: step.startTime,
-      });
-
-      for (const action of step.actions) {
-        applyDuration({
-          endTime: action.endTime,
-          setDuration: (durationMs) => {
-            action.durationMs = durationMs;
-          },
-          startTime: action.startTime,
-        });
-      }
-    }
+function actionStatus(call: CallRow, turn: TurnRow): TraceAction["status"] {
+  if (call.status === "settled") {
+    if (call.outcome === "completed") return "completed";
+    if (call.outcome === "failed" || call.outcome === "rejected") return "failed";
+    return "aborted";
   }
+  if (turn.status === "settled") return "aborted";
+  return call.status === "requested" ? "requested" : "running";
+}
 
-  return orderedTurns.map(toReadonlyTurn);
+function stepStatus(run: RunRow, turn: TurnRow): TraceStep["status"] {
+  if (run.status === "settled") {
+    if (run.outcome === "completed") return "completed";
+    if (run.outcome === "failed") return "failed";
+    return "aborted";
+  }
+  return turn.status === "settled" ? "aborted" : "running";
+}
+
+function turnStatus(turn: TurnRow): TraceTurn["status"] {
+  if (turn.status !== "settled") return "running";
+  return turn.outcome === "failed" ? "failed" : "completed";
+}
+
+function textOf(parts: readonly PartRow[]): string {
+  return parts
+    .flatMap((part) => (typeof part.value === "string" ? [part.value] : []))
+    .join("");
+}
+
+function userMessageOf(view: SessionView, turnId: string): string | undefined {
+  const text = Object.values(view.deliveries)
+    .filter((delivery) => delivery.turnId === turnId)
+    .sort((a, b) => a.introducedAt - b.introducedAt)
+    .flatMap((delivery) => delivery.parts ?? [])
+    .flatMap((part) => (part.kind === "text" ? [part.text] : []))
+    .join("\n");
+  return text.length > 0 ? text : undefined;
+}
+
+function scopeTurnId(event: TranscriptStreamEvent): string | undefined {
+  const scope = "scope" in event ? event.scope : undefined;
+  if (typeof scope === "object" && scope !== null && "turnId" in scope) {
+    return typeof scope.turnId === "string" ? scope.turnId : undefined;
+  }
+  const data: unknown = event.data;
+  if (typeof data === "object" && data !== null && "turnId" in data) {
+    return typeof data.turnId === "string" ? data.turnId : undefined;
+  }
+  return undefined;
+}
+
+function turnSequence(turnId: string): number | undefined {
+  const match = /^turn_(\d+)$/.exec(turnId);
+  return match === null ? undefined : Number(match[1]);
+}
+
+function durationBetween(start: string | undefined, end: string | undefined): number | undefined {
+  if (start === undefined || end === undefined) return undefined;
+  const startMs = Date.parse(start);
+  const endMs = Date.parse(end);
+  return Number.isNaN(startMs) || Number.isNaN(endMs) || endMs < startMs
+    ? undefined
+    : endMs - startMs;
 }

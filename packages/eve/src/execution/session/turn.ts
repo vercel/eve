@@ -471,7 +471,7 @@ class CallWait {
    * `eve__task_cancel` is answered at once, and so is each `eve__task_wait` that can
    * return now: a timeout of 0, a result already waiting, or nothing working.
    * Any other `eve__task_wait` parks the open turn, reported once as
-   * `turn.waiting`, and the turn resolves it alongside the step's other
+   * `turn.paused`, and the turn resolves it alongside the step's other
    * workflow tool calls.
    */
   async answerTaskToolCalls(calls: readonly TaskToolCall[]): Promise<void> {

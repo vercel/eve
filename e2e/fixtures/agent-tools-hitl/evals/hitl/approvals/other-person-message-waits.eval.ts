@@ -26,21 +26,23 @@ export default defineEval({
 
     const bob = await session.start(SAY.bobStatus, asBob);
     const approved = (await session.respond(answers("approve", request), asAlice)).expectOk();
-    expectResolved(approved, request, "approved");
+    expectResolved(approved, request, "accepted");
     approved.calledTool("change-a", { status: "completed", output: { executions: 1 }, count: 1 });
-    approved.notEvent("message.received", { data: { message: SAY.bobStatus } });
+    approved.notEvent("delivery.consumed", {
+      data: { parts: [{ kind: "text", text: SAY.bobStatus }] },
+    });
 
-    approved.event("message.completed", { data: { message: /^Change A: done / } });
-    approved.event("turn.completed", { count: 1 });
+    approved.event("content.completed", { data: { phase: "reply", value: /^Change A: done / } });
+    approved.event("turn.settled", { count: 1, data: { outcome: "completed" } });
 
     // Bob's message starts its own turn once Alice's has ended.
     const bobTurn = (await bob.result()).expectOk();
     bobTurn.eventOrder([
       { type: "turn.started" },
-      { type: "message.received", data: { message: SAY.bobStatus } },
-      { type: "message.completed", data: { message: REPLY.bobStatus } },
-      { type: "turn.completed" },
+      { type: "delivery.consumed", data: { parts: [{ kind: "text", text: SAY.bobStatus }] } },
+      { type: "content.completed", data: { phase: "reply", value: REPLY.bobStatus } },
+      { data: { outcome: "completed" }, type: "turn.settled" },
     ]);
-    bobTurn.notEvent("input.resolved");
+    bobTurn.notEvent("interaction.settled");
   },
 });

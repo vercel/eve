@@ -1,4 +1,5 @@
 import { defineEval } from "eve/evals";
+import { callsReachingTasks } from "./task-calls.shared";
 
 const MEMORABLE_FACT = "Alice named the tide station notebook Harbor Lumen 4482.";
 
@@ -35,16 +36,14 @@ export default defineEval({
 
     t.succeeded();
     t.eventsSatisfy("both turns continue one remote child session", (events) => {
-      const calls = events.flatMap((event) =>
-        event.type === "task.started" && event.data.name === "remote-loopback" ? [event.data] : [],
-      );
+      const calls = callsReachingTasks(events, "remote-loopback");
       return (
         calls.length >= 2 &&
         new Set(calls.map((call) => call.taskId)).size === 1 &&
         new Set(calls.map((call) => call.turnId)).size >= 2
       );
     });
-    t.event("agent.started", { data: { name: "remote-loopback" }, count: 1 });
+    t.event("child.opened", { data: { name: "remote-loopback" }, count: 1 });
     t.noFailedActions();
   },
 });

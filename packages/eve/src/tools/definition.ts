@@ -266,7 +266,7 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends Pub
    *
    * When omitted, the model sees the full `execute` return value
    * (default AI SDK serialization). Channel event handlers
-   * (`action.result`) always receive the full output regardless.
+   * (`call.settled`) always receive the full output regardless.
    */
   toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
 }

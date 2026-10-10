@@ -8,6 +8,13 @@ import { setEveAttributes } from "#runtime/attributes/emit.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
 import { contextStorage } from "#context/container.js";
 import { runStep } from "#context/run-step.js";
+import { sessionProvider } from "#context/providers/session.js";
+import { ConnectionRegistryKey, connectionProvider } from "#context/providers/connection.js";
+import { sandboxProvider } from "#context/providers/sandbox.js";
+import {
+  drainDynamicInstructionUserMessages,
+  prepareDynamicInstructionPreamble,
+} from "#context/dynamic-instruction-lifecycle.js";
 import {
   AuthKey,
   ScheduleIdKey,
@@ -16,6 +23,9 @@ import {
   InitiatorAuthKey,
   SessionTitleKey,
   ParentSessionKey,
+  SandboxKey,
+  SessionPredecessorKey,
+  SessionKey,
   CapabilitiesKey,
   ChannelDeliveryKey,
   HandleEventKey,
@@ -59,6 +69,7 @@ import { openSessionEventPublisher } from "#execution/publish-session-events.js"
 import { admitDeliveries, type DeliveryAdmission } from "#execution/session/delivery-facts.js";
 import { getAdapterKind } from "#channel/adapter.js";
 import type { SessionEvent } from "#protocol/session-event.js";
+import type { FactOf } from "#protocol/session-events/facts.js";
 import { eventsOf } from "#harness/publication.js";
 import { createTurnEventHandler } from "#execution/session/turn-event-handler.js";
 import { CallbackBaseUrlKey, PendingAuthorizationResultKey } from "#harness/authorization.js";
@@ -200,7 +211,7 @@ async function runSessionStepBody(
           .requester
       : undefined;
   if (requester !== undefined) ctx.set(AuthKey, requester);
-  const initialSession: HarnessSession = {
+  let initialSession: HarnessSession = {
     ...hydrateDurableSession({
       compactionOverrides: {
         thresholdPercent: effectiveAgent.thresholdPercent,
@@ -405,21 +416,61 @@ async function runSessionStepBody(
       setChannelContext(ctx, updatedAdapter);
     }
 
+    /** Whether the admission changed the session: its history or its sandbox. */
+    let admissionChangedSession = false;
     /** The admission commit: the session's start if it hasn't, then each delivery admitted. */
     const publishAdmission = async (runtime: ReturnType<typeof buildRuntimeIdentity>) => {
       if (admission === undefined || admission.facts.length === 0) return;
       const facts: SessionEvent[] = [];
       if (!turnPosition(currentProjection(ctx)).sessionStarted) {
         const parent = ctx.get(ParentSessionKey);
-        facts.push({
-          data:
-            parent === undefined
-              ? { runtime }
-              : { parent: { callId: parent.callId, sessionId: parent.sessionId }, runtime },
-          type: "session.started",
-        });
+        const predecessor = ctx.get(SessionPredecessorKey);
+        const data: {
+          -readonly [
+            K in keyof FactOf<"session.started">["data"]
+          ]: FactOf<"session.started">["data"][K];
+        } = { runtime };
+        if (parent !== undefined) {
+          data.parent = { callId: parent.callId, sessionId: parent.sessionId };
+        }
+        if (predecessor !== undefined) data.predecessor = predecessor;
+        facts.push({ data, type: "session.started" });
       }
-      await contextStorage.run(ctx, () => handleEvent([...facts, ...admission.facts]));
+      // The admission commits before the step's framework context exists, and its hooks read
+      // the session (`ctx.session`) like every other commit's. The session's start resolves
+      // its dynamic connections into a registry, which the step's own scope rebuilds and
+      // rehydrates, and its dynamic skills write their files to the sandbox, whose state the
+      // step's scope resumes.
+      const created = sessionProvider.create(ctx, initialSession);
+      ctx.setVirtualContext(SessionKey, created.value);
+      const registry = await connectionProvider.create(ctx, initialSession);
+      if (registry !== undefined) ctx.setVirtualContext(ConnectionRegistryKey, registry.value);
+      const sandbox = await sandboxProvider.create(ctx, initialSession);
+      if (sandbox !== undefined) ctx.setVirtualContext(SandboxKey, sandbox.value);
+      // A user-role instruction the session's start resolves enters history ahead of the turn's
+      // input, as it would from the turn's own preamble.
+      prepareDynamicInstructionPreamble(ctx, history.initial.messages);
+      try {
+        await contextStorage.run(ctx, () => handleEvent([...facts, ...admission.facts]));
+      } finally {
+        const instructions = drainDynamicInstructionUserMessages(ctx);
+        if (instructions.length > 0) {
+          admissionChangedSession = true;
+          initialSession = {
+            ...initialSession,
+            history: validateHarnessModelMessages([...initialSession.history, ...instructions]),
+          };
+        }
+        if (sandbox !== undefined) {
+          const sandboxState = await sandbox.value.captureState();
+          if (
+            JSON.stringify(sandboxState) !== JSON.stringify(initialSession.sandboxState ?? null)
+          ) {
+            admissionChangedSession = true;
+            initialSession = { ...initialSession, sandboxState };
+          }
+        }
+      }
     };
 
     if (delivery !== undefined && resolved === undefined && startedBetweenTurns) {
@@ -438,7 +489,7 @@ async function runSessionStepBody(
       );
       const nextSerializedContext = serializeContext(ctx);
       const nextValues =
-        aliased === initialSession
+        aliased === initialSession && !admissionChangedSession
           ? { history: input.history, sessionState: input.sessionState }
           : createDurableSessionValues(aliased);
 

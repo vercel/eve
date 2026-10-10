@@ -196,7 +196,7 @@ export async function defaultReceived(_message: SlackMessage, ctx: SlackContext)
 
 /**
  * Reads the first non-empty line of a model-emitted message. The
- * default `actions.requested` handler uses this to surface the
+ * default `call.requested` handler uses this to surface the
  * model's own pre-tool-call narration as the typing indicator.
  */
 function firstNonEmptyLine(text: string): string | undefined {
@@ -333,7 +333,7 @@ export function defaultInteractionOpenedHandler(
  * eve's default Slack event rendering: status lines, replies, errors, and the
  * connection-authorization flow. It is the innermost link of every channel's
  * renderer chain. Typed as the internal full-context map because the default
- * `authorization.required` handler owns the public link-free status, which
+ * sign-in `interaction.opened` handler owns the public link-free status, which
  * authored renderers cannot express.
  */
 export const defaultEvents: SlackChannelInternalEvents = {

@@ -11,15 +11,13 @@ export default defineEval({
     const { request, session } = await budgetQuestion(t);
 
     const stopped = await session.respond(answers("stop", request), asAlice);
-    expectResolved(stopped, request, "answered");
-    stopped.event("input.resolved", { count: 1 });
-    stopped.event("turn.cancelled", { count: 1 });
-    stopped.notEvent("step.started");
-    stopped.notEvent("message.completed");
-    stopped.notEvent("turn.failed");
-    session.event("input.resolved", {
-      count: 1,
-      data: { resolutions: (items) => items.some((item) => item.requestId === request.requestId) },
-    });
+    // Stop declines to go on.
+    expectResolved(stopped, request, "declined");
+    stopped.event("interaction.settled", { count: 1 });
+    stopped.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
+    stopped.notEvent("model.started");
+    stopped.notEvent("content.completed");
+    stopped.notEvent("turn.settled", { data: { outcome: "failed" } });
+    session.event("interaction.settled", { count: 1, data: { interactionId: request.requestId } });
   },
 });

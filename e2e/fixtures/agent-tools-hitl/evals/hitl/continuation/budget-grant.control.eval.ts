@@ -24,7 +24,7 @@ export default defineEval({
     const nextBudget = requestFrom(next, "session_limit_continuation");
     await t.check(nextBudget.requestId === budget.requestId, equals(false));
     next.calledTool("read-draft", { status: "completed", count: 1 });
-    next.notEvent("message.completed");
+    next.notEvent("content.completed", { data: { kind: "text", phase: "reply" } });
     await session.respond([{ requestId: nextBudget.requestId, optionId: "stop" }]);
   },
 });

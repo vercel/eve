@@ -104,7 +104,7 @@ interface ConformanceChannel {
 
 const SIGN_IN_NOT_SHOWN = /Timed out waiting for the bot to show/u;
 
-/** The channel has no default `authorization.required` renderer, so a sign-in shows nothing. */
+/** The channel has no default sign-in `interaction.opened` renderer, so a sign-in shows nothing. */
 function noSignInRenderer(
   ...rules: ContractRuleName[]
 ): Partial<Record<ContractRuleName, BrokenCell>> {

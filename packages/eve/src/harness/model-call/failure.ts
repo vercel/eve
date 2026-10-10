@@ -16,8 +16,8 @@ import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 
 const log = createLogger("harness.tool-loop");
 /**
- * Projects a model-call failure into the `step.failed` / `turn.failed`
- * `details` payload. Three mutually exclusive branches:
+ * Projects a model-call failure into the failure `details` the stream's
+ * `model.settled` and `turn.settled` errors are read from. Three mutually exclusive branches:
  *
  * 1. Catalog match → the rule's curated `name`/`message`/`hint` plus its
  *    registered `semanticErrorId`, no SDK inspector dump.
@@ -174,7 +174,7 @@ export async function reportModelCallFailure(step: Step, error: unknown): Promis
       }),
     );
     // A delegated run's caller needs a failed result to report; a conversation already ended
-    // with `session.failed`.
+    // with `session.ended`.
     return {
       next: step.hasDelegatedCaller
         ? { done: true, isError: true, output: taskFailureOutput }

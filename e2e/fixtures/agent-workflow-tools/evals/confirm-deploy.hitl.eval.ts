@@ -11,35 +11,29 @@ export default defineEval({
       optionIds: ["approve", "cancel"],
       toolName: "confirm_deploy",
     });
-    parked.event("action.partial", {
-      count: (count) => count >= 1,
-      data: { result: { toolName: "confirm_deploy", output: "awaiting approval" } },
-    });
     parked.calledTool("confirm_deploy", { status: "pending", count: 1 });
+    const callId = parked.toolCalls.find((call) => call.name === "confirm_deploy")?.callId;
+    parked.event("call.progress", {
+      count: (count) => count >= 1,
+      data: { callId, output: "awaiting approval" },
+    });
 
     const approved = await session.respondAll("approve");
     approved.expectOk();
-    approved.event("action.result", {
+    approved.calledTool("confirm_deploy", {
       count: 1,
-      data: {
-        result: {
-          kind: "tool-result",
-          output: /"approved":true/u,
-          toolName: "confirm_deploy",
-        },
-        status: "completed",
-      },
+      output: /"approved":true/u,
+      status: "completed",
     });
     approved.eventsSatisfy("progress arrives before the final workflow result", (events) => {
       const progress = events.findIndex(
         (event) =>
-          event.type === "action.partial" && event.data.result.output === "approval received",
+          event.type === "call.progress" &&
+          event.data.callId === callId &&
+          event.data.output === "approval received",
       );
       const result = events.findIndex(
-        (event) =>
-          event.type === "action.result" &&
-          event.data.result.kind === "tool-result" &&
-          event.data.result.toolName === "confirm_deploy",
+        (event) => event.type === "call.settled" && event.data.callId === callId,
       );
       return progress >= 0 && result > progress;
     });

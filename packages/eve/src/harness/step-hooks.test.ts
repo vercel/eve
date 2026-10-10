@@ -146,4 +146,54 @@ describe("buildStepHooks", () => {
       gateway: { caching: "auto", sessionId: "authored-session" },
     });
   });
+
+  it("marks an opaque Bedrock profile with the authored Anthropic cache TTL", async () => {
+    const model = new MockLanguageModelV3({
+      modelId: "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc",
+      provider: "amazon-bedrock",
+    });
+    const hooks = buildStepHooks({
+      profile: resolveModelProfile(model, { anthropic: { ttl: "1h" } }),
+      session: createSession(),
+    });
+
+    const prepared = await hooks.prepareStep({
+      messages: [{ content: "c", role: "user" }],
+      model,
+      instructions: undefined,
+      initialInstructions: undefined,
+      initialMessages: [],
+      responseMessages: [],
+      runtimeContext: {},
+      toolsContext: {},
+      experimental_sandbox: undefined,
+      stepNumber: 0,
+      steps: [],
+    });
+    expect(prepared?.messages?.[0]?.providerOptions).toEqual({
+      anthropic: { cacheControl: { type: "ephemeral", ttl: "1h" } },
+      bedrock: { cachePoint: { type: "default", ttl: "1h" } },
+    });
+  });
+
+  it("gives a direct OpenAI model only a prompt cache key", async () => {
+    const model = new MockLanguageModelV3({ modelId: "gpt-5", provider: "openai.chat" });
+    const hooks = buildStepHooks({ profile: resolveModelProfile(model), session: createSession() });
+
+    const prepared = await hooks.prepareStep({
+      messages: [{ content: "hi", role: "user" }],
+      model,
+      instructions: undefined,
+      initialInstructions: undefined,
+      initialMessages: [],
+      responseMessages: [],
+      runtimeContext: {},
+      toolsContext: {},
+      experimental_sandbox: undefined,
+      stepNumber: 0,
+      steps: [],
+    });
+    expect(prepared?.providerOptions).toEqual({ openai: { promptCacheKey: expect.any(String) } });
+    expect(prepared?.messages?.[0]?.providerOptions).toBeUndefined();
+  });
 });

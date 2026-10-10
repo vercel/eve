@@ -33,12 +33,18 @@ export async function expectSurveyCountedAgainstParent(t: EveEvalContext, messag
   const resumed = await session.respond([{ optionId: "continue", requestId: request.requestId }]);
   resumed.expectOk();
   resumed.messageIncludes("SURVEY-REPLY Alice's tide survey has 12 stations.");
-  t.eventsSatisfy("the parent's session.waiting usage counts the worker's tokens", (events) => {
-    const waiting = events.filter((event) => event.type === "session.waiting").at(-1);
-    return (
-      waiting?.type === "session.waiting" &&
-      (waiting.data.usage?.inputTokens ?? 0) >= SURVEY_WORKER_INPUT_TOKENS
+  t.eventsSatisfy("the parent's recorded usage counts the worker's tokens", (events) => {
+    // A delegated call's spend is recorded against the call that delegated it.
+    const delegated = events.reduce(
+      (total, event) =>
+        event.type === "usage.recorded" &&
+        event.data.owner !== undefined &&
+        "callId" in event.data.owner
+          ? total + event.data.usage.inputTokens
+          : total,
+      0,
     );
+    return delegated >= SURVEY_WORKER_INPUT_TOKENS;
   });
   return session;
 }

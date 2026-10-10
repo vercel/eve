@@ -62,8 +62,6 @@ export async function runModelStep(
     readonly turn: TurnInput;
     readonly approved: ApprovedWork;
     readonly generation: GenerationSteering;
-    /** A child's caller and a schedule hear only the turn's real end. */
-    readonly hidesHeldText: boolean;
     /** The attempt the step's events belong to, for instrumentation. */
     readonly setAttemptScope: (scope: InstrumentationAttempt | undefined) => void;
   },
@@ -103,7 +101,6 @@ export async function runModelStep(
     approvedTools,
     catalog,
     generation,
-    hidesHeldText: input.hidesHeldText,
     model: run.model,
     newRun: async () => {
       const next = await requestRun(step, prompt);

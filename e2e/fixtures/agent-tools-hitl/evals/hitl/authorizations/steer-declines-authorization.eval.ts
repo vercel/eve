@@ -20,16 +20,15 @@ export default defineEval({
 
     const steered = (await session.send(SAY.hello, asAlice)).expectOk();
     steered.notEvent("turn.started");
-    steered.event("authorization.completed", {
+    // A new message withdraws the sign-in; nobody declined it.
+    steered.event("interaction.settled", {
       count: 1,
-      data: {
-        attemptId: authorization.attemptId,
-        outcome: "declined",
-        reason: "Cancelled because a new message arrived.",
-      },
+      data: { interactionId: authorization.attemptId, outcome: "withdrawn" },
     });
     // The scripted model answers this way only when the authorization note reached it.
-    steered.event("message.completed", { data: { message: REPLY.helloAfterAuthorization } });
-    steered.notEvent("action.result", { data: { status: "completed" } });
+    steered.event("content.completed", {
+      data: { phase: "reply", value: REPLY.helloAfterAuthorization },
+    });
+    steered.notEvent("call.settled", { data: { outcome: "completed" } });
   },
 });

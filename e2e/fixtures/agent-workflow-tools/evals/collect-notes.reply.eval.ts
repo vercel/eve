@@ -19,11 +19,10 @@ export default defineEval({
       count: 1,
       output: /^collect_notes-\w{6} completed; its result follows\.$/u,
     });
+    // The reply settles both calls; the second refers to the first's output instead of repeating it.
+    turn.calledTool("collect_notes", { count: 2, output: NOTES });
     for (const callId of ["notes-draft", "notes-final"]) {
-      turn.event("task.settled", {
-        count: 1,
-        data: { callId, output: NOTES, status: "completed" },
-      });
+      turn.event("call.settled", { count: 1, data: { callId, outcome: "completed" } });
     }
     turn.messageIncludes(`WORKFLOW-NOTES-RESULT 1 ${JSON.stringify(NOTES)}`);
     t.noFailedActions();

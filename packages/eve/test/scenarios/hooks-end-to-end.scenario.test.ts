@@ -22,7 +22,7 @@ const AGENT_SOURCE = `export default { model: "openai/gpt-5.4" };\n`;
 
 const AUDIT_HOOK_SOURCE = `export default {
   events: {
-    async "turn.completed"() {},
+    async "turn.settled"() {},
     async "session.started"() {},
   },
 };
@@ -57,7 +57,7 @@ describe("authored hooks end-to-end", () => {
     const graph = await resolveRuntimeAgentGraph({ manifest, moduleMap });
     const registry = graph.root.hookRegistry;
 
-    expect(registry.streamEventsByType.get("turn.completed")?.map((e) => e.slug)).toEqual([
+    expect(registry.streamEventsByType.get("turn.settled")?.map((e) => e.slug)).toEqual([
       "audit",
     ]);
     expect(registry.streamEventsByType.get("session.started")?.map((e) => e.slug)).toEqual([
@@ -125,7 +125,7 @@ describe("authored hooks end-to-end", () => {
     if (subagentNode === undefined) throw new Error("expected the researcher node");
 
     expect(
-      graph.root.hookRegistry.streamEventsByType.get("turn.completed")?.map((e) => e.slug),
+      graph.root.hookRegistry.streamEventsByType.get("turn.settled")?.map((e) => e.slug),
     ).toEqual(["audit"]);
     expect(subagentNode.hookRegistry.streamEventsByType.size).toBe(0);
     expect(subagentNode.hookRegistry.streamEventsWildcard.map((e) => e.slug)).toEqual([

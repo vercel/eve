@@ -9,10 +9,7 @@ import {
   settle,
 } from "#harness/session-machine/transitions.js";
 import type { SuspendedStep } from "#harness/session-machine/view.js";
-import { validateHarnessModelMessages } from "#harness/messages.js";
-import { openTurn, type Step } from "#harness/step/context.js";
-import { prepareTurnInput } from "#harness/step/intake.js";
-import { placeTurnInput } from "#harness/step/prompt.js";
+import type { Step } from "#harness/step/context.js";
 import { SessionLimitDeclinedError, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { bumpSessionRuntimeUsageLimits } from "#harness/turn-tag-state.js";
 import type { HarnessToolLookup, HarnessStepInput, StepResult } from "#harness/types.js";
@@ -175,27 +172,6 @@ export async function acceptHumanInput(
         }),
       );
       return stop(held(step));
-    case "defer-message": {
-      // Approved calls wait behind the budget prompt, and the message waits behind them.
-      if (approvedCalls(step.view().turn).length > 0) {
-        const deferred = turnInputOnly(decision.input);
-        if (deferred !== undefined) await step.apply(deferInput(step.view(), deferred));
-        return stop({ next: null, session: step.session });
-      }
-      // The message is received now, into a turn that holds for the budget prompt: the grant
-      // resumes that turn, and the model reads the message from history.
-      const turn = await prepareTurnInput(step, decision.input, { consumedMessage: false });
-      const failed = await openTurn(step, {
-        input: [...turn.ephemeral, ...turn.messages],
-        message: delivered.displayMessage ?? decision.input?.message,
-      });
-      if (failed !== undefined) return stop(failed);
-      step.session = {
-        ...step.session,
-        history: validateHarnessModelMessages(placeTurnInput(step, step.session.history, turn)),
-      };
-      return stop(await holdForInput(step));
-    }
     case "continue":
       break;
   }

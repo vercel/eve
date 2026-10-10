@@ -331,9 +331,9 @@ described in [Tasks](/docs/tools/tasks). What differs:
 - **Unknown tasks:** the id must name an unfinished task this tool started; otherwise the call
   fails with `UNKNOWN_TASK`. The call can come from any caller in the session.
 - **`ctx.session` and `ctx.agents` describe the call being served:** a later call can come in a
-  later turn than the one that started the task. Its `task.started` and `task.settled` carry that
-  call's `callId` and `turnId`, and so do the questions, sign-ins, and `agent.started` events the
-  body causes while serving it. From the moment `receive()` resolves with a call, `ctx.session` is that call's view of
+  later turn than the one that started the task. Its `call.started` and `call.settled` carry that
+  call's `callId` and turn, and so do the questions and sign-ins the body opens while serving
+  it. From the moment `receive()` resolves with a call, `ctx.session` is that call's view of
   the session, including in a step that receives `ctx`: `ctx.session.turn` is the call's turn, and
   `ctx.session.auth` is the auth the session admitted the call with, which may belong to a
   different caller than the one that started the task. `getToken`, `requireAuth`, and connections
@@ -356,7 +356,7 @@ described in [Tasks](/docs/tools/tasks). What differs:
   uses the auth of the call being served; remote identity follows the
   [forwarding rules](../guides/remote-agents#forwarding-the-caller-identity).
 - **Results:** `ctx.reply(output)` settles every call received so far with `output`, all at once.
-  Each settled call reports its own `task.settled`, and the model receives the reply once. The task
+  Each settled call reports its own `call.settled`, and the model receives the reply once. The task
   then goes idle until its next call. A reply with
   no call left to settle is dropped, and `ctx.ask` throws while no call is waiting for a result.
   A reply also withdraws the questions still pending for the calls it settles, but doesn't abort
@@ -455,8 +455,8 @@ const answer = await ctx.ask(
 // | { status: "unavailable" }
 ```
 
-`ctx.ask` publishes an `input.requested` event on the session — rendered the way channels render
-tool approvals — and returns an awaitable answer. Awaiting it suspends the run until a response arrives.
+`ctx.ask` opens an interaction on the session (`interaction.opened`) — rendered the way channels
+render tool approvals — and returns an awaitable answer. Awaiting it suspends the run until a response arrives.
 The `ask_question` tool is a workflow tool built on `ctx.ask`.
 
 The answer's `status` tells the body what happened:
@@ -464,8 +464,7 @@ The answer's `status` tells the body what happened:
 - `answered`: the person picked an option (`optionId`) or typed a reply (`text`).
 - `cancelled`: the request was withdrawn before anyone answered it, because the `signal` passed to
   `ctx.ask` or the call's `abortSignal` aborted, or because a `serve` body replied to the call. The
-  session emits `input.resolved` with
-  `outcome: "cancelled"`, so clients stop offering the question.
+  session settles the interaction `withdrawn`, so clients stop offering the question.
 - `unavailable`: the session cannot request input, such as a scheduled run. `ctx.ask` returns this
   immediately instead of waiting for an answer no one can give.
 
@@ -553,12 +552,10 @@ identity, set `forwardPrincipal: true` on the remote agent and configure the rec
 A person answers the child's questions and sign-ins at the root session, as for any subagent.
 The session ends when the run finishes, which cancels any turn still running.
 
-The parent stream announces each session with `agent.started`, which carries the `callId` and
-`turnId` of the tool call the run is serving when it opens the session (for a `serve` task, the
-latest call it received), the
-`taskId` when the call runs as a task, the agent `name`, the child's `sessionId`, and a
-`streamPath`. Pass the event to
-[`session.agent(started).stream()`](/docs/guides/client/streaming#follow-a-subagent) to follow the child.
+The parent stream announces each session with `child.opened`, which carries its `owner` (the
+task whose run opened the session, or the tool call when the call doesn't run as a task), the
+agent `name`, the child's `sessionId`, and its `stream` path. Pass the event to
+[`session.agent(opened).stream()`](/docs/guides/client/streaming#follow-a-subagent) to follow the child.
 
 ### Route to a hidden subagent with Jev
 
@@ -675,7 +672,7 @@ eve advances the generator; use an awaited workflow operation when the body need
 
 | Operation       | Behavior                                                          |
 | --------------- | ----------------------------------------------------------------- |
-| `yield value`   | Emits an `action.partial` snapshot for the pending tool call.     |
+| `yield value`   | Emits a `call.progress` snapshot for the pending tool call.       |
 | `return value`  | Settles the tool call with its output.                            |
 | No return value | Uses the last yield as output, or `null` if there were no yields. |
 

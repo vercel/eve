@@ -9,6 +9,10 @@ import {
   expectResolved,
 } from "../helpers.ts";
 
+/**
+ * Bob approves Alice's release-access check. His answer supplies consent, not his access: the
+ * call runs as Alice, the requester, and reports her access.
+ */
 export default defineEval({
   description: "Approval supplies consent, not the responder's release access.",
   tags: ["hitl", "approval"],
@@ -17,13 +21,19 @@ export default defineEval({
     const session = await aliceSession(t);
     const request = approvalFor(await session.send(SAY.callerAccess, asAlice), "caller-access");
     const approved = (await session.respond(answers("approve", request), asBob)).expectOk();
-    expectResolved(approved, request, "approved");
-    approved.event("approval.settled", {
-      data: { responderPrincipalId: "bob", outcome: "approved" },
-    });
-    approved.event("action.result", {
+    expectResolved(approved, request, "accepted");
+    approved.eventOrder([
+      { type: "delivery.admitted", data: { principal: { id: "bob" } } },
+      { type: "response.submitted", data: { interactionId: request.requestId } },
+      {
+        type: "interaction.settled",
+        data: { interactionId: request.requestId, outcome: "accepted" },
+      },
+    ]);
+    approved.calledTool("caller-access", {
       count: 1,
-      data: { result: { toolName: "caller-access", output: { actor: "alice", allowed: false } } },
+      output: { actor: "alice", allowed: false },
+      status: "completed",
     });
   },
 });

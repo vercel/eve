@@ -1,3 +1,8 @@
+import {
+  SESSION_LIMIT_CONTINUE_OPTION_ID,
+  SESSION_LIMIT_STOP_OPTION_ID,
+} from "#harness/hitl/budget-request.js";
+import type { InteractionRow } from "#protocol/session-projection/tables.js";
 import type { ModelMessage, ToolCallPart } from "ai";
 
 import type {
@@ -5,7 +10,7 @@ import type {
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
-import { callSettledFrom } from "#harness/call-facts.js";
+import { callSettledFrom, toJsonValue } from "#harness/call-facts.js";
 import { closeFacts, closureFor, notIn, publicViewOf } from "#harness/session-machine/closure.js";
 import {
   activeTurn,
@@ -13,8 +18,10 @@ import {
   callTurn,
   interactionOwner,
   noWork,
+  openInteractions,
   type OpenWork,
   openWork,
+  subjectTurn,
 } from "#protocol/session-projection/selectors.js";
 import type {
   InputResolution,
@@ -27,6 +34,7 @@ import {
   interactionOpened,
   interactionSettled,
   responseSettled,
+  responseAdmitted,
   responseSubmitted,
   signInInteractionId,
   signInOpened,
@@ -48,15 +56,11 @@ import type {
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { FactOf } from "#protocol/session-events/facts.js";
 import type { TurnAwaiting } from "#protocol/session-events/families/turn.js";
-import {
-  nextChangeId,
-  nextRunId,
-  openRequests,
-  workingTaskCalls,
-  type SessionProjection,
-} from "#protocol/session-projection.js";
+import { nextChangeId, nextRunId, type SessionProjection } from "#protocol/session-projection.js";
+import { openRequests } from "#protocol/session-reader.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
+import type { InteractionOrigin } from "#protocol/session-events/families/interaction.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { Transition } from "./commit.js";
 import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
@@ -119,9 +123,34 @@ function openDeliveriesOf(projection: SessionProjection, turnId: string): readon
     .map((delivery) => delivery.deliveryId);
 }
 
+/**
+ * Deliveries that carried answers the turn hasn't acted on yet, such as one answer of several a
+ * paused step waits on: admitted, never consumed, and still open.
+ */
+function answeringDeliveriesOf(projection: SessionProjection): readonly string[] {
+  const deliveries = projection.view?.deliveries ?? {};
+  return [
+    ...new Set(
+      Object.values(projection.view?.responses ?? {})
+        .filter((response) => deliveries[response.deliveryId]?.status === "admitted")
+        .map((response) => response.deliveryId),
+    ),
+  ];
+}
+
 // ---------------------------------------------------------------------------
 // Turns
 // ---------------------------------------------------------------------------
+
+/** The deliveries the session admitted and nothing has consumed or settled yet. */
+function waitingDeliveries(
+  projection: SessionProjection,
+  deliveries: readonly ConsumedDelivery[],
+): readonly ConsumedDelivery[] {
+  return deliveries.filter(
+    ({ deliveryId }) => projection.view?.deliveries[deliveryId]?.status === "admitted",
+  );
+}
 
 /**
  * Deliveries arrive for a turn: the session starts once, a turn opens unless one is open, and
@@ -143,7 +172,9 @@ export function receive(
   const { projection } = view;
   const position = turnPosition(projection);
   const turnId = activeTurnId(position);
-  const deliveries = input.deliveries ?? [];
+  // Only a delivery still waiting is consumed. One that settled, such as an answer the turn
+  // answered for now while it waited for the rest of its batch, or one a policy refused, is not.
+  const deliveries = waitingDeliveries(projection, input.deliveries ?? []);
   const first = deliveries[0];
   const cause: Cause =
     first === undefined ? (input.cause ?? { policy: "system" }) : { deliveryId: first.deliveryId };
@@ -193,9 +224,7 @@ export function join(
   input: { readonly deliveries: readonly ConsumedDelivery[] },
 ): Transition {
   const { projection } = view;
-  const open = input.deliveries.filter(
-    ({ deliveryId }) => projection.view?.deliveries[deliveryId]?.status !== "settled",
-  );
+  const open = waitingDeliveries(projection, input.deliveries);
   const turnId = projection.activeTurnId;
   if (turnId === undefined) {
     return unchanged(
@@ -301,6 +330,26 @@ function runScope(
 }
 
 /**
+ * The calls a turn held for tasks waits on: every task's running call, and the calls the turn made
+ * that are still open, such as a blocking workflow tool's run, except those an open interaction
+ * still asks about.
+ */
+function runtimeAwaiting(tables: ReturnType<typeof publicViewOf>, turnId: string): TurnAwaiting[] {
+  const asked = new Set(
+    openInteractions(tables).flatMap((row) =>
+      row.subject !== undefined && "callId" in row.subject ? [row.subject.callId] : [],
+    ),
+  );
+  return Object.values(tables.calls)
+    .filter((call) =>
+      call.taskId !== undefined
+        ? call.status === "running"
+        : call.status !== "settled" && !asked.has(call.callId) && callTurn(tables, call) === turnId,
+    )
+    .map(({ callId }) => ({ callId }));
+}
+
+/**
  * The open turn pauses: on `"tasks"` while work it started runs, on `"input"` while a person must
  * act on a sign-in, approval, or question. A pause on a person answers its deliveries for now
  * (`awaiting-input`); the answer's delivery carries the resumed work.
@@ -318,14 +367,20 @@ export function hold(
   if (turnId === "") return unchanged(view, []);
   const awaiting: TurnAwaiting[] =
     input.on === "tasks"
-      ? [...new Set(workingTaskCalls(projection).map((call) => call.callId))].map((callId) => ({
-          callId,
-        }))
+      ? // The public tables, which the checkpoint keeps: a restored session's projection holds
+        // no reader-side task calls. The turn waits on every task's call, and on the runtime
+        // calls it made itself, such as a blocking workflow tool's run.
+        runtimeAwaiting(publicViewOf(projection), turnId)
       : [
           ...new Set([
             ...openWork(publicViewOf(projection), { turnId }).interactions.map(
               (row) => row.interactionId,
             ),
+            // A request relayed from a task this turn's call started belongs to the task, but
+            // the turn still waits on the person it asks.
+            ...openInteractions(publicViewOf(projection))
+              .filter((row) => subjectTurn(publicViewOf(projection), row) === turnId)
+              .map((row) => row.interactionId),
             ...(input.opening ?? []),
           ]),
         ].map((interactionId) => ({ interactionId }));
@@ -333,7 +388,11 @@ export function hold(
     { data: { awaiting, turnId }, scope: { turnId }, type: "turn.paused" },
   ];
   if (input.on === "input") {
-    for (const deliveryId of openDeliveriesOf(projection, turnId)) {
+    const answered = [
+      ...openDeliveriesOf(projection, turnId),
+      ...answeringDeliveriesOf(projection),
+    ];
+    for (const deliveryId of new Set(answered)) {
       events.push({
         data: { deliveryId, outcome: "awaiting-input", turnId },
         type: "delivery.settled",
@@ -466,6 +525,11 @@ export function sessionEndedFacts(
   },
 ): SessionEvent[] {
   const facts: SessionEvent[] = [];
+  // A session that ends before it started, as one that fails admitting its first message or a
+  // prewarmed one that expires, starts in the same commit: only a started session ends.
+  if (projection !== undefined && projection.started !== true) {
+    facts.push({ data: {}, type: "session.started" });
+  }
   const { control } = ending;
   if (control !== undefined) facts.push(controlAdmitted(control, "reset"));
   let closed: OpenWork = noWork();
@@ -917,7 +981,11 @@ export function relay(
       if (tables.interactions[request.requestId] !== undefined) continue;
       opening.push(request.requestId);
       events.push(
-        interactionOpened(request, { origin: origin(request.requestId), scope, subject }),
+        interactionOpened(request, {
+          origin: { ...origin(request.requestId), call: askedAbout(request) },
+          scope,
+          subject,
+        }),
       );
     }
   } else {
@@ -935,6 +1003,12 @@ export function relay(
       }
     } else if (event.type === "interaction.settled") {
       if (mirror?.status === "open") events.push(...mirrorSettled(tables, event.data, scope));
+    } else if (event.type === "response.admitted") {
+      // The asker admitted an answer this session forwarded: it stands here too, while the rest
+      // of its batch waits.
+      const answer = mirror === undefined ? undefined : forwardedAnswer(tables, event.data);
+      if (answer !== undefined && tables.responses[answer]?.status === "submitted")
+        events.push(responseAdmitted(answer));
     } else if (mirror !== undefined) {
       // How the asker settled an answer this session forwarded; a deciding one settles with
       // its interaction.
@@ -943,8 +1017,10 @@ export function relay(
         events.push(responseSettled(answer, event.data.outcome, event.data.reason));
     }
   }
-  // A task's request waits on its task, not on the turn.
-  if (opening.length > 0 && taskId === undefined)
+  // A task's request waits on its task, not on the turn, unless the turn already waits on its
+  // tasks: then it waits on the person too, and its deliveries are answered for now.
+  const waiting = turnId === undefined ? undefined : tables.turns[turnId];
+  if (opening.length > 0 && (taskId === undefined || waiting?.status === "paused"))
     events.push(...hold(view, { on: "input", opening }).events);
   if (payload.kind !== "subagent-input-request") return unchanged(view, events);
   // A child's fresh batch replaces the routes its prior one held.
@@ -969,6 +1045,15 @@ export function relay(
       },
     },
   };
+}
+
+/** The child's call a relayed request asks about; a budget prompt asks about no call. */
+function askedAbout(request: InputRequest): InteractionOrigin["call"] {
+  if (request.kind === "session-limit") return undefined;
+  const { callId, input, toolName } = request.action;
+  return input === undefined
+    ? { callId, name: toolName }
+    : { callId, input: toJsonValue(input), name: toolName };
 }
 
 /** The asker settled what this session mirrors: the mirror settles the same way. */
@@ -1037,6 +1122,20 @@ function decidedOutcome(outcome: InputResolution["outcome"]) {
     default:
       return "withdrawn" as const;
   }
+}
+
+/**
+ * How a relayed request this session decides at forward settles. A budget prompt's Stop
+ * declines it, as the asker's own prompt does; any other answer accepts it.
+ */
+function routedOutcome(row: InteractionRow, resolution: InputResolution) {
+  if (row.request.kind === "budget" && resolution.response !== undefined) {
+    const granted = resolution.response.optionId === SESSION_LIMIT_CONTINUE_OPTION_ID;
+    const stopped = resolution.response.optionId === SESSION_LIMIT_STOP_OPTION_ID;
+    if (granted || stopped) return granted ? ("accepted" as const) : ("declined" as const);
+    return "invalid" as const;
+  }
+  return decidedOutcome(resolution.outcome);
 }
 
 /**
@@ -1120,7 +1219,7 @@ export function routeAnswer(
     if (owner.turnId !== undefined) scope.turnId = owner.turnId;
     if (owner.taskId !== undefined) scope.taskId = owner.taskId;
     events.push(
-      interactionSettled(row.interactionId, decidedOutcome(resolution.outcome), {
+      interactionSettled(row.interactionId, routedOutcome(row, resolution), {
         cause: decider === undefined ? undefined : { responseId: decider },
         response: resolution.response,
         scope,

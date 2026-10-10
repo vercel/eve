@@ -67,7 +67,7 @@ const log = createLogger("execution.publish-session-events");
  *
  * A relayed event belongs to an exchange this session carries for a child
  * session or a workflow run: the question or sign-in it raised, the turn
- * boundary that question causes here, and the `input.resolved` for the answer
+ * boundary that question causes here, and the `interaction.settled` for the answer
  * this session routes back. This session's instrumentation never tracks that
  * pending input, so no event of the exchange reaches it; the child records its
  * side as its own.
@@ -94,7 +94,7 @@ export interface PublishedSessionEvents {
 
 /**
  * Publishes a session step's own events, such as a workflow tool's
- * `action.partial`, exactly as a turn publishes its events. Call from a step
+ * `call.progress`, exactly as a turn publishes its events. Call from a step
  * and adopt the result: hooks run in the session's context and may change it.
  */
 export async function publishSessionEvents(
@@ -539,7 +539,7 @@ export async function publishTerminalSessionEvent(input: {
   }
 
   // Terminal events publish outside any turn step, and only a turn step
-  // installs the session callback context that channel `session.completed`
+  // installs the session callback context that channel `session.ended`
   // handlers read, so install it here. A prewarmed session that expires,
   // resets, or closes before its first message has no turn yet: `turn_0`.
   const auth = ctx.get(AuthKey) ?? null;

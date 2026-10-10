@@ -1,72 +1,94 @@
-import type {
-  MessageStreamEvent,
-  TaskSettledStreamEvent,
-  TaskStartedStreamEvent,
-} from "eve/client";
+import type { SessionStreamEvent } from "eve/client";
+
+/** A call that started or reached a task. */
+export interface TaskCall {
+  readonly callId: string;
+  readonly taskId: string;
+  readonly turnId?: string;
+}
+
+/** How a call a task served settled. */
+export interface TaskCallSettlement {
+  readonly callId: string;
+  readonly outcome: string;
+  readonly output?: unknown;
+}
 
 /**
- * Whether eve held the turn: the model ended a step with a reply while its
- * tasks worked, and the turn parked with `turn.waiting` instead of ending. A
- * `turn.waiting` after a `eve__task_wait` call is the model waiting, not a hold.
+ * Whether eve held the turn: the model ended a run with a reply while its
+ * tasks worked, and the turn paused instead of ending. A pause after an
+ * `eve__task_wait` call is the model waiting, not a hold.
  */
-export function heldTurn(events: readonly MessageStreamEvent[]): boolean {
+export function heldTurn(events: readonly SessionStreamEvent[]): boolean {
   let replied = false;
   for (const event of events) {
-    if (event.type === "message.completed") replied = event.data.finishReason === "stop";
-    else if (event.type === "actions.requested") replied = false;
-    else if (event.type === "turn.waiting" && replied) return true;
+    if (event.type === "content.completed" && event.data.kind === "text") {
+      replied = event.data.phase === "reply";
+    } else if (event.type === "call.requested") replied = false;
+    else if (event.type === "turn.paused" && replied) return true;
   }
   return false;
 }
 
 /** Every call that started or reached a task of `tool`, in stream order. */
 export function taskStarts(
-  events: readonly MessageStreamEvent[],
+  events: readonly SessionStreamEvent[],
   tool: string,
-): readonly TaskStartedStreamEvent["data"][] {
+): readonly TaskCall[] {
+  const tasks = new Set(
+    events.flatMap((event) =>
+      event.type === "task.started" && event.data.name === tool ? [event.data.taskId] : [],
+    ),
+  );
   return events.flatMap((event) =>
-    event.type === "task.started" && event.data.name === tool ? [event.data] : [],
+    event.type === "call.started" && event.data.taskId !== undefined && tasks.has(event.data.taskId)
+      ? [{ callId: event.data.callId, taskId: event.data.taskId, turnId: event.scope?.turnId }]
+      : [],
   );
 }
 
 /** How every call in `callIds` settled, in stream order. */
 export function settlementsOf(
-  events: readonly MessageStreamEvent[],
+  events: readonly SessionStreamEvent[],
   callIds: readonly string[],
-): readonly TaskSettledStreamEvent["data"][] {
+): readonly TaskCallSettlement[] {
   return events.flatMap((event) =>
-    event.type === "task.settled" && callIds.includes(event.data.callId) ? [event.data] : [],
+    event.type === "call.settled" && callIds.includes(event.data.callId)
+      ? [{ callId: event.data.callId, outcome: event.data.outcome, output: event.data.output }]
+      : [],
   );
 }
 
 /** The text of every assistant message that completed, interim or final, in stream order. */
-export function assistantMessages(events: readonly MessageStreamEvent[]): readonly string[] {
+export function assistantMessages(events: readonly SessionStreamEvent[]): readonly string[] {
   return events.flatMap((event) =>
-    event.type === "message.completed" ? [event.data.message] : [],
+    event.type === "content.completed" &&
+    event.data.kind === "text" &&
+    typeof event.data.value === "string"
+      ? [event.data.value]
+      : [],
   );
 }
 
-/** Index of the first `actions.requested` event that calls `tool`, or -1. */
-export function firstRequestOf(events: readonly MessageStreamEvent[], tool: string): number {
+/** Index of the first `call.requested` event that calls `tool`, or -1. */
+export function firstRequestOf(events: readonly SessionStreamEvent[], tool: string): number {
   return events.findIndex(
-    (event) =>
-      event.type === "actions.requested" &&
-      event.data.actions.some((action) => action.kind === "tool-call" && action.toolName === tool),
+    (event) => event.type === "call.requested" && event.data.capability.name === tool,
   );
 }
 
-/** Index of the first `task.settled` event for any call in `callIds`, or -1. */
+/** Index of the first `call.settled` event for any call in `callIds`, or -1. */
 export function firstSettlementOf(
-  events: readonly MessageStreamEvent[],
+  events: readonly SessionStreamEvent[],
   callIds: readonly string[],
 ): number {
   return events.findIndex(
-    (event) => event.type === "task.settled" && callIds.includes(event.data.callId),
+    (event) => event.type === "call.settled" && callIds.includes(event.data.callId),
   );
 }
 
 /** The `reportId` a completed `compile_report` call returned. */
-export function reportIdOf(settlement: TaskSettledStreamEvent["data"]): string | undefined {
+export function reportIdOf(settlement: TaskCallSettlement): string | undefined {
   const output = settlement.output;
   if (typeof output !== "object" || output === null || !("reportId" in output)) return undefined;
   const reportId = output.reportId;

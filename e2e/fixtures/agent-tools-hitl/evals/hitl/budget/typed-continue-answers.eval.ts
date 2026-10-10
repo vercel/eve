@@ -11,11 +11,11 @@ export default defineEval({
     const { request, session } = await budgetQuestion(t);
 
     const typed = (await session.send("continue", asAlice)).expectOk();
-    expectResolved(typed, request, "answered");
-    typed.event("input.resolved", {
-      data: { resolutions: [{ requestId: request.requestId, response: { optionId: "continue" } }] },
+    expectResolved(typed, request, "accepted");
+    typed.event("interaction.settled", {
+      data: { interactionId: request.requestId, response: { optionId: "continue" } },
     });
     typed.notEvent("turn.started");
-    typed.event("message.completed", { data: { message: REPLY.statusNote } });
+    typed.event("content.completed", { data: { phase: "reply", value: REPLY.statusNote } });
   },
 });

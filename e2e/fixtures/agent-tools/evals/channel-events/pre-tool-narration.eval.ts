@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 
-import type { MessageStreamEvent } from "eve/client";
+import type { SessionStreamEvent } from "eve/client";
 import { defineEval, type EveEvalTargetHandle } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
@@ -18,41 +18,40 @@ function firstNonEmptyLine(message: string): string | undefined {
   return undefined;
 }
 
-function preToolNarration(events: readonly MessageStreamEvent[]): string | undefined {
-  const actionRequestIndex = events.findIndex(
+function preToolNarration(events: readonly SessionStreamEvent[]): string | undefined {
+  const requestIndex = events.findIndex(
     (event) =>
-      event.type === "actions.requested" &&
-      event.data.actions.some(
-        (action) => action.kind === "tool-call" && action.toolName === STREAMED_ACTION_TOOL,
-      ),
+      event.type === "call.requested" && event.data.capability.name === STREAMED_ACTION_TOOL,
   );
-  if (actionRequestIndex < 0) return undefined;
+  if (requestIndex < 0) return undefined;
 
-  for (let index = actionRequestIndex - 1; index >= 0; index -= 1) {
+  for (let index = requestIndex - 1; index >= 0; index -= 1) {
     const event = events[index];
-    if (event?.type === "message.completed" && event.data.finishReason === "tool-calls") {
-      return firstNonEmptyLine(event.data.message);
+    if (
+      event?.type === "content.completed" &&
+      event.data.phase === "narration" &&
+      typeof event.data.value === "string"
+    ) {
+      return firstNonEmptyLine(event.data.value);
     }
   }
   return undefined;
 }
 
-function narratedStreamedActionOrder(events: readonly MessageStreamEvent[]): boolean {
-  const requests = events.flatMap((event, eventIndex) => {
-    if (event.type !== "actions.requested") return [];
-
-    return event.data.actions.flatMap((action) => {
-      if (action.kind !== "tool-call" || action.toolName !== STREAMED_ACTION_TOOL) return [];
-      return [{ callId: action.callId, eventIndex }];
-    });
-  });
-  const results = events.flatMap((event, eventIndex) => {
-    if (event.type !== "action.result" || event.data.result.kind !== "tool-result") return [];
-    if (event.data.result.toolName !== STREAMED_ACTION_TOOL || event.data.status !== "completed") {
-      return [];
-    }
-    return [{ callId: event.data.result.callId, eventIndex }];
-  });
+function narratedStreamedActionOrder(events: readonly SessionStreamEvent[]): boolean {
+  const requests = events.flatMap((event, eventIndex) =>
+    event.type === "call.requested" && event.data.capability.name === STREAMED_ACTION_TOOL
+      ? [{ callId: event.data.callId, eventIndex }]
+      : [],
+  );
+  const callIds = new Set(requests.map((request) => request.callId));
+  const results = events.flatMap((event, eventIndex) =>
+    event.type === "call.settled" &&
+    callIds.has(event.data.callId) &&
+    event.data.outcome === "completed"
+      ? [{ callId: event.data.callId, eventIndex }]
+      : [],
+  );
 
   const [request] = requests;
   const [result] = results;
@@ -93,8 +92,8 @@ async function postChannel(
 }
 
 /**
- * End-to-end channel contract: the adapter receives the pre-tool completion
- * before the matching action request and result.
+ * End-to-end channel contract: the adapter receives the pre-tool narration
+ * before the matching call request and result.
  */
 export default defineEval({
   tags: ["real-model"],

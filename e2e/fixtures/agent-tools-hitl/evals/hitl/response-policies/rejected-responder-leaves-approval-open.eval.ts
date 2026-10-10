@@ -27,16 +27,12 @@ export default defineEval({
     const refused = await session.respond(answers("approve", request), asBob);
     expectHeld(refused);
     refused.eventOrder([
-      { type: "approval.candidate", data: { outcome: "pending", responderPrincipalId: "bob" } },
-      {
-        type: "approval.candidate",
-        data: { outcome: "rejected", reason: "Wrong responder.", responderPrincipalId: "bob" },
-      },
-      { type: "turn.waiting", data: { on: "input" } },
+      { type: "delivery.admitted", data: { principal: { id: "bob" } } },
+      { type: "response.submitted", data: { interactionId: request.requestId } },
+      { type: "response.settled", data: { outcome: "refused", reason: "Wrong responder." } },
     ]);
-    refused.notEvent("approval.settled");
-    refused.notEvent("input.resolved");
-    refused.notEvent("action.result");
+    refused.notEvent("interaction.settled");
+    refused.notEvent("call.settled");
     expectNoModelCallWhileOpen(session, request.requestId);
   },
 });

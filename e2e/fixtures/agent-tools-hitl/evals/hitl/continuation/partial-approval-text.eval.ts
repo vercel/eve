@@ -24,16 +24,12 @@ export default defineEval({
     const live = await session.start("Explain what is waiting, without calling any tools.");
     const reply = await expectReply(t, live, "Your changes are waiting for approval.");
     // Then A keeps its approval and runs once, B is cancelled, and the message gets its reply.
-    reply.event("input.resolved", {
-      data: {
-        resolutions: (items) =>
-          items.some(
-            (item) => item.requestId === approvalA.requestId && item.outcome === "approved",
-          ) &&
-          items.some(
-            (item) => item.requestId === approvalB.requestId && item.outcome === "ignored",
-          ),
-      },
+    reply.event("interaction.settled", {
+      data: { interactionId: approvalA.requestId, outcome: "accepted" },
+      count: 1,
+    });
+    reply.event("interaction.settled", {
+      data: { interactionId: approvalB.requestId, outcome: "withdrawn" },
       count: 1,
     });
     reply.calledTool("change-a", { status: "completed", output: { executions: 1 }, count: 1 });

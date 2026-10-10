@@ -2,13 +2,13 @@
 
 import { Client } from "eve/client";
 import type {
-  AuthorizationRequiredStreamEvent,
   ClientSession,
   ClientSessionState,
   ConversationState,
   EveAgentStoreSnapshot,
+  InteractionOpened,
   EveMessageData,
-  MessageStreamEvent,
+  SessionStreamEvent,
   RespondTurnOptions,
   SendTurnInput,
   SendTurnOptions,
@@ -84,31 +84,27 @@ function advanceBrowserSession({
   sessionId,
 }: {
   readonly baseStreamIndex: number;
-  readonly events: readonly MessageStreamEvent[];
+  readonly events: readonly SessionStreamEvent[];
   readonly sessionId: string;
 }): ClientSessionState | undefined {
   const boundary = findBoundaryEvent(events);
 
-  if (boundary?.type === "session.waiting") {
-    return {
-      sessionId,
-      streamIndex: baseStreamIndex + events.length,
-    };
+  if (boundary === undefined) {
+    return undefined;
   }
 
-  const lastEvent = events.at(-1);
-
-  if (lastEvent?.type === "authorization.required") {
-    return {
-      sessionId,
-      streamIndex: baseStreamIndex + events.length,
-    };
-  }
-
-  return undefined;
+  // The cursor is the position of the next line: one past the last line the read saw.
+  const lastLine = events.reduce(
+    (line, event) => Math.max(line, event.meta.position.line),
+    baseStreamIndex - 1,
+  );
+  return {
+    sessionId,
+    streamIndex: lastLine + 1,
+  };
 }
 
-function findBoundaryEvent(events: readonly MessageStreamEvent[]) {
+function findBoundaryEvent(events: readonly SessionStreamEvent[]) {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
 
@@ -125,7 +121,7 @@ function attachClientSession(session: ClientSessionState | undefined): ClientSes
   });
 }
 
-function reduceEventsToMessageData(events: readonly MessageStreamEvent[]): ConversationState {
+function reduceEventsToMessageData(events: readonly SessionStreamEvent[]): ConversationState {
   const reducer = conversationReducer;
   let data = reducer.initial();
 
@@ -136,7 +132,7 @@ function reduceEventsToMessageData(events: readonly MessageStreamEvent[]): Conve
   return data;
 }
 
-function hasOpenChatTurn(events: readonly MessageStreamEvent[]) {
+function hasOpenChatTurn(events: readonly SessionStreamEvent[]) {
   let open = false;
 
   for (const event of events) {
@@ -151,9 +147,9 @@ function hasOpenChatTurn(events: readonly MessageStreamEvent[]) {
 }
 
 function namespaceStreamEvent(
-  event: MessageStreamEvent,
+  event: SessionStreamEvent,
   namespace: string | undefined,
-): MessageStreamEvent {
+): SessionStreamEvent {
   if (!namespace) {
     return event;
   }
@@ -162,26 +158,29 @@ function namespaceStreamEvent(
     return event;
   }
 
-  const turnId =
-    "turnId" in event.data && typeof event.data.turnId === "string" ? event.data.turnId : undefined;
-
-  if (!turnId) {
-    return event;
-  }
-
+  // A chat starts a new session after a skipped sign-in, and every session numbers its turns
+  // from turn_0, so turn ids are prefixed with the session to stay distinct within the chat.
   const prefix = `${namespace}:`;
+  const prefixed = (turnId: string) => (turnId.startsWith(prefix) ? turnId : `${prefix}${turnId}`);
+  const dataTurnId =
+    "turnId" in event.data && typeof event.data.turnId === "string" ? event.data.turnId : undefined;
+  const scopeTurnId = "scope" in event ? event.scope?.turnId : undefined;
 
-  if (turnId.startsWith(prefix)) {
+  if (dataTurnId === undefined && scopeTurnId === undefined) {
     return event;
   }
 
-  return {
-    ...event,
-    data: {
-      ...event.data,
-      turnId: `${prefix}${turnId}`,
-    },
-  } as MessageStreamEvent;
+  const withData = (
+    dataTurnId === undefined
+      ? event
+      : { ...event, data: { ...event.data, turnId: prefixed(dataTurnId) } }
+  ) as SessionStreamEvent;
+  return scopeTurnId === undefined
+    ? withData
+    : ({
+        ...withData,
+        scope: { ...withData.scope, turnId: prefixed(scopeTurnId) },
+      } as SessionStreamEvent);
 }
 
 function isSnapshotForCurrentSession(
@@ -275,11 +274,11 @@ export function AgentChatSession({
   const [currentTitle, setCurrentTitle] = useState(activeChat?.title ?? "New chat");
   const [clientError, setClientError] = useState<string | null>(null);
   const [dismissedError, setDismissedError] = useState<string | null>(null);
-  const [resumedEvents, setResumedEvents] = useState<MessageStreamEvent[]>([]);
+  const [resumedEvents, setResumedEvents] = useState<SessionStreamEvent[]>([]);
   const [isResuming, setIsResuming] = useState(false);
   const [isFinalizingTurn, setIsFinalizingTurn] = useState(false);
-  const [streamEvents, setStreamEvents] = useState<MessageStreamEvent[]>([]);
-  const [localEvents, setLocalEvents] = useState<MessageStreamEvent[]>([]);
+  const [streamEvents, setStreamEvents] = useState<SessionStreamEvent[]>([]);
+  const [localEvents, setLocalEvents] = useState<SessionStreamEvent[]>([]);
   const {
     clearMessage: clearLocalPendingUserMessage,
     message: localPendingUserMessage,
@@ -290,12 +289,12 @@ export function AgentChatSession({
   const activeChatIdRef = useRef(activeChat?.id ?? chatId ?? null);
   const eventIndexRef = useRef(activeChat?.events.length ?? 0);
   const eventIndexChatIdRef = useRef(activeChat?.id ?? chatId ?? null);
-  const knownInitialEventsRef = useRef<readonly MessageStreamEvent[]>(activeChat?.events ?? []);
+  const knownInitialEventsRef = useRef<readonly SessionStreamEvent[]>(activeChat?.events ?? []);
   const currentTitleRef = useRef(activeChat?.title ?? "New chat");
   const resumeStartedRef = useRef(false);
-  const resumedEventsRef = useRef<MessageStreamEvent[]>([]);
-  const streamEventsRef = useRef<MessageStreamEvent[]>([]);
-  const localEventsRef = useRef<MessageStreamEvent[]>([]);
+  const resumedEventsRef = useRef<SessionStreamEvent[]>([]);
+  const streamEventsRef = useRef<SessionStreamEvent[]>([]);
+  const localEventsRef = useRef<SessionStreamEvent[]>([]);
   const persistedSessionRef = useRef<ClientSession | null>(
     attachClientSession(activeChat?.session),
   );
@@ -380,7 +379,7 @@ export function AgentChatSession({
   );
 
   const persistStreamEvent = useCallback(
-    (event: MessageStreamEvent) => {
+    (event: SessionStreamEvent) => {
       const displayEvent = namespaceStreamEvent(
         event,
         persistedSessionRef.current?.state?.sessionId,
@@ -392,7 +391,10 @@ export function AgentChatSession({
         setStreamEvents(nextStreamEvents);
       }
 
-      if (displayEvent.type === "authorization.required") {
+      if (
+        displayEvent.type === "interaction.opened" &&
+        displayEvent.data.request.kind === "sign-in"
+      ) {
         stopFinalizingTurn();
       }
 
@@ -753,7 +755,7 @@ export function AgentChatSession({
         return;
       }
 
-      const events = createAuthorizationDeclinedEvents(authorization, sessionId);
+      const events = createAuthorizationDeclinedEvents(authorization);
       const previousSession = persistedSession.state;
       const nextSession = undefined;
 
@@ -780,7 +782,7 @@ export function AgentChatSession({
           result.eventIndex + result.eventCount,
         );
         knownInitialEventsRef.current = skippedEvents;
-        const nextStreamEvents = events.reduce<MessageStreamEvent[]>(
+        const nextStreamEvents = events.reduce<SessionStreamEvent[]>(
           (mergedEvents, event) => appendUniqueStreamEvent(mergedEvents, event),
           streamEventsRef.current,
         );
@@ -1098,27 +1100,25 @@ type PendingConnectionAuthorization = {
   readonly displayName: string;
   readonly expiresAt?: string;
   readonly instructions?: string;
+  /** The sign-in's interaction id. */
   readonly key: string;
   readonly name: string;
-  readonly sequence: number;
-  readonly stepIndex: number;
-  readonly turnId: string;
+  readonly turnId?: string;
   readonly url?: string;
-  readonly authorization?: AuthorizationRequiredStreamEvent["data"]["authorization"];
 };
 
-function getPendingAuthorizations(events: readonly MessageStreamEvent[]) {
+function getPendingAuthorizations(events: readonly SessionStreamEvent[]) {
   const pending = new Map<string, PendingConnectionAuthorization>();
 
   for (const event of events) {
-    if (event.type === "authorization.required") {
+    if (event.type === "interaction.opened" && event.data.request.kind === "sign-in") {
       const authorization = toPendingAuthorization(event);
-      pending.set(authorization.name, authorization);
+      pending.set(authorization.key, authorization);
       continue;
     }
 
-    if (event.type === "authorization.completed") {
-      pending.delete(event.data.name);
+    if (event.type === "interaction.settled") {
+      pending.delete(event.data.interactionId);
     }
   }
 
@@ -1133,27 +1133,22 @@ function getConnectionAuthorizationDisabledReason(
   return `Connect ${displayName} to continue this turn, or skip it.`;
 }
 
-function toPendingAuthorization(
-  event: AuthorizationRequiredStreamEvent,
-): PendingConnectionAuthorization {
-  const challenge = event.data.authorization;
-  const displayName = challenge?.displayName ?? event.data.name;
+function toPendingAuthorization(event: InteractionOpened): PendingConnectionAuthorization {
+  const { request } = event.data;
+  const challenge = request.signIn;
+  const name = challenge?.name ?? request.title ?? "service";
+  const displayName = challenge?.displayName ?? name;
 
   return {
-    authorization: challenge,
     description:
-      challenge?.instructions ??
-      event.data.description ??
-      `Connect ${displayName} to let eve continue.`,
+      challenge?.instructions ?? request.prompt ?? `Connect ${displayName} to let eve continue.`,
     displayName,
     expiresAt: challenge?.expiresAt,
     instructions: challenge?.instructions,
-    key: `${event.data.turnId}:${event.data.name}`,
-    name: event.data.name,
-    sequence: event.data.sequence,
-    stepIndex: event.data.stepIndex,
-    turnId: event.data.turnId,
-    url: challenge?.url,
+    key: event.data.interactionId,
+    name,
+    turnId: event.scope?.turnId,
+    url: challenge?.url ?? request.link?.url,
   };
 }
 
@@ -1206,47 +1201,46 @@ function ConnectionAuthorizationPrompt({
 
 function createAuthorizationDeclinedEvents(
   authorization: PendingConnectionAuthorization,
-  sessionId: string,
-): readonly MessageStreamEvent[] {
-  return [
-    {
-      data: {
-        authorization: authorization.authorization,
-        name: authorization.name,
-        outcome: "declined",
-        reason: "skipped",
-        sequence: authorization.sequence,
-        stepIndex: authorization.stepIndex,
-        turnId: authorization.turnId,
-      },
-      meta: createLocalEventMeta(),
-      type: "authorization.completed",
-    },
-    createSessionWaitingEvent(sessionId),
+): readonly SessionStreamEvent[] {
+  // Skipping abandons the session: the chat's next message starts a new one. These records
+  // close the sign-in and the turn in the chat's own history; the server never sees them.
+  const data = {
+    interactionId: authorization.key,
+    outcome: "declined",
+    reason: "skipped",
+  } as const;
+  const events: SessionStreamEvent[] = [
+    authorization.turnId === undefined
+      ? { data, meta: createLocalEventMeta(), type: "interaction.settled" }
+      : {
+          data,
+          meta: createLocalEventMeta(),
+          scope: { turnId: authorization.turnId },
+          type: "interaction.settled",
+        },
   ];
+  if (authorization.turnId !== undefined) {
+    events.push({
+      data: { outcome: "cancelled", turnId: authorization.turnId },
+      meta: createLocalEventMeta(),
+      scope: { turnId: authorization.turnId },
+      type: "turn.settled",
+    });
+  }
+  return events;
 }
 
-function createSessionWaitingEvent(sessionId: string): MessageStreamEvent {
-  return {
-    data: {
-      continuationToken: sessionId,
-      wait: "next-user-message",
-    },
-    meta: createLocalEventMeta(),
-    type: "session.waiting",
-  };
-}
-
+/** A record only this chat keeps. Its line is negative, so it never names a stream position. */
 function createLocalEventMeta() {
   return {
     at: new Date().toISOString(),
-    id: `local_${crypto.randomUUID()}`,
+    position: { index: 0, line: -1 },
   };
 }
 
 function advanceSessionWithLocalEvents(
   session: ClientSessionState | undefined,
-  events: readonly MessageStreamEvent[],
+  events: readonly SessionStreamEvent[],
 ) {
   if (events.length === 0 || !session) {
     return session;
@@ -1260,9 +1254,9 @@ function advanceSessionWithLocalEvents(
 }
 
 function mergeLocalEvents(
-  events: readonly MessageStreamEvent[],
-  localEvents: readonly MessageStreamEvent[],
-): MessageStreamEvent[] {
+  events: readonly SessionStreamEvent[],
+  localEvents: readonly SessionStreamEvent[],
+): SessionStreamEvent[] {
   const merged = [...events];
 
   if (localEvents.length === 0) {
@@ -1286,14 +1280,14 @@ function mergeLocalEvents(
 }
 
 function mergeStreamEventLogs(
-  events: readonly MessageStreamEvent[],
-  streamedEvents: readonly MessageStreamEvent[],
-): MessageStreamEvent[] {
+  events: readonly SessionStreamEvent[],
+  streamedEvents: readonly SessionStreamEvent[],
+): SessionStreamEvent[] {
   if (streamedEvents.length === 0) {
-    return events as MessageStreamEvent[];
+    return events as SessionStreamEvent[];
   }
 
-  let merged: MessageStreamEvent[] = [...events];
+  let merged: SessionStreamEvent[] = [...events];
 
   for (const event of streamedEvents) {
     const next = appendUniqueStreamEvent(merged, event);
@@ -1307,19 +1301,19 @@ function mergeStreamEventLogs(
 }
 
 function appendUniqueStreamEvent(
-  events: readonly MessageStreamEvent[],
-  event: MessageStreamEvent,
-): MessageStreamEvent[] {
+  events: readonly SessionStreamEvent[],
+  event: SessionStreamEvent,
+): SessionStreamEvent[] {
   if (events.some((existingEvent) => areSameStreamEvent(existingEvent, event))) {
-    return events as MessageStreamEvent[];
+    return events as SessionStreamEvent[];
   }
 
   return [...events, event];
 }
 
 function preserveKnownInitialEvents(
-  snapshotEvents: readonly MessageStreamEvent[],
-  knownEvents: readonly MessageStreamEvent[],
+  snapshotEvents: readonly SessionStreamEvent[],
+  knownEvents: readonly SessionStreamEvent[],
 ) {
   if (knownEvents.length === 0) {
     return snapshotEvents;
@@ -1347,8 +1341,8 @@ function preserveKnownInitialEvents(
 }
 
 function countSharedEventPrefix(
-  events: readonly MessageStreamEvent[],
-  knownEvents: readonly MessageStreamEvent[],
+  events: readonly SessionStreamEvent[],
+  knownEvents: readonly SessionStreamEvent[],
 ) {
   const count = Math.min(events.length, knownEvents.length);
 
@@ -1361,7 +1355,7 @@ function countSharedEventPrefix(
   return count;
 }
 
-function areSameStreamEvent(left: MessageStreamEvent, right: MessageStreamEvent | undefined) {
+function areSameStreamEvent(left: SessionStreamEvent, right: SessionStreamEvent | undefined) {
   return right !== undefined && areEqualJsonValues(left, right);
 }
 
@@ -1402,13 +1396,17 @@ function areEqualJsonValues(left: unknown, right: unknown): boolean {
   );
 }
 
-function getLocalEventKey(event: MessageStreamEvent) {
-  if (event.type === "authorization.completed") {
-    return `${event.type}:${event.data.turnId}:${event.data.name}:${event.data.outcome}:${event.data.reason ?? ""}`;
+function getLocalEventKey(event: SessionStreamEvent) {
+  if (event.meta.position.line >= 0) {
+    return null;
   }
 
-  if (event.type === "session.waiting") {
-    return `${event.type}:${event.meta?.at ?? "local"}`;
+  if (event.type === "interaction.settled") {
+    return `${event.type}:${event.data.interactionId}:${event.data.outcome}`;
+  }
+
+  if (event.type === "turn.settled") {
+    return `${event.type}:${event.data.turnId}:${event.data.outcome}`;
   }
 
   return null;

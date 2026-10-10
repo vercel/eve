@@ -15,7 +15,7 @@ export default defineEval({
     const { request, session } = await budgetQuestion(t);
 
     const added = await session.send(SAY.deadline, asAlice);
-    added.notEvent("step.started");
+    added.notEvent("model.started");
     expectNoModelCallWhileOpen(session, request.requestId);
   },
 });

@@ -26,24 +26,27 @@ export default defineEval({
     const session = await aliceSession(t);
     const held = await session.send(SAY.checkAccess, asAlice);
     expectHeld(held);
-    held.event("authorization.required", { count: 1, data: { principalId: ALICE } });
-    held.notEvent("authorization.completed");
+    held.event("interaction.opened", {
+      count: 1,
+      data: { audience: { principalIds: [ALICE] }, request: { kind: "sign-in" } },
+    });
+    held.notEvent("interaction.settled");
     const authorization = authorizationFrom(held);
 
     const startIndex = session.state.streamIndex;
     await completeAuthorization(authorization.url);
     const resumed = (await follow(t, session, startIndex)).expectOk();
     resumed.notEvent("turn.started");
-    resumed.event("authorization.completed", {
+    resumed.event("interaction.settled", {
       count: 1,
-      data: { attemptId: authorization.attemptId, outcome: "authorized", principalId: ALICE },
+      data: { interactionId: authorization.attemptId, outcome: "accepted" },
     });
     resumed.calledTool("auth-probe", {
       status: "completed",
       output: { actor: ALICE },
       count: 1,
     });
-    resumed.event("message.completed", { data: { message: /^Access check: done / } });
+    resumed.event("content.completed", { data: { phase: "reply", value: /^Access check: done / } });
     expectNoModelCallDuringAuthorization(resumed, authorization.attemptId, held.events);
   },
 });

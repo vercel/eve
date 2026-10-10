@@ -314,8 +314,9 @@ export interface MessageResult<TOutput = unknown> {
   /**
    * How the response ended.
    *
-   * - `"completed"`: its turn settled (`turn.settled`).
-   * - `"waiting"`: its turn waits on a person (`delivery.settled` with `"awaiting-input"`).
+   * - `"waiting"`: the session stays open, for the next message or for a person's answer
+   *   (`inputRequests`).
+   * - `"completed"`: the session ended (`session.ended`).
    * - `"failed"`: its turn or the session failed.
    */
   readonly status: "completed" | "failed" | "waiting";

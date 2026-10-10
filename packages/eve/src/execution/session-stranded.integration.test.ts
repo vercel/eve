@@ -1,4 +1,3 @@
-import { encodeTestLine } from "#internal/testing/events.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { createChannelAddress } from "#channel/channel-address.js";
@@ -29,7 +28,6 @@ import { startSessionOwner, waitForHook } from "#internal/testing/workflow-test-
 import { getRun, getWorld, start } from "#internal/workflow/runtime.js";
 import { type SessionPredecessor } from "#protocol/message.js";
 import { transcriptReducer, type TranscriptData } from "#client/transcript-reducer.js";
-import type { SessionEvent } from "#protocol/session-event.js";
 import { sessions } from "#public/server/index.js";
 import { defineDynamic, defineInstructions } from "#public/definitions/instructions.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -122,44 +120,39 @@ async function readSessionStarted(sessionId: string) {
   }
 }
 
-/** Appends events to a parked session's stream, as its earlier build recorded them. */
-async function recordHistory(sessionId: string, events: readonly SessionEvent[]): Promise<void> {
+/** Appends v26 events to a parked session's stream, one per line, as its earlier build recorded them. */
+async function recordHistory(
+  sessionId: string,
+  events: readonly Record<string, unknown>[],
+): Promise<void> {
   const writer = getRun(sessionId).getWritable<Uint8Array>().getWriter();
   try {
-    for (const event of events) {
-      await writer.write(new TextEncoder().encode(encodeTestLine(event)));
+    for (const [index, event] of events.entries()) {
+      const meta = { at: "2026-10-01T00:00:00.000Z", id: `evt_${String(index)}` };
+      await writer.write(new TextEncoder().encode(`${JSON.stringify({ ...event, meta })}\n`));
     }
   } finally {
     writer.releaseLock();
   }
 }
 
-/** A short conversation the stranded session recorded before the upgrade. */
-const OFFSITE_HISTORY: readonly SessionEvent[] = [
+const TURN = { sequence: 0, turnId: "turn_0" };
+
+/** A short conversation the stranded session recorded before the upgrade, in v26 events. */
+const OFFSITE_HISTORY: readonly Record<string, unknown>[] = [
   { data: {}, type: "session.started" },
-  { data: { deliveryId: "delivery_0" }, type: "delivery.admitted" },
   {
-    data: { cause: { deliveryId: "delivery_0" }, follows: null, turnId: "turn_0" },
-    type: "turn.started",
+    data: { ...TURN, message: "Alice asks for help planning the offsite." },
+    type: "message.received",
   },
   {
     data: {
-      deliveryId: "delivery_0",
-      parts: [{ kind: "text", text: "Alice asks for help planning the offsite." }],
-      turnId: "turn_0",
+      ...TURN,
+      finishReason: "stop",
+      message: "Here is a draft agenda for the offsite.",
+      stepIndex: 0,
     },
-    type: "delivery.consumed",
-  },
-  {
-    data: {
-      kind: "text",
-      partId: "part_0",
-      phase: "reply",
-      runId: "run_0",
-      value: "Here is a draft agenda for the offsite.",
-    },
-    scope: { turnId: "turn_0" },
-    type: "content.completed",
+    type: "message.completed",
   },
 ];
 

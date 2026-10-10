@@ -24,7 +24,7 @@ export default ["first", "later"].map((launchTurn) =>
         );
         expectHealthyTurn(planning);
         planning.messageIncludes("96");
-        planning.notEvent("actions.requested");
+        planning.notEvent("call.requested");
       }
 
       const started = await session.send(
@@ -43,13 +43,14 @@ export default ["first", "later"].map((launchTurn) =>
 function expectFiveReviewers(started: EveEvalTurn) {
   expectHealthyTurn(started);
   started.calledSubagent("reviewer", { status: "completed", count: 5 });
-  const launchSteps = started.events
-    .filter((event) => event.type === "actions.requested")
-    .flatMap(({ data }) =>
-      data.actions
-        .filter((action) => action.kind === "subagent-call" && action.subagentName === "reviewer")
-        .map(() => `${data.turnId}:${data.stepIndex}`),
-    );
+  const launchSteps = started.events.flatMap((event) =>
+    event.type === "call.requested" &&
+    event.data.capability.kind === "agent" &&
+    event.data.capability.name === "reviewer" &&
+    "runId" in event.data.owner
+      ? [event.data.owner.runId]
+      : [],
+  );
   assert.equal(launchSteps.length, 5, "five reviewer requests");
   assert.equal(new Set(launchSteps).size, 1, "all five reviewers launch in one model step");
 }
@@ -57,16 +58,16 @@ function expectFiveReviewers(started: EveEvalTurn) {
 function expectReviewSummary(turn: EveEvalTurn) {
   assert(turn.message?.trim(), "parent reports the completed reviews");
   // The task prompt lets the parent tell the person the reviews have started before the summary.
-  turn.event("step.completed", {
+  turn.event("model.settled", {
     data: { finishReason: "stop" },
     count: (count) => count === 1 || count === 2,
   });
-  turn.notEvent("compaction.completed");
+  turn.notEvent("context.settled", { data: { kind: "compaction", outcome: "completed" } });
 }
 
 async function expectParallelReviews(t: EveEvalContext, turn: EveEvalTurn) {
   const sessions = turn.events
-    .filter((event) => event.type === "agent.started")
+    .filter((event) => event.type === "child.opened")
     .filter(({ data }) => data.name === "reviewer");
   const childIds = sessions.map(({ data }) => data.sessionId);
   assert.equal(childIds.length, 5, "no repeated delegation");

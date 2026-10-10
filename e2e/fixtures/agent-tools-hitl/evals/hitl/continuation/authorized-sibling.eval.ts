@@ -34,8 +34,8 @@ export default defineEval({
       output: { executions: 1 },
       count: 1,
     });
-    reply.event("approval.settled", {
-      data: { requestId: current.requestId, outcome: "approved" },
+    reply.event("interaction.settled", {
+      data: { interactionId: current.requestId, outcome: "accepted" },
       count: 1,
     });
     expectChangeStillUnexecuted(session);

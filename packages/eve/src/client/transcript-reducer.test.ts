@@ -26,18 +26,22 @@ function content(
   options: { readonly kind?: string; readonly phase?: string; readonly interrupted?: true } = {},
 ): SessionEvent {
   parts += 1;
-  return {
-    data: {
-      kind: options.kind ?? "text",
-      partId: `part_${parts}`,
-      phase: options.phase ?? "reply",
-      runId: "run_0",
-      value,
-      ...(options.interrupted === undefined ? {} : { interrupted: options.interrupted }),
-    },
-    scope: { turnId: TURN },
-    type: "content.completed",
+  const data: {
+    kind: string;
+    partId: string;
+    phase: string;
+    runId: string;
+    value: string;
+    interrupted?: true;
+  } = {
+    kind: options.kind ?? "text",
+    partId: `part_${parts}`,
+    phase: options.phase ?? "reply",
+    runId: "run_0",
+    value,
   };
+  if (options.interrupted !== undefined) data.interrupted = options.interrupted;
+  return { data, scope: { turnId: TURN }, type: "content.completed" };
 }
 
 function cleared(): SessionEvent {

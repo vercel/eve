@@ -28,7 +28,7 @@ and [`agent-workflow-tools/evals/hitl`](../../../agent-workflow-tools/evals/hitl
 | Approve runs the call in eve, result before the next step                          | [approve-runs-the-call](./approvals/approve-runs-the-call.eval.ts)                                                      |
 | Approval beside runtime work reports tasks, then input                             | [approval-runtime-park-emits-waiting](./continuation/approval-runtime-park-emits-waiting.eval.ts)                       |
 | Runtime workflow parks report waiting on tasks                                     | [runtime-park-emits-waiting](./continuation/runtime-park-emits-waiting.eval.ts)                                         |
-| Deny resolves `denied` and records a not-run result                                | [deny-records-not-run](./approvals/deny-records-not-run.eval.ts)                                                        |
+| Deny settles `declined` and records a rejected, not-run call                       | [deny-records-not-run](./approvals/deny-records-not-run.eval.ts)                                                        |
 | A partial answer keeps the turn held, with no model call                           | [partial-answer-keeps-turn-held](./approvals/partial-answer-keeps-turn-held.eval.ts)                                    |
 | A typed reply naming an option answers                                             | [typed-approve-answers](./approvals/typed-approve-answers.eval.ts)                                                      |
 | A typed reply answers only what it matches                                         | [typed-reply-answers-only-what-matches](./approvals/typed-reply-answers-only-what-matches.eval.ts)                      |
@@ -51,7 +51,7 @@ and [`agent-workflow-tools/evals/hitl`](../../../agent-workflow-tools/evals/hitl
 | No step starts behind the budget question                                          | [no-step-behind-budget](./budget/no-step-behind-budget.eval.ts)                                                         |
 | A late budget answer is dropped                                                    | [stale-budget-answer-dropped](./budget/stale-budget-answer-dropped.eval.ts)                                             |
 | An authorization holds the turn; the callback resumes it as the requester          | [authorization-holds-then-resumes-as-requester](./authorizations/authorization-holds-then-resumes-as-requester.eval.ts) |
-| Steering declines an authorization and tells the model                             | [steer-declines-authorization](./authorizations/steer-declines-authorization.eval.ts)                                   |
+| Steering withdraws an authorization and tells the model                            | [steer-declines-authorization](./authorizations/steer-declines-authorization.eval.ts)                                   |
 | Cancel declines an authorization                                                   | [cancel-declines-authorization](./authorizations/cancel-declines-authorization.eval.ts)                                 |
 | An approved call that needs an authorization                                       | [approved-call-needs-authorization](./authorizations/approved-call-needs-authorization.eval.ts)                         |
 | A sibling sign-in is emitted beside an approval; newer attempts replace older ones | [newer-attempt-supersedes](./authorizations/newer-attempt-supersedes.eval.ts)                                           |

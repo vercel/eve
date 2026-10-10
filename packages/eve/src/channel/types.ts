@@ -336,9 +336,9 @@ export interface RuntimeActionResultHookPayload {
 }
 
 /**
- * Event coordinates attached to a proxied `input.requested` batch.
+ * Event coordinates attached to a proxied `interaction.opened` batch.
  *
- * Mirrors the `data` payload of the child's `input.requested` stream event so
+ * Mirrors the `data` payload of the child's `interaction.opened` stream event so
  * the parent re-emits the same semantics without inventing new identifiers.
  */
 export interface SubagentInputRequestEvent {
@@ -356,7 +356,7 @@ export interface SubagentInputRequestEvent {
  *
  * Runtime-internal. Channel adapters and authored code never observe this
  * kind: it exists only on the durable hook between the subagent adapter's
- * `input.requested` handler and the parent's runtime loop.
+ * `interaction.opened` handler and the parent's runtime loop.
  */
 export interface SubagentInputRequestHookPayload {
   readonly remote?: import("#eve-channel/support.js").RemoteAgentBinding & {
@@ -389,9 +389,23 @@ export type SubagentAuthorizationEvent =
       readonly data: InteractionSettledData;
     }
   | {
+      readonly type: "response.admitted";
+      readonly data: RelayedResponseAdmission;
+    }
+  | {
       readonly type: "response.settled";
       readonly data: RelayedResponseSettlement;
     };
+
+/**
+ * An asker admitted an answer it was forwarded: it stands, revisable, while the rest of its batch
+ * waits. Which interaction, and the delivery the asker received it in.
+ */
+export interface RelayedResponseAdmission {
+  readonly interactionId: string;
+  /** The delivery the asker received the answer in, when it kept the forwarder's id. */
+  readonly deliveryId?: string;
+}
 
 /** How an asker settled an answer: which interaction, from which delivery, and how. */
 export interface RelayedResponseSettlement {
@@ -614,7 +628,7 @@ export interface DeliverInput {
 /**
  * Terminal outcome of a runtime run.
  *
- * The durable event stream's `session.completed` / `session.failed`
+ * The durable event stream's `session.ended`
  * events report terminal state on the workflow runtime.
  */
 export type RunResult =

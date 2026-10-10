@@ -47,11 +47,10 @@ interface EmittedStreamContent {
 interface StreamActionEmissionOptions {
   readonly excludedActionToolNames: ReadonlySet<string>;
   /**
-   * A child's or schedule's turn is held while its tasks work, so a text step
-   * can't end it: the step reports `"tool-calls"` and channels don't post it
-   * as the reply.
+   * The turn holds while its tasks work, so a text step can't end it: its text narrates, and
+   * only the reply after the tasks report is the turn's.
    */
-  readonly hidesHeldText?: boolean;
+  readonly held?: boolean;
   readonly tools: HarnessToolLookup;
   /** A deliberate turn cancel or steering interrupt, not a provider failure/retry. */
   readonly interruptSignal?: AbortSignal;
@@ -97,9 +96,9 @@ export async function emitStreamContent(
  * Whether the run's last text replies. Text the turn continues after narrates: text before calls,
  * and a held turn's text, which waits on its tasks before the turn can reply.
  */
-function finalPhase(finishReason: AssistantStepFinishReason, hidesHeldText: boolean) {
+function finalPhase(finishReason: AssistantStepFinishReason, held: boolean) {
   if (finishReason === "tool-calls") return "narration";
-  if (hidesHeldText && finishReason === "stop") return "narration";
+  if (held && finishReason === "stop") return "narration";
   return "reply";
 }
 
@@ -468,7 +467,7 @@ async function consumeStreamContent(
       messagePartId,
       "text",
       currentMessage,
-      finalPhase(finishReason, options?.hidesHeldText === true),
+      finalPhase(finishReason, options?.held === true),
     );
   }
 

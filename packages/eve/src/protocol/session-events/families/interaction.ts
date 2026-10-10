@@ -49,12 +49,23 @@ export interface SignInChallenge {
   readonly callbackUrl?: string;
 }
 
+/** Where a relayed request was asked: the child session's request, and the call it asks about. */
+export interface InteractionOrigin {
+  readonly sessionId: string;
+  readonly interactionId: string;
+  /**
+   * The asker's call, when it asks about one, such as the tool a child wants approved. This
+   * session's tables hold only the call that delegated to the child.
+   */
+  readonly call?: { readonly callId: string; readonly name: string; readonly input?: JsonValue };
+}
+
 export interface InteractionOpenedData {
   readonly interactionId: string;
   readonly subject: InteractionSubject;
   readonly request: InteractionRequest;
   /** The child session's request this one relays. */
-  readonly origin?: { readonly sessionId: string; readonly interactionId: string };
+  readonly origin?: InteractionOrigin;
   /** Who the request is for, such as the principal that started a sign-in. */
   readonly audience?: { readonly principalIds: readonly string[] };
 }
@@ -132,7 +143,15 @@ export const interactionSchemas = {
       z.object({
         audience: z.object({ principalIds: z.array(z.string()) }).optional(),
         interactionId: id,
-        origin: z.object({ interactionId: id, sessionId: id }).optional(),
+        origin: z
+          .object({
+            call: z
+              .object({ callId: id, input: jsonValue.optional(), name: z.string() })
+              .optional(),
+            interactionId: id,
+            sessionId: id,
+          })
+          .optional(),
         request,
         subject,
       }),

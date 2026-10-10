@@ -59,12 +59,12 @@ export default defineEval({
     const sessionId = created.sessionId!;
 
     const initial = await t.target.watchTurn(sessionId).result();
-    initial.notEvent("turn.failed");
-    initial.notEvent("session.failed");
+    initial.notEvent("turn.settled", { data: { outcome: "failed" } });
+    initial.notEvent("session.ended", { data: { outcome: "failed" } });
     initial.messageIncludes(/HTTP-SESSION-INITIAL-OK/i);
 
     const liveCancellation = t.target.watchTurn(sessionId, {
-      startIndex: initial.events.length,
+      startIndex: initial.session.state!.streamIndex,
     });
     const sent = await postJson<AcceptedResponse>(
       t.target,
@@ -80,11 +80,8 @@ export default defineEval({
       ),
     );
 
-    await liveCancellation.waitForEvent("actions.requested", {
-      data: {
-        actions: (actions) =>
-          actions.some((action) => action.kind === "tool-call" && action.toolName === TOOL_NAME),
-      },
+    await liveCancellation.waitForEvent("call.requested", {
+      data: { capability: { name: TOOL_NAME } },
     });
     const cancelled = await postJson<AcceptedResponse>(
       t.target,
@@ -101,13 +98,18 @@ export default defineEval({
     );
 
     const cancelledTurn = await liveCancellation.result();
-    cancelledTurn.event("turn.cancelled", { count: 1 });
-    cancelledTurn.eventOrder([{ type: "turn.cancelled" }, { type: "session.waiting" }]);
-    cancelledTurn.notEvent("turn.failed");
-    cancelledTurn.notEvent("session.failed");
+    cancelledTurn.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
+    cancelledTurn.eventOrder([{ data: { outcome: "cancelled" }, type: "turn.settled" }]);
+    cancelledTurn.notEvent("turn.settled", { data: { outcome: "failed" } });
+    cancelledTurn.notEvent("session.ended", { data: { outcome: "failed" } });
 
-    let eventIndex = initial.events.length + cancelledTurn.events.length;
-    const liveCompaction = t.target.watchTurn(sessionId, { startIndex: eventIndex });
+    // Each read starts at the line after the last one read. A context change between turns
+    // ends no turn, so its read ends with its settlement.
+    const settlesContext = (event: { readonly type: string }) => event.type === "context.settled";
+    const liveCompaction = t.target.watchTurn(sessionId, {
+      startIndex: cancelledTurn.session.state!.streamIndex,
+      until: settlesContext,
+    });
     const compacted = await postJson<AcceptedResponse>(
       t.target,
       `/eve/v1/session/${sessionId}/compact`,
@@ -123,14 +125,15 @@ export default defineEval({
     );
     const compactedEvents = await liveCompaction.result();
     compactedEvents.eventOrder([
-      { type: "compaction.requested" },
-      { type: "compaction.completed" },
-      { type: "session.waiting" },
+      { data: { kind: "compaction" }, type: "context.started" },
+      { data: { kind: "compaction", outcome: "completed" }, type: "context.settled" },
     ]);
     compactedEvents.notEvent("turn.started");
-    eventIndex += compactedEvents.events.length;
 
-    const liveClear = t.target.watchTurn(sessionId, { startIndex: eventIndex });
+    const liveClear = t.target.watchTurn(sessionId, {
+      startIndex: compactedEvents.session.state!.streamIndex,
+      until: settlesContext,
+    });
     const cleared = await postJson<AcceptedResponse>(
       t.target,
       `/eve/v1/session/${sessionId}/clear`,
@@ -145,12 +148,18 @@ export default defineEval({
       ),
     );
     const clearedEvents = await liveClear.result();
-    clearedEvents.event("context.cleared", { count: 1 });
-    clearedEvents.eventOrder([{ type: "context.cleared" }, { type: "session.waiting" }]);
+    clearedEvents.event("context.settled", {
+      count: 1,
+      data: { kind: "clear", outcome: "completed" },
+    });
+    clearedEvents.eventOrder([
+      { data: { kind: "clear", outcome: "completed" }, type: "context.settled" },
+    ]);
     clearedEvents.notEvent("turn.started");
-    eventIndex += clearedEvents.events.length;
 
-    const liveFollowUp = t.target.watchTurn(sessionId, { startIndex: eventIndex });
+    const liveFollowUp = t.target.watchTurn(sessionId, {
+      startIndex: clearedEvents.session.state!.streamIndex,
+    });
     const followUpResponse = await postJson<AcceptedResponse>(
       t.target,
       `/eve/v1/session/${sessionId}`,
@@ -165,8 +174,8 @@ export default defineEval({
       ),
     );
     const followUp = await liveFollowUp.result();
-    followUp.notEvent("turn.failed");
-    followUp.notEvent("session.failed");
+    followUp.notEvent("turn.settled", { data: { outcome: "failed" } });
+    followUp.notEvent("session.ended", { data: { outcome: "failed" } });
     followUp.messageIncludes(/HTTP-SESSION-FOLLOW-UP-OK/i);
 
     const reset = await postJson<ResetResponse>(
@@ -216,8 +225,8 @@ export default defineEval({
     );
 
     const replacementTurn = await t.target.watchTurn(replacement.sessionId!).result();
-    replacementTurn.notEvent("turn.failed");
-    replacementTurn.notEvent("session.failed");
+    replacementTurn.notEvent("turn.settled", { data: { outcome: "failed" } });
+    replacementTurn.notEvent("session.ended", { data: { outcome: "failed" } });
     replacementTurn.messageIncludes(/HTTP-SESSION-REPLACEMENT-OK/i);
 
     t.succeeded();

@@ -10,14 +10,14 @@ export default defineEval({
     );
     let parent = started.session;
     let child = started.events.find(
-      (event) => event.type === "agent.started" && event.data.name === "approval-child",
+      (event) => event.type === "child.opened" && event.data.name === "approval-child",
     );
-    if (child?.type !== "agent.started") {
+    if (child?.type !== "child.opened") {
       const live = watchNextTurn(t, parent, "approval child dispatch wait");
-      child = await live.waitForEvent("agent.started", { data: { name: "approval-child" } });
+      child = await live.waitForEvent("child.opened", { data: { name: "approval-child" } });
       parent = live.session;
     }
-    if (child.type !== "agent.started") throw new Error("Approval child was not called.");
+    if (child.type !== "child.opened") throw new Error("Approval child was not called.");
     const childTurn = t.target.watchTurn(child.data.sessionId);
     const pending = await waitForInput(t, parent);
     const request = pending.requireInputRequest({
@@ -30,15 +30,11 @@ export default defineEval({
       startIndex: parkedChild.session.state.streamIndex,
     });
     const approved = await pending.start("approve");
-    const resolution = await waitForObservedEvent(resumedChild, "input.resolved");
-    if (resolution.type !== "input.resolved") throw new Error("Question was not resolved.");
+    const resolution = await waitForObservedEvent(resumedChild, "interaction.settled");
+    if (resolution.type !== "interaction.settled") throw new Error("Question was not resolved.");
     if (
-      !resolution.data.resolutions.some(
-        (entry) =>
-          entry.kind === "question" &&
-          entry.outcome === "answered" &&
-          entry.response?.optionId === request.options?.[0]?.id,
-      )
+      resolution.data.outcome !== "accepted" ||
+      resolution.data.response?.optionId !== request.options?.[0]?.id
     ) {
       throw new Error("The child did not resolve the proxied question with the selected option.");
     }
@@ -62,7 +58,7 @@ async function waitForInput(t: EveEvalContext, initial: EveEvalSession): Promise
   throw new Error("Approval child did not surface its ctx.ask() request.");
 }
 
-async function waitForObservedEvent<TType extends "input.resolved">(
+async function waitForObservedEvent<TType extends "interaction.settled">(
   turn: ReturnType<EveEvalContext["target"]["watchTurn"]>,
   type: TType,
 ) {

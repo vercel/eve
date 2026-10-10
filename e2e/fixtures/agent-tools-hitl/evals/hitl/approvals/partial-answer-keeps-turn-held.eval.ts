@@ -28,24 +28,31 @@ export default defineEval({
 
     const partial = await session.respond(answers("approve", a), asAlice);
     expectHeld(partial);
-    partial.notEvent("input.resolved");
-    partial.notEvent("step.started");
-    partial.notEvent("action.result");
+    partial.notEvent("interaction.settled");
+    partial.notEvent("model.started");
+    partial.notEvent("call.settled");
 
     const finished = (await session.respond(answers("cancel", b), asAlice)).expectOk();
-    finished.event("input.resolved", {
+    // Both approvals settle in the one commit, each with its own answer.
+    finished.event("interaction.settled", { count: 2 });
+    finished.event("interaction.settled", {
       count: 1,
-      data: {
-        resolutions: (items) =>
-          items.length === 2 &&
-          items.some((item) => item.requestId === a.requestId && item.outcome === "approved") &&
-          items.some((item) => item.requestId === b.requestId && item.outcome === "denied"),
-      },
+      data: { interactionId: a.requestId, outcome: "accepted" },
+    });
+    finished.event("interaction.settled", {
+      count: 1,
+      data: { interactionId: b.requestId, outcome: "declined" },
+    });
+    finished.eventsSatisfy("both approvals settle in one commit", (events) => {
+      const lines = events.flatMap((event) =>
+        event.type === "interaction.settled" ? [event.meta.position.line] : [],
+      );
+      return lines.length === 2 && lines[0] === lines[1];
     });
     finished.calledTool("change-a", { status: "completed", output: { executions: 1 }, count: 1 });
     expectNotRun(finished, "change-b");
-    finished.event("message.completed", {
-      data: { message: /^Change A: done .*\. Change B: not run\.$/u },
+    finished.event("content.completed", {
+      data: { phase: "reply", value: /^Change A: done .*\. Change B: not run\.$/u },
     });
     expectNoModelCallWhileOpen(session, a.requestId);
     expectNoModelCallWhileOpen(session, b.requestId);

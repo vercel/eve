@@ -78,6 +78,8 @@ export interface TurnRow extends Introduced, Ended {
   readonly cause: Cause;
   readonly follows: string | null;
   readonly status: "running" | "paused" | "settled";
+  /** Model runs the turn requested so far: its steps. */
+  readonly runs?: number;
   readonly awaiting?: readonly TurnAwaiting[];
   /** What most recently resumed it. */
   readonly resumedBy?: Cause;
@@ -92,6 +94,8 @@ export interface RunRow extends Introduced, Ended {
   readonly runId: string;
   readonly owner: ModelOwner;
   readonly status: "requested" | "running" | "settled";
+  /** A turn's run's step: 0 for the turn's first run. A context change's run has none. */
+  readonly step?: number;
   readonly modelId?: string;
   readonly outcome?: ModelOutcome;
   readonly finishReason?: string;

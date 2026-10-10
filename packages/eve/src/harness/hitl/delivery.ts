@@ -1,6 +1,6 @@
+import { openRequests, readerInputs } from "#protocol/session-reader.js";
 import { withTypedBindings } from "#harness/response-bindings.js";
 import type { UserContent } from "ai";
-import { openInputs } from "#protocol/session-projection.js";
 
 import { resolveTextToResponse, resolveTextToResponses } from "#channel/resolve-text.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
@@ -37,7 +37,9 @@ export function deliver(
   readonly takeQueued: boolean;
 } {
   const queued = options.takeQueued ? view.turn.queued : undefined;
-  const limit = openInputs(view.projection).find((entry) => entry.request.kind === "session-limit");
+  const limit = openRequests(view.projection.view).find(
+    (entry) => entry.request.kind === "session-limit",
+  );
   // Match the new typed answer before queued messages join it.
   const incoming =
     queued !== undefined && limit !== undefined
@@ -55,8 +57,12 @@ export function deliver(
     ...ownOpenRequestIds(view),
     ...view.turn.suspended.flatMap((step) => step.requests.map((request) => request.requestId)),
   ]);
+  const tables = view.projection.view;
   const known = new Map(
-    Object.values(view.projection.inputs).map((entry) => [entry.request.requestId, entry.request]),
+    Object.values(tables === undefined ? {} : readerInputs(tables)).map((entry) => [
+      entry.request.requestId,
+      entry.request,
+    ]),
   );
   const converted = convertStaleResponsesToUserMessage({
     pendingRequestIds,

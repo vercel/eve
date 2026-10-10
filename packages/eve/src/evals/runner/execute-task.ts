@@ -14,7 +14,7 @@ import type {
   EveEvalTraceContext,
   EveEvalTurn,
 } from "#evals/types.js";
-import { createEmptyDerivedFacts } from "#evals/runner/derive-run-facts.js";
+import { createEmptyDerivedFacts, deriveRunFacts } from "#evals/runner/derive-run-facts.js";
 import { EvalSessionManager } from "#evals/session-manager.js";
 import type { EvalSessionStartedEvent } from "#evals/session.js";
 import { createEvalContext } from "#evals/context.js";
@@ -156,13 +156,55 @@ function collectTraceContexts(
   });
 }
 
-function combineDerivedFacts(sessions: readonly EveEvalSessionResult[]): EveEvalDerivedFacts {
+/**
+ * Each session's facts once. Handles that read the same session, such as a turn watched after
+ * the handle that sent it, saw parts of one stream: a call one requested, another settled. Their
+ * events merge by position before facts are derived.
+ */
+function derivedBySession(
+  sessions: readonly EveEvalSessionResult[],
+): readonly EveEvalSessionResult["derived"][] {
+  const groups: EveEvalSessionResult[][] = [];
+  const byId = new Map<string, EveEvalSessionResult[]>();
+  for (const session of sessions) {
+    const group = session.sessionId === undefined ? undefined : byId.get(session.sessionId);
+    if (group !== undefined) {
+      group.push(session);
+      continue;
+    }
+    const created = [session];
+    groups.push(created);
+    if (session.sessionId !== undefined) byId.set(session.sessionId, created);
+  }
+  return groups.map((group) => {
+    if (group.length === 1) return group[0]!.derived;
+    const byPosition = new Map<string, SessionStreamEvent>();
+    for (const session of group) {
+      for (const event of session.events) {
+        const { index, line } = event.meta.position;
+        byPosition.set(`${line}:${index}`, event);
+      }
+    }
+    const events = [...byPosition.values()].sort(
+      (a, b) =>
+        a.meta.position.line - b.meta.position.line ||
+        a.meta.position.index - b.meta.position.index,
+    );
+    return deriveRunFacts(events, { sessionId: group[0]!.sessionId });
+  });
+}
+
+/** The facts of every session an eval read, each session's handles read as one stream. */
+export function combineDerivedFacts(
+  sessions: readonly EveEvalSessionResult[],
+): EveEvalDerivedFacts {
   if (sessions.length === 0) return createEmptyDerivedFacts();
 
-  const toolCalls = sessions.flatMap((session) => session.derived.toolCalls);
-  const skillLoads = sessions.flatMap((session) => session.derived.skillLoads);
-  const subagentCalls = sessions.flatMap((session) => session.derived.subagentCalls);
-  const inputRequests = sessions.flatMap((session) => session.derived.inputRequests);
+  const derived = derivedBySession(sessions);
+  const toolCalls = derived.flatMap((facts) => facts.toolCalls);
+  const skillLoads = derived.flatMap((facts) => facts.skillLoads);
+  const subagentCalls = derived.flatMap((facts) => facts.subagentCalls);
+  const inputRequests = derived.flatMap((facts) => facts.inputRequests);
   const failureCode = sessions.find((session) => session.derived.failureCode !== undefined)?.derived
     .failureCode;
 
@@ -173,7 +215,8 @@ function combineDerivedFacts(sessions: readonly EveEvalSessionResult[]): EveEval
     subagentCalls,
     subagentCallCount: subagentCalls.length,
     inputRequests,
-    parked: sessions.some((session) => session.derived.parked),
+    // A session read in several handles is parked only if its merged stream still is.
+    parked: derived.some((facts) => facts.parked),
     messageCount: sum(sessions, (session) => session.derived.messageCount),
     reasoningBlockCount: sum(sessions, (session) => session.derived.reasoningBlockCount),
     models: [...new Set(sessions.flatMap((session) => session.derived.models))],

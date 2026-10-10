@@ -29,18 +29,13 @@ const TASK_SYSTEM_BLOCK_CLOSING = [
   `- To correct or continue an agent, or any task that accepts more input, call its tool again with its taskId. A new message never stops your tasks: answer it if it asks you something, decide whether it changes the work, then keep each task, correct an agent by taskId, or stop a task with ${TASK_CANCEL_TOOL_NAME}.`,
 ];
 
-/** The task block for a session a person reads, where a reply before a result is posted. */
+/**
+ * The task block. Text written while tasks work is narration, which channels don't deliver, so
+ * only the final reply reaches the person or caller.
+ */
 export const TASK_SYSTEM_BLOCK = [
   ...TASK_SYSTEM_BLOCK_OPENING,
-  `- If you have nothing to tell the person until a result arrives, call ${TASK_WAIT_TOOL_NAME}. Start every independent task first, then wait.`,
-  "- If the person should hear from you now, for example to confirm work is underway when they don't need the result yet, reply. When results arrive, report them without repeating yourself.",
-  ...TASK_SYSTEM_BLOCK_CLOSING,
-].join("\n");
-
-/** The task block for a child or schedule session, whose caller reads only the final reply. */
-export const FINAL_REPLY_TASK_SYSTEM_BLOCK = [
-  ...TASK_SYSTEM_BLOCK_OPENING,
-  `- Only your final reply reaches your caller. While tasks work, call ${TASK_WAIT_TOOL_NAME} instead of replying. Start every independent task first, then wait.`,
+  `- Only your final reply is delivered. While tasks work, call ${TASK_WAIT_TOOL_NAME} instead of replying. Start every independent task first, then wait.`,
   ...TASK_SYSTEM_BLOCK_CLOSING,
 ].join("\n");
 

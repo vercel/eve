@@ -70,10 +70,10 @@ export default defineEval({
       },
     ]);
     stopped.expectOk();
-    stopped.notEvent("turn.failed");
-    stopped.notEvent("session.failed");
-    stopped.notEvent("session.completed");
-    stopped.event("turn.cancelled");
+    stopped.notEvent("turn.settled", { data: { outcome: "failed" } });
+    stopped.notEvent("session.ended", { data: { outcome: "failed" } });
+    stopped.notEvent("session.ended", { data: { outcome: "completed" } });
+    stopped.event("turn.settled", { data: { outcome: "cancelled" } });
     t.check(stopped.status, equals("waiting"));
 
     const recovered = await blockedStopSession.send(

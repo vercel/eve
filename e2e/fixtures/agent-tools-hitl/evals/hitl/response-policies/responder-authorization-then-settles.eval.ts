@@ -39,9 +39,12 @@ export default defineEval({
 
     const held = await session.respond(answers("approve", request), as(RESPONDER));
     expectHeld(held);
-    held.event("approval.candidate", { count: 1, data: { outcome: "pending" } });
-    held.event("authorization.required", { count: 1, data: { principalId: RESPONDER } });
-    held.notEvent("approval.settled");
+    held.event("response.submitted", { count: 1, data: { interactionId: request.requestId } });
+    held.event("interaction.opened", {
+      count: 1,
+      data: { audience: { principalIds: [RESPONDER] }, request: { kind: "sign-in" } },
+    });
+    held.notEvent("interaction.settled", { data: { interactionId: request.requestId } });
     const authorization = authorizationFrom(held);
 
     const startIndex = session.state.streamIndex;
@@ -50,21 +53,22 @@ export default defineEval({
     resumed.notEvent("turn.started");
     resumed.eventOrder([
       {
-        type: "authorization.completed",
-        data: { attemptId: authorization.attemptId, outcome: "authorized" },
+        type: "interaction.settled",
+        data: { interactionId: authorization.attemptId, outcome: "accepted" },
       },
+      // The responder's answer applies once their sign-in completes.
       {
-        type: "approval.settled",
-        data: { outcome: "approved", responderPrincipalId: RESPONDER },
+        type: "interaction.settled",
+        data: { interactionId: request.requestId, outcome: "accepted" },
       },
+      { type: "call.settled", data: { callId: request.action.callId, outcome: "completed" } },
       {
-        type: "action.result",
-        data: { status: "completed", result: { toolName: "oauth-authorized-gate" } },
+        type: "content.completed",
+        data: { phase: "reply", value: /^OAuth-checked change: done / },
       },
-      { type: "message.completed", data: { message: /^OAuth-checked change: done / } },
-      { type: "turn.completed" },
+      { data: { outcome: "completed" }, type: "turn.settled" },
     ]);
-    expectResolved(resumed, request, "approved");
+    expectResolved(resumed, request, "accepted");
     expectNoModelCallDuringAuthorization(resumed, authorization.attemptId, held.events);
   },
 });

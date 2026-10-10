@@ -1,42 +1,29 @@
-import type {
-  ActionPartialStreamEvent,
-  ActionResultStreamEvent,
-  MessageStreamEvent,
-} from "eve/client";
+import type { SessionStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 
 const TOOL_NAME = "streamed-action";
 const LABEL = "streaming-e2e";
 
-function streamedBeforeLocalExecutionCompletes(events: readonly MessageStreamEvent[]): boolean {
-  const matchingRequests = events.flatMap((event) => {
-    if (event.type !== "actions.requested") return [];
+/** The one request for the tool, or undefined when there isn't exactly one. */
+function onlyRequest(events: readonly SessionStreamEvent[]) {
+  const requests = events.filter(
+    (event) => event.type === "call.requested" && event.data.capability.name === TOOL_NAME,
+  );
+  const [request] = requests;
+  return requests.length === 1 && request?.type === "call.requested" ? request : undefined;
+}
 
-    return event.data.actions
-      .filter((action) => action.kind === "tool-call" && action.toolName === TOOL_NAME)
-      .map((action) => ({ action, event }));
-  });
-  const [request] = matchingRequests;
-  if (
-    request === undefined ||
-    matchingRequests.length !== 1 ||
-    request.action.kind !== "tool-call"
-  ) {
-    return false;
-  }
+function streamedBeforeLocalExecutionCompletes(events: readonly SessionStreamEvent[]): boolean {
+  const request = onlyRequest(events);
+  if (request === undefined) return false;
 
   const result = events.find(
-    (event): event is ActionResultStreamEvent & MessageStreamEvent =>
-      event.type === "action.result" &&
-      event.data.result.kind === "tool-result" &&
-      event.data.result.callId === request.action.callId,
+    (event) => event.type === "call.settled" && event.data.callId === request.data.callId,
   );
-  if (result === undefined) {
-    return false;
-  }
+  if (result?.type !== "call.settled") return false;
 
-  const requestAt = parseTimestamp(request.event.meta.at);
-  const executionCompletedAt = readExecutionCompletedAt(result.data.result.output);
+  const requestAt = parseTimestamp(request.meta.at);
+  const executionCompletedAt = readExecutionCompletedAt(result.data.output);
   return (
     requestAt !== undefined &&
     executionCompletedAt !== undefined &&
@@ -44,37 +31,21 @@ function streamedBeforeLocalExecutionCompletes(events: readonly MessageStreamEve
   );
 }
 
-function streamsPreliminaryToolOutput(events: readonly MessageStreamEvent[]): boolean {
-  const matchingRequests = events.flatMap((event) => {
-    if (event.type !== "actions.requested") return [];
-
-    return event.data.actions.filter(
-      (action) => action.kind === "tool-call" && action.toolName === TOOL_NAME,
-    );
-  });
-  const [request] = matchingRequests;
-  if (request === undefined || matchingRequests.length !== 1 || request.kind !== "tool-call") {
-    return false;
-  }
+function streamsPreliminaryToolOutput(events: readonly SessionStreamEvent[]): boolean {
+  const request = onlyRequest(events);
+  if (request === undefined) return false;
 
   const partialIndex = events.findIndex(
-    (event): event is ActionPartialStreamEvent & MessageStreamEvent =>
-      event.type === "action.partial" &&
-      event.data.result.callId === request.callId &&
-      event.data.result.toolName === TOOL_NAME,
+    (event) => event.type === "call.progress" && event.data.callId === request.data.callId,
   );
   const partial = events[partialIndex];
   const resultIndex = events.findIndex(
-    (event) =>
-      event.type === "action.result" &&
-      event.data.result.kind === "tool-result" &&
-      event.data.result.callId === request.callId,
+    (event) => event.type === "call.settled" && event.data.callId === request.data.callId,
   );
   return (
     partialIndex !== -1 &&
-    partial !== undefined &&
-    partial.type === "action.partial" &&
-    hasPhase(partial.data.result.output, "waiting") &&
+    partial?.type === "call.progress" &&
+    hasPhase(partial.data.output, "waiting") &&
     partialIndex < resultIndex
   );
 }

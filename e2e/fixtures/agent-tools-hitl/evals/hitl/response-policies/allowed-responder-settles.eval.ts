@@ -27,24 +27,19 @@ export default defineEval({
     const settled = (
       await session.respond(answers("approve", request), asReleaseManager)
     ).expectOk();
+    // The release manager's delivery carries the answer; the policy applies it.
     settled.eventOrder([
-      { type: "approval.candidate", data: { outcome: "pending", requestId: request.requestId } },
+      { type: "delivery.admitted", data: { principal: { id: RELEASE_MANAGER } } },
+      { type: "response.submitted", data: { interactionId: request.requestId } },
+      { type: "response.settled", data: { outcome: "applied" } },
       {
-        type: "approval.settled",
-        data: {
-          outcome: "approved",
-          requestId: request.requestId,
-          responderPrincipalId: RELEASE_MANAGER,
-        },
+        type: "interaction.settled",
+        data: { interactionId: request.requestId, outcome: "accepted" },
       },
-      { type: "input.resolved" },
-      {
-        type: "action.result",
-        data: { status: "completed", result: { toolName: "authorized-change" } },
-      },
-      { type: "turn.completed" },
+      { type: "call.settled", data: { callId: request.action.callId, outcome: "completed" } },
+      { data: { outcome: "completed" }, type: "turn.settled" },
     ]);
-    expectResolved(settled, request, "approved");
+    expectResolved(settled, request, "accepted");
     settled.calledTool("authorized-change", {
       status: "completed",
       output: { executions: 1 },

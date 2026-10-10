@@ -27,15 +27,16 @@ export default defineEval({
     const request = approvalFor(held, "change-a");
 
     const approved = (await session.respond(answers("approve", request), asAlice)).expectOk();
-    expectResolved(approved, request, "approved");
+    expectResolved(approved, request, "accepted");
     approved.calledTool("change-a", { status: "completed", output: { executions: 1 }, count: 1 });
     approved.notEvent("turn.started");
+    // eve runs the approved call before the model's next run starts.
     approved.eventOrder([
-      { type: "input.resolved" },
-      { type: "step.started" },
-      { type: "action.result", data: { status: "completed", result: { toolName: "change-a" } } },
-      { type: "message.completed", data: { message: /^Change A: done / } },
-      { type: "turn.completed" },
+      { type: "interaction.settled", data: { interactionId: request.requestId } },
+      { type: "call.settled", data: { callId: request.action.callId, outcome: "completed" } },
+      { type: "model.started" },
+      { type: "content.completed", data: { phase: "reply", value: /^Change A: done / } },
+      { data: { outcome: "completed" }, type: "turn.settled" },
     ]);
     expectNoModelCallWhileOpen(session, request.requestId);
   },

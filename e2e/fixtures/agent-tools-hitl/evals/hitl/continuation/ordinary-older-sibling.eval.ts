@@ -26,7 +26,7 @@ export default defineEval({
     // the newer change is cancelled too, and nothing runs.
     stale.expectOk();
     stale.notEvent("turn.started");
-    stale.event("message.completed", { count: 1 });
+    stale.event("content.completed", { count: 1, data: { kind: "text", phase: "reply" } });
     expectApprovalCancelled(session, newer);
     expectChangeStillUnexecuted(session);
     t.check(session.pendingInputRequests.length, equals(0));

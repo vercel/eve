@@ -1,5 +1,5 @@
-import type { MessageStreamEvent } from "eve/client";
-import { defineEval } from "eve/evals";
+import type { SessionStreamEvent } from "eve/client";
+import { defineEval, toolCallsOf } from "eve/evals";
 
 const BASH_TOOL = "bash";
 const INDEX_COMMAND = "for i in $(seq 1 120); do echo indexed batch $i; sleep 1; done";
@@ -54,11 +54,10 @@ function jobWasObservedAndStopped(outputs: readonly BashOutput[]): boolean {
   );
 }
 
-function bashOutputs(events: readonly MessageStreamEvent[]): readonly BashOutput[] {
-  return events.flatMap((event) => {
-    if (event.type !== "action.result" || event.data.result.kind !== "tool-result") return [];
-    if (event.data.result.toolName !== BASH_TOOL) return [];
-    const output = event.data.result.output;
+function bashOutputs(events: readonly SessionStreamEvent[]): readonly BashOutput[] {
+  return toolCallsOf(events).flatMap((call) => {
+    if (call.name !== BASH_TOOL || call.status !== "completed") return [];
+    const output = call.output;
     if (typeof output !== "object" || output === null || Array.isArray(output)) return [];
     return [output as BashOutput];
   });

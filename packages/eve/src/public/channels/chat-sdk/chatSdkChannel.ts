@@ -506,6 +506,7 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
         await clearAnsweredCards({ resolutions: [resolution] }, channel);
       await prompts["interaction.settled"](event, ctx);
     },
+    "response.admitted": prompts["response.admitted"],
     async "content.completed"({ data }, { channel }) {
       if (data.kind !== "text") return;
       const text = typeof data.value === "string" ? data.value : "";

@@ -1,3 +1,4 @@
+import { getMessageResponseDeliveryId } from "#client/message-response.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
@@ -35,6 +36,7 @@ import type {
   EveEvalToolCall,
   EveEvalTurn,
   EveEvalWaitForEventOptions,
+  EveEvalWatchOptions,
 } from "#evals/types.js";
 import type { EveEvalInputRequestMatchOptions, EveEvalToolCallMatchOptions } from "#evals/match.js";
 import { assertReportedToolName } from "#evals/reported-tool-name.js";
@@ -79,6 +81,8 @@ export class EvalSessionDriver implements EveEvalSession {
   readonly #signal: AbortSignal | undefined;
   readonly #collector: AssertionCollector;
   readonly #events: SessionStreamEvent[] = [];
+  /** Earlier events that name calls and tasks this driver's turns settle; never reported. */
+  readonly #history: readonly SessionStreamEvent[];
   readonly #primary: boolean;
   readonly #onSessionStart: ((event: EvalSessionStartedEvent) => void) | undefined;
   readonly #traceContexts: RuntimeTraceContext[] = [];
@@ -94,7 +98,10 @@ export class EvalSessionDriver implements EveEvalSession {
     readonly session: ClientSession;
     readonly onTurn: (session: EvalSessionDriver) => void;
     readonly signal?: AbortSignal;
+    /** What this eval already read of the session before this driver attached. */
+    readonly history?: readonly SessionStreamEvent[];
   }) {
+    this.#history = input.history ?? [];
     this.#collector = input.collector;
     this.#onSessionStart = input.onSessionStart;
     this.#primary = input.primary;
@@ -151,7 +158,10 @@ export class EvalSessionDriver implements EveEvalSession {
     if (result.status !== "accepted") {
       throw new Error(`compact() found no active session for "${this.sessionId}".`);
     }
-    return await this.readTurn();
+    // A compaction between turns settles a context change and ends no turn.
+    return await this.consume(this.#session.stream({ signal: this.#signal }), undefined, {
+      endsWith: (event) => event.type === "context.settled",
+    }).result();
   }
 
   agent(opened: ChildOpened): EveEvalAgentSession {
@@ -246,16 +256,23 @@ export class EvalSessionDriver implements EveEvalSession {
       inputResponses === undefined
         ? await this.#session.send(message!, options)
         : await this.#session.respond(inputResponses, options);
-    return this.consume(response, message);
+    // A message's response ends when its delivery settles; an answer's at its first turn boundary.
+    const deliveryId = message === undefined ? undefined : getMessageResponseDeliveryId(response);
+    return this.consume(response, message, { deliveryId });
   }
 
   /** @internal */
   consume(
     events: AsyncIterable<SessionStreamEvent>,
     message?: SendTurnInput["message"],
+    ending: {
+      readonly deliveryId?: string;
+      readonly endsWith?: (event: SessionStreamEvent) => boolean;
+    } = {},
   ): EveEvalLiveTurn {
     const sessionId = this.sessionId;
     return new EvalLiveTurn({
+      ...ending,
       events,
       observe: (event) => this.#observeEvent(sessionId, event),
       record: (observed) => {
@@ -290,9 +307,11 @@ export class EvalSessionDriver implements EveEvalSession {
     return await this.watchTurn(options).result();
   }
 
-  watchTurn(options?: { readonly startIndex?: number }): EveEvalLiveTurn {
+  watchTurn(options?: EveEvalWatchOptions): EveEvalLiveTurn {
     return this.consume(
       this.#session.stream({ signal: this.#signal, startIndex: options?.startIndex }),
+      undefined,
+      { endsWith: options?.until },
     );
   }
 
@@ -341,7 +360,7 @@ export class EvalSessionDriver implements EveEvalSession {
 
     const derived = deriveRunFacts(input.events, {
       sessionId: input.sessionId,
-      usageEvents: this.#events,
+      usageEvents: this.#history.length === 0 ? this.#events : [...this.#history, ...this.#events],
     });
     const turn = new EvalTurn({
       collector: this.#collector,
@@ -390,9 +409,10 @@ export class EvalSessionDriver implements EveEvalSession {
 }
 
 interface LiveEventWaiter {
-  readonly matches: (event: SessionStreamEvent) => boolean;
+  /** What the waiter waits for, once `event` brings it. */
+  readonly take: (event: SessionStreamEvent) => unknown;
   readonly reject: (error: Error) => void;
-  readonly resolve: (event: SessionStreamEvent) => void;
+  readonly resolve: (value: unknown) => void;
 }
 
 class EvalLiveTurn implements EveEvalLiveTurn {
@@ -404,6 +424,10 @@ class EvalLiveTurn implements EveEvalLiveTurn {
   #waitError: Error | undefined;
 
   constructor(input: {
+    /** A message's delivery: its response ends when the delivery settles, not at a turn boundary. */
+    readonly deliveryId?: string;
+    /** Ends the turn with the line holding a matching event instead of a turn boundary. */
+    readonly endsWith?: (event: SessionStreamEvent) => boolean;
     readonly events: AsyncIterable<SessionStreamEvent>;
     readonly observe: (event: SessionStreamEvent) => void;
     readonly record: (events: readonly SessionStreamEvent[]) => EveEvalTurn;
@@ -412,7 +436,7 @@ class EvalLiveTurn implements EveEvalLiveTurn {
   }) {
     this.session = input.session;
     this.sessionId = input.sessionId;
-    this.#completion = this.#consume(input.events, input.observe, input.record);
+    this.#completion = this.#consume(input.events, input.observe, input.record, input);
     void this.#completion.catch(() => {});
   }
 
@@ -435,17 +459,38 @@ class EvalLiveTurn implements EveEvalLiveTurn {
     const matches = (event: SessionStreamEvent): boolean =>
       event.type === type &&
       (options?.data === undefined ||
-        matchesValue(options.data, "data" in event ? event.data : undefined));
-    const observed = this.#events.find(matches);
-    if (observed !== undefined) return observed as EveEvalStreamEvent<TType>;
-    if (this.#waitError !== undefined) throw this.#waitError;
+        matchesValue(options.data, "data" in event ? event.data : undefined)) &&
+      (options?.scope === undefined || matchesValue(options.scope, event.scope ?? {}));
+    const take = (event: SessionStreamEvent) =>
+      matches(event) ? (event as EveEvalStreamEvent<TType>) : undefined;
+    return await this.#waitFor(take, this.#events.find(matches) as EveEvalStreamEvent<TType>);
+  }
 
-    return await new Promise<EveEvalStreamEvent<TType>>((resolve, reject) => {
-      const waiter: LiveEventWaiter = {
-        matches,
-        reject,
-        resolve: (event) => resolve(event as EveEvalStreamEvent<TType>),
-      };
+  async waitForToolCall(
+    name: string,
+    options: Omit<EveEvalToolCallMatchOptions, "count"> = {},
+  ): Promise<EveEvalToolCall> {
+    const find = () =>
+      deriveRunFacts(this.#events, { sessionId: this.sessionId }).toolCalls.find(
+        (call) =>
+          call.name === name &&
+          call.status !== "pending" &&
+          toolCallMatches(call, { ...options, status: options.status ?? call.status }),
+      );
+    // A call settles on `call.settled`; nothing else can complete one.
+    const take = (event: SessionStreamEvent) =>
+      event.type === "call.settled" ? find() : undefined;
+    return await this.#waitFor(take, find());
+  }
+
+  async #waitFor<T>(
+    take: (event: SessionStreamEvent) => T | undefined,
+    observed: T | undefined,
+  ): Promise<T> {
+    if (observed !== undefined) return observed;
+    if (this.#waitError !== undefined) throw this.#waitError;
+    return await new Promise<T>((resolve, reject) => {
+      const waiter: LiveEventWaiter = { reject, resolve: (value) => resolve(value as T), take };
       this.#waiters.add(waiter);
     });
   }
@@ -454,13 +499,27 @@ class EvalLiveTurn implements EveEvalLiveTurn {
     source: AsyncIterable<SessionStreamEvent>,
     observe: (event: SessionStreamEvent) => void,
     record: (events: readonly SessionStreamEvent[]) => EveEvalTurn,
+    ending: {
+      readonly deliveryId?: string;
+      readonly endsWith?: (event: SessionStreamEvent) => boolean;
+    },
   ): Promise<EveEvalTurn> {
+    const { deliveryId, endsWith } = ending;
+    let matched = false;
     try {
       let sawBoundary = false;
-      const segment = new ResponseSegment();
+      // A turn ends at its boundary. A message's response may also end earlier, when its
+      // delivery settles without one, as an answer routed to a child does.
+      const turn = new ResponseSegment();
+      const delivery = deliveryId === undefined ? undefined : new ResponseSegment({ deliveryId });
       for await (const event of source) {
         this.#events.push(event);
-        const endsSegment = segment.observe(event);
+        const endsTurn = turn.observe(event);
+        if (endsWith?.(event) === true) matched = true;
+        const endsSegment =
+          endsWith === undefined
+            ? (delivery?.observe(event) ?? false) || endsTurn
+            : matched && event.meta.endOfLine !== false;
         observe(event);
         this.#resolveWaiters(event);
 
@@ -495,9 +554,10 @@ class EvalLiveTurn implements EveEvalLiveTurn {
 
   #resolveWaiters(event: SessionStreamEvent): void {
     for (const waiter of this.#waiters) {
-      if (!waiter.matches(event)) continue;
+      const value = waiter.take(event);
+      if (value === undefined) continue;
       this.#waiters.delete(waiter);
-      waiter.resolve(event);
+      waiter.resolve(value);
     }
   }
 

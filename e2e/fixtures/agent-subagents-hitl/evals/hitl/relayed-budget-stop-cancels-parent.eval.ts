@@ -23,16 +23,16 @@ export default defineEval({
     }
 
     const stopped = await session.respond([{ optionId: "stop", requestId: request.requestId }]);
-    stopped.event("input.resolved", {
+    stopped.event("interaction.settled", {
       count: 1,
       data: {
-        resolutions: [
-          { outcome: "answered", requestId: request.requestId, response: { optionId: "stop" } },
-        ],
+        interactionId: request.requestId,
+        outcome: "declined",
+        response: { optionId: "stop" },
       },
     });
-    stopped.event("turn.cancelled", { count: 1 });
-    stopped.notEvent("turn.failed");
-    stopped.notEvent("message.completed", { data: { message: /RELAY-RESULT/u } });
+    stopped.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
+    stopped.notEvent("turn.settled", { data: { outcome: "failed" } });
+    stopped.notEvent("content.completed", { data: { phase: "reply", value: /RELAY-RESULT/u } });
   },
 });

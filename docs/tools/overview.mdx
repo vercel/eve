@@ -174,7 +174,7 @@ export default defineTool({
 });
 ```
 
-eve publishes every earlier yield as an `action.partial` stream event. The
+eve publishes every earlier yield as a `call.progress` stream record. The
 snapshot is visible to channels, hooks, and clients but never enters model
 history or `toModelOutput`; only the final yield does. Treat snapshots as
 last-write-wins by tool call id, not append-only progress. The durable runtime
@@ -192,7 +192,7 @@ action complete.
 eve normalizes and bounds projected text before rendering it. If either
 callback throws or returns an empty string, eve keeps the existing activity
 label. `label.complete` does not run for failed or rejected tool calls. The
-full values remain available in `action.partial` and `action.result`; renderers
+full values remain available in `call.progress` and `call.settled`; renderers
 receive only the projected text.
 
 ### Durable waits
@@ -228,10 +228,10 @@ answer from the human.
 It does not by itself create a durable wait for a person, timer, or external event. The value's
 meaning depends on the executor:
 
-| Executor             | Ordinary `yield value`                                                                  | Final output                                                                                                |
-| -------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `defineTool`         | Earlier values are `action.partial` snapshots; the final yield becomes the tool result. | Last yielded value; a generator `return` value is ignored.                                                  |
-| `defineWorkflowTool` | Every yield is an `action.partial` snapshot.                                            | Explicit return value; falls back to the last yield if the return is `null` or `undefined`, then to `null`. |
+| Executor             | Ordinary `yield value`                                                                 | Final output                                                                                                |
+| -------------------- | -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `defineTool`         | Earlier values are `call.progress` snapshots; the final yield becomes the tool result. | Last yielded value; a generator `return` value is ignored.                                                  |
+| `defineWorkflowTool` | Every yield is a `call.progress` snapshot.                                             | Explicit return value; falls back to the last yield if the return is `null` or `undefined`, then to `null`. |
 
 Progress snapshots do not enter model history as intermediate tool results. The final output
 selected by the rules above becomes the tool result.
@@ -260,7 +260,7 @@ eve never runs authored tools during discovery. The model sees descriptors first
 
 ## When a tool throws
 
-If an authored tool's `execute` function throws, eve records a failed `action.result` and gives the error to the model as a tool error. The model can respond, choose another action, or call the tool again. eve does not automatically call the tool again based on the exception type, an upstream HTTP status, or a `retryable` property.
+If an authored tool's `execute` function throws, eve records the call as `call.settled` with `outcome: "failed"` and gives the error to the model as a tool error. The model can respond, choose another action, or call the tool again. eve does not automatically call the tool again based on the exception type, an upstream HTTP status, or a `retryable` property.
 
 Authored tools have no public terminal-error class or retry policy for thrown exceptions. Handle retry policy inside the tool when the operation is safe to retry, and return or throw an actionable error when it is not. Do not rely on that distinction to protect a write: an interruption before the durable step completes can re-run the step and execute the tool again even if the first request reached the upstream service.
 
@@ -303,7 +303,7 @@ toModelOutput(output) {
 },
 ```
 
-`toModelOutput` receives the final, typed `execute` return and only affects the model. Channel event handlers and hooks still get the full output on `action.result`, so a channel can render rich platform output (Slack Block Kit, say) the model never sees. Return `{ type: "text", value }` for a summary, or `{ type: "json", value }` for a smaller object.
+`toModelOutput` receives the final, typed `execute` return and only affects the model. Channel event handlers and hooks still get the full output on `call.settled`, so a channel can render rich platform output (Slack Block Kit, say) the model never sees. Return `{ type: "text", value }` for a summary, or `{ type: "json", value }` for a smaller object.
 
 Tool outputs must be JSON-serializable. Return plain objects, arrays, strings, numbers, booleans, or `null`; convert values like `Date`, `Map`, `Set`, `NaN`, and cyclic objects before returning them from `execute` or from a `{ type: "json" }` `toModelOutput`.
 

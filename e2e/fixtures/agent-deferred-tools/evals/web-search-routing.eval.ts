@@ -19,10 +19,8 @@ export default defineEval({
     turn.expectOk();
     turn.eventsSatisfy("web_search is the only tool called", (events) => {
       const called = events.flatMap((event) =>
-        event.type === "actions.requested"
-          ? event.data.actions.flatMap((action) =>
-              action.kind === "tool-call" ? [action.toolName] : [],
-            )
+        event.type === "call.requested" && event.data.capability.kind === "tool"
+          ? [event.data.capability.name]
           : [],
       );
       return called.length > 0 && called.every((name) => name === "web_search");

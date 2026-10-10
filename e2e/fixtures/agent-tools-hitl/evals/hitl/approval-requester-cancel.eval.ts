@@ -19,24 +19,21 @@ export default defineEval({
     const { requestId } = parked.session.requireInputRequest({ toolName: TOOL });
 
     const refused = await session.respond([{ optionId: "cancel", requestId }], { headers: BOB });
-    refused.event("approval.candidate", {
+    refused.event("delivery.admitted", { count: 1, data: { principal: { id: "bob" } } });
+    refused.event("response.submitted", { count: 1, data: { interactionId: requestId } });
+    refused.event("response.settled", {
       count: 1,
-      data: {
-        outcome: "rejected",
-        reason: "Only the requester can cancel this change.",
-        requestId,
-        responderPrincipalId: "bob",
-      },
+      data: { outcome: "refused", reason: "Only the requester can cancel this change." },
     });
-    refused.notEvent("approval.settled");
-    refused.notEvent("input.resolved");
+    refused.notEvent("interaction.settled");
 
     const cancelled = await session.respond([{ optionId: "cancel", requestId }], {
       headers: ALICE,
     });
-    cancelled.event("approval.settled", {
+    cancelled.event("delivery.admitted", { count: 1, data: { principal: { id: "alice" } } });
+    cancelled.event("interaction.settled", {
       count: 1,
-      data: { outcome: "cancelled", requestId, responderPrincipalId: "alice" },
+      data: { interactionId: requestId, outcome: "declined" },
     });
     cancelled.calledTool(TOOL, { status: "completed", count: 0 });
     t.succeeded();

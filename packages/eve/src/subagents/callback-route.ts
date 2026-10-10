@@ -51,6 +51,10 @@ const sessionAuthorizationCallbackSchema = z.object({
     interactionSchemas["interaction.opened"],
     interactionSchemas["interaction.settled"],
     z.object({
+      type: z.literal("response.admitted"),
+      data: z.object({ deliveryId: z.string().optional(), interactionId: z.string() }),
+    }),
+    z.object({
       type: z.literal("response.settled"),
       data: z.object({
         deliveryId: z.string().optional(),

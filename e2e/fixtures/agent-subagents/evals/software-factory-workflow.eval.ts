@@ -31,17 +31,17 @@ export default defineEval({
     t.succeeded();
     t.calledTool("workflow", { count: 1 });
     // The workflow tool runs as a task: its result settles the task, not the call.
-    t.event("task.settled", {
+    t.event("call.settled", {
       count: 1,
-      data: { output: (observed) => isDeepStrictEqual(observed, expected), status: "completed" },
+      data: { output: (observed) => isDeepStrictEqual(observed, expected), outcome: "completed" },
     });
-    t.event("agent.started", { count: 1, data: { name: TRIAGE } });
-    t.event("agent.started", { count: 1, data: { name: REVIEW } });
-    t.event("agent.started", { count: 1, data: { name: REPRODUCE } });
+    t.event("child.opened", { count: 1, data: { name: TRIAGE } });
+    t.event("child.opened", { count: 1, data: { name: REVIEW } });
+    t.event("child.opened", { count: 1, data: { name: REPRODUCE } });
     turn.eventsSatisfy("analysis fans out before reproduction consumes both results", (events) => {
       const called = new Map<string, number>();
       for (const [index, event] of events.entries()) {
-        if (event.type === "agent.started" && !called.has(event.data.name)) {
+        if (event.type === "child.opened" && !called.has(event.data.name)) {
           called.set(event.data.name, index);
         }
       }

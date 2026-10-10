@@ -26,10 +26,11 @@ export default defineEval({
     const stale = (
       await session.respond([{ optionId: "approve", requestId: "an-earlier-prompt" }], asAlice)
     ).expectOk();
-    expectResolved(stale, request, "ignored");
+    expectResolved(stale, request, "withdrawn");
     expectNotRun(stale, "change-a");
-    stale.event("message.received", { count: 1, data: { message: "approve" } });
-    stale.event("message.completed", { data: { message: REPLY.staleAnswer } });
-    stale.event("turn.completed", { count: 1 });
+    // The answer reaches the model as a note about an earlier prompt, never as Alice's text.
+    stale.event("delivery.consumed", { count: 1, data: { parts: [] } });
+    stale.event("content.completed", { data: { phase: "reply", value: REPLY.staleAnswer } });
+    stale.event("turn.settled", { count: 1, data: { outcome: "completed" } });
   },
 });

@@ -18,10 +18,10 @@ export default defineEval({
     const following = next(t, session);
     await session.cancel();
     const cancelled = await following;
-    cancelled.event("input.resolved", {
+    cancelled.event("interaction.settled", {
       count: 1,
-      data: { resolutions: [{ outcome: "cancelled", requestId: request.requestId }] },
+      data: { interactionId: request.requestId, outcome: "interrupted" },
     });
-    cancelled.event("turn.cancelled", { count: 1 });
+    cancelled.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
   },
 });

@@ -20,25 +20,19 @@ export default defineEval({
     ]);
 
     approved.expectOk();
-    approved.event("approval.candidate", {
-      data: { outcome: "pending", requestId: approval.requestId },
+    approved.event("response.submitted", {
+      data: { interactionId: approval.requestId },
       count: 1,
     });
-    approved.event("approval.settled", {
-      data: { outcome: "approved", requestId: approval.requestId },
+    approved.event("interaction.settled", {
+      data: { interactionId: approval.requestId, outcome: "accepted" },
       count: 1,
     });
-    approved.event("action.result", {
-      data: {
-        result: {
-          kind: "tool-result",
-          output: new RegExp(MARKER),
-          toolName: TOOL_NAME,
-        },
-        status: "completed",
-      },
-      count: 1,
-    });
+    approved.eventOrder([
+      { type: "interaction.settled", data: { interactionId: approval.requestId } },
+      { type: "call.started", data: { clearedBy: { interactionId: approval.requestId } } },
+    ]);
+    approved.calledTool(TOOL_NAME, { output: new RegExp(MARKER), status: "completed", count: 1 });
     t.succeeded();
   },
 });

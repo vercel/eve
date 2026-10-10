@@ -67,6 +67,17 @@ export function relayedInteractionEvent(
       return relaysSettlement(view.interactions[event.data.interactionId], event.data.outcome)
         ? { data: event.data, type: "interaction.settled" }
         : undefined;
+    case "response.admitted": {
+      // A forwarded approval's answer stands while the rest of its batch waits; the serving
+      // session marks its own copy so a typed reply there can't revise it.
+      const row = view.responses[event.data.responseId];
+      if (row === undefined) return undefined;
+      if (view.interactions[row.interactionId]?.request.kind !== "approval") return undefined;
+      return {
+        data: { deliveryId: row.deliveryId, interactionId: row.interactionId },
+        type: "response.admitted",
+      };
+    }
     case "response.settled": {
       const { outcome, reason, responseId } = event.data;
       const row = view.responses[responseId];

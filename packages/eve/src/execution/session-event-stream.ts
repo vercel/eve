@@ -2,6 +2,7 @@ import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import { getRun } from "#internal/workflow/runtime.js";
 import { createEventReader } from "#protocol/session-lines.js";
+import { readV26TranscriptLine } from "#protocol/v26-transcript-lines.js";
 import { isStoredLine, type StoredLine } from "#protocol/session-events/envelope.js";
 
 /** Options for {@link streamSessionEvents}. */
@@ -25,6 +26,8 @@ export interface SessionEventStreamOptions {
 export interface PositionedLine {
   readonly position: number;
   readonly line: StoredLine | undefined;
+  /** The line as stored, parsed. */
+  readonly record: unknown;
 }
 
 /**
@@ -170,7 +173,7 @@ export async function* streamSessionLines(
     while (!signal?.aborted) {
       const { done, value } = await reader.read();
       if (done) return;
-      yield { line: isStoredLine(value) ? value : undefined, position };
+      yield { line: isStoredLine(value) ? value : undefined, position, record: value };
       if (!follow && tailIndex !== undefined && position >= tailIndex) return;
       position += 1;
     }
@@ -182,15 +185,18 @@ export async function* streamSessionLines(
 }
 
 /**
- * Iterates one session's v26 events in process, from the lines {@link streamSessionLines}
- * reads. Kept while v26 event types ride inside lines.
+ * Iterates one session's events in process, from the lines {@link streamSessionLines} reads.
+ * Lines an eve before v27 stored yield only the facts a transcript reads; see
+ * `readV26TranscriptLine`.
  */
 export async function* streamSessionEvents(
   sessionId: string,
   options: SessionEventStreamOptions = {},
 ): AsyncGenerator<SessionStreamEvent, void, undefined> {
   const reader = createEventReader();
-  for await (const { line, position } of streamSessionLines(sessionId, options)) {
-    if (line !== undefined) yield* reader.read(line, position);
+  for await (const { line, position, record } of streamSessionLines(sessionId, options)) {
+    // A session an earlier eve recorded in v26 lines still reads as a transcript.
+    const read = line ?? readV26TranscriptLine(record, position);
+    if (read !== undefined) yield* reader.read(read, position);
   }
 }
