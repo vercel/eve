@@ -332,7 +332,15 @@ function foldFact(
     case "model.requested": {
       const { owner, runId } = fact.data;
       if (view.runs[runId] !== undefined) return;
-      view.runs[runId] = { ...introduced, owner, runId, status: "requested" };
+      const turn = "turnId" in owner ? view.turns[owner.turnId] : undefined;
+      if (turn === undefined) {
+        view.runs[runId] = { ...introduced, owner, runId, status: "requested" };
+        return;
+      }
+      // A turn's runs are its steps, in the order it requested them.
+      const step = turn.runs ?? 0;
+      view.turns[turn.turnId] = { ...turn, runs: step + 1 };
+      view.runs[runId] = { ...introduced, owner, runId, status: "requested", step };
       return;
     }
     case "model.started": {

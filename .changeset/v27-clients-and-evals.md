@@ -15,6 +15,7 @@ Clients, evals and templates read v27 session facts.
   requests, sign-ins, tasks and call statuses from the shared tables `eve/events` folds,
   instead of a second, client-only lifecycle fold.
 - `eve/events` adds `foldReceivedEvent(view, event)`, for readers that update on each event,
-  and `copyView(view)`, a cheap copy for readers that keep every state.
+  and `copyView(view)`, a cheap copy for readers that keep every state. A run row carries its
+  `step` within its turn, and a turn row its `runs` count.
 - `eve/svelte` and `eve/vue` no longer export the `SessionAuthorization`, `SessionCall` and
   `SessionProjection` types. `SessionCallStatus` remains.

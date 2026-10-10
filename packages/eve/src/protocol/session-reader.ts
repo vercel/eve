@@ -40,20 +40,23 @@ export interface ReaderTurn {
   readonly waiting?: boolean;
 }
 
+/** One turn as a reader shows it. */
+export function readerTurn(view: SessionView, turnId: string): ReaderTurn | undefined {
+  const row = view.turns[turnId];
+  if (row === undefined) return undefined;
+  if (row.status === "paused") return { status: "active", turnId, waiting: true };
+  if (row.status === "running") return { status: "active", turnId };
+  const status =
+    row.outcome === "completed" ? "completed" : row.outcome === "failed" ? "failed" : "cancelled";
+  return { status, turnId };
+}
+
 /** Each turn as a reader shows it. */
 export function readerTurns(view: SessionView): Readonly<Record<string, ReaderTurn>> {
   const turns: Record<string, ReaderTurn> = {};
-  for (const row of Object.values(view.turns)) {
-    if (row.status !== "settled") {
-      turns[row.turnId] =
-        row.status === "paused"
-          ? { status: "active", turnId: row.turnId, waiting: true }
-          : { status: "active", turnId: row.turnId };
-      continue;
-    }
-    const status =
-      row.outcome === "completed" ? "completed" : row.outcome === "failed" ? "failed" : "cancelled";
-    turns[row.turnId] = { status, turnId: row.turnId };
+  for (const turnId of Object.keys(view.turns)) {
+    const turn = readerTurn(view, turnId);
+    if (turn !== undefined) turns[turnId] = turn;
   }
   return turns;
 }
@@ -69,38 +72,18 @@ export interface RunPlace {
   readonly stepIndex: number;
 }
 
-const placesByRuns = new WeakMap<object, ReadonlyMap<string, RunPlace>>();
-
-/**
- * Each turn-owned run's place. A run's step is the count of runs its turn requested before it,
- * which a complete view holds. A run a context change owns has no step.
- */
-function runPlaces(view: SessionView): ReadonlyMap<string, RunPlace> {
-  const cached = placesByRuns.get(view.runs);
-  if (cached !== undefined) return cached;
-  const places = new Map<string, RunPlace>();
-  const steps = new Map<string, number>();
-  for (const row of Object.values(view.runs)) {
-    if (!("turnId" in row.owner)) continue;
-    const { turnId } = row.owner;
-    const stepIndex = steps.get(turnId) ?? 0;
-    steps.set(turnId, stepIndex + 1);
-    places.set(row.runId, { stepIndex, turnId });
-  }
-  placesByRuns.set(view.runs, places);
-  return places;
-}
-
 export function runPlace(view: SessionView, runId: string | undefined): RunPlace | undefined {
-  return runId === undefined ? undefined : runPlaces(view).get(runId);
+  const row = runId === undefined ? undefined : view.runs[runId];
+  if (row === undefined || row.step === undefined || !("turnId" in row.owner)) return undefined;
+  return { stepIndex: row.step, turnId: row.owner.turnId };
 }
 
 /** A turn's latest step as of a position: the place of its last run introduced by then. */
 export function turnStepAt(view: SessionView, turnId: string, position = Infinity): number {
   let step = 0;
-  for (const [runId, place] of runPlaces(view)) {
-    const introducedAt = view.runs[runId]?.introducedAt ?? Infinity;
-    if (place.turnId === turnId && introducedAt <= position) step = place.stepIndex;
+  for (const row of Object.values(view.runs)) {
+    if (row.step === undefined || row.introducedAt > position) continue;
+    if ("turnId" in row.owner && row.owner.turnId === turnId) step = Math.max(step, row.step);
   }
   return step;
 }
@@ -253,6 +236,22 @@ function taskCallOf(view: SessionView, row: CallRow): ConversationTaskCall {
   return row.error === undefined
     ? { callId: row.callId, status: "failed", turnId }
     : { callId: row.callId, error: { message: row.error.message }, status: "failed", turnId };
+}
+
+/** One call that reached a task, as the task's record lists it. */
+export function readerTaskCall(
+  view: SessionView,
+  callId: string,
+): ConversationTaskCall | undefined {
+  const row = view.calls[callId];
+  return row?.taskId === undefined ? undefined : taskCallOf(view, row);
+}
+
+/** A task without its calls, as `task.started` introduced it. */
+export function readerTaskRow(view: SessionView, taskId: string): ConversationTask | undefined {
+  const row = view.tasks[taskId];
+  if (row === undefined) return undefined;
+  return { calls: {}, kind: row.kind === "agent" ? "agent" : "tool", name: row.name, taskId };
 }
 
 /** Each task with the calls that reached it. */

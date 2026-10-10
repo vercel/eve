@@ -3,7 +3,7 @@ import type { EveDynamicToolPart, EveMessageData } from "#client/message-reducer
 import {
   isSettledCallStatus,
   readerInput,
-  readerTasks,
+  readerTaskCall,
   reportedCallStatus,
 } from "#protocol/session-reader.js";
 
@@ -74,8 +74,7 @@ export function toolPartState(data: EveMessageData, part: EveDynamicToolPart): E
     return { ...base, approval: requested, state: "approval-requested" };
   }
 
-  const task =
-    call?.taskId === undefined ? undefined : readerTasks(view)[call.taskId]?.calls[part.toolCallId];
+  const task = call?.taskId === undefined ? undefined : readerTaskCall(view, part.toolCallId);
   if (call === undefined || status === undefined) {
     if (input === undefined) return part;
     return input.response === undefined

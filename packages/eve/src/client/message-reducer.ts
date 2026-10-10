@@ -1,6 +1,5 @@
 import {
   conversationLedger,
-  conversationView,
   emptyConversationLedger,
   foldConversationLedger,
   withConversationLedger,
@@ -86,7 +85,7 @@ export function defaultMessageReducer(): EveAgentReducer<EveMessageData> {
 }
 
 function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): EveMessageData {
-  const ledger = foldConversationLedger(conversationLedger(data), event);
+  const { ledger } = foldConversationLedger(conversationLedger(data), event);
   const content = withConversationLedger(reduceContent(data, event, ledger.view), ledger);
   const callIds = toolCallIds(content, event);
   return withConversationLedger(
@@ -97,14 +96,13 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
 
 /**
  * What an event says about the conversation's messages and parts. `after` is the tables with
- * the event folded in; the data still carries the ones before it.
+ * the event folded in.
  */
 function reduceContent(
   data: EveMessageData,
   event: EveAgentReducerEvent,
   after: SessionView,
 ): EveMessageData {
-  const before = conversationView(data);
   switch (event.type) {
     case "client.message.submitted":
     case "client.message.failed":
@@ -303,8 +301,8 @@ function reduceContent(
         return removeToolPart(data, callId);
       }
       const existing = findToolPart(data, callId);
-      const place = callPlace(before, callId);
-      const name = before.calls[callId]?.capability.name;
+      const place = callPlace(after, callId);
+      const name = after.calls[callId]?.capability.name;
       const turnId = place?.turnId ?? event.scope?.turnId;
       if (existing === undefined && turnId === undefined) return data;
       const part = {
@@ -362,7 +360,7 @@ function reduceContent(
 
     case "interaction.settled": {
       const { interactionId, outcome, reason } = event.data;
-      const attempt = readerSignIn(before, interactionId);
+      const attempt = readerSignIn(after, interactionId);
       if (attempt !== undefined) {
         const settled: { -readonly [K in keyof SignInSettlement]: SignInSettlement[K] } = {
           attemptId: interactionId,

@@ -20,11 +20,7 @@ import {
 import { Client, ClientError } from "#client/index.js";
 import type { ClientOptions, SendTurnInput, SendTurnPayload } from "#client/types.js";
 import { isFactType } from "#protocol/session-events/catalog.js";
-import {
-  copyView,
-  emptySessionView,
-  foldReceivedEvent,
-} from "#protocol/session-projection/fold.js";
+import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
 import { callStatus, readerInput, type SessionCallStatus } from "#protocol/session-reader.js";
 import { callOutputSource } from "#protocol/session-projection/selectors.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
@@ -367,9 +363,11 @@ export class EveAcpAdapter {
     event: SessionStreamEvent,
     client: AgentContext,
   ): Promise<void> {
-    const before = session.view;
-    if (isFactType(event.type)) {
-      session.view = copyView(before);
+    const fact = isFactType(event.type);
+    const before = new Map<string, ReturnType<typeof callStatus>>();
+    if (fact) {
+      for (const callId of session.tools.keys())
+        before.set(callId, callStatus(session.view, callId));
       foldReceivedEvent(session.view, event);
     }
     await this.#projectContent(sessionId, session, event, client);
@@ -379,10 +377,10 @@ export class EveAcpAdapter {
     // an approval reaches the client through its permission request.
     if (event.type === "call.requested") return;
     const updated = new Set<string>();
-    if (session.view !== before) {
+    if (fact) {
       for (const callId of session.tools.keys()) {
         const status = callStatus(session.view, callId);
-        if (status === undefined || status === callStatus(before, callId)) continue;
+        if (status === undefined || status === before.get(callId)) continue;
         updated.add(callId);
         await notifyUpdate(client, sessionId, {
           sessionUpdate: "tool_call_update",
