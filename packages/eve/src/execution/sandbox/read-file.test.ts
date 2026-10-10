@@ -231,6 +231,19 @@ describe("read_file PDFs", () => {
     });
   });
 
+  it("reads text that mentions the PDF header as text", async () => {
+    const sandbox = mockSandbox();
+    const content = "# Notes\nEvery PDF starts with %PDF- followed by its version.\n";
+    await sandbox.session.writeTextFile({ content, path: "/workspace/notes.md" });
+
+    const output = await contextStorage.run(sandboxContext(sandbox), () =>
+      executeReadFileOnSandbox(sandbox.session, { filePath: "/workspace/notes.md" }),
+    );
+
+    expect(output.file).toBeUndefined();
+    expect(output.totalLines).toBe(2);
+  });
+
   it("rejects PDFs over 20 MiB", async () => {
     const sandbox = mockSandbox();
     await sandbox.session.writeBinaryFile({
