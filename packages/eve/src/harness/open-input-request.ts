@@ -1,8 +1,5 @@
-import {
-  type OpenRequest,
-  openRequests,
-  type SessionProjection,
-} from "#protocol/session-projection.js";
+import type { SessionProjection } from "#protocol/session-projection.js";
+import { type OpenRequest, openRequests } from "#protocol/session-reader.js";
 import { answeredInteractionIds } from "#protocol/session-projection/selectors.js";
 
 /**

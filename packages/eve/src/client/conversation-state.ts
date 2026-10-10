@@ -1,11 +1,11 @@
-import { conversationProjection } from "#client/conversation-projection.js";
+import { conversationView } from "#client/conversation-projection.js";
 import type { EveAuthorizationPart, EveMessageData } from "#client/message-reducer-types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import {
   type ConversationTask,
   type ConversationTaskCall,
   openSignIns,
-} from "#protocol/session-projection.js";
+} from "#protocol/session-reader.js";
 
 export type { ConversationTask, ConversationTaskCall };
 
@@ -80,9 +80,7 @@ export function conversationAuthorizations(
 
 /** A sign-in the session still waits on, which resumes its work when the callback arrives. */
 export function hasPendingAuthorizations(state: ConversationState): boolean {
-  return openSignIns(conversationProjection(state)).some(
-    (attempt) => attempt.awaitsCallback === true,
-  );
+  return openSignIns(conversationView(state)).some((attempt) => attempt.awaitsCallback === true);
 }
 
 /**

@@ -1,6 +1,7 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { ChildOpenedData } from "#protocol/session-events/families/child.js";
-import { foldSession, initialSessionProjection } from "#protocol/session-projection.js";
+import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
+import { readerInput } from "#protocol/session-reader.js";
 import type { TaskStartedData } from "#protocol/session-events/families/task.js";
 import type { CallOutcome, CallRequestedData } from "#protocol/session-events/families/call.js";
 import type { InputRequest } from "#shared/input.js";
@@ -109,10 +110,10 @@ export function deriveRunFacts(
     return call;
   };
 
-  // The private fold rebuilds each request with the call it's about.
-  let requests = initialSessionProjection();
+  // The shared tables rebuild each request with the call it's about.
+  const view = emptySessionView();
   for (const event of events) {
-    requests = foldSession(requests, event);
+    foldReceivedEvent(view, event);
     switch (event.type) {
       case "turn.started": {
         if (!turnIndexes.has(event.data.turnId)) {
@@ -208,7 +209,7 @@ export function deriveRunFacts(
         break;
       }
       case "interaction.opened": {
-        const request = requests.inputs[event.data.interactionId]?.request;
+        const request = readerInput(view, event.data.interactionId)?.request;
         if (request !== undefined) inputRequests.push(request);
         break;
       }

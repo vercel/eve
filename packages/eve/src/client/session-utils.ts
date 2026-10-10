@@ -1,12 +1,8 @@
 import { signInPromptOf, type SignInPrompt } from "#channel/interaction-prompts.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
-import {
-  foldSession,
-  initialSessionProjection,
-  openInputs,
-  openSignIns,
-} from "#protocol/session-projection.js";
+import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
+import { openRequests, openSignIns } from "#protocol/session-reader.js";
 import type { InputRequest } from "#shared/input.js";
 
 /** A connection authorization challenge that remains unresolved where a response ended. */
@@ -107,7 +103,7 @@ export function endsTurn(event: SessionEvent): boolean {
  * the session ends first; a read that follows no delivery ends with the turn ({@link endsTurn}).
  */
 export class ResponseSegment {
-  #projection = initialSessionProjection();
+  readonly #view = emptySessionView();
   readonly #authorizations = new Map<string, PendingAuthorization>();
   readonly #deliveryId: string | undefined;
   #boundary: SessionEvent | undefined;
@@ -117,11 +113,11 @@ export class ResponseSegment {
   }
 
   get inputRequests(): readonly InputRequest[] {
-    return openInputs(this.#projection).map((input) => input.request);
+    return openRequests(this.#view).map((input) => input.request);
   }
 
   get pendingAuthorizations(): readonly PendingAuthorization[] {
-    return openSignIns(this.#projection).flatMap(
+    return openSignIns(this.#view).flatMap(
       (attempt) => this.#authorizations.get(attempt.attemptId) ?? [],
     );
   }
@@ -132,7 +128,7 @@ export class ResponseSegment {
 
   /** Records `event`; an ending fact ends the response after the rest of its commit. */
   observe(event: SessionEvent): boolean {
-    this.#projection = foldSession(this.#projection, event);
+    foldReceivedEvent(this.#view, event);
     if (event.type === "interaction.opened") {
       const prompt = signInPromptOf(event.data, event.scope);
       if (prompt !== undefined) this.#authorizations.set(prompt.attemptId, prompt);

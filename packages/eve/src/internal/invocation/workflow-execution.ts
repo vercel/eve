@@ -20,12 +20,14 @@ import {
 } from "#internal/invocation/metadata.js";
 import type { RouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { getRun, getWorld } from "#internal/workflow/runtime.js";
+import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
 import {
-  foldSessionEvents,
-  type OpenSignIn,
-  openInputs,
-  type SessionProjection,
-} from "#protocol/session-projection.js";
+  openRequests,
+  openSignIns,
+  readerInput,
+  type ReaderSignIn,
+} from "#protocol/session-reader.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
 import { type InputRequest, type InputResponse, parseInputResponses } from "#shared/input.js";
 import type { JsonValue } from "#shared/json.js";
 
@@ -183,15 +185,15 @@ interface InvocationFailure {
   readonly terminal: boolean;
 }
 
-/** The session's shared projection, plus what an invocation shows that it doesn't keep. */
+/** The session's shared tables, plus what an invocation shows that they don't keep. */
 interface InvocationStream {
-  readonly projection: SessionProjection;
+  readonly view: SessionView;
   /** The batches in the order they were requested, each holding the requests it introduced. */
   readonly batches: readonly InputBatch[];
   /** The latest batch with requests still open, narrowed to them. */
   readonly pending: InputBatch | undefined;
   /** Each sign-in still open, in the order they opened. */
-  readonly signIns: readonly OpenSignIn[];
+  readonly signIns: readonly ReaderSignIn[];
   /** The latest turn's final message. */
   readonly result: JsonValue | undefined;
   /** How the latest turn ended; reset when a turn starts or a park resumes. */
@@ -205,7 +207,9 @@ async function readInvocationStream(invocationId: string): Promise<InvocationStr
   const parts = new Map<string, { readonly kind: string; readonly value: JsonValue | undefined }>();
   const opened: { readonly key: string; readonly line: number; readonly ids: string[] }[] = [];
   const events = streamSessionEvents(invocationId, { follow: false });
-  const { projection, signIns } = await foldSessionEvents(events, (event, before) => {
+  const view = emptySessionView();
+  const claimed = new Set<string>();
+  for await (const event of events) {
     switch (event.type) {
       case "turn.started":
         result = undefined;
@@ -213,10 +217,10 @@ async function readInvocationStream(invocationId: string): Promise<InvocationStr
         parts.clear();
         break;
       case "interaction.opened": {
-        // One commit's requests are one batch. The projection keeps the first request under an
-        // id, so a batch claims only new ids.
+        // One commit's requests are one batch, and a batch claims only new ids.
         if (event.data.request.kind === "sign-in") break;
-        if (before.inputs[event.data.interactionId] !== undefined) break;
+        if (claimed.has(event.data.interactionId)) break;
+        claimed.add(event.data.interactionId);
         const { line, index } = event.meta.position;
         const current = opened.at(-1);
         if (current?.line === line) current.ids.push(event.data.interactionId);
@@ -269,12 +273,14 @@ async function readInvocationStream(invocationId: string): Promise<InvocationStr
         break;
       }
     }
-  });
+    foldReceivedEvent(view, event);
+  }
+  const signIns = openSignIns(view);
   for (const batch of opened) {
     batches.push(
       new Map(
         batch.ids.flatMap((id) => {
-          const request = projection.inputs[id]?.request;
+          const request = readerInput(view, id)?.request;
           return request === undefined
             ? []
             : [[invocationInputRequestId(batch.key, request.requestId), request] as const];
@@ -282,7 +288,7 @@ async function readInvocationStream(invocationId: string): Promise<InvocationStr
       ),
     );
   }
-  const open = new Set(openInputs(projection).map((input) => input.request.requestId));
+  const open = new Set(openRequests(view).map((input) => input.request.requestId));
   let pending: InputBatch | undefined;
   for (const batch of batches.toReversed()) {
     const stillOpen = new Map([...batch].filter(([, request]) => open.has(request.requestId)));
@@ -290,11 +296,11 @@ async function readInvocationStream(invocationId: string): Promise<InvocationStr
     pending = stillOpen;
     break;
   }
-  return { batches, pending, projection, result, settled, signIns };
+  return { batches, pending, result, settled, signIns, view };
 }
 
 /** An open sign-in as the invocation API reports it. */
-function authorizationRequestOf(open: OpenSignIn): AgentInvocationAuthorizationRequest {
+function authorizationRequestOf(open: ReaderSignIn): AgentInvocationAuthorizationRequest {
   const request: {
     -readonly [
       K in keyof AgentInvocationAuthorizationRequest
@@ -336,7 +342,7 @@ function replaysSettledBatch(
     const rawRequestId = batch.get(response.requestId)?.requestId;
     if (rawRequestId === undefined || seen.has(rawRequestId)) return false;
     seen.add(rawRequestId);
-    const input = stream.projection.inputs[rawRequestId];
+    const input = readerInput(stream.view, rawRequestId);
     if (input?.status !== "settled" || input.response === undefined) return false;
     if (input.response.optionId !== response.optionId || input.response.text !== response.text) {
       return false;

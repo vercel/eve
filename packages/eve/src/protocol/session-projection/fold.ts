@@ -4,7 +4,7 @@
 // facts about entities it never saw introduced (or no longer retains), a second terminal, and
 // a terminal whose outcome is outside its closed set: the first terminal wins, and nothing is
 // inferred. It folds a line in place, replacing the rows the line changes, because a session can
-// run to many thousands of lines; take `cloneView` for a snapshot.
+// run to many thousands of lines; take `copyView` before a fold to keep the state before it.
 
 import { isFactType, isKnownOutcome, isProgressType } from "#protocol/session-events/catalog.js";
 import type { StoredLine, Usage } from "#protocol/session-events/envelope.js";
@@ -168,6 +168,45 @@ export function viewOfEvents(events: readonly ReceivedEvent[]): {
   const previews = emptyPreviews();
   foldEvents(view, events, { previews });
   return { previews, view };
+}
+
+/**
+ * A copy of a view that folding can change without changing `view`. Rows are replaced, never
+ * edited, so copying the tables is enough: a reader that keeps every state, such as a UI's
+ * reducer, copies before each fold instead of cloning every row.
+ */
+export function copyView(view: SessionView): SessionView {
+  return {
+    ...view,
+    calls: { ...view.calls },
+    changes: { ...view.changes },
+    children: { ...view.children },
+    deliveries: { ...view.deliveries },
+    interactions: { ...view.interactions },
+    parts: { ...view.parts },
+    responses: { ...view.responses },
+    runs: { ...view.runs },
+    tasks: { ...view.tasks },
+    turns: { ...view.turns },
+  };
+}
+
+/**
+ * Folds one event as a reader received it, for a reader that updates on each event rather than
+ * on each line. Facts apply in order within a line, so folding a line event by event leaves the
+ * same tables; the view's position moves past the line with its last event. Events of a line
+ * the view already passed are skipped.
+ */
+export function foldReceivedEvent(
+  view: SessionView,
+  event: { readonly type: string; readonly meta?: Partial<ReceivedEvent["meta"]> },
+): void {
+  const state = view as MutableView;
+  const line = event.meta?.position?.line ?? state.position;
+  if (line < state.position) return;
+  if (isFactType(event.type))
+    foldFact(state, undefined, event, { at: event.meta?.at ?? "", position: line });
+  if (event.meta?.endOfLine !== false) state.position = line + 1;
 }
 
 /** Moves a view's position past lines a read skipped, as a position marker says. */

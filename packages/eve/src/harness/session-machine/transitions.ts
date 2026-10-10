@@ -47,12 +47,8 @@ import type {
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { FactOf } from "#protocol/session-events/facts.js";
 import type { TurnAwaiting } from "#protocol/session-events/families/turn.js";
-import {
-  nextChangeId,
-  nextRunId,
-  openRequests,
-  type SessionProjection,
-} from "#protocol/session-projection.js";
+import { nextChangeId, nextRunId, type SessionProjection } from "#protocol/session-projection.js";
+import { openRequests } from "#protocol/session-reader.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { InteractionOrigin } from "#protocol/session-events/families/interaction.js";

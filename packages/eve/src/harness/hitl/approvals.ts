@@ -35,12 +35,8 @@ import {
 import { responseBindingFor } from "#harness/response-bindings.js";
 import { publicViewOf } from "#harness/session-machine/closure.js";
 import type { RefusedResponse } from "#harness/hitl/coordinator.js";
-import {
-  openRequests,
-  SUPERSEDED_BY_MESSAGE,
-  turnCoordinates,
-  turnCoordinatesOf,
-} from "#protocol/session-projection.js";
+import { turnCoordinates, turnCoordinatesOf } from "#protocol/session-projection.js";
+import { openRequests, SUPERSEDED_BY_MESSAGE } from "#protocol/session-reader.js";
 import type { InteractionOutcome } from "#protocol/session-events/families/interaction.js";
 import type {
   ResponseOutcome,
