@@ -442,11 +442,10 @@ describe("compileAgentManifest source graph", () => {
     ]);
     const namespace = moduleMap.nodes.__root__!.modules[wrapper.sourceId]!;
     const tools = await (namespace.default as ReturnType<typeof defineDynamic>).resolve(
-      null as never,
+      { schedule: null, turn: null } as never,
       {
         abortSignal: new AbortController().signal,
         channel: {},
-        facts: [],
         session: { id: "session", auth: { current: null, initiator: null } },
       } as never,
     );
