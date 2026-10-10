@@ -35,7 +35,7 @@ import {
   type ToolSchemaSource,
   UNSPECIFIED_INPUT_SCHEMA,
 } from "#tools/schema.js";
-import { normalizeApproval } from "#internal/authored-definition/approval.js";
+import { normalizeToolApproval } from "#internal/authored-definition/approval.js";
 import { shouldRebindDynamicCallbacks } from "#internal/dynamic-tool-rebind.js";
 import {
   assertResolverOnlyDynamicSentinel,
@@ -233,7 +233,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   }
 
   if (record.approval !== undefined) {
-    normalizeApproval(record.approval, message);
+    normalizeToolApproval(record.approval, message);
   }
 
   if (record.approvalKey !== undefined) {

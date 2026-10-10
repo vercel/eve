@@ -89,9 +89,27 @@ function extractApprovalRequests(input: {
     }
 
     const action = createRuntimeToolCallActionFromToolCall({ toolCall });
-    const label =
-      projectToolStartLabel(input.tools.get(action.toolName), action.input) ??
-      displayTitle(action.toolName);
+    const tool = input.tools.get(action.toolName);
+    const toolInput =
+      typeof toolCall.input === "object" &&
+      toolCall.input !== null &&
+      !Array.isArray(toolCall.input)
+        ? (toolCall.input as Record<string, unknown>)
+        : {};
+    const toolApproval = tool?.approval;
+    const prompt =
+      toolApproval === undefined || typeof toolApproval === "function"
+        ? undefined
+        : toolApproval.prompt?.({
+            callId: toolCall.toolCallId,
+            input: toolInput,
+            toolName: toolCall.toolName,
+          });
+    if (prompt !== undefined && typeof prompt !== "string") {
+      throw new Error(`Tool "${toolCall.toolName}" approval prompt must return a string.`);
+    }
+    const label = projectToolStartLabel(tool, action.input) ?? displayTitle(action.toolName);
+
     requests.push({
       action,
       allowFreeform: false,
@@ -101,7 +119,7 @@ function extractApprovalRequests(input: {
         { id: "approve", label: "Approve" },
         { id: "cancel", label: "Cancel" },
       ],
-      prompt: `Approve ${label}?`,
+      prompt: prompt ?? `Approve ${label}?`,
       requestId: approval.approvalId,
     });
   }
