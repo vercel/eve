@@ -266,6 +266,24 @@ describe("runReactions", () => {
     expect(dynamicTools(selected).map((tool) => tool.description)).toEqual(["Count 7."]);
   });
 
+  it("runs only hooks for a commit of streamed progress", async () => {
+    let selects = 0;
+    const ctx = session({
+      resolve: (() => null) as never,
+      select: (() => {
+        selects += 1;
+        return null;
+      }) as never,
+    });
+    const [record] = written(1, "content.delta") as unknown as readonly object[];
+    const delta = [{ ...record, progress: true }] as never;
+    await runReactions(ctx, { written: delta });
+    expect(selects).toBe(0);
+
+    await runReactions(ctx, { written: written(2) });
+    expect(selects).toBe(1);
+  });
+
   it("withdraws the slot of a resolve that throws, retrying when the selection changes", async () => {
     let fail = false;
     let calls = 0;

@@ -79,8 +79,12 @@ export async function runReactions(ctx: ContextContainer, input: RunReactionsInp
   const revision = readReactionsState(ctx).revision;
   const changedKinds = new Set<ReactionKind>();
   const changedHooks = new Set<string>();
+  // Streamed progress, such as content deltas, reaches hooks that handle it, and nothing else:
+  // capabilities depend on facts, and a select per delta would cost every stream.
+  const progressOnly = input.written.length > 0 && input.written.every(({ progress }) => progress);
 
   for (const reaction of reactions) {
+    if (progressOnly && reaction.kind !== "hook") continue;
     if (reaction.conversation === true && input.conversation === undefined) continue;
     let selection: JsonValue;
     try {
@@ -319,10 +323,11 @@ function withdraw(
 ): boolean {
   const previous = readSlot(ctx, reaction.id);
   if (previous?.digest !== failed.digest || previous.value !== null) {
-    log.error(`Reaction "${reaction.label}" failed; its contribution is withdrawn.`, {
-      error: toErrorMessage(error),
-      kind: reaction.kind,
-    });
+    // A model selection's failure is reported by the model call that needs it.
+    (reaction.kind === "model" ? log.warn : log.error)(
+      `Reaction "${reaction.label}" failed; its contribution is withdrawn.`,
+      { error: toErrorMessage(error), kind: reaction.kind },
+    );
   }
   const had = previous !== undefined && previous.value !== null;
   writeSlot(ctx, reaction.id, {
