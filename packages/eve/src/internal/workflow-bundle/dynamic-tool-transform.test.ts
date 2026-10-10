@@ -1298,6 +1298,35 @@ export default defineDynamic({
     });
   });
 
+  it("destructured callback param that shadows a captured binding does not collide", async () => {
+    // Minified extensions reuse short names, e.g. the published git extension's
+    // `defineGhTool(e)` with `approval: ({ toolInput: e }) => ...` (#4634).
+    const source = `
+import { defineDynamic, defineTool } from "eve/tools";
+
+function makeEcho(e) {
+  return defineTool({
+    description: "Echo",
+    inputSchema: { type: "object" },
+    approval: ({ toolInput: e }) => (e?.value === "secret" ? "user-approval" : "not-applicable"),
+    execute: ({ value }) => e() + ": " + value,
+  });
+}
+
+export default defineDynamic({
+  events: {
+    "session.started": async () => ({ tool: makeEcho(() => "echo") }),
+  },
+});
+`;
+
+    const { callHandler } = await transformAndEval("tools/shadow-destructured.ts", source);
+    const tool = (await callHandler()).tool as Record<string, Function>;
+
+    expect(await tool.approval!({ toolInput: { value: "secret" } })).toBe("user-approval");
+    expect(tool.execute!({ value: "hi" })).toBe("echo: hi");
+  });
+
   it("nested function param shadows handler var — inner value wins", async () => {
     // Handler declares `name = "outer"`, helper takes `name` as a param.
     // The execute body uses `name` — it should get the INNER value
