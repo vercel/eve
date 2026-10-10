@@ -95,27 +95,26 @@ function respond(request: MockModelRequest): MockModelResponse | string {
 
 const base = e2eAgentConfig({ mock: respond });
 
-export default defineAgent({
+export default defineDynamic({
   experimental: base.experimental,
   reasoning: "high",
   // Budget evals exhaust this with synthetic usage; ordinary HITL sessions do not.
   limits: { maxOutputTokensPerSession: 1_000_000 },
-  model: defineDynamic({
-    events: {
-      "session.started": () => ({
-        model: typeof base.model === "string" ? base.model : "openai/gpt-6.1-sol",
-        modelContextWindowTokens: base.modelContextWindowTokens,
-      }),
-      "step.started": (_event, ctx) => {
-        switch (ctx.session.auth.initiator?.attributes?.model) {
-          case "continuation":
-            return { model: continuationModel(), modelContextWindowTokens: 1_000_000 };
-          case "hitl":
-            return { model: humanInputModel(), modelContextWindowTokens: 1_000_000 };
-          default:
-            return { model: base.model, modelContextWindowTokens: base.modelContextWindowTokens };
-        }
-      },
-    },
-  }),
+  select: (_view, ctx) => {
+    const model = ctx.session.auth.initiator?.attributes?.model;
+    return typeof model === "string" ? model : null;
+  },
+  resolve: (scripted) => {
+    switch (scripted) {
+      case "continuation":
+        return defineAgent({ model: continuationModel(), modelContextWindowTokens: 1_000_000 });
+      case "hitl":
+        return defineAgent({ model: humanInputModel(), modelContextWindowTokens: 1_000_000 });
+      default:
+        return defineAgent({
+          model: base.model,
+          modelContextWindowTokens: base.modelContextWindowTokens,
+        });
+    }
+  },
 });

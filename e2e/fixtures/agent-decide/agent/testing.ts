@@ -72,21 +72,20 @@ export function fixtureModel(respond: MockModelResponder) {
     },
   });
   return defineDynamic({
-    events: {
-      "step.started": async (event, ctx) => {
-        const selected = await model.events["step.started"]!(event, ctx);
-        const selection =
-          typeof selected === "object" && "model" in selected ? selected : { model: selected };
-        routing.update((value) => ({
-          ...value,
-          model: typeof selection.model === "string" ? selection.model : selection.model.modelId,
-          reasoning: selection.reasoning ?? "provider-default",
-        }));
-        return {
-          ...selection,
-          modelContextWindowTokens: 1_000_000,
-        };
-      },
+    select: model.select!,
+    resolve: async (state, ctx) => {
+      const selected = await model.resolve(state, ctx);
+      const selection =
+        typeof selected === "object" && "model" in selected ? selected : { model: selected };
+      routing.update((value) => ({
+        ...value,
+        model: typeof selection.model === "string" ? selection.model : selection.model.modelId,
+        reasoning: selection.reasoning ?? "provider-default",
+      }));
+      return {
+        ...selection,
+        modelContextWindowTokens: 1_000_000,
+      };
     },
   });
 }

@@ -64,10 +64,13 @@ export type DynamicAgentResult = AgentDefinition | RemoteAgentDefinition | null;
 
 /**
  * Makes `agent.ts` dynamic: `resolve` returns `defineAgent(...)` for the session, and eve calls
- * it again when `select` changes. In the root agent it chooses the model, its options, and
- * reasoning; in `subagents/<name>/agent.ts` it chooses the whole subagent, which needs a
- * description so its parent knows when to delegate, or `null` to omit it. Fields that can't vary
- * per session, such as `build` or `compaction`, sit beside `select` and `resolve`.
+ * it again when `select` changes. Fields that can't vary per session, such as `build` or
+ * `compaction`, sit beside `select` and `resolve`.
+ *
+ * In the root agent, and in a subagent with a static `description`, `resolve` chooses the
+ * model, its options, and reasoning for the agent's own session. Without a static description,
+ * `subagents/<name>/agent.ts` chooses the whole subagent: `resolve` returns it with its
+ * description, or `null` to omit it.
  *
  * ```ts
  * export default defineDynamic({

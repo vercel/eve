@@ -1,17 +1,13 @@
-import { defineDynamic, defineSkill, type DynamicResolveContext } from "eve/skills";
+import { defineDynamic, defineSkill } from "eve/skills";
 import { recordDynamicSkillContext } from "../../dynamic-skill-context-audit";
 
-function resolve(event: "session.started" | "turn.started", ctx: DynamicResolveContext) {
-  recordDynamicSkillContext(event, ctx);
-  return defineSkill({
-    description: "Policy for auditing dynamic skill context.",
-    markdown: "Read the recorded resolver context when asked to audit it.",
-  });
-}
-
 export default defineDynamic({
-  events: {
-    "session.started": (_event, ctx) => resolve("session.started", ctx),
-    "turn.started": (_event, ctx) => resolve("turn.started", ctx),
+  select: (view) => view.latest["turn.started"] ?? null,
+  resolve: (turn, ctx) => {
+    recordDynamicSkillContext(turn === null ? "session.started" : "turn.started", ctx);
+    return defineSkill({
+      description: "Policy for auditing dynamic skill context.",
+      markdown: "Read the recorded resolver context when asked to audit it.",
+    });
   },
 });

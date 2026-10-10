@@ -13,22 +13,8 @@ if (requestedModel === MOCK_MODEL_SENTINEL) {
 
 const { experimental } = e2eAgentConfig();
 
-export default defineAgent({
+// Without a select, the dynamic agent resolves once, after the session's first commit.
+export default defineDynamic({
   experimental,
-  model: defineDynamic({
-    events: {
-      "session.started": (_event, ctx) => {
-        if (ctx.messages.length > 0) {
-          throw new Error(
-            "session.started dynamic model resolver ran after session history existed",
-          );
-        }
-
-        return {
-          model: selectedModel,
-          modelContextWindowTokens: 1_000_000,
-        };
-      },
-    },
-  }),
+  resolve: () => defineAgent({ model: selectedModel, modelContextWindowTokens: 1_000_000 }),
 });

@@ -8,15 +8,14 @@ import { z } from "zod";
  * asked even when a later step would not offer this one.
  */
 export default defineDynamic({
-  events: {
-    "step.started": (_event, ctx) =>
-      ctx.session.auth.current?.attributes?.flag === "retire"
-        ? null
-        : defineTool({
-            description: "Apply the retiring fixture change after approval.",
-            inputSchema: z.object({}),
-            approval: always(),
-            execute: () => ({ change: "retiring" }),
-          }),
-  },
+  select: (view) => view.latest["model.requested"] ?? null,
+  resolve: (_event, ctx) =>
+    ctx.session.auth.current?.attributes?.flag === "retire"
+      ? null
+      : defineTool({
+          description: "Apply the retiring fixture change after approval.",
+          inputSchema: z.object({}),
+          approval: always(),
+          execute: () => ({ change: "retiring" }),
+        }),
 });

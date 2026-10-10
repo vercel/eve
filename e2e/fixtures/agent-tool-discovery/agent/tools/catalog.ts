@@ -8,26 +8,24 @@ import { CATALOG_TOOLS, referenceOf } from "../lib/catalog";
  * the same deferred entries as authored files would give it.
  */
 export default defineDynamic({
-  events: {
-    "session.started": () =>
-      Object.fromEntries(
-        CATALOG_TOOLS.map(({ description, inputs = {}, name, result }) => [
-          name,
-          defineTool({
-            deferred: true,
-            description,
-            inputSchema: {
-              type: "object",
-              properties: Object.fromEntries(
-                Object.entries(inputs).map(([input, about]) => [
-                  input,
-                  { type: "string", description: about },
-                ]),
-              ),
-            },
-            execute: () => ({ reference: referenceOf(name), ...result }),
-          }),
-        ]),
-      ),
-  },
+  resolve: () =>
+    Object.fromEntries(
+      CATALOG_TOOLS.map(({ description, inputs = {}, name, result }) => [
+        name,
+        defineTool({
+          deferred: true,
+          description,
+          inputSchema: {
+            type: "object",
+            properties: Object.fromEntries(
+              Object.entries(inputs).map(([input, about]) => [
+                input,
+                { type: "string", description: about },
+              ]),
+            ),
+          },
+          execute: () => ({ reference: referenceOf(name), ...result }),
+        }),
+      ]),
+    ),
 });

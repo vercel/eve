@@ -1,13 +1,13 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
-import { defineAgent } from "eve";
+import { defineDynamic } from "eve";
 
 import { fixtureModel, routing } from "./testing";
 
 const { experimental } = e2eAgentConfig();
 
-export default defineAgent({
+export default defineDynamic({
   experimental,
-  model: fixtureModel(async (request) => {
+  ...fixtureModel(async (request) => {
     if (request.userMessages.some((text) => text.includes("auto-resume-question"))) {
       const result = request.toolResults.find((entry) => entry.name === "ask_question");
       if (result) return `Question answered: ${JSON.stringify(result.output)}`;

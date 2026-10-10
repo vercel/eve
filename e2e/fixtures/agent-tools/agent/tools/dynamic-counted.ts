@@ -9,21 +9,19 @@ async function simulateIo(): Promise<{ label: string }> {
 }
 
 export default defineDynamic({
-  events: {
-    "session.started": async (_event, _ctx) => {
-      const data = await simulateIo();
+  resolve: async (_event, _ctx) => {
+    const data = await simulateIo();
 
-      return {
-        get_io_count: defineTool({
-          description:
-            "Returns how many times the resolver's I/O function has actually executed. " +
-            "Only call when the user explicitly asks for the I/O count.",
-          inputSchema: { type: "object" as const, properties: {} },
-          async execute() {
-            return { ioCallCount: ioCallCount.get(), label: data.label };
-          },
-        }),
-      };
-    },
+    return {
+      get_io_count: defineTool({
+        description:
+          "Returns how many times the resolver's I/O function has actually executed. " +
+          "Only call when the user explicitly asks for the I/O count.",
+        inputSchema: { type: "object" as const, properties: {} },
+        async execute() {
+          return { ioCallCount: ioCallCount.get(), label: data.label };
+        },
+      }),
+    };
   },
 });

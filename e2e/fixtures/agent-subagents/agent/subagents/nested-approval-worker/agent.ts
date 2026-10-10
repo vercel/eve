@@ -1,4 +1,4 @@
-import { defineAgent, defineDynamic } from "eve";
+import { defineDynamic } from "eve";
 import { mockModel } from "eve/evals";
 import { playScript } from "@eve-e2e/config/mock-script";
 
@@ -25,11 +25,7 @@ const workerModel = mockModel({
   },
 });
 
-export default defineAgent({
+export default defineDynamic({
   description: "Collects Alice's or Bob's release checklist approvals or authorization.",
-  model: defineDynamic({
-    events: {
-      "step.started": () => ({ model: workerModel, modelContextWindowTokens: 1_000_000 }),
-    },
-  }),
+  resolve: () => ({ model: workerModel, modelContextWindowTokens: 1_000_000 }),
 });

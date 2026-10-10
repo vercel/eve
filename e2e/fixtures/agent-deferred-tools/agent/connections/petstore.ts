@@ -4,14 +4,12 @@ import { petstoreBaseUrl, petstoreHeaders, petstoreSpecUrl } from "../../petstor
 
 // Resolved per session because the fixture's own URL is known only at runtime.
 export default defineDynamic({
-  events: {
-    "session.started": () => ({
-      petstore: defineOpenAPIConnection({
-        baseUrl: petstoreBaseUrl(),
-        spec: petstoreSpecUrl(),
-        headers: petstoreHeaders(),
-        description: "Pet store inventory API.",
-      }),
+  resolve: () => ({
+    petstore: defineOpenAPIConnection({
+      baseUrl: petstoreBaseUrl(),
+      spec: petstoreSpecUrl(),
+      headers: petstoreHeaders(),
+      description: "Pet store inventory API.",
     }),
-  },
+  }),
 });

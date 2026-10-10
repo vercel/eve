@@ -22,17 +22,15 @@ function respond(request: MockModelRequest): MockModelResponse | string {
 
 const { model, modelContextWindowTokens, ...config } = e2eAgentConfig({ mock: respond });
 
-export default defineAgent({
+export default defineDynamic({
   ...config,
-  model: defineDynamic({
-    events: {
-      "step.started": (_event, ctx) =>
-        ctx.messages.some(
-          (message) => message.role === "user" && message.content === PREFIX_REQUEST,
-        )
-          ? { model: prefixModel, modelContextWindowTokens: 1_000_000 }
-          : { model, modelContextWindowTokens },
-    },
-  }),
+  select: (view) =>
+    view.messages.some((message) => message.role === "user" && message.content === PREFIX_REQUEST),
+  resolve: (prefixed) =>
+    defineAgent(
+      prefixed
+        ? { model: prefixModel, modelContextWindowTokens: 1_000_000 }
+        : { model, modelContextWindowTokens },
+    ),
   reasoning: "high",
 });

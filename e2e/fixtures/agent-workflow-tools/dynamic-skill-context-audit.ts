@@ -1,24 +1,21 @@
 import { defineState } from "eve/context";
-import type { DynamicResolveContext } from "eve/skills";
+import type { ResolveContext } from "eve/skills";
 
-function snapshot(ctx: DynamicResolveContext) {
+function snapshot(ctx: ResolveContext) {
   return {
-    abortSignal: ctx.abortSignal === undefined ? null : { aborted: ctx.abortSignal.aborted },
-    model: ctx.model,
     session: {
       id: ctx.session.id,
       auth: ctx.session.auth,
       schedule: ctx.session.schedule ?? null,
       predecessor: ctx.session.predecessor ?? null,
-    } satisfies Record<keyof DynamicResolveContext["session"], unknown>,
+    } satisfies Record<keyof ResolveContext["session"], unknown>,
     channel: {
       kind: ctx.channel.kind ?? null,
       continuationToken: ctx.channel.continuationToken ?? null,
       metadata: ctx.channel.metadata ?? null,
-    } satisfies Record<keyof DynamicResolveContext["channel"], unknown>,
+    } satisfies Record<keyof ResolveContext["channel"], unknown>,
     conversation: ctx.conversation ?? null,
-    messages: ctx.messages,
-  } satisfies Record<keyof DynamicResolveContext, unknown>;
+  };
 }
 
 export interface DynamicSkillContextObservation {
@@ -33,7 +30,7 @@ export const dynamicSkillContextAudit = defineState<DynamicSkillContextObservati
 
 export function recordDynamicSkillContext(
   event: DynamicSkillContextObservation["event"],
-  ctx: DynamicResolveContext,
+  ctx: ResolveContext,
 ): void {
   dynamicSkillContextAudit.update((observations) => [
     ...observations,

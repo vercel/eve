@@ -30,6 +30,11 @@ export type NormalizedSubagentConfig =
     };
 
 export function normalizeSubagentConfig(value: unknown, message: string): NormalizedSubagentConfig {
+  // A static description makes a subagent the parent always sees, with settings its own session
+  // resolves, as the root agent does; without one, the whole subagent is dynamic.
+  if (isDynamicSentinel(value) && (value as { description?: unknown }).description !== undefined) {
+    return { definition: value, kind: "local" };
+  }
   if (isDynamicSentinel(value)) {
     assertDynamicSentinelKeys(value, message, ["build", "defaultTools"]);
     const record = value as unknown as Record<string, unknown>;

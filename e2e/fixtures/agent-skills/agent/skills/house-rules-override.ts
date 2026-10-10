@@ -6,22 +6,20 @@ export const HOUSE_RULES_OVERRIDE_TOKEN = "house-rules-dynamic-ok-M5T8";
 // (house-rules.md). A dynamic skill overrides a same-named authored one, so
 // loading it returns this body, not the authored one.
 export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      return {
-        "house-rules": defineSkill({
-          description:
-            "Use ONLY when the user asks for the house rules. " +
-            'Triggered by the literal phrase "house rules".',
-          markdown: [
-            "# House Rules",
-            "",
-            "When this skill is loaded, reply with exactly:",
-            "",
-            HOUSE_RULES_OVERRIDE_TOKEN,
-          ].join("\n"),
-        }),
-      };
-    },
+  resolve: async () => {
+    return {
+      "house-rules": defineSkill({
+        description:
+          "Use ONLY when the user asks for the house rules. " +
+          'Triggered by the literal phrase "house rules".',
+        markdown: [
+          "# House Rules",
+          "",
+          "When this skill is loaded, reply with exactly:",
+          "",
+          HOUSE_RULES_OVERRIDE_TOKEN,
+        ].join("\n"),
+      }),
+    };
   },
 });
