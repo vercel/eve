@@ -160,7 +160,7 @@ jobs:
         run: pnpm test:scenario
 
   test-framework-fixtures:
-    name: test-framework-fixtures (next, nuxt, sveltekit)
+    name: test-framework-fixtures (next, nuxt, sveltekit, tanstack)
     runs-on: ubuntu-latest
 
     steps:

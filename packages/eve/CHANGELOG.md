@@ -1,5 +1,14 @@
 # eve
 
+## 0.76.2
+
+### Patch Changes
+
+- 91f4b68: Add `modelOptions.promptCache` for models eve calls directly. `promptCache: { anthropic: { ttl: "1h" } }` switches eve's Anthropic cache breakpoints to a 1-hour lifetime. `promptCache: { anthropic: {} }` turns breakpoints on for an Anthropic model eve can't recognize from its id, such as a Bedrock application inference profile.
+- c160b22: A session that replaces a retired stranded session names the session it replaced in `ctx.session.predecessor` (also on dynamic resolver contexts) and `session.started` `data.predecessor` (`{ sessionId }`). The new `transcriptReducer()` in `eve/client` folds a session's stream into its user and completed assistant text since the last clear; combine it with `sessions.attach(predecessor.sessionId).stream()` from `eve/server` in a `session.started` user-role dynamic instruction to give the replacement the earlier conversation.
+- 89bd625: Add `eve/tanstack`, a Vite plugin that runs an eve agent inside a TanStack Start app: Nitro proxies `/eve/v1/**` to a local eve server in development, and Vercel builds deploy eve as a sibling service. Set `devServerTimeoutMs` to wait longer for a slow eve dev server to start. `eve build` and `eve dev` now always use Nitro's Rolldown builder, so an agent that shares its root with a TanStack Start app no longer fails to start.
+- b664838: `eve add channel/web` now asks which framework Web Chat uses and can install a TanStack Start app under `apps/web/`, hosted as a separate Vercel service or inside the app through `eve/tanstack`; non-interactive installs keep Next.js unless you pass `--answer 'web-framework="tanstack"'`. Web Chat setup also checks for authored configuration before writing, removes the `vercel.ts` and scripts it wrote when you switch hosting modes, and renders text in the loaded Geist fonts.
+
 ## 0.76.1
 
 ### Patch Changes

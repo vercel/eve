@@ -1,6 +1,6 @@
 {
   "name": "eve",
-  "version": "0.76.1",
+  "version": "0.76.2",
   "private": false,
   "description": "Filesystem-first framework for durable backend AI agents that run anywhere.",
   "keywords": [
@@ -16,6 +16,7 @@
     "observability",
     "react",
     "serverless",
+    "tanstack",
     "tools",
     "vercel",
     "workflow"
@@ -101,6 +102,11 @@
       "types": "./dist/src/public/sveltekit/index.d.ts",
       "import": "./dist/src/public/sveltekit/index.js",
       "default": "./dist/src/public/sveltekit/index.js"
+    },
+    "./tanstack": {
+      "types": "./dist/src/public/tanstack/index.d.ts",
+      "import": "./dist/src/public/tanstack/index.js",
+      "default": "./dist/src/public/tanstack/index.js"
     },
     "./tools/approval": {
       "types": "./dist/src/public/tools/approval/index.d.ts",

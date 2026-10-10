@@ -14,6 +14,7 @@ interface RegistryItem {
   files?: RegistryFile[];
   meta?: {
     eve?: {
+      hidden?: boolean;
       setup?:
         | {
             command?: string;
@@ -96,7 +97,13 @@ const nonStreamingCatalogSlugs = new Set(["chat-sdk-sendblue"]);
 
 const docsRoot = join(import.meta.dirname, "..");
 const registry = JSON.parse(await readFile(join(docsRoot, "registry.json"), "utf8")) as Registry;
-const items = registry.items.filter((item) => item.name.startsWith("channel/"));
+const channelItems = registry.items.filter((item) => item.name.startsWith("channel/"));
+
+// Framework variants of Web Chat that `eve add channel/web` installs. They are
+// one catalog channel, so they stay hidden and share the Web Chat setup.
+const webChatVariantNames = new Set(["channel/web-tanstack"]);
+const items = channelItems.filter((item) => !webChatVariantNames.has(item.name));
+const webChatVariants = channelItems.filter((item) => webChatVariantNames.has(item.name));
 const registryEntries = channelEntries().filter((entry) => entry.surfaces.registry);
 const expectedSlugs = registryEntries.map(
   (entry) => registrySlugsByCatalogSlug[entry.slug] ?? entry.slug,
@@ -109,14 +116,56 @@ if (JSON.stringify(actualSlugs) !== JSON.stringify(expectedSlugs)) {
   );
 }
 
-for (const [index, item] of items.entries()) {
+function declaredSetups(item: RegistryItem) {
   const declaredSetup = item.meta?.eve?.setup;
-  const setups =
-    declaredSetup === undefined
-      ? undefined
-      : Array.isArray(declaredSetup)
-        ? declaredSetup
-        : [declaredSetup];
+  return declaredSetup === undefined
+    ? undefined
+    : Array.isArray(declaredSetup)
+      ? declaredSetup
+      : [declaredSetup];
+}
+
+function assertDelegatesSetup(item: RegistryItem, setupKind: string): void {
+  const expectedArgs = ["integration", "setup", setupKind];
+  if (
+    JSON.stringify(declaredSetups(item)) !==
+    JSON.stringify([{ command: "eve", package: "eve", bin: "eve", args: expectedArgs }])
+  ) {
+    throw new Error(
+      `Registry item "${item.name}" must delegate setup to eve integration setup ${setupKind}.`,
+    );
+  }
+}
+
+function assertWebChatItem(item: RegistryItem): void {
+  if (
+    item.dependencies?.some((dependency) => dependency === "ai" || dependency.startsWith("ai@"))
+  ) {
+    throw new Error(
+      `Registry item "${item.name}" must preserve the agent's existing AI SDK dependency.`,
+    );
+  }
+  if (item.files?.some((file) => file.target === "tsconfig.json")) {
+    throw new Error(
+      `Registry item "${item.name}" must let eve prepare tsconfig.json before shadcn installs files.`,
+    );
+  }
+}
+
+for (const name of webChatVariantNames) {
+  const item = webChatVariants.find((candidate) => candidate.name === name);
+  if (item === undefined) throw new Error(`apps/docs/registry.json must define ${name}.`);
+  if (item.meta?.eve?.hidden !== true) {
+    throw new Error(
+      `Registry item "${name}" must be hidden; users install it through channel/web.`,
+    );
+  }
+  assertWebChatItem(item);
+  assertDelegatesSetup(item, "web");
+}
+
+for (const [index, item] of items.entries()) {
+  const setups = declaredSetups(item);
   if (
     setups?.some(
       (setup) =>
@@ -133,32 +182,11 @@ for (const [index, item] of items.entries()) {
 
   const entry = registryEntries[index];
   if (entry === undefined) throw new Error(`Unexpected channel registry item "${item.name}".`);
-  if (entry.slug === "eve") {
-    if (
-      item.dependencies?.some((dependency) => dependency === "ai" || dependency.startsWith("ai@"))
-    ) {
-      throw new Error(
-        `Registry item "${item.name}" must preserve the agent's existing AI SDK dependency.`,
-      );
-    }
-    if (item.files?.some((file) => file.target === "tsconfig.json")) {
-      throw new Error(
-        `Registry item "${item.name}" must let eve prepare tsconfig.json before shadcn installs files.`,
-      );
-    }
-  }
+  if (entry.slug === "eve") assertWebChatItem(item);
 
   const setupKind = setupKindsByCatalogSlug[entry.slug];
   if (setupKind !== undefined) {
-    const expectedArgs = ["integration", "setup", setupKind];
-    if (
-      JSON.stringify(setups) !==
-      JSON.stringify([{ command: "eve", package: "eve", bin: "eve", args: expectedArgs }])
-    ) {
-      throw new Error(
-        `Registry item "${item.name}" must delegate setup to eve integration setup ${expectedArgs[2]}.`,
-      );
-    }
+    assertDelegatesSetup(item, setupKind);
     continue;
   }
 

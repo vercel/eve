@@ -445,6 +445,22 @@ describe("application Nitro creation", () => {
     });
   });
 
+  it("pins Nitro's rolldown builder so a host app's Vite config is never built as eve", async () => {
+    const { createDevelopmentApplicationNitro, createProductionApplicationNitro } =
+      await import("#internal/nitro/host/create-application-nitro.js");
+    const preparedHost = await createPreparedHost();
+
+    createNitroMock.mockResolvedValueOnce(createNitroStub().nitro);
+    await createDevelopmentApplicationNitro(preparedHost);
+    createNitroMock.mockResolvedValueOnce(createNitroStub().nitro);
+    await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
+
+    expect(createNitroMock.mock.calls.map(([config]) => config.builder)).toEqual([
+      "rolldown",
+      "rolldown",
+    ]);
+  });
+
   it("keeps Nitro dev watch off authored app sources", async () => {
     const nitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
