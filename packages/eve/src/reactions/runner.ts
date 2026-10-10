@@ -146,16 +146,21 @@ export async function restoreReactions(
         await reaction.resolve(slot.selection, rctx),
         rctx,
       );
-      const value = parseJsonValue(contribution.value);
+      const value = parseJsonValue(contribution.value ?? null);
       let restored = slot;
+      let live = contribution.live;
       if (canonicalJson(value) !== canonicalJson(slot.value)) {
         log.warn("A reaction rebuilt from its recorded selection returned something different", {
           reaction: reaction.label,
         });
-        restored = { ...slot, value };
-        writeSlot(ctx, reaction.id, restored);
+        if (reaction.reconcile === undefined) {
+          restored = { ...slot, value };
+          writeSlot(ctx, reaction.id, restored);
+        } else {
+          live = reaction.reconcile(slot.value, { live, value });
+        }
       }
-      if (contribution.live !== undefined) writeLive(ctx, reaction.id, restored, contribution.live);
+      if (live !== undefined) writeLive(ctx, reaction.id, restored, live);
     } catch (error) {
       if (reaction.failure === "throw") throw error;
       withdraw(ctx, reaction, error, {

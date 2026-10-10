@@ -98,6 +98,25 @@ describe("runReactions", () => {
     expect(dynamicTools(ctx).map((tool) => tool.description)).toEqual(["Count 2."]);
   });
 
+  it("fails calls to a tool whose rebuilt declaration differs from the one offered", async () => {
+    let description = "Offered.";
+    const ctx = session({
+      resolve: (() =>
+        defineTool({ description, execute: async () => "ran", inputSchema: {} })) as never,
+    });
+    await runReactions(ctx, { written: written(1) });
+
+    description = "Changed.";
+    forgetSessionLive(ctx.get(SessionIdKey)!);
+    await restoreReactions(ctx);
+
+    const [tool] = dynamicTools(ctx);
+    expect(tool?.description).toBe("Offered.");
+    await expect(tool!.execute!({}, {} as never)).rejects.toThrow(
+      'Tool "count" changed since it was offered.',
+    );
+  });
+
   it("withdraws the slot of a resolve that throws, retrying when the selection changes", async () => {
     let fail = false;
     let calls = 0;

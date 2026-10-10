@@ -64,6 +64,12 @@ export interface Reaction {
   ) => Contribution | Promise<Contribution>;
   /** Reads the conversation in `resolve`, so it runs only where the step has it. */
   readonly conversation?: boolean;
+  /**
+   * Reconciles code rebuilt in another process with the JSON the slot recorded, when the two
+   * differ. The slot keeps what it recorded; the returned live value replaces the rebuilt one.
+   * Without it, the rebuilt contribution replaces the recorded one.
+   */
+  readonly reconcile?: (recorded: JsonValue, rebuilt: Contribution) => unknown;
   /** A failure fails the commit instead of withdrawing the slot. */
   readonly failure?: "throw";
 }
