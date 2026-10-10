@@ -335,7 +335,7 @@ describe("shouldCompact", () => {
 // strategy a test hits is pure threshold arithmetic:
 //
 // - The tool-result cap heuristic is accepted only when the capped history
-//   PLUS the fixed compaction prompt envelope fits the threshold.
+//   PLUS the fixed compaction prompt envelope fits 60% of the threshold.
 //   `HEURISTICS_FORBIDDEN` sits below the envelope estimate, so no heuristic
 //   can be accepted and the summarization fallback always runs.
 // - `ROOMY` accepts capping whenever the history's bulk is tool output.
@@ -476,6 +476,53 @@ describe("compactMessages: tool-result cap heuristic", () => {
       expect(shouldCompact(result, { recentWindowSize: 1, threshold: 20_000 })).toBe(false);
     },
   );
+
+  describe("headroom after capping", () => {
+    // Older region: prose that capping cannot shrink, plus one large tool
+    // result that it can. Measure the capped size on shouldCompact's ruler,
+    // then place the trigger relative to it.
+    const [call, resultMsg] = toolExchange({ callId: "bulk", payloadChars: 400_000 });
+    const messages = [
+      user(`Earlier analysis. ${"notes ".repeat(6_000)}`),
+      call,
+      resultMsg,
+      user("Continue."),
+    ];
+    async function cappedTokens(): Promise<number> {
+      const capped = await compactMessages(
+        messages,
+        { recentWindowSize: 1, threshold: 10_000_000 },
+        summarizeWith("unused"),
+      );
+      expect(JSON.stringify(capped)).toContain("Truncated by eve");
+      return estimateTokens(capped) + ENVELOPE_TOKENS;
+    }
+
+    it("summarizes when capping lands just under the trigger", async () => {
+      // Production case: capping brought 180k-trigger history to 168.7k
+      // (~94%), shouldCompact re-fired six steps later, and a summary ran
+      // anyway after a second prompt-cache miss.
+      const threshold = Math.ceil((await cappedTokens()) / 0.94);
+      expect(shouldCompact(messages, { recentWindowSize: 1, threshold })).toBe(true);
+
+      const { result, summarizer } = await compact(messages, { recentWindowSize: 1, threshold });
+
+      expect(summarizer).toHaveBeenCalledOnce();
+      expect(result[1]).toEqual(assistant("checkpoint text"));
+      expect(JSON.stringify(result)).not.toContain("Truncated by eve");
+    });
+
+    it("accepts capping that leaves real headroom below the trigger", async () => {
+      const threshold = Math.ceil((await cappedTokens()) / 0.5);
+      expect(shouldCompact(messages, { recentWindowSize: 1, threshold })).toBe(true);
+
+      const { result, summarizer } = await compact(messages, { recentWindowSize: 1, threshold });
+
+      expect(summarizer).not.toHaveBeenCalled();
+      expect(result).toHaveLength(messages.length);
+      expect(JSON.stringify(result)).toContain("Truncated by eve");
+    });
+  });
 
   it("accepts capping that frees enough space against the measured input count", async () => {
     const messages = [

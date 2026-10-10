@@ -16,6 +16,18 @@ import type { CompactionConfig } from "#harness/types.js";
 const COMPACTION_SUMMARY_RESERVE_TOKENS = 2_048;
 
 /**
+ * Fraction of the compaction threshold a tool-result-capped history must fit
+ * under before capping is accepted instead of summarizing. Capping only
+ * shrinks the older region, so a result that lands just under the threshold
+ * re-triggers compaction a few steps later, and every cycle rewrites the
+ * prompt prefix and loses the provider prompt cache. Requiring 40% of the
+ * threshold as free space keeps a capped history alive for many steps; when
+ * capping cannot reach that, summarizing now costs one model call instead of
+ * a run of cache-busting cap cycles followed by a summary anyway.
+ */
+const TOOL_RESULT_CAP_TARGET_RATIO = 0.6;
+
+/**
  * Element type of a non-string `ModelMessage.content` array.
  */
 type ModelMessageContentPart = Exclude<ModelMessage["content"], string>[number];
@@ -142,7 +154,10 @@ function toolResultCapHeuristic(input: CompactionHeuristicInput): CompactionHeur
     "should-compact",
     input.tokenEstimateAdjustment,
   );
-  return evaluation.type === "within-limit"
+  // Accepting anything merely under the threshold would make no lasting
+  // progress: see TOOL_RESULT_CAP_TARGET_RATIO.
+  return evaluation.estimatedTokens <=
+    Math.floor(input.config.threshold * TOOL_RESULT_CAP_TARGET_RATIO)
     ? { messages: capped, type: "within-limit" }
     : { type: "insufficient" };
 }
