@@ -136,7 +136,8 @@ class ScopedAuthorizationRequiredError extends Error {
   }
 }
 
-function isScopedAuthorizationRequiredError(
+/** Whether `error` asks the enclosing boundary to start a sign-in. */
+export function isScopedAuthorizationRequiredError(
   error: unknown,
 ): error is ScopedAuthorizationRequiredError {
   return error instanceof Error && error.name === "ScopedAuthorizationRequiredError";
