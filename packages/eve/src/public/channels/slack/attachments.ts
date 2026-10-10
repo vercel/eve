@@ -6,10 +6,16 @@ import { readLimitedBytes } from "#internal/attachments/limited-read.js";
 import { createLogger } from "#internal/logging.js";
 import {
   resolveSlackBotToken,
+  THREAD_REFRESH_LIMIT,
   type SlackBotToken,
   type SlackThread,
+  type SlackThreadMessage,
 } from "#public/channels/slack/api.js";
-import type { SlackAttachment, SlackMessage } from "#public/channels/slack/inbound.js";
+import {
+  parseAttachments,
+  type SlackAttachment,
+  type SlackMessage,
+} from "#public/channels/slack/inbound.js";
 import {
   isConfiguredSlackFileUrl,
   resolveSlackTransportOptions,
@@ -24,11 +30,16 @@ import { DEFAULT_UPLOAD_POLICY, type UploadPolicy } from "#public/channels/uploa
 
 const log = createLogger("slack.attachments");
 
+/** Thread messages the lookback inspects, newest first, when a mention carries no files. */
+const THREAD_LOOKBACK_MESSAGES = 10;
+/** Slack file downloads give up after this long, so one slow file can't stall the turn. */
+const FILE_FETCH_TIMEOUT_MS = 30_000;
+
 /**
- * Emits one {@link FilePart} per supported attachment in the inbound
- * message, with `data` set to a `URL` object pointing at the Slack
- * file. Audio, video, URL-less, and policy-violating attachments are
- * dropped so a single bad upload never blocks the text portion.
+ * Emits one {@link FilePart} per attachment in the inbound message, with
+ * `data` set to a `URL` object pointing at the Slack file. URL-less and
+ * policy-violating attachments are dropped so a single bad upload never
+ * blocks the text portion.
  *
  * The `URL` object in `data` is resolved by the channel's `fetchFile`
  * function at staging time inside the workflow step.
@@ -55,9 +66,6 @@ export function collectSlackFileParts(
 }
 
 function toSlackFilePart(attachment: SlackAttachment, index: number): FilePart | null {
-  if (attachment.type === "audio" || attachment.type === "video") {
-    return null;
-  }
   if (!attachment.url) {
     log.warn("dropped attachment — no url available", {
       name: attachment.name,
@@ -74,28 +82,41 @@ function toSlackFilePart(attachment: SlackAttachment, index: number): FilePart |
 }
 
 /**
- * Collects file parts for an inbound mention.
+ * Collects file parts for an inbound message.
  *
- * Prefers attachments on the triggering mention (the common case: user
- * uploads a file and mentions the bot in the same message). When the
- * mention has none, refreshes the thread via {@link SlackThread.refresh}
- * and picks the attachments of the latest message this app did not
- * author (the thread message `isMe` classification) — covering the case
- * where a user or another bot dropped a file in the thread first, then a
- * user mentioned the bot in a follow-up. Any error during refresh is logged
- * and treated as "no attachments" so the text portion of the mention
- * still gets delivered.
+ * Prefers attachments on the triggering message (the common case: a person
+ * uploads a file and mentions the app in the same message). When a mention
+ * carries none, refreshes the thread via {@link SlackThread.refresh} and
+ * collects, in thread order, the files of the messages between the previous
+ * mention of the app and the trigger, up to {@link THREAD_LOOKBACK_MESSAGES}
+ * messages back. When the cached replies don't reach the trigger, as in a
+ * thread past Slack's first page, the window ending at the trigger is
+ * fetched; a trigger neither returns gets no lookback.
+ * That earlier mention started its own turn, which collected the files before
+ * it. The app's own messages and remote files are skipped. A message that
+ * didn't mention the app gets no lookback: the app answers every message in
+ * that conversation, so each earlier message brought its own files.
  *
- * Skips the thread-history lookback when the policy disables uploads,
- * since the refresh can't surface anything we'd deliver.
+ * Any error during refresh is logged and treated as "no attachments" so the
+ * text portion of the message still gets delivered. Skips the lookback when
+ * the policy disables uploads, since the refresh can't surface anything we'd
+ * deliver.
  */
 export async function collectInboundFileParts(input: {
-  readonly mention: Pick<SlackMessage, "attachments">;
+  readonly mention: Pick<SlackMessage, "attachments" | "ts">;
   readonly thread: SlackThread;
   readonly policy: UploadPolicy;
+  /** Whether the triggering message mentions the app. */
+  readonly isMentioned: boolean;
+  readonly botUserId: string | undefined;
+  /** Fetches the `size` thread messages ending at `latest`, oldest first. */
+  readonly fetchThreadWindow?: (
+    latest: string,
+    size: number,
+  ) => Promise<readonly SlackThreadMessage[] | undefined>;
 }): Promise<FilePart[]> {
   const fromMention = collectSlackFileParts(input.mention.attachments, input.policy);
-  if (fromMention.length > 0) return fromMention;
+  if (fromMention.length > 0 || !input.isMentioned) return fromMention;
   if (isUploadsDisabled(input.policy)) return [];
 
   if (input.thread.recentMessages.length === 0) {
@@ -107,42 +128,57 @@ export async function collectInboundFileParts(input: {
     }
   }
 
-  const recent = input.thread.recentMessages;
-  for (let i = recent.length - 1; i >= 0; i -= 1) {
-    const candidate = recent[i];
-    if (!candidate || candidate.isMe) continue;
-    const raw = candidate.raw as { files?: readonly Record<string, unknown>[] } | undefined;
-    const attachments = extractAttachmentsFromRaw(raw?.files);
-    const parts = collectSlackFileParts(attachments, input.policy);
-    if (parts.length > 0) return parts;
+  // Anchor on the trigger: messages posted after it aren't its files.
+  const recent = await withTrigger(input);
+  const trigger = recent.findIndex((message) => message.ts === input.mention.ts);
+  if (trigger === -1) return [];
+  const earlier = recent.slice(Math.max(0, trigger - THREAD_LOOKBACK_MESSAGES), trigger);
+  const attachments: SlackAttachment[] = [];
+  const seen = new Set<string>();
+  for (const message of earlier.toReversed()) {
+    if (message.isMe) continue;
+    if (mentionsApp(message.text, input.botUserId)) break;
+    const raw = message.raw as { files?: readonly Record<string, unknown>[] } | undefined;
+    const files = parseAttachments(raw?.files).filter(
+      (file) => file.id === "" || !seen.has(file.id),
+    );
+    for (const file of files) seen.add(file.id);
+    attachments.unshift(...files);
+  }
+  return collectSlackFileParts(attachments, input.policy);
+}
+
+/**
+ * Returns thread messages that include the trigger. The cached replies are
+ * the thread's first page, so a later trigger needs its own window.
+ */
+async function withTrigger(input: {
+  readonly mention: Pick<SlackMessage, "ts">;
+  readonly thread: SlackThread;
+  readonly fetchThreadWindow?: (
+    latest: string,
+    size: number,
+  ) => Promise<readonly SlackThreadMessage[] | undefined>;
+}): Promise<readonly SlackThreadMessage[]> {
+  const cached = input.thread.recentMessages;
+  if (cached.some((message) => message.ts === input.mention.ts)) return cached;
+  // Only a full first page means the thread continues past it. A short or
+  // failed refresh has nothing further to fetch.
+  if (input.fetchThreadWindow === undefined || cached.length < THREAD_REFRESH_LIMIT) return [];
+  try {
+    return (await input.fetchThreadWindow(input.mention.ts, THREAD_LOOKBACK_MESSAGES + 1)) ?? [];
+  } catch (error) {
+    log.warn("slack thread window fetch failed for attachment collection", { error });
     return [];
   }
-  return [];
 }
 
-function extractAttachmentsFromRaw(
-  files: readonly Record<string, unknown>[] | undefined,
-): SlackAttachment[] {
-  if (!Array.isArray(files)) return [];
-  return files.map((file) => {
-    const mimeType = typeof file.mimetype === "string" ? file.mimetype : undefined;
-    return {
-      id: typeof file.id === "string" ? file.id : "",
-      type: inferAttachmentType(mimeType),
-      url: typeof file.url_private === "string" ? file.url_private : undefined,
-      name: typeof file.name === "string" ? file.name : undefined,
-      mimeType,
-      size: typeof file.size === "number" ? file.size : undefined,
-    };
-  });
-}
-
-function inferAttachmentType(mimeType: string | undefined): "image" | "file" | "video" | "audio" {
-  if (mimeType === undefined) return "file";
-  if (mimeType.startsWith("image/")) return "image";
-  if (mimeType.startsWith("video/")) return "video";
-  if (mimeType.startsWith("audio/")) return "audio";
-  return "file";
+/** Matches `<@U123>` and the labelled `<@U123|name>` form. */
+function mentionsApp(text: string, botUserId: string | undefined): boolean {
+  return (
+    botUserId !== undefined &&
+    (text.includes(`<@${botUserId}>`) || text.includes(`<@${botUserId}|`))
+  );
 }
 
 /**
@@ -190,6 +226,7 @@ export function createSlackFetchFile(input: {
     });
     const response = await (api?.fetch ?? fetch)(url, {
       headers: { authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(FILE_FETCH_TIMEOUT_MS),
     });
     if (!response.ok) {
       throw new EveAttachmentError({
