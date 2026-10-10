@@ -359,7 +359,7 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
   const metadata = definition.metadata;
   const hasMetadata = metadata !== undefined;
   const audience = definition.audience;
-  const hasBehavior = hasState || hasContext || hasMetadata || definition.deliver !== undefined;
+  const hasBehavior = hasState || hasContext || hasMetadata;
 
   const eventHandlers: Record<string, unknown> = {};
   let hasEventHandlers = false;
@@ -458,9 +458,9 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
       };
     },
 
-    async deliver(payload: DeliverPayload, adapterCtx) {
-      const input = await definition.deliver?.(payload, adapterCtx as TCtx);
-      return input ?? defaultDeliverResult(payload);
+    deliver(payload: DeliverPayload, adapterCtx) {
+      if (definition.deliver === undefined) return defaultDeliverResult(payload);
+      return definition.deliver(payload, adapterCtx as TCtx);
     },
 
     ...eventHandlers,

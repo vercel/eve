@@ -61,6 +61,11 @@ export {
   isDisabledRouteSentinel,
 } from "#public/definitions/channel.js";
 export { attachmentError } from "#public/channels/attachment-error.js";
+export type {
+  FetchFileContext,
+  FetchFileFunction,
+  FetchFileResult,
+} from "#shared/channel-definition.js";
 export {
   createWebSocketUpgradeServer,
   type WebSocketUpgradeServerBridge,

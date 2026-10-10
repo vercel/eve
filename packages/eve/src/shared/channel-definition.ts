@@ -66,11 +66,6 @@ export interface GenericChannelDefinition<
 > {
   /** Policy used by message sends that do not provide an explicit override. */
   readonly turnPolicy?: TurnPolicy;
-  /**
-   * Inbound hook that runs once per delivery before the harness starts. Return a
-   * {@link StepInput} to replace the input the harness sees, or nothing to use
-   * the default projection of `payload`.
-   */
   deliver?(payload: DeliverPayload, ctx: TCtx): StepInput | void | Promise<StepInput | void>;
   readonly state?: TState;
   /**
