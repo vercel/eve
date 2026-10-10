@@ -4,15 +4,17 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
 import {
   CallbackBaseUrlKey,
-  clearPendingAuthorization,
   consumeAuthorizationResult,
-  getPendingAuthorization,
   getHookUrl,
   PendingAuthorizationResultKey,
-  resolveActiveAuthorizationChallenges,
-  setPendingAuthorization,
-  supersededChallenges,
 } from "#harness/authorization.js";
+import {
+  withSignIns,
+  signInAttemptKey,
+  resolveActiveAuthorizationChallenges,
+  supersededChallenges,
+} from "#harness/hitl/sign-ins.js";
+
 import type { ConnectionPrincipal } from "#shared/connection-types.js";
 
 afterEach(() => {
@@ -109,43 +111,29 @@ function candidateChallenge(name: string, candidateId: string) {
 
 describe("pending authorization state", () => {
   it("merges concurrent candidate challenges by authorization name", () => {
-    const first = setPendingAuthorization(undefined, {
-      challenges: [candidateChallenge("candidate-1:github", "candidate-1")],
-    });
-    const second = setPendingAuthorization(first, {
-      challenges: [candidateChallenge("candidate-2:github", "candidate-2")],
-    });
+    const first = withSignIns([], [candidateChallenge("candidate-1:github", "candidate-1")]);
+    const second = withSignIns(first, [candidateChallenge("candidate-2:github", "candidate-2")]);
 
-    expect(getPendingAuthorization(second)?.challenges).toEqual([
+    expect(second).toEqual([
       expect.objectContaining({ candidateId: "candidate-1", name: "candidate-1:github" }),
       expect.objectContaining({ candidateId: "candidate-2", name: "candidate-2:github" }),
     ]);
   });
 
   it("replaces a repeated challenge without duplicating it", () => {
-    const first = setPendingAuthorization(undefined, {
-      challenges: [candidateChallenge("candidate-1:github", "candidate-1")],
-    });
-    const second = setPendingAuthorization(first, {
-      challenges: [
-        {
-          ...candidateChallenge("candidate-1:github", "candidate-1"),
-          hookUrl: "https://eve.example/refreshed",
-        },
-      ],
-    });
-
-    expect(getPendingAuthorization(second)?.challenges).toEqual([
-      expect.objectContaining({ hookUrl: "https://eve.example/refreshed" }),
+    const first = withSignIns([], [candidateChallenge("candidate-1:github", "candidate-1")]);
+    const second = withSignIns(first, [
+      {
+        ...candidateChallenge("candidate-1:github", "candidate-1"),
+        hookUrl: "https://eve.example/refreshed",
+      },
     ]);
+
+    expect(second).toEqual([expect.objectContaining({ hookUrl: "https://eve.example/refreshed" })]);
   });
 
   it("clears by candidate ID", () => {
-    const state = setPendingAuthorization(undefined, {
-      challenges: [candidateChallenge("github", "candidate-1")],
-    });
-
-    expect(clearPendingAuthorization(state, ["candidate-1"])).toBeUndefined();
+    expect(signInAttemptKey(candidateChallenge("github", "candidate-1"))).toBe("candidate-1");
   });
 });
 
@@ -165,31 +153,23 @@ describe("pending authorization attempts", () => {
   it("keeps same-name attempts owned by different principals", () => {
     const userA = { id: "user-a", issuer: "idp", type: "user" } as const;
     const userB = { id: "user-b", issuer: "idp", type: "user" } as const;
-    const first = setPendingAuthorization(undefined, {
-      challenges: [challenge("linear", "linear-a", userA)],
-    });
-    const second = setPendingAuthorization(first, {
-      challenges: [challenge("linear", "linear-b", userB)],
-    });
+    const first = withSignIns([], [challenge("linear", "linear-a", userA)]);
+    const second = withSignIns(first, [challenge("linear", "linear-b", userB)]);
 
-    expect(getPendingAuthorization(second)?.challenges).toEqual([
+    expect(second).toEqual([
       challenge("linear", "linear-a", userA),
       challenge("linear", "linear-b", userB),
     ]);
   });
 
   it("merges distinct names and replaces only the same name", () => {
-    const first = setPendingAuthorization(undefined, {
-      challenges: [challenge("linear", "linear-1"), challenge("github", "github-1")],
-    });
-    const replaced = setPendingAuthorization(first, {
-      challenges: [challenge("linear", "linear-2")],
-    });
+    const first = withSignIns(
+      [],
+      [challenge("linear", "linear-1"), challenge("github", "github-1")],
+    );
+    const replaced = withSignIns(first, [challenge("linear", "linear-2")]);
 
-    expect(getPendingAuthorization(replaced)?.challenges).toEqual([
-      challenge("github", "github-1"),
-      challenge("linear", "linear-2"),
-    ]);
+    expect(replaced).toEqual([challenge("github", "github-1"), challenge("linear", "linear-2")]);
   });
 
   it("keeps only the latest same-scope challenge from one batch", () => {
@@ -201,11 +181,7 @@ describe("pending authorization attempts", () => {
     const active = resolveActiveAuthorizationChallenges([first, otherPrincipal, latest]);
 
     expect(active).toEqual([otherPrincipal, latest]);
-    expect(
-      getPendingAuthorization(
-        setPendingAuthorization(undefined, { challenges: [first, otherPrincipal, latest] }),
-      )?.challenges,
-    ).toEqual([otherPrincipal, latest]);
+    expect(withSignIns([], [first, otherPrincipal, latest])).toEqual([otherPrincipal, latest]);
   });
 
   it("shows one sign-in per Vercel Connect grant across tools and connections", () => {
@@ -215,9 +191,7 @@ describe("pending authorization attempts", () => {
       ...challenge(name, attemptId, principal),
       grant: "linear/myagent",
     });
-    const pending = setPendingAuthorization(undefined, {
-      challenges: [grant("linear", "connection")],
-    });
+    const pending = withSignIns([], [grant("linear", "connection")]);
     const listTool = grant("list_issues__linear_myagent", "list-tool");
     const createTool = grant("create_issue__linear_myagent", "create-tool");
     const bobTool = grant("create_issue__linear_myagent", "bob-tool", bob);
@@ -226,19 +200,18 @@ describe("pending authorization attempts", () => {
     expect(resolveActiveAuthorizationChallenges([listTool, createTool, bobTool, approval])).toEqual(
       [createTool, bobTool, approval],
     );
-    expect(
-      supersededChallenges(getPendingAuthorization(pending)?.challenges ?? [], [createTool]),
-    ).toEqual([grant("linear", "connection")]);
+    expect(supersededChallenges(pending, [createTool])).toEqual([grant("linear", "connection")]);
   });
 
   it("clears by exact attempt identity", () => {
-    const state = setPendingAuthorization(undefined, {
-      challenges: [challenge("linear", "linear-2"), challenge("github", "github-1")],
-    });
+    const state = withSignIns(
+      [],
+      [challenge("linear", "linear-2"), challenge("github", "github-1")],
+    );
 
-    expect(clearPendingAuthorization(state, ["linear-1"])).toEqual(state);
-    expect(
-      getPendingAuthorization(clearPendingAuthorization(state, ["linear-2"]))?.challenges,
-    ).toEqual([challenge("github", "github-1")]);
+    expect(state.filter((c) => signInAttemptKey(c) !== "linear-1")).toEqual(state);
+    expect(state.filter((c) => signInAttemptKey(c) !== "linear-2")).toEqual([
+      challenge("github", "github-1"),
+    ]);
   });
 });

@@ -7,7 +7,7 @@ import {
   SessionInboxKey,
 } from "#context/keys.js";
 import { forwardLegacySessionInput } from "#execution/legacy-remote-agent/protocol.js";
-import { resolvedForParent } from "#harness/proxy-input-requests.js";
+import { resolvedForParent } from "#harness/hitl/relays.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";

@@ -1,6 +1,7 @@
 import { queuedInput, storedProjection } from "#harness/session-machine/view.js";
 import { openInputs, openSignIns } from "#protocol/session-projection.js";
 import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
+import { holdsHitlRequests } from "#harness/hitl/index.js";
 import {
   EntityConflictError,
   RunExpiredError,
@@ -24,7 +25,6 @@ import { getResolvedRuntimeAgentNode } from "#runtime/graph.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import { walkCauseChain } from "#shared/errors.js";
-import { isObject } from "#shared/guards.js";
 
 const log = createLogger("execution.handoff");
 
@@ -38,8 +38,8 @@ export function isSessionStateIdleForHandoff(input: {
 
   // These registries are deleted when work settles. Their ordinary readers
   // tolerate malformed values as absent; that must not authorize a handoff.
+  if (holdsHitlRequests(state)) return false;
   const pendingKeys = [
-    "eve.runtime.pendingAuthorization",
     "eve.runtime.pendingInputBatch",
     "eve.runtime.pendingCoordinationBatch",
     "eve.runtime.deferredStepInput",
@@ -48,12 +48,6 @@ export function isSessionStateIdleForHandoff(input: {
   if (pendingKeys.some((key) => state?.[key] !== undefined)) return false;
   const batches = state?.["eve.runtime.pendingInputBatches"];
   if (batches !== undefined && (!Array.isArray(batches) || batches.length > 0)) return false;
-  const proxyRequests = state?.["eve.runtime.proxyInputRequests"];
-  if (
-    proxyRequests !== undefined &&
-    (!isObject(proxyRequests) || Object.keys(proxyRequests).length > 0)
-  )
-    return false;
   const projection = storedProjection(state);
   return (
     workflowToolRuns.length === 0 &&

@@ -36,13 +36,19 @@ import * as agentTraceState from "#tracing/agent-trace-context-store.js";
 import { matchAuthorizationCallbacks } from "#execution/authorization-callback-match.js";
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
-import { activeTurnId, isBetweenTurns, turnPosition } from "#harness/session-machine/view.js";
+import {
+  activeTurnId,
+  isBetweenTurns,
+  storedProjection,
+  turnPosition,
+} from "#harness/session-machine/view.js";
 import {
   currentProjection,
   enterSessionProjection,
   saveSessionProjection,
 } from "#harness/session-machine/current.js";
-import { dropClosedRecords } from "#harness/session-machine/commit.js";
+import { saveTransition, dropClosedRecords, sessionView } from "#harness/session-machine/commit.js";
+import { matchSignIns } from "#harness/session-machine/transitions.js";
 import {
   sessionStartedForResolvers,
   turnStartedForResolvers,
@@ -60,12 +66,8 @@ import { withSessionStateDelta } from "#execution/session/state-delta.js";
 import { openSessionEventPublisher } from "#execution/publish-session-events.js";
 import { createTurnEventHandler } from "#execution/session/turn-event-handler.js";
 import { derivePendingState } from "#execution/session/pending-turn-state.js";
-import {
-  CallbackBaseUrlKey,
-  clearPendingAuthorization,
-  getPendingAuthorization,
-  PendingAuthorizationResultKey,
-} from "#harness/authorization.js";
+import { CallbackBaseUrlKey, PendingAuthorizationResultKey } from "#harness/authorization.js";
+import { readHitlState } from "#harness/hitl/index.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { countRunUsage } from "#execution/agent-sessions/usage.js";
 import {
@@ -152,22 +154,20 @@ async function runSessionStepBody(
     // Outside a workflow context (e.g. tests) — getHookUrl will return undefined.
   }
 
-  const pendingAuth = getPendingAuthorization(durableSession.state);
+  const { signIns } = readHitlState(durableSession.state);
   let completedAuths: ReturnType<typeof matchAuthorizationCallbacks>["matches"] | undefined;
-  if (pendingAuth && delivery !== undefined) {
-    const { matches, remainingPayloads } = matchAuthorizationCallbacks(
-      pendingAuth,
-      delivery.payloads,
-    );
+  if (signIns.length > 0 && delivery !== undefined) {
+    const { matches, remainingPayloads } = matchAuthorizationCallbacks(signIns, delivery.payloads);
     delivery = { ...delivery, payloads: remainingPayloads };
     if (matches.length > 0) {
       const matchedAttemptIds = matches.map((match) => match.result.attemptId);
       const authResults = matches.map((match) => match.result);
       ctx.set(PendingAuthorizationResultKey, authResults);
-      durableSession = {
-        ...durableSession,
-        state: clearPendingAuthorization(durableSession.state, matchedAttemptIds),
-      };
+      // The session stops waiting on them; the turn they resume reports their completion.
+      const view = sessionView(storedProjection(durableSession.state), durableSession.state);
+      const transition = matchSignIns(view, { attemptIds: matchedAttemptIds });
+      if (transition.events.length !== 0) throw new Error("matchSignIns must not emit events.");
+      durableSession = saveTransition(durableSession, transition);
       completedAuths = matches;
       if (remainingPayloads.length === 0) delivery = undefined;
     }

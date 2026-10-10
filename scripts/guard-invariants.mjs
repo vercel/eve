@@ -125,8 +125,9 @@
  *             so telemetry ownership survives renamed and namespaced tools.
  *   rule 50 — The human-in-the-loop lifecycle in `harness/hitl/` is
  *             reached only through its `index.ts`, its request vocabulary
- *             (`approval-prompt`, `budget-request`), so replacing it changes one
- *             seam.
+ *             (`approval-prompt`, `budget-request`, `relays`, `sign-ins`) and
+ *             read surface via index.ts. Only commit.ts and checkpoint-migrations.ts
+ *             import requests.ts for saving and legacy upgrades.
  *   rule 51 — Only the session machine (`harness/session-machine/`) and the
  *             human-in-the-loop lifecycle it delegates to
  *             (`harness/hitl/`) build lifecycle events and read the
@@ -501,7 +502,7 @@ function checkRule47(posix, lines, violations) {
 
 const HUMAN_INPUT_DIR = "packages/eve/src/harness/hitl/";
 const HUMAN_INPUT_PRIVATE_IMPORT_RE =
-  /["'](?:#harness\/|(?:\.\.?\/)+)hitl\/(?!(?:index|approval-prompt|budget-request)\.js["'])/;
+  /["'](?:#harness\/|(?:\.\.?\/)+)hitl\/(?!(?:index|approval-prompt|budget-request|relays|sign-ins)\.js["'])/;
 
 /** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
 function checkRule50(posix, lines, violations) {
@@ -514,6 +515,12 @@ function checkRule50(posix, lines, violations) {
     return;
   lines.forEach((line, idx) => {
     if (!HUMAN_INPUT_PRIVATE_IMPORT_RE.test(line)) return;
+    if (
+      /["']#harness\/hitl\/requests\.js["']/.test(line) &&
+      (posix === "packages/eve/src/harness/session-machine/commit.ts" ||
+        posix === "packages/eve/src/execution/session/checkpoint-migrations.ts")
+    )
+      return;
     violations.push({
       rule: 50,
       file: posix,

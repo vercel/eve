@@ -1,5 +1,5 @@
 import type { HarnessModelMessage } from "#harness/messages.js";
-import { hasProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { readHitlState } from "#harness/hitl/index.js";
 import type { HarnessSession, HarnessSessionBase, SessionStateMap } from "#harness/types.js";
 import { projectToDurableSession } from "#execution/session.js";
 import type { SandboxState } from "#sandbox/state.js";
@@ -100,7 +100,7 @@ export function replaceDurableSessionSnapshot(input: {
 function projectDurableSessionState(session: DurableSession): DurableSessionState {
   return {
     continuationToken: session.continuationToken,
-    hasProxyInputRequests: hasProxyInputRequests(session.state),
+    hasProxyInputRequests: readHitlState(session.state).relays.size > 0,
     sessionId: session.sessionId,
     version: DURABLE_SESSION_VERSION,
     snapshot: { session },

@@ -6,7 +6,10 @@ import {
   getApprovalAuditState,
   markApprovalCandidateAuthorizationRequired,
 } from "#harness/hitl/candidates.js";
-import { setPendingAuthorization } from "#harness/authorization.js";
+
+import { withSignIns } from "#harness/hitl/sign-ins.js";
+import { readHitlState, writeHitlState } from "#harness/hitl/requests.js";
+
 import { z } from "zod";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
@@ -611,17 +614,15 @@ it("keeps the turn held while a responder signs in, and fails the sign-in on exp
       challenge: { url: "https://example.com/sign-in" },
     },
   ];
-  f.updateSession((session) => ({
-    ...session,
-    state: setPendingAuthorization(
-      markApprovalCandidateAuthorizationRequired({
-        state: session.state,
-        candidateId: candidate.candidateId,
-        authorizationChallenges: challenges,
-      }),
-      { challenges },
-    ),
-  }));
+  f.updateSession((session) => {
+    const state = markApprovalCandidateAuthorizationRequired({
+      state: session.state,
+      candidateId: candidate.candidateId,
+      authorizationChallenges: challenges,
+    });
+    const signIns = withSignIns(readHitlState(state).signIns, challenges);
+    return { ...session, state: writeHitlState({ state }, { signIns }).state };
+  });
   f.record(
     createAuthorizationRequiredEvent({
       attemptId: "notes-attempt",

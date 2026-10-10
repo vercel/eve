@@ -50,6 +50,8 @@ import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { Transition } from "./commit.js";
 import { inputWithdrawn, signInWithdrawn } from "./events.js";
+import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
+import { toProxyInputRequestEntries, type WorkflowAskRoute } from "#harness/hitl/relays.js";
 import type { StepCoordinates, SuspendedStep, TurnState } from "./state.js";
 import {
   activeTurnId,
@@ -512,6 +514,9 @@ export function relay(
   input: {
     readonly payload: SubagentInputRequestHookPayload | SubagentAuthorizationEventHookPayload;
     readonly replacedRequestIds?: Iterable<string>;
+    /** The workflow tool run that relays the request, and the hook its `ctx.ask()` answers reach. */
+    readonly runId?: string;
+    readonly workflowAsk?: WorkflowAskRoute;
   },
 ): Transition {
   const { payload } = input;
@@ -536,7 +541,29 @@ export function relay(
     if (event.type !== "authorization.required") return unchanged(view, events);
   }
   events.push(...hold(view, { on: "input" }).events);
-  return unchanged(view, events);
+  if (payload.kind !== "subagent-input-request") return unchanged(view, events);
+  // A child's fresh batch replaces the routes its prior one held.
+  const entries = toProxyInputRequestEntries(payload).map(
+    ([requestId, route]) =>
+      [
+        requestId,
+        {
+          ...route,
+          ...(input.workflowAsk !== undefined && { workflowAsk: input.workflowAsk }),
+          ...(input.runId !== undefined && { runId: input.runId }),
+        },
+      ] as const,
+  );
+  return {
+    ...unchanged(view, events),
+    relays: {
+      upsert: {
+        entries,
+        forChildContinuationToken: payload.childContinuationToken,
+        inputSource: payload.inputSource,
+      },
+    },
+  };
 }
 
 /**
@@ -557,12 +584,20 @@ export function routeAnswer(
       readonly event: StepCoordinates;
       readonly resolutions: readonly InputResolution[];
     }[];
+    /**
+     * Answers left other relayed requests pending, and nothing for the turn itself: the open
+     * turn stays held, as after a partial approval answer.
+     */
+    readonly holds?: boolean;
   },
 ): Transition {
   const events: UnstampedMessageStreamEvent[] = input.children
     .filter((child) => child.resolutions.length > 0)
     .map((child) => createInputResolvedEvent({ resolutions: child.resolutions, ...child.event }));
-  return unchanged(view, events);
+  if (input.holds === true) events.push(...hold(view, { on: "input" }).events);
+  // The answered routes retire, so a later delivery can't route through them.
+  const retire = input.children.flatMap((child) => child.resolutions.map((r) => r.requestId));
+  return { ...unchanged(view, events), ...(retire.length > 0 && { relays: { retire } }) };
 }
 
 /**
@@ -598,6 +633,21 @@ export function runSignIn(
 // ---------------------------------------------------------------------------
 // Sign-ins
 // ---------------------------------------------------------------------------
+
+/**
+ * Sign-in callbacks matched the attempts `attemptIds` name: the session stops waiting on them.
+ * Their completions report once the turn they resume runs (`completeSignIn`).
+ */
+export function matchSignIns(
+  view: SessionView,
+  input: { readonly attemptIds: readonly string[] },
+): Transition {
+  const matched = new Set(input.attemptIds);
+  return {
+    ...unchanged(view, []),
+    signIns: view.signIns.filter((challenge) => !matched.has(signInAttemptKey(challenge))),
+  };
+}
 
 /** Sign-in callbacks arrived: each completion is reported at the coordinates of the turn that asked. */
 export function completeSignIn(

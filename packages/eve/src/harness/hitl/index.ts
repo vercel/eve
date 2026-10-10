@@ -2,7 +2,6 @@ import type { ModelMessage } from "ai";
 
 import type { SessionAuthContext } from "#channel/types.js";
 import { AuthKey, SessionKey } from "#context/keys.js";
-import { clearPendingAuthorization } from "#harness/authorization.js";
 import type { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
 import { validateHarnessModelMessages } from "#harness/messages.js";
 import { fail, hold } from "#harness/session-machine/transitions.js";
@@ -34,7 +33,7 @@ import { holdForInput } from "./intake.js";
 // meets it: a delivery's answers and sign-in callbacks before its turn runs (`acceptHumanInput`),
 // the work they approved once its model step starts (`runApprovedLocalCalls`), a model step's gated calls and
 // sign-ins, the budget gate before each model call, and what the model reads about pending
-// approvals. Nothing outside this directory reads its records.
+// approvals. Outside readers use only the read-only requests view exported here.
 
 export {
   acceptHumanInput,
@@ -47,6 +46,7 @@ export {
 } from "./intake.js";
 export { extractToolApprovalInputRequests } from "#harness/input-extraction.js";
 export { hasRunnableQueue } from "./approvals.js";
+export { discardClearedHitlState as discardClearedHumanInput } from "./requests.js";
 
 /**
  * A model step made calls that need a person's approval: the step parks on them beside any
@@ -159,18 +159,6 @@ export function humanInputContext(
   };
 }
 
-const APPROVAL_STATE_KEY = "eve.runtime.hitl.approvalState";
-
-/**
- * Drops what a cleared context owned: sign-in attempts and responders' approval progress. `clear`
- * reported each close; relay routes for live tasks stay.
- */
-export function discardClearedHumanInput<T extends HarnessSessionBase>(session: T): T {
-  const { [APPROVAL_STATE_KEY]: _approvals, ...state } =
-    clearPendingAuthorization(session.state) ?? {};
-  return { ...session, state: Object.keys(state).length > 0 ? state : undefined };
-}
-
 /**
  * The approvals whose tool defines a response policy. Every park records them, so no Approve or
  * Cancel of such an approval skips the policy.
@@ -217,3 +205,5 @@ export function takeDeferredMessage<T extends HarnessSessionBase>(
     session: writeTurnState(session, isEmptyInput(rest) ? turn : { ...turn, queued: rest }),
   };
 }
+
+export { readHitlState, holdsHitlRequests } from "./requests.js";

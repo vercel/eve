@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { readHitlState } from "#harness/hitl/requests.js";
+
 import { handleWorkflowToolRunMessage } from "#execution/session-workflow-tool-run.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { applyTaskRunMessageStep } from "#execution/tasks/steps.js";
@@ -11,7 +13,7 @@ import {
   writeTaskTable,
 } from "#execution/tasks/table.js";
 import type { WorkflowToolRunRef } from "#execution/tools/workflow/messages.js";
-import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
+
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { containsEventSequence, filterEventsByType } from "#internal/testing/events.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
@@ -124,6 +126,6 @@ describe("handleWorkflowToolRunMessage", () => {
     expect(
       containsEventSequence(events, ["input.requested", "input.resolved", "task.settled"]),
     ).toBe(true);
-    expect(getProxyInputRequests(cursor.sessionState.snapshot.session.state).size).toBe(0);
+    expect(readHitlState(cursor.sessionState.snapshot.session.state).relays.size).toBe(0);
   });
 });

@@ -25,7 +25,7 @@ import {
   isInboxToolResultFromRecordedWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
-import type { WorkflowAskRoute } from "#harness/proxy-input-requests.js";
+import type { WorkflowAskRoute } from "#harness/hitl/relays.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 
 interface HandlerInput<T> {

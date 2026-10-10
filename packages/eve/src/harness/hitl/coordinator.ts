@@ -1,3 +1,4 @@
+import { readHitlState } from "./requests.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import { contextStorage } from "#context/container.js";
@@ -21,10 +22,12 @@ import {
   type ApprovalCandidateDecision,
   type ApprovalSettlementAuditRecord,
 } from "#harness/hitl/candidates.js";
+import { saveTransition, sessionView } from "#harness/session-machine/commit.js";
+import { matchSignIns } from "#harness/session-machine/transitions.js";
+import { storedProjection } from "#harness/session-machine/view.js";
+import { signInAttemptKey } from "./sign-ins.js";
 import {
-  clearPendingAuthorization,
   getAuthorizationResult,
-  getPendingAuthorization,
   isAuthorizationSignal,
   type AuthorizationChallenge,
 } from "#harness/authorization.js";
@@ -87,17 +90,17 @@ export async function coordinateApprovalDelivery(input: {
   const expiredCandidates = getApprovalAuditState(input.session.state).activeCandidates.filter(
     (candidate) => candidate.expiresAt <= now,
   );
-  const expiredChallengeIds = expiredCandidates.flatMap(
-    (candidate) =>
-      candidate.authorizationChallenges?.map(
-        (challenge) => challenge.attemptId ?? challenge.candidateId ?? challenge.name,
-      ) ?? [],
+  const expiredChallengeIds = new Set(
+    expiredCandidates.flatMap(
+      (candidate) => candidate.authorizationChallenges?.map(signInAttemptKey) ?? [],
+    ),
   );
   const expiredState = expireApprovalCandidates({ now, state: input.session.state });
-  let session: HarnessSession = {
-    ...input.session,
-    state: clearPendingAuthorization(expiredState, expiredChallengeIds),
-  };
+  let session: HarnessSession = { ...input.session, state: expiredState };
+  if (expiredChallengeIds.size > 0) {
+    const view = sessionView(storedProjection(session.state), session.state);
+    session = saveTransition(session, matchSignIns(view, { attemptIds: [...expiredChallengeIds] }));
+  }
   const audit = getApprovalAuditState(session.state);
   const batches = suspendedSteps(session.state).filter((step) => step.requests.length > 0);
   const pendingRequestIds = new Set(
@@ -231,7 +234,7 @@ export async function coordinateApprovalDelivery(input: {
   // Candidates are persisted in an earlier pass. Run pending candidates and
   // resume only authorization-required candidates whose callback arrived.
   const parkedChallengeNames = new Set(
-    getPendingAuthorization(session.state)?.challenges.map((challenge) => challenge.name) ?? [],
+    readHitlState(session.state).signIns.map((challenge) => challenge.name),
   );
   for (const candidate of candidatesAtStart) {
     if (candidate.status === "authorization-required") {
