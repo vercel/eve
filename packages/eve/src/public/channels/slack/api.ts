@@ -391,6 +391,8 @@ interface SlackBinding {
   readonly slack: SlackHandle;
 }
 
+/** Replies {@link SlackThread.refresh} loads: the thread's first page. */
+export const THREAD_REFRESH_LIMIT = 50;
 /** Replies per page when paging to a message. */
 const WINDOW_PAGE_SIZE = 200;
 /** Pages read before giving up on reaching a message: 1000 replies. */
@@ -485,7 +487,7 @@ export function buildSlackBinding(input: {
         const response = await fetchSlackThreadReplies({
           ...apiOptions,
           channel: input.channelId,
-          limit: 50,
+          limit: THREAD_REFRESH_LIMIT,
           ts: currentThreadTs,
         });
         messages = (response.messages as Record<string, unknown>[]).map((raw) =>

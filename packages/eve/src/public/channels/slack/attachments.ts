@@ -6,6 +6,7 @@ import { readLimitedBytes } from "#internal/attachments/limited-read.js";
 import { createLogger } from "#internal/logging.js";
 import {
   resolveSlackBotToken,
+  THREAD_REFRESH_LIMIT,
   type SlackBotToken,
   type SlackThread,
   type SlackThreadMessage,
@@ -161,7 +162,9 @@ async function withTrigger(input: {
 }): Promise<readonly SlackThreadMessage[]> {
   const cached = input.thread.recentMessages;
   if (cached.some((message) => message.ts === input.mention.ts)) return cached;
-  if (input.fetchThreadWindow === undefined) return [];
+  // Only a full first page means the thread continues past it. A short or
+  // failed refresh has nothing further to fetch.
+  if (input.fetchThreadWindow === undefined || cached.length < THREAD_REFRESH_LIMIT) return [];
   try {
     return (await input.fetchThreadWindow(input.mention.ts, THREAD_LOOKBACK_MESSAGES + 1)) ?? [];
   } catch (error) {

@@ -482,6 +482,18 @@ describe("collectInboundFileParts", () => {
 
     expect(fetchThreadWindow).toHaveBeenCalledWith("80.0", 11);
     expect(parts.map((part) => part.filename)).toEqual(["F79.csv"]);
+    // A short first page holds the whole thread, so there's nothing to fetch.
+    const shortThread = { recentMessages: [], refresh: vi.fn() } as never;
+    const notCalled = vi.fn(async () => undefined);
+    await expect(
+      collect({
+        fetchThreadWindow: notCalled,
+        mention,
+        thread: shortThread,
+        policy: DEFAULT_UPLOAD_POLICY,
+      }),
+    ).resolves.toEqual([]);
+    expect(notCalled).not.toHaveBeenCalled();
     // Past the paging limit, the window is unknown and nothing is collected.
     await expect(
       collect({
