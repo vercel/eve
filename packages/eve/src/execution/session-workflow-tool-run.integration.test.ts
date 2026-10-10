@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { readHitlState } from "#harness/hitl/session-state.js";
+import { readHitlState } from "#harness/hitl/requests.js";
 
 import { handleWorkflowToolRunMessage } from "#execution/session-workflow-tool-run.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";

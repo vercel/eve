@@ -6,7 +6,10 @@ import { isObject } from "#shared/guards.js";
 import type { ActiveApprovalCandidate, DurableApprovalState } from "./candidates.js";
 import { parseProxyInputRequest, type ProxyInputRequest } from "./relays.js";
 
-// The only module that reads or writes human-in-the-loop session state: the requests the
+// Storage stays in hitl/ to keep the rule 50 import seam around the request codecs.
+// Sign-ins and relays use machine transitions; approval writes through candidates.ts remain
+// direct, and checkpoint upgrades migrate legacy storage outside the machine.
+// The module that owns the human-in-the-loop storage key: the requests the
 // session holds, i.e. responders' approval candidates, the sign-ins it waits on, and the requests
 // it relays for a workflow run or a child session. Nothing else names their session-state key;
 // `candidates.ts` and `relays.ts` model the records it stores.
@@ -79,7 +82,7 @@ export interface RelayChange {
   readonly retire?: readonly string[];
 }
 
-/** Writes a transition's change. Only the session machine's save calls it. */
+/** Writes a transition's change. Production callers are the machine save and its closed-route cleanup. */
 export function writeHitlState<T extends { readonly state?: SessionStateMap }>(
   session: T,
   change: HitlStateChange,

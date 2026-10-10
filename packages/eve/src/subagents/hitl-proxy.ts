@@ -4,7 +4,7 @@ import { resolveInputOutcome } from "#harness/input-request-resolution.js";
 import { firstOpenInput } from "#harness/open-input-request.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import type { StepCoordinates as PendingInputBatchEvent } from "#harness/session-machine/view.js";
-import { readHitlState } from "#harness/hitl/session-state.js";
+import { readHitlState } from "#harness/hitl/index.js";
 import { resolvedByChild } from "#harness/hitl/relays.js";
 import type { WorkflowAskRoute, ProxyInputRequest } from "#harness/hitl/relays.js";
 import type { SessionStateMap } from "#harness/types.js";

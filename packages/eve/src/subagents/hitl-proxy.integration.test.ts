@@ -1,7 +1,7 @@
 import { toProxyInputRequestEntries } from "#harness/hitl/relays.js";
 import { describe, expect, it } from "vitest";
 
-import { readHitlState } from "#harness/hitl/session-state.js";
+import { readHitlState } from "#harness/hitl/requests.js";
 
 import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";

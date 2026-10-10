@@ -2,7 +2,7 @@ import { SESSION_CHECKPOINT_VERSION, type SessionCheckpoint } from "#execution/s
 import { isObject } from "#shared/guards.js";
 import { initialSessionProjection } from "#protocol/session-projection.js";
 import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
-import { LEGACY_HITL_STATE_KEYS, upgradeLegacyHitlState } from "#harness/hitl/session-state.js";
+import { LEGACY_HITL_STATE_KEYS, upgradeLegacyHitlState } from "#harness/hitl/requests.js";
 
 /**
  * Oldest checkpoint a successor upgrades (eve 0.66.0). Earlier checkpoints

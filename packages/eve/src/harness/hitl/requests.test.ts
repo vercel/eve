@@ -7,7 +7,7 @@ import {
   holdsHitlRequests,
   readHitlState,
   writeHitlState,
-} from "./session-state.js";
+} from "./requests.js";
 import { type ProxyInputRequest } from "./relays.js";
 
 const EVENT = { sequence: 1, stepIndex: 0, turnId: "turn_1" };

@@ -1,7 +1,7 @@
 import { queuedInput, storedProjection } from "#harness/session-machine/view.js";
 import { openInputs, openSignIns } from "#protocol/session-projection.js";
 import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
-import { holdsHitlRequests } from "#harness/hitl/session-state.js";
+import { holdsHitlRequests } from "#harness/hitl/index.js";
 import {
   EntityConflictError,
   RunExpiredError,

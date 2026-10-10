@@ -54,7 +54,7 @@ import {
   type HarnessModelMessage,
 } from "#harness/messages.js";
 
-import { readHitlState } from "#harness/hitl/session-state.js";
+import { readHitlState } from "#harness/hitl/requests.js";
 
 import { modelFacingAuthorizationOutput, requestAuthorization } from "#harness/authorization.js";
 import { applyTransition, sessionView } from "#harness/session-machine/commit.js";

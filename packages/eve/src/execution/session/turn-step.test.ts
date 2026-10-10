@@ -41,7 +41,7 @@ import { textStreamResult } from "#internal/testing/approval-resume.js";
 import { openInputs } from "#protocol/session-projection.js";
 import type { InputRequest } from "#shared/input.js";
 import { withSignIns } from "#harness/hitl/sign-ins.js";
-import { readHitlState, writeHitlState } from "#harness/hitl/session-state.js";
+import { readHitlState, writeHitlState } from "#harness/hitl/requests.js";
 import {
   parkedSteps,
   positionOf,

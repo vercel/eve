@@ -3,7 +3,7 @@ import type {
   PublishedSessionEvents,
   SessionStepState,
 } from "#execution/publish-session-events.js";
-import { commitSessionStep } from "#execution/session/commit-step.js";
+import { commitSessionStep } from "#execution/publish-session-events.js";
 import {
   withSessionStateDelta,
   type SessionStateTransition,
@@ -11,7 +11,7 @@ import {
 import type { WorkflowToolRunControlMessage } from "#execution/tools/workflow/messages.js";
 import { ignoreGoneTarget } from "#execution/tasks/workflow-target.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
-import { readHitlState } from "#harness/hitl/session-state.js";
+import { readHitlState } from "#harness/hitl/index.js";
 import type { ProxyInputRequest } from "#harness/hitl/relays.js";
 import { finishRun } from "#harness/session-machine/transitions.js";
 
