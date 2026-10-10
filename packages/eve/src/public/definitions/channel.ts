@@ -25,7 +25,7 @@ import type { Session, SessionHandle } from "#channel/session.js";
 import type { DeliverPayload, TurnPolicy } from "#channel/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import type { FactPosition, Scope } from "#protocol/session-events/envelope.js";
+import type { FactPosition } from "#protocol/session-events/envelope.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import { currentView } from "#harness/session-machine/current.js";
 import { removedEventKeyMessage } from "#public/definitions/removed-event-keys.js";
@@ -171,10 +171,10 @@ export function isDisabledRouteSentinel(value: unknown): value is DisabledRouteS
   );
 }
 
-type EventData<T extends SessionEvent["type"]> =
-  Extract<SessionEvent, { type: T }> extends { data: infer D } ? D : undefined;
+/** The session event a handler keyed `T` observes. */
+export type ChannelEventOf<T extends SessionEvent["type"]> = Extract<SessionEvent, { type: T }>;
 
-/** Continuation routing on the `channel` argument of every channel event handler. */
+/** Continuation routing on the `ctx.channel` of every channel event handler. */
 export interface ChannelContinuationOps {
   readonly continuation?: {
     readonly token: string;
@@ -189,29 +189,33 @@ export interface ChannelContinuationOps {
 type ChannelContext<TCtx> = TCtx & ChannelContinuationOps;
 
 /**
- * What a channel event handler knows about the event it observes, beyond the session: where the
- * event sits on the stream. Observer-only, so tools never see it.
+ * What a channel event handler knows beyond the event it observes: the channel's own context,
+ * where the event sits on the stream, and the session's tables. Observer-only, so tools never see
+ * it.
  */
-export interface ChannelEventContext extends SessionContext {
+export interface ChannelEventContext<TChannel = ChannelContinuationOps> extends SessionContext {
+  /** The channel's context, as its `context()` built it, with continuation routing. */
+  readonly channel: TChannel;
   /** The position of the event's line, and its index in that line. */
   readonly position: FactPosition;
   /** The session's tables as of the whole commit the event is in. */
   readonly view: SessionView;
-  /** The event's owners: its turn, task, model run, or context change. */
-  readonly scope?: Scope;
 }
 
-type ChannelEventHandler<T extends SessionEvent["type"], TCtx> = (
-  data: EventData<T>,
-  channel: ChannelContext<TCtx>,
-  ctx: ChannelEventContext,
+/**
+ * Handles one session event: the fact or progress record, with its `type`, `data`, and `scope`,
+ * and the {@link ChannelEventContext}. Hooks receive the same event.
+ */
+export type ChannelEventHandler<T extends SessionEvent["type"], TCtx = void> = (
+  event: ChannelEventOf<T>,
+  ctx: ChannelEventContext<ChannelContext<TCtx>>,
 ) => void | Promise<void>;
 
 /**
- * Optional handlers keyed by session event type: the session's facts, the progress records a
- * channel streams (`content.delta`, `call.input`, `call.progress`). Each handler receives the event `data`, the {@link ChannelContext}, and a
- * {@link ChannelEventContext} `ctx`. Handlers run after the event is written, so they observe it
- * and never shape it.
+ * Optional handlers keyed by session event type: the session's facts and the progress records a
+ * channel streams (`content.delta`, `call.input`, `call.progress`). Each handler receives the
+ * event and a {@link ChannelEventContext} whose `channel` is the channel's own context. Handlers
+ * run after the event is written, so they observe it and never shape it.
  */
 export interface ChannelEvents<TCtx = void> {
   readonly "session.started"?: ChannelEventHandler<"session.started", TCtx>;
@@ -255,8 +259,8 @@ export type ReceiveInput<TReceiveTarget = Record<string, unknown>> =
 
 /**
  * The object passed to {@link defineChannel}. `routes` is required; `state`
- * seeds durable adapter state, `context` builds the per-step `channel` argument
- * for `events` and `deliver`, `events` handle session lifecycle, `receive`
+ * seeds durable adapter state, `context` builds the per-step channel context
+ * for `events` (as `ctx.channel`) and `deliver`, `events` handle session lifecycle, `receive`
  * accepts cross-channel handoffs, `fetchFile` stages remote file URLs, and
  * `metadata` projects observability data.
  *
@@ -392,8 +396,8 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
     const userHandler = events?.[eventType];
     if (userHandler) {
       hasEventHandlers = true;
-      eventHandlers[eventType] = (data: unknown, adapterCtx: any) => {
-        const { session, position, scope, view, ...platformContext } = adapterCtx;
+      eventHandlers[eventType] = (event: SessionEvent, adapterCtx: any) => {
+        const { session, position, scope: _scope, view, ...platformContext } = adapterCtx;
         const channel = {
           ...platformContext,
           continuation:
@@ -404,19 +408,18 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
                   alias: (token: string) => session.continuation?.alias(token),
                 },
         };
-        const ctx: ChannelEventContext = {
+        const ctx: ChannelEventContext<typeof channel> = {
           ...buildCallbackContext(),
+          channel,
           position: position ?? { index: 0, line: 0 },
-          scope,
           view: view ?? currentView(),
         };
         return (
           userHandler as (
-            data: unknown,
-            channel: any,
-            ctx: ChannelEventContext,
+            event: SessionEvent,
+            ctx: ChannelEventContext<typeof channel>,
           ) => void | Promise<void>
-        )(data, channel, ctx);
+        )(event, ctx);
       };
     }
   }

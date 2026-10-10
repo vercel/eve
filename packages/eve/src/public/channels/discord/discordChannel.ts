@@ -1,4 +1,4 @@
-import type { ChannelEventContext } from "#public/definitions/channel.js";
+import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { DiscordInstrumentationMetadata } from "#public/channels/discord/index.js";
 import type { ChannelFrom } from "#channel/channel-operations.js";
@@ -63,9 +63,6 @@ import type { ChannelAudience } from "#shared/channel-audience.js";
 import { discordAudience, discordInstrumentationMetadata } from "./audience.js";
 
 const log = createLogger("discord.channel");
-
-type EventData<T extends SessionEvent["type"]> =
-  Extract<SessionEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /** Pre-dispatch Discord context passed to inbound command hooks. */
 export interface DiscordContext {
@@ -152,12 +149,15 @@ export type DiscordInputResponseInteraction =
   | DiscordModalSubmitInteraction;
 
 type DiscordEventHandler<T extends SessionEvent["type"]> = (
-  data: EventData<T>,
-  channel: DiscordEventContext,
-  ctx: ChannelEventContext,
+  event: ChannelEventOf<T>,
+  ctx: ChannelEventContext<DiscordEventContext>,
 ) => void | Promise<void>;
 
-/** Per-event handlers for `discordChannel({ events })`. Supplied handlers override built-in defaults per key; unspecified events keep their defaults. `session.failed` receives only `(data, channel)` and exposes the ID as `data.sessionId`; every other handler also gets the session `ctx`. */
+/**
+ * Per-event handlers for `discordChannel({ events })`. Supplied handlers override built-in
+ * defaults per key; unspecified events keep their defaults. Each handler receives the event and
+ * a `ctx` whose `channel` is the Discord context.
+ */
 export interface DiscordChannelEvents {
   readonly "turn.started"?: DiscordEventHandler<"turn.started">;
   readonly "call.requested"?: DiscordEventHandler<"call.requested">;

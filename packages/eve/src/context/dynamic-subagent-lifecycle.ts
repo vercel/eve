@@ -43,7 +43,10 @@ async function resolveSelections(input: {
         return [resolver.nodeId, null] as const;
       }
 
-      const result = await handler(input.event, buildResolveContext(input.ctx, input.messages));
+      const result = await handler(
+        input.event.fact,
+        buildResolveContext(input.ctx, input.messages),
+      );
       if (result === null || result === undefined) {
         return [resolver.nodeId, null] as const;
       }

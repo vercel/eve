@@ -85,7 +85,7 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
   const prompts = promptQueueEvents(showPrompt);
 
   return {
-    async "turn.started"(_event, channel, _ctx) {
+    async "turn.started"(_event, { channel }) {
       channel.state.pendingToolCallMessage = null;
       await postActivity(
         channel,
@@ -100,7 +100,7 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       );
     },
 
-    async "call.requested"(event, channel, _ctx) {
+    async "call.requested"({ data }, { channel }) {
       const buffered = channel.state.pendingToolCallMessage;
       channel.state.pendingToolCallMessage = null;
       if (buffered) {
@@ -118,13 +118,13 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
         return;
       }
       // eve's own task controls stay out of view.
-      if (isTaskControlTool(event.capability.name)) return;
+      if (isTaskControlTool(data.capability.name)) return;
       await postActivity(
         channel,
         options,
         {
-          action: event.capability.title ?? displayTitle(event.capability.name),
-          parameter: actionParameter({ input: event.input }),
+          action: data.capability.title ?? displayTitle(data.capability.name),
+          parameter: actionParameter({ input: data.input }),
           type: "action",
         },
         {
@@ -133,9 +133,11 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       );
     },
 
-    async "interaction.opened"(data, channel, ctx) {
-      await prompts["interaction.opened"](data, channel, ctx);
-      const event = signInPromptOf(data, ctx.scope);
+    async "interaction.opened"(fact, ctx) {
+      const { data } = fact;
+      const { channel } = ctx;
+      await prompts["interaction.opened"](fact, ctx);
+      const event = signInPromptOf(data, fact.scope);
       if (event === undefined) return;
       const displayName = authorizationDisplayName(event.name, event.authorization?.displayName);
       const url = event.authorization?.url;
@@ -161,8 +163,10 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       );
     },
 
-    async "interaction.settled"(data, channel, ctx) {
-      await prompts["interaction.settled"](data, channel, ctx);
+    async "interaction.settled"(fact, ctx) {
+      const { data } = fact;
+      const { channel } = ctx;
+      await prompts["interaction.settled"](fact, ctx);
       const event = signInSettlementOf(ctx.view, data);
       if (event === undefined) return;
       const displayName = authorizationDisplayName(event.name, event.authorization?.displayName);
@@ -186,27 +190,27 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       });
     },
 
-    async "content.completed"(event, channel, _ctx) {
-      if (event.kind !== "text" || typeof event.value !== "string") return;
+    async "content.completed"({ data }, { channel }) {
+      if (data.kind !== "text" || typeof data.value !== "string") return;
       // Narration before calls posts as a thought with the next call.
-      if (contentPhase(event.phase) === "narration") {
-        channel.state.pendingToolCallMessage = event.value
-          ? (firstNonEmptyLine(event.value) ?? null)
+      if (contentPhase(data.phase) === "narration") {
+        channel.state.pendingToolCallMessage = data.value
+          ? (firstNonEmptyLine(data.value) ?? null)
           : null;
         return;
       }
       channel.state.pendingToolCallMessage = null;
-      if (!event.value) return;
+      if (!data.value) return;
       await postActivity(channel, options, {
-        body: event.value,
+        body: data.value,
         type: "response",
       });
     },
 
-    async "session.ended"(event, channel, _ctx) {
-      if (event.outcome !== "failed") return;
-      const hint = formatErrorHint(errorHintOf(event.error));
-      const errorId = event.error?.id;
+    async "session.ended"({ data }, { channel }) {
+      if (data.outcome !== "failed") return;
+      const hint = formatErrorHint(errorHintOf(data.error));
+      const errorId = data.error?.id;
       await postActivity(channel, options, {
         body: [
           `This session could not recover from an error${hint}.`,
@@ -218,10 +222,10 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       });
     },
 
-    async "turn.settled"(event, channel, _ctx) {
-      if (event.outcome !== "failed") return;
-      const hint = formatErrorHint(errorHintOf(event.error));
-      const errorId = event.error?.id;
+    async "turn.settled"({ data }, { channel }) {
+      if (data.outcome !== "failed") return;
+      const hint = formatErrorHint(errorHintOf(data.error));
+      const errorId = data.error?.id;
       await postActivity(channel, options, {
         body: [
           `I hit an error while handling your request${hint}.`,
@@ -236,7 +240,7 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
 }
 
 function postActivity(
-  channel: Parameters<NonNullable<LinearChannelEvents["turn.started"]>>[1],
+  channel: Parameters<NonNullable<LinearChannelEvents["turn.started"]>>[1]["channel"],
   options: LinearDefaultEventOptions,
   content: Parameters<typeof createLinearAgentActivity>[0]["activity"]["content"],
   activityOptions: {

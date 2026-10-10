@@ -76,20 +76,13 @@ type StateOf<TCtx> = TCtx extends ChannelAdapterContext<infer S> ? S : Record<st
 // ---------------------------------------------------------------------------
 
 /**
- * Extracts the `data` field type from a stream event by its `type` discriminant.
- * Events that carry no `data` field (e.g. `session.completed`) resolve to `undefined`.
- */
-type EventData<T extends SessionEvent["type"]> =
-  Extract<SessionEvent, { type: T }> extends { data: infer D } ? D : undefined;
-
-/**
- * A single outbound event handler. Receives the event's `data` (not the full
- * envelope) and the adapter context. Void return — side effects only.
+ * A single outbound event handler. Receives the written event and the adapter context. Void
+ * return: side effects only.
  */
 type EventHandler<
   T extends SessionEvent["type"],
   TCtx extends ChannelAdapterContext<any> = ChannelAdapterContext,
-> = (data: EventData<T>, ctx: TCtx) => void | Promise<void>;
+> = (event: Extract<SessionEvent, { type: T }>, ctx: TCtx) => void | Promise<void>;
 
 /**
  * Map of outbound event handlers keyed by event type. The adapter declares
@@ -272,11 +265,11 @@ export async function callAdapterEventHandler(
   ctx: ChannelAdapterContext,
 ): Promise<void> {
   const handler = adapter[event.type] as
-    | ((data: unknown, ctx: ChannelAdapterContext) => void | Promise<void>)
+    | ((event: SessionEvent, ctx: ChannelAdapterContext) => void | Promise<void>)
     | undefined;
   if (handler === undefined) return;
   try {
-    await handler("data" in event ? event.data : undefined, ctx);
+    await handler(event, ctx);
   } catch (error) {
     log.error("adapter event handler threw — event swallowed", {
       adapterKind: getAdapterKind(adapter),

@@ -6,7 +6,9 @@ import type { SignInPrompt, SignInSettlement } from "#channel/interaction-prompt
 
 const log = createLogger("chat-sdk.authorization");
 
-type SignInChannel = Parameters<NonNullable<ChatSdkChannelEvents["interaction.opened"]>>[1];
+type SignInChannel = Parameters<
+  NonNullable<ChatSdkChannelEvents["interaction.opened"]>
+>[1]["channel"];
 
 /** Shows a sign-in on a Chat SDK thread; outside a DM its challenge goes only to the person. */
 export async function showChatSdkSignIn(

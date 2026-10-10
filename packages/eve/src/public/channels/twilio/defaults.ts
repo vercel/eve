@@ -82,16 +82,18 @@ const prompts = promptQueueEvents((channel: TwilioEventContext, request: InputRe
 
 /** Built-in Twilio event handlers for text delivery, sign-ins, and terminal errors. */
 export const defaultEvents: TwilioChannelEvents = {
-  async "content.completed"(event, channel, _ctx) {
-    const text = replyTextOf(event);
+  async "content.completed"({ data }, { channel }) {
+    const text = replyTextOf(data);
     if (text === undefined) return;
     await channel.twilio.sendMessage(text);
   },
 
   // An SMS thread is one person's, so the link and code can go in the message.
-  async "interaction.opened"(data, channel, ctx) {
-    await prompts["interaction.opened"](data, channel, ctx);
-    const event = signInPromptOf(data, ctx.scope);
+  async "interaction.opened"(fact, ctx) {
+    const { data } = fact;
+    const { channel } = ctx;
+    await prompts["interaction.opened"](fact, ctx);
+    const event = signInPromptOf(data, fact.scope);
     if (event === undefined) return;
     if (event.responseId !== undefined) return;
     const challenge = event.authorization;
@@ -107,8 +109,10 @@ export const defaultEvents: TwilioChannelEvents = {
     );
   },
 
-  async "interaction.settled"(data, channel, ctx) {
-    await prompts["interaction.settled"](data, channel, ctx);
+  async "interaction.settled"(fact, ctx) {
+    const { data } = fact;
+    const { channel } = ctx;
+    await prompts["interaction.settled"](fact, ctx);
     const event = signInSettlementOf(ctx.view, data);
     if (event === undefined) return;
     if (event.responseId !== undefined) return;
@@ -121,10 +125,10 @@ export const defaultEvents: TwilioChannelEvents = {
     );
   },
 
-  async "turn.settled"(event, channel, _ctx) {
-    if (event.outcome !== "failed") return;
-    const hint = formatErrorHint(errorHintOf(event.error));
-    const errorId = event.error?.id;
+  async "turn.settled"({ data }, { channel }) {
+    if (data.outcome !== "failed") return;
+    const hint = formatErrorHint(errorHintOf(data.error));
+    const errorId = data.error?.id;
     await channel.twilio.sendMessage(
       [
         `I hit an error while handling your request${hint}.`,
@@ -135,10 +139,10 @@ export const defaultEvents: TwilioChannelEvents = {
     );
   },
 
-  async "session.ended"(event, channel, _ctx) {
-    if (event.outcome !== "failed") return;
-    const hint = formatErrorHint(errorHintOf(event.error));
-    const errorId = event.error?.id;
+  async "session.ended"({ data }, { channel }) {
+    if (data.outcome !== "failed") return;
+    const hint = formatErrorHint(errorHintOf(data.error));
+    const errorId = data.error?.id;
     await channel.twilio.sendMessage(
       [
         `This session could not recover from an error${hint}.`,

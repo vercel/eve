@@ -1,4 +1,4 @@
-import type { ChannelEventContext } from "#public/definitions/channel.js";
+import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { parseSlackWebhookBody } from "#compiled/@chat-adapter/slack/webhook.js";
 
@@ -116,9 +116,6 @@ export type {
 const log = createLogger("slack.channel");
 const PRIVATE_SLACK_RUN_TITLE = "Private message";
 
-type EventData<T extends SessionEvent["type"]> =
-  Extract<SessionEvent, { type: T }> extends { data: infer D } ? D : undefined;
-
 /**
  * Base Slack context for inbound webhook handlers. These hooks run before the
  * runtime hydrates session state, so `state` is absent here.
@@ -159,9 +156,8 @@ export type {
 export type { SlackWebhookVerifier } from "#public/channels/slack/verify.js";
 
 type SlackEventHandler<T extends SessionEvent["type"]> = (
-  data: EventData<T>,
-  channel: SlackEventContext,
-  ctx: ChannelEventContext,
+  event: ChannelEventOf<T>,
+  ctx: ChannelEventContext<SlackEventContext>,
 ) => void | Promise<void>;
 
 /**
@@ -843,12 +839,13 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     {
       ...rendering.events,
       "content.completed": withFinalReplyDelivery(rendering.events["content.completed"]),
-      async "turn.started"(data, channel, ctx) {
+      async "turn.started"(event, ctx) {
+        const { channel } = ctx;
         const triggeringUserId = slackUserIdFromAuthContext(ctx.session.auth.current);
         if (triggeringUserId !== undefined) {
           channel.state.triggeringUserId = triggeringUserId;
         }
-        await renderTurnStarted?.(data, channel, ctx);
+        await renderTurnStarted?.(event, ctx);
       },
     },
     rendering.taskCard,

@@ -76,12 +76,14 @@ function loggingResolver(
   logicalPath: string,
   keys: readonly ("session.started" | "turn.started" | "step.started")[],
   result: (key: string) => unknown = () => null,
+  received?: { key: string; event: unknown }[],
 ) {
   const events = Object.fromEntries(
     keys.map((key) => [
       key,
-      () => {
+      (event: unknown) => {
         log.push(`${kind}:${key.split(".")[0]}`);
+        received?.push({ event, key });
         return result(key);
       },
     ]),
@@ -108,6 +110,7 @@ function turnSlice(log: readonly string[], turn: number): string[] {
 describe("participant timing", () => {
   it("runs memory, the dynamic model, and each resolver at its moment", async () => {
     const log: string[] = [];
+    const toolEvents: { key: string; event: unknown }[] = [];
     const prompts: LanguageModelV4Prompt[] = [];
     const model = scriptedModel(log, prompts);
     const runtime = await createTestRuntime({
@@ -173,6 +176,7 @@ describe("participant timing", () => {
                   }),
                 }
               : {},
+          toolEvents,
         ),
         loggingResolver(log, "skills", "skills/playbook.ts", ["session.started", "turn.started"]),
         loggingResolver(log, "instructions", "instructions/policy.ts", [
@@ -233,6 +237,33 @@ describe("participant timing", () => {
 
       // Capture follows the turn's last model call.
       expect(entries.at(-1)).toBe("capture:turn");
+    }
+
+    // Each resolver receives the fact behind its key: the session's and the turn's starts, and the
+    // turn's request for each model run.
+    const factOf = (key: string) =>
+      toolEvents.filter((entry) => entry.key === key).map((entry) => entry.event);
+    expect(factOf("session.started")).toEqual([
+      expect.objectContaining({ type: "session.started" }),
+    ]);
+    expect(factOf("turn.started")).toEqual(
+      ["turn_0", "turn_1"].map((turnId) =>
+        expect.objectContaining({
+          data: expect.objectContaining({
+            cause: { deliveryId: expect.any(String) },
+            turnId,
+          }),
+          type: "turn.started",
+        }),
+      ),
+    );
+    expect(factOf("step.started")).toHaveLength(4);
+    for (const fact of factOf("step.started")) {
+      expect(fact).toMatchObject({
+        data: { owner: { turnId: expect.stringMatching(/^turn_/u) }, runId: expect.any(String) },
+        scope: { turnId: expect.stringMatching(/^turn_/u) },
+        type: "model.requested",
+      });
     }
 
     // Session resolvers run once, at the session's start.

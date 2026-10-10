@@ -102,7 +102,8 @@ export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): Gi
   }
 
   return {
-    async "turn.started"(_event, channel, ctx) {
+    async "turn.started"(_event, ctx) {
+      const { channel } = ctx;
       if (options.progress?.reactions !== false) {
         try {
           await channel.thread.react("eyes");
@@ -114,8 +115,8 @@ export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): Gi
       await checkoutRepositoryForTurn(channel, ctx, options);
     },
 
-    async "content.completed"(event, channel, _ctx) {
-      const text = replyTextOf(event);
+    async "content.completed"({ data }, { channel }) {
+      const text = replyTextOf(data);
       if (text === undefined) return;
       await postCommentChunks(channel, text);
     },
@@ -123,10 +124,10 @@ export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): Gi
     // A comment can only answer the prompt it sees, so prompts post one at a time.
     ...promptQueueEvents(showPrompt),
 
-    async "session.ended"(event, channel, _ctx) {
-      if (event.outcome !== "failed") return;
-      const hint = formatErrorHint(errorHintOf(event.error));
-      const errorId = event.error?.id;
+    async "session.ended"({ data }, { channel }) {
+      if (data.outcome !== "failed") return;
+      const hint = formatErrorHint(errorHintOf(data.error));
+      const errorId = data.error?.id;
       const message = [
         `This session could not recover from an error${hint}.`,
         "",
@@ -136,10 +137,10 @@ export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): Gi
       await postFailure(channel, message);
     },
 
-    async "turn.settled"(event, channel, _ctx) {
-      if (event.outcome !== "failed") return;
-      const hint = formatErrorHint(errorHintOf(event.error));
-      const errorId = event.error?.id;
+    async "turn.settled"({ data }, { channel }) {
+      if (data.outcome !== "failed") return;
+      const hint = formatErrorHint(errorHintOf(data.error));
+      const errorId = data.error?.id;
       const message = [
         `I hit an error while handling your request${hint}.`,
         "",
@@ -171,7 +172,7 @@ function renderReplyInstruction(
 }
 
 async function checkoutRepositoryForTurn(
-  channel: Parameters<NonNullable<GitHubChannelEvents["turn.started"]>>[1],
+  channel: Parameters<NonNullable<GitHubChannelEvents["turn.started"]>>[1]["channel"],
   ctx: SessionContext,
   options: GitHubDefaultEventOptions,
 ): Promise<void> {
@@ -207,7 +208,7 @@ async function checkoutRepositoryForTurn(
 }
 
 async function postCommentChunks(
-  channel: Parameters<NonNullable<GitHubChannelEvents["turn.started"]>>[1],
+  channel: Parameters<NonNullable<GitHubChannelEvents["turn.started"]>>[1]["channel"],
   body: string,
 ): Promise<void> {
   for (const chunk of splitGitHubCommentBody(body)) {
@@ -216,7 +217,7 @@ async function postCommentChunks(
 }
 
 async function postFailure(
-  channel: Parameters<NonNullable<GitHubChannelEvents["turn.started"]>>[1],
+  channel: Parameters<NonNullable<GitHubChannelEvents["turn.started"]>>[1]["channel"],
   message: string,
 ): Promise<void> {
   await postCommentChunks(channel, message);

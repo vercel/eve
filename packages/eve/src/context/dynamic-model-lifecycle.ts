@@ -83,7 +83,7 @@ export async function resolveDynamicModel(input: {
     }
 
     input.abortSignal?.throwIfAborted();
-    const rawResult = await handler(input.event, {
+    const rawResult = await handler(input.event.fact, {
       ...buildResolveContext(input.ctx, input.messages),
       abortSignal: input.abortSignal,
     });

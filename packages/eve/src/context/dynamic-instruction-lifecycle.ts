@@ -105,7 +105,7 @@ export async function resolveDynamicInstructions(input: {
       const handler = resolver.events[event.type];
       if (handler === undefined) return null;
 
-      const rawResult = await handler(event, resolveCtx);
+      const rawResult = await handler(event.fact, resolveCtx);
       if (rawResult === null || rawResult === undefined)
         return { resolver, instruction: undefined };
 

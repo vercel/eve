@@ -1,3 +1,4 @@
+import { turnStartedForResolvers } from "#harness/session-machine/change-points.js";
 import type { ModelMessage } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
@@ -31,10 +32,14 @@ import {
   validateMemoryRecallResult,
 } from "#shared/memory-state.js";
 
-const turnStarted = {
-  data: { sequence: 0, turnId: "turn_0" },
-  type: "turn.started" as const,
-};
+const turnStarted = turnStartedForResolvers(
+  { sequence: 0, turnId: "turn_0" },
+  {
+    data: { cause: { deliveryId: "delivery_0" }, follows: null, turnId: "turn_0" },
+    scope: { turnId: "turn_0" },
+    type: "turn.started",
+  },
+);
 
 function createContext() {
   const auth = {

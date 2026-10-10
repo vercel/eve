@@ -1,4 +1,4 @@
-import type { ChannelEventContext } from "#public/definitions/channel.js";
+import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { PromptQueueState } from "#channel/prompt-queue.js";
 import type { SessionHandle } from "#channel/session.js";
@@ -50,9 +50,6 @@ import { readNonEmptyString } from "#shared/guards.js";
 import { defineChannel, GET, POST, type Channel } from "#public/definitions/channel.js";
 
 const log = createLogger("twilio.channel");
-
-type EventData<T extends SessionEvent["type"]> =
-  Extract<SessionEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /** Pre-dispatch Twilio context passed to the inbound text, voice, and voice-transcription hooks. */
 export interface TwilioContext {
@@ -146,9 +143,8 @@ export type TwilioVoiceResultOrPromise =
   | Promise<TwilioVoiceResult | null | undefined>;
 
 type TwilioEventHandler<T extends SessionEvent["type"]> = (
-  data: EventData<T>,
-  channel: TwilioEventContext,
-  ctx: ChannelEventContext,
+  event: ChannelEventOf<T>,
+  ctx: ChannelEventContext<TwilioEventContext>,
 ) => void | Promise<void>;
 
 /** Event handlers supported by `twilioChannel({ events })`. */

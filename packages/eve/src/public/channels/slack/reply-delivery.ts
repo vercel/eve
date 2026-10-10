@@ -175,15 +175,15 @@ function refusedPayloadError(error: unknown): string | undefined {
 export function withFinalReplyDelivery(
   render: ContentCompletedHandler | undefined,
 ): ContentCompletedHandler {
-  return async (event, channel, ctx) => {
-    if (replyTextOf(event) === undefined) {
-      await render?.(event, channel, ctx);
+  return async (event, ctx) => {
+    if (replyTextOf(event.data) === undefined) {
+      await render?.(event, ctx);
       return;
     }
     try {
-      await render?.(event, channel, ctx);
+      await render?.(event, ctx);
     } catch (error) {
-      await reportUndeliveredReply(channel, ctx.session.turn.id, error);
+      await reportUndeliveredReply(ctx.channel, ctx.session.turn.id, error);
     }
   };
 }

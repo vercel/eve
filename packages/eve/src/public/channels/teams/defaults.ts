@@ -70,7 +70,9 @@ export async function defaultOnMessage(
   return { auth: defaultTeamsAuth(message) };
 }
 
-type TeamsHandlerChannel = Parameters<NonNullable<TeamsChannelEvents["turn.started"]>>[1];
+type TeamsHandlerChannel = Parameters<
+  NonNullable<TeamsChannelEvents["turn.started"]>
+>[1]["channel"];
 
 async function showTeamsRequests(event: RequestBatch, channel: TeamsHandlerChannel): Promise<void> {
   for (const request of event.requests) {
@@ -226,25 +228,28 @@ async function settleTeamsSignIn(
 
 /** Built-in Teams event handlers for typing, replies, HITL, auth cards, and terminal errors. */
 export const defaultEvents: TeamsChannelEvents = {
-  async "turn.started"(_event, channel, _ctx) {
+  async "turn.started"(_event, { channel }) {
     await channel.thread.startTyping();
   },
 
-  async "call.requested"(_event, channel, _ctx) {
+  async "call.requested"(_event, { channel }) {
     await channel.thread.startTyping();
   },
 
-  async "interaction.opened"(data, channel, ctx) {
+  async "interaction.opened"(event, ctx) {
+    const { data } = event;
+    const { channel } = ctx;
     const batch = requestBatchOf(ctx.view, data);
     if (batch !== undefined) {
       await showTeamsRequests(batch, channel);
       return;
     }
-    const prompt = signInPromptOf(data, ctx.scope);
+    const prompt = signInPromptOf(data, event.scope);
     if (prompt !== undefined) await showTeamsSignIn(prompt, channel);
   },
 
-  async "interaction.settled"(data, channel, ctx) {
+  async "interaction.settled"({ data }, ctx) {
+    const { channel } = ctx;
     const signIn = signInSettlementOf(ctx.view, data);
     if (signIn !== undefined) {
       await settleTeamsSignIn(signIn, channel);
@@ -269,18 +274,18 @@ export const defaultEvents: TeamsChannelEvents = {
     await settleTeamsRequests({ resolutions: [resolution] }, channel);
   },
 
-  async "content.completed"(event, channel, _ctx) {
-    const text = replyTextOf(event);
+  async "content.completed"({ data }, { channel }) {
+    const text = replyTextOf(data);
     if (text === undefined) return;
     for (const chunk of splitTeamsMessageText(text)) {
       await channel.thread.post(chunk);
     }
   },
 
-  async "session.ended"(event, channel, _ctx) {
-    if (event.outcome !== "failed") return;
-    const hint = formatErrorHint(errorHintOf(event.error));
-    const errorId = event.error?.id;
+  async "session.ended"({ data }, { channel }) {
+    if (data.outcome !== "failed") return;
+    const hint = formatErrorHint(errorHintOf(data.error));
+    const errorId = data.error?.id;
     await channel.thread.post(
       [
         `This session could not recover from an error${hint}.`,
@@ -291,10 +296,10 @@ export const defaultEvents: TeamsChannelEvents = {
     );
   },
 
-  async "turn.settled"(event, channel, _ctx) {
-    if (event.outcome !== "failed") return;
-    const hint = formatErrorHint(errorHintOf(event.error));
-    const errorId = event.error?.id;
+  async "turn.settled"({ data }, { channel }) {
+    if (data.outcome !== "failed") return;
+    const hint = formatErrorHint(errorHintOf(data.error));
+    const errorId = data.error?.id;
     await channel.thread.post(
       [
         `I hit an error while handling your request${hint}.`,
