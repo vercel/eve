@@ -81,7 +81,6 @@ function createDeployProjectDeps() {
 
 function createNonInteractiveLinkDeps(): NonInteractiveLinkDependencies {
   return {
-    isEveProject: vi.fn(async () => true),
     runVercel: vi.fn(async () => true),
     runVercelEnvPull: vi.fn(async () => true),
     readProjectLink: vi.fn(async () => ({
@@ -145,7 +144,7 @@ describe("runDeployCommand", () => {
   test("links and deploys a workspace root non-interactively", async () => {
     const projectRoot = await createWorkspaceProject();
     const logger = new TestLogger();
-    const linkDeps = { ...createNonInteractiveLinkDeps(), isEveProject };
+    const linkDeps = createNonInteractiveLinkDeps();
     const deployDeps = createDeployProjectDeps();
 
     await runDeployCommand(

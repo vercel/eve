@@ -145,7 +145,6 @@ describe("runLinkCommand", () => {
           existing ? { projectId: "prj_existing", projectName: "my-agent" } : null,
         );
       const linkDeps: NonInteractiveLinkDependencies = {
-        isEveProject,
         runVercel: vi.fn(async () => true),
         runVercelEnvPull: vi.fn(async () => true),
         resolveTeam: vi.fn(async () => "acme"),
@@ -218,7 +217,6 @@ describe("runLinkCommand", () => {
     const projectRoot = await createWorkspaceProject();
     const logger = new TestLogger();
     const linkDeps: NonInteractiveLinkDependencies = {
-      isEveProject,
       runVercel: vi.fn(async () => true),
       runVercelEnvPull: vi.fn(async () => true),
       resolveTeam: vi.fn(async () => "acme"),
