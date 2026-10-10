@@ -64,7 +64,7 @@ export default defineEval({
     initial.messageIncludes(/HTTP-SESSION-INITIAL-OK/i);
 
     const liveCancellation = t.target.watchTurn(sessionId, {
-      startIndex: initial.events.length,
+      startIndex: initial.session.state!.streamIndex,
     });
     const sent = await postJson<AcceptedResponse>(
       t.target,
@@ -103,8 +103,13 @@ export default defineEval({
     cancelledTurn.notEvent("turn.settled", { data: { outcome: "failed" } });
     cancelledTurn.notEvent("session.ended", { data: { outcome: "failed" } });
 
-    let eventIndex = initial.events.length + cancelledTurn.events.length;
-    const liveCompaction = t.target.watchTurn(sessionId, { startIndex: eventIndex });
+    // Each read starts at the line after the last one read. A context change between turns
+    // ends no turn, so its read ends with its settlement.
+    const settlesContext = (event: { readonly type: string }) => event.type === "context.settled";
+    const liveCompaction = t.target.watchTurn(sessionId, {
+      startIndex: cancelledTurn.session.state!.streamIndex,
+      until: settlesContext,
+    });
     const compacted = await postJson<AcceptedResponse>(
       t.target,
       `/eve/v1/session/${sessionId}/compact`,
@@ -124,9 +129,11 @@ export default defineEval({
       { data: { kind: "compaction", outcome: "completed" }, type: "context.settled" },
     ]);
     compactedEvents.notEvent("turn.started");
-    eventIndex += compactedEvents.events.length;
 
-    const liveClear = t.target.watchTurn(sessionId, { startIndex: eventIndex });
+    const liveClear = t.target.watchTurn(sessionId, {
+      startIndex: compactedEvents.session.state!.streamIndex,
+      until: settlesContext,
+    });
     const cleared = await postJson<AcceptedResponse>(
       t.target,
       `/eve/v1/session/${sessionId}/clear`,
@@ -149,9 +156,10 @@ export default defineEval({
       { data: { kind: "clear", outcome: "completed" }, type: "context.settled" },
     ]);
     clearedEvents.notEvent("turn.started");
-    eventIndex += clearedEvents.events.length;
 
-    const liveFollowUp = t.target.watchTurn(sessionId, { startIndex: eventIndex });
+    const liveFollowUp = t.target.watchTurn(sessionId, {
+      startIndex: clearedEvents.session.state!.streamIndex,
+    });
     const followUpResponse = await postJson<AcceptedResponse>(
       t.target,
       `/eve/v1/session/${sessionId}`,

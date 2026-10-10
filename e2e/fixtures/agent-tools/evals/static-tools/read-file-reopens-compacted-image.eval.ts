@@ -27,7 +27,7 @@ export default defineEval({
     const session = shown.session;
 
     const liveCompaction = t.target.watchTurn(session.sessionId, {
-      startIndex: session.events.length,
+      startIndex: session.state!.streamIndex,
     });
     const response = await t.target.fetch(
       `/eve/v1/session/${encodeURIComponent(session.sessionId)}/compact`,

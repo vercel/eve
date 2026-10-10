@@ -45,7 +45,8 @@ export default defineEval({
     const { childSessionId, taskId } = aliceParent;
     const aliceChild = await t.target.watchTurn(childSessionId).result();
     await expectWorkspaceReads(t, aliceChild, ALICE_WORKSPACE_LABEL);
-    let childEventCount = aliceChild.events.length;
+    // Each read starts at the line after the last one read.
+    let childNextLine = aliceChild.session.state!.streamIndex;
 
     // Bob continues it by its taskId and must resolve Bob's workspace label, not Alice's.
     const bobTurn = await aliceParent.session.send(CONTINUE_CHILD_MESSAGE, {
@@ -59,10 +60,10 @@ export default defineEval({
       BOB_AUTHORIZATION,
     );
     const bobChild = await t.target
-      .watchTurn(childSessionId, { startIndex: childEventCount })
+      .watchTurn(childSessionId, { startIndex: childNextLine })
       .result();
     await expectWorkspaceReads(t, bobChild, BOB_WORKSPACE_LABEL);
-    childEventCount += bobChild.events.length;
+    childNextLine = bobChild.session.state!.streamIndex;
 
     // A grantless observer continues it once more. Reusing either prior membership
     // would complete this call; correct per-turn scoping denies access.
@@ -77,7 +78,7 @@ export default defineEval({
       OBSERVER_AUTHORIZATION,
     );
     const observerChild = await t.target
-      .watchTurn(childSessionId, { startIndex: childEventCount })
+      .watchTurn(childSessionId, { startIndex: childNextLine })
       .result();
     observerChild.expectOk();
     observerChild.calledTool("read-workspace-label", { status: "failed" });

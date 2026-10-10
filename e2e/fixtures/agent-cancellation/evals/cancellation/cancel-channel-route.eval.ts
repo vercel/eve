@@ -99,7 +99,7 @@ export default defineEval({
     );
 
     const followUp = await t.target
-      .watchTurn(sessionId, { startIndex: cancelledTurn.events.length })
+      .watchTurn(sessionId, { startIndex: cancelledTurn.session.state!.streamIndex })
       .result();
     followUp.notEvent("turn.settled", { data: { outcome: "cancelled" } });
     followUp.notEvent("turn.settled", { data: { outcome: "failed" } });
