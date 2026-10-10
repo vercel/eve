@@ -1,3 +1,4 @@
+import { getMessageResponseDeliveryId } from "#client/message-response.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
@@ -251,16 +252,20 @@ export class EvalSessionDriver implements EveEvalSession {
       inputResponses === undefined
         ? await this.#session.send(message!, options)
         : await this.#session.respond(inputResponses, options);
-    return this.consume(response, message);
+    // A message's response ends when its delivery settles; an answer's at its first turn boundary.
+    const deliveryId = message === undefined ? undefined : getMessageResponseDeliveryId(response);
+    return this.consume(response, message, deliveryId);
   }
 
   /** @internal */
   consume(
     events: AsyncIterable<SessionStreamEvent>,
     message?: SendTurnInput["message"],
+    deliveryId?: string,
   ): EveEvalLiveTurn {
     const sessionId = this.sessionId;
     return new EvalLiveTurn({
+      deliveryId,
       events,
       observe: (event) => this.#observeEvent(sessionId, event),
       record: (observed) => {
@@ -410,6 +415,8 @@ class EvalLiveTurn implements EveEvalLiveTurn {
   #waitError: Error | undefined;
 
   constructor(input: {
+    /** A message's delivery: its response ends when the delivery settles, not at a turn boundary. */
+    readonly deliveryId?: string;
     readonly events: AsyncIterable<SessionStreamEvent>;
     readonly observe: (event: SessionStreamEvent) => void;
     readonly record: (events: readonly SessionStreamEvent[]) => EveEvalTurn;
@@ -418,7 +425,7 @@ class EvalLiveTurn implements EveEvalLiveTurn {
   }) {
     this.session = input.session;
     this.sessionId = input.sessionId;
-    this.#completion = this.#consume(input.events, input.observe, input.record);
+    this.#completion = this.#consume(input.events, input.observe, input.record, input.deliveryId);
     void this.#completion.catch(() => {});
   }
 
@@ -481,10 +488,11 @@ class EvalLiveTurn implements EveEvalLiveTurn {
     source: AsyncIterable<SessionStreamEvent>,
     observe: (event: SessionStreamEvent) => void,
     record: (events: readonly SessionStreamEvent[]) => EveEvalTurn,
+    deliveryId: string | undefined,
   ): Promise<EveEvalTurn> {
     try {
       let sawBoundary = false;
-      const segment = new ResponseSegment();
+      const segment = new ResponseSegment({ deliveryId });
       for await (const event of source) {
         this.#events.push(event);
         const endsSegment = segment.observe(event);
