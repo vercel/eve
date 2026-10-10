@@ -671,17 +671,16 @@ describe("createMessageReceivedEvent", () => {
     ]);
   });
 
-  it("exposes data URLs but not opaque base64 strings", () => {
-    const dataUrl = "data:text/plain;base64,aGVsbG8=";
-
-    expect(projectParts([{ data: dataUrl, mediaType: "text/plain", type: "file" }])).toEqual([
-      { mediaType: "text/plain", type: "file", url: dataUrl },
-    ]);
+  it("projects data URLs and base64 strings as their size, never their bytes", () => {
     expect(
       projectParts([
+        { data: "data:text/plain;base64,aGVsbG8=", mediaType: "text/plain", type: "file" },
         { data: "aGVsbG8=", filename: "note.txt", mediaType: "text/plain", type: "file" },
       ]),
-    ).toEqual([{ filename: "note.txt", mediaType: "text/plain", type: "file" }]);
+    ).toEqual([
+      { mediaType: "text/plain", size: 5, type: "file" },
+      { filename: "note.txt", mediaType: "text/plain", size: 5, type: "file" },
+    ]);
   });
 
   it("exposes tagged URL file data", () => {

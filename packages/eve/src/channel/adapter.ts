@@ -6,6 +6,7 @@ import { createLogger } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { DeliverPayload } from "#channel/types.js";
+import type { UploadPolicy } from "#public/channels/upload-policy.js";
 import type {
   FetchFileContext,
   FetchFileResult,
@@ -159,15 +160,24 @@ export type ChannelAdapter<TCtx extends ChannelAdapterContext<any> = ChannelAdap
   /**
    * Fetches bytes for a URL encountered in `FilePart.data`.
    *
-   * Called by the staging pipeline when it encounters a `URL` object
-   * on a `FilePart`. Return `null` to let the URL pass through to the
-   * model provider (e.g. public images). Return bytes or
-   * {@link FetchFileResult} to stage the file to the sandbox.
+   * Called by the staging pipeline when it encounters a link on a
+   * `FilePart`. Return bytes or {@link FetchFileResult} to stage the file
+   * to the sandbox. Return `null` when the link is not this channel's: eve
+   * then downloads a public `https:` link itself, and any other link
+   * reaches the model as a note.
    *
    * Credentials should be captured in the closure at channel
    * construction time.
    */
   readonly fetchFile?: FetchFileFunction;
+
+  /**
+   * Upload policy staging applies to every inbound attachment, on its final
+   * bytes and verified media type, including links eve downloads itself.
+   * Without one, staging checks nothing and eve's own downloads stop at the
+   * framework default size.
+   */
+  readonly uploadPolicy?: UploadPolicy;
 
   /**
    * Framework-owned observability projection for the active channel.

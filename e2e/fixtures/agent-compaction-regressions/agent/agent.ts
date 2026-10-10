@@ -110,7 +110,7 @@ const taskModel = mockModel({
           toolText.includes(CONTENT_OUTPUT_LEAD_MARKER) ? "LEAD_PRESERVED" : "LEAD_LOST",
           // The stub names the file's sandbox path, which ends in its filename.
           toolText.includes("Attached file ") &&
-          toolText.includes(`${CONTENT_OUTPUT_FILENAME} (application/octet-stream)`)
+          toolText.includes(`${CONTENT_OUTPUT_FILENAME} (image/png)`)
             ? "FILE_STUB_RENDERED"
             : "FILE_STUB_LOST",
           request.userMessages.some((text) => text.includes("[case: content-output-file-stub]"))

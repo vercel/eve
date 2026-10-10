@@ -95,10 +95,11 @@ export interface GenericChannelDefinition<
   readonly events?: TEvents;
 
   /**
-   * Fetches bytes for a `URL` object encountered on a `FilePart.data` by the
-   * staging pipeline. Return `null` to pass the URL through to the model
-   * provider unchanged, or bytes / {@link FetchFileResult} to stage the file to
-   * the sandbox.
+   * Fetches bytes for a link encountered on a `FilePart.data` by the staging
+   * pipeline. Return bytes / {@link FetchFileResult} to stage the file to the
+   * sandbox, or `null` when the link is not this channel's: eve then downloads
+   * a public `https:` link itself, and any other link reaches the model as a
+   * note. A provider never fetches an attachment.
    */
   readonly fetchFile?: FetchFileFunction;
 

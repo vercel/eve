@@ -479,8 +479,8 @@ function parseMessagePart(raw: unknown): TextPart | FilePart | Response {
       );
     }
     // Callers must never supply framework-internal refs (`eve-url:`,
-    // `eve-sandbox:`, `eve-attachment:`): the staging pipeline trusts the
-    // scheme and would reconstitute the string into a privileged sandbox read.
+    // `eve-sandbox:`): the staging pipeline trusts the scheme and would
+    // reconstitute the string into a privileged sandbox read.
     if (hasInternalRefScheme(part.data)) {
       return Response.json(
         { error: "File part 'data' must not use a framework-internal ref scheme.", ok: false },
