@@ -1,3 +1,4 @@
+import { eachEvent } from "#internal/testing/session-machine.js";
 import { jsonSchema, type LanguageModel } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -39,9 +40,9 @@ function createEventCollector(): {
 } {
   const events: UnstampedMessageStreamEvent[] = [];
   return {
-    emit: async (event) => {
+    emit: eachEvent(async (event) => {
       events.push(event);
-    },
+    }),
     events,
   };
 }
@@ -292,14 +293,14 @@ describe("tool loop streamed provider retries", () => {
     ]);
     const events: UnstampedMessageStreamEvent[] = [];
     let sinkFailed = false;
-    const emit: HarnessEmitFn = async (event) => {
+    const emit: HarnessEmitFn = eachEvent(async (event) => {
       if (!sinkFailed && event.type === "action.result" && event.data.result.callId === "call_a2") {
         sinkFailed = true;
         // A transient sink failure the model-call retry classifies as retryable.
         throw Object.assign(new Error("Event sink unavailable"), { statusCode: 503 });
       }
       events.push(event);
-    };
+    });
 
     const toolStep = await createToolLoopHarness(createConfig(model, emit, tools))(
       createSession(),

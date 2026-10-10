@@ -1,5 +1,9 @@
 import { buildAdapterContext } from "#channel/adapter-context.js";
-import { callAdapterEventHandler, type ChannelAdapterContext } from "#channel/adapter.js";
+import {
+  callAdapterEventHandler,
+  withWaitingContinuationToken,
+  type ChannelAdapterContext,
+} from "#channel/adapter.js";
 import { type ContextContainer, contextStorage } from "#context/container.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import {
@@ -23,7 +27,6 @@ import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession } from "#execution/session.js";
 import {
-  publishTransition,
   saveTransition,
   sessionView,
   type Transition,
@@ -32,7 +35,9 @@ import {
 import {
   currentProjection,
   enterSessionProjection,
-  recordPublishedEvent,
+  enterSessionProjectionAt,
+  nextLinePosition,
+  recordPublishedLine,
   saveSessionProjection,
 } from "#harness/session-machine/current.js";
 import {
@@ -42,15 +47,22 @@ import {
   turnPosition,
 } from "#harness/session-machine/view.js";
 import { validateHarnessModelMessages, type HarnessModelMessage } from "#harness/messages.js";
-import type { HandleEventFn, HarnessSession, HarnessSessionBase } from "#harness/types.js";
+import { eventsOf } from "#harness/publication.js";
+import type {
+  HandleEventFn,
+  HarnessSession,
+  HarnessSessionBase,
+  SessionPublication,
+} from "#harness/types.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { createLogger } from "#internal/logging.js";
+import { eventsOfLine, linesOf } from "#protocol/legacy-lines.js";
+import type { MessageStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
-  encodeMessageStreamEvent,
-  stampMessageStreamEvent,
-  type MessageStreamEvent,
-  type UnstampedMessageStreamEvent,
-} from "#protocol/message.js";
+  encodeLine,
+  type FactPosition,
+  type StoredLine,
+} from "#protocol/session-events/envelope.js";
 import { type SessionProjection } from "#protocol/session-projection.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
@@ -269,28 +281,41 @@ export interface SessionEventWriter {
   release(): void;
 }
 
-interface StreamWriter extends SessionEventWriter {
-  /** Stamps the event, then writes it; returns the event as written. */
-  write(event: UnstampedMessageStreamEvent): Promise<MessageStreamEvent>;
+/** One event as written: as v26 readers read it back, and where it sits on the stream. */
+export interface WrittenEvent {
+  readonly event: MessageStreamEvent;
+  readonly position: FactPosition;
+  /** It rode as a progress record, which only hooks keyed on its type hear. */
+  readonly progress: boolean;
 }
 
-/** Dispatches a session's events to its channel and stream-event hooks. */
+interface StreamWriter extends SessionEventWriter {
+  /** Writes one line: one chunk, so a crash leaves all of it or none. */
+  write(line: StoredLine): Promise<void>;
+}
+
+/** Dispatches a session's written events to its channel and stream-event hooks. */
 export interface SessionEventDispatcher {
   /** The context delivery hands the channel adapter; a turn step also hands it to `adapter.deliver`. */
   readonly adapterCtx: ChannelAdapterContext;
   /**
-   * Runs the stream-event hooks for a written event. Only a turn step passes
-   * `cancelTurn`; see `turn-event-handler.ts`.
+   * Runs the stream-event hooks for written events, in order. Only a turn step passes
+   * `cancelTurnFor`, which says how a hook on each event may stop the turn; see
+   * `turn-event-handler.ts`.
    */
-  runHooks(event: MessageStreamEvent, cancelTurn?: () => void): Promise<void>;
+  runHooks(
+    written: readonly WrittenEvent[],
+    cancelTurnFor?: (event: MessageStreamEvent) => (() => void) | undefined,
+  ): Promise<void>;
 }
 
 interface EventDispatcher extends SessionEventDispatcher {
   /**
-   * Channel delivery: `forwardSessionInput` or the channel adapter's handler,
-   * then the channel context. Returns the event as the handler left it.
+   * After the write: relays each input request this session carries for its caller
+   * (`forwardSessionInput`), or runs the channel adapter's handler, then saves the channel
+   * context.
    */
-  deliver(event: UnstampedMessageStreamEvent): Promise<UnstampedMessageStreamEvent>;
+  deliver(written: readonly WrittenEvent[]): Promise<void>;
 }
 
 /** A session's stream held by one step, with the dispatch of the events that step publishes. */
@@ -298,13 +323,13 @@ export interface SessionEventPublisher {
   readonly dispatcher: SessionEventDispatcher;
   readonly writer: SessionEventWriter;
   /**
-   * Delivers and writes one event the step produced, and returns it
-   * as written for its hooks. Delivery comes first so the channel adapter's
-   * handler shapes what is written.
+   * Writes one publication (a commit's facts on one line, each progress record on its own),
+   * folds each line into the step's projection, then runs the channel's handlers. Returns the
+   * events as written, for their hooks.
    */
-  emit(event: UnstampedMessageStreamEvent): Promise<MessageStreamEvent>;
-  /** `emit`, then the event's stream-event hooks. */
-  publish(event: UnstampedMessageStreamEvent): Promise<void>;
+  emit(publication: SessionPublication): Promise<readonly WrittenEvent[]>;
+  /** `emit`, then the events' stream-event hooks. */
+  publish(publication: SessionPublication): Promise<void>;
 }
 
 export function openSessionEventPublisher(input: {
@@ -317,21 +342,33 @@ export function openSessionEventPublisher(input: {
   const dispatcher = createSessionEventDispatcher(input);
   // Opened after the dispatcher, so a context that cannot build one leaves the
   // stream unlocked for the terminal event's fallback write.
-  const writer = openSessionEventWriter({
-    deliveryIds: () => (origin === "own" ? ctx.get(TurnDeliveryIdsKey) : undefined),
-    sessionWritable: input.sessionWritable,
-  });
-  const emit = async (event: UnstampedMessageStreamEvent): Promise<MessageStreamEvent> => {
-    const stamped = await writer.write(await dispatcher.deliver(event));
-    recordPublishedEvent(ctx, stamped);
-    return stamped;
+  const writer = openSessionEventWriter(input.sessionWritable);
+  const emit = async (publication: SessionPublication): Promise<readonly WrittenEvent[]> => {
+    const events = eventsOf(publication).map((event) =>
+      withWaitingContinuationToken(event, dispatcher.adapterCtx),
+    );
+    const at = new Date().toISOString();
+    const deliveryIds = origin === "own" ? ctx.get(TurnDeliveryIdsKey) : undefined;
+    const written: WrittenEvent[] = [];
+    for (const line of linesOf(events, at, deliveryIds)) {
+      const position = nextLinePosition(ctx);
+      await writer.write(line);
+      const lineEvents = eventsOfLine(line, position, at);
+      recordPublishedLine(ctx, lineEvents);
+      const progress = "progress" in line;
+      lineEvents.forEach((event, index) =>
+        written.push({ event, position: { index, line: position }, progress }),
+      );
+    }
+    await dispatcher.deliver(written);
+    return written;
   };
   return {
     dispatcher,
     writer,
     emit,
-    async publish(event) {
-      await dispatcher.runHooks(await emit(event));
+    async publish(publication) {
+      await dispatcher.runHooks(await emit(publication));
     },
   };
 }
@@ -343,43 +380,39 @@ function createSessionEventDispatcher(input: {
   const { ctx, inputSource } = input;
   const adapter = ctx.require(ChannelKey);
   const adapterCtx = buildAdapterContext(adapter, ctx);
+  const deliveryCtx = inputSource === undefined ? adapterCtx : { ...adapterCtx, inputSource };
 
   return {
     adapterCtx,
-    async deliver(event) {
-      const forwarded = await forwardSessionInput(ctx, event, inputSource);
-      const routed = forwarded
-        ? event
-        : await callAdapterEventHandler(
-            adapter,
-            event,
-            inputSource === undefined ? adapterCtx : { ...adapterCtx, inputSource },
-          );
+    async deliver(written) {
+      if (written.length === 0) return;
+      for (const { event, position } of written) {
+        if (await forwardSessionInput(ctx, event, inputSource)) continue;
+        await callAdapterEventHandler(adapter, event, { ...deliveryCtx, position });
+      }
       setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
-      return routed;
     },
-    async runHooks(event, cancelTurn) {
+    async runHooks(written, cancelTurnFor) {
+      if (written.length === 0) return;
       // Read here rather than when the dispatcher is built: terminal delivery
       // runs no hooks and must not require the bundle.
-      await dispatchStreamEventHooks({
-        cancelTurn,
-        ctx,
-        event,
-        registry: ctx.require(BundleKey).hookRegistry,
-      });
+      const registry = ctx.require(BundleKey).hookRegistry;
+      for (const { event, position, progress } of written) {
+        await dispatchStreamEventHooks({
+          cancelTurn: cancelTurnFor?.(event),
+          ctx,
+          event,
+          position,
+          progress,
+          registry,
+        });
+      }
     },
   };
 }
 
-function openSessionEventWriter(input: {
-  /**
-   * The delivery ids stamped on each event. Read at each write because a turn
-   * step records its delivery ids after it opens the stream.
-   */
-  readonly deliveryIds: () => readonly string[] | undefined;
-  readonly sessionWritable: WritableStream<Uint8Array>;
-}): StreamWriter {
-  const streamWriter = input.sessionWritable.getWriter();
+function openSessionEventWriter(sessionWritable: WritableStream<Uint8Array>): StreamWriter {
+  const streamWriter = sessionWritable.getWriter();
 
   let released = false;
   const release = (): void => {
@@ -388,10 +421,8 @@ function openSessionEventWriter(input: {
     streamWriter.releaseLock();
   };
   return {
-    async write(event) {
-      const stamped = stampMessageStreamEvent(event, input.deliveryIds());
-      await streamWriter.write(encodeMessageStreamEvent(stamped));
-      return stamped;
+    async write(line) {
+      await streamWriter.write(textEncoder.encode(encodeLine(line)));
     },
     close: async () => {
       await streamWriter.close();
@@ -400,6 +431,8 @@ function openSessionEventWriter(input: {
     release,
   };
 }
+
+const textEncoder = new TextEncoder();
 
 /** The session's projection as of the last event it published. */
 export function readSessionProjection(ctx: ContextContainer): SessionProjection {
@@ -430,6 +463,8 @@ export async function publishTerminalSessionEvent(input: {
   readonly turn?: { readonly id: string; readonly sequence: number };
   /** The turn the event ends, for instrumentation. */
   readonly turnId?: string;
+  /** The position of the line the event takes, from the session's last checkpoint. */
+  readonly position?: number;
 }): Promise<void> {
   const sessionId = (input.serializedContext["eve.sessionId"] as string | undefined) ?? "";
   const fields = { errorId: input.errorId, sessionId };
@@ -439,7 +474,7 @@ export async function publishTerminalSessionEvent(input: {
   let publisher: SessionEventPublisher;
   try {
     ctx = await deserializeContext(input.serializedContext);
-    enterSessionProjection(ctx, undefined);
+    enterSessionProjectionAt(ctx, input.position ?? 0);
     publisher = openSessionEventPublisher({
       ctx,
       origin: "own",
@@ -504,9 +539,11 @@ async function writeUnroutedSessionEvent(
   sessionWritable: WritableStream<Uint8Array>,
   event: UnstampedMessageStreamEvent,
 ): Promise<void> {
-  const writer = openSessionEventWriter({ deliveryIds: () => undefined, sessionWritable });
+  const writer = openSessionEventWriter(sessionWritable);
   try {
-    await writer.write(event);
+    for (const line of linesOf([event], new Date().toISOString(), undefined)) {
+      await writer.write(line);
+    }
     await writer.close();
   } finally {
     writer.release();
@@ -554,7 +591,9 @@ async function commit(
     inputSource: options.inputSource,
     origin: options.origin,
     async publish(emit) {
-      for (const transition of transitions) await publishTransition(transition, emit);
+      // One commit: the batch's events are one atomic line.
+      const events = transitions.flatMap((transition) => transition.events);
+      if (events.length > 0) await emit(events);
     },
     // Save onto the session the scope committed, which carries what its providers captured.
     updateSession: (session) => ({

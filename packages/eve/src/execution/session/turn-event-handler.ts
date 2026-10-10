@@ -1,6 +1,7 @@
 import type { SessionParticipants } from "#execution/participants.js";
 import type { SessionEventPublisher } from "#execution/publish-session-events.js";
 import { throwIfTurnAborted, TurnCancelledError } from "#harness/turn-cancellation.js";
+import { readsHistory } from "#harness/session-machine/commit.js";
 import type { HandleEventFn } from "#harness/types.js";
 import type { HookEventType } from "#public/definitions/hook.js";
 /**
@@ -51,9 +52,9 @@ export function isHookCancellableEvent(type: string): boolean {
 }
 
 /**
- * Publishes one turn event, runs its hooks, then the participants that receive it. A hook's
- * `ctx.cancel()` aborts the turn signal at once; the event's remaining hooks still run, then the
- * turn stops before its participants or its next model call.
+ * Publishes one turn event or commit, runs its hooks, then the participants that receive each
+ * event. A hook's `ctx.cancel()` aborts the turn signal at once; the commit's remaining hooks
+ * still run, then the turn stops before its participants or its next model call.
  */
 export function createTurnEventHandler(input: {
   /** False for clear and compact requests, which run outside any turn. */
@@ -63,14 +64,15 @@ export function createTurnEventHandler(input: {
   readonly publisher: SessionEventPublisher;
 }): HandleEventFn {
   const { participants, publisher } = input;
-  return async (event, messages) => {
-    const emitted = await publisher.emit(event);
-    const cancelTurn =
-      input.canCancelTurn && isHookCancellableEvent(emitted.type)
-        ? () => input.hookCancellation.abort(new TurnCancelledError())
-        : undefined;
-    await publisher.dispatcher.runHooks(emitted, cancelTurn);
-    if (cancelTurn !== undefined) throwIfTurnAborted(input.hookCancellation.signal);
-    await participants.receive(emitted, messages);
+  const cancelTurn = () => input.hookCancellation.abort(new TurnCancelledError());
+  return async (publication, messages) => {
+    const written = await publisher.emit(publication);
+    await publisher.dispatcher.runHooks(written, (event) =>
+      input.canCancelTurn && isHookCancellableEvent(event.type) ? cancelTurn : undefined,
+    );
+    throwIfTurnAborted(input.hookCancellation.signal);
+    for (const { event } of written) {
+      await participants.receive(event, readsHistory(event.type) ? messages : undefined);
+    }
   };
 }

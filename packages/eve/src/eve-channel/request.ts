@@ -17,13 +17,15 @@ import {
   EVE_MESSAGE_STREAM_FORMAT,
   EVE_MESSAGE_STREAM_VERSION,
   EVE_SESSION_ID_HEADER,
-  EVE_STREAM_CONTROL_VERSION,
-  EVE_STREAM_CONTROL_VERSION_QUERY,
   EVE_STREAM_FORMAT_HEADER,
-  EVE_STREAM_LEASE_ENDED_CONTROL,
   EVE_STREAM_TAIL_INDEX_HEADER,
   EVE_STREAM_VERSION_HEADER,
 } from "#protocol/message.js";
+import {
+  HEARTBEAT_RECORD,
+  LEASE_ENDED_RECORD,
+  STREAM_ENDED_RECORD,
+} from "#protocol/session-events/envelope.js";
 import {
   REMOTE_AGENT_PROTOCOL_MISMATCH,
   REMOTE_AGENT_PROTOCOL_VERSION,
@@ -302,25 +304,25 @@ export async function createSessionStreamResponse(
   const includeTailIndex = !follow || parseIncludeTailIndex(request);
 
   try {
-    // Resolve the tail before committing a response; otherwise an unknown or
-    // unreachable session would answer 200 and fail mid-body. Open the event
-    // stream alongside the tail lookup to avoid an extra round trip.
-    const eventsPromise = session.getEventStream({ follow, startIndex });
+    // An unknown or unreachable session would otherwise answer 200 and then fail mid-body, so
+    // the tail must resolve before any bytes are committed. A position cursor opens the stream
+    // alongside it to save a round trip; a tail-relative cursor needs the tail to become one.
+    const early =
+      startIndex === undefined || startIndex >= 0
+        ? session.getLineStream({ follow, startIndex: startIndex ?? 0 })
+        : undefined;
     // Handled below; this keeps an early rejection from being reported as unhandled.
-    eventsPromise.catch(() => {});
+    early?.catch(() => {});
     let tailIndex: number;
     try {
       tailIndex = await session.getStreamTailIndex();
     } catch (error) {
-      void eventsPromise.then((events) => events.cancel()).catch(() => {});
+      void early?.then((lines) => lines.cancel()).catch(() => {});
       throw error;
     }
-    const events = await eventsPromise;
-    const controlVersion =
-      new URL(request.url).searchParams.get(EVE_STREAM_CONTROL_VERSION_QUERY) ===
-      EVE_STREAM_CONTROL_VERSION
-        ? EVE_STREAM_CONTROL_VERSION
-        : undefined;
+    const from =
+      early === undefined ? Math.max(0, tailIndex + 1 + (startIndex ?? 0)) : (startIndex ?? 0);
+    const lines = await (early ?? session.getLineStream({ follow, startIndex: from }));
     const headers = new Headers({
       "cache-control": "no-store, no-transform",
       "content-type": EVE_MESSAGE_STREAM_CONTENT_TYPE,
@@ -333,11 +335,10 @@ export async function createSessionStreamResponse(
       headers.set(EVE_STREAM_TAIL_INDEX_HEADER, String(tailIndex));
     }
     return new Response(
-      serializeAsNdjson(
-        events,
+      serializeLines(
+        lines,
         request.signal,
-        includeTailIndex ? streamEventLimit(startIndex, tailIndex) : undefined,
-        controlVersion !== undefined,
+        includeTailIndex ? Math.max(0, tailIndex - from + 1) : undefined,
       ),
       { headers },
     );
@@ -634,28 +635,20 @@ export function parseStartIndex(request: Request): number | undefined | Response
   return parsed;
 }
 
-function streamEventLimit(
-  startIndex: number | undefined,
-  tailIndex: number | undefined,
-): number | undefined {
-  if (tailIndex === undefined) return undefined;
-  const resolvedStartIndex =
-    startIndex === undefined
-      ? 0
-      : startIndex < 0
-        ? Math.max(0, tailIndex + 1 + startIndex)
-        : startIndex;
-  return Math.max(0, tailIndex - resolvedStartIndex + 1);
-}
-
-function serializeAsNdjson(
-  events: ReadableStream<unknown>,
+/**
+ * Serializes stored lines as NDJSON, with the transport records every v27 reader understands: a
+ * heartbeat every 10 seconds of silence (and one first, so the response commits at once), a
+ * lease end after 60 seconds, and `stream.ended` when the durable stream is done. A bounded read
+ * ends after `lineLimit` lines, without `stream.ended`: the stream itself goes on.
+ */
+function serializeLines(
+  lines: ReadableStream<unknown>,
   signal: AbortSignal,
-  eventLimit?: number,
-  leased = false,
+  lineLimit?: number,
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
-  let eventCount = 0;
+  const record = (value: unknown) => encoder.encode(`${JSON.stringify(value)}\n`);
+  let lineCount = 0;
   let heartbeat: ReturnType<typeof setTimeout> | undefined;
   let lease: ReturnType<typeof setTimeout> | undefined;
 
@@ -669,50 +662,48 @@ function serializeAsNdjson(
     clearTimeout(heartbeat);
     heartbeat = setTimeout(() => {
       try {
-        controller.enqueue(encoder.encode("\n"));
+        controller.enqueue(record(HEARTBEAT_RECORD));
         scheduleHeartbeat(controller);
       } catch {
         clearTimers();
       }
     }, SESSION_STREAM_HEARTBEAT_MS);
   };
-  const startLease = (controller: TransformStreamDefaultController<Uint8Array>) => {
-    scheduleHeartbeat(controller);
-    lease = setTimeout(() => {
-      clearTimers();
-      try {
-        controller.enqueue(encoder.encode(`${JSON.stringify(EVE_STREAM_LEASE_ENDED_CONTROL)}\n`));
-        controller.terminate();
-      } catch {
-        // The response was cancelled while the lease callback was already queued.
-      }
-    }, SESSION_STREAM_LEASE_MS);
-  };
 
   const transform = new TransformStream<unknown, Uint8Array>({
     start(controller) {
-      controller.enqueue(encoder.encode("\n"));
-      if (eventLimit === 0) {
+      controller.enqueue(record(HEARTBEAT_RECORD));
+      if (lineLimit === 0) {
         controller.terminate();
-      } else if (leased) {
-        startLease(controller);
+        return;
       }
+      scheduleHeartbeat(controller);
+      lease = setTimeout(() => {
+        clearTimers();
+        try {
+          controller.enqueue(record(LEASE_ENDED_RECORD));
+          controller.terminate();
+        } catch {
+          // The response was cancelled while the lease callback was already queued.
+        }
+      }, SESSION_STREAM_LEASE_MS);
     },
-    transform(event, controller) {
-      controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
-      eventCount += 1;
-      if (eventCount === eventLimit) {
+    transform(line, controller) {
+      controller.enqueue(record(line));
+      lineCount += 1;
+      if (lineCount === lineLimit) {
         clearTimers();
         controller.terminate();
-      } else if (leased) {
+      } else {
         scheduleHeartbeat(controller);
       }
     },
-    flush() {
+    flush(controller) {
       clearTimers();
+      controller.enqueue(record(STREAM_ENDED_RECORD));
     },
   });
-  void events
+  void lines
     .pipeTo(transform.writable, { signal })
     .catch(() => {})
     .finally(clearTimers);

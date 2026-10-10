@@ -1,3 +1,4 @@
+import { stampTestEvent } from "#internal/testing/events.js";
 import { describe, expect, it } from "vitest";
 
 import { transcriptReducer } from "#client/transcript-reducer.js";
@@ -9,7 +10,6 @@ import {
   createReasoningCompletedEvent,
   createSessionFailedEvent,
   createSessionStartedEvent,
-  stampMessageStreamEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 
@@ -28,7 +28,7 @@ function reduce(
   reducer = transcriptReducer(),
 ): ReturnType<typeof reducer.initial> {
   return events.reduce(
-    (data, event) => reducer.reduce(data, stampMessageStreamEvent(event)),
+    (data, event) => reducer.reduce(data, stampTestEvent(event)),
     reducer.initial(),
   );
 }
@@ -88,7 +88,7 @@ describe("transcriptReducer", () => {
   it("returns its input unchanged for events it ignores", () => {
     const reducer = transcriptReducer();
     const data = reducer.initial();
-    expect(reducer.reduce(data, stampMessageStreamEvent(createSessionStartedEvent()))).toBe(data);
+    expect(reducer.reduce(data, stampTestEvent(createSessionStartedEvent()))).toBe(data);
   });
 
   it.each([0, -1, 1.5])("rejects maxMessages %s", (maxMessages) => {

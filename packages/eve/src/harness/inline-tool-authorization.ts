@@ -1,8 +1,6 @@
 import type { ModelMessage } from "ai";
 
-import {
-  type AuthorizationSignal,
-} from "#harness/authorization.js";
+import { type AuthorizationSignal } from "#harness/authorization.js";
 import { resolveActiveAuthorizationChallenges } from "#harness/hitl/sign-ins.js";
 
 /**

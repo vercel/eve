@@ -15,7 +15,7 @@ import { serializeContext } from "#context/serialize.js";
 import { applyTransition, sessionView } from "#harness/session-machine/commit.js";
 import { relay } from "#harness/session-machine/transitions.js";
 import { storedProjection } from "#harness/session-machine/view.js";
-import { withOpenTurn, withRelays } from "#internal/testing/session-machine.js";
+import { withOpenTurn, withRelays, eachEvent } from "#internal/testing/session-machine.js";
 
 import type { HarnessEmitFn, HarnessSession } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -208,10 +208,10 @@ function buildCapturingEmit(ctx: ContextContainer): {
   const events: UnstampedMessageStreamEvent[] = [];
   const adapter = ctx.require(ChannelKey);
   const adapterCtx = buildAdapterContext(adapter, ctx);
-  const emit: HarnessEmitFn = async (event) => {
-    const transformed = await callAdapterEventHandler(adapter, event, adapterCtx);
-    events.push(transformed);
-  };
+  const emit: HarnessEmitFn = eachEvent(async (event) => {
+    await callAdapterEventHandler(adapter, event, adapterCtx);
+    events.push(event);
+  });
   const persistAdapterState = () => {
     ctx.set(ChannelKey, { ...adapter, state: { ...adapterCtx.state } });
   };

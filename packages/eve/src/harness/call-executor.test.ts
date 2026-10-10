@@ -1,3 +1,4 @@
+import { eachEvent } from "#internal/testing/session-machine.js";
 import { jsonSchema, type ToolSet, type TypedToolCall } from "ai";
 import { expect, it } from "vitest";
 
@@ -29,9 +30,9 @@ it("tells the model a failed call's error as the AI SDK did, name included", asy
     excludedCallIds: new Set(),
     messages: [],
     position: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
-    publish: async (event) => {
+    publish: eachEvent(async (event) => {
       published.push(event);
-    },
+    }),
     toolCalls: [call],
     tools: new Map([["lookup_record", lookup]]),
   });

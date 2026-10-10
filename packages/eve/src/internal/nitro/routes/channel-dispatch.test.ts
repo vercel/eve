@@ -70,6 +70,7 @@ function createRuntime(overrides: Partial<Runtime> = {}): Runtime {
     dispatchContinuation: vi.fn(),
     dispatchSession: vi.fn(),
     getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
+    getLineStream: vi.fn().mockResolvedValue(new ReadableStream()),
     getStreamTailIndex: vi.fn().mockResolvedValue(-1),
     resolveContinuation: vi.fn(),
     ...overrides,
@@ -244,6 +245,9 @@ describe("dispatchChannelRequest", () => {
       },
       async reset() {
         return { previousSessionId: "sess_target", status: "reset" };
+      },
+      async getLineStream() {
+        return new ReadableStream();
       },
       async getEventStream() {
         return new ReadableStream();

@@ -25,6 +25,7 @@ import type { DeliverPayload, TurnPolicy } from "#channel/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
+import type { FactPosition } from "#protocol/session-events/envelope.js";
 import type { GenericChannelDefinition, GenericReceiveInput } from "#shared/channel-definition.js";
 
 declare const CHANNEL_METADATA_TYPE: unique symbol;
@@ -184,10 +185,19 @@ export interface ChannelContinuationOps {
  */
 type ChannelContext<TCtx> = TCtx & ChannelContinuationOps;
 
+/**
+ * What a channel event handler knows about the event it observes, beyond the session: where the
+ * event sits on the stream. Observer-only, so tools never see it.
+ */
+export interface ChannelEventContext extends SessionContext {
+  /** The position of the event's line, and its index in that line. */
+  readonly position: FactPosition;
+}
+
 type ChannelEventHandler<T extends UnstampedMessageStreamEvent["type"], TCtx> = (
   data: EventData<T>,
   channel: ChannelContext<TCtx>,
-  ctx: SessionContext,
+  ctx: ChannelEventContext,
 ) => void | Promise<void>;
 
 type ChannelSessionFailedHandler<TCtx> = (
@@ -197,8 +207,8 @@ type ChannelSessionFailedHandler<TCtx> = (
 
 /**
  * Optional handlers keyed by session lifecycle event name. Each handler receives
- * the event `data`, the {@link ChannelContext}, and a {@link SessionContext}
- * `ctx`. The `session.failed` handler is the exception: it receives only `data`
+ * the event `data`, the {@link ChannelContext}, and a {@link ChannelEventContext}
+ * `ctx`. Handlers run after the event is written, so they observe it and never shape it. The `session.failed` handler is the exception: it receives only `data`
  * and the channel context, with no `ctx`; its data includes `sessionId`.
  */
 export interface ChannelEvents<TCtx = void> {
@@ -373,7 +383,7 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
     if (userHandler) {
       hasEventHandlers = true;
       eventHandlers[eventType] = (data: unknown, adapterCtx: any) => {
-        const { session, ...platformContext } = adapterCtx;
+        const { session, position, ...platformContext } = adapterCtx;
         const channel = {
           ...platformContext,
           continuation:
@@ -390,9 +400,16 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
             channel,
           );
         }
-        const ctx = buildCallbackContext();
+        const ctx: ChannelEventContext = {
+          ...buildCallbackContext(),
+          position: position ?? { index: 0, line: 0 },
+        };
         return (
-          userHandler as (data: unknown, channel: any, ctx: SessionContext) => void | Promise<void>
+          userHandler as (
+            data: unknown,
+            channel: any,
+            ctx: ChannelEventContext,
+          ) => void | Promise<void>
         )(data, channel, ctx);
       };
     }

@@ -1,21 +1,18 @@
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import { getRun } from "#internal/workflow/runtime.js";
+import { createLegacyEventReader } from "#protocol/legacy-lines.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
-import {
-  normalizePersistedMessageStreamEvent,
-  type MessageStreamEventForVersion,
-  type MessageStreamVersion,
-} from "#protocol/message-version.js";
+import { isStoredLine, type StoredLine } from "#protocol/session-events/envelope.js";
 
 /** Options for {@link streamSessionEvents}. */
 export interface SessionEventStreamOptions {
   /**
-   * Zero-based index of the first event to read. Negative values count back
-   * from the durable tail (`-1` is the latest event). Defaults to `0`.
+   * Position of the first line to read. Negative values count back from the
+   * durable tail (`-1` is the latest line). Defaults to `0`.
    */
   readonly startIndex?: number;
   /**
-   * Whether to keep following events recorded after the read opens. When
+   * Whether to keep following lines recorded after the read opens. When
    * `false`, the read ends at the durable tail observed when it opens.
    * Defaults to `true`.
    */
@@ -24,18 +21,53 @@ export interface SessionEventStreamOptions {
   readonly signal?: AbortSignal;
 }
 
+/** One stored line and its position. A line this version can't read has `line: undefined`. */
+export interface PositionedLine {
+  readonly position: number;
+  readonly line: StoredLine | undefined;
+}
+
 /**
- * Reads one session's durable event stream. Negative `startIndex` values count
- * back from the tail.
+ * Reads one session's stored records from `startIndex`, one per line, as parsed JSON. Negative
+ * `startIndex` values count back from the tail. Callers count positions: one per record.
+ */
+export function readSessionRecords(
+  sessionId: string,
+  startIndex?: number,
+): ReadableStream<unknown> {
+  return parseNdjsonStream<unknown>(() => getRun(sessionId).getReadable({ startIndex }));
+}
+
+/**
+ * Reads one session's v26 events: the records each line carries, rebuilt as v26 readers expect
+ * them. Kept while v26 event types ride inside lines.
  */
 export function readSessionEventStream(
   sessionId: string,
   startIndex?: number,
 ): ReadableStream<MessageStreamEvent> {
-  return parseNdjsonStream<MessageStreamEvent>(
-    () => getRun(sessionId).getReadable({ startIndex }),
-    normalizePersistedEvent,
-  );
+  const lines = streamSessionLines(sessionId, { startIndex });
+  const reader = createLegacyEventReader();
+  return new ReadableStream<MessageStreamEvent>({
+    async pull(controller) {
+      while (true) {
+        const next = await lines.next();
+        if (next.done === true) {
+          controller.close();
+          return;
+        }
+        const { line, position } = next.value;
+        if (line === undefined) continue;
+        const events = reader.read(line, position);
+        if (events.length === 0) continue;
+        for (const event of events) controller.enqueue(event);
+        return;
+      }
+    },
+    async cancel() {
+      await lines.return(undefined);
+    },
+  });
 }
 
 /**
@@ -60,7 +92,45 @@ export function readSessionEventHistory(
   });
 }
 
-/** Returns the index of the last durably recorded event, or `-1` before the first. */
+/**
+ * Reads one session's stored records up to the durable tail observed when the read opens, then
+ * ends. Negative `startIndex` values count back from that tail.
+ */
+export function readSessionRecordHistory(
+  sessionId: string,
+  startIndex?: number,
+): ReadableStream<unknown> {
+  let reader: ReadableStreamDefaultReader<unknown> | undefined;
+  let position = 0;
+  let tailIndex = -1;
+  return new ReadableStream<unknown>({
+    async start() {
+      tailIndex = await readSessionStreamTailIndex(sessionId);
+      const requested = startIndex ?? 0;
+      position = requested < 0 ? Math.max(0, tailIndex + 1 + requested) : requested;
+      if (position <= tailIndex) reader = readSessionRecords(sessionId, position).getReader();
+    },
+    async pull(controller) {
+      if (reader === undefined || position > tailIndex) {
+        controller.close();
+        await reader?.cancel().catch(() => {});
+        return;
+      }
+      const { done, value } = await reader.read();
+      if (done) {
+        controller.close();
+        return;
+      }
+      controller.enqueue(value);
+      position += 1;
+    },
+    async cancel() {
+      await reader?.cancel().catch(() => {});
+    },
+  });
+}
+
+/** Returns the position of the last durably recorded line, or `-1` before the first. */
 export async function readSessionStreamTailIndex(sessionId: string): Promise<number> {
   // The readable is never consumed; cancel it so the unread source does not linger.
   const readable = getRun(sessionId).getReadable();
@@ -72,17 +142,14 @@ export async function readSessionStreamTailIndex(sessionId: string): Promise<num
 }
 
 /**
- * Iterates one session's durable events in process, without the HTTP stream
- * route.
- *
- * A bounded read counts events up from `startIndex` to find the tail. That
- * holds because the writer persists exactly one chunk per event (see
- * `createOrderedStreamEmitter`).
+ * Iterates one session's stored lines in process, without the HTTP stream route, with each
+ * line's position. A bounded read stops at the tail it observed when it opened: the writer
+ * stores one chunk per line, so positions are chunk indexes.
  */
-export async function* streamSessionEvents(
+export async function* streamSessionLines(
   sessionId: string,
   options: SessionEventStreamOptions = {},
-): AsyncGenerator<MessageStreamEvent, void, undefined> {
+): AsyncGenerator<PositionedLine, void, undefined> {
   const { follow = true, signal } = options;
   const requestedStartIndex = options.startIndex ?? 0;
   if (signal?.aborted) return;
@@ -95,17 +162,17 @@ export async function* streamSessionEvents(
   }
   if (!follow && tailIndex !== undefined && startIndex > tailIndex) return;
 
-  const reader = readSessionEventStream(sessionId, startIndex).getReader();
+  const reader = readSessionRecords(sessionId, startIndex).getReader();
   const cancel = () => void reader.cancel(signal?.reason).catch(() => {});
   signal?.addEventListener("abort", cancel, { once: true });
   try {
-    let index = startIndex;
+    let position = startIndex;
     while (!signal?.aborted) {
       const { done, value } = await reader.read();
       if (done) return;
-      yield value;
-      if (!follow && tailIndex !== undefined && index >= tailIndex) return;
-      index += 1;
+      yield { line: isStoredLine(value) ? value : undefined, position };
+      if (!follow && tailIndex !== undefined && position >= tailIndex) return;
+      position += 1;
     }
   } finally {
     signal?.removeEventListener("abort", cancel);
@@ -114,8 +181,16 @@ export async function* streamSessionEvents(
   }
 }
 
-function normalizePersistedEvent(value: unknown): MessageStreamEvent {
-  return normalizePersistedMessageStreamEvent(
-    value as MessageStreamEventForVersion<MessageStreamVersion>,
-  );
+/**
+ * Iterates one session's v26 events in process, from the lines {@link streamSessionLines}
+ * reads. Kept while v26 event types ride inside lines.
+ */
+export async function* streamSessionEvents(
+  sessionId: string,
+  options: SessionEventStreamOptions = {},
+): AsyncGenerator<MessageStreamEvent, void, undefined> {
+  const reader = createLegacyEventReader();
+  for await (const { line, position } of streamSessionLines(sessionId, options)) {
+    if (line !== undefined) yield* reader.read(line, position);
+  }
 }

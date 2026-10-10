@@ -49,6 +49,7 @@ function createRuntime(): Runtime {
         status: "accepted",
       })),
     getEventStream: vi.fn(),
+    getLineStream: vi.fn().mockResolvedValue(new ReadableStream()),
     getStreamTailIndex: vi.fn(),
     resolveContinuation: vi.fn(),
   };

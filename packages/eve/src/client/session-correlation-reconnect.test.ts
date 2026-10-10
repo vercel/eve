@@ -54,9 +54,7 @@ describe("delivery correlation across reconnects and concurrent sends", () => {
       await resumed.send("new", {
         headers: { authorization: "Bearer fixture" },
         signal: controller.signal,
-        streamReconnectPolicy: {
-          streamIdleReconnectPolicy: { baseDelayMs: 1, maxDelayMs: 1, maxAttempts: 2 },
-        },
+        streamReconnectPolicy: {},
       })
     ).result();
     expect(result.message).toBe("NEW");

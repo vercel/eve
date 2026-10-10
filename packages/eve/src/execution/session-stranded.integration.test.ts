@@ -1,3 +1,4 @@
+import { encodeTestLine } from "#internal/testing/events.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { createChannelAddress } from "#channel/channel-address.js";
@@ -30,8 +31,6 @@ import {
   createMessageCompletedEvent,
   createMessageReceivedEvent,
   createSessionStartedEvent,
-  encodeMessageStreamEvent,
-  stampMessageStreamEvent,
   type SessionPredecessor,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
@@ -135,7 +134,7 @@ async function recordHistory(
   const writer = getRun(sessionId).getWritable<Uint8Array>().getWriter();
   try {
     for (const event of events) {
-      await writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(event)));
+      await writer.write(new TextEncoder().encode(encodeTestLine(event)));
     }
   } finally {
     writer.releaseLock();

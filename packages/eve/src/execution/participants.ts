@@ -4,9 +4,7 @@ import { contextStorage, type ContextContainer } from "#context/container.js";
 import { resolveDynamicConnections } from "#context/dynamic-connection-lifecycle.js";
 import { resolveDynamicInstructions } from "#context/dynamic-instruction-lifecycle.js";
 import { resolveDynamicModel } from "#context/dynamic-model-lifecycle.js";
-import {
-  resolveDynamicSkills,
-} from "#context/dynamic-skill-lifecycle.js";
+import { resolveDynamicSkills } from "#context/dynamic-skill-lifecycle.js";
 import {
   refreshDynamicSessionSubagentsForRuntimeRevision,
   resolveDynamicSubagents,

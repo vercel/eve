@@ -1278,9 +1278,7 @@ describe("ClientSession", () => {
     vi.useFakeTimers();
     try {
       const response = await session.send("first", {
-        streamReconnectPolicy: {
-          streamIdleReconnectPolicy: { baseDelayMs: 10, maxAttempts: 2 },
-        },
+        streamReconnectPolicy: {},
       });
       const assertion = expect(response.result()).rejects.toThrow("before the accepted message");
       await vi.runAllTimersAsync();

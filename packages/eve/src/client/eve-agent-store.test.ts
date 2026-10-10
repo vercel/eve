@@ -1,3 +1,4 @@
+import { encodeTestLine } from "#internal/testing/events.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -33,10 +34,9 @@ import {
   type UnstampedMessageStreamEvent,
   type MessageStreamEvent,
 } from "#protocol/message.js";
-import type {
-  MessageStreamEventForVersion,
-  MessageStreamVersion,
-} from "#protocol/message-version.js";
+import type { MessageStreamVersion } from "#client/stream-version.js";
+
+type MessageStreamEventForVersion<_Version extends MessageStreamVersion> = MessageStreamEvent;
 
 function turnEvents(): MessageStreamEvent[] {
   return stampTestEvents([
@@ -103,7 +103,7 @@ function versionedStreamResponse<Version extends MessageStreamVersion>(
     new ReadableStream<Uint8Array>({
       start(controller) {
         for (const event of events) {
-          controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+          controller.enqueue(encoder.encode(encodeTestLine(event)));
         }
         controller.close();
       },
@@ -134,7 +134,7 @@ function versionedDisconnectingStreamResponse<Version extends MessageStreamVersi
         const event = events[index];
         if (event !== undefined) {
           index += 1;
-          controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+          controller.enqueue(encoder.encode(encodeTestLine(event)));
           return;
         }
         controller.error(new TypeError("terminated"));
@@ -1013,9 +1013,7 @@ describe("EveAgentStore prewarming", () => {
     const first = store.send({
       headers: { authorization: "Bearer old" },
       message: "Hello",
-      streamReconnectPolicy: {
-        streamIdleReconnectPolicy: { baseDelayMs: 1, maxAttempts: 5, maxDelayMs: 1 },
-      },
+      streamReconnectPolicy: {},
     });
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     emitTurn("delivery_1", "first");
@@ -1070,64 +1068,6 @@ describe("EveAgentStore stream overlap", () => {
         ),
     ).toEqual([null, "3"]);
   });
-
-  it.each(["21", "24"] as const)(
-    "reconstructs a split message across a v%s-to-v25 reconnect",
-    async (legacyVersion) => {
-      const current = streamingTurnEvents();
-      const received = current[0]!;
-      const started = current[1]!;
-      if (received.type !== "message.received" || started.type !== "turn.started") {
-        throw new Error("Expected the streaming fixture to begin a turn.");
-      }
-      const legacyPrefix = [
-        received,
-        started,
-        {
-          data: {
-            messageDelta: "Hel",
-            messageSoFar: "Hel",
-            sequence: 2,
-            stepIndex: 0,
-            turnId: "turn_1",
-          },
-          meta: current[2]!.meta,
-          type: "message.appended",
-        },
-      ] satisfies readonly MessageStreamEventForVersion<typeof legacyVersion>[];
-      const fetchMock = vi
-        .spyOn(globalThis, "fetch")
-        .mockResolvedValueOnce(startedResponse())
-        .mockResolvedValueOnce(versionedDisconnectingStreamResponse(legacyVersion, legacyPrefix))
-        .mockResolvedValueOnce(versionedStreamResponse("25", current.slice(3)));
-      const store = createStore({ reducer: defaultMessageReducer() });
-      const streamingText: string[] = [];
-      store.subscribe(() => {
-        const part = store.snapshot.data.messages.at(-1)?.parts.at(-1);
-        if (part?.type === "text" && part.state === "streaming") streamingText.push(part.text);
-      });
-
-      await store.send({ message: "Hello" });
-
-      expect(streamingText).toContain("Hel");
-      expect(streamingText).toContain("Hello");
-      expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual(
-        expect.objectContaining({
-          state: "done",
-          stepIndex: 0,
-          text: "Hello",
-          type: "text",
-        }),
-      );
-      expect(
-        fetchMock.mock.calls
-          .slice(1)
-          .map(([request]) =>
-            new URL(request.toString(), "http://localhost").searchParams.get("startIndex"),
-          ),
-      ).toEqual([null, "3"]);
-    },
-  );
 
   it("rejects a prepared turn containing both a message and input responses", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");

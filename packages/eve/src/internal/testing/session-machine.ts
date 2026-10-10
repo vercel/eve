@@ -6,6 +6,7 @@ import { suspendStep } from "#harness/session-machine/transitions.js";
 import { sessionView } from "#harness/session-machine/commit.js";
 import { writeHitlState, type RelayChange } from "#harness/hitl/requests.js";
 import { readTurnState, writeTurnState } from "#harness/session-machine/state.js";
+import { eventsOf } from "#harness/publication.js";
 import {
   ensureSessionProjection,
   recordPublishedEvent,
@@ -116,14 +117,30 @@ export function withParkedStep(
  * Wraps a test's event handler so the harness's events fold into the step's projection, as the
  * publish sink does in a running session.
  */
-export function foldingHandler(handleEvent?: HarnessEmitFn): HarnessEmitFn {
-  return async (event, messages) => {
+export function foldingHandler(handleEvent?: TestEventHandler): HarnessEmitFn {
+  return async (publication, messages) => {
     const ctx = contextStorage.getStore();
     if (ctx !== undefined) {
       ensureSessionProjection(ctx, undefined);
-      recordPublishedEvent(ctx, event);
+      for (const event of eventsOf(publication)) recordPublishedEvent(ctx, event);
     }
-    await handleEvent?.(event, messages);
+    if (handleEvent !== undefined) await eachEvent(handleEvent)(publication, messages);
+  };
+}
+
+/** A test's event handler: one event at a time, with the conversation its participants read. */
+export type TestEventHandler = (
+  event: UnstampedMessageStreamEvent,
+  messages?: readonly ModelMessage[],
+) => void | Promise<void>;
+
+/**
+ * Adapts a test's per-event handler to the harness's sink, which publishes a transition's events
+ * as one commit: the handler hears each event in order.
+ */
+export function eachEvent(handler: TestEventHandler): HarnessEmitFn {
+  return async (publication, messages) => {
+    for (const event of eventsOf(publication)) await handler(event, messages);
   };
 }
 

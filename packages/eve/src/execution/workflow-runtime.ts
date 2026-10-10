@@ -49,6 +49,8 @@ import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.
 import {
   readSessionEventHistory,
   readSessionEventStream,
+  readSessionRecordHistory,
+  readSessionRecords,
   readSessionStreamTailIndex,
 } from "#execution/session-event-stream.js";
 import {
@@ -278,15 +280,17 @@ export function createWorkflowRuntime(config: {
     ): Promise<ReadableStream<MessageStreamEvent>> {
       // Recorded history needs no owner, so reading it never inspects the session's lifecycle.
       if (options?.follow === false) return readSessionEventHistory(sessionId, options.startIndex);
-      // An ended session has no inbox, and a dormant `eve dev` run may resume;
-      // either recorded stream stays readable. Only a stranded owner refuses.
-      try {
-        await assertRunnableSessionInbox(sessionInboxHookToken(sessionCommandHookToken(sessionId)));
-      } catch (error) {
-        if (error instanceof StrandedSessionOwnerError) throw sessionStrandedError(error);
-        throw error;
-      }
+      await assertFollowableSession(sessionId);
       return readSessionEventStream(sessionId, options?.startIndex);
+    },
+
+    async getLineStream(
+      sessionId: string,
+      options?: GetEventStreamOptions,
+    ): Promise<ReadableStream<unknown>> {
+      if (options?.follow === false) return readSessionRecordHistory(sessionId, options.startIndex);
+      await assertFollowableSession(sessionId);
+      return readSessionRecords(sessionId, options?.startIndex);
     },
 
     async getStreamTailIndex(sessionId: string): Promise<number> {
@@ -411,6 +415,19 @@ async function settleStrandedCommand<TCommand extends SessionCommand>(
       throw sessionStrandedError(stranded);
     default:
       return inactiveCommandResult(command);
+  }
+}
+
+/**
+ * An ended session has no inbox, and a dormant `eve dev` run may resume; either recorded stream
+ * stays readable. Only a stranded owner refuses a follow.
+ */
+async function assertFollowableSession(sessionId: string): Promise<void> {
+  try {
+    await assertRunnableSessionInbox(sessionInboxHookToken(sessionCommandHookToken(sessionId)));
+  } catch (error) {
+    if (error instanceof StrandedSessionOwnerError) throw sessionStrandedError(error);
+    throw error;
   }
 }
 

@@ -50,7 +50,7 @@ function callEvent(
   adapter: ChannelAdapter,
   event: UnstampedMessageStreamEvent,
   ctx: any,
-): Promise<UnstampedMessageStreamEvent> {
+): Promise<void> {
   return contextStorage.run(stubAlsContext, () => callAdapterEventHandler(adapter, event, ctx));
 }
 

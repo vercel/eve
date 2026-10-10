@@ -10,6 +10,8 @@ export async function emitTerminalSessionCompletionStep(input: {
   /** The session's last turn, reported to channel handlers as `ctx.session.turn`. */
   readonly turn?: HarnessTurnRef;
   readonly usage: TokenUsage | undefined;
+  /** The position of the line the event takes. */
+  readonly position?: number;
 }): Promise<void> {
   "use step";
 

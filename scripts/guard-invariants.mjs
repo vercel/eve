@@ -141,6 +141,14 @@
  *             events, so nothing changes without readers hearing it. The model
  *             step's streamed content (its calls) is built where it streams,
  *             and their results where eve runs them (`call-executor.ts`).
+ *   rule 52 — The session event contract (`protocol/session-events/`) and
+ *             the shared fold (`protocol/session-projection/`) stand alone:
+ *             they import only each other, plus the vendored Zod in the
+ *             schema files, so a runtime refactor can't change the wire.
+ *   rule 53 — Zod stays out of readers. The modules readers load (the
+ *             contract's catalog, envelope, guards, and index; the fold;
+ *             `eve/events`; the client) never import a schema module by
+ *             value: schemas serve tests and development only.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -262,6 +270,7 @@ function isTsLike(relPath) {
  *   rule48: Violation[];
  *   rule50: Violation[];
  *   rule51: Violation[];
+ *   rule52: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -297,6 +306,7 @@ async function scanRepo(state) {
     checkRule48(posix, lines, state.rule48);
     checkRule50(posix, lines, state.rule50);
     checkRule51(posix, lines, state.rule51);
+    checkRule52(posix, lines, state.rule52);
   }
 }
 
@@ -557,6 +567,59 @@ function checkRule50(posix, lines, violations) {
       message:
         "imports the human-in-the-loop lifecycle's internals. Reach it through `#harness/hitl/index.js`, the one seam the rest of eve meets it at.",
     });
+  });
+}
+
+// ---------- Rules 52 and 53: the session event contract stands alone ----------
+
+const CONTRACT_DIR = "packages/eve/src/protocol/session-events/";
+const FOLD_DIR = "packages/eve/src/protocol/session-projection/";
+const CONTRACT_IMPORT_RE = /(?:\bfrom\s+|\bimport\s*\(\s*|^\s*import\s+)["']([^"']+)["']/;
+const CONTRACT_SPECIFIER_RE = /^(?:#protocol\/session-(?:events|projection)\/|\.\.?\/)/;
+const SCHEMA_FILE_RE =
+  /^packages\/eve\/src\/protocol\/session-events\/(?:common|schemas|families\/[^/]+)\.ts$/;
+const SCHEMA_SPECIFIER_RE =
+  /session-events\/(?:common|schemas|families\/[^"'/]+)\.js$|^\.\.?\/(?:common|schemas)\.js$|^\.\/families\//;
+const READER_FILE_RE =
+  /^packages\/eve\/src\/(?:protocol\/session-events\/(?:catalog|envelope|facts|guards|index)\.ts$|protocol\/session-projection\/|public\/events\/|client\/)/;
+
+/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
+function checkRule52(posix, lines, violations) {
+  if (/\.(?:test|integration\.test|scenario\.test)\.ts$/.test(posix)) return;
+  const inContract = posix.startsWith(CONTRACT_DIR) || posix.startsWith(FOLD_DIR);
+  const isReader = READER_FILE_RE.test(posix);
+  if (!inContract && !isReader) return;
+  // A multi-line `import type { … } from` names its specifier lines after the `type`.
+  let statementTypeOnly = false;
+  lines.forEach((line, idx) => {
+    if (/^\s*(?:import|export)\b/.test(line)) {
+      statementTypeOnly = /^\s*(?:import|export)\s+type\b/.test(line);
+    }
+    const specifier = CONTRACT_IMPORT_RE.exec(line)?.[1];
+    if (specifier === undefined) return;
+    const typeOnly = statementTypeOnly;
+    if (inContract) {
+      const allowed =
+        CONTRACT_SPECIFIER_RE.test(specifier) ||
+        (specifier === "#compiled/zod/index.js" && SCHEMA_FILE_RE.test(posix));
+      if (!allowed) {
+        violations.push({
+          rule: 52,
+          file: posix,
+          line: idx + 1,
+          message: `imports "${specifier}". The session event contract and its fold stand alone, so runtime refactors can't change the wire.`,
+        });
+        return;
+      }
+    }
+    if (isReader && !typeOnly && SCHEMA_SPECIFIER_RE.test(specifier)) {
+      violations.push({
+        rule: 53,
+        file: posix,
+        line: idx + 1,
+        message: `imports the schema module "${specifier}" by value, which loads Zod. Readers import its types with \`import type\`, and validate nothing.`,
+      });
+    }
   });
 }
 
@@ -1734,6 +1797,7 @@ async function main() {
     rule48: /** @type {Violation[]} */ ([]),
     rule50: /** @type {Violation[]} */ ([]),
     rule51: /** @type {Violation[]} */ ([]),
+    rule52: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1851,6 +1915,7 @@ async function main() {
   violations.push(...(await checkFrameworkActionIdentity()));
   violations.push(...state.rule50);
   violations.push(...state.rule51);
+  violations.push(...state.rule52);
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

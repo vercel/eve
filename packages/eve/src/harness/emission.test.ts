@@ -1,3 +1,6 @@
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { eventsOf } from "#harness/publication.js";
+import { eachEvent } from "#internal/testing/session-machine.js";
 import { jsonSchema, type TextStreamPart, type ToolSet } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
@@ -5,7 +8,7 @@ import { emitStreamContent } from "#harness/emission.js";
 import type { TurnPosition } from "#harness/session-machine/view.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { resolveWebSearchActivityLabel } from "#harness/provider-tool-schemas.js";
-import type { HarnessEmitFn } from "#harness/types.js";
+import type { HarnessEmitFn, SessionPublication } from "#harness/types.js";
 
 async function* streamOf(parts: TextStreamPart<ToolSet>[]): AsyncIterable<TextStreamPart<ToolSet>> {
   for (const part of parts) {
@@ -30,7 +33,7 @@ describe("emitStreamContent empty delivery", () => {
     const writeReleases: Array<() => void> = [];
     let providerDeltas = 0;
     let providerFinished = false;
-    const emit = vi.fn(async (_event: Parameters<HarnessEmitFn>[0]) => {
+    const emit = vi.fn(async (_publication: SessionPublication) => {
       await new Promise<void>((resolve) => {
         writeReleases.push(resolve);
       });
@@ -55,7 +58,7 @@ describe("emitStreamContent empty delivery", () => {
     }
     await run;
 
-    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
+    const events = vi.mocked(emit).mock.calls.flatMap(([publication]) => eventsOf(publication));
     const appended = events.filter((event) => event.type === "message.appended");
     expect(providerFinished).toBe(true);
     expect(events).toHaveLength(8);
@@ -105,7 +108,7 @@ describe("emitStreamContent action requests", () => {
       },
     );
 
-    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
+    const events = vi.mocked(emit).mock.calls.flatMap(([publication]) => eventsOf(publication));
     expect(events.map((event) => event.type)).toEqual([
       "action.input.appended",
       "action.input.appended",
@@ -204,10 +207,10 @@ describe("emitStreamContent action requests", () => {
   });
 
   it("emits tool labels for provider-executed calls", async () => {
-    const emitted: Parameters<HarnessEmitFn>[0][] = [];
-    const emit: HarnessEmitFn = async (event) => {
+    const emitted: UnstampedMessageStreamEvent[] = [];
+    const emit: HarnessEmitFn = eachEvent(async (event) => {
       emitted.push(event);
-    };
+    });
 
     await emitStreamContent(
       emit,
@@ -244,10 +247,10 @@ describe("emitStreamContent action requests", () => {
   });
 
   it("emits a provider action batch before any provider result arrives", async () => {
-    const events: Parameters<HarnessEmitFn>[0][] = [];
-    const emit: HarnessEmitFn = async (event) => {
+    const events: UnstampedMessageStreamEvent[] = [];
+    const emit: HarnessEmitFn = eachEvent(async (event) => {
       events.push(event);
-    };
+    });
     let releaseResults!: () => void;
     const resultsPending = new Promise<void>((resolve) => {
       releaseResults = resolve;
@@ -331,7 +334,7 @@ describe("emitStreamContent action requests", () => {
       },
     );
 
-    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
+    const events = vi.mocked(emit).mock.calls.flatMap(([publication]) => eventsOf(publication));
     expect(events.map((event) => event.type)).toEqual([
       "message.appended",
       "message.completed",
@@ -378,7 +381,7 @@ describe("emitStreamContent action requests", () => {
       },
     );
 
-    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
+    const events = vi.mocked(emit).mock.calls.flatMap(([publication]) => eventsOf(publication));
     expect(events).toEqual([
       expect.objectContaining({
         data: expect.objectContaining({
@@ -430,7 +433,7 @@ describe("emitStreamContent action requests", () => {
       },
     );
 
-    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
+    const events = vi.mocked(emit).mock.calls.flatMap(([publication]) => eventsOf(publication));
     const actionResult = events.find((event) => event.type === "action.result");
     if (actionResult?.data.error === undefined) {
       throw new Error("Expected a failed action.result event.");

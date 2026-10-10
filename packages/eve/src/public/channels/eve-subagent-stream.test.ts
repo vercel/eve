@@ -219,6 +219,9 @@ function createHarness(input: {
     async reset() {
       return { previousSessionId: coordinates.parentSessionId, status: "reset" };
     },
+    async getLineStream() {
+      return new ReadableStream();
+    },
     async getEventStream() {
       return new ReadableStream<MessageStreamEvent>({
         start(controller) {

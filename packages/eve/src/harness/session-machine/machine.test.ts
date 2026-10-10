@@ -1,5 +1,6 @@
 import type { ModelMessage } from "ai";
 import { describe, expect, it } from "vitest";
+import { eachEvent } from "#internal/testing/session-machine.js";
 
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { HarnessSession, StepInput } from "#harness/types.js";
@@ -74,7 +75,7 @@ function createMachine() {
     view: () => sessionView(projection, session.state),
     position: () => turnPosition(projection),
     async apply<T extends Transition>(transition: T): Promise<T> {
-      session = await applyTransition(session, transition, publish);
+      session = await applyTransition(session, transition, eachEvent(publish));
       return transition;
     },
     /** What the model step streams as it runs: its calls. */
@@ -810,9 +811,9 @@ describe("receive", () => {
     await applyTransition(
       machine.session,
       receive(machine.view(), { message: "hello" }),
-      async (event, messages) => {
+      eachEvent(async (event, messages) => {
         seen.push([event.type, messages]);
-      },
+      }),
       history,
     );
 

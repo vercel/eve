@@ -68,6 +68,8 @@ export interface Session {
    * the current tail without inspecting or changing the session.
    */
   getEventStream(options?: GetEventStreamOptions): Promise<ReadableStream<MessageStreamEvent>>;
+  /** The session's stored lines from `startIndex`: one parsed record per line. Follows like `getEventStream`. */
+  getLineStream(options?: GetEventStreamOptions): Promise<ReadableStream<unknown>>;
   getStreamTailIndex(): Promise<number>;
 }
 
@@ -182,6 +184,9 @@ export function createSession(
     },
     async getEventStream(options?: GetEventStreamOptions) {
       return runtime.getEventStream(id, options);
+    },
+    async getLineStream(options?: GetEventStreamOptions) {
+      return runtime.getLineStream(id, options);
     },
     async getStreamTailIndex() {
       return runtime.getStreamTailIndex(id);

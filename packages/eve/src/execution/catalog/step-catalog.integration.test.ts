@@ -1,3 +1,4 @@
+import { eachEvent } from "#internal/testing/session-machine.js";
 import type {
   LanguageModelV4CallOptions,
   LanguageModelV4Prompt,
@@ -92,9 +93,9 @@ function createDriver(ctx: ContextContainer, tools: HarnessToolMap) {
   const events: UnstampedMessageStreamEvent[] = [];
   const harness = createToolLoopHarness({
     capabilities: { requestInput: true },
-    handleEvent: async (event) => {
+    handleEvent: eachEvent(async (event) => {
       events.push(event);
-    },
+    }),
     resolveModel: async (reference) => (reference.id === "summary" ? summary : model),
     tools,
   });

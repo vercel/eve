@@ -4,7 +4,9 @@ import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
+import { createLegacyEventReader } from "#protocol/legacy-lines.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
+import { isStoredLine } from "#protocol/session-events/envelope.js";
 import type { ChannelCors } from "#public/definitions/channel.js";
 import {
   defaultEveAuth,
@@ -56,9 +58,7 @@ interface RemoteAgentStreamCoordinates {
 export async function findRemoteAgentBinding(
   input: RemoteAgentStreamCoordinates & {
     readonly parent: {
-      getEventStream(options?: {
-        startIndex?: number;
-      }): Promise<ReadableStream<MessageStreamEvent>>;
+      getLineStream(options?: { startIndex?: number }): Promise<ReadableStream<unknown>>;
       getStreamTailIndex(): Promise<number>;
     };
   },
@@ -66,14 +66,17 @@ export async function findRemoteAgentBinding(
   const tailIndex = await input.parent.getStreamTailIndex();
   if (tailIndex < 0) return undefined;
 
-  const events = await input.parent.getEventStream({ startIndex: 0 });
-  const reader = events.getReader();
+  const reader = (await input.parent.getLineStream({ startIndex: 0 })).getReader();
+  const events = createLegacyEventReader();
   let binding: RemoteAgentBinding | undefined;
   try {
-    for (let index = 0; index <= tailIndex; index += 1) {
+    for (let position = 0; position <= tailIndex; position += 1) {
       const next = await reader.read();
       if (next.done) break;
-      binding = readRemoteAgentBinding(next.value, input) ?? binding;
+      if (!isStoredLine(next.value)) continue;
+      for (const event of events.read(next.value, position)) {
+        binding = readRemoteAgentBinding(event, input) ?? binding;
+      }
     }
   } finally {
     await reader.cancel().catch(() => {});

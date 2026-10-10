@@ -1,3 +1,4 @@
+import { eachEvent } from "#internal/testing/session-machine.js";
 import { TEST_USAGE } from "#internal/testing/events.js";
 import { describe, expect, it, vi } from "vitest";
 
@@ -94,9 +95,9 @@ describe("createInstrumentationHandleEvent", () => {
     };
     const handleEvent = createInstrumentationHandleEvent({
       agentName: "weather",
-      handleEvent: async (event) => {
+      handleEvent: eachEvent(async (event) => {
         order.push(`durable:${event.type}`);
-      },
+      }),
       hooks,
       sessionId: "session-1",
     })!;
@@ -140,9 +141,9 @@ describe("createInstrumentationHandleEvent", () => {
     const source = createSessionStartedEvent();
     let forwarded: unknown;
     const handleEvent = createInstrumentationHandleEvent({
-      handleEvent: async (event) => {
+      handleEvent: eachEvent(async (event) => {
         forwarded = event;
-      },
+      }),
       hooks: { capturesContent: false, publish: async () => {} },
       sessionId: "session-1",
     })!;

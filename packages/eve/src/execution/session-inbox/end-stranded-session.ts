@@ -16,7 +16,8 @@ import { createLogger } from "#internal/logging.js";
 import { isInactiveWorkflowRunError } from "#internal/workflow/is-inactive-workflow-run-error.js";
 import { cancelRun, getRun, getWorld } from "#internal/workflow/runtime.js";
 import { sessionFailed } from "#harness/session-machine/transitions.js";
-import { encodeMessageStreamEvent, stampMessageStreamEvent } from "#protocol/message.js";
+import { linesOf } from "#protocol/legacy-lines.js";
+import { encodeLine } from "#protocol/session-events/envelope.js";
 
 type World = Awaited<ReturnType<typeof getWorld>>;
 
@@ -105,20 +106,17 @@ async function publishTerminalEvent(
 ): Promise<void> {
   const writer = getRun(sessionId).getWritable<Uint8Array>().getWriter();
   const publication = (async () => {
-    await writer.write(
-      encodeMessageStreamEvent(
-        stampMessageStreamEvent(
-          sessionFailed({
-            code: "session_stranded",
-            // A replacement reading this history skips it when a reset ended the session.
-            details: { trigger },
-            message: "This session is no longer available.",
-            sessionId,
-            usage: undefined,
-          }),
-        ),
-      ),
-    );
+    const event = sessionFailed({
+      code: "session_stranded",
+      // A replacement reading this history skips it when a reset ended the session.
+      details: { trigger },
+      message: "This session is no longer available.",
+      sessionId,
+      usage: undefined,
+    });
+    for (const line of linesOf([event], new Date().toISOString(), undefined)) {
+      await writer.write(new TextEncoder().encode(encodeLine(line)));
+    }
     await writer.close();
     return true;
   })();

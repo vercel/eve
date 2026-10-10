@@ -647,6 +647,9 @@ describe("defineChannel", () => {
           async reset() {
             return { previousSessionId: channelId, status: "reset" as const };
           },
+          async getLineStream() {
+            return new ReadableStream();
+          },
           async getEventStream() {
             return new ReadableStream();
           },

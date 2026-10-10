@@ -60,6 +60,8 @@ import {
   withOpenTurn,
   withPublished,
   withParkedStep,
+  eachEvent,
+  type TestEventHandler,
 } from "#internal/testing/session-machine.js";
 import { appendMissingToolResultMessages } from "#harness/model-call/response.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
@@ -288,7 +290,7 @@ function createTestSession(overrides?: Partial<HarnessSession>): HarnessSession 
 }
 
 function createTestConfig(
-  emit?: HarnessEmitFn,
+  emit?: TestEventHandler,
   overrides?: Partial<ToolLoopHarnessConfig>,
 ): ToolLoopHarnessConfig {
   return {
@@ -373,9 +375,9 @@ function createEventCollector(): {
   events: UnstampedMessageStreamEvent[];
 } {
   const events: UnstampedMessageStreamEvent[] = [];
-  const emit: HarnessEmitFn = async (event) => {
+  const emit: HarnessEmitFn = eachEvent(async (event) => {
     events.push(event);
-  };
+  });
   return { emit, events };
 }
 
@@ -773,12 +775,12 @@ describe("createToolLoopHarness", () => {
   });
 
   it("reports the session's usage on session.failed when model selection fails", async () => {
-    const emit: HarnessEmitFn = async (event) => {
+    const emit: HarnessEmitFn = eachEvent(async (event) => {
       events.push(event);
       if (event.type === "turn.started") {
         throw new DynamicModelSelectionError(new Error("flag service unavailable"));
       }
-    };
+    });
     const events: UnstampedMessageStreamEvent[] = [];
 
     await createToolLoopHarness(createTestConfig(emit))(
@@ -808,11 +810,11 @@ describe("createToolLoopHarness", () => {
       messages.filter((message) => message !== hidden),
     );
     const stepEventMessages: Array<readonly ModelMessage[]> = [];
-    const handleEvent: HarnessEmitFn = async (event, messages) => {
+    const handleEvent: HarnessEmitFn = eachEvent(async (event, messages) => {
       if (event.type === "step.started") {
         stepEventMessages.push(messages ?? []);
       }
-    };
+    });
     const dynamicModelMessages: Array<readonly ModelMessage[]> = [];
     const runStep = createToolLoopHarness(
       createTestConfig(handleEvent, {
@@ -886,9 +888,9 @@ describe("createToolLoopHarness", () => {
       toolResults: [],
     });
     const completedHistory: Array<readonly ModelMessage[]> = [];
-    const handleEvent: HarnessEmitFn = async (event, messages) => {
+    const handleEvent: HarnessEmitFn = eachEvent(async (event, messages) => {
       if (event.type === "turn.completed") completedHistory.push(messages ?? []);
-    };
+    });
 
     await createToolLoopHarness(createTestConfig(handleEvent))(createTestSession(), {
       message: "Hi",
@@ -1327,12 +1329,12 @@ describe("createToolLoopHarness", () => {
   it("emits a terminal failure when a turn-scoped dynamic model resolver throws", async () => {
     const logs = captureLogRecords();
     const events: UnstampedMessageStreamEvent[] = [];
-    const emit: HarnessEmitFn = async (event) => {
+    const emit: HarnessEmitFn = eachEvent(async (event) => {
       events.push(event);
       if (event.type === "turn.started") {
         throw new DynamicModelSelectionError(new Error("flag service unavailable"));
       }
-    };
+    });
     const runStep = createToolLoopHarness(createTestConfig(emit));
 
     const result = await runStep(createTestSession({ outputSchema: { type: "object" } }), {
@@ -5606,9 +5608,9 @@ describe("createToolLoopHarness", () => {
     };
     const preCompactionModelViews: Array<readonly ModelMessage[]> = [];
     const stepViews: Array<readonly ModelMessage[]> = [];
-    const emit: HarnessEmitFn = async (event, messages) => {
+    const emit: HarnessEmitFn = eachEvent(async (event, messages) => {
       if (event.type === "step.started") stepViews.push(messages ?? []);
-    };
+    });
     const runStep = createToolLoopHarness(
       createTestConfig(emit, {
         participants: modelParticipants(async ({ messages }) => {
@@ -7756,10 +7758,10 @@ describe("createToolLoopHarness", () => {
 
       const order: string[] = [];
       const events: UnstampedMessageStreamEvent[] = [];
-      const emit: HarnessEmitFn = async (event) => {
+      const emit: HarnessEmitFn = eachEvent(async (event) => {
         order.push(event.type);
         events.push(event);
-      };
+      });
       const resolveRuntimeContext = vi.fn((input: InstrumentationStepStartedEventInput) => {
         order.push("runtimeContext");
         if (input.channel.kind !== "channel:support") {
@@ -8553,7 +8555,7 @@ describe("createToolLoopHarness", () => {
         sourceId: "instructions/context.ts",
         sourceKind: "module",
       };
-      const handleEvent: HarnessEmitFn = async (event, messages) => {
+      const handleEvent: HarnessEmitFn = eachEvent(async (event, messages) => {
         if (event.type !== "session.started" && event.type !== "turn.started") return;
         await resolveDynamicInstructions({
           ctx,
@@ -8561,7 +8563,7 @@ describe("createToolLoopHarness", () => {
           messages: messages ?? [],
           resolvers: [resolver],
         });
-      };
+      });
       const hidden = {
         content: "Hidden context.",
         kind: "user" as const,
@@ -8815,9 +8817,9 @@ describe("appendMissingToolResultMessages", () => {
 describe("boundary event failures", () => {
   it("keeps runtime preamble failures terminal", async () => {
     const failure = new Error("memory recall failed");
-    const emit: HarnessEmitFn = async (event) => {
+    const emit: HarnessEmitFn = eachEvent(async (event) => {
       if (event.type === "turn.started") throw failure;
-    };
+    });
     await expect(
       createToolLoopHarness(createTestConfig(emit))(createTestSession(), {
         message: "Hi",

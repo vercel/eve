@@ -87,7 +87,7 @@ function callEvent(
   event: UnstampedMessageStreamEvent,
   ctx: any,
   sandbox?: MockSandbox,
-): Promise<UnstampedMessageStreamEvent> {
+): Promise<void> {
   return contextStorage.run(
     sandbox === undefined ? stubAlsContext : createAlsContext(sandbox),
     () => callAdapterEventHandler(adapter, event, ctx),
