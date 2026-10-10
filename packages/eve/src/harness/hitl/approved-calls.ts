@@ -9,18 +9,24 @@ import {
 
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import { isInlineAuthorizationToolResult } from "#harness/inline-tool-authorization.js";
+import { toolCallModelOutput } from "#harness/tool-call-io.js";
 import { projectDeltaPresentation, projectResultPresentation } from "#harness/tool-presentation.js";
-import { buildToolSet, recheckApprovedCall } from "#harness/tools.js";
-import { TOOL_EXECUTION_DENIED_MESSAGE } from "#harness/input-request-resolution.js";
+import { recheckApprovedCall, wrapToolExecute } from "#harness/tools.js";
+import {
+  failedCall,
+  TOOL_EXECUTION_DENIED_MESSAGE,
+  unavailableToolMessage,
+} from "#harness/input-request-resolution.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
-import type { HarnessToolMap } from "#harness/types.js";
-import { emitNestedToolActions } from "#harness/nested-actions.js";
+import type { HarnessToolLookup } from "#harness/types.js";
+import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { createActionPartialEvent, createActionResultEvent } from "#protocol/message.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { toError } from "#shared/errors.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { InputRequest } from "#shared/input.js";
 import { parseJsonObject } from "#shared/json.js";
+import { toModelSchema } from "#tools/schema.js";
 import type { HandleEventFn } from "#harness/types.js";
 
 type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
@@ -30,6 +36,10 @@ export interface ApprovedCallResult {
 
 const log = createLogger("harness.tool-loop");
 
+/** What the model reads for an approved call the turn's cancellation cut short. */
+export const APPROVED_CALL_INTERRUPTED_MESSAGE =
+  "The turn was cancelled while this approved tool call was running. It may have partially run; it was not retried.";
+
 /**
  * Runs approved local calls before the model reads their results. Like the calls a model step
  * runs inline, each streams its progress and result as it goes. The lifecycle owner places the
@@ -37,7 +47,8 @@ const log = createLogger("harness.tool-loop");
  */
 export async function runApprovedCalls(input: {
   readonly requests: readonly InputRequest[];
-  readonly tools: HarnessToolMap;
+  /** The entries of the step that asked, which the approved calls run. */
+  readonly tools: HarnessToolLookup;
   readonly approvedTools?: ReadonlySet<string>;
   /** The conversation the tools read as `ctx.messages`. */
   readonly messages: readonly ModelMessage[];
@@ -54,62 +65,55 @@ export async function runApprovedCalls(input: {
   readonly settled: readonly ApprovedCallResult[];
   readonly toolResults: readonly TypedToolResult<ToolSet>[];
 }> {
-  const tools = buildToolSet({ tools: input.tools, approvedTools: input.approvedTools });
-  const calls = input.requests.map((request) => {
-    const definition = input.tools.get(request.action.toolName);
-    const tool = tools[request.action.toolName];
-    if (
-      definition?.execute === undefined ||
-      tool?.execute === undefined ||
-      tool.toModelOutput === undefined
-    ) {
-      throw new Error(
-        "The approved tool is no longer available. Request a new tool call and approval.",
-      );
-    }
-    return { request, definition, tool };
-  });
   const at = {
     sequence: input.position.sequence,
     stepIndex: input.position.stepIndex,
     turnId: input.position.turnId,
   };
+  /** A call that ends without running: the stream reports it failed, and the model reads why. */
+  const settleFailure = async (
+    callId: string,
+    toolName: string,
+    message: string,
+  ): Promise<ApprovedCallResult> => {
+    const failed = failedCall({ callId, message, toolName });
+    await input.publish(createActionResultEvent({ ...at, result: failed.result }));
+    return { part: failed.part };
+  };
   const executed = await Promise.allSettled(
-    calls.map(async ({ request, definition, tool }) => {
+    input.requests.map(async (request) => {
       const settled: ApprovedCallResult[] = [];
       const toolResults: TypedToolResult<ToolSet>[] = [];
       const { callId, toolName, input: args } = request.action;
+      const definition = input.tools.get(toolName);
+      const execute = definition === undefined ? undefined : wrapToolExecute(definition);
+      // Once the tool runs, the call settles even if the turn is cancelled: a result reaches the
+      // session, so it never runs a call with side effects a second time.
+      let started = false;
+      let completed: ApprovedCallResult | undefined;
       try {
         throwIfTurnAborted(input.abortSignal);
-        // As in the AI SDK: the stored input revalidates against the tool's own schema and runs
-        // unchanged, so the call that runs is the one the person approved.
-        const validation = await asSchema(tool.inputSchema).validate?.(args);
-        if (validation?.success === false) {
-          const message = `The approved input is no longer valid for tool "${toolName}". Request a new tool call and approval.`;
-          await input.publish(
-            createActionResultEvent({
-              ...at,
-              result: createRuntimeToolResultFromValue({
-                callId,
-                isError: true,
-                output: message,
-                toolName,
-              }),
-            }),
-          );
+        // A connection or dynamic tool can go away while its call waits for approval.
+        if (definition === undefined || execute === undefined) {
           return {
             settled: [
-              {
-                part: {
-                  type: "tool-result" as const,
-                  toolCallId: callId,
-                  toolName,
-                  output: { type: "error-text" as const, value: message },
-                },
-              },
+              await settleFailure(
+                callId,
+                toolName,
+                unavailableToolMessage(toolName, input.tools.get(SEARCH_TOOL_NAME) !== undefined),
+              ),
             ],
             toolResults,
           };
+        }
+        // As in the AI SDK: the stored input revalidates against the tool's own schema and runs
+        // unchanged, so the call that runs is the one the person approved.
+        const validation = await asSchema(
+          toModelSchema(definition.inputSchema, "input"),
+        ).validate?.(args);
+        if (validation?.success === false) {
+          const message = `The approved input is no longer valid for tool "${toolName}". Request a new tool call and approval.`;
+          return { settled: [await settleFailure(callId, toolName, message)], toolResults };
         }
         const recheck = await recheckApprovedCall(definition, {
           abortSignal: input.abortSignal,
@@ -158,9 +162,9 @@ export async function runApprovedCalls(input: {
           await telemetry.execute(async () => {
             const startedAt = performance.now();
             try {
-              const executed = tool.execute!(args, {
+              started = true;
+              const executed = execute(args, {
                 abortSignal: input.abortSignal,
-                context: undefined,
                 messages: [...input.messages],
                 toolCallId: callId,
               });
@@ -216,18 +220,17 @@ export async function runApprovedCalls(input: {
         } as TypedToolResult<ToolSet>;
         toolResults.push(result);
         if (isInlineAuthorizationToolResult(result)) return { settled, toolResults };
-        // Calls the tool made on the model's behalf report before its result.
-        await emitNestedToolActions(input.publish, input.position, callId);
-        settled.push({
+        completed = {
           part: {
             output: failed
               ? { type: "error-text", value: String(output) }
-              : await tool.toModelOutput!({ input: args, output, toolCallId: callId }),
+              : await toolCallModelOutput(definition, output, callId),
             toolCallId: callId,
             toolName,
             type: "tool-result",
           },
-        });
+        };
+        settled.push(completed);
         await input.publish(
           createActionResultEvent({
             ...at,
@@ -239,42 +242,39 @@ export async function runApprovedCalls(input: {
         );
         return { settled, toolResults };
       } catch (error) {
-        throwIfTurnAborted(input.abortSignal);
-        const message = toError(error).message;
+        if (input.abortSignal?.aborted === true) {
+          if (!started) throwIfTurnAborted(input.abortSignal);
+          if (completed !== undefined) return { settled: [completed], toolResults };
+          return { settled: [interruptedResult(callId, toolName)], toolResults };
+        }
         logError(log, "approved tool failed", error, { toolName, toolCallId: callId });
-        await input.publish(
-          createActionResultEvent({
-            ...at,
-            result: createRuntimeToolResultFromValue({
-              callId,
-              isError: true,
-              output: message,
-              toolName,
-            }),
-          }),
-        );
         return {
-          settled: [
-            {
-              part: {
-                type: "tool-result" as const,
-                toolCallId: callId,
-                toolName,
-                output: { type: "error-text" as const, value: message },
-              },
-            },
-          ],
+          settled: [await settleFailure(callId, toolName, toError(error).message)],
           toolResults,
         };
       }
     }),
   );
   const failed = executed.find((call) => call.status === "rejected");
-  if (failed?.status === "rejected") throw failed.reason;
+  // Only a cancellation rejects a call, and only one that hadn't started: it stays approved. The
+  // calls that settled keep their results, and the caller ends the cancelled turn after it
+  // records them.
+  if (failed?.status === "rejected" && input.abortSignal?.aborted !== true) throw failed.reason;
   const completed = executed.flatMap((call) => (call.status === "fulfilled" ? [call.value] : []));
   return {
     settled: completed.flatMap((call) => call.settled),
     toolResults: completed.flatMap((call) => call.toolResults),
+  };
+}
+
+function interruptedResult(callId: string, toolName: string): ApprovedCallResult {
+  return {
+    part: {
+      output: { type: "error-text", value: APPROVED_CALL_INTERRUPTED_MESSAGE },
+      toolCallId: callId,
+      toolName,
+      type: "tool-result",
+    },
   };
 }
 

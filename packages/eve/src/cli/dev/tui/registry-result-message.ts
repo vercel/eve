@@ -41,7 +41,10 @@ function outcomeDetails(outcome: RegistrySessionOutcome): string[] {
       ];
     }
     case "incomplete":
-      return [`Finish with \`${outcome.resumeCommand}\``];
+      return [
+        ...(outcome.reason === undefined ? [] : [outcome.reason]),
+        `Finish with \`${outcome.resumeCommand}\``,
+      ];
     case "failed":
       return outcome.message.replace(" Try again with `", "\nTry again with `").split("\n");
     case "cancelled":

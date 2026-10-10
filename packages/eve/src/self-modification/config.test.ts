@@ -1,180 +1,41 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { resolveSelfModificationConfig } from "./config.js";
-import { createGitHubCredentialProvider } from "./credentials.js";
-import { resolveSelfModificationMode } from "./mode.js";
+import { DEPLOYED_OPTION_MOVED_MESSAGE, resolveSelfModificationConfig } from "./config.js";
+import { isDeployedRuntime, isLocalSelfModificationEnabled } from "./mode.js";
 
 afterEach(() => {
   delete process.env.EVE_DEV;
-  delete process.env.EVE_SELF_MODIFICATION_GITHUB_TOKEN;
 });
 
-const deployed = {
-  deployed: {
-    source: { git: { directory: "apps/weather", repository: "github.com/vercel/eve" } },
-    target: { branch: "main" },
-    authorize: () => true,
-    credentials: { pat: true },
-  },
-} as const;
-
-describe("self-modification deployed configuration", () => {
-  it("resolves a repository-root application", () => {
-    expect(
-      resolveSelfModificationConfig({
-        deployed: {
-          ...deployed.deployed,
-          source: { git: { ...deployed.deployed.source.git, directory: "." } },
-        },
-      }),
-    ).toMatchObject({
-      deployed: {
-        directory: ".",
-        repository: { owner: "vercel", repo: "eve" },
-        targetBranch: "main",
-      },
+describe("local self-modification configuration", () => {
+  it("enables local editing by default", () => {
+    expect(resolveSelfModificationConfig()).toEqual({ localEnabled: true });
+    expect(resolveSelfModificationConfig({ local: { enabled: false } })).toEqual({
+      localEnabled: false,
     });
-  });
-
-  it("requires opting into the self-hosted PAT exception", () => {
-    expect(resolveSelfModificationConfig(deployed)).toMatchObject({
-      localEnabled: true,
-      deployed: { credentials: { kind: "pat" } },
-    });
-    expect(() =>
-      resolveSelfModificationConfig({
-        deployed: { ...deployed.deployed, credentials: undefined },
-      }),
-    ).toThrow("must explicitly configure");
-  });
-
-  it("resolves an application-supplied credential provider", () => {
-    const provider = { resolve: async () => "github-token" };
-    const config = resolveSelfModificationConfig({
-      deployed: {
-        ...deployed.deployed,
-        credentials: provider,
-      },
-    });
-
-    expect(config.deployed?.credentials).toEqual({ kind: "provider", provider });
-    expect(resolveSelfModificationMode(config)).toBe("deployed");
-  });
-
-  it.each(["", "/agent", "agent/../other", "agent//other", "agent\\other"])(
-    "rejects unsafe application directories: %s",
-    (directory) => {
-      expect(() =>
-        resolveSelfModificationConfig({
-          deployed: {
-            ...deployed.deployed,
-            source: { git: { ...deployed.deployed.source.git, directory } },
-          },
-        }),
-      ).toThrow("safe repository-relative");
-    },
-  );
-
-  it("requires complete deployed configuration", () => {
-    expect(() =>
-      resolveSelfModificationConfig({ deployed: { source: deployed.deployed.source } } as never),
-    ).toThrow("source, target, and authorization");
-  });
-
-  it("requires a deployed authorization policy", () => {
-    expect(() => {
-      const { authorize: _authorize, ...withoutAuthorize } = deployed.deployed;
-      resolveSelfModificationConfig({ deployed: withoutAuthorize } as never);
-    }).toThrow("source, target, and authorization");
-    expect(() =>
-      resolveSelfModificationConfig({
-        deployed: { ...deployed.deployed, authorize: true as never },
-      }),
-    ).toThrow("authorize must be a function");
-  });
-
-  it("rejects ambiguous or malformed credential configuration", () => {
-    expect(() =>
-      resolveSelfModificationConfig({
-        deployed: {
-          ...deployed.deployed,
-          credentials: { pat: true, resolve: async () => "token" },
-        },
-      }),
-    ).toThrow("not both");
-    expect(() =>
-      resolveSelfModificationConfig({
-        deployed: { ...deployed.deployed, credentials: { pat: false } as never },
-      }),
-    ).toThrow("pat must be true");
-    expect(() =>
-      resolveSelfModificationConfig({
-        deployed: { ...deployed.deployed, credentials: { resolve: true } as never },
-      }),
-    ).toThrow("resolve function");
   });
 
   it.each([
     [null, "configuration must be an object"],
     [{ local: null }, "local must be an object"],
-    [
-      {
-        deployed: {
-          authorize: deployed.deployed.authorize,
-          source: null,
-          target: deployed.deployed.target,
-        },
-      },
-      "deployed.source must be an object",
-    ],
-    [
-      {
-        deployed: {
-          authorize: deployed.deployed.authorize,
-          source: {},
-          target: deployed.deployed.target,
-        },
-      },
-      "deployed.source.git must be an object",
-    ],
-    [
-      {
-        deployed: {
-          authorize: deployed.deployed.authorize,
-          source: deployed.deployed.source,
-          target: null,
-        },
-      },
-      "deployed.target must be an object",
-    ],
-  ])("rejects malformed nested configuration", (config, message) => {
+    [{ local: { enabled: "yes" } }, "local.enabled must be a boolean"],
+  ])("rejects malformed configuration", (config, message) => {
     expect(() => resolveSelfModificationConfig(config as never)).toThrow(message);
   });
 
-  it("rejects a fully qualified target ref", () => {
-    expect(() =>
-      resolveSelfModificationConfig({
-        deployed: { ...deployed.deployed, target: { branch: "refs/heads/main" } },
-      }),
-    ).toThrow("must be a branch name");
+  it("points the former deployed option at the deployed mount", () => {
+    expect(() => resolveSelfModificationConfig({ deployed: {} } as never)).toThrow(
+      DEPLOYED_OPTION_MOVED_MESSAGE,
+    );
   });
 
-  it("activates deployed while keeping local editing local", () => {
-    const config = resolveSelfModificationConfig(deployed);
-    expect(resolveSelfModificationMode(config)).toBe("deployed");
+  it("enables local editing only inside eve dev", () => {
+    const config = resolveSelfModificationConfig();
+    expect(isLocalSelfModificationEnabled(config)).toBe(false);
+    expect(isDeployedRuntime()).toBe(true);
     process.env.EVE_DEV = "1";
-    expect(resolveSelfModificationMode(config)).toBe("local");
-  });
-
-  it("resolves the GitHub token for each capability", async () => {
-    process.env.EVE_SELF_MODIFICATION_GITHUB_TOKEN = " secret-token ";
-    const { credentials, repository } = resolveSelfModificationConfig(deployed).deployed!;
-    const provider = createGitHubCredentialProvider(credentials);
-    await expect(provider.resolve({ capability: "checkout", repository })).resolves.toBe(
-      "secret-token",
-    );
-    await expect(provider.resolve({ capability: "publish", repository })).resolves.toBe(
-      "secret-token",
-    );
+    expect(isLocalSelfModificationEnabled(config)).toBe(true);
+    expect(isLocalSelfModificationEnabled({ localEnabled: false })).toBe(false);
+    expect(isDeployedRuntime()).toBe(false);
   });
 });

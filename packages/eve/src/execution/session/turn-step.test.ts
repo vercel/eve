@@ -1,5 +1,6 @@
 import { createTestSessionState } from "#internal/testing/session-state.js";
-import type { ModelMessage } from "ai";
+import { jsonSchema, type ModelMessage } from "ai";
+import { MockLanguageModelV4 } from "ai/test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js";
 import type {
@@ -11,6 +12,7 @@ import { ContextContainer, loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import {
   AuthKey,
+  ScheduleIdKey,
   ChannelInstrumentationKey,
   ContinuationHookTokensKey,
   ContinuationTokenKey,
@@ -21,6 +23,7 @@ import {
   SessionDynamicToolRuntimeRevisionKey,
   ParentSessionKey,
   SessionIdKey,
+  SessionTitleKey,
   SessionTraceSeedKey,
   TraceRootKey,
   TurnDynamicToolMetadataKey,
@@ -31,16 +34,24 @@ import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { startWorkflowTask } from "#execution/tools/workflow/start.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
+import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { queuedInput, storedProjection } from "#harness/session-machine/view.js";
+import { APPROVED_CALL_INTERRUPTED_MESSAGE } from "#harness/hitl/approved-calls.js";
+import { textStreamResult } from "#internal/testing/approval-resume.js";
+import { openInputs } from "#protocol/session-projection.js";
+import type { InputRequest } from "#shared/input.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
 import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import {
+  parkedSteps,
   positionOf,
   positionState,
   withOpenTurn,
   withParkedStep,
+  withPublished,
   withQueuedInput,
 } from "#internal/testing/session-machine.js";
-import type { HarnessSession, StepFn, StepResult } from "#harness/types.js";
+import type { HarnessSession, StepFn, StepInput, StepResult } from "#harness/types.js";
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import {
   createInputRequestedEvent,
@@ -57,6 +68,7 @@ import {
   createDurableSessionValues,
   type DurableSessionState,
   readDurableSession,
+  replaceDurableSessionSnapshot,
 } from "#execution/durable-session-store.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import { defineTool } from "#tools/definition.js";
@@ -69,6 +81,7 @@ import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.
 import type { TurnStepInput, TurnStepPayload } from "#execution/session/turn-step-types.js";
 import type { DeliverHookPayload } from "#channel/types.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
+import { setEveAttributes } from "#runtime/attributes/emit.js";
 
 type LegacyStepPayload =
   | DeliverHookPayload
@@ -220,7 +233,14 @@ vi.mock("../../runtime/sessions/compiled-agent-cache.js", () => ({
 }));
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
+  getHookByToken: async (token: string) => {
+    const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
+    if (!token.startsWith("eve:inbox:v1:")) throw new HookNotFoundError(token);
+    return currentSessionHook(token);
+  },
   getRun: (...args: unknown[]) => getRunMock(...args),
+  // Vercel-shaped: owners run on their own deployment, so ingress resumes by token.
+  getWorld: async () => ({ capabilities: { deploymentAffinity: true } }),
   resumeHook: (...args: unknown[]) => resumeHookMock(...args),
   start: (...args: unknown[]) => startMock(...args),
 }));
@@ -249,8 +269,8 @@ function createTurnStepTestBundle(modelCallsPerStep?: number) {
     },
     hookRegistry: createRuntimeHookRegistry([]),
     moduleMap: { nodes: {} },
-    resolvedAgent: { config },
-    subagentRegistry: {},
+    resolvedAgent: { config, dynamicSkillResolvers: [], dynamicToolResolvers: [] },
+    subagentRegistry: { dynamicResolvers: [] },
     toolRegistry: {},
     turnAgent: TestTurnAgent,
   } as never;
@@ -416,7 +436,8 @@ describe("routeProxiedDeliverStep", () => {
         [
           "ask-1",
           {
-            workflowAsk: { control: "control", question: { allowFreeform: true } },
+            workflowAsk: { control: "control" },
+            reply: { allowFreeform: true },
             runId: "run-1",
             childContinuationToken: "ask-1",
             event: REQUEST_EVENT,
@@ -451,6 +472,131 @@ describe("routeProxiedDeliverStep", () => {
     });
   });
 
+  it("forwards a typed approve to a subagent's approval as its sender, once", async () => {
+    const auth = {
+      attributes: {},
+      authenticator: "test",
+      principalId: "alice",
+      principalType: "user",
+    };
+    const session = upsertProxyInputRequests({
+      entries: [
+        [
+          "approval-1",
+          {
+            childContinuationToken: "child-token",
+            event: REQUEST_EVENT,
+            kind: "tool-approval",
+            reply: { options: [{ id: "approve", label: "Approve" }] },
+          },
+        ],
+      ],
+      forChildContinuationToken: "child-token",
+      session: createStubSession(),
+    });
+    installSessionStoreMocks([session]);
+
+    const result = await routeProxiedDeliverStep({
+      serializedContext: createSerializedContext(),
+      delivery: {
+        kind: "deliver",
+        auth,
+        payloads: [{ message: "approve" }, { message: "approve" }],
+      },
+      sessionWritable: createTestWritable(),
+      sessionState: createStubSessionState({ hasProxyInputRequests: true }),
+    });
+
+    expect(resumeHookMock).toHaveBeenCalledTimes(1);
+    expect(resumeHookMock).toHaveBeenCalledWith("eve:inbox:v1:child-token", {
+      auth,
+      deliveryMetadata: undefined,
+      kind: "deliver",
+      payloads: [{ inputResponses: [{ optionId: "approve", requestId: "approval-1" }] }],
+    });
+    expect(result).toMatchObject({
+      kind: "continue",
+      remainder: { payloads: [{ message: "approve" }] },
+    });
+  });
+
+  describe("a forwarded subagent approval", () => {
+    const auth = {
+      attributes: {},
+      authenticator: "test",
+      principalId: "bob",
+      principalType: "user",
+    };
+    const approvalRoute = {
+      childContinuationToken: "child-token",
+      event: REQUEST_EVENT,
+      kind: "tool-approval" as const,
+      reply: { options: [{ id: "approve", label: "Approve" }] },
+    };
+    function parkedOn(requestIds: readonly string[]) {
+      const relayed = createInputRequestedEvent({
+        ...REQUEST_EVENT,
+        callId: "child-call",
+        requests: requestIds.map((requestId) => ({
+          action: { callId: requestId, input: {}, kind: "tool-call", toolName: "deploy" },
+          kind: "tool-approval",
+          options: approvalRoute.reply.options,
+          prompt: "Approve deploy?",
+          requestId,
+        })),
+      });
+      const session = upsertProxyInputRequests({
+        entries: requestIds.map((requestId) => [requestId, approvalRoute] as const),
+        forChildContinuationToken: "child-token",
+        session: withPublished(withOpenTurn(createStubSession(), REQUEST_EVENT), [relayed]),
+      });
+      // Read back what each step persists, so a later step sees the routes it left.
+      vi.mocked(readDurableSession).mockImplementation((state) => state.snapshot!.session);
+      return replaceDurableSessionSnapshot({ session, state: createStubSessionState() });
+    }
+    async function approveFirst(sessionState: DurableSessionState) {
+      workflowWritesByNamespace.clear();
+      const result = await runSessionStateStep(
+        {
+          serializedContext: createSerializedContext(),
+          delivery: { auth, kind: "deliver" as const, payloads: [{ message: "approve" }] },
+          sessionWritable: createTestWritable(),
+          sessionState,
+        },
+        routeProxiedDeliverStep,
+      );
+      const writes = workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE) ?? [];
+      const types = writes.map(
+        (chunk) => JSON.parse(new TextDecoder().decode(chunk as Uint8Array)).type,
+      );
+      return { result, types };
+    }
+
+    it("stays answerable until the subagent closes it", async () => {
+      // The child's response policy may refuse Bob, so a second reply still reaches it.
+      const first = await approveFirst(parkedOn(["approval-1"]));
+      await approveFirst(first.result.sessionState);
+
+      expect(resumeHookMock).toHaveBeenCalledTimes(2);
+      for (const [, delivery] of resumeHookMock.mock.calls) {
+        expect(delivery).toMatchObject({
+          payloads: [{ inputResponses: [{ optionId: "approve", requestId: "approval-1" }] }],
+        });
+      }
+      expect(first.types).not.toContain("input.resolved");
+    });
+
+    it("holds the open turn while another approval still waits on a person", async () => {
+      const { types } = await approveFirst(parkedOn(["approval-1", "approval-2"]));
+      expect(types).toContain("turn.waiting");
+    });
+
+    it("does not hold the open turn on the approval it just forwarded", async () => {
+      const { types } = await approveFirst(parkedOn(["approval-1"]));
+      expect(types).not.toContain("turn.waiting");
+    });
+  });
+
   it.each([
     ["local", { "eve.channel": { kind: "subagent" } }],
     [
@@ -470,12 +616,10 @@ describe("routeProxiedDeliverStep", () => {
         [
           "ask-1",
           {
-            workflowAsk: {
-              control: "control",
-              question: {
-                allowFreeform: false,
-                options: [{ id: "approve", label: "Approve" }],
-              },
+            workflowAsk: { control: "control" },
+            reply: {
+              allowFreeform: false,
+              options: [{ id: "approve", label: "Approve" }],
             },
             runId: "run-1",
             childContinuationToken: "ask-1",
@@ -819,6 +963,81 @@ describe("dispatchCoordinationStep", () => {
 });
 
 describe("turnStep", () => {
+  it("starts model work before the title attribute write settles and joins it before returning", async () => {
+    let finishTitle!: () => void;
+    vi.mocked(setEveAttributes)
+      .mockReset()
+      .mockReturnValue(
+        new Promise<void>((resolve) => {
+          finishTitle = resolve;
+        }),
+      );
+    installSessionStoreMocks([createStubSession()]);
+    const execute = vi.fn(async (session: HarnessSession): Promise<StepResult> => {
+      expect(loadContext().get(SessionTitleKey)).toBe("Start the quarterly report");
+      return { next: { done: true, output: "complete" }, session };
+    });
+    vi.mocked(createExecutionNodeStep).mockImplementation((input) => {
+      expect(input.titleAttributeWrite).toBeDefined();
+      return execute;
+    });
+
+    let settled = false;
+    const result = turnStep({
+      input: { kind: "deliver", payloads: [{ message: "Start the quarterly report" }] },
+      sessionWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    }).then((value) => {
+      settled = true;
+      return value;
+    });
+
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    expect(setEveAttributes).toHaveBeenCalledWith({
+      "$eve.title": "Start the quarterly report",
+    });
+    expect(settled).toBe(false);
+    finishTitle();
+
+    await expect(result).resolves.toMatchObject({ action: "done", output: "complete" });
+  });
+
+  it("joins the title attribute write before propagating a harness failure", async () => {
+    let finishTitle!: () => void;
+    vi.mocked(setEveAttributes)
+      .mockReset()
+      .mockReturnValue(
+        new Promise<void>((resolve) => {
+          finishTitle = resolve;
+        }),
+      );
+    installSessionStoreMocks([createStubSession()]);
+    const failure = new Error("model failed");
+    const execute = vi.fn(async (): Promise<StepResult> => {
+      throw failure;
+    });
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => execute);
+
+    let rejected = false;
+    const result = turnStep({
+      input: { kind: "deliver", payloads: [{ message: "Start the quarterly report" }] },
+      sessionWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    }).catch((error: unknown) => {
+      rejected = true;
+      throw error;
+    });
+
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    await Promise.resolve();
+    expect(rejected).toBe(false);
+    finishTitle();
+
+    await expect(result).rejects.toBe(failure);
+  });
+
   it("resumes an interrupted turn when the channel ignores the correction", async () => {
     const originalAuth: SessionAuthContext = {
       attributes: {},
@@ -989,6 +1208,268 @@ describe("turnStep", () => {
     expect(result.history.at(-1)).toEqual({
       content: "model call 50",
       role: "assistant",
+    });
+  });
+
+  describe("an approval answered before a cancelled model call", () => {
+    const approvalRequest: InputRequest = {
+      action: {
+        callId: "approval-call",
+        input: { command: "pwd" },
+        kind: "tool-call",
+        toolName: "bash",
+      },
+      allowFreeform: false,
+      display: "confirmation",
+      kind: "tool-approval",
+      options: [
+        { id: "approve", label: "Yes" },
+        { id: "cancel", label: "No" },
+      ],
+      prompt: "Approve tool call: bash",
+      requestId: "approval-1",
+    };
+
+    /**
+     * Answers the parked approval, cancels the model call that follows (or, with `cutTool`, the
+     * approved call while it runs), then sends a message.
+     */
+    async function answerThenCancel(
+      optionId: "approve" | "cancel",
+      options: {
+        readonly cutTool?: boolean;
+        readonly message?: string;
+        /** The answer, or earlier input, waits in the queue instead of arriving with the delivery. */
+        readonly queued?: StepInput;
+      } = {},
+    ) {
+      const { cutTool = false, message, queued } = options;
+      const answered = queued?.inputResponses !== undefined;
+      const parked = withParkedStep(
+        createStubSession({ history: [{ content: "Run pwd.", kind: "user", role: "user" }] }),
+        {
+          event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+          messages: [
+            {
+              content: [
+                {
+                  input: { command: "pwd" },
+                  toolCallId: "approval-call",
+                  toolName: "bash",
+                  type: "tool-call",
+                },
+                {
+                  approvalId: "approval-1",
+                  toolCallId: "approval-call",
+                  type: "tool-approval-request",
+                },
+              ],
+              role: "assistant",
+            },
+          ],
+          requests: [approvalRequest],
+        },
+      );
+      const start = queued === undefined ? parked : withQueuedInput(parked, queued);
+      const controller = new AbortController();
+      const events: UnstampedMessageStreamEvent[] = [];
+      const execute = vi.fn(async () => {
+        // The tool has started its side effect when the turn is cancelled.
+        if (cutTool && execute.mock.calls.length === 1) {
+          controller.abort(new TurnCancelledError());
+          throw controller.signal.reason;
+        }
+        return "/workspace";
+      });
+      const model = new MockLanguageModelV4({
+        doStream: async () => {
+          if (cutTool || model.doStreamCalls.length > 1) return textStreamResult("Done.");
+          return {
+            stream: new ReadableStream({
+              start(stream) {
+                stream.enqueue({ type: "stream-start", warnings: [] });
+                stream.enqueue({ id: "answer", type: "text-start" });
+                stream.enqueue({ delta: "Interrupted.", id: "answer", type: "text-delta" });
+                controller.abort(new TurnCancelledError());
+              },
+            }),
+          };
+        },
+      });
+      vi.mocked(createExecutionNodeStep).mockImplementation((input) =>
+        createToolLoopHarness({
+          abortSignal: input.abortSignal,
+          handleEvent: async (event, messages) => {
+            events.push(event);
+            await input.handleEvent?.(event, messages);
+          },
+          resolveModel: async () => model,
+          tools: new Map([
+            [
+              "bash",
+              {
+                description: "Run a shell command.",
+                execute,
+                inputSchema: jsonSchema({ type: "object" }),
+                name: "bash",
+              },
+            ],
+          ]),
+        }),
+      );
+      // An adapter without `deliver` passes the answer through as an answer, not a message.
+      const adapter: ChannelAdapter = { kind: "answers" };
+      const bundle = Object.assign({}, createTurnStepTestBundle() as object, {
+        adapterRegistry: { adaptersByKind: new Map([[adapter.kind, adapter]]) },
+      }) as never;
+      vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(bundle);
+      const ctx = new ContextContainer();
+      ctx.set(AuthKey, null);
+      ctx.set(BundleKey, bundle);
+      ctx.set(ChannelKey, adapter);
+      ctx.set(ContinuationTokenKey, "answers");
+      ctx.set(SessionIdKey, "sess-test");
+      installSessionStoreMocks([start]);
+
+      const cancelled = await turnStep({
+        abortSignal: controller.signal,
+        history: parked.history,
+        input: {
+          kind: "deliver",
+          payloads: [
+            {
+              inputResponses: answered ? [] : [{ optionId, requestId: "approval-1" }],
+              message,
+            },
+          ],
+        },
+        sessionWritable: createTestWritable(),
+        serializedContext: serializeContext(ctx),
+        sessionState: createStubSessionState(),
+      });
+      const cancelledEvents = [...events];
+      const session = cancelled.sessionState.snapshot.session;
+
+      events.length = 0;
+      installSessionStoreMocks([session]);
+      const next = await turnStep({
+        history: cancelled.history,
+        input: { kind: "deliver", payloads: [{ message: "next" }] },
+        sessionWritable: createTestWritable(),
+        serializedContext: cancelled.serializedContext,
+        sessionState: cancelled.sessionState,
+      });
+      return { cancelled, cancelledEvents, execute, next, nextEvents: [...events], session };
+    }
+
+    const resolutions = (events: readonly UnstampedMessageStreamEvent[]) =>
+      events.filter((event) => event.type === "input.resolved");
+
+    it("keeps a denial the cancelled step published", async () => {
+      const { cancelled, cancelledEvents, nextEvents, session } = await answerThenCancel("cancel");
+
+      expect(cancelled.action).toBe("cancelled");
+      expect(resolutions(cancelledEvents)).toHaveLength(1);
+      expect(openInputs(storedProjection(session.state))).toEqual([]);
+      expect(parkedSteps(session)).toEqual([]);
+      expect(cancelled.history).toContainEqual({
+        content: [
+          {
+            output: { reason: "Tool execution was denied.", type: "execution-denied" },
+            toolCallId: "approval-call",
+            toolName: "bash",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      });
+      // The next message neither resolves the denied approval again nor asks it again.
+      expect(resolutions(nextEvents)).toEqual([]);
+      expect(nextEvents.map((event) => event.type)).not.toContain("input.requested");
+    });
+
+    it("keeps a message sent with the denial once, and doesn't queue it again", async () => {
+      const { cancelled, next, session } = await answerThenCancel("cancel", {
+        message: "do something else",
+      });
+      const sent = (history: readonly ModelMessage[]) =>
+        history.filter((entry) => entry.role === "user" && entry.content === "do something else");
+
+      expect(cancelled.action).toBe("cancelled");
+      expect(sent(cancelled.history)).toHaveLength(1);
+      expect(queuedInput(session.state)).toBeUndefined();
+      // The next message doesn't consume the preserved one a second time.
+      expect(sent(next.history)).toHaveLength(1);
+      expect(next.history).toContainEqual(
+        expect.objectContaining({ content: "next", role: "user" }),
+      );
+    });
+
+    it("doesn't restore a queued answer the cancelled step consumed", async () => {
+      const { cancelled, next, nextEvents, session } = await answerThenCancel("cancel", {
+        queued: { inputResponses: [{ optionId: "cancel", requestId: "approval-1" }] },
+      });
+
+      expect(cancelled.action).toBe("cancelled");
+      expect(queuedInput(session.state)).toBeUndefined();
+      expect(parkedSteps(session)).toEqual([]);
+      // The next message doesn't carry the answer again as a response to an earlier prompt.
+      expect(resolutions(nextEvents)).toEqual([]);
+      expect(JSON.stringify(next.history)).not.toContain("earlier interactive prompt");
+    });
+
+    it("keeps earlier queued input once, with the denial's message", async () => {
+      const { cancelled, next, session } = await answerThenCancel("cancel", {
+        message: "and this",
+        queued: { message: "earlier" },
+      });
+      const userText = (history: readonly ModelMessage[]) =>
+        JSON.stringify(history.filter((entry) => entry.role === "user"));
+      const count = (text: string, value: string) => text.split(value).length - 1;
+
+      expect(cancelled.action).toBe("cancelled");
+      expect(queuedInput(session.state)).toBeUndefined();
+      expect(count(userText(cancelled.history), "earlier")).toBe(1);
+      expect(count(userText(cancelled.history), "and this")).toBe(1);
+      expect(count(userText(next.history), "earlier")).toBe(1);
+      expect(count(userText(next.history), "and this")).toBe(1);
+    });
+
+    it("doesn't run an approved call again after the cancellation cut it short", async () => {
+      const { cancelled, execute, nextEvents, session } = await answerThenCancel("approve", {
+        cutTool: true,
+      });
+
+      expect(cancelled.action).toBe("cancelled");
+      expect(execute).toHaveBeenCalledOnce();
+      expect(parkedSteps(session)).toEqual([]);
+      expect(cancelled.history).toContainEqual({
+        content: [
+          {
+            output: { type: "error-text", value: APPROVED_CALL_INTERRUPTED_MESSAGE },
+            toolCallId: "approval-call",
+            toolName: "bash",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      });
+      expect(resolutions(nextEvents)).toEqual([]);
+    });
+
+    it("keeps the result of an approved call that ran before the cut", async () => {
+      const { cancelled, execute, nextEvents, session } = await answerThenCancel("approve");
+
+      expect(cancelled.action).toBe("cancelled");
+      expect(parkedSteps(session)).toEqual([]);
+      expect(cancelled.history).toContainEqual(
+        expect.objectContaining({
+          content: [expect.objectContaining({ toolCallId: "approval-call", type: "tool-result" })],
+          role: "tool",
+        }),
+      );
+      expect(resolutions(nextEvents)).toEqual([]);
+      expect(execute).toHaveBeenCalledOnce();
     });
   });
 
@@ -1459,12 +1940,15 @@ describe("turnStep", () => {
     ctx.set(BundleKey, bundle);
     ctx.set(ChannelKey, threadContextAdapter);
     ctx.set(ContinuationTokenKey, "http:auth-replacement");
+    ctx.set(ScheduleIdKey, "previous-scheduled-turn");
     ctx.set(SessionIdKey, "session-1");
 
+    let observedSchedule: string | undefined;
     let observed: SessionAuthContext | null | undefined;
     vi.mocked(createExecutionNodeStep).mockImplementation(() => {
       return async (session): Promise<StepResult> => {
         observed = loadContext().get(AuthKey);
+        observedSchedule = loadContext().get(ScheduleIdKey);
         return { next: null, session };
       };
     });
@@ -1477,6 +1961,7 @@ describe("turnStep", () => {
     });
 
     expect(observed).toEqual(expected);
+    expect(observedSchedule).toBeUndefined();
   });
 
   it("keeps a session-scoped dynamic model selection when the first turn is cancelled", async () => {
@@ -1535,7 +2020,7 @@ describe("turnStep", () => {
       serializedContext: {
         ...createSerializedContext(),
         [TurnDeliveryIdsKey.name]: ["previous-delivery"],
-        [HistoryStateKey.name]: { availableSkills: announcement },
+        [HistoryStateKey.name]: { announcements: { skills: announcement } },
       },
       sessionState: createStubSessionState(),
     });
@@ -1544,7 +2029,7 @@ describe("turnStep", () => {
       action: "cancelled",
       serializedContext: {
         [TurnDeliveryIdsKey.name]: ["cancelled-delivery"],
-        [HistoryStateKey.name]: { availableSkills: announcement },
+        [HistoryStateKey.name]: { announcements: { skills: announcement } },
         [SessionDynamicModelReferenceKey.name]: {
           id: "anthropic/claude-opus-4.6",
           contextWindowTokens: 1_000_000,
@@ -2527,8 +3012,8 @@ describe("turnStep", () => {
         config: {},
         dynamicToolResolvers: [dynamicToolResolver],
       },
-      subagentRegistry: {},
-      toolRegistry: {},
+      subagentRegistry: { dynamicResolvers: [], preparedTools: [] },
+      toolRegistry: { toolsByName: new Map() },
       turnAgent: TestTurnAgent,
     } as never;
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);

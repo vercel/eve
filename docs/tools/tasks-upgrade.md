@@ -148,7 +148,7 @@ The eval assertion `t.calledSubagent(name, { status })` keeps its API and reads 
 A turn doesn't end while tasks are working, so one turn can span a wait. The stream
 reports each wait with the new `turn.waiting` event, which carries the open turn's `turnId`:
 
-- **Held turns.** When the model ends its text while its tasks work, and when `task_wait` has no
+- **Held turns.** When the model ends its text while its tasks work, and when `eve__task_wait` has no
   result yet, the stream emits `turn.waiting`. The next `step.started` for the same `turnId` means
   the turn resumed. In a root session, the text before the wait completes as a normal
   `message.completed`; in child sessions and a schedule's sessions, that step reports

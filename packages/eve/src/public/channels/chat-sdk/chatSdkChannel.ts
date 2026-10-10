@@ -1,3 +1,4 @@
+import { type PromptQueueState, promptQueueEvents } from "#channel/prompt-queue.js";
 import type { UserContent } from "ai";
 
 import type {
@@ -5,7 +6,9 @@ import type {
   ChannelRespondOptions,
   ChannelSendOptions,
 } from "#channel/channel-operations.js";
-import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import { defaultDeliverResult } from "#channel/adapter.js";
+import type { SessionHandle } from "#channel/session.js";
+import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
@@ -13,6 +16,7 @@ import { assertWithinLimit } from "#internal/attachments/limited-read.js";
 import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
 import type { InputResolution, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { FetchFileResult } from "#shared/channel-definition.js";
+import { actionLabel, visibleActions } from "#shared/action-label.js";
 import type { InputRequest } from "#shared/input.js";
 import {
   type InputResponse,
@@ -63,7 +67,7 @@ interface ActiveWebhookContext {
 const ActiveWebhookKey = new ContextKey<ActiveWebhookContext>("chat-sdk.active-webhook");
 
 /** Durable Chat SDK thread state plus default-handler streaming bookkeeping. */
-export interface ChatSdkChannelState extends Record<string, unknown> {
+export interface ChatSdkChannelState extends Record<string, unknown>, PromptQueueState {
   thread: SerializedThread | null;
   /** Message id of the in-flight streamed assistant post (edit fallback). */
   anchorMessageId?: string | null;
@@ -79,6 +83,11 @@ export interface ChatSdkChannelState extends Record<string, unknown> {
   pendingToolCallMessage?: string | null;
   /** Authorization status messages, keyed by connection name. */
   pendingAuthMessageIds?: Record<string, string>;
+  /**
+   * The Chat SDK user behind each principal that sent a message, so a sign-in
+   * reaches them privately. `null` once more than one person sent as it.
+   */
+  usersByPrincipal?: Record<string, string | null>;
   /** Posted input request cards, keyed by message id, until eve resolves every request on them. */
   pendingInputCards?: Record<string, ChatSdkPendingInputCard>;
   streamStepIndex?: number | null;
@@ -345,6 +354,14 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
         state: { thread },
       });
     },
+    // `session.auth.current` is the caller of this delivery.
+    deliver(
+      payload,
+      channel: ChatSdkChannelContext<TAdapters> & { readonly session: SessionHandle },
+    ) {
+      recordPrincipalUser(channel.state, channel.session.auth.current, payload);
+      return defaultDeliverResult(payload);
+    },
     events: mergedEvents,
   });
 
@@ -363,6 +380,60 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
 function defaultEvents<TAdapters extends ChatSdkAdapters>(
   inputActionPrefix: string,
 ): ChatSdkChannelEvents<TAdapters> {
+  type EventChannel = Parameters<
+    NonNullable<ChatSdkChannelEvents<TAdapters>["input.requested"]>
+  >[1];
+
+  async function showPrompt(channel: EventChannel, request: InputRequest) {
+    if (!channel.thread) return false;
+    const posted = await channel.thread.post(renderInputRequests([request], inputActionPrefix));
+    if (!posted.id || channel.state.editSupported === false) return;
+    channel.state.pendingInputCards = {
+      ...channel.state.pendingInputCards,
+      [posted.id]: { requests: [request], resolved: {} },
+    };
+  }
+
+  async function clearAnsweredCards(
+    event: { readonly resolutions: readonly InputResolution[] },
+    channel: EventChannel,
+  ) {
+    const thread = channel.thread;
+    if (!thread) return;
+    for (const [messageId, card] of Object.entries(channel.state.pendingInputCards ?? {})) {
+      const resolutions = event.resolutions.filter((resolution) =>
+        card.requests.some((request) => request.requestId === resolution.requestId),
+      );
+      if (resolutions.length === 0) continue;
+      const resolved = {
+        ...card.resolved,
+        ...Object.fromEntries(resolutions.map((resolution) => [resolution.requestId, resolution])),
+      };
+      const { [messageId]: _, ...rest } = channel.state.pendingInputCards ?? {};
+      channel.state.pendingInputCards = card.requests.every(
+        (request) => resolved[request.requestId] !== undefined,
+      )
+        ? rest
+        : { ...rest, [messageId]: { requests: card.requests, resolved } };
+      try {
+        await thread.adapter.editMessage(
+          thread.id,
+          messageId,
+          renderInputRequests(card.requests, inputActionPrefix, resolved),
+        );
+      } catch (error) {
+        if (!isNotImplemented(error)) {
+          log.warn("answered input card edit failed", { error, messageId });
+          continue;
+        }
+        channel.state.editSupported = false;
+        channel.state.pendingInputCards = {};
+        return;
+      }
+    }
+  }
+
+  const prompts = promptQueueEvents(showPrompt);
   return {
     ...defaultAuthorizationEvents(),
     async "turn.started"(_event, channel, _ctx) {
@@ -377,10 +448,11 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
         await safeStartTyping(channel.thread, truncate(buffered));
         return;
       }
-      const labels = event.actions.map((action) =>
-        action.kind === "tool-call" ? action.toolName : action.kind,
+      const labels = visibleActions(event.actions).map((action) =>
+        actionLabel(action, event.presentation),
       );
-      await safeStartTyping(channel.thread, truncate(`Running ${labels.join(", ")}...`));
+      if (labels.length === 0) return;
+      await safeStartTyping(channel.thread, truncate(`${labels.join(", ")}...`));
     },
     async "message.appended"(event, channel, _ctx) {
       if (!channel.thread || !canStream(channel)) return;
@@ -410,54 +482,13 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
         clearStream(channel.state);
       }
     },
-    async "input.requested"(event, channel, _ctx) {
-      if (!channel.thread || event.requests.length === 0) return;
-      const posted = await channel.thread.post(
-        renderInputRequests(event.requests, inputActionPrefix),
-      );
-      if (!posted.id || channel.state.editSupported === false) return;
-      channel.state.pendingInputCards = {
-        ...channel.state.pendingInputCards,
-        [posted.id]: { requests: event.requests, resolved: {} },
-      };
-    },
+    // Some adapters show only text, where a reply can answer only the request
+    // it sees, so cards post one at a time.
+    ...prompts,
     // Covers every way a request ends: a press, a typed answer, or a withdrawal.
     async "input.resolved"(event, channel, _ctx) {
-      const thread = channel.thread;
-      if (!thread) return;
-      for (const [messageId, card] of Object.entries(channel.state.pendingInputCards ?? {})) {
-        const resolutions = event.resolutions.filter((resolution) =>
-          card.requests.some((request) => request.requestId === resolution.requestId),
-        );
-        if (resolutions.length === 0) continue;
-        const resolved = {
-          ...card.resolved,
-          ...Object.fromEntries(
-            resolutions.map((resolution) => [resolution.requestId, resolution]),
-          ),
-        };
-        const { [messageId]: _, ...rest } = channel.state.pendingInputCards ?? {};
-        channel.state.pendingInputCards = card.requests.every(
-          (request) => resolved[request.requestId] !== undefined,
-        )
-          ? rest
-          : { ...rest, [messageId]: { requests: card.requests, resolved } };
-        try {
-          await thread.adapter.editMessage(
-            thread.id,
-            messageId,
-            renderInputRequests(card.requests, inputActionPrefix, resolved),
-          );
-        } catch (error) {
-          if (!isNotImplemented(error)) {
-            log.warn("answered input card edit failed", { error, messageId });
-            continue;
-          }
-          channel.state.editSupported = false;
-          channel.state.pendingInputCards = {};
-          return;
-        }
-      }
+      await clearAnsweredCards(event, channel);
+      await prompts["input.resolved"](event, channel);
     },
     async "message.completed"(event, channel, _ctx) {
       if (event.finishReason === "tool-calls") {
@@ -618,6 +649,28 @@ async function bridgeRespond<TAdapters extends ChatSdkAdapters>(
     ...respondOptions,
     auth: auth ?? null,
   });
+}
+
+/**
+ * Records the author of the delivery's message as the Chat SDK user behind its
+ * caller. A principal several people send as, such as tenant auth, names no one
+ * person, so it records `null` rather than whoever spoke last.
+ */
+function recordPrincipalUser(
+  state: ChatSdkChannelState,
+  caller: SessionAuthContext | null,
+  payload: DeliverPayload,
+): void {
+  if (caller === null) return;
+  const thread = (payload.state as Partial<ChatSdkChannelState> | undefined)?.thread;
+  const author = thread?.currentMessage?.author;
+  if (author === undefined || author.isBot === true || author.isMe) return;
+  const recorded = state.usersByPrincipal?.[caller.principalId];
+  if (recorded === author.userId || recorded === null) return;
+  state.usersByPrincipal = {
+    ...state.usersByPrincipal,
+    [caller.principalId]: recorded === undefined ? author.userId : null,
+  };
 }
 
 function activeFrom(operation: "respond" | "send"): ChannelFrom<ChatSdkChannelState> {

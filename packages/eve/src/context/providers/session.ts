@@ -5,6 +5,7 @@ import {
   type Session,
   SessionIdKey,
   SessionKey,
+  SessionPredecessorKey,
 } from "#context/keys.js";
 import type { ContextReader } from "#context/key.js";
 import type { HarnessSession } from "#harness/types.js";
@@ -26,6 +27,7 @@ export const sessionProvider = {
           initiator: ctx.get(InitiatorAuthKey) ?? currentAuth,
         },
         parent: ctx.get(ParentSessionKey),
+        predecessor: ctx.get(SessionPredecessorKey),
         sessionId: ctx.require(SessionIdKey),
         turn: { id: turnId, sequence: emission.sequence },
       }),

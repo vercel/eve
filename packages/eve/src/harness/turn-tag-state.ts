@@ -250,6 +250,44 @@ export function accumulateTurnUsage(input: {
   };
 }
 
+/** Folds one model call's usage into the session's turn and session totals. */
+export function addTurnUsage<T extends { readonly state?: SessionStateMap }>(
+  session: T,
+  turnId: string,
+  usage: TokenUsageDelta | undefined,
+): T {
+  return setTurnUsageState(
+    session,
+    accumulateTurnUsage({ previous: getTurnUsageState(session.state), turnId, usage }),
+  );
+}
+
+/**
+ * Counts usage that belongs to no turn, such as a manual compaction between turns. It adds to
+ * session totals, so session limits see it, and is marked reported so a later turn's usage delta
+ * doesn't claim it.
+ */
+export function addUsageOutsideTurns<T extends { readonly state?: SessionStateMap }>(
+  session: T,
+  usage: TokenUsageDelta | undefined,
+): T {
+  if (usage === undefined) return session;
+  const counted = setTurnUsageState(
+    session,
+    accumulateSessionUsage({ previous: getTurnUsageState(session.state), usage }),
+  );
+  const reported =
+    (session.state?.[REPORTED_SESSION_USAGE_STATE_KEY] as TokenUsageTotals | undefined) ??
+    ZERO_TOKEN_USAGE;
+  return {
+    ...counted,
+    state: {
+      ...counted.state,
+      [REPORTED_SESSION_USAGE_STATE_KEY]: addTokenUsage(reported, toTokenUsageDelta(usage)),
+    },
+  };
+}
+
 /**
  * Adds usage to session totals without touching the in-flight turn totals:
  * the delegated spend a parent counts, or a run's tally of what its

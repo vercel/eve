@@ -1,5 +1,6 @@
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
+import { resumeRunnableHook } from "#execution/session-inbox/owner.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
 import { encodeLegacyCommand, resolveLegacyInbox } from "./inbox.js";
@@ -15,7 +16,7 @@ export async function resumeAuthorizationCallback(
   payload: AuthorizationCallbackPayload,
 ): Promise<void> {
   try {
-    await resumeHook(token, payload);
+    await resumeRunnableHook(token, payload);
     return;
   } catch (error) {
     if (!HookNotFoundError.is(error)) throw error;

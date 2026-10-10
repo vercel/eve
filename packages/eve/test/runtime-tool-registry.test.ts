@@ -169,14 +169,14 @@ describe("createRuntimeToolRegistry", () => {
         {
           tools: [
             createResolvedToolDefinition({
-              logicalPath: "tools/load-skill.ts",
-              name: "load_skill",
-              sourceId: "tools/load-skill.ts",
+              logicalPath: "tools/search.ts",
+              name: "search",
+              sourceId: "tools/search.ts",
             }),
           ],
         },
         {
-          reservedToolNames: ["load_skill"],
+          reservedToolNames: ["search"],
         },
       ),
     ).rejects.toBeInstanceOf(RuntimeRegistryError);

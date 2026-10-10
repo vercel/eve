@@ -7,7 +7,7 @@ import {
   createCrossChannelToFn,
   toCrossChannelTargets,
 } from "../../src/channel/cross-channel-receive.js";
-import type { Runtime, SessionCommand, SessionCommandResult } from "../../src/channel/types.js";
+import type { SessionCommandResult, Runtime, SessionCommand } from "../../src/channel/types.js";
 import { compileAgent } from "../../src/compiler/compile-agent.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "../../src/runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "../../src/runtime/sessions/compiled-agent-cache.js";

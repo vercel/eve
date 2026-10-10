@@ -51,6 +51,22 @@ export interface EveEvalToolCall {
 }
 
 /**
+ * One skill load extracted from the captured stream, pairing the `load-skill`
+ * request with its matching `load-skill-result`.
+ */
+export interface EveEvalSkillLoad {
+  /** The loaded skill's name. */
+  readonly skill: string;
+  /** The skill's instructions; `undefined` when the load never resolved. */
+  readonly output: JsonValue | undefined;
+  readonly status: EveEvalActionStatus;
+  /** Zero-based index of the turn the load happened in. */
+  readonly turnIndex: number;
+  /** Owning session id, when the runner knows it. */
+  readonly sessionId?: string;
+}
+
+/**
  * One call to an agent task extracted from the captured stream: its
  * `task.started`, joined with its `task.settled` and the task's
  * `agent.started`.
@@ -80,6 +96,7 @@ export interface EveEvalSubagentCall {
 export interface EveEvalDerivedFacts {
   readonly toolCalls: readonly EveEvalToolCall[];
   readonly toolCallCount: number;
+  readonly skillLoads: readonly EveEvalSkillLoad[];
   readonly subagentCalls: readonly EveEvalSubagentCall[];
   readonly subagentCallCount: number;
   /** Every HITL input request raised during the run (`input.requested`). */
@@ -244,7 +261,7 @@ export interface EveEvalAssertions {
   parked(): AssertionHandle;
   messageIncludes(token: string | RegExp): AssertionHandle;
   calledTool(name: string, options?: EveEvalToolCallMatchOptions): AssertionHandle;
-  /** Sugar for `calledTool("load_skill", { input: { skill }, ... })`. */
+  /** Asserts a completed load of `skill`, constrained like `calledTool`. */
   loadedSkill(skill: string, options?: EveEvalSkillLoadMatchOptions): AssertionHandle;
   notCalledTool(name: string): AssertionHandle;
   /** Asserts that tool requests appeared in order, allowing unrelated requests between them. */
@@ -396,7 +413,8 @@ export interface EveEvalTurn extends EveEvalAssertions, EveEvalOutputAssertions 
 export interface EveEvalJudgeConfig {
   /** Decision model ID or instance. Defaults to the model used by `eve/ai` decide. */
   readonly model?: DecisionModel;
-  readonly modelOptions?: AgentModelOptionsDefinition;
+  /** Judge calls carry provider options only; eve places no prompt-cache breakpoints on them. */
+  readonly modelOptions?: Pick<AgentModelOptionsDefinition, "providerOptions">;
 }
 
 /** JSON content accepted as decision state, instructions, or rubric descriptions. */

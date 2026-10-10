@@ -181,7 +181,7 @@ void (async () => {
       () => {
         const snap = screen.snapshot();
         return (
-          snap.includes("URL: https://example.com/authorize/stub-mcp") &&
+          snap.includes("https://example.com/authorize/stub-mcp") &&
           snap.includes("Code: STUB-1234") &&
           snap.includes("Visit the URL above")
         );
@@ -210,7 +210,7 @@ void (async () => {
         return (
           snap.includes("Authorization complete") &&
           !snap.includes("Authorization required for stub-mcp") &&
-          !snap.includes("URL: https://example.com/authorize/stub-mcp") &&
+          !snap.includes("https://example.com/authorize/stub-mcp") &&
           !snap.includes("Code: STUB-1234") &&
           !snap.includes("Visit the URL above")
         );

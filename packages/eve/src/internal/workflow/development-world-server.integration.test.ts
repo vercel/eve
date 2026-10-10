@@ -1,4 +1,5 @@
 import { access, mkdir, rm, writeFile } from "node:fs/promises";
+import { DevelopmentRunUnavailableError } from "#internal/workflow/development-run-unavailable-error.js";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -404,9 +405,17 @@ describe("parent development Workflow World", () => {
       await second.start();
       expect(startupFetch).not.toHaveBeenCalled();
       startupFetch.mockRestore();
-      await expect(createDevelopmentWorkflowWorld().hooks.getByToken(token)).rejects.toThrow(
-        "Local Workflow run was not resumed",
-      );
+      // Ingress reports the session stranded from this error, so its identity
+      // must survive the worker boundary.
+      const refusal = await createDevelopmentWorkflowWorld()
+        .hooks.getByToken(token)
+        .catch((error: unknown) => error);
+      expect(DevelopmentRunUnavailableError.is(refusal)).toBe(true);
+      expect(refusal).toMatchObject({
+        availability: "dormant",
+        message: expect.stringContaining("Local Workflow run was not resumed"),
+        runId,
+      });
       for (const message of [
         { runId },
         { workflowRunId: runId },

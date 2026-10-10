@@ -5,6 +5,7 @@ import { ResetResponseSchema, type ResetResponse } from "#protocol/reset-session
 import {
   REMOTE_AGENT_PROTOCOL_MISMATCH,
   REMOTE_AGENT_PROTOCOL_VERSION,
+  UNVERSIONED_REMOTE_AGENT_PROTOCOL,
   formatRemoteAgentProtocolMismatch,
   readRemoteAgentProtocolVersion,
 } from "#protocol/remote-agent-protocol.js";
@@ -50,6 +51,9 @@ const CreateSessionResponseSchema = z.object({
   sessionId: z.string().min(1),
   status: z.literal("accepted"),
 });
+
+const UNKNOWN_REMOTE_OUTCOME =
+  "The request may have completed on the remote agent. Do not retry automatically; check the remote outcome before sending the request again.";
 
 type RemoteAgentSessionCoordinates = {
   readonly sessionId: string;
@@ -167,21 +171,25 @@ export async function startRemoteAgentSession(input: {
   try {
     body = await response.json();
   } catch {
-    throw new Error(
-      `Remote agent "${input.action.remoteAgentName}" create-session response was not valid JSON.`,
+    throw new FatalError(
+      `Remote agent "${input.action.remoteAgentName}" create-session response was not valid JSON. ${UNKNOWN_REMOTE_OUTCOME}`,
     );
   }
 
   const parsed = CreateSessionResponseSchema.safeParse(body);
   if (!parsed.success) {
-    throw new Error(
-      `Remote agent "${input.action.remoteAgentName}" create-session response was invalid.`,
+    throw new FatalError(
+      `Remote agent "${input.action.remoteAgentName}" create-session response was invalid. ${UNKNOWN_REMOTE_OUTCOME}`,
     );
   }
   const receiverVersion = readRemoteAgentProtocolVersion(parsed.data.protocolVersion);
-  if (receiverVersion !== REMOTE_AGENT_PROTOCOL_VERSION) {
+  // A protocol-1 remote already accepted the work and settles it with the same result callbacks.
+  if (
+    receiverVersion !== REMOTE_AGENT_PROTOCOL_VERSION &&
+    receiverVersion !== UNVERSIONED_REMOTE_AGENT_PROTOCOL
+  ) {
     throw new FatalError(
-      formatRemoteAgentProtocolMismatch({ name: input.action.remoteAgentName, receiverVersion }),
+      `${formatRemoteAgentProtocolMismatch({ name: input.action.remoteAgentName, receiverVersion })} ${UNKNOWN_REMOTE_OUTCOME} Remote session: ${parsed.data.sessionId}.`,
     );
   }
 

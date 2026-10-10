@@ -113,7 +113,7 @@ describe("settleCancelledTurnStep", () => {
       relay(base.snapshot.session.state, "deploy-run-ask-1", {
         kind: "question",
         runId: "deploy-run",
-        workflowAsk: { control: "deploy-run-control", question: {} },
+        workflowAsk: { control: "deploy-run-control" },
       }),
       "reviewer-approval-1",
       { kind: "tool-approval" },

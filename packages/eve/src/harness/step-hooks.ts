@@ -21,16 +21,13 @@ import {
   createRuntimeToolResultFromToolError,
   createRuntimeToolResultFromMessagePart,
   createRuntimeToolResultFromStepResult,
+  toActionResult,
 } from "#harness/action-result-helpers.js";
 import type { TurnPosition } from "#harness/session-machine/view.js";
 import { normalizeAssistantStepFinishReason } from "#harness/finish-reason.js";
 import { extractToolApprovalInputRequests } from "#harness/input-extraction.js";
-import {
-  type AnthropicCacheMarker,
-  applyConversationCacheControl,
-  mergeGatewayAutoCaching,
-  type PromptCachePath,
-} from "#harness/prompt-cache.js";
+import type { ModelProfile } from "#harness/model-profile.js";
+import { applyConversationCacheControl, mergeGatewayAutoCaching } from "#harness/prompt-cache.js";
 import { resolveCallProviderOptions } from "#harness/provider-safety.js";
 import {
   collectActionPresentation,
@@ -41,25 +38,21 @@ import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import {
   type HarnessEmitFn,
   type HarnessSession,
+  type HarnessToolLookup,
   requireSessionModelReference,
-  type ToolLoopHarnessConfig,
 } from "#harness/types.js";
 import { contextStorage } from "#context/container.js";
 import { isAuthorizationSignal, isPendingAuthorizationToolOutput } from "#harness/authorization.js";
 import { readToolInterrupt } from "#harness/tool-interrupts.js";
-import { emitNestedToolActions } from "#harness/nested-actions.js";
 import { AuthKey } from "#context/keys.js";
-import { resolveConversationId } from "#shared/conversation-identity.js";
 
 // ---------------------------------------------------------------------------
 // Step result type
 // ---------------------------------------------------------------------------
 
 /**
- * The subset of `StepResult` that the harness reads after a step completes.
- *
- * Used by both the streaming (`onStepEnd` callback) and non-streaming
- * (`generateText` result) code paths.
+ * The subset of `StepResult` that the harness reads after a step completes, captured by the
+ * `onStepEnd` callback.
  */
 export type HarnessStepResult = Pick<
   StepResult<ToolSet>,
@@ -84,13 +77,12 @@ export type HarnessStepResult = Pick<
  */
 interface StepHooksInput {
   readonly auth?: import("#channel/types.js").SessionAuthContext | null;
-  readonly cachePath: PromptCachePath;
+  readonly profile: ModelProfile;
   /**
    * Starts the model step the SDK is about to run. Omitted when the step already started, as
    * it has for a retry of the same step.
    */
   readonly startStep?: (messages: readonly ModelMessage[]) => Promise<void>;
-  readonly marker: AnthropicCacheMarker | undefined;
   readonly session: HarnessSession;
 }
 
@@ -169,26 +161,22 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
   // session history — no prepareStep snapshot required.
   // -------------------------------------------------------------------------
 
-  const prepareStep: PrepareStepFunction<ToolSet> = async ({ messages, model }) => {
-    let processed = messages;
-
-    if (input.cachePath.kind === "anthropic-direct" && input.marker) {
-      processed = applyConversationCacheControl([...messages], input.marker);
-    }
-
+  const prepareStep: PrepareStepFunction<ToolSet> = async ({ messages }) => {
+    const { profile } = input;
     const stepResult: NonNullable<Awaited<ReturnType<PrepareStepFunction<ToolSet>>>> = {
-      messages: processed,
+      messages: profile.anthropicCache
+        ? applyConversationCacheControl(messages, profile.anthropicCache)
+        : messages,
     };
 
     const modelReference = requireSessionModelReference(session);
     const providerOptions = resolveCallProviderOptions({
       auth: input.auth ?? contextStorage.getStore()?.get(AuthKey) ?? null,
-      conversationId: resolveConversationId(session.rootSessionId ?? session.sessionId),
-      model,
-      modelReference,
+      profile,
       providerOptions: modelReference.providerOptions,
+      session,
     });
-    if (input.cachePath.kind === "gateway-auto") {
+    if (profile.gateway) {
       stepResult.providerOptions = mergeGatewayAutoCaching(providerOptions) as NonNullable<
         typeof stepResult.providerOptions
       >;
@@ -243,7 +231,7 @@ export async function emitStepActions(
     readonly excludedActionCallIds?: ReadonlySet<string>;
     readonly excludedActionToolNames: ReadonlySet<string>;
     readonly handledInlineToolResultCallIds?: ReadonlySet<string>;
-    readonly tools: ToolLoopHarnessConfig["tools"];
+    readonly tools: HarnessToolLookup;
   },
 ): Promise<void> {
   const providerExecutedCallIds = new Set(
@@ -257,6 +245,7 @@ export async function emitStepActions(
     ...extractToolApprovalInputRequests({
       content: (step.content ?? []) as ContentPart<ToolSet>[],
       excludedCallIds: options.excludedActionCallIds,
+      tools: options.tools,
     }).map((request) => request.action.callId),
     ...(step.toolCalls as TypedToolCall<ToolSet>[])
       .filter(isInvalidToolCall)
@@ -300,6 +289,12 @@ export async function emitStepActions(
       toolResult.output,
     ]),
   );
+  const inputByCallId = new Map<string, unknown>(
+    (step.toolCalls as TypedToolCall<ToolSet>[]).map((toolCall) => [
+      toolCall.toolCallId,
+      toolCall.input,
+    ]),
+  );
 
   for (const result of reconcileToolResults(step)) {
     if (isExcluded(result.callId, result.toolName)) {
@@ -315,10 +310,9 @@ export async function emitStepActions(
       continue;
     }
 
-    await emitNestedToolActions(emitFn, state, result.callId);
     await emitFn(
       createActionResultEvent({
-        result,
+        result: toActionResult(result, inputByCallId.get(result.callId)),
         sequence: state.sequence,
         stepIndex: state.stepIndex,
         turnId: state.turnId,
@@ -373,6 +367,12 @@ function reconcileToolResults(step: HarnessStepResult): readonly RuntimeToolResu
     resultsByCallId.set(part.toolCallId, createRuntimeToolResultFromToolError(part));
   }
 
+  const entryNames = new Map(
+    (step.toolCalls as TypedToolCall<ToolSet>[]).map((toolCall) => [
+      toolCall.toolCallId,
+      toolCall.toolName,
+    ]),
+  );
   for (const part of extractToolResultParts(step.response.messages)) {
     if ((part as { readonly providerExecuted?: boolean }).providerExecuted === true) {
       continue;
@@ -382,7 +382,13 @@ function reconcileToolResults(step: HarnessStepResult): readonly RuntimeToolResu
       continue;
     }
 
-    resultsByCallId.set(part.toolCallId, createRuntimeToolResultFromMessagePart(part));
+    resultsByCallId.set(
+      part.toolCallId,
+      createRuntimeToolResultFromMessagePart(
+        part,
+        entryNames.get(part.toolCallId) ?? part.toolName,
+      ),
+    );
   }
 
   return [...resultsByCallId.values()];

@@ -9,9 +9,11 @@ import {
   GATED_TOOL,
   type GatedTool,
   OPEN_GATED_TOOL,
+  type Person,
   PLAIN_TOOL,
   type RenderedOption,
   REQUESTER_GATED_TOOL,
+  RETRO_DAY_TOOL,
   type SentFile,
   type Surface,
   SECOND_GATED_TOOL,
@@ -20,8 +22,9 @@ import {
 } from "#internal/testing/channel-conformance/harness.js";
 import {
   DAY_PROMPT,
+  RETRO_PROMPT,
   TIME_PROMPT,
-} from "#internal/testing/channel-conformance/two-questions-workflow.js";
+} from "#internal/testing/channel-conformance/question-workflows.js";
 
 /**
  * One behavior every first-party channel owes a person, stated once and run
@@ -99,6 +102,25 @@ function option(
   return found!;
 }
 
+// Neither matches an option, a tool, or a number, so each steers the turn.
+const ASIDE = "Alice also wants the changelog summarized.";
+const FOLLOW_UP = "Alice asks what is still left to do.";
+
+/** Each person in turn asks for {@link PLAIN_TOOL}; returns the caller each run saw. */
+async function lookUpNotesAs(
+  conversation: ChannelConversation,
+  people: readonly Person[],
+): Promise<readonly (string | null)[]> {
+  for (const [index, person] of people.entries()) {
+    // Numbered, so each run's reply, which quotes its message, can be told apart.
+    const request = `request ${index + 1}`;
+    await conversation.say(`Use ${PLAIN_TOOL} to find the review notes, ${request}.`, person);
+    await conversation.waitForShown(new RegExp(`Used ${PLAIN_TOOL} for .*${request}`, "su"));
+  }
+  expect(conversation.runsOf(PLAIN_TOOL), `${PLAIN_TOOL} runs`).toBe(people.length);
+  return conversation.callersOf(PLAIN_TOOL);
+}
+
 const HOTFIX = `Use ${REQUESTER_GATED_TOOL} to ship the fix.`;
 const HOTFIX_PROMPT = "Approve Release hotfix?";
 
@@ -132,12 +154,12 @@ async function expectReleased(conversation: ChannelConversation) {
   await expectRan(conversation, REQUESTER_GATED_TOOL, { released: true });
 }
 
-/** Once the session settles after Bob's press, the requester-only approval is still pending. */
+/** Once the session settles after Bob answers, the requester-only approval is still pending. */
 async function expectStillPending(conversation: ChannelConversation) {
   await conversation.waitForRest();
   expect(
     conversation.runsOf(REQUESTER_GATED_TOOL),
-    `${REQUESTER_GATED_TOOL} ran on Bob's press`,
+    `${REQUESTER_GATED_TOOL} ran on Bob's answer`,
   ).toBe(0);
 }
 
@@ -220,9 +242,6 @@ async function expectResponderNamed(conversation: ChannelConversation, prompt: s
  * A one-token input budget lets the model call that crosses it finish, so a
  * turn that calls a tool is held before the model reads the tool's result.
  */
-// Neither matches an option, a tool, or a number, so it steers the turn.
-const FOLLOW_UP = "Alice asks what is still left to do.";
-
 // The smallest valid JPEG (1x1) and PDF, so a channel's media checks accept them.
 const DIAGRAM: SentFile = {
   bytes: Buffer.from(
@@ -265,7 +284,7 @@ async function attachmentsSeen(
   conversation: ChannelConversation,
   files?: readonly SentFile[],
 ): Promise<readonly SeenFile[]> {
-  await conversation.say(LIST_ATTACHMENTS, files);
+  await conversation.say(LIST_ATTACHMENTS, "alice", files);
   const shown = await conversation.waitForShown(ATTACHMENTS_REPLY);
   return JSON.parse(ATTACHMENTS_REPLY.exec(shown)![1]!) as SeenFile[];
 }
@@ -420,20 +439,6 @@ const questionRules = [
     },
   },
   {
-    rule: "pressing an option of an answered question sends it to the agent as new input",
-    source: "docs/tools/workflows.mdx#ask-a-human-ctxask",
-    requires: ["buttons"],
-    async run(conversation) {
-      const options = await askWhichDay(conversation);
-      const saturday = options.find((option) => option.label === "Saturday");
-      expect(saturday, "a Saturday option to press").toBeDefined();
-      await conversation.press(saturday!);
-      expectAnsweredSaturday(await conversation.waitForToolResult("ask_question"));
-      await conversation.press(saturday!);
-      await conversation.waitForReplyTo("Saturday");
-    },
-  },
-  {
     rule: "pressing options of two pending questions answers each with its own option",
     source: "docs/tools/workflows.mdx#ask-a-human-ctxask",
     requires: ["buttons"],
@@ -448,17 +453,52 @@ const questionRules = [
     },
   },
   {
-    rule: "a text reply matching an option does not answer either of two pending questions",
-    source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
+    rule: "text replies answer two pending questions one at a time, in the order shown",
+    source: "docs/tools/human-in-the-loop.md#several-requests-at-once",
     requires: ["text-replies"],
     variesByConversation: true,
     async run(conversation) {
       await conversation.say(PLAN_REVIEW);
-      await conversation.waitForRequest(DAY_PROMPT);
-      await conversation.waitForRequest(TIME_PROMPT);
-      await conversation.say("Saturday");
-      // Answering only the day question would leave the tool waiting, with no reply.
+      await conversation.replyToEach({ [DAY_PROMPT]: "Saturday", [TIME_PROMPT]: "Afternoon" });
+      const output = await conversation.waitForToolResult(TWO_QUESTIONS_TOOL);
+      expect(output, `${TWO_QUESTIONS_TOOL} returned ${JSON.stringify(output)}`).toEqual({
+        day: "Saturday",
+        time: "Afternoon",
+      });
+    },
+  },
+  {
+    rule: "pressing an option of an answered question sends it to the agent as new input",
+    source: "docs/tools/workflows.mdx#ask-a-human-ctxask",
+    requires: ["buttons"],
+    async run(conversation) {
+      const options = await askWhichDay(conversation);
+      const saturday = options.find((option) => option.label === "Saturday");
+      expect(saturday, "a Saturday option to press").toBeDefined();
+      await conversation.press(saturday!);
+      expectAnsweredSaturday(await conversation.waitForToolResult("ask_question"));
+      await conversation.press(saturday!);
       await conversation.waitForReplyTo("Saturday");
+    },
+  },
+  {
+    rule: "a message while a question without free text is pending withdraws it, and the next message gets a reply",
+    source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
+    requires: ["text-replies"],
+    variesByConversation: true,
+    async run(conversation) {
+      await conversation.say(`Use ${RETRO_DAY_TOOL} to schedule the retro.`);
+      await conversation.waitForQuestion(RETRO_PROMPT);
+      await conversation.say(ASIDE);
+      await conversation.waitForReplyTo(ASIDE);
+      // Once withdrawn, an option label is an ordinary message. A question left open would take it.
+      await conversation.say("Thursday");
+      await conversation.waitForRest();
+      expect(
+        await conversation.sharedText(),
+        `${RETRO_DAY_TOOL} took "Thursday" as an answer after the aside`,
+      ).not.toMatch(/"day":"Thursday"/u);
+      await conversation.waitForReplyTo("Thursday");
     },
   },
 ] as const satisfies readonly ContractRule[];
@@ -497,47 +537,6 @@ const approvalRules = [
     },
   },
   {
-    rule: "pressing Approve twice runs the gated tool once",
-    source: "docs/tools/human-in-the-loop.md#approvals",
-    requires: ["buttons"],
-    async run(conversation) {
-      const options = await askToDeploy(conversation);
-      const approve = option(options, APPROVE_LABELS);
-      await conversation.press(approve);
-      await conversation.press(approve);
-      await expectDeployed(conversation);
-      // However the channel reads the second press, the session must finish with it.
-      await conversation.waitForRest();
-      expect(conversation.runsOf(GATED_TOOL)).toBe(1);
-    },
-  },
-  {
-    rule: "pressing Approve on one of two pending approvals runs only that tool",
-    source: "docs/tools/human-in-the-loop.md#approvals",
-    requires: ["buttons"],
-    async run(conversation) {
-      await conversation.say(DEPLOY_AND_PUBLISH);
-      await answerEach(conversation, {
-        [APPROVAL_PROMPT]: APPROVE_LABELS,
-        [PUBLISH_PROMPT]: CANCEL_LABELS,
-      });
-      // Results reach the model in the order they settle, so the reply names the approved call.
-      await expectDeployed(conversation);
-      expect(conversation.runsOf(SECOND_GATED_TOOL)).toBe(0);
-    },
-  },
-  {
-    rule: "answering an approval and a question pending together settles both",
-    source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
-    requires: ["buttons"],
-    async run(conversation) {
-      await conversation.say(ASK_AND_DEPLOY);
-      await answerEach(conversation, { [APPROVAL_PROMPT]: APPROVE_LABELS, [PROMPT]: "Saturday" });
-      // The turn replies only once both calls settle.
-      await expectDeployed(conversation);
-    },
-  },
-  {
     rule: "pressing Cancel stops the gated tool without running it",
     source: "docs/tools/human-in-the-loop.md#approvals",
     requires: ["buttons"],
@@ -569,6 +568,108 @@ const approvalRules = [
       await askToDeploy(conversation);
       await conversation.say("cancel");
       await expectNotDeployed(conversation);
+    },
+  },
+  {
+    rule: "pressing Approve twice runs the gated tool once",
+    source: "docs/tools/human-in-the-loop.md#approvals",
+    requires: ["buttons"],
+    async run(conversation) {
+      const options = await askToDeploy(conversation);
+      const approve = option(options, APPROVE_LABELS);
+      await conversation.press(approve);
+      await conversation.press(approve);
+      await expectDeployed(conversation);
+      // However the channel reads the second press, the session must finish with it.
+      await conversation.waitForRest();
+      expect(conversation.runsOf(GATED_TOOL)).toBe(1);
+    },
+  },
+  {
+    rule: "pressing Approve on one of two pending approvals runs only that tool",
+    source: "docs/tools/human-in-the-loop.md#approvals",
+    requires: ["buttons"],
+    async run(conversation) {
+      await conversation.say(DEPLOY_AND_PUBLISH);
+      await answerEach(conversation, {
+        [APPROVAL_PROMPT]: APPROVE_LABELS,
+        [PUBLISH_PROMPT]: CANCEL_LABELS,
+      });
+      // Results reach the model in the order they settle, so the reply names the approved call.
+      await expectDeployed(conversation);
+      expect(conversation.runsOf(SECOND_GATED_TOOL)).toBe(0);
+    },
+  },
+  {
+    rule: "text replies answer two pending approvals one at a time, in the order shown",
+    source: "docs/tools/human-in-the-loop.md#several-requests-at-once",
+    requires: ["text-replies"],
+    variesByConversation: true,
+    async run(conversation) {
+      await conversation.say(DEPLOY_AND_PUBLISH);
+      await conversation.replyToEach({ [APPROVAL_PROMPT]: "approve", [PUBLISH_PROMPT]: "cancel" });
+      await expectDeployed(conversation);
+      expect(conversation.runsOf(SECOND_GATED_TOOL)).toBe(0);
+    },
+  },
+  {
+    rule: "answering an approval and a question pending together settles both",
+    source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
+    requires: ["buttons"],
+    async run(conversation) {
+      await conversation.say(ASK_AND_DEPLOY);
+      await answerEach(conversation, { [APPROVAL_PROMPT]: APPROVE_LABELS, [PROMPT]: "Saturday" });
+      // The turn replies only once both calls settle.
+      await expectDeployed(conversation);
+    },
+  },
+  {
+    rule: "text replies answer a question and an approval raised together, in the order shown",
+    source: "docs/tools/human-in-the-loop.md#several-requests-at-once",
+    requires: ["text-replies"],
+    async run(conversation) {
+      await conversation.say(ASK_AND_DEPLOY);
+      await conversation.replyToEach({ [PROMPT]: "Saturday", [APPROVAL_PROMPT]: "approve" });
+      // The turn replies only once both calls settle.
+      await expectDeployed(conversation);
+    },
+  },
+  {
+    rule: "a message while an approval is pending cancels it, so typing approve afterwards runs nothing and the next message gets a reply",
+    // Policy since #4135. #4051 proposes keeping the approval open instead, which flips this rule.
+    source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
+    requires: ["text-replies"],
+    variesByConversation: true,
+    async run(conversation) {
+      await askToDeploy(conversation);
+      await conversation.say(ASIDE);
+      await conversation.waitForReplyTo(ASIDE);
+      await conversation.say("approve");
+      await conversation.waitForRest();
+      expect(
+        conversation.runsOf(GATED_TOOL),
+        `${GATED_TOOL} ran on an approval the aside cancelled`,
+      ).toBe(0);
+      await conversation.say(FOLLOW_UP);
+      await conversation.waitForReplyTo(FOLLOW_UP);
+    },
+  },
+  {
+    rule: "pressing Approve on an approval a message cancelled runs nothing",
+    source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
+    requires: ["buttons", "text-replies"],
+    variesByConversation: true,
+    async run(conversation) {
+      const options = await askToDeploy(conversation);
+      await conversation.say(ASIDE);
+      await conversation.waitForReplyTo(ASIDE);
+      // The card's original button, as a client that hasn't refreshed still shows it.
+      await conversation.press(option(options, APPROVE_LABELS));
+      await conversation.waitForRest();
+      expect(
+        conversation.runsOf(GATED_TOOL),
+        `${GATED_TOOL} ran on an approval the aside cancelled`,
+      ).toBe(0);
     },
   },
 ] as const satisfies readonly ContractRule[];
@@ -842,39 +943,47 @@ const signInRules = [
       await conversation.waitForShown(/\b(?:cancel|declin)/iu);
     },
   },
+] as const satisfies readonly ContractRule[];
+
+const approvalPermissionRules = [
   {
-    rule: "the requester pressing Approve on a requester-only approval runs the tool",
+    rule: "the requester typing approve on a requester-only approval runs the tool",
     source: "docs/tools/human-in-the-loop.md#authorizing-approval-responses",
-    requires: ["buttons"],
+    requires: ["text-replies"],
     async run(conversation) {
-      const options = await askToReleaseHotfix(conversation);
-      await conversation.press(option(options, APPROVE_LABELS));
+      await askToReleaseHotfix(conversation);
+      await conversation.say("approve");
       await expectReleased(conversation);
     },
   },
   {
-    rule: "another person pressing Approve on a requester-only approval leaves it pending",
+    rule: "another person pressing Cancel or Approve on a requester-only approval leaves it pending",
     source: "docs/tools/human-in-the-loop.md#authorizing-approval-responses",
     requires: ["another-person", "buttons"],
     async run(conversation) {
       const options = await askToReleaseHotfix(conversation);
       const approve = option(options, APPROVE_LABELS);
+      await conversation.press(option(options, CANCEL_LABELS), "bob");
       await conversation.press(approve, "bob");
       await expectStillPending(conversation);
+      // A cancel that got through would settle the call as denied before this approval.
       await conversation.press(approve);
       await expectReleased(conversation);
     },
   },
   {
-    rule: "another person pressing Cancel on a requester-only approval leaves it pending",
-    source: "docs/tools/human-in-the-loop.md#authorizing-approval-responses",
-    requires: ["another-person", "buttons"],
+    rule: "another person typing cancel or approve doesn't settle a requester-only approval",
+    source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
+    requires: ["another-person", "text-replies"],
     async run(conversation) {
-      const options = await askToReleaseHotfix(conversation);
-      await conversation.press(option(options, CANCEL_LABELS), "bob");
+      await askToReleaseHotfix(conversation);
+      // Today another person's message waits for the turn to end, so it never reaches the
+      // response policy; the approval stays pending either way.
+      await conversation.say("cancel", "bob");
+      await conversation.say("approve", "bob");
       await expectStillPending(conversation);
-      // A cancel that got through would settle the call as denied before this approval.
-      await conversation.press(option(options, APPROVE_LABELS));
+      // A cancel taken as Alice's would settle the call as denied before this approval.
+      await conversation.say("approve");
       await expectReleased(conversation);
     },
   },
@@ -897,6 +1006,37 @@ const signInRules = [
       const options = await askToRollBack(conversation);
       await conversation.press(option(options, APPROVE_LABELS), "bob");
       await expectRan(conversation, OPEN_GATED_TOOL, { rolledBack: true });
+    },
+  },
+] as const satisfies readonly ContractRule[];
+
+const callerRules = [
+  {
+    rule: "a tool sees the person who sent the message as its caller",
+    source: "docs/tools/overview.mdx",
+    requires: [],
+    // Platforms name the sender differently in a DM, e.g. Discord's user rather than member.
+    variesByConversation: true,
+    async run(conversation) {
+      const [caller] = await lookUpNotesAs(conversation, ["alice"]);
+      expect(caller, `${PLAIN_TOOL} ran with no caller`).not.toBeNull();
+      const [principalId] = JSON.parse(caller!) as [string];
+      // Platform principals are namespaced, e.g. `slack:T01:U_ALICE`; a client's is the bare id.
+      expect(
+        principalId === conversation.personId || principalId.endsWith(`:${conversation.personId}`),
+        `${PLAIN_TOOL} ran as ${principalId}, which doesn't name ${conversation.personId}`,
+      ).toBe(true);
+    },
+  },
+  {
+    rule: "another person's message reaches tools as a different caller, and each person stays the same caller",
+    source: "docs/tools/overview.mdx",
+    requires: ["another-person"],
+    async run(conversation) {
+      const [alice, bob, aliceAgain] = await lookUpNotesAs(conversation, ["alice", "bob", "alice"]);
+      expect(bob, `${PLAIN_TOOL} ran with no caller for Bob`).not.toBeNull();
+      expect(bob, "Bob's message ran as Alice").not.toBe(alice);
+      expect(aliceAgain, "Alice ran as a different caller the second time").toBe(alice);
     },
   },
 ] as const satisfies readonly ContractRule[];
@@ -940,7 +1080,7 @@ const attachmentRules = [
     requires: ["attachments"],
     async run(conversation) {
       const text = `Alice attached ${DIAGRAM.name}.`;
-      await conversation.say(text, [DIAGRAM]);
+      await conversation.say(text, "alice", [DIAGRAM]);
       await conversation.waitForReplyTo(text);
       await conversation.say(FOLLOW_UP);
       await conversation.waitForReplyTo(FOLLOW_UP);
@@ -957,9 +1097,11 @@ const attachmentRules = [
 export const channelContractSections = [
   { title: "Questions", rules: questionRules },
   { title: "Tool approvals", rules: approvalRules },
+  { title: "Approval permissions", rules: approvalPermissionRules },
   { title: "Answered prompts", rules: answeredPromptRules },
   { title: "Budget prompts", rules: budgetRules },
   { title: "Sign-ins", rules: signInRules },
+  { title: "Tool callers", rules: callerRules },
   { title: "Attachments", rules: attachmentRules },
 ] as const;
 

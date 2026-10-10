@@ -108,13 +108,6 @@ describe("integration catalog", () => {
     expect(getIntegrationEntry("linear")!.connection!.mcp!.url).toBe("https://mcp.linear.app/mcp");
   });
 
-  it("exposes Buzz as a gallery-only channel", () => {
-    expect(getIntegrationEntry("buzz")).toMatchObject({
-      kind: "channel",
-      surfaces: { scaffoldable: false, registry: false, gallery: true },
-    });
-  });
-
   it("exposes Mux Video as a gallery-only extension", () => {
     expect(getIntegrationEntry("mux-video")).toMatchObject({
       kind: "extension",

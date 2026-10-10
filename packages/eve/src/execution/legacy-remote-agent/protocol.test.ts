@@ -9,6 +9,8 @@ const getHookByTokenMock = vi.fn();
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   getHookByToken: (token: string) => getHookByTokenMock(token),
+  // Vercel-shaped: owners run on their own deployment, so ingress resumes by token.
+  getWorld: async () => ({ capabilities: { deploymentAffinity: true } }),
   resumeHook: (token: string, payload: unknown) => resumeHookMock(token, payload),
 }));
 
@@ -34,6 +36,11 @@ describe("legacy task input route", () => {
   });
 
   it("delivers answers to the session behind the capability without replacing its principal", async () => {
+    getHookByTokenMock.mockImplementation(async (token: string) => ({
+      hookId: "hook-1",
+      runId: "run-1",
+      token,
+    }));
     resumeHookMock.mockResolvedValue({ runId: "run-1" });
 
     const response = await postAnswers(`eve:task-input:${DIGEST}`);

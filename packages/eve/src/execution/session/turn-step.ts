@@ -1,6 +1,7 @@
 import { bindTurnCallerContext } from "#subagents/parent-notification.js";
 import type { HandleEventFn } from "#harness/types.js";
 import { bindDynamicConnections } from "#execution/dynamic-connections.js";
+import { recoverDynamicConnectionRehydration } from "#execution/dynamic-connection-recovery.js";
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
@@ -13,6 +14,9 @@ import {
 } from "#context/dynamic-tool-lifecycle.js";
 import {
   AuthKey,
+  ScheduleIdKey,
+  ScheduleInstanceKey,
+  OccurrenceIdKey,
   InitiatorAuthKey,
   SessionTitleKey,
   ParentSessionKey,
@@ -92,6 +96,10 @@ function channelDeliveryErrorCode(error: unknown): string {
 
 export type { TurnStepInput };
 
+interface PendingStepAttributes {
+  title?: Promise<void>;
+}
+
 /** Runs a bounded batch of harness model steps inside one durable `"use step"` boundary. */
 export async function turnStep(input: TurnStepInput): Promise<TurnStepResult> {
   "use step";
@@ -104,6 +112,18 @@ export async function turnStep(input: TurnStepInput): Promise<TurnStepResult> {
 }
 
 async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> {
+  const pendingAttributes: PendingStepAttributes = {};
+  try {
+    return await runSessionStepBody(input, pendingAttributes);
+  } finally {
+    await pendingAttributes.title;
+  }
+}
+
+async function runSessionStepBody(
+  input: TurnStepInput,
+  pendingAttributes: PendingStepAttributes,
+): Promise<DurableStepResult> {
   // The delivery as accepted, before authorization callbacks are matched out of it.
   const rawDelivery = input.input?.delivery;
   let delivery = rawDelivery;
@@ -153,6 +173,20 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     }
   }
 
+  // A new inbound message is a new caller action, not a scheduled occurrence.
+  // Approval/input responses alone keep the parked turn's provenance.
+  if (delivery?.payloads.some((payload) => payload.message !== undefined)) {
+    ctx.delete(ScheduleIdKey);
+    ctx.delete(ScheduleInstanceKey);
+    ctx.delete(OccurrenceIdKey);
+    if (delivery.schedule !== undefined) {
+      ctx.set(ScheduleIdKey, delivery.schedule.definition);
+      if (delivery.schedule.instance !== undefined)
+        ctx.set(ScheduleInstanceKey, delivery.schedule.instance);
+      if (delivery.schedule.occurrenceId !== undefined)
+        ctx.set(OccurrenceIdKey, delivery.schedule.occurrenceId);
+    }
+  }
   const previousAuth = ctx.get(AuthKey);
   const hadInitiator = ctx.has(InitiatorAuthKey);
 
@@ -199,7 +233,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     const title = deriveSessionTitle(rawDelivery?.title ?? message);
     if (title !== undefined) {
       ctx.set(SessionTitleKey, title);
-      await setEveAttributes({ "$eve.title": title });
+      pendingAttributes.title = setEveAttributes({ "$eve.title": title });
     }
   }
 
@@ -467,6 +501,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
           nodeId: bundle.nodeId,
         },
         node: effectiveNode,
+        titleAttributeWrite: pendingAttributes.title,
       });
       return step(modelSession, stepInput);
     };
@@ -492,13 +527,24 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
                 ? { ...enrichedSession, outputSchema: resolved.outputSchema }
                 : enrichedSession;
             const connectionState = turnPosition(currentProjection(ctx));
-            await dynamicConnections.rehydrate(
-              connectionState,
-              runtimeIdentity,
-              isBetweenTurns(currentProjection(ctx))
-                ? undefined
-                : { sequence: connectionState.sequence, turnId: activeTurnId(connectionState) },
-            );
+            try {
+              await dynamicConnections.rehydrate(
+                connectionState,
+                runtimeIdentity,
+                isBetweenTurns(currentProjection(ctx))
+                  ? undefined
+                  : { sequence: connectionState.sequence, turnId: activeTurnId(connectionState) },
+              );
+            } catch (error) {
+              const recovered = await recoverDynamicConnectionRehydration({
+                emit: handleEvent,
+                error,
+                projection: currentProjection(ctx),
+                session: schemaSession,
+              });
+              if (recovered !== undefined) return recovered;
+              throw error;
+            }
             // A sign-in completes before the turn it resumes, in the first call only.
             const completions =
               firstCall && completedAuths !== undefined

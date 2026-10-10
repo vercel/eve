@@ -1,3 +1,4 @@
+import { promptQueueEvents } from "#channel/prompt-queue.js";
 import { renderTextInputRequest } from "#channel/resolve-text.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
@@ -10,6 +11,7 @@ import type {
 import type {
   TwilioChannelEvents,
   TwilioContext,
+  TwilioEventContext,
   TwilioInboundResult,
   TwilioVoiceResult,
 } from "#public/channels/twilio/twilioChannel.js";
@@ -78,10 +80,8 @@ export const defaultEvents: TwilioChannelEvents = {
     await channel.twilio.sendMessage(event.message);
   },
 
-  async "input.requested"(event, channel, _ctx) {
-    if (event.requests.length === 0) return;
-    await channel.twilio.sendMessage(renderTwilioInputRequests(event.requests));
-  },
+  // SMS has no buttons, so a reply can only answer the request it sees.
+  ...promptQueueEvents(showPrompt),
 
   // An SMS thread is one person's, so the link and code can go in the message.
   async "authorization.required"(event, channel, _ctx) {
@@ -137,23 +137,17 @@ export const defaultEvents: TwilioChannelEvents = {
   },
 };
 
-// SMS has no buttons, so options are numbered. The batch goes out as one message
-// because a text reply resolves against every pending request at once.
-function renderTwilioInputRequests(requests: readonly InputRequest[]): string {
-  const sections = requests.map(renderTextInputRequest);
-  const hasOptions = requests.some((request) => (request.options ?? []).length > 0);
-  if (hasOptions) {
-    const freeform = requests.some((request) => request.allowFreeform === true);
-    sections.push(
-      [
-        freeform
-          ? "Reply with a number, or with your own answer."
-          : "Reply with a number to choose.",
-        ...(requests.length > 1 ? ["Your reply answers each of these."] : []),
-      ].join(" "),
-    );
+async function showPrompt(channel: TwilioEventContext, request: InputRequest): Promise<void> {
+  const body = renderTextInputRequest(request);
+  if ((request.options ?? []).length === 0) {
+    await channel.twilio.sendMessage(body);
+    return;
   }
-  return sections.join("\n\n");
+  const instruction =
+    request.allowFreeform === true
+      ? "Reply with a number, or with your own answer."
+      : "Reply with a number to choose.";
+  await channel.twilio.sendMessage(`${body}\n\n${instruction}`);
 }
 
 function renderAuthorizationOutcome(input: {

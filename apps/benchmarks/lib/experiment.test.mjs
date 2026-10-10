@@ -56,7 +56,7 @@ test("passes an explicit native model override to Codex", () => {
   assert.equal(config.model, "openai/gpt-6-astra?reasoningEffort=high");
 });
 
-test("strips the Gateway provider prefix for native Claude Code", () => {
+test("strips the Gateway prefix and preserves explicit Claude Code effort", () => {
   const config = authoringExperiment({
     ...common,
     benchmark: {
@@ -64,10 +64,13 @@ test("strips the Gateway provider prefix for native Claude Code", () => {
       model: "anthropic/claude-sonnet-5",
       displayName: "Claude Sonnet 5",
       harness: "Claude Code",
+      agentOptions: { effort: "high" },
       support: "supported",
     },
   });
 
   assert.equal(config.agent, "vercel-ai-gateway/claude-code");
   assert.equal(config.model, "claude-sonnet-5");
+  assert.equal(config.agentOptions.effort, "high");
+  assert.equal(config.agentOptions.verbose, false);
 });

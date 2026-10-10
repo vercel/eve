@@ -104,7 +104,7 @@ export type WorkflowToolContext = WorkflowSharedContext &
   Pick<ToolContext, "callId"> & {
     /**
      * Aborts when the call's work should stop: the call is cancelled, by
-     * `task_cancel`, `session.cancel()`, a failed turn, or the end of the
+     * `eve__task_cancel`, `session.cancel()`, a failed turn, or the end of the
      * session, or, for an `execute` call, a steering message arrives while the
      * turn waits on it. Stop and return what you have. After a steering
      * message the call settles with what the body returns, or with

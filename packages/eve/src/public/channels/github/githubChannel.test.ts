@@ -5,6 +5,7 @@ import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.j
 import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
+import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { SandboxKey, SessionKey } from "#context/keys.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { mockSandbox, type MockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
@@ -62,7 +63,10 @@ function withState(
 }
 
 function stubAccessor() {
-  return { get: () => undefined, set: () => {} } as any;
+  const accessor = { get: () => undefined, set: () => {} } as any;
+  // A step enters its projection before it publishes.
+  enterSessionProjection(accessor, undefined);
+  return accessor;
 }
 
 function createAlsContext(sandbox?: MockSandbox): ContextContainer {
@@ -891,47 +895,6 @@ describe("githubChannel", () => {
     expect(issue.send).not.toHaveBeenCalled();
     expect(pullRequest.send).not.toHaveBeenCalled();
     for (const ciEvent of ciEvents) expect(ciEvent.send).not.toHaveBeenCalled();
-  });
-
-  it("posts final messages through the issue comments API", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 77 })));
-    const adapter = withState(
-      getAdapter(
-        githubChannel({
-          api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
-          credentials: {
-            installationToken: "ghs_test",
-            webhookSecret: SECRET,
-          },
-        }),
-      ),
-      {
-        conversationKind: "issue",
-        installationId: 55,
-        issueNumber: 5,
-        owner: "vercel",
-        repo: "eve",
-        repositoryId: 123,
-      },
-    );
-    const ctx = buildAdapterContext(adapter, stubAccessor());
-
-    await callEvent(
-      adapter,
-      makeEvent("message.completed", {
-        finishReason: "stop",
-        message: "Final answer",
-        sequence: 0,
-        stepIndex: 0,
-        turnId: "t1",
-      }),
-      ctx,
-    );
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "https://github.test/repos/vercel/eve/issues/5/comments",
-    );
   });
 
   it("renders the mention instruction from a lazy botName resolver", async () => {

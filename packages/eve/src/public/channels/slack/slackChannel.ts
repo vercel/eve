@@ -485,6 +485,12 @@ export interface SlackInteractionAction {
    */
   readonly messageTs?: string;
   /**
+   * Slack `trigger_id` of the click. Pass it to `views.open` (for example
+   * through `ctx.slack.request`) to open a modal from a message button. Slack
+   * accepts it for about 3 seconds, so call `views.open` first in the handler.
+   */
+  readonly triggerId?: string;
+  /**
    * Display label of the clicked widget: `text.text` for buttons,
    * `selected_option.text.text` for radio/static_select. Renders the
    * "answered" card without re-fetching the original request.

@@ -9,6 +9,7 @@ import {
   EveAgentStore,
 } from "#client/eve-agent-store.js";
 import { isAbortError } from "#client/eve-agent-store-helpers.js";
+import { formatStrandedSessionNotice } from "./stranded-session.js";
 import { normalizeActionRequest, normalizeActionResult } from "#client/message-action-parts.js";
 import { isTerminalToolCallPart } from "./terminal-tool-part.js";
 import { userText } from "./transcript-parts.js";
@@ -853,10 +854,7 @@ export class EveTUIRunner {
         : { message, turnPolicy: "queue" };
     void this.#store.send(input).catch((error: unknown) => {
       if (this.#disposed || isAbortError(error)) return;
-      this.#renderer.renderError?.(
-        steering ? "Steering failed" : "Error",
-        this.#formatTransportError(error),
-      );
+      this.#renderSendError(steering ? "Steering failed" : "Error", error);
     });
   }
 
@@ -912,8 +910,31 @@ export class EveTUIRunner {
     if (error === undefined || error === this.#reportedError) return;
     this.#reportedError = error;
     if (sessionFailed) return;
-    this.#remoteConnection?.reportFailure(error);
-    this.#renderer.renderError?.("Error", this.#formatTransportError(error));
+    // A stranded session is a property of that session, not of the connection.
+    if (!this.#renderStrandedSession(error)) {
+      this.#remoteConnection?.reportFailure(error);
+      this.#renderer.renderError?.("Error", this.#formatTransportError(error));
+    }
+  }
+
+  #renderSendError(title: string, error: unknown): void {
+    if (this.#renderStrandedSession(error)) return;
+    this.#renderer.renderError?.(title, this.#formatTransportError(error));
+  }
+
+  #strandedSessionNotice(error: unknown): string | undefined {
+    return formatStrandedSessionNotice(error, {
+      localServer: this.#appRoot !== undefined,
+      sessionId: this.#store.snapshot.session?.sessionId,
+    });
+  }
+
+  /** Renders a stranded-session notice; false when `error` is anything else. */
+  #renderStrandedSession(error: unknown): boolean {
+    const notice = this.#strandedSessionNotice(error);
+    if (notice === undefined) return false;
+    this.#renderer.renderError?.("Session stranded", notice);
+    return true;
   }
 
   #reportFirstResponse(conversation: ConversationState): void {
@@ -954,7 +975,7 @@ export class EveTUIRunner {
       }
       void this.#store.send({ inputResponses: [response] }).catch((error: unknown) => {
         if (this.#disposed || isAbortError(error)) return;
-        this.#renderer.renderError?.("Error", this.#formatTransportError(error));
+        this.#renderSendError("Error", error);
       });
     }
   }
@@ -1050,7 +1071,7 @@ export class EveTUIRunner {
     } catch (error) {
       this.#finishCommand({
         kind: "result",
-        message: toErrorMessage(error),
+        message: this.#strandedSessionNotice(error) ?? toErrorMessage(error),
         summary: input.failed,
       });
     }

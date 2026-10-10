@@ -34,7 +34,7 @@ export default defineDynamic({
             },
           });
           const { response } = await client.sessions.create({
-            message: 'Call final_output exactly once with {"answer":"client-recursion-ok"}.',
+            message: 'Call eve__reply exactly once with {"answer":"client-recursion-ok"}.',
             outputSchema: {
               type: "object",
               properties: { answer: { type: "string", const: "client-recursion-ok" } },

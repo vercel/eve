@@ -90,19 +90,6 @@ function unnamedAnsweredPrompts(
   );
 }
 
-/** Presses reach a response policy without the presser's identity, so eve refuses them all. */
-function anonymousPresses(
-  reason: string,
-  rules: readonly ContractRuleName[],
-): Partial<Record<ContractRuleName, BrokenCell>> {
-  return Object.fromEntries(
-    rules.map((rule) => [
-      rule,
-      { reason, symptom: /Authentication is required to respond to this approval/ },
-    ]),
-  );
-}
-
 interface ConformanceChannel {
   readonly driver: () => ChannelDriver | ClientDriver;
   /**
@@ -129,8 +116,11 @@ function noSignInRenderer(
   );
 }
 
-/** Chat SDK's default sign-in, outside a DM, points the person at a DM it never sends. */
-const SIGN_IN_ONLY_IN_DMS = Object.fromEntries(
+/**
+ * Linq's group sign-in can't reach the person privately: its `openDM` needs a phone
+ * handle, and a message names its sender only by the handle's opaque id.
+ */
+const LINQ_SIGN_IN_NOT_PRIVATE = Object.fromEntries(
   [
     "a sign-in names the service and shows its sign-in link",
     "a sign-in shows its confirmation code",
@@ -138,7 +128,8 @@ const SIGN_IN_ONLY_IN_DMS = Object.fromEntries(
   ].map((rule) => [
     rule,
     {
-      reason: "outside a DM the bot says to continue in a direct message but never sends one",
+      reason:
+        "Linq's openDM needs the person's phone handle, but a message names its sender by an opaque handle id, so the bot can only say to continue in a direct message",
       symptom: SIGN_IN_NOT_SHOWN,
     },
   ]),
@@ -158,15 +149,6 @@ const CHAT_SDK_BROKEN = {
 
 const DISCORD_BROKEN = {
   ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, ["approvalPress", "questionPress"]),
-  ...anonymousPresses(
-    "a button press responds with `auth: null`, so no one can satisfy a response policy",
-    [
-      "the requester pressing Approve on a requester-only approval runs the tool",
-      "another person pressing Approve on a requester-only approval leaves it pending",
-      "another person pressing Cancel on a requester-only approval leaves it pending",
-      "another person pressing Approve on an open approval runs the tool",
-    ],
-  ),
   ...noSignInRenderer(
     "a sign-in names the service and shows its sign-in link",
     "a sign-in shows its confirmation code",
@@ -185,9 +167,10 @@ const SLACK_BROKEN = {
     "only the button interaction handler edits a question; a typed answer leaves it",
     ["questionText"],
   ),
-  "approving by text names who approved on the approval": {
-    reason: "the card loses its buttons after a typed approval but doesn't say who approved",
-    symptom: /the answered prompt never names who answered/,
+  "text replies answer two pending approvals one at a time, in the order shown": {
+    reason:
+      "one card shows every approval a step raises, so a typed reply can't say which it answers",
+    symptom: /were shown in one message, so a typed reply can't say which it answers/,
   },
 } satisfies Partial<Record<ContractRuleName, BrokenCell>>;
 
@@ -214,6 +197,8 @@ const TELEGRAM_BROKEN = {
 
 const TUI_TYPED_APPROVAL =
   "the approval drawer holds the keyboard; a person answers it with y or n";
+const TUI_TYPED_REPLIES =
+  "each open request has its own drawer, and typing a message dismisses them all";
 const TUI_SINGLE_PERSON = "one person answers at their own terminal; there's nobody else to tell";
 const WEB_CHAT_SINGLE_PERSON =
   "one person answers in their own browser tab; there's nobody else to tell";
@@ -231,10 +216,7 @@ const WEB_CHAT_SINGLE_PERSON =
  *   failure (such as harness breakage) both turn it red.
  */
 const channelConformance = {
-  "chat-sdk": [
-    { driver: chatSdkDriver, broken: { ...CHAT_SDK_BROKEN, ...SIGN_IN_ONLY_IN_DMS } },
-    { driver: chatSdkTextDriver },
-  ],
+  "chat-sdk": [{ driver: chatSdkDriver, broken: CHAT_SDK_BROKEN }, { driver: chatSdkTextDriver }],
   "chat-sdk-dm": [{ dm: true, driver: () => chatSdkDriver("private"), broken: CHAT_SDK_BROKEN }],
   discord: [{ driver: discordDriver, broken: DISCORD_BROKEN, unsupported: DISCORD_UNSUPPORTED }],
   "discord-dm": [
@@ -269,7 +251,7 @@ const channelConformance = {
       },
     },
   ],
-  linq: [{ driver: linqDriver, broken: SIGN_IN_ONLY_IN_DMS }],
+  linq: [{ driver: linqDriver, broken: LINQ_SIGN_IN_NOT_PRIVATE }],
   "linq-dm": [{ dm: true, driver: () => linqDriver("private") }],
   photon: [{ driver: photonDriver }],
   slack: [{ driver: slackDriver, broken: SLACK_BROKEN }],
@@ -288,9 +270,20 @@ const channelConformance = {
         "a text reply of cancel stops the gated tool without running it": TUI_TYPED_APPROVAL,
         "approving by text clears the approval's buttons": TUI_TYPED_APPROVAL,
         "approving by text names who approved on the approval": TUI_TYPED_APPROVAL,
+        "a message while an approval is pending cancels it, so typing approve afterwards runs nothing and the next message gets a reply":
+          TUI_TYPED_APPROVAL,
+        "pressing Approve on an approval a message cancelled runs nothing": TUI_TYPED_APPROVAL,
+        "the requester typing approve on a requester-only approval runs the tool":
+          TUI_TYPED_APPROVAL,
         "pressing Approve names who approved on the approval": TUI_SINGLE_PERSON,
         "pressing an option names who answered on the question": TUI_SINGLE_PERSON,
         "answering a question by text names who answered on the question": TUI_SINGLE_PERSON,
+        "text replies answer two pending questions one at a time, in the order shown":
+          TUI_TYPED_REPLIES,
+        "text replies answer two pending approvals one at a time, in the order shown":
+          TUI_TYPED_APPROVAL,
+        "text replies answer a question and an approval raised together, in the order shown":
+          TUI_TYPED_APPROVAL,
       },
     },
   ],
@@ -305,6 +298,9 @@ const channelConformance = {
         "approving by text names who approved on the approval": WEB_CHAT_SINGLE_PERSON,
         "pressing an option names who answered on the question": WEB_CHAT_SINGLE_PERSON,
         "answering a question by text names who answered on the question": WEB_CHAT_SINGLE_PERSON,
+        // Flaky rather than failing, so it can't be recorded as broken: see the reason.
+        "text replies answer two pending approvals one at a time, in the order shown":
+          "a reply sent while approvals wait goes out as a steering message, which sometimes restarts the turn instead of answering",
       },
     },
   ],

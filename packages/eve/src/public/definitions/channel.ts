@@ -38,6 +38,7 @@ export type {
   SessionCallback,
   TurnPolicy,
 } from "#channel/types.js";
+export { SessionStrandedError } from "#channel/session-stranded-error.js";
 export type { Session, SessionHandle } from "#channel/session.js";
 export type { ChannelAudience } from "#shared/channel-audience.js";
 export type {
@@ -57,7 +58,12 @@ export type {
   ChannelSource,
 };
 export type { ChannelCors, ChannelCorsOptions } from "#channel/cors.js";
-export type { AgentDescription, AgentToolDescription } from "#channel/agent-description.js";
+export type {
+  AgentDescription,
+  AgentSkillDescription,
+  AgentSkillFileDescription,
+  AgentToolDescription,
+} from "#channel/agent-description.js";
 export type { InvokeToolFn, InvokeToolOptions, InvokeToolResult } from "#channel/invoke-tool.js";
 export { DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT, WS } from "#channel/routes.js";
 export type {

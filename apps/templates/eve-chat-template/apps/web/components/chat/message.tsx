@@ -362,7 +362,7 @@ function ToolGroup({
   const shouldOpen = parts.some(needsInputResponse);
   const [open, setOpen] = useState(shouldOpen);
   const status = getSettledToolStatus(getToolGroupStatus(parts), isSettled && !shouldOpen);
-  const label = summarizeToolGroup(parts, status);
+  const label = summarizeToolGroup(parts);
   const canExpand = parts.length > 1 ? parts.some(hasToolDetails) : hasToolDetails(parts[0]!);
 
   useEffect(() => {
@@ -453,7 +453,7 @@ function ToolCallItem({
     >
       <ToolStatusIcon status={status} />
       <ToolNameLabel part={part} />
-      <span className="truncate text-foreground/80">{describeToolAction(part, status)}</span>
+      <span className="truncate text-foreground/80">{describeToolAction(part)}</span>
       {canExpand ? (
         <ChevronRightIcon
           className={cn(
@@ -731,9 +731,9 @@ function toolStatusLabel(status: ToolStatus) {
   }
 }
 
-function summarizeToolGroup(parts: readonly EveDynamicToolPart[], status: ToolStatus) {
+function summarizeToolGroup(parts: readonly EveDynamicToolPart[]) {
   if (parts.length === 1) {
-    return describeToolAction(parts[0]!, status);
+    return describeToolAction(parts[0]!);
   }
 
   const counts = new Map<string, number>();
@@ -780,7 +780,12 @@ function toolCategory(name: string) {
   return "ran";
 }
 
-function describeToolAction(part: EveDynamicToolPart, status = getToolStatus(part)) {
+function describeToolAction(part: EveDynamicToolPart) {
+  const label = toolLabel(part);
+  if (label) {
+    return label;
+  }
+
   const name = resolveToolName(part);
   const normalized = normalizeToolName(name);
   const input = asRecord(part.input);
@@ -788,22 +793,6 @@ function describeToolAction(part: EveDynamicToolPart, status = getToolStatus(par
   const path = readString(input, ["path", "filePath", "filename"]);
   const command = readString(input, ["command", "cmd"]);
   const url = readString(input, ["url", "href"]);
-  const connection = readString(input, ["connection", "connectionName", "connector", "source"]);
-
-  if (normalized.includes("connection") && normalized.includes("search")) {
-    const verb = status === "running" ? "Searching" : "Searched";
-    const connectionName = resolveConnectionName(name, connection);
-
-    if (connectionName) {
-      return `${verb} ${formatDisplayName(connectionName)}`;
-    }
-
-    if (query && query !== "*") {
-      return `${verb} ${truncateInline(query, 72)}`;
-    }
-
-    return `${verb} connections`;
-  }
 
   if (normalized.includes("search") || normalized.includes("grep")) {
     return query ? `Searched ${truncateInline(query, 72)}` : `Searched ${formatToolName(name)}`;
@@ -836,55 +825,23 @@ function describeToolAction(part: EveDynamicToolPart, status = getToolStatus(par
   return `Used ${formatToolName(name)}`;
 }
 
+/** eve versions that set `toolMetadata.eve.label` say how a call reads; older ones fall back to its name. */
+function toolLabel(part: EveDynamicToolPart): string | undefined {
+  const eve: Readonly<Record<string, unknown>> | undefined = part.toolMetadata?.eve;
+  return typeof eve?.label === "string" ? eve.label : undefined;
+}
+
 function resolveToolName(part: EveDynamicToolPart) {
   const metadataName = part.toolMetadata?.eve?.name;
   return metadataName && metadataName !== "unknown" ? metadataName : part.toolName;
 }
 
 function formatToolName(name: string) {
-  return normalizeToolName(name)
-    .replace(/^connection search$/, "connection search")
-    .replace(/\s+/g, " ")
-    .trim();
+  return normalizeToolName(name).replace(/\s+/g, " ").trim();
 }
 
 function normalizeToolName(name: string) {
   return name.replace(/__/g, " ").replace(/[_-]/g, " ").trim().toLowerCase();
-}
-
-function formatDisplayName(value: string) {
-  const cleaned = value
-    .replace(/^mcp\./, "")
-    .replace(/\.com(?:\/.*)?$/, "")
-    .replace(/[_-]/g, " ");
-
-  return cleaned
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
-function resolveConnectionName(toolName: string, inputConnection?: string | null) {
-  if (inputConnection && inputConnection !== "*") {
-    return inputConnection;
-  }
-
-  const tokens = normalizeToolName(toolName).split(/\s+/).filter(Boolean);
-
-  if (tokens[0] !== "connection" || tokens.length <= 2) {
-    return null;
-  }
-
-  const connectionTokens = tokens
-    .slice(1)
-    .filter((token) => token !== "search" && token !== "tool" && token !== "tools");
-
-  if (connectionTokens.length === 0) {
-    return null;
-  }
-
-  return [...new Set(connectionTokens)].join(" ");
 }
 
 function shortenPath(filepath: string) {

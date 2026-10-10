@@ -58,6 +58,25 @@ export default defineTool({
 
 The option defaults to `true` and works with `defineTool` and `defineWorkflowTool`. A root copy does not receive a tool with this option, and a tool authored inside a declared subagent is unavailable because that agent runs in a delegated session. This controls tool availability only; it does not add or remove entries from a workflow's `ctx.agents` registry.
 
+### Keep a tool out of the tool list
+
+Set `deferred: true` when the model needs a tool only occasionally, or when an agent has more tools than you want in every model request:
+
+```ts title="agent/tools/export_report.ts"
+export default defineTool({
+  deferred: true,
+  description: "Export a finished report as a PDF.",
+  inputSchema: z.object({ reportId: z.string() }),
+  execute({ reportId }) {
+    return exportReport(reportId);
+  },
+});
+```
+
+A deferred tool is not in the model's tool list, and eve doesn't name it in context. The model finds its name, description, and signature with [`eve__search`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) and calls it with `eve__tool({ name: "export_report", input })`. After that, the call runs exactly like a direct call: approvals, `endsTurn`, `toModelOutput`, hooks, and stream events see `export_report`, not `execute`.
+
+The option works with `defineTool`, `defineWorkflowTool`, and dynamic tool entries. Provider tools such as `webSearch()` cannot be deferred, because the provider has to see their definition; the compiler rejects `deferred` on them. To defer an agent, set [`tool: "deferred"`](/docs/subagents#declared-subagents) on its `defineAgent` definition.
+
 Compiled tools preserve Zod schema composition, including input and output schemas imported from helper modules. Durable replay metadata stays separate from the original schema, so adding it does not mutate shared schema objects.
 
 ### End the turn after a tool call
@@ -128,7 +147,9 @@ export default defineTool({
 
 The label is presentation only. It does not replace the path-derived tool name, enter model input, or change execution. eve records the bounded label on the corresponding public action event so activity renderers and other authorized stream consumers can use it without interpreting raw tool data. Built-in channel activity can show `Deploy storefront to production` instead of `Deploy`; if the callback throws or returns an empty label, activity falls back to a readable form of the tool name, such as `Sync accounts` for `sync_accounts`.
 
-Provided tools define labels for `bash`, `glob`, `grep`, `load_skill`, `read_file`, `web_fetch`, `web_search`, and `write_file`.
+Provided tools define labels for `bash`, `glob`, `grep`, `read_file`, `web_fetch`, `web_search`, and `write_file`.
+
+Calls the model makes through the [catalog](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) read the same way. A deferred tool, agent, or connection tool called through `eve__tool` shows its own label, exactly as a direct call would. An `eve__search` call shows `Search tools for “linear issues”`, then `Searched tools for “linear issues”, found 5` when it returns. A skill load shows `Load skill release-notes`, then `Loaded skill release-notes`, and a connection's sign-in entry shows `Sign in to Linear`.
 
 ### Stream preliminary tool results
 
@@ -176,8 +197,8 @@ receive only the projected text.
 
 ### Durable waits
 
-Every tool call finishes before its turn continues. The definition decides whether the executor
-can wait durably while the call is pending:
+A tool call with an `execute` entry point finishes before the model continues. The definition
+decides whether the executor can wait durably while the call is pending:
 
 | Definition           | Durable waits inside `execute`                           | Result delivered to the model      |
 | -------------------- | -------------------------------------------------------- | ---------------------------------- |
@@ -191,11 +212,15 @@ the call returns a receipt at once, and the workflow's output reaches the model 
 [resumable task](/docs/tools/workflows#resumable-tasks-serve), which the model can send more calls
 by its `taskId`.
 
+Built-in, declared local, and remote subagent tools run as resumable tasks: each call returns a
+receipt at once, and the child's reply reaches the model later in a `task.result` message.
+Inside an authored workflow, awaiting a [`ctx.agent` session's `response.result()`](/docs/tools/workflows#delegate-work-ctxagent)
+waits for the child's turn to end instead.
+
 The `TaskExec` argument and `task.postMessage` have been removed. Return the result. In a workflow
 body, keep values needed after a wait in local variables; workflow replay reconstructs them across
 durable waits. Use [`ctx.ask`](/docs/tools/workflows#ask-a-human-ctxask) when the body needs an
-answer from the human. Built-in, declared local, and remote subagent calls also block: each call
-returns the child's reply as its tool result.
+answer from the human.
 
 ### Yield and return
 

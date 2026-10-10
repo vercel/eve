@@ -159,11 +159,11 @@ function createTestSandboxProvider() {
     const opened = sandbox;
     return {
       sandbox: opened.session,
-      async onSessionDelete(options?: import("#shared/sandbox-provider.js").SandboxDeleteOptions) {
+      async onSandboxDelete(options?: import("#shared/sandbox-provider.js").SandboxDeleteOptions) {
         sessionSandboxes.delete(sessionId);
         await opened.access.delete?.(options);
       },
-      async onSessionStop() {},
+      async onSandboxStop() {},
       async onRuntimeShutdown() {},
     };
   }
@@ -265,6 +265,7 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
     session.bundleCache.clear();
     session.bundleCacheKeyBySourceKey.clear();
     sandboxes.clear();
+    session.describedAgents.clear();
   }
 
   async function executeTool(

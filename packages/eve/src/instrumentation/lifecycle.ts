@@ -51,6 +51,7 @@ export interface InstrumentationUsage {
 export interface InstrumentationModelInput {
   readonly instructions?: unknown;
   readonly messages: readonly unknown[];
+  readonly tools?: readonly unknown[];
 }
 
 /**
@@ -460,7 +461,6 @@ export type InstrumentationToolCallKind =
 export interface InstrumentationToolCallStartedEvent {
   /** Durable dispatch metadata, when this call is owned by eve's tool loop. */
   readonly kind?: InstrumentationToolCallKind;
-  readonly parentCallId?: string;
   readonly isWorkflowTool?: boolean;
   readonly frameworkTool?: boolean;
   readonly startedAtMs?: number;

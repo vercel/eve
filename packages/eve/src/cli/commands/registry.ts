@@ -15,6 +15,7 @@ import {
   withPolicy,
 } from "#setup/ask.js";
 import type { WebChatFramework } from "#setup/integrations/web/framework.js";
+import type { SetupPrerequisite } from "#setup/integrations/shared/prerequisite.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
 import type { RegistrySetupCompletion } from "#setup/registry-setup-protocol.js";
 import { setupQuestionToWire } from "#setup/setup-question-wire.js";
@@ -22,7 +23,7 @@ import { WizardCancelledError } from "#setup/step.js";
 
 import { hasInteractiveTerminal } from "./preconditions.js";
 import { installRegistryItemTransaction } from "./registry-install-transaction.js";
-import { runDeclaredSetups } from "./registry-declared-setups.js";
+import { RegistrySetupFailedError, runDeclaredSetups } from "./registry-declared-setups.js";
 import {
   errorMessage,
   reportRegistryCompletion as reportCompletion,
@@ -54,6 +55,15 @@ import {
 } from "./registry-project.js";
 export { runRegistryAddCommand } from "./registry-add-command.js";
 export type { RegistryCommandLogger } from "./registry-recovery.js";
+/** Source was installed, but the item's setup was cancelled, skipped, or failed. */
+export interface RegistrySetupIncomplete {
+  resumeCommand: string;
+  /** Why setup failed; absent when it was cancelled or skipped. */
+  reason?: string;
+  /** A structured action that unblocks setup, such as `vercel login`. */
+  prerequisite?: SetupPrerequisite;
+}
+
 export interface AddCommandOptions {
   skipInstall?: boolean;
   overwrite?: boolean;
@@ -91,6 +101,8 @@ type RunAddCommandOptions = AddCommandOptions & {
   prompter?: Prompter;
   signal?: AbortSignal;
   setupAuthorized?: boolean;
+  /** Throw {@link RegistrySetupFailedError} to the caller instead of logging it. */
+  throwSetupFailures?: boolean;
 };
 
 /** One discoverable item from an eve-compatible registry catalog. */
@@ -155,7 +167,9 @@ const OFFICIAL_REGISTRY = resolveOfficialRegistryUrl();
 const OFFICIAL_CATALOG = `${OFFICIAL_REGISTRY}/registry.json`;
 const SKILLS_REGISTRY = "@skills";
 const SKILLS_REGISTRY_URL = "https://www.skills.sh/r/{name}?agent=eve";
-const CATALOG_PAGE_SIZE = 100;
+// Browsing loads the whole catalog in one page, so this must stay above the
+// official registry's item count (hidden items count until they are filtered).
+const CATALOG_PAGE_SIZE = 500;
 const DEFAULT_SEARCH_LIMIT = 10;
 const ADD_SUGGESTION_LIMIT = 5;
 
@@ -486,8 +500,7 @@ export async function installRegistryItem(
 ): Promise<{
   output: readonly string[];
   setup?: RegistrySetupCompletion;
-  /** Files were added, but setup was cancelled or skipped. */
-  setupIncomplete?: { resumeCommand: string };
+  setupIncomplete?: RegistrySetupIncomplete;
 }> {
   let failure: string | undefined;
   const output: string[] = [];
@@ -498,17 +511,32 @@ export async function installRegistryItem(
     log: (message) => output.push(message),
   };
   const previousExitCode = process.exitCode;
-  const setup = await runAddCommand(
-    logger,
-    appRoot,
-    item,
-    {
-      ...options,
-      yes: options.prompter === undefined ? true : options.yes,
-      setupAuthorized: options.prompter !== undefined,
-    },
-    dependencies,
-  );
+  let setup: Awaited<ReturnType<typeof runAddCommand>>;
+  try {
+    setup = await runAddCommand(
+      logger,
+      appRoot,
+      item,
+      {
+        ...options,
+        yes: options.prompter === undefined ? true : options.yes,
+        setupAuthorized: options.prompter !== undefined,
+        throwSetupFailures: true,
+      },
+      dependencies,
+    );
+  } catch (error) {
+    process.exitCode = previousExitCode;
+    if (!(error instanceof RegistrySetupFailedError)) throw error;
+    // The source is already installed, so this is unfinished setup rather
+    // than a failed add; keep the reason and any prerequisite for recovery.
+    const incomplete: RegistrySetupIncomplete = {
+      resumeCommand: error.resumeCommand,
+      reason: error.reason,
+    };
+    if (error.prerequisite !== undefined) incomplete.prerequisite = error.prerequisite;
+    return { output, setupIncomplete: incomplete };
+  }
   process.exitCode = previousExitCode;
   if (failure !== undefined) throw new Error(failure);
   if (setup === false) throw new WizardCancelledError();
@@ -533,7 +561,7 @@ export async function runAddCommand(
     if (options.silent !== true) logger.log(setupReminder(item, outcome));
     return "setup-incomplete" as const;
   };
-  return runRegistryAction(logger, appRoot, async () => {
+  const action = async () => {
     const address = itemAddress(item);
     let webChatFramework: WebChatFramework | undefined;
     // Setup reads the framework from the installed files, so only installs ask.
@@ -680,6 +708,10 @@ export async function runAddCommand(
     });
     if (completion === false && !options.nonInteractive) return setupIncomplete("cancelled");
     return reportCompletion(logger, item, completion, options);
+  };
+  return runRegistryAction(logger, appRoot, action, {
+    rethrow: (error) =>
+      options.throwSetupFailures === true && error instanceof RegistrySetupFailedError,
   });
 }
 /** Lists registry items from every configured source or one selected source. */

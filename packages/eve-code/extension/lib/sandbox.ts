@@ -94,10 +94,11 @@ export {
   startComputerUse,
 } from "eve/computer-use/sandbox";
 
+/** @deprecated Import from `eve/extensions/git/sandbox`. */
 export {
   executeGitHubShell,
   githubShellApproval,
   type GitHubLeaseRule,
   type GitHubShellInput,
   type GitHubShellOutput,
-} from "./github-shell.ts";
+} from "eve/extensions/git/sandbox";

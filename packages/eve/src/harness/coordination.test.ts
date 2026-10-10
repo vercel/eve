@@ -63,35 +63,6 @@ describe("createRuntimeActionRequestFromToolCall", () => {
       });
     },
   );
-  const loadSkillCall = {
-    input: { skill: "research" },
-    toolCallId: "call-skill",
-    toolName: "load_skill",
-    type: "tool-call" as const,
-  };
-
-  it("classifies the framework load_skill tool as a skill action", () => {
-    expect(
-      createRuntimeActionRequestFromToolCall({
-        toolCall: loadSkillCall,
-        tools: new Map([
-          [
-            "load_skill",
-            {
-              description: "Load a skill.",
-              frameworkAction: "load-skill" as const,
-              inputSchema: jsonSchema({ type: "object" }),
-              name: "load_skill",
-            },
-          ],
-        ]),
-      }),
-    ).toEqual({
-      callId: "call-skill",
-      input: { skill: "research" },
-      kind: "load-skill",
-    });
-  });
 
   it("preserves workflow identity without changing observable action data", () => {
     const action = createRuntimeActionRequestFromToolCall({
@@ -232,20 +203,6 @@ describe("createRuntimeActionRequestFromToolCall", () => {
       },
     });
   });
-
-  it("keeps an authored load_skill override as an ordinary tool action", () => {
-    expect(
-      createRuntimeActionRequestFromToolCall({
-        toolCall: loadSkillCall,
-        tools: new Map(),
-      }),
-    ).toEqual({
-      callId: "call-skill",
-      input: { skill: "research" },
-      kind: "tool-call",
-      toolName: "load_skill",
-    });
-  });
 });
 
 describe("createCoordinationRequestFromToolCall", () => {
@@ -357,7 +314,8 @@ describe("runtime results", () => {
             answerToken,
             {
               runId: "run-1",
-              workflowAsk: { control: "control", question: {} },
+              workflowAsk: { control: "control" },
+              reply: {},
               childContinuationToken: answerToken,
               event: REQUEST_EVENT,
               kind: "question",

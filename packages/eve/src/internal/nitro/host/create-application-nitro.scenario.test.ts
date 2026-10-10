@@ -86,6 +86,7 @@ function createNitroStub(input: { buildDir?: string; dev?: boolean } = {}): Nitr
         dev: input.dev ?? false,
         handlers: [],
         publicAssets: [],
+        serverAssets: [],
         rootDir: "/tmp/weather-agent",
         virtual: {},
       },

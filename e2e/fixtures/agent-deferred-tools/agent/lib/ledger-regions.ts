@@ -1,0 +1,23 @@
+/** The regions the session-scoped ledger resolver returns a deferred tool for. */
+export const LEDGER_REGIONS = [
+  "us_east",
+  "us_west",
+  "us_central",
+  "canada",
+  "mexico",
+  "brazil",
+  "argentina",
+  "uk",
+  "ireland",
+  "france",
+  "germany",
+  "spain",
+  "italy",
+  "nordics",
+  "india",
+  "singapore",
+  "japan",
+  "korea",
+  "australia",
+  "new_zealand",
+] as const;

@@ -32,28 +32,36 @@ export function createCodexFetch(options: CodexTransportOptions = {}): Fetch {
 
   return async (input: FetchInput, init?: RequestInit): Promise<Response> => {
     const url = rewriteCodexEndpoint(requestUrl(input), codexApiEndpoint);
-    const requestInit = stripInputItemIds(init);
+    const request = prepareCodexBody(init);
     const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
     const token = await resolveToken(undefined, signal);
-    const first = await httpFetch(url, authenticatedInit(input, requestInit, token));
+    const first = await httpFetch(url, authenticatedInit(input, request, token));
     if (first.status !== 401 || !isReplayable(input, init)) return first;
 
     await first.body?.cancel();
     const refreshed = await resolveToken(token.token, signal);
-    return httpFetch(url, authenticatedInit(input, requestInit, refreshed));
+    return httpFetch(url, authenticatedInit(input, request, refreshed));
   };
 }
 
-function stripInputItemIds(init: RequestInit | undefined): RequestInit | undefined {
-  if (typeof init?.body !== "string") return init;
+interface CodexRequest {
+  readonly init: RequestInit | undefined;
+  readonly promptCacheKey?: string;
+}
+
+function prepareCodexBody(init: RequestInit | undefined): CodexRequest {
+  if (typeof init?.body !== "string") return { init };
 
   let body: unknown;
   try {
     body = JSON.parse(init.body);
   } catch {
-    return init;
+    return { init };
   }
-  if (!isObject(body) || !Array.isArray(body.input)) return init;
+  if (!isObject(body)) return { init };
+  const promptCacheKey =
+    typeof body.prompt_cache_key === "string" ? body.prompt_cache_key : undefined;
+  if (!Array.isArray(body.input)) return { init, promptCacheKey };
 
   // Only response item IDs are forbidden; tool call IDs and IDs inside tool
   // inputs or outputs belong to the conversation and must survive replay.
@@ -64,7 +72,7 @@ function stripInputItemIds(init: RequestInit | undefined): RequestInit | undefin
       changed = true;
     }
   }
-  return changed ? { ...init, body: JSON.stringify(body) } : init;
+  return { init: changed ? { ...init, body: JSON.stringify(body) } : init, promptCacheKey };
 }
 
 export function rewriteCodexEndpoint(input: string, codexApiEndpoint = CODEX_API_ENDPOINT): string {
@@ -77,12 +85,17 @@ export function rewriteCodexEndpoint(input: string, codexApiEndpoint = CODEX_API
 
 function authenticatedInit(
   input: FetchInput,
-  init: RequestInit | undefined,
+  { init, promptCacheKey }: CodexRequest,
   token: { readonly accountId?: string; readonly token: string },
 ): RequestInit {
   const headers = cloneHeaders(
     init?.headers ?? (input instanceof Request ? input.headers : undefined),
   );
+  // The Codex backend routes prompt-cache affinity on `session-id`, not on the body's
+  // `prompt_cache_key`; the Codex CLI sends the same value in both.
+  if (promptCacheKey !== undefined && !headers.has("session-id")) {
+    headers.set("session-id", promptCacheKey);
+  }
   headers.delete("authorization");
   headers.delete("Authorization");
   headers.set("authorization", `Bearer ${token.token}`);

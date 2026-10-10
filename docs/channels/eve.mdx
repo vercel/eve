@@ -160,12 +160,14 @@ Set `turnPolicy: "queue"` on `eveChannel(...)` when follow-ups should wait for a
 Sending a message to an unknown or terminal session ID returns `409` with
 `{"code":"session_not_active","error":"The session is no longer active.","ok":false}`.
 An existing workflow whose inbox is not yet available returns `409 session_not_ready` instead.
-TypeScript clients expose the stable code as `ClientError.code`. The route never
-creates or follows a replacement session.
+A session that another eve version built returns `409 session_stranded` with the `eveVersion`
+that built it.
 
 ### Stream events
 
 Stream a session as newline-delimited JSON from `GET /eve/v1/session/:sessionId/stream`. The [session protocol](../concepts/sessions-runs-and-streaming#stream-a-session) defines the event set, envelopes, cursors, and reconnection behavior.
+
+Following a stranded session's stream returns `409 session_stranded`, just like a send. The TypeScript client reports `ClientSessionStrandedError` without retrying. Pass `follow=false` to read the recorded history instead: the response ends at the durable tail, carries the `x-eve-stream-tail-index` header, and never inspects or changes the session, so it works before a reset. A reset attempts to append `session.failed` with code `session_stranded` and close the stream. Existing readers finish when they receive that terminal event.
 
 ### Cancel a turn
 
@@ -175,7 +177,7 @@ See [Cancel the in-flight turn](../concepts/sessions-runs-and-streaming#cancel-t
 
 ### Clear context
 
-Post to `/eve/v1/session/:sessionId/clear` to remove model-message history while preserving the session ID, system prompt, tools, skills, durable state, limits, and sandbox. See [Compact, clear, and reset](../concepts/sessions-runs-and-streaming#compact-clear-and-reset).
+Post to `/eve/v1/session/:sessionId/clear` to remove model-message history while preserving the session ID, system prompt, tools, skills, durable state, limits, and sandbox. A stranded session cannot run the clear, so the route returns `409 session_stranded` and changes nothing; post to the `reset` route to end it instead. See [Compact, clear, and reset](../concepts/sessions-runs-and-streaming#compact-clear-and-reset).
 
 ### Compact context
 
@@ -183,7 +185,7 @@ Post to `/eve/v1/session/:sessionId/compact` to summarize context without sendin
 
 ### Reset a session
 
-Post to `/eve/v1/session/:sessionId/reset` to terminally retire that session. Reset never replaces the ID automatically; create a new session explicitly for a fresh conversation. See [Compact, clear, and reset](../concepts/sessions-runs-and-streaming#compact-clear-and-reset).
+Post to `/eve/v1/session/:sessionId/reset` to terminally retire that session. Reset never replaces the ID automatically; create a new session explicitly for a fresh conversation. Reset also works on a stranded session: eve cancels the stranded workflow run directly instead of delivering the command to it. See [Compact, clear, and reset](../concepts/sessions-runs-and-streaming#compact-clear-and-reset).
 
 ## Replace or disable the defaults
 

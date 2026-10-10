@@ -1,3 +1,4 @@
+import type { PromptQueueState } from "#channel/prompt-queue.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { ChannelFrom } from "#channel/channel-operations.js";
@@ -43,7 +44,7 @@ type EventData<T extends UnstampedMessageStreamEvent["type"]> =
   Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /** JSON-serializable state for one Linear Agent Session conversation. */
-export interface LinearChannelState {
+export interface LinearChannelState extends PromptQueueState {
   readonly agentSessionId: string | null;
   readonly agentSessionUrl?: string | null;
   readonly commentId?: string | null;
@@ -144,6 +145,8 @@ export interface LinearChannelEvents {
   readonly "message.completed"?: LinearEventHandler<"message.completed">;
   readonly "message.appended"?: LinearEventHandler<"message.appended">;
   readonly "input.requested"?: LinearEventHandler<"input.requested">;
+  readonly "input.resolved"?: LinearEventHandler<"input.resolved">;
+  readonly "approval.settled"?: LinearEventHandler<"approval.settled">;
   readonly "turn.failed"?: LinearEventHandler<"turn.failed">;
   readonly "turn.completed"?: LinearEventHandler<"turn.completed">;
   readonly "turn.cancelled"?: LinearEventHandler<"turn.cancelled">;

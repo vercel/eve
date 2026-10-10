@@ -958,7 +958,7 @@ describe("slackChannel() default event handlers", () => {
     expect(ctx.state.pendingToolCallMessage).toBeNull();
   });
 
-  it("shows a step's first call label, or its display title, and counts the step's other calls, without the model's own task calls or calls its tools make", async () => {
+  it("shows a step's first call label, or its display title, and counts the step's other calls, without the model's own task calls", async () => {
     const adapter = withState(
       getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
       THREAD_STATE,
@@ -978,31 +978,17 @@ describe("slackChannel() default event handlers", () => {
         turnId: "t1",
       });
 
-    await callEvent(adapter, requested(["task_wait"], 0), ctx);
+    await callEvent(adapter, requested(["eve__task_wait"], 0), ctx);
     expect(fetchMock).not.toHaveBeenCalled();
 
-    await callEvent(adapter, requested(["task_cancel", "search", "ops__deploy_preview"], 0), ctx);
-    // Streamed calls arrive one at a time; the step keeps its first label.
-    await callEvent(adapter, requested(["lookup"], 0), ctx);
     await callEvent(
       adapter,
-      makeEvent("actions.requested", {
-        actions: [
-          {
-            callId: "call_lookup:1",
-            input: {},
-            kind: "tool-call",
-            parentCallId: "call_lookup",
-            toolName: "linear__search_issues",
-          },
-        ],
-        sequence: 0,
-        stepIndex: 0,
-        turnId: "t1",
-      }),
+      requested(["eve__task_cancel", "search", "ops__deploy_preview"], 0),
       ctx,
     );
-    await callEvent(adapter, requested(["task_cancel", "ops__deploy_preview"], 1), ctx);
+    // Streamed calls arrive one at a time; the step keeps its first label.
+    await callEvent(adapter, requested(["lookup"], 0), ctx);
+    await callEvent(adapter, requested(["eve__task_cancel", "ops__deploy_preview"], 1), ctx);
     expect(slackStatuses(fetchMock)).toEqual([
       "Search checkout incidents +1 more",
       "Search checkout incidents +2 more",
@@ -4446,6 +4432,35 @@ describe("slackChannel() HITL interaction pipeline", () => {
       turnId: "turn_observed",
     });
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it("passes the click's trigger_id to onInteraction", async () => {
+    const triggerIds: (string | undefined)[] = [];
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onInteraction(action) {
+        triggerIds.push(action.triggerId);
+      },
+    });
+
+    await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "block_actions",
+        trigger_id: "13345224609.738474920.8088930838d88f008e0",
+        team: { id: "T01" },
+        user: { id: "U01", username: "ada" },
+        channel: { id: "C01" },
+        message: {
+          ts: "1700000000.000010",
+          thread_ts: "1700000000.000001",
+          blocks: [],
+        },
+        actions: [{ action_id: "edit", text: { type: "plain_text", text: "Edit" } }],
+      }),
+    );
+
+    expect(triggerIds).toEqual(["13345224609.738474920.8088930838d88f008e0"]);
   });
 
   it("gives a Slack Connect user one principal across messages and button clicks", async () => {

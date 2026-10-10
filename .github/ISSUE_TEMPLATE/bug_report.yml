@@ -1,11 +1,13 @@
 name: Bug report
-description: Report a reproducible bug in eve.
+description: Report a reproducible bug and optionally share a prompt for our agents.
 labels: ["bug"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to file a bug report. Before opening a new issue:
+        Thanks for taking the time to file a bug report. We welcome prompts as issues and greatly appreciate your investigation. If you have a fix in mind, include a prompt or short implementation plan for the team to review and run with our own coding agents, using our chosen models and skills. A prompt is optional; a reproducible report is valuable on its own, and you do not need to submit a pull request.
+
+        Before opening a new issue:
 
         - [Search existing issues](https://github.com/vercel/eve/issues) and upvote instead of duplicating — it gets bugs fixed faster.
         - Verify the bug still reproduces on the **latest** eve release; it may already be fixed.
@@ -100,15 +102,18 @@ body:
   - type: textarea
     id: implementation-prompt
     attributes:
-      label: Suggested implementation prompt
-      description: Optionally provide a prompt a maintainer or coding agent could use to fix this bug after it is accepted. Include the expected behavior, constraints, and acceptance criteria rather than prescribing unnecessary implementation details.
+      label: Prompt or implementation plan for our agents (optional)
+      description: If you have a fix in mind, share a prompt the team can run. Include the expected behavior, relevant code, constraints, and how to validate the fix. Include implementation steps if you know them; a prompt is not required to report a bug.
       placeholder: |
-        Fix ...
+        Fix the bug using the reproduction and expected behavior above.
 
-        Requirements:
+        Relevant code:
         - ...
 
-        Acceptance criteria:
+        Constraints and proposed steps:
+        - ...
+
+        Validation:
         - ...
     validations:
       required: false

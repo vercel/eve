@@ -21,7 +21,11 @@ import {
   type DiscordMessageBody,
   type DiscordPostedMessage,
 } from "#public/channels/discord/api.js";
-import { defaultEvents, defaultOnCommand } from "#public/channels/discord/defaults.js";
+import {
+  defaultDiscordAuth,
+  defaultEvents,
+  defaultOnCommand,
+} from "#public/channels/discord/defaults.js";
 import {
   deriveComponentInputResponses,
   deriveModalInputResponses,
@@ -66,6 +70,12 @@ type EventData<T extends UnstampedMessageStreamEvent["type"]> =
 /** Pre-dispatch Discord context passed to inbound command hooks. */
 export interface DiscordContext {
   readonly discord: DiscordHandle;
+}
+
+/** Context passed to `discordChannel({ onInputResponse })` before eve answers the pending request. */
+export interface DiscordInputResponseContext extends DiscordContext {
+  /** Auth derived from the Discord user who pressed or submitted, as `defaultDiscordAuth` builds it. */
+  readonly defaultAuth: SessionAuthContext;
 }
 
 /** Channel-owned Discord context returned by `context()`. */
@@ -133,6 +143,14 @@ export type DiscordCommandResult = {
 /** Sync or async {@link DiscordCommandResult}. */
 export type DiscordCommandResultOrPromise = DiscordCommandResult | Promise<DiscordCommandResult>;
 
+/** Result of {@link DiscordChannelConfig.onInputResponse}: `{ auth }` to accept the answer, or `null` to drop it. */
+export type DiscordInputResponseResult = { readonly auth: SessionAuthContext | null } | null;
+
+/** A Discord interaction that answers a pending request: a button press, a select, or a modal submission. */
+export type DiscordInputResponseInteraction =
+  | DiscordComponentInteraction
+  | DiscordModalSubmitInteraction;
+
 type DiscordEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
   data: EventData<T>,
   channel: DiscordEventContext,
@@ -178,6 +196,19 @@ export interface DiscordChannelConfig {
     ctx: DiscordContext,
     interaction: DiscordCommandInteraction,
   ): DiscordCommandResultOrPromise;
+
+  /**
+   * Authorizes a button press, select, or modal submission before it answers a
+   * pending request. Return `{ auth }` to accept the answer, or `null` to drop
+   * it and keep the request pending. Thrown errors are logged and drop the
+   * answer. Defaults to the interacting user's Discord auth. With a custom
+   * `onCommand` and no `onInputResponse`, every answer is dropped: set it to
+   * give a person's answers the same principal, and gating, as their commands.
+   */
+  onInputResponse?(
+    ctx: DiscordInputResponseContext,
+    interaction: DiscordInputResponseInteraction,
+  ): DiscordInputResponseResult | Promise<DiscordInputResponseResult>;
 
   readonly events?: DiscordChannelEvents;
 }
@@ -230,6 +261,9 @@ export interface DiscordChannel extends Channel<
 /** Discord channel factory for HTTP Interactions and proactive channel messages. */
 export function discordChannel(config: DiscordChannelConfig = {}): DiscordChannel {
   const onCommand = config.onCommand ?? defaultOnCommand;
+  const onInputResponse =
+    config.onInputResponse ??
+    (config.onCommand === undefined ? acceptAsPresser : dropUnmappedInputResponse);
   const mergedEvents: DiscordChannelEvents = { ...defaultEvents, ...config.events };
 
   return defineChannel<
@@ -277,6 +311,7 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
             config,
             interaction,
             onCommand,
+            onInputResponse,
             from,
             waitUntil,
           });
@@ -499,6 +534,7 @@ async function handleInteraction(input: {
   readonly config: DiscordChannelConfig;
   readonly interaction: DiscordInteraction;
   readonly onCommand: NonNullable<DiscordChannelConfig["onCommand"]>;
+  readonly onInputResponse: NonNullable<DiscordChannelConfig["onInputResponse"]>;
   readonly from: ChannelFrom<DiscordChannelState>;
   readonly waitUntil: (task: Promise<unknown>) => void;
 }): Promise<Response> {
@@ -513,13 +549,17 @@ async function handleInteraction(input: {
   }
   if (input.interaction.type === DISCORD_INTERACTION_TYPE.MESSAGE_COMPONENT) {
     return handleComponentInteraction({
+      config: input.config,
       interaction: input.interaction,
+      onInputResponse: input.onInputResponse,
       from: input.from,
       waitUntil: input.waitUntil,
     });
   }
   return handleModalSubmitInteraction({
+    config: input.config,
     interaction: input.interaction,
+    onInputResponse: input.onInputResponse,
     from: input.from,
     waitUntil: input.waitUntil,
   });
@@ -564,7 +604,9 @@ async function handleCommandInteraction(input: {
 }
 
 function handleComponentInteraction(input: {
+  readonly config: DiscordChannelConfig;
   readonly interaction: DiscordComponentInteraction;
+  readonly onInputResponse: NonNullable<DiscordChannelConfig["onInputResponse"]>;
   readonly from: ChannelFrom<DiscordChannelState>;
   readonly waitUntil: (task: Promise<unknown>) => void;
 }): Response {
@@ -582,6 +624,8 @@ function handleComponentInteraction(input: {
   if (inputResponses.length > 0) {
     input.waitUntil(
       dispatchInputResponses({
+        config: input.config,
+        onInputResponse: input.onInputResponse,
         conversationId: input.interaction.messageId,
         inputResponses,
         interaction: input.interaction,
@@ -593,7 +637,9 @@ function handleComponentInteraction(input: {
 }
 
 function handleModalSubmitInteraction(input: {
+  readonly config: DiscordChannelConfig;
   readonly interaction: DiscordModalSubmitInteraction;
+  readonly onInputResponse: NonNullable<DiscordChannelConfig["onInputResponse"]>;
   readonly from: ChannelFrom<DiscordChannelState>;
   readonly waitUntil: (task: Promise<unknown>) => void;
 }): Response {
@@ -601,6 +647,8 @@ function handleModalSubmitInteraction(input: {
   if (inputResponses.length > 0) {
     input.waitUntil(
       dispatchInputResponses({
+        config: input.config,
+        onInputResponse: input.onInputResponse,
         conversationId: input.interaction.messageId ?? input.interaction.id,
         inputResponses,
         interaction: input.interaction,
@@ -647,20 +695,57 @@ async function dispatchCommand(input: {
 }
 
 async function dispatchInputResponses(input: {
+  readonly config: DiscordChannelConfig;
+  readonly onInputResponse: NonNullable<DiscordChannelConfig["onInputResponse"]>;
   readonly conversationId: string;
   readonly inputResponses: readonly ValidatedInputResponse[];
-  readonly interaction: DiscordComponentInteraction | DiscordModalSubmitInteraction;
+  readonly interaction: DiscordInputResponseInteraction;
   readonly from: ChannelFrom<DiscordChannelState>;
 }): Promise<void> {
+  const state = stateFromInteraction(input.interaction, {
+    conversationId: input.conversationId,
+    // A modal opened outside a message falls back to the interaction id, which is no message.
+    hasMessageAnchor: input.conversationId !== input.interaction.id,
+    initialResponseSent: true,
+  });
+  let result: DiscordInputResponseResult;
+  try {
+    result = await input.onInputResponse(
+      {
+        defaultAuth: defaultDiscordAuth(input.interaction),
+        discord: buildDiscordHandle({ config: input.config, state }),
+      },
+      input.interaction,
+    );
+  } catch (error) {
+    log.error("input response handler failed", { error });
+    return;
+  }
+  if (result === null) return;
   try {
     await input
       .from(discordContinuationToken(input.interaction.channelId, input.conversationId))
       .respond(input.inputResponses, {
-        auth: null,
+        auth: result.auth,
       });
   } catch (error) {
     log.error("interaction response delivery failed", { error });
   }
+}
+
+function acceptAsPresser(ctx: DiscordInputResponseContext): DiscordInputResponseResult {
+  return { auth: ctx.defaultAuth };
+}
+
+/**
+ * A custom `onCommand` may map users to its own principals or keep some out.
+ * The default Discord auth would match neither, so answers fail closed.
+ */
+function dropUnmappedInputResponse(): null {
+  log.warn(
+    "dropped a Discord input response: onCommand is customized but onInputResponse is not; set onInputResponse to accept button presses and modal submissions",
+  );
+  return null;
 }
 
 function stateFromInteraction(

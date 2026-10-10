@@ -10,8 +10,15 @@ import type { MessageStreamEvent, UnstampedMessageStreamEvent } from "#protocol/
 import { SESSION_PROJECTION_STATE_KEY, storedProjection } from "./view.js";
 
 // A step-local holder for the projection as the step publishes. It survives provider scope
-// resets but never serializes with context; the step saves it into session state.
-const liveProjections = new WeakMap<ContextReader, { projection: SessionProjection }>();
+// resets but never serializes with context; the step saves it into session state. Rooted on
+// `globalThis`, like the context key registry, so every bundled copy of eve in a step, such as
+// a channel's, reads the same one.
+const LIVE_PROJECTIONS_GLOBAL_KEY = Symbol.for("eve.live-session-projections");
+type LiveProjectionsGlobal = typeof globalThis & {
+  [LIVE_PROJECTIONS_GLOBAL_KEY]?: WeakMap<ContextReader, { projection: SessionProjection }>;
+};
+const liveProjections = ((globalThis as LiveProjectionsGlobal)[LIVE_PROJECTIONS_GLOBAL_KEY] ??=
+  new WeakMap());
 
 export function enterSessionProjection(
   ctx: ContextReader,
@@ -54,6 +61,21 @@ export function recordPublishedEvent(
     throw new Error("Session publication requires an initialized projection.");
   const folded = foldSession(live.projection, event);
   live.projection = event.type === "session.waiting" ? pruneSessionProjection(folded) : folded;
+}
+
+// The session as the step's last applied transition left it. Each transition publishes its events
+// before the step writes its state, so a step cut short (a cancelled model call) keeps the state
+// that matches what it published instead of rolling back past it.
+const appliedSessions = new WeakMap<ContextReader, HarnessSessionBase>();
+
+/** Records the session a transition the step published produced. */
+export function recordAppliedSession(ctx: ContextReader, session: HarnessSessionBase): void {
+  appliedSessions.set(ctx, session);
+}
+
+/** The session the step's last applied transition produced, if it applied any. */
+export function appliedSession<T extends HarnessSessionBase>(ctx: ContextReader): T | undefined {
+  return appliedSessions.get(ctx) as T | undefined;
 }
 
 export function saveSessionProjection<T extends HarnessSessionBase>(

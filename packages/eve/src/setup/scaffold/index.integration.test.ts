@@ -553,16 +553,19 @@ describe("ensureChannel", () => {
       join(projectRoot, "app/_components/agent-message.tsx"),
       "utf8",
     );
-    const questionSource = await readFile(
-      join(projectRoot, "components/ai-elements/question.tsx"),
+    const questionnaireSource = await readFile(
+      join(projectRoot, "components/ui/questionnaire.tsx"),
       "utf8",
     );
+    const packageJson = JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8"));
     expect(agentMessageSource).toContain("questionsFor(part.toolCallId)");
     expect(agentMessageSource).toContain("<QuestionRequest");
     expect(agentMessageSource).toContain("onInputResponses");
-    expect(questionSource).toContain("export const Question");
-    expect(questionSource).toContain("export const QuestionInput");
-    expect(questionSource).toContain("export const QuestionOption");
+    expect(questionnaireSource).toContain('from "@shadcn/react/questionnaire"');
+    expect(packageJson.dependencies).toHaveProperty("@shadcn/react");
+    await expect(
+      pathExists(join(projectRoot, "components/ai-elements/question.tsx")),
+    ).resolves.toBe(false);
   });
 
   test("scaffolds a Web Chat Stop button with the agent cancellation API", async () => {

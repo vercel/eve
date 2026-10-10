@@ -35,10 +35,21 @@ export interface McpClientConnectionDefinition {
    */
   readonly protocolVersionDiscovery?: boolean;
   /**
+   * Whether to forward the calling turn's user and initiator to the server in
+   * the `eve-forwarded-principal` header, so an eve agent's `mcpChannel` can
+   * run its published tools as that user. The server must set
+   * `trustedForwarders` and trust this connection's route-authenticated
+   * identity; otherwise it refuses the request with 403. Anonymous callers
+   * are not forwarded. Requests carrying the header fail rather than follow
+   * a redirect.
+   * @default false
+   */
+  readonly forwardPrincipal?: boolean;
+  /**
    * Human-readable summary of the connection and its tools.
    *
-   * The model sees it in the connection listing eve announces, so it
-   * can choose which connection to search with `connection_search`.
+   * The model sees it in the catalog listing eve announces, so it can
+   * choose which connection to search with `eve__search`.
    */
   readonly description: string;
   /**
@@ -96,8 +107,8 @@ export interface McpClientConnectionDefinition {
    */
   toolCall?: ConnectionToolCallDefinition;
   /**
-   * Client-side tool filter. When set, `connection_search` returns and
-   * `connection_execute` calls only tools whose names pass the filter.
+   * Client-side tool filter. When set, `eve__search` returns and `eve__tool`
+   * calls only tools whose names pass the filter.
    *
    * Specify exactly one of `allow` or `block`.
    */

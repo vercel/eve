@@ -1,8 +1,20 @@
 import { jsonSchema } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
+import { CALL_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
-import { foldingHandler, positionOf, withOpenTurn } from "#internal/testing/session-machine.js";
+import {
+  inlineTool,
+  subagentTool,
+  toolMap,
+  workflowTool,
+} from "#internal/testing/catalog-fixtures.js";
+import {
+  foldingHandler,
+  parkedSteps,
+  positionOf,
+  withOpenTurn,
+} from "#internal/testing/session-machine.js";
 import {
   createFrameworkUserMessage,
   createUserMessage,
@@ -471,5 +483,100 @@ describe("generation steering with the real AI SDK", () => {
     expect(result.steered).toBeUndefined();
     expect(providerSignal?.aborted).toBe(false);
     expect(events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
+  });
+
+  it.each([
+    ["a workflow tool directly", workflowTool("deploy_service"), "deploy_service", {}],
+    [
+      "a workflow tool through eve__tool",
+      workflowTool("deploy_service", "execute", { deferred: true }),
+      CALL_TOOL_NAME,
+      { name: "deploy_service" },
+    ],
+    [
+      "an agent through eve__tool",
+      subagentTool("billing_specialist", { deferred: true }),
+      CALL_TOOL_NAME,
+      { input: { message: "Review Bob's dispute." }, name: "billing_specialist" },
+    ],
+  ] as const)(
+    "interrupts a step that calls %s, since it runs only after the step",
+    async (_case, entry, toolName, input) => {
+      const steering = new AbortController();
+      const model = new MockLanguageModelV3({
+        doStream: async () => ({
+          stream: new ReadableStream<Part>({
+            start(controller) {
+              controller.enqueue({
+                type: "tool-call",
+                toolCallId: "call-1",
+                toolName,
+                input: JSON.stringify(input),
+              });
+              controller.enqueue({
+                type: "finish",
+                finishReason: { unified: "tool-calls", raw: undefined },
+                usage,
+              });
+              controller.close();
+            },
+          }),
+        }),
+      });
+      const result = await createToolLoopHarness({
+        steeringSignal: steering.signal,
+        tools: toolMap(entry),
+        resolveModel: async () => model,
+        handleEvent: async (event) => {
+          if (event.type === "actions.requested") steering.abort();
+        },
+      })(session(), { message: "Alice asks for the work to start" });
+
+      expect(result.steered).toBe(true);
+      expect(parkedSteps(result.session)).toEqual([]);
+    },
+  );
+
+  it("does not interrupt a step once an inline entry called through eve__tool is running", async () => {
+    const steering = new AbortController();
+    const executing = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const refund = vi.fn(async () => {
+      executing.resolve();
+      await release.promise;
+      return { refunded: true };
+    });
+    const model = new MockLanguageModelV3({
+      doStream: async () => ({
+        stream: new ReadableStream<Part>({
+          start(controller) {
+            controller.enqueue({
+              type: "tool-call",
+              toolCallId: "refund-1",
+              toolName: CALL_TOOL_NAME,
+              input: JSON.stringify({ input: {}, name: "refund_invoice" }),
+            });
+            controller.enqueue({
+              type: "finish",
+              finishReason: { unified: "tool-calls", raw: undefined },
+              usage,
+            });
+            controller.close();
+          },
+        }),
+      }),
+    });
+    const running = createToolLoopHarness({
+      steeringSignal: steering.signal,
+      tools: toolMap(inlineTool("refund_invoice", { deferred: true, execute: refund })),
+      resolveModel: async () => model,
+      handleEvent: async () => {},
+    })(session(), { message: "Alice asks for a refund of invoice in_1" });
+    await executing.promise;
+    steering.abort();
+    release.resolve();
+
+    expect((await running).steered).toBeUndefined();
+    expect(refund).toHaveBeenCalledOnce();
   });
 });

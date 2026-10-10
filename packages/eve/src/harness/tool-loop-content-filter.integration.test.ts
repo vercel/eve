@@ -84,34 +84,4 @@ describe("content-filter reporting (real AI SDK)", () => {
       );
     },
   );
-
-  it.each(["", "Alice's inventory list is"])(
-    "rejects a filtered generated response without retry: %j",
-    async (text) => {
-      let calls = 0;
-      const model = new MockLanguageModelV4({
-        doGenerate: async () => {
-          calls++;
-          return {
-            content: text === "" ? [] : [{ type: "text", text }],
-            finishReason,
-            usage,
-            providerMetadata,
-            warnings: [],
-          };
-        },
-      });
-      const step = createToolLoopHarness({
-        resolveModel: async () => model,
-        tools: new Map(),
-      });
-      await expect(
-        step(session(), { message: "Help Alice prepare Bob's inventory list." }),
-      ).rejects.toMatchObject({
-        name: "ContentFilteredModelResponseError",
-        generationId: "gen_filtered",
-      });
-      expect(calls).toBe(1);
-    },
-  );
 });

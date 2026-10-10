@@ -8,8 +8,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ComponentProps } from "react";
 import { translations } from "@/geistdocs";
+import { JsonLd } from "@/components/geistdocs/json-ld";
 import { canonicalAlternates, templatePath } from "@/lib/geistdocs/canonical";
 import { pageTitleMetadata } from "@/lib/geistdocs/metadata-title";
+import { breadcrumbListNode } from "@/lib/geistdocs/structured-data";
 import { getTemplateEntry, type TemplateEntry, type TemplateFile } from "@/lib/templates/data";
 import { templateManifest } from "@/lib/templates/manifest";
 import { getSiteOrigin } from "@/lib/geistdocs/url";
@@ -76,13 +78,7 @@ const TemplateDetailPage = async ({ params }: { params: Promise<PageParams> }) =
 
   return (
     <>
-      <script
-        dangerouslySetInnerHTML={{
-          __html: JSON.stringify(structuredData).replace(/</g, "\\u003c"),
-        }}
-        id={`template-structured-data-${entry.slug}`}
-        type="application/ld+json"
-      />
+      <JsonLd data={structuredData} id={`template-structured-data-${entry.slug}`} />
       <main className="mx-auto max-w-[1080px] px-4 pt-10 pb-32 sm:px-6 sm:pt-12">
         <Link
           className="inline-flex min-h-8 items-center gap-1.5 rounded-sm text-gray-900 text-label-14 no-underline outline-none transition-colors hover:text-gray-1000 focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2 focus-visible:ring-offset-background-100 motion-reduce:transition-none"
@@ -181,23 +177,10 @@ const TemplateDetailPage = async ({ params }: { params: Promise<PageParams> }) =
 const createStructuredData = (entry: TemplateEntry, canonicalUrl: string) => ({
   "@context": "https://schema.org",
   "@graph": [
-    {
-      "@type": "BreadcrumbList",
-      itemListElement: [
-        {
-          "@type": "ListItem",
-          item: new URL("/templates", getSiteOrigin()).toString(),
-          name: "Templates",
-          position: 1,
-        },
-        {
-          "@type": "ListItem",
-          item: canonicalUrl,
-          name: entry.title,
-          position: 2,
-        },
-      ],
-    },
+    breadcrumbListNode([
+      { name: "Templates", pathname: "/templates" },
+      { name: entry.title, pathname: templatePath(entry.slug) },
+    ]),
     {
       "@type": "SoftwareSourceCode",
       codeRepository: entry.sourceRevisionHref,

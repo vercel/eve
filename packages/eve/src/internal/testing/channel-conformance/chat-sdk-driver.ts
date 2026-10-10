@@ -52,6 +52,7 @@ interface InboundFile extends Pick<SentFile, "mediaType" | "name"> {
 type Inbound =
   | {
       readonly kind: "message";
+      readonly person: Person;
       readonly text: string;
       /** Files on the message, as the platform lists them: a URL to each, not its bytes. */
       readonly files?: readonly InboundFile[];
@@ -115,6 +116,7 @@ export function chatSdkDriver(surface: Exclude<Surface, "public"> = "shared"): C
       return {
         id: messageIdOf(call),
         links: linkTargets(card),
+        onlyPerson: isPersonDirectMessage(call),
         options: buttonsOf(call),
         text: card === undefined ? (driver.postedText(call) ?? "") : texts(card),
       };
@@ -194,6 +196,7 @@ function chatSdkDriverWith(input: {
 
   return {
     name: input.name,
+    personId: PERSON.userId,
     inbound,
     createChannel(record) {
       const dm = input.surface === "private";
@@ -243,7 +246,7 @@ function chatSdkDriverWith(input: {
       }
       return bridge.channel;
     },
-    message: (text, files = []) =>
+    message: (text, person, files = []) =>
       inbound({
         files: files.map((file) => {
           const url = `https://files.conformance.example/${uploads.size + 1}/${encodeURIComponent(file.name)}`;
@@ -251,6 +254,7 @@ function chatSdkDriverWith(input: {
           return { mediaType: file.mediaType, name: file.name, url };
         }),
         kind: "message",
+        person,
         text,
       }),
     postedText(call: PlatformCall) {
@@ -266,6 +270,14 @@ function chatSdkDriverWith(input: {
 
 function isPost(call: PlatformCall): boolean {
   return call.method === "postMessage" || call.method === "editMessage";
+}
+
+/** The DM thread the bot opens with the person, beside the conversation's own thread. */
+const PERSON_DM_THREAD = `${ADAPTER}:direct-message:${PERSON.userId}`;
+
+function isPersonDirectMessage(call: PlatformCall): boolean {
+  const { threadId } = call.response as { readonly threadId?: string };
+  return threadId === PERSON_DM_THREAD;
 }
 
 function fakeAdapter({
@@ -327,7 +339,7 @@ function fakeAdapter({
           adapter,
           threadId,
           // A person mentions the bot to start a channel thread; Chat routes the rest by subscription.
-          inboundMessage(threadId, id, body.text, !dm, body.files, fetchData),
+          inboundMessage(threadId, id, body.text, !dm, PEOPLE[body.person], body.files, fetchData),
           options,
         );
       }
@@ -348,13 +360,27 @@ function fakeAdapter({
       isDM: dm,
       metadata: {},
     }),
+    // No native ephemerals, as on Discord or Linq: `postEphemeral` falls back to a DM.
+    // Only the person signing in can be reached, so a sign-in sent to anyone else fails its cells.
+    async openDM(userId: string) {
+      if (userId !== PERSON.userId) throw new Error(`no direct message with ${userId}`);
+      return PERSON_DM_THREAD;
+    },
     async postMessage(id: string, posted: AdapterPostableMessage) {
       const messageId = `posted-${nextId()}`;
-      record({ body: render(posted), method: "postMessage", response: { id: messageId } });
+      record({
+        body: render(posted),
+        method: "postMessage",
+        response: { id: messageId, threadId: id },
+      });
       return { id: messageId, raw: posted, threadId: id };
     },
     async editMessage(id: string, messageId: string, posted: AdapterPostableMessage) {
-      record({ body: render(posted), method: "editMessage", response: { id: messageId } });
+      record({
+        body: render(posted),
+        method: "editMessage",
+        response: { id: messageId, threadId: id },
+      });
       return { id: messageId, raw: posted, threadId: id };
     },
     async addReaction() {},
@@ -372,6 +398,7 @@ function inboundMessage(
   id: string,
   text: string,
   isMention = false,
+  author: (typeof PEOPLE)[Person] = PERSON,
   files: readonly InboundFile[] = [],
   fetchData?: (url: string) => Promise<Buffer>,
 ): Message {
@@ -384,7 +411,7 @@ function inboundMessage(
       // Private to the platform, as Slack's or Teams' are: only `fetchData` can download it.
       url: file.url,
     })),
-    author: PERSON,
+    author,
     formatted: parseMarkdown(text),
     id,
     isMention,

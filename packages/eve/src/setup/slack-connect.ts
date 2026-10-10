@@ -8,21 +8,6 @@
 
 import { z } from "#compiled/zod/index.js";
 
-interface VercelConnectListClient {
-  uid?: unknown;
-  id?: unknown;
-  type?: unknown;
-  createdAt?: unknown;
-  projects?: unknown;
-}
-
-export interface VercelConnectListResponse {
-  /** `vercel connect list -F json` (current CLI). */
-  connectors?: unknown;
-  /** Older CLI builds emitted the same array under `clients`. */
-  clients?: unknown;
-}
-
 const NonEmptyStringSchema = z.string().min(1);
 
 const SlackConnectorRefSchema = z.object({
@@ -30,7 +15,15 @@ const SlackConnectorRefSchema = z.object({
   id: NonEmptyStringSchema,
 });
 
+const SlackTriggerDestinationSchema = z.object({
+  projectId: NonEmptyStringSchema,
+  path: NonEmptyStringSchema.nullish(),
+  branch: NonEmptyStringSchema.nullish(),
+  customEnvironmentId: NonEmptyStringSchema.nullish(),
+});
+
 const SlackConnectorDetailsSchema = SlackConnectorRefSchema.extend({
+  triggerDestinations: z.array(SlackTriggerDestinationSchema).nullish(),
   data: z
     .object({
       appId: NonEmptyStringSchema.nullish(),
@@ -53,10 +46,32 @@ export interface SlackWorkspaceConnection {
   workspaceName?: string;
 }
 
+/**
+ * One place Vercel Connect forwards Slack events. A destination without
+ * `branch` or `customEnvironmentId` targets the project's default deployment.
+ */
+export interface SlackTriggerDestination {
+  projectId: string;
+  path?: string;
+  branch?: string;
+  customEnvironmentId?: string;
+}
+
 /** Parsed Slack connector state returned by Vercel's connector detail API. */
 export interface SlackConnectorDetails {
   ref: SlackConnectorRef;
   workspace?: SlackWorkspaceConnection;
+  triggerDestinations: readonly SlackTriggerDestination[];
+}
+
+function toTriggerDestination(
+  raw: z.infer<typeof SlackTriggerDestinationSchema>,
+): SlackTriggerDestination {
+  const destination: SlackTriggerDestination = { projectId: raw.projectId };
+  if (raw.path != null) destination.path = raw.path;
+  if (raw.branch != null) destination.branch = raw.branch;
+  if (raw.customEnvironmentId != null) destination.customEnvironmentId = raw.customEnvironmentId;
+  return destination;
 }
 
 /**
@@ -69,7 +84,8 @@ export function parseSlackConnectorDetails(body: unknown): SlackConnectorDetails
   if (!parsed.success) return undefined;
   const { id, uid, data } = parsed.data;
   const ref = { id, uid };
-  if (data?.appId == null || data.slackTeam == null) return { ref };
+  const triggerDestinations = (parsed.data.triggerDestinations ?? []).map(toTriggerDestination);
+  if (data?.appId == null || data.slackTeam == null) return { ref, triggerDestinations };
 
   const workspaceUrl = new URL("https://slack.com/app_redirect");
   workspaceUrl.searchParams.set("app", data.appId);
@@ -78,10 +94,7 @@ export function parseSlackConnectorDetails(body: unknown): SlackConnectorDetails
     data.slackTeam.name == null
       ? { workspaceUrl: workspaceUrl.href }
       : { workspaceUrl: workspaceUrl.href, workspaceName: data.slackTeam.name };
-  return {
-    ref,
-    workspace,
-  };
+  return { ref, workspace, triggerDestinations };
 }
 
 /**
@@ -122,39 +135,78 @@ export function slackMessageDeepLink(url: string): string {
   return parsed.href;
 }
 
-/** A Slack connector plus the project ids it is attached to. */
+/** A project attached to a connector. */
+export interface SlackConnectorProject {
+  id: string;
+  name?: string;
+}
+
+/** A Slack connector plus the projects it is attached to. */
 export interface RawSlackConnector {
   uid: string;
-  id?: string;
-  projectIds: readonly string[];
+  id: string;
+  /** Attached projects, possibly truncated to the first few. */
+  projects: readonly SlackConnectorProject[];
   createdAt: number;
 }
 
-/** Parses Slack connectors (uid + attached project ids) from a connect-list response. */
-export function parseSlackConnectors(listJson: unknown): RawSlackConnector[] {
-  if (typeof listJson !== "object" || listJson === null) return [];
-  const response = listJson as VercelConnectListResponse;
-  const connectors = response.connectors ?? response.clients;
-  if (!Array.isArray(connectors)) return [];
-  const parsed: RawSlackConnector[] = [];
-  for (const raw of connectors as VercelConnectListClient[]) {
-    if (raw.type !== "slack" || typeof raw.uid !== "string") continue;
-    const projectIds = Array.isArray(raw.projects)
-      ? raw.projects
-          .map((project) =>
-            typeof project === "object" && project !== null
-              ? (project as { id?: unknown }).id
-              : undefined,
-          )
-          .filter((id): id is string => typeof id === "string")
-      : [];
-    const connector: RawSlackConnector = {
-      uid: raw.uid,
-      projectIds,
-      createdAt: typeof raw.createdAt === "number" ? raw.createdAt : 0,
-    };
-    if (typeof raw.id === "string") connector.id = raw.id;
-    parsed.push(connector);
-  }
-  return parsed;
+const ProjectLinkSchema = z.object({
+  projectId: NonEmptyStringSchema,
+  project: z.object({ id: NonEmptyStringSchema, name: z.string().nullish() }).nullish(),
+});
+
+const PaginationSchema = z.object({ next: z.string().nullish() }).nullish();
+
+const ConnectorPageSchema = z.object({
+  clients: z.array(
+    z.object({
+      id: NonEmptyStringSchema,
+      uid: NonEmptyStringSchema,
+      type: z.string(),
+      createdAt: z.number().nullish(),
+      includes: z
+        .object({
+          projects: z.object({ items: z.array(ProjectLinkSchema) }).nullish(),
+        })
+        .nullish(),
+    }),
+  ),
+  pagination: PaginationSchema,
+});
+
+const ConnectorProjectsSchema = z.object({ projects: z.array(ProjectLinkSchema) });
+
+function toProject(link: z.infer<typeof ProjectLinkSchema>): SlackConnectorProject {
+  const id = link.project?.id ?? link.projectId;
+  const name = link.project?.name;
+  return name == null ? { id } : { id, name };
+}
+
+/** One page of `GET /v1/connect/connectors?include=projects`. */
+export interface SlackConnectorPage {
+  connectors: RawSlackConnector[];
+  /** Cursor for the next page, absent on the last one. */
+  next?: string;
+}
+
+/** Parses one connector list page, keeping only Slack connectors. */
+export function parseSlackConnectorPage(body: unknown): SlackConnectorPage | undefined {
+  const parsed = ConnectorPageSchema.safeParse(body);
+  if (!parsed.success) return undefined;
+  const connectors = parsed.data.clients
+    .filter((client) => client.type === "slack")
+    .map((client) => ({
+      uid: client.uid,
+      id: client.id,
+      projects: (client.includes?.projects?.items ?? []).map(toProject),
+      createdAt: client.createdAt ?? 0,
+    }));
+  const next = parsed.data.pagination?.next;
+  return next == null ? { connectors } : { connectors, next };
+}
+
+/** Parses one page of `GET /v1/connect/connectors/<id>/projects`. */
+export function parseConnectorProjects(body: unknown): SlackConnectorProject[] | undefined {
+  const parsed = ConnectorProjectsSchema.safeParse(body);
+  return parsed.success ? parsed.data.projects.map(toProject) : undefined;
 }

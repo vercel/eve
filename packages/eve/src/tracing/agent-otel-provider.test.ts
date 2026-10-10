@@ -107,6 +107,8 @@ function createRuntime(
   const agentOtelInput: Omit<AgentOtelInstrumentationInput, "tracePolicy"> & {
     tracePolicy?: TraceCapturePolicy;
   } = {
+    // Pin the environment so an inherited EVE_DEV/VERCEL_ENV cannot relax audience ceilings.
+    environment: "production",
     frameworkVersion: "test",
     idGenerator,
     recordInputs: true,
@@ -136,6 +138,7 @@ async function emitAttempt(input: {
   readonly attemptError?: Error;
   readonly channelAudience?: ChannelAudience;
   readonly hooks: InstrumentationHooks;
+  readonly modelTools?: readonly Record<string, unknown>[];
   readonly parentLineage?: InstrumentationParentLineage;
   readonly parentTraceContext?: InstrumentationTraceContext;
   readonly runInContext: InstrumentationContextRunner;
@@ -190,6 +193,7 @@ async function emitAttempt(input: {
       ],
       modelId: "claude-test",
       provider: "anthropic",
+      tools: input.modelTools,
     },
   ]);
   await bridge.executeLanguageModelCall!({ callId: "call-1", execute: async () => undefined });
@@ -1481,6 +1485,8 @@ describe("createAgentOtelInstrumentation", () => {
     expect(step.attributes).toMatchObject({
       "agent.framework.name": "eve",
       "agent.model.id": "claude-test",
+      "gen_ai.operation.name": "workflow",
+      "operation.name": "workflow",
       "agent.usage.cache_read_tokens": 4,
       "agent.usage.cache_write_tokens": 2,
       "agent.usage.input_tokens": 10,
@@ -2062,7 +2068,7 @@ describe("createAgentOtelInstrumentation", () => {
         idempotencyKey: uncorrelatedToolKey,
         input: {},
         scope,
-        toolName: "final_output",
+        toolName: "eve__reply",
         type: "tool.call",
       },
       () => Promise.resolve("done"),
@@ -2076,7 +2082,7 @@ describe("createAgentOtelInstrumentation", () => {
 
     const spans = runtime.exporter.getFinishedSpans();
     const tool = byName(spans, "execute_tool weather")[0]!;
-    const uncorrelatedTool = byName(spans, "execute_tool final_output")[0]!;
+    const uncorrelatedTool = byName(spans, "execute_tool eve__reply")[0]!;
     expect(tool.parentSpanContext?.spanId).toBe(
       byName(spans, "agent.step")[0]!.spanContext().spanId,
     );
@@ -2262,7 +2268,8 @@ describe("createAgentOtelInstrumentation", () => {
       "agent.approval.request": expect.stringContaining("Approve weather?"),
       "agent.approval.request_id": "approval-1",
       "agent.approval.response": expect.stringContaining("approve"),
-      "operation.name": "agent.approval",
+      "gen_ai.operation.name": "workflow",
+      "operation.name": "workflow",
       "resource.name": "agent.approval",
       "gen_ai.conversation.id": "session-1",
       "agent.step.index": 0,
@@ -2726,6 +2733,17 @@ describe("createAgentOtelInstrumentation", () => {
     const runtime = createRuntime();
     await emitAttempt({
       hooks: runtime.hooks,
+      modelTools: [
+        {
+          description: "Get the current weather.",
+          inputSchema: {
+            properties: { city: { type: "string" } },
+            required: ["city"],
+            type: "object",
+          },
+          name: "get_weather",
+        },
+      ],
       runInContext: runtime.runInContext,
       sessionId: "session-1",
       turnId: "turn-1",
@@ -2736,6 +2754,12 @@ describe("createAgentOtelInstrumentation", () => {
     const spans = runtime.exporter.getFinishedSpans();
     const model = byName(spans, "chat claude-test")[0]!;
     const tool = byName(spans, "execute_tool weather")[0]!;
+    const turn = byName(spans, "invoke_agent weather")[0]!;
+    expect(turn.attributes).toMatchObject({
+      "gen_ai.input.messages":
+        '[{"parts":[{"content":"real user text","type":"text"}],"role":"user"}]',
+      "gen_ai.output.messages": expect.stringContaining("Checking the weather."),
+    });
     expect(model.attributes["ai.response.finish_reason"]).toBe("tool-calls");
     expect(model.attributes["ai.response.reasoning"]).toBe("thinking about weather");
     expect(model.attributes["ai.response.text"]).toBe("Checking the weather.");
@@ -2748,6 +2772,8 @@ describe("createAgentOtelInstrumentation", () => {
       "gen_ai.response.finish_reasons": ["tool-calls"],
       "gen_ai.system_instructions":
         '[{"content":"You are a weather assistant (system prompt).","type":"text"}]',
+      "gen_ai.tool.definitions":
+        '[{"name":"get_weather","description":"Get the current weather.","parameters":{"properties":{"city":{"type":"string"}},"required":["city"],"type":"object"}}]',
     });
     expect(model.attributes).not.toHaveProperty("ai.prompt.system");
     expect(model.attributes["agent.input.messages.delta"]).toBeUndefined();
@@ -2772,6 +2798,12 @@ describe("createAgentOtelInstrumentation", () => {
     await emitAttempt({
       channelAudience: "public",
       hooks: runtime.hooks,
+      modelTools: [
+        {
+          inputSchema: { type: "object" },
+          name: "get_weather",
+        },
+      ],
       runInContext: runtime.runInContext,
       sessionId: "session-redacted",
       turnId: "turn-redacted",
@@ -2787,6 +2819,15 @@ describe("createAgentOtelInstrumentation", () => {
       "gen_ai.system_instructions",
     );
     expect(byName(spans, "chat claude-test")[0]?.attributes).not.toHaveProperty(
+      "gen_ai.tool.definitions",
+    );
+    expect(byName(spans, "chat claude-test")[0]?.attributes).not.toHaveProperty(
+      "gen_ai.output.messages",
+    );
+    expect(byName(spans, "invoke_agent weather")[0]?.attributes).not.toHaveProperty(
+      "gen_ai.input.messages",
+    );
+    expect(byName(spans, "invoke_agent weather")[0]?.attributes).not.toHaveProperty(
       "gen_ai.output.messages",
     );
     expect(byName(spans, "execute_tool weather")[0]?.attributes).not.toHaveProperty(

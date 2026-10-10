@@ -47,7 +47,7 @@ function createGeneration(id: string): DevelopmentGeneration {
 
 describe("development generation staging", () => {
   const compileResult = {
-    manifest: {},
+    manifest: { agentRoot: "/tmp/app/agent" },
     paths: { moduleMapPath: "/tmp/app/modules.mjs" },
     project: { appRoot: "/tmp/app" },
   } as CompileAgentResult;
@@ -71,11 +71,21 @@ describe("development generation staging", () => {
       moduleMapPath: "/tmp/app/modules.mjs",
     });
     expect(mocks.stage).toHaveBeenCalledOnce();
-    preparation.resolve({ authoredWorkflowModules: {} });
+    preparation.resolve({
+      authoredWorkflowModules: {},
+      sourceModules: ["/tmp/app/agent/tools/plan.ts", "/tmp/lib/run.ts"],
+    });
     await Promise.resolve();
     expect(mocks.materialize).not.toHaveBeenCalled();
-    staging.resolve(createGeneration("parallel"));
-    expect(await result).toMatchObject({ fingerprint: "ready" });
+    staging.resolve({
+      ...createGeneration("parallel"),
+      sourceWatchPaths: ["/tmp/app/package.json"],
+    });
+    // The watcher already covers the agent root, so only shared modules outside it are added.
+    expect(await result).toMatchObject({
+      fingerprint: "ready",
+      sourceWatchPaths: ["/tmp/app/package.json", "/tmp/lib/run.ts"],
+    });
     expect(mocks.rm).not.toHaveBeenCalled();
   });
 

@@ -41,7 +41,7 @@ function getBundledExtensionById(): ReadonlyMap<string, BundledExtensionMount> {
         [
           {
             namespace: "self-modification",
-            importSpecifier: "eve/self-modification",
+            importSpecifier: "eve/self-modification/local",
             entryPath: resolvePackageSourceFilePath("src/self-modification/extension/extension.ts"),
             config: SELF_MODIFICATION_CONFIG,
             sourceDirectory: resolvePackageSourceDirectoryPath("src/self-modification/extension"),

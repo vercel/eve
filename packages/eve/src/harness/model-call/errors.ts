@@ -10,16 +10,22 @@ const GATEWAY_MODEL_REQUEST_REJECTED_MESSAGE =
   "AI Gateway rejected the model request before the agent produced a response.";
 
 /**
- * Anchored regex for the upstream "unsupported tool" rejection message
- * that AI Gateway returns when a fallback provider cannot serve a
- * provider-specific tool (e.g. Bedrock rejecting `web_search_20250305`).
- *
- * The phrasing comes from the gateway's own provider attempt projection
- * and is stable across the Bedrock and Vertex Anthropic backends. We
- * anchor the match on the literal `tool type` prefix to avoid sweeping
- * in unrelated "not supported" errors.
+ * Upstream rejections of a provider tool the host cannot serve, each anchored on its literal
+ * phrasing so unrelated "not supported" errors don't drop a tool. Each yields the upstream
+ * identifier it names: the tool type, or a request value only that tool adds.
  */
-const UNSUPPORTED_TOOL_TYPE_REGEX = /tool type ['"]([\w.-]+)['"] is not supported/i;
+const UNSUPPORTED_PROVIDER_TOOL_MATCHERS: readonly ((text: string) => string | undefined)[] = [
+  // AI Gateway reporting the one host that rejected the tool.
+  (text) => /tool type ['"]([\w.-]+)['"] is not supported/i.exec(text)?.[1],
+  // Bedrock's raw error, which AI Gateway surfaces when every host failed.
+  (text) => /Input tag ['"]([\w.-]+)['"] found using ['"]type['"] does not match/i.exec(text)?.[1],
+  // OpenAI-compatible Responses endpoints (Bedrock Mantle) rejecting the `include` value the
+  // OpenAI web search tool adds. The first quoted value is the rejected one; any after it are
+  // the endpoint's supported values.
+  (text) => /Invalid value: ['"]([\w.-]+)['"]/i.exec(text)?.[1],
+  // AI Gateway routing OpenAI web search to a host without it (Bedrock).
+  (text) => (/web search is not supported for this request/i.test(text) ? "web_search" : undefined),
+];
 
 /**
  * The most informative human-readable rejection a model-call error
@@ -93,13 +99,12 @@ function isTransientHttpStatus(status: number | undefined): boolean {
 }
 
 /**
- * Returns the distinct upstream tool types referenced by any
- * "tool type 'X' is not supported" rejection in an AI Gateway error's
- * provider attempt list.
+ * Returns the distinct upstream identifiers named by any unsupported provider tool rejection
+ * (see {@link UNSUPPORTED_PROVIDER_TOOL_MATCHERS}) in a model-call error.
  *
- * Walks the cause chain to find the gateway error and inspects both the
- * structured `data` field and the raw `responseBody` JSON. Returns an
- * empty array for errors that are not of this shape.
+ * Walks the cause chain and inspects both the structured `data` field and
+ * the raw `responseBody` JSON. Returns an empty array for errors that are
+ * not of this shape.
  *
  * Used by the harness recovery path to identify which framework tools
  * to drop before retrying the failing step. Detection is by string
@@ -122,10 +127,7 @@ export function extractUnsupportedProviderToolTypes(error: unknown): readonly st
         // includes a large request snapshot. Fall back to a raw string
         // scan so we still surface the tool name when the regex match
         // lies before the truncation boundary.
-        const match = UNSUPPORTED_TOOL_TYPE_REGEX.exec(responseBody);
-        if (match?.[1] !== undefined) {
-          found.add(match[1]);
-        }
+        collectUnsupportedToolTypes(responseBody, found);
       }
     }
   }
@@ -133,14 +135,18 @@ export function extractUnsupportedProviderToolTypes(error: unknown): readonly st
   return [...found];
 }
 
+function collectUnsupportedToolTypes(text: string, out: Set<string>): void {
+  for (const match of UNSUPPORTED_PROVIDER_TOOL_MATCHERS) {
+    const type = match(text);
+    if (type !== undefined) out.add(type);
+  }
+}
+
 function collectUnsupportedToolTypesFromValue(value: unknown, out: Set<string>): void {
   if (value === null || value === undefined) return;
 
   if (typeof value === "string") {
-    const match = UNSUPPORTED_TOOL_TYPE_REGEX.exec(value);
-    if (match?.[1] !== undefined) {
-      out.add(match[1]);
-    }
+    collectUnsupportedToolTypes(value, out);
     return;
   }
 
