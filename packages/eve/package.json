@@ -102,6 +102,11 @@
       "import": "./dist/src/public/sveltekit/index.js",
       "default": "./dist/src/public/sveltekit/index.js"
     },
+    "./tanstack": {
+      "types": "./dist/src/public/tanstack/index.d.ts",
+      "import": "./dist/src/public/tanstack/index.js",
+      "default": "./dist/src/public/tanstack/index.js"
+    },
     "./tools/approval": {
       "types": "./dist/src/public/tools/approval/index.d.ts",
       "import": "./dist/src/public/tools/approval/index.js",
