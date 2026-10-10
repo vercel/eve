@@ -189,8 +189,9 @@ export interface Answered extends Transition {
   readonly limit?: { readonly granted: boolean };
   /**
    * New answers to open requests that passed the response policies, in order, including those
-   * that wait: a partial answer, or one behind another policy pass or a sign-in. An answer is
-   * admitted once; merged back in from the queue, it isn't admitted again.
+   * that wait: a partial answer, or one behind another policy pass or a sign-in. An unchanged answer is
+   * admitted once; merged back in from the queue, it isn't admitted again. A changed answer
+   * is admitted anew.
    */
   readonly admitted: readonly InputResponse[];
 }
@@ -247,14 +248,25 @@ export function answer(
       open.request.kind === "session-limit" && ownOpenRequestIds(view).has(open.request.requestId),
   );
   const answerable = turn.suspended.filter((step) => step.requests.length > 0);
-  // Every path below that queues an answer admits it first, so a queued answer is a replay.
+  // Every path below that queues an answer admits it first; only an unchanged answer is a replay.
   const open = new Set(answerable.flatMap((step) => step.requests.map((r) => r.requestId)));
   if (limit !== undefined) open.add(limit.request.requestId);
-  const replayed = new Set(view.turn.queued?.inputResponses?.map(({ requestId }) => requestId));
+  const replayed = new Map(
+    canonicalize([
+      ...(view.turn.queued?.inputResponses ?? []),
+      ...(view.turn.queued?.attributedInputResponses ?? []).map(({ response }) => response),
+    ]).map((response) => [response.requestId, response]),
+  );
   const admit = (responses: readonly InputResponse[] | undefined) => {
-    admitted = canonicalize(responses ?? []).filter(
-      ({ requestId }) => open.has(requestId) && !replayed.has(requestId),
-    );
+    admitted = canonicalize(responses ?? []).filter((response) => {
+      const queued = replayed.get(response.requestId);
+      return (
+        open.has(response.requestId) &&
+        (queued === undefined ||
+          queued.optionId !== response.optionId ||
+          queued.text !== response.text)
+      );
+    });
   };
   if (policy.kind === "continue-coordination") {
     admit(policy.stepInput?.inputResponses);

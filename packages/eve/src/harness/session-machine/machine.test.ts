@@ -567,6 +567,63 @@ describe("answers", () => {
     expect(rest.admitted).toEqual([second]);
   });
 
+  it("admits a changed answer to a queued request", async () => {
+    const machine = createMachine();
+    await parkOnApprovals(machine, "call-1", "call-2");
+    const first = { optionId: "approve", requestId: "approval-call-1" };
+    expect((await respond(machine, { inputResponses: [first] })).admitted).toEqual([first]);
+
+    const changed = { ...first, optionId: "cancel", text: "Do not deploy." };
+    expect((await respond(machine, { inputResponses: [changed] })).admitted).toEqual([changed]);
+    const revised = { ...changed, text: "Wait for verification." };
+    expect((await respond(machine, { inputResponses: [revised] })).admitted).toEqual([revised]);
+    expect((await respond(machine, { inputResponses: [revised] })).admitted).toEqual([]);
+
+    const rest = await respond(machine, {
+      inputResponses: [{ optionId: "approve", requestId: "approval-call-2" }],
+    });
+    expect(rest.resolved[0]?.inputs[0]?.response).toEqual(revised);
+    expect(rest.resolved[0]?.inputs[0]?.outcome).toBe("denied");
+  });
+
+  it("recognizes attributed queued answers as replays", async () => {
+    const machine = createMachine();
+    await parkOnApprovals(machine, "call-1");
+    const response = { optionId: "approve", requestId: "approval-call-1" };
+    const view = machine.view();
+    const queuedView = {
+      ...view,
+      turn: {
+        ...view.turn,
+        queued: {
+          attributedInputResponses: [
+            {
+              auth: {
+                attributes: {},
+                authenticator: "test",
+                issuer: "test",
+                principalId: "user-1",
+                principalType: "user",
+              },
+              response,
+            },
+          ],
+        },
+      },
+    };
+    const respondToQueued = (next: typeof response) =>
+      answer(queuedView, {
+        approvalKey: () => undefined,
+        delivery: { inputResponses: [next] },
+        policy: noPolicy(),
+        searchable: () => false,
+        takeQueued: true,
+      });
+    expect(respondToQueued(response).admitted).toEqual([]);
+    const changed = { ...response, optionId: "cancel" };
+    expect(respondToQueued(changed).admitted).toEqual([changed]);
+  });
+
   it("admits an answer once when it waits behind a responder's sign-in", async () => {
     const machine = createMachine();
     await parkOnApprovals(machine, "call-1");
@@ -603,7 +660,7 @@ describe("answers", () => {
     const machine = createMachine();
     await parkOnApprovals(machine, "call-1");
     const response = { optionId: "approve", requestId: "approval-call-1" };
-    const repeated = { inputResponses: [response, response] };
+    const repeated = { inputResponses: [{ ...response, optionId: "cancel" }, response] };
     const challenge: AuthorizationChallenge = {
       attemptId: "attempt-1",
       challenge: { instructions: "Sign in to Google." },
