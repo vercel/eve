@@ -134,6 +134,7 @@ export interface GitHubChannelEvents {
   readonly "call.requested"?: GitHubEventHandler<"call.requested">;
   readonly "interaction.opened"?: GitHubEventHandler<"interaction.opened">;
   readonly "interaction.settled"?: GitHubEventHandler<"interaction.settled">;
+  readonly "response.admitted"?: GitHubEventHandler<"response.admitted">;
   readonly "content.delta"?: GitHubEventHandler<"content.delta">;
   readonly "content.completed"?: GitHubEventHandler<"content.completed">;
   readonly "session.ended"?: GitHubEventHandler<"session.ended">;

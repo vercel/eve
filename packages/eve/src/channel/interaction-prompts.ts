@@ -11,7 +11,10 @@ import type {
   InteractionSettledData,
 } from "#protocol/session-events/families/interaction.js";
 import type { ResponseSettledData } from "#protocol/session-events/families/response.js";
-import { interactionOwner } from "#protocol/session-projection/selectors.js";
+import {
+  answeredInteractionIds,
+  interactionOwner,
+} from "#protocol/session-projection/selectors.js";
 import type { InteractionRow, SessionView } from "#protocol/session-projection/tables.js";
 import type { InputOption, InputRequest, InputResponse } from "#shared/input.js";
 import { isJsonObjectValue, type JsonObject } from "#shared/json.js";
@@ -153,8 +156,13 @@ export function requestBatchOf(
  * can only show text show this request alone, so a reply answers the request the person sees.
  */
 export function firstOpenRequest(view: SessionView): InputRequest | undefined {
+  // An answer that waits for the rest of its batch answered its request for now.
+  const answered = answeredInteractionIds(view);
   const open = Object.values(view.interactions)
-    .filter((row) => row.status === "open" && row.request.kind !== "sign-in")
+    .filter(
+      (row) =>
+        row.status === "open" && row.request.kind !== "sign-in" && !answered.has(row.interactionId),
+    )
     .sort((a, b) => a.introducedAt - b.introducedAt);
   const first = open.find((row) => row.request.kind === "budget") ?? open[0];
   return first === undefined ? undefined : inputRequestOf(view, first);

@@ -136,6 +136,7 @@ export interface LinearChannelEvents {
   readonly "content.delta"?: LinearEventHandler<"content.delta">;
   readonly "interaction.opened"?: LinearEventHandler<"interaction.opened">;
   readonly "interaction.settled"?: LinearEventHandler<"interaction.settled">;
+  readonly "response.admitted"?: LinearEventHandler<"response.admitted">;
   readonly "turn.settled"?: LinearEventHandler<"turn.settled">;
   readonly "session.ended"?: LinearEventHandler<"session.ended">;
   readonly "delivery.settled"?: LinearEventHandler<"delivery.settled">;
